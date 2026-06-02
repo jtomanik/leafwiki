@@ -83,7 +83,9 @@ supports macOS and Linux install targets on `amd64` and `arm64`. It may use
 ### Run LeafWiki as an MCP STDIO server command
 
 Use this when an MCP client wants a single command that starts LeafWiki and then
-speaks MCP over STDIO.
+speaks MCP over STDIO. By default, the script execs one
+`leafwiki --mcp-stdio` process, so the same LeafWiki instance serves the HTTP UI
+and MCP STDIO.
 
 ```bash
 ./scripts/run-mcp.sh
@@ -95,10 +97,9 @@ Example MCP client command:
 /path/to/leafwiki/scripts/run-mcp.sh --root-dir /path/to/wiki
 ```
 
-The script starts `leafwiki` with MCP enabled, waits for `/api/health`, then
-runs `leafwiki-mcp-stdio` against the computed `/mcp` endpoint. LeafWiki server
-logs are written to a log file so stdout remains reserved for MCP JSON-RPC from
-the stdio proxy.
+Use `--mode sidecar` to start `leafwiki --enable-mcp` and bridge it with
+`leafwiki-mcp-stdio`. In both modes, stdout remains reserved for MCP JSON-RPC
+protocol frames and wrapper diagnostics go to stderr.
 
 ## Script Reference
 
@@ -108,7 +109,7 @@ the stdio proxy.
 | `install-macos.sh` | Build and install the main `leafwiki` executable from this checkout on macOS. | `./scripts/install-macos.sh` | Builds the UI, updates ignored frontend build output, builds the server with production embedding, and installs to `/usr/local/bin` by default. |
 | `build-mcp-stdio.sh` | Build the optional `leafwiki-mcp-stdio` MCP STDIO sidecar/proxy. | `./scripts/build-mcp-stdio.sh` | Writes a release-style binary and `.sha256` under `releases/` by default. No Docker required. |
 | `install-mcp-stdio.sh` | Build and install the MCP STDIO sidecar/proxy. | `./scripts/install-mcp-stdio.sh` | Calls `build-mcp-stdio.sh`, then installs `leafwiki-mcp-stdio` to `/usr/local/bin` by default. |
-| `run-mcp.sh` | Start `leafwiki` with MCP enabled, then run `leafwiki-mcp-stdio` against it. | `./scripts/run-mcp.sh --root-dir ./wiki` | Intended as an MCP client command. It keeps LeafWiki logs out of stdout. |
+| `run-mcp.sh` | Run native `leafwiki --mcp-stdio` by default, or use sidecar mode for the old HTTP MCP bridge. | `./scripts/run-mcp.sh --root-dir ./wiki` | Intended as an MCP client command. Use `--mode sidecar` for API keys, OAuth-capable HTTP MCP setup, or an already-running `/mcp` server. |
 | `changelog.sh` | Generate categorized release notes from commits between two tags. | `./scripts/changelog.sh v0.10.0 v0.11.0` | Writes `current_release_changelog.md` in the current working directory. Used by the release workflow. |
 | `test-install.sh` | Validate root `install.sh` configuration handling without performing a real system install. | `./scripts/test-install.sh` | Uses fake `systemctl`/`wget` and `LEAFWIKI_INSTALL_VALIDATE_ONLY=1`. This tests the Linux installer at repo root, not the macOS installer. |
 | `test-install-macos.sh` | Lightweight checks for `install-macos.sh`. | `./scripts/test-install-macos.sh` | Checks syntax, help text, and dry-run planning without installing. |
@@ -218,29 +219,30 @@ using this install script.
 
 ### `run-mcp.sh`
 
-Starts a LeafWiki server process with MCP enabled, waits for readiness, then
-runs `leafwiki-mcp-stdio` connected to that server. This is the script to use as
-the command in MCP clients that only support spawning a STDIO process.
+Starts a project-local MCP STDIO command for clients that spawn one process.
+Native mode is the default: one `leafwiki` process serves MCP over STDIO and
+the HTTP UI. `--mode sidecar` preserves the older server-plus-stdio-bridge
+behavior for API-key auth or already-running HTTP MCP endpoints.
 
-Default server command shape:
+Default native command shape:
 
 ```bash
 leafwiki \
-  --enable-mcp \
+  --mcp-stdio \
+  --disable-auth=true \
   --host 127.0.0.1 \
   --port 8080 \
-  --data-dir ./data \
+  --data-dir ./.wiki \
   --root-dir ./wiki \
   --log-target stderr \
-  --jwt-secret p4lyOlQU643BRUc2HBiCrr55L6ygh4pJlVQ8z5LEnfT \
-  --admin-password admin \
   --allow-insecure \
   --disable-request-log
 ```
 
-Default stdio proxy command shape:
+Sidecar stdio proxy command shape:
 
 ```bash
+leafwiki --enable-mcp ...
 leafwiki-mcp-stdio --endpoint http://127.0.0.1:8080/mcp
 ```
 
@@ -250,19 +252,27 @@ Useful commands:
 ./scripts/run-mcp.sh --help
 ./scripts/run-mcp.sh --dry-run
 ./scripts/run-mcp.sh --root-dir "$PWD/wiki"
-./scripts/run-mcp.sh --api-key "lwk_<id>_<secret>"
-./scripts/run-mcp.sh --leafwiki-bin "$HOME/.local/bin/leafwiki" --mcp-stdio-bin "$HOME/.local/bin/leafwiki-mcp-stdio"
+./scripts/run-mcp.sh --mode sidecar --api-key "lwk_<id>_<secret>"
+./scripts/run-mcp.sh --mode sidecar --leafwiki-bin "$HOME/.local/bin/leafwiki" --mcp-stdio-bin "$HOME/.local/bin/leafwiki-mcp-stdio"
 ```
 
 Important behavior:
 
 - All wrapper diagnostics go to stderr.
-- LeafWiki is started with `--log-target stderr`.
-- LeafWiki server stdout/stderr are redirected to `--server-log`.
-- The MCP client's stdin/stdout are inherited by `leafwiki-mcp-stdio`.
-- When `leafwiki-mcp-stdio` exits, the wrapper stops the LeafWiki server.
-- When the wrapper receives `SIGINT` or `SIGTERM`, it stops
-  `leafwiki-mcp-stdio` first, then stops the LeafWiki server it started.
+- Native mode keeps stdout attached directly to `leafwiki --mcp-stdio`; stdout
+  must contain only MCP JSON-RPC frames.
+- Native mode is disabled-auth only in v1 and does not pass `--enable-mcp`.
+- Sidecar mode starts LeafWiki with `--log-target stderr`; server stdout/stderr
+  are redirected to `--server-log`.
+- In sidecar mode, the MCP client's stdin/stdout are inherited by
+  `leafwiki-mcp-stdio`.
+- In sidecar mode, when `leafwiki-mcp-stdio` exits, the wrapper stops the
+  LeafWiki server.
+- Native mode rejects sidecar-only flags such as `--endpoint`, `--api-key`,
+  `--mcp-stdio-bin`, `--request-timeout`, `--shutdown-timeout`, and
+  `--max-frame-size`.
+- LeafWiki locks `<data-dir>/.leafwiki/leafwiki.lock`; two active processes
+  cannot share the same data dir.
 - `SIGKILL` cannot be trapped, so no shell wrapper can clean up children after
   `kill -9`.
 - `--server-arg` and `--stdio-arg` can be repeated for flags not modeled by the

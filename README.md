@@ -257,6 +257,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
 | `--enable-mcp`                   | Enable the local-only MCP endpoint; requires loopback host              | `false`       | v0.11.0 |
+| `--mcp-stdio`                    | Enable native MCP STDIO while also serving the HTTP UI                  | `false`       | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
@@ -292,6 +293,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
 | `LEAFWIKI_ENABLE_MCP`                   | Local-only MCP endpoint; requires loopback host                   | `false`       | v0.11.0 |
+| `LEAFWIKI_MCP_STDIO`                    | Native MCP STDIO plus HTTP UI                         | `false`       | v0.11.0 |
 | `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
@@ -361,7 +363,15 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki can expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
+LeafWiki can run as a project-local MCP STDIO process while also serving the HTTP UI from the same `Wiki` instance. The easiest setup is the wrapper script:
+
+```bash
+./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+```
+
+Native STDIO mode is disabled-auth only in v1, keeps stdout reserved for MCP JSON-RPC frames, and locks `<data-dir>/.leafwiki/leafwiki.lock` so two active processes cannot share state.
+
+LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
 
 ```bash
 ./leafwiki --enable-mcp --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
@@ -375,9 +385,9 @@ The legacy disabled-auth mode remains available for isolated local workflows:
 ./leafwiki --disable-auth --enable-mcp --host=127.0.0.1
 ```
 
-For clients that only support spawning a local STDIO MCP process, the optional `leafwiki-mcp-stdio` sidecar bridges STDIO JSON-RPC to the same `/mcp` endpoint. It supports disabled-auth and MCP API-key bearer auth; OAuth-capable clients should use Streamable HTTP directly.
+For clients that need STDIO but also require API-key auth or an already-running HTTP MCP server, `scripts/run-mcp.sh --mode sidecar` or the optional `leafwiki-mcp-stdio` binary bridges STDIO JSON-RPC to the same `/mcp` endpoint. OAuth-capable clients should use Streamable HTTP directly.
 
-See [Local MCP Interface](docs/mcp.md) for OAuth client settings, API-key behavior, STDIO sidecar setup, the tool surface, safety gates, and the parity contract.
+See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, sidecar compatibility, the tool surface, safety gates, and the parity contract.
 
 ### Operations notes
 

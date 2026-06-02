@@ -1,20 +1,28 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dustin/go-humanize"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/tools"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/wiki"
 )
@@ -25,6 +33,7 @@ func writeUsage(w io.Writer) {
 	Usage:
 	leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
+	leafwiki --mcp-stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki reset-admin-password
 	leafwiki --help
 
@@ -53,6 +62,7 @@ func writeUsage(w io.Writer) {
 	--enable-revision             Enable the revision / page history feature (default: false)
 	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
 	--enable-mcp                  Enable local MCP Streamable HTTP endpoint (requires loopback host) (default: false)
+	--mcp-stdio                   Enable native MCP STDIO while also serving the HTTP UI (requires --disable-auth in v1)
 	--max-revision-history        Maximum revisions kept per page; 0 = unlimited (default: 100)
 	--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)
 	--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)
@@ -83,6 +93,7 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_ENABLE_REVISION
 	LEAFWIKI_ENABLE_LINK_REFACTOR
 	LEAFWIKI_ENABLE_MCP
+	LEAFWIKI_MCP_STDIO
 	LEAFWIKI_MAX_REVISION_HISTORY
 	LEAFWIKI_ENABLE_HTTP_REMOTE_USER
 	LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME
@@ -159,6 +170,7 @@ type cliFlags struct {
 	enableRevision          *bool
 	enableLinkRefactor      *bool
 	enableMCP               *bool
+	mcpStdio                *bool
 	maxRevisionHistory      *int
 	enableHTTPRemoteUser    *bool
 	httpRemoteUserHeader    *string
@@ -190,6 +202,7 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		enableRevision:          fs.Bool("enable-revision", false, "enable the revision / page history feature (default: false)"),
 		enableLinkRefactor:      fs.Bool("enable-link-refactor", false, "enable the link refactoring dialog and rewrite flow (default: false)"),
 		enableMCP:               fs.Bool("enable-mcp", false, "enable local MCP Streamable HTTP endpoint (requires loopback host)"),
+		mcpStdio:                fs.Bool("mcp-stdio", false, "enable native MCP STDIO while also serving the HTTP UI"),
 		maxRevisionHistory:      fs.Int("max-revision-history", 100, "maximum revisions kept per page; 0 = unlimited (default: 100)"),
 		enableHTTPRemoteUser:    fs.Bool("enable-http-remote-user", false, "enable reverse-proxy authentication via HTTP header (default: false)"),
 		httpRemoteUserHeader:    fs.String("http-remote-user-header-name", "Remote-User", "HTTP header name carrying the username from a trusted proxy (default: Remote-User)"),
@@ -219,6 +232,9 @@ func main() {
 
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	args := flag.Args()
+	if visited["mcp-stdio"] && *flags.mcpStdio && len(args) > 0 {
+		fail("Invalid native STDIO configuration", "error", fmt.Errorf("native STDIO does not support positional commands"))
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "reset-admin-password":
@@ -268,6 +284,7 @@ func main() {
 	enableRevision := resolveBool("enable-revision", *flags.enableRevision, visited, "LEAFWIKI_ENABLE_REVISION")
 	enableLinkRefactor := resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR")
 	enableMCP := resolveBool("enable-mcp", *flags.enableMCP, visited, "LEAFWIKI_ENABLE_MCP")
+	mcpStdio := resolveBool("mcp-stdio", *flags.mcpStdio, visited, "LEAFWIKI_MCP_STDIO")
 	maxRevisionHistory := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100)
 	enableHTTPRemoteUser := resolveBool("enable-http-remote-user", *flags.enableHTTPRemoteUser, visited, "LEAFWIKI_ENABLE_HTTP_REMOTE_USER")
 	httpRemoteUserHeader := resolveString("http-remote-user-header-name", *flags.httpRemoteUserHeader, visited, "LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME", "Remote-User")
@@ -287,10 +304,27 @@ func main() {
 	if err != nil {
 		fail("Invalid logging configuration", "error", err)
 	}
+	if err := validateNativeStdioOptions(nativeStdioOptions{
+		Enabled:     mcpStdio,
+		DisableAuth: disableAuth,
+		LogTarget:   loggingConfig.Target,
+		Host:        host,
+	}); err != nil {
+		fail("Invalid native STDIO configuration", "error", err)
+	}
 	dataDirMissingBeforeLogger := false
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		dataDirMissingBeforeLogger = true
 	}
+	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	if err != nil {
+		fail("Failed to acquire data directory lock", "error", err)
+	}
+	defer func() {
+		if err := dataLock.Release(); err != nil {
+			slog.Default().Error("Failed to release data directory lock", "error", err)
+		}
+	}()
 	logCloser, err := setupLogger(loggingConfig, os.Stdout, os.Stderr)
 	if err != nil {
 		fail("Invalid logging configuration", "error", err)
@@ -369,7 +403,7 @@ func main() {
 		}
 	}()
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), buildHTTPRouterOptions(httpRouterOptionsInput{
+	routerOpts := buildHTTPRouterOptions(httpRouterOptionsInput{
 		publicAccess:            publicAccess,
 		injectCodeInHeader:      injectCodeInHeader,
 		customStylesheet:        customStylesheet,
@@ -392,10 +426,28 @@ func main() {
 			LogoutURL:      httpRemoteUserLogoutURL,
 		},
 		disableRequestLog: disableRequestLog,
-	}))
+	})
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), routerOpts)
 
 	listenAddr := buildListenAddress(host, port)
 	slog.Default().Info("Starting LeafWiki", "address", listenAddr, "data_dir", dataDir)
+	if mcpStdio {
+		if err := runNativeStdioRuntime(context.Background(), nativeStdioRuntime{
+			Wiki:       w,
+			Router:     router,
+			RouterOpts: routerOpts,
+			ListenAddr: listenAddr,
+			Host:       host,
+			Port:       port,
+			BasePath:   basePath,
+			Stdin:      os.Stdin,
+			Stdout:     os.Stdout,
+			Stderr:     os.Stderr,
+		}); err != nil {
+			fail("Native STDIO runtime failed", "error", err)
+		}
+		return
+	}
 	if err := router.Run(listenAddr); err != nil {
 		fail("Failed to start server", "error", err)
 	}
@@ -415,6 +467,154 @@ func shouldPrintUsage(args []string) bool {
 func buildListenAddress(host, port string) string {
 	return net.JoinHostPort(host, port)
 }
+
+type nativeStdioRuntime struct {
+	Wiki       *wiki.Wiki
+	Router     http.Handler
+	RouterOpts httpinternal.RouterOptions
+	ListenAddr string
+	Host       string
+	Port       string
+	BasePath   string
+	Stdin      io.ReadCloser
+	Stdout     io.Writer
+	Stderr     io.Writer
+}
+
+func runNativeStdioRuntime(parent context.Context, cfg nativeStdioRuntime) error {
+	if cfg.Wiki == nil {
+		return fmt.Errorf("wiki is required")
+	}
+	if cfg.Router == nil {
+		return fmt.Errorf("router is required")
+	}
+	if cfg.Stdin == nil {
+		cfg.Stdin = os.Stdin
+	}
+	if cfg.Stdout == nil {
+		cfg.Stdout = os.Stdout
+	}
+	if cfg.Stderr == nil {
+		cfg.Stderr = io.Discard
+	}
+
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	var closeStdin sync.Once
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			cancel()
+			closeStdin.Do(func() {
+				_ = cfg.Stdin.Close()
+			})
+		case <-ctx.Done():
+			closeStdin.Do(func() {
+				_ = cfg.Stdin.Close()
+			})
+		}
+	}()
+
+	listener, err := net.Listen("tcp", cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("start HTTP listener: %w", err)
+	}
+
+	server := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: cfg.Router,
+	}
+	serverDone := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serverDone <- err
+	}()
+
+	fmt.Fprintf(cfg.Stderr, "LeafWiki HTTP listening at %s\n", nativeStdioHTTPURL(cfg.Host, cfg.Port, cfg.BasePath))
+
+	stdioDone := make(chan error, 1)
+	go func() {
+		stdioDone <- cfg.Wiki.RunMCPStdio(ctx, cfg.RouterOpts, &sdkmcp.IOTransport{
+			Reader: cfg.Stdin,
+			Writer: nopWriteCloser{Writer: cfg.Stdout},
+		})
+	}()
+
+	var stdioErr error
+	stdioComplete := false
+	serverAlreadyDone := false
+	select {
+	case stdioErr = <-stdioDone:
+		stdioComplete = true
+		closeStdin.Do(func() {})
+	case serverErr := <-serverDone:
+		serverAlreadyDone = true
+		if serverErr != nil {
+			return fmt.Errorf("HTTP server failed: %w", serverErr)
+		}
+	case <-ctx.Done():
+		stdioErr = ctx.Err()
+	}
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	shutdownErr := server.Shutdown(shutdownCtx)
+
+	if !serverAlreadyDone {
+		select {
+		case serverErr := <-serverDone:
+			if serverErr != nil {
+				return fmt.Errorf("HTTP server failed: %w", serverErr)
+			}
+		case <-shutdownCtx.Done():
+			return fmt.Errorf("HTTP server shutdown timed out: %w", shutdownCtx.Err())
+		}
+	}
+
+	if !stdioComplete {
+		select {
+		case stdioErr = <-stdioDone:
+			stdioComplete = true
+		case <-shutdownCtx.Done():
+			return fmt.Errorf("MCP STDIO shutdown timed out: %w", shutdownCtx.Err())
+		}
+	}
+
+	if shutdownErr != nil {
+		return fmt.Errorf("shut down HTTP server: %w", shutdownErr)
+	}
+	if !isCleanNativeStdioClose(stdioErr) {
+		return fmt.Errorf("MCP STDIO failed: %w", stdioErr)
+	}
+	return nil
+}
+
+func isCleanNativeStdioClose(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+		return true
+	}
+	return strings.Contains(err.Error(), "server is closing: EOF")
+}
+
+func nativeStdioHTTPURL(host, port, basePath string) string {
+	return "http://" + net.JoinHostPort(host, port) + basePath
+}
+
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (nopWriteCloser) Close() error { return nil }
 
 // CLI > ENV > default(flag)
 func resolveString(flagName, flagVal string, visited map[string]bool, envVar string, def string) string {
@@ -603,6 +803,29 @@ func validateLocalMCPOptions(opts localMCPOptions) error {
 	}
 	if !httpinternal.IsLoopbackHost(opts.Host) {
 		return fmt.Errorf("--enable-mcp requires a loopback host (localhost, 127.0.0.1, or ::1)")
+	}
+	return nil
+}
+
+type nativeStdioOptions struct {
+	Enabled     bool
+	DisableAuth bool
+	LogTarget   leaflogging.Target
+	Host        string
+}
+
+func validateNativeStdioOptions(opts nativeStdioOptions) error {
+	if !opts.Enabled {
+		return nil
+	}
+	if !opts.DisableAuth {
+		return fmt.Errorf("native STDIO requires disabled auth in v1")
+	}
+	if opts.LogTarget == leaflogging.TargetStdout {
+		return fmt.Errorf("stdout is reserved for MCP STDIO")
+	}
+	if !httpinternal.IsLoopbackHost(opts.Host) {
+		return fmt.Errorf("native STDIO requires a loopback host (localhost, 127.0.0.1, or ::1)")
 	}
 	return nil
 }

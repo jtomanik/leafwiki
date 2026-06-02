@@ -2,13 +2,16 @@ package wiki
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/tree"
+	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/test_utils"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 )
@@ -205,6 +208,81 @@ func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testin
 			t.Fatalf("expected no branding state %s in root dir, got err=%v", rel, err)
 		}
 	}
+}
+
+func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AuthDisabled:            true,
+			MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
+		}, serverTransport)
+	}()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("Connect MCP client failed: %v", err)
+	}
+	defer session.Close()
+
+	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+	if !mcpToolNamesContain(tools.Tools, "create_page") || !mcpToolNamesContain(tools.Tools, "get_current_user") {
+		t.Fatalf("native stdio tools = %#v, want shared LeafWiki tools", tools.Tools)
+	}
+
+	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_current_user"})
+	if err != nil {
+		t.Fatalf("get_current_user failed: %v", err)
+	}
+	currentUser, ok := current.StructuredContent.(map[string]any)["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("get_current_user structured content = %#v, want user map", current.StructuredContent)
+	}
+	if currentUser["username"] != "public-editor" || currentUser["role"] != "editor" {
+		t.Fatalf("native stdio current user = %#v, want public-editor editor", currentUser)
+	}
+
+	session.Close()
+	select {
+	case err := <-serverDone:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunMCPStdio returned %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
+	}
+}
+
+func mcpToolNamesContain(tools []*sdkmcp.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWiki_RejectsWorkspaceWithSameDataAndRootDir(t *testing.T) {

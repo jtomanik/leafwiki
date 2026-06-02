@@ -159,9 +159,7 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 		return
 	}
 
-	serverRoutes := *r
-	serverRoutes.authDisabled = ctx.Opts.AuthDisabled
-	server := serverRoutes.newServer(ctx.Opts)
+	server := r.NewServer(ctx.Opts)
 	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
 		return server
 	}, &sdkmcp.StreamableHTTPOptions{
@@ -204,6 +202,12 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 		}, nil
 	}
 	return r.oauthService.VerifyBearerToken(ctx, token, req)
+}
+
+func (r *Routes) NewServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
+	serverRoutes := *r
+	serverRoutes.authDisabled = opts.AuthDisabled
+	return serverRoutes.newServer(opts)
 }
 
 func (r *Routes) newServer(opts httpinternal.RouterOptions) *sdkmcp.Server {

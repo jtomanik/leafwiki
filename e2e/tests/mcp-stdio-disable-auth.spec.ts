@@ -36,7 +36,7 @@ function expectMarkdownInConfiguredRoot(slug: string, expectedContent: string) {
   expect(existsSync(defaultRootFile), `${defaultRootFile} should not exist`).toBe(false);
 }
 
-test('mcp stdio sidecar seeds page and UI edit is readable through mcp', async ({ page }) => {
+test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }) => {
   const mcp = await connectMCPStdioClient(appURL('/mcp'));
   const slug = `mcp-stdio-e2e-${Date.now()}`;
   const title = 'MCP STDIO E2E Page';
@@ -80,7 +80,7 @@ test('mcp stdio sidecar seeds page and UI edit is readable through mcp', async (
   }
 });
 
-test('mcp stdio sidecar raw lifecycle exits after stdin closes', async () => {
+test('mcp stdio raw lifecycle exits after stdin closes', async () => {
   const result = await requestMCPStdioFrame(appURL('/mcp'), {
     jsonrpc: '2.0',
     id: 1,
@@ -91,7 +91,7 @@ test('mcp stdio sidecar raw lifecycle exits after stdin closes', async () => {
     },
   });
 
-  expect(result.exitCode).toBe(0);
+  expect(result.exitCode, `stderr=${result.stderr}\nstdout=${result.stdout}`).toBe(0);
   expect(result.signal).toBeNull();
   expect(result.stdoutLines).toHaveLength(1);
   expect(result.responses).toHaveLength(1);
@@ -99,7 +99,7 @@ test('mcp stdio sidecar raw lifecycle exits after stdin closes', async () => {
   expect(result.stderr).not.toContain('shutdown delete failed');
 });
 
-test('mcp stdio sidecar uses a base-path endpoint', async () => {
+test('mcp stdio uses a base-path endpoint', async () => {
   test.skip(process.env.E2E_BASE_PATH !== '/wiki', 'requires E2E_BASE_PATH=/wiki');
 
   const mcp = await connectMCPStdioClient(appURL('/mcp'));

@@ -21,6 +21,10 @@ docker_root_volume=""
 mcp_stdio_dir=""
 mcp_stdio_command=""
 
+is_native_stdio_e2e() {
+  [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ] && [ "${E2E_MCP_STDIO_NATIVE:-0}" = "1" ]
+}
+
 print_runner_diagnostics() {
   echo "--- E2E runtime diagnostics ---"
 
@@ -64,7 +68,7 @@ build_frontend_for_local_e2e() {
   touch "$repo_root/internal/http/dist/.gitkeep"
 }
 
-prepare_mcp_stdio_sidecar() {
+prepare_mcp_stdio_command() {
   if [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" != "stdio" ]; then
     return
   fi
@@ -76,14 +80,54 @@ prepare_mcp_stdio_sidecar() {
     echo "❌ The MCP STDIO sidecar supports disabled-auth and API-key modes only; keep OAuth E2E on Streamable HTTP."
     exit 1
   fi
+  if is_native_stdio_e2e && [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+    echo "❌ Native MCP STDIO is disabled-auth only in v1; keep API-key STDIO E2E on sidecar mode."
+    exit 1
+  fi
 
   mcp_stdio_dir="$(mktemp -d /tmp/leafwiki-mcp-stdio-e2e.XXXXXX)"
-  mcp_stdio_command="$mcp_stdio_dir/leafwiki-mcp-stdio"
-  echo "🔨 Building MCP STDIO sidecar for E2E..."
-  (
-    cd "$repo_root"
-    go build -o "$mcp_stdio_command" ./cmd/leafwiki-mcp-stdio
-  )
+  if is_native_stdio_e2e; then
+    local leafwiki_bin="$mcp_stdio_dir/leafwiki"
+    mcp_stdio_command="$mcp_stdio_dir/leafwiki-native-stdio"
+    echo "🔨 Building native LeafWiki STDIO binary for E2E..."
+    (
+      cd "$repo_root"
+      go build -ldflags="-X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X github.com/perber/wiki/internal/wiki/auth.DisableRefreshTokenRateLimit=true" -o "$leafwiki_bin" ./cmd/leafwiki
+    )
+    local native_args=(
+      --mcp-stdio
+      --disable-auth=true
+      --host 127.0.0.1
+      --port "$app_port"
+      --data-dir "$local_data_dir"
+      --allow-insecure=true
+      --enable-revision=true
+      --enable-link-refactor=true
+      --log-target stderr
+      --disable-request-log
+    )
+    if [ -n "$local_root_dir" ]; then
+      native_args+=(--root-dir "$local_root_dir")
+    fi
+    if [ -n "$app_base_path" ]; then
+      native_args+=(--base-path "$app_base_path")
+    fi
+    {
+      printf '#!/usr/bin/env bash\n'
+      printf 'set -euo pipefail\n'
+      printf 'exec %q' "$leafwiki_bin"
+      printf ' %q' "${native_args[@]}"
+      printf '\n'
+    } >"$mcp_stdio_command"
+    chmod +x "$mcp_stdio_command"
+  else
+    mcp_stdio_command="$mcp_stdio_dir/leafwiki-mcp-stdio"
+    echo "🔨 Building MCP STDIO sidecar for E2E..."
+    (
+      cd "$repo_root"
+      go build -o "$mcp_stdio_command" ./cmd/leafwiki-mcp-stdio
+    )
+  fi
 }
 
 start_docker() {
@@ -146,20 +190,30 @@ start_local() {
   build_frontend_for_local_e2e
 
   local_data_dir="$(mktemp -d /tmp/leafwiki-e2e-data.XXXXXX)"
-  server_log="$(mktemp /tmp/leafwiki-e2e-server.XXXXXX.log)"
+  server_log="$(mktemp /tmp/leafwiki-e2e-server.XXXXXX)"
+  rm -f "$server_log"
+  server_log="${server_log}.log"
   local auth_args=(
     --jwt-secret=e2e-tests-secret
     --admin-password=admin
   )
-  local root_args=()
-  local base_path_args=()
+  local server_args=(
+    --host 127.0.0.1
+    --port "$app_port"
+    --data-dir "$local_data_dir"
+  )
 
   if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
     local_root_dir="$(mktemp -d /tmp/leafwiki-e2e-root.XXXXXX)"
-    root_args=(--root-dir "$local_root_dir")
+    server_args+=(--root-dir "$local_root_dir")
   fi
   if [ -n "$app_base_path" ]; then
-    base_path_args=(--base-path "$app_base_path")
+    server_args+=(--base-path "$app_base_path")
+  fi
+
+  if is_native_stdio_e2e; then
+    echo "✅ Native STDIO mode will start LeafWiki from the MCP client command."
+    return
   fi
 
   local mcp_modes_enabled=0
@@ -201,11 +255,7 @@ start_local() {
     go run \
       -ldflags="-X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X github.com/perber/wiki/internal/wiki/auth.DisableRefreshTokenRateLimit=true" \
       ./cmd/leafwiki/main.go \
-      --host 127.0.0.1 \
-      --port "$app_port" \
-      --data-dir "$local_data_dir" \
-      "${root_args[@]}" \
-      "${base_path_args[@]}" \
+      "${server_args[@]}" \
       --allow-insecure=true \
       "${auth_args[@]}" \
       --enable-revision=true \
@@ -234,7 +284,7 @@ stop_local() {
   fi
 }
 
-cleanup_mcp_stdio_sidecar() {
+cleanup_mcp_stdio_command() {
   if [ -n "$mcp_stdio_dir" ] && [ -d "$mcp_stdio_dir" ]; then
     rm -rf "$mcp_stdio_dir"
   fi
@@ -258,7 +308,9 @@ run_invalid_root_dir_startup_smoke() {
   local invalid_log
   local invalid_pid
   invalid_dir="$(mktemp -d /tmp/leafwiki-e2e-invalid-root.XXXXXX)"
-  invalid_log="$(mktemp /tmp/leafwiki-e2e-invalid-root.XXXXXX.log)"
+  invalid_log="$(mktemp /tmp/leafwiki-e2e-invalid-root.XXXXXX)"
+  rm -f "$invalid_log"
+  invalid_log="${invalid_log}.log"
 
   (
     cd "$repo_root"
@@ -324,7 +376,7 @@ cleanup_runner() {
   fi
 
   stop_runner
-  cleanup_mcp_stdio_sidecar
+  cleanup_mcp_stdio_command
   exit "$exit_code"
 }
 
@@ -413,6 +465,8 @@ else
 fi
 trap cleanup_runner EXIT
 
-wait_until_reachable
-prepare_mcp_stdio_sidecar
+prepare_mcp_stdio_command
+if ! is_native_stdio_e2e; then
+  wait_until_reachable
+fi
 run_playwright_tests "$@"

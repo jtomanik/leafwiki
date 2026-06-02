@@ -9,8 +9,9 @@ const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
     process.env.E2E_ENABLE_MCP_API_KEYS_LOCAL !== '1' ||
-    process.env.E2E_MCP_CLIENT_TRANSPORT !== 'stdio',
-  'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_API_KEYS_LOCAL=1, and E2E_MCP_CLIENT_TRANSPORT=stdio to run the MCP stdio API-key smoke test.',
+    process.env.E2E_MCP_CLIENT_TRANSPORT !== 'stdio' ||
+    process.env.E2E_MCP_STDIO_NATIVE === '1',
+  'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_API_KEYS_LOCAL=1, E2E_MCP_CLIENT_TRANSPORT=stdio, and keep E2E_MCP_STDIO_NATIVE unset/0 to run the MCP stdio API-key sidecar smoke test.',
 );
 
 function appURL(path: string): string {

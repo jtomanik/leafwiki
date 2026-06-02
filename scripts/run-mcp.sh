@@ -3,11 +3,12 @@ set -euo pipefail
 
 leafwiki_bin="${LEAFWIKI_RUN_MCP_LEAFWIKI_BIN:-${LEAFWIKI_BIN:-leafwiki}}"
 mcp_stdio_bin="${LEAFWIKI_RUN_MCP_STDIO_BIN:-${LEAFWIKI_MCP_STDIO_BIN:-leafwiki-mcp-stdio}}"
+mode="${LEAFWIKI_RUN_MCP_MODE:-native}"
 scheme="${LEAFWIKI_RUN_MCP_SCHEME:-http}"
 host="${LEAFWIKI_RUN_MCP_HOST:-${LEAFWIKI_HOST:-127.0.0.1}}"
 port="${LEAFWIKI_RUN_MCP_PORT:-${LEAFWIKI_PORT:-8080}}"
 base_path="${LEAFWIKI_RUN_MCP_BASE_PATH:-${LEAFWIKI_BASE_PATH:-}}"
-data_dir="${LEAFWIKI_RUN_MCP_DATA_DIR:-${LEAFWIKI_DATA_DIR:-./data}}"
+data_dir="${LEAFWIKI_RUN_MCP_DATA_DIR:-${LEAFWIKI_DATA_DIR:-./.wiki}}"
 root_dir="${LEAFWIKI_RUN_MCP_ROOT_DIR:-${LEAFWIKI_ROOT_DIR:-./wiki}}"
 jwt_secret="${LEAFWIKI_RUN_MCP_JWT_SECRET:-${LEAFWIKI_JWT_SECRET:-p4lyOlQU643BRUc2HBiCrr55L6ygh4pJlVQ8z5LEnfT}}"
 admin_password="${LEAFWIKI_RUN_MCP_ADMIN_PASSWORD:-${LEAFWIKI_ADMIN_PASSWORD:-admin}}"
@@ -26,25 +27,42 @@ dry_run=0
 
 server_extra_args=()
 stdio_extra_args=()
+sidecar_flag_names=()
+sidecar_env_name=""
 server_pid=""
 stdio_pid=""
+
+if [[ -n "${LEAFWIKI_RUN_MCP_STDIO_BIN:-}" || -n "${LEAFWIKI_MCP_STDIO_BIN:-}" ]]; then
+  sidecar_env_name="--mcp-stdio-bin"
+elif [[ -n "${LEAFWIKI_RUN_MCP_ENDPOINT:-}" || -n "${LEAFWIKI_MCP_ENDPOINT:-}" ]]; then
+  sidecar_env_name="--endpoint"
+elif [[ -n "${LEAFWIKI_RUN_MCP_API_KEY:-}" || -n "${LEAFWIKI_MCP_API_KEY:-}" ]]; then
+  sidecar_env_name="--api-key"
+elif [[ -n "${LEAFWIKI_RUN_MCP_REQUEST_TIMEOUT:-}" || -n "${LEAFWIKI_MCP_STDIO_REQUEST_TIMEOUT:-}" ]]; then
+  sidecar_env_name="--request-timeout"
+elif [[ -n "${LEAFWIKI_RUN_MCP_SHUTDOWN_TIMEOUT:-}" || -n "${LEAFWIKI_MCP_STDIO_SHUTDOWN_TIMEOUT:-}" ]]; then
+  sidecar_env_name="--shutdown-timeout"
+elif [[ -n "${LEAFWIKI_RUN_MCP_MAX_FRAME_SIZE:-}" || -n "${LEAFWIKI_MCP_STDIO_MAX_FRAME_SIZE:-}" ]]; then
+  sidecar_env_name="--max-frame-size"
+fi
 
 usage() {
   cat <<EOF
 Usage: scripts/run-mcp.sh [options]
 
-Starts a local LeafWiki server with MCP enabled, then runs leafwiki-mcp-stdio
-against that server. This wrapper is intended to be configured as the command
-for MCP clients that only support spawning a STDIO MCP server process.
+Starts a project-local LeafWiki MCP STDIO process. Native mode is the default:
+one leafwiki process serves the HTTP UI and MCP STDIO. Sidecar mode preserves
+the older two-process server-plus-leafwiki-mcp-stdio bridge.
 
 Options:
+  --mode <native|sidecar>   Runtime mode (default: native)
   --leafwiki-bin <path>     LeafWiki executable (default: leafwiki)
-  --mcp-stdio-bin <path>    leafwiki-mcp-stdio executable (default: leafwiki-mcp-stdio)
+  --mcp-stdio-bin <path>    leafwiki-mcp-stdio executable (sidecar mode only)
   --scheme <scheme>         Endpoint scheme for computed URLs (default: http)
   --host <host>             LeafWiki bind host (default: 127.0.0.1)
   --port <port>             LeafWiki port (default: 8080)
   --base-path <path>        LeafWiki base path, if any
-  --data-dir <path>         LeafWiki data directory (default: ./data)
+  --data-dir <path>         LeafWiki data directory (default: ./.wiki)
   --root-dir <path>         LeafWiki root markdown directory (default: ./wiki)
   --jwt-secret <secret>     LeafWiki JWT secret (default: local development secret)
   --admin-password <pass>   LeafWiki initial admin password (default: admin)
@@ -53,21 +71,21 @@ Options:
   --no-allow-insecure       Do not pass --allow-insecure
   --request-log             Keep LeafWiki request logs enabled
   --disable-request-log     Pass --disable-request-log to LeafWiki (default)
-  --endpoint <url>          Upstream MCP URL for leafwiki-mcp-stdio (default: computed /mcp)
-  --health-url <url>        URL polled before starting leafwiki-mcp-stdio (default: computed /api/health)
-  --api-key <key>           MCP API key passed to leafwiki-mcp-stdio
-  --request-timeout <dur>   leafwiki-mcp-stdio request timeout
-  --shutdown-timeout <dur>  leafwiki-mcp-stdio shutdown timeout
-  --max-frame-size <size>   leafwiki-mcp-stdio max frame size
+  --endpoint <url>          Upstream MCP URL for leafwiki-mcp-stdio (sidecar mode only)
+  --health-url <url>        URL polled before starting leafwiki-mcp-stdio (sidecar mode only)
+  --api-key <key>           MCP API key passed to leafwiki-mcp-stdio (sidecar mode only)
+  --request-timeout <dur>   leafwiki-mcp-stdio request timeout (sidecar mode only)
+  --shutdown-timeout <dur>  leafwiki-mcp-stdio shutdown timeout (sidecar mode only)
+  --max-frame-size <size>   leafwiki-mcp-stdio max frame size (sidecar mode only)
   --ready-timeout <sec>     Seconds to wait for LeafWiki readiness (default: 30)
   --server-log <path>       LeafWiki server stdout/stderr log path (truncated on start)
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
-  --stdio-arg <arg>         Extra argument passed to leafwiki-mcp-stdio; repeatable
+  --stdio-arg <arg>         Extra argument passed to leafwiki-mcp-stdio; repeatable (sidecar mode only)
   --dry-run                 Print the planned commands without starting anything
   -h, --help                Show this help
 
 Environment overrides use LEAFWIKI_RUN_MCP_* names matching the option names,
-for example LEAFWIKI_RUN_MCP_PORT, LEAFWIKI_RUN_MCP_ROOT_DIR,
+for example LEAFWIKI_RUN_MCP_MODE, LEAFWIKI_RUN_MCP_PORT, LEAFWIKI_RUN_MCP_ROOT_DIR,
 LEAFWIKI_RUN_MCP_ENDPOINT, and LEAFWIKI_RUN_MCP_API_KEY. Existing LeafWiki
 environment variables such as LEAFWIKI_HOST, LEAFWIKI_PORT, LEAFWIKI_ROOT_DIR,
 LEAFWIKI_JWT_SECRET, LEAFWIKI_ADMIN_PASSWORD, LEAFWIKI_MCP_ENDPOINT, and
@@ -110,6 +128,17 @@ truthy() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+is_loopback_host() {
+  case "$1" in
+    localhost|127.0.0.1|::1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 require_executable() {
@@ -192,6 +221,15 @@ while [[ $# -gt 0 ]]; do
   fi
 
   case "$1" in
+    --mode=*)
+      mode="${1#*=}"
+      shift
+      ;;
+    --mode)
+      [[ $# -ge 2 ]] || fail "--mode requires native or sidecar"
+      mode="$2"
+      shift 2
+      ;;
     --leafwiki-bin=*)
       leafwiki_bin="${1#*=}"
       shift
@@ -202,11 +240,13 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --mcp-stdio-bin=*)
+      sidecar_flag_names+=("--mcp-stdio-bin")
       mcp_stdio_bin="${1#*=}"
       shift
       ;;
     --mcp-stdio-bin)
       [[ $# -ge 2 ]] || fail "--mcp-stdio-bin requires a path"
+      sidecar_flag_names+=("--mcp-stdio-bin")
       mcp_stdio_bin="$2"
       shift 2
       ;;
@@ -303,56 +343,68 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --endpoint=*)
+      sidecar_flag_names+=("--endpoint")
       endpoint="${1#*=}"
       shift
       ;;
     --endpoint)
       [[ $# -ge 2 ]] || fail "--endpoint requires a URL"
+      sidecar_flag_names+=("--endpoint")
       endpoint="$2"
       shift 2
       ;;
     --health-url=*)
+      sidecar_flag_names+=("--health-url")
       health_url="${1#*=}"
       shift
       ;;
     --health-url)
       [[ $# -ge 2 ]] || fail "--health-url requires a URL"
+      sidecar_flag_names+=("--health-url")
       health_url="$2"
       shift 2
       ;;
     --api-key=*)
+      sidecar_flag_names+=("--api-key")
       api_key="${1#*=}"
       shift
       ;;
     --api-key)
       [[ $# -ge 2 ]] || fail "--api-key requires a value"
+      sidecar_flag_names+=("--api-key")
       api_key="$2"
       shift 2
       ;;
     --request-timeout=*)
+      sidecar_flag_names+=("--request-timeout")
       request_timeout="${1#*=}"
       shift
       ;;
     --request-timeout)
       [[ $# -ge 2 ]] || fail "--request-timeout requires a duration"
+      sidecar_flag_names+=("--request-timeout")
       request_timeout="$2"
       shift 2
       ;;
     --shutdown-timeout=*)
+      sidecar_flag_names+=("--shutdown-timeout")
       shutdown_timeout="${1#*=}"
       shift
       ;;
     --shutdown-timeout)
       [[ $# -ge 2 ]] || fail "--shutdown-timeout requires a duration"
+      sidecar_flag_names+=("--shutdown-timeout")
       shutdown_timeout="$2"
       shift 2
       ;;
     --max-frame-size=*)
+      sidecar_flag_names+=("--max-frame-size")
       max_frame_size="${1#*=}"
       shift
       ;;
     --max-frame-size)
       [[ $# -ge 2 ]] || fail "--max-frame-size requires a size"
+      sidecar_flag_names+=("--max-frame-size")
       max_frame_size="$2"
       shift 2
       ;;
@@ -384,11 +436,13 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --stdio-arg=*)
+      sidecar_flag_names+=("--stdio-arg")
       stdio_extra_args+=("${1#*=}")
       shift
       ;;
     --stdio-arg)
       [[ $# -ge 2 ]] || fail "--stdio-arg requires an argument"
+      sidecar_flag_names+=("--stdio-arg")
       stdio_extra_args+=("$2")
       shift 2
       ;;
@@ -406,6 +460,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$mode" in
+  native|sidecar)
+    ;;
+  *)
+    fail "--mode must be native or sidecar"
+    ;;
+esac
+
+if [[ "$mode" == "native" && "${#sidecar_flag_names[@]}" -gt 0 ]]; then
+  fail "${sidecar_flag_names[0]} requires --mode sidecar"
+fi
+if [[ "$mode" == "native" && -n "$sidecar_env_name" ]]; then
+  fail "$sidecar_env_name requires --mode sidecar"
+fi
+
 [[ "$ready_timeout" =~ ^[0-9]+$ ]] || fail "--ready-timeout must be a non-negative integer"
 
 base_path="$(normalize_base_path "$base_path")"
@@ -414,6 +483,42 @@ if [[ -z "$endpoint" ]]; then
 fi
 if [[ -z "$health_url" ]]; then
   health_url="$scheme://$host:$port$base_path/api/health"
+fi
+
+if [[ "$mode" == "native" ]]; then
+  is_loopback_host "$host" || fail "native mode requires a loopback host (localhost, 127.0.0.1, or ::1)"
+
+  native_cmd=(
+    "$leafwiki_bin"
+    --mcp-stdio
+    --disable-auth=true
+    --host "$host"
+    --port "$port"
+    --data-dir "$data_dir"
+    --root-dir "$root_dir"
+    --log-target stderr
+  )
+  if truthy "$allow_insecure"; then
+    native_cmd+=(--allow-insecure)
+  fi
+  if [[ -n "$base_path" ]]; then
+    native_cmd+=(--base-path "$base_path")
+  fi
+  if truthy "$disable_request_log"; then
+    native_cmd+=(--disable-request-log)
+  fi
+  if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
+    native_cmd+=("${server_extra_args[@]}")
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would run LeafWiki native combined MCP STDIO"
+    print_command "${native_cmd[@]}"
+    exit 0
+  fi
+
+  require_executable "$leafwiki_bin"
+  exec "${native_cmd[@]}"
 fi
 
 server_cmd=(

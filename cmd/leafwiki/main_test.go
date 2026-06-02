@@ -40,10 +40,12 @@ func TestWriteUsage_UsesLongFlags(t *testing.T) {
 		"--log-target",
 		"--log-file",
 		"--enable-mcp",
+		"--mcp-stdio",
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
 		"LEAFWIKI_LOG_FILE",
 		"LEAFWIKI_ENABLE_MCP",
+		"LEAFWIKI_MCP_STDIO",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected usage output to contain %q, got %q", expected, output)
@@ -250,6 +252,201 @@ func TestMainProcess_RejectsExplicitLogFileForStreamTarget(t *testing.T) {
 	}
 }
 
+func TestMainProcess_NativeStdioRejectsAuthenticatedStartup(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--mcp-stdio",
+		"--data-dir", dataDir,
+		"--jwt-secret", "test-secret",
+		"--admin-password", "admin-password",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("expected native stdio with auth enabled to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "native STDIO requires disabled auth in v1") {
+		t.Fatalf("stderr = %q, want native stdio disabled-auth error", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--log-target", "stdout",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("expected native stdio with stdout logging to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "stdout is reserved for MCP STDIO") {
+		t.Fatalf("stderr = %q, want stdout reserved error", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioRejectsNonLoopbackHost(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--host", "0.0.0.0",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--log-target", "stderr",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("expected native stdio on a non-loopback host to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "native STDIO requires a loopback host") {
+		t.Fatalf("stderr = %q, want loopback host error", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--mcp-stdio",
+		"bogus",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("expected native stdio with a positional command to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "native STDIO does not support positional commands") {
+		t.Fatalf("stderr = %q, want positional-command error", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil, stdinReader)
+
+	waitForLeafwikiReady(t, proc, port)
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	proc.waitForExit(t)
+
+	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+	}
+	waitForLeafwikiUnavailable(t, port)
+}
+
+func TestMainProcess_NativeStdioRejectsSecondProcessWithSameDataDir(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	firstPort := freeTCPPort(t)
+	first := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", firstPort,
+		"--log-target", "stderr",
+	}, nil, stdinReader)
+	waitForLeafwikiReady(t, first, firstPort)
+
+	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", freeTCPPort(t),
+		"--log-target", "stderr",
+	}, nil, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("expected second process with same data dir to exit non-zero")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second process did not exit; expected data directory lock rejection\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "data directory is already in use") {
+		t.Fatalf("stderr = %q, want data directory lock error", stderr)
+	}
+
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	first.waitForExit(t)
+}
+
+func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
+	if !supportsGracefulProcessSignal() {
+		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
+	}
+
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	firstPort := freeTCPPort(t)
+	first, firstStdinWriter := startLeafwikiHelperWithStdinPipe(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", firstPort,
+		"--log-target", "stderr",
+	}, nil)
+	waitForLeafwikiReady(t, first, firstPort)
+
+	if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	first.waitForExit(t)
+	_ = firstStdinWriter.Close()
+	waitForLeafwikiUnavailable(t, firstPort)
+
+	secondStdinReader, secondStdinWriter := io.Pipe()
+	secondPort := freeTCPPort(t)
+	second := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", secondPort,
+		"--log-target", "stderr",
+	}, nil, secondStdinReader)
+	waitForLeafwikiReady(t, second, secondPort)
+
+	if err := secondStdinWriter.Close(); err != nil {
+		t.Fatalf("close second stdin writer: %v", err)
+	}
+	second.waitForExit(t)
+}
+
 func TestMainProcess_FileTargetStartupFailureAlsoReachesStderr(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
@@ -323,6 +520,26 @@ func TestMainProcess_UnknownCommandIgnoresDirtyServerOnlyEnvironment(t *testing.
 		"unknown-command",
 	}, map[string]string{
 		"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
+	})
+
+	if err != nil {
+		t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
+	}
+	if !strings.Contains(stdout, "Unknown command: unknown-command") {
+		t.Fatalf("stdout = %q, want unknown command handling", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestMainProcess_UnknownCommandIgnoresMCPStdioEnvironment(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--data-dir", dataDir,
+		"unknown-command",
+	}, map[string]string{
+		"LEAFWIKI_MCP_STDIO": "true",
 	})
 
 	if err != nil {
@@ -592,6 +809,36 @@ func TestValidateMCPStartupOptions_RequiresLoopbackHost(t *testing.T) {
 	}
 }
 
+func TestValidateNativeStdioOptions_RequiresLoopbackHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		host    string
+		wantErr bool
+	}{
+		{name: "localhost", host: "localhost"},
+		{name: "IPv4 loopback", host: "127.0.0.1"},
+		{name: "IPv6 loopback", host: "::1"},
+		{name: "wildcard", host: "0.0.0.0", wantErr: true},
+		{name: "external", host: "192.0.2.10", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNativeStdioOptions(nativeStdioOptions{
+				Enabled:     true,
+				DisableAuth: true,
+				LogTarget:   leaflogging.TargetStderr,
+				Host:        tt.host,
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateNativeStdioOptions() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveLocalMCPOptions_UsesFlagEnvPrecedenceBeforeValidation(t *testing.T) {
 	t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
 	t.Setenv("LEAFWIKI_DISABLE_AUTH", "true")
@@ -750,6 +997,17 @@ func TestRegisterFlags_AcceptsEnableMCPFlag(t *testing.T) {
 	}
 }
 
+func TestRegisterFlags_AcceptsMCPStdioFlag(t *testing.T) {
+	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+	var errOut bytes.Buffer
+	fs.SetOutput(&errOut)
+	registerFlags(fs)
+
+	if err := fs.Parse([]string{"--mcp-stdio=true"}); err != nil {
+		t.Fatalf("expected mcp-stdio flag to parse, got %v (%s)", err, errOut.String())
+	}
+}
+
 func TestRegisterFlags_AcceptsRootDirFlag(t *testing.T) {
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 	var errOut bytes.Buffer
@@ -879,6 +1137,10 @@ type leafwikiHelperProcess struct {
 }
 
 func startLeafwikiHelper(t *testing.T, args []string, env map[string]string) *leafwikiHelperProcess {
+	return startLeafwikiHelperWithStdin(t, args, env, nil)
+}
+
+func startLeafwikiHelperWithStdin(t *testing.T, args []string, env map[string]string, stdin io.Reader) *leafwikiHelperProcess {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -896,6 +1158,7 @@ func startLeafwikiHelper(t *testing.T, args []string, env map[string]string) *le
 	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(env)
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
@@ -923,6 +1186,60 @@ func startLeafwikiHelper(t *testing.T, args []string, env map[string]string) *le
 	return proc
 }
 
+func startLeafwikiHelperWithStdinPipe(t *testing.T, args []string, env map[string]string) (*leafwikiHelperProcess, io.WriteCloser) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stdoutPath := filepath.Join(t.TempDir(), "leafwiki.stdout")
+	stderrPath := filepath.Join(t.TempDir(), "leafwiki.stderr")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create stdout file: %v", err)
+	}
+	stderr, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create stderr file: %v", err)
+	}
+
+	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
+	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+	cmd.Env = leafwikiHelperEnv(env)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		t.Fatalf("create stdin pipe: %v", err)
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		_ = stdin.Close()
+		t.Fatalf("start leafwiki helper: %v", err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatalf("close parent stdout file: %v", err)
+	}
+	if err := stderr.Close(); err != nil {
+		t.Fatalf("close parent stderr file: %v", err)
+	}
+
+	proc := &leafwikiHelperProcess{
+		cmd:        cmd,
+		cancel:     cancel,
+		stdoutPath: stdoutPath,
+		stderrPath: stderrPath,
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		proc.stop(t)
+	})
+	return proc, stdin
+}
+
 func (p *leafwikiHelperProcess) stop(t *testing.T) {
 	t.Helper()
 	if p.stopped {
@@ -944,17 +1261,51 @@ func (p *leafwikiHelperProcess) stop(t *testing.T) {
 	t.Fatalf("wait leafwiki helper: %v", err)
 }
 
+func (p *leafwikiHelperProcess) waitForExit(t *testing.T) {
+	t.Helper()
+	if p.stopped {
+		return
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+	select {
+	case err := <-done:
+		p.stopped = true
+		p.cancel()
+		if err != nil {
+			t.Fatalf("wait leafwiki helper exit: %v\nstdout:\n%s\nstderr:\n%s", err, readFileString(t, p.stdoutPath), readFileString(t, p.stderrPath))
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("leafwiki helper did not exit\nstdout:\n%s\nstderr:\n%s", readFileString(t, p.stdoutPath), readFileString(t, p.stderrPath))
+	}
+}
+
 func runLeafwikiHelper(t *testing.T, args []string, env map[string]string) (string, string, error) {
 	t.Helper()
 
+	return runLeafwikiHelperWithTimeout(t, args, env, 30*time.Second)
+}
+
+func runLeafwikiHelperWithTimeout(t *testing.T, args []string, env map[string]string, timeout time.Duration) (string, string, error) {
+	t.Helper()
+
 	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
-	cmd := exec.Command(os.Args[0], cmdArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(env)
+	cmd.Stdin = strings.NewReader("")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = ctx.Err()
+	}
 	return stdout.String(), stderr.String(), err
 }
 
@@ -1016,6 +1367,24 @@ func waitForLeafwikiReady(t *testing.T, proc *leafwikiHelperProcess, port string
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("LeafWiki did not become ready at %s: %v\nstdout:\n%s\nstderr:\n%s", url, lastErr, readFileString(t, proc.stdoutPath), readFileString(t, proc.stderrPath))
+}
+
+func waitForLeafwikiUnavailable(t *testing.T, port string) {
+	t.Helper()
+
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	url := "http://127.0.0.1:" + port + "/api/health"
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("LeafWiki stayed reachable at %s after shutdown", url)
 }
 
 func freeTCPPort(t *testing.T) string {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/branding"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/auth"
@@ -572,6 +573,14 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 		w.oauthRoutes,
 		w.mcpRoutes,
 	}
+}
+
+func (w *Wiki) RunMCPStdio(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport) error {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	server := w.mcpRoutes.NewServer(opts)
+	return server.Run(ctx, transport)
 }
 
 // FrontendConfig returns the minimal runtime data required by the router to serve the SPA.
