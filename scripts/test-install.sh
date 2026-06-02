@@ -97,6 +97,40 @@ if ! grep -q "RootDirectory: $tmp_dir/default-data/root" "$default_output"; then
   fail "empty root defaulting output was wrong: $(cat "$default_output")"
 fi
 
+valid_logging_env="$tmp_dir/valid-logging.env"
+valid_logging_output="$tmp_dir/valid-logging.out"
+write_env_file "$valid_logging_env" "$tmp_dir/logging-data" "$tmp_dir/logging-pages"
+printf 'LEAFWIKI_LOG_TARGET=stderr\n' >> "$valid_logging_env"
+if ! LEAFWIKI_INSTALL_VALIDATE_ONLY=1 run_installer --non-interactive --env-file "$valid_logging_env" > "$valid_logging_output" 2>&1; then
+  fail "valid logging target failed: $(cat "$valid_logging_output")"
+fi
+if ! grep -q "Validated LeafWiki install configuration" "$valid_logging_output"; then
+  fail "valid logging target did not stop after validation: $(cat "$valid_logging_output")"
+fi
+
+invalid_logging_file_env="$tmp_dir/invalid-logging-file.env"
+invalid_logging_file_output="$tmp_dir/invalid-logging-file.out"
+write_env_file "$invalid_logging_file_env" "$tmp_dir/invalid-logging-file-data" "$tmp_dir/invalid-logging-file-pages"
+printf 'LEAFWIKI_LOG_TARGET=stderr\n' >> "$invalid_logging_file_env"
+printf 'LEAFWIKI_LOG_FILE=logs/leafwiki.log\n' >> "$invalid_logging_file_env"
+if LEAFWIKI_INSTALL_VALIDATE_ONLY=1 run_installer --non-interactive --env-file "$invalid_logging_file_env" > "$invalid_logging_file_output" 2>&1; then
+  fail "log file with stderr target unexpectedly passed"
+fi
+if ! grep -q "LEAFWIKI_LOG_FILE requires LEAFWIKI_LOG_TARGET=file" "$invalid_logging_file_output"; then
+  fail "log file with stderr target output was wrong: $(cat "$invalid_logging_file_output")"
+fi
+
+invalid_logging_env="$tmp_dir/invalid-logging.env"
+invalid_logging_output="$tmp_dir/invalid-logging.out"
+write_env_file "$invalid_logging_env" "$tmp_dir/invalid-logging-data" "$tmp_dir/invalid-logging-pages"
+printf 'LEAFWIKI_LOG_TARGET=system\n' >> "$invalid_logging_env"
+if LEAFWIKI_INSTALL_VALIDATE_ONLY=1 run_installer --non-interactive --env-file "$invalid_logging_env" > "$invalid_logging_output" 2>&1; then
+  fail "invalid logging target unexpectedly passed"
+fi
+if ! grep -q "invalid LEAFWIKI_LOG_TARGET" "$invalid_logging_output"; then
+  fail "invalid logging target output was wrong: $(cat "$invalid_logging_output")"
+fi
+
 trimmed_env="$tmp_dir/trimmed.env"
 trimmed_output="$tmp_dir/trimmed.out"
 write_env_file "$trimmed_env" " $tmp_dir/trimmed-data " " $tmp_dir/trimmed-pages "
@@ -157,6 +191,12 @@ if ! printf '%s' "$revision_input" |
 fi
 if ! grep -q 'LEAFWIKI_ENABLE_REVISION="true"' "$revision_env"; then
   fail "interactive revision env was wrong: $(cat "$revision_env")"
+fi
+if ! grep -q 'LEAFWIKI_LOG_TARGET="file"' "$revision_env"; then
+  fail "interactive logging target env was wrong: $(cat "$revision_env")"
+fi
+if ! grep -q 'LEAFWIKI_LOG_FILE=""' "$revision_env"; then
+  fail "interactive logging file env was wrong: $(cat "$revision_env")"
 fi
 
 printf 'PASS: install.sh validation checks\n'

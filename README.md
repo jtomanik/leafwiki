@@ -16,7 +16,8 @@ If you've looked at Wiki.js or Outline and thought "this is too much to operate 
 ```bash
 docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
   ghcr.io/perber/leafwiki:latest \
-  --jwt-secret=yoursecret --admin-password=yourpassword --allow-insecure=true
+  --jwt-secret=yoursecret --admin-password=yourpassword --allow-insecure=true \
+  --log-target=stderr
 ```
 
 → [All install options](#install) (Docker Compose, Linux installer, binary)
@@ -96,7 +97,8 @@ docker run -p 8080:8080 \
     ghcr.io/perber/leafwiki:latest \
     --jwt-secret=yoursecret \
     --admin-password=yourpassword \
-    --allow-insecure=true
+    --allow-insecure=true \
+    --log-target=stderr
 ```
 
 `--allow-insecure=true` is required for plain HTTP. Omit it when serving over HTTPS (make sure your reverse proxy forwards `X-Forwarded-Proto: https`).
@@ -110,7 +112,8 @@ docker run -p 8080:8080 \
     ghcr.io/perber/leafwiki:latest \
     --jwt-secret=yoursecret \
     --admin-password=yourpassword \
-    --allow-insecure=true
+    --allow-insecure=true \
+    --log-target=stderr
 ```
 
 The data directory must be writable by the specified user.
@@ -131,6 +134,7 @@ services:
       - LEAFWIKI_JWT_SECRET=yourSecret
       - LEAFWIKI_ADMIN_PASSWORD=yourPassword
       - LEAFWIKI_ALLOW_INSECURE=true  # Required for plain HTTP. Omit for HTTPS (ensure `X-Forwarded-Proto: https` is forwarded).
+      - LEAFWIKI_LOG_TARGET=stderr
     volumes:
       - ${HOME}/leafwiki-data:/app/data
     restart: unless-stopped
@@ -246,6 +250,8 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--refresh-token-timeout`        | Refresh token duration (e.g. `168h`, `7d`)                              | `7d`          | v0.7.0  |
 | `--max-asset-upload-size`        | Max upload size (e.g. `50MiB`, `52428800`)                              | `50MiB`       | v0.8.5  |
 | `--custom-stylesheet`            | Path to a `.css` file inside the data dir                               | `""`          | v0.8.5  |
+| `--log-target`                   | Log target: `file`, `stderr`, or `stdout`                               | `file`        | v0.11.0 |
+| `--log-file`                     | Log file path when `--log-target=file`; relative paths use data dir      | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `--inject-code-in-header`        | Raw HTML/JS injected into `<head>`                                      | `""`          | v0.6.0  |
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
 | `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
@@ -256,6 +262,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
 | `--trusted-proxy-ips`            | Trusted proxy IPs/CIDRs for remote-user header                          | `""`          | v0.10.0 |
 | `--http-remote-user-logout-url`  | Logout redirect when reverse-proxy auth is active                       | `""`          | v0.10.0 |
+| `--disable-request-log`          | Suppress per-request HTTP access logs                                   | `false`       | v0.11.0 |
 
 > Docker image default: `LEAFWIKI_HOST` is set to `0.0.0.0` automatically by the container entrypoint if neither `--host` nor `LEAFWIKI_HOST` is provided.
 
@@ -277,6 +284,9 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_REFRESH_TOKEN_TIMEOUT`        | Refresh token duration                               | `7d`          | v0.7.0  |
 | `LEAFWIKI_MAX_ASSET_UPLOAD_SIZE`        | Max upload size                                      | `50MiB`       | v0.8.5  |
 | `LEAFWIKI_CUSTOM_STYLESHEET`            | Path to `.css` file inside data dir                  | `""`          | v0.8.5  |
+| `LEAFWIKI_LOG_LEVEL`                    | Log level: `debug`, `info`, `warn`, or `error`       | `info`        | –       |
+| `LEAFWIKI_LOG_TARGET`                   | Log target: `file`, `stderr`, or `stdout`            | `file`        | v0.11.0 |
+| `LEAFWIKI_LOG_FILE`                     | File path when log target is `file`                  | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `LEAFWIKI_INJECT_CODE_IN_HEADER`        | HTML/JS injected into `<head>`                       | `""`          | v0.6.0  |
 | `LEAFWIKI_HIDE_LINK_METADATA_SECTION`   | Hide backlinks and link status panel                 | `false`       | –       |
 | `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
@@ -287,6 +297,15 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
 | `LEAFWIKI_TRUSTED_PROXY_IPS`            | Trusted proxy IPs/CIDRs                              | `""`          | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL`  | Logout redirect URL                                  | `""`          | v0.10.0 |
+| `LEAFWIKI_DISABLE_REQUEST_LOG`          | Suppress per-request HTTP access logs                | `false`       | v0.11.0 |
+
+### Logging
+
+By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. `--log-target stdout` is available only when you explicitly want server logs on stdout.
+
+LeafWiki does not rotate log files in-process. Configure external rotation with your service manager, container runtime, or a tool such as `logrotate`.
+
+See [Logging](docs/logging.md) for examples.
 
 ### Custom Stylesheet
 

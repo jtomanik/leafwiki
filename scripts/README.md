@@ -231,6 +231,7 @@ leafwiki \
   --port 8080 \
   --data-dir ./data \
   --root-dir ./wiki \
+  --log-target stderr \
   --jwt-secret p4lyOlQU643BRUc2HBiCrr55L6ygh4pJlVQ8z5LEnfT \
   --admin-password admin \
   --allow-insecure \
@@ -256,6 +257,7 @@ Useful commands:
 Important behavior:
 
 - All wrapper diagnostics go to stderr.
+- LeafWiki is started with `--log-target stderr`.
 - LeafWiki server stdout/stderr are redirected to `--server-log`.
 - The MCP client's stdin/stdout are inherited by `leafwiki-mcp-stdio`.
 - When `leafwiki-mcp-stdio` exits, the wrapper stops the LeafWiki server.
@@ -265,6 +267,11 @@ Important behavior:
   `kill -9`.
 - `--server-arg` and `--stdio-arg` can be repeated for flags not modeled by the
   wrapper.
+- LeafWiki and `run-mcp.sh` do not rotate `--server-log`. The wrapper
+  truncates it at startup, so rotate or archive stable server log paths before
+  starting the wrapper if you need retention. If rotation happens while the
+  wrapper is running, account for the open redirected file descriptor by
+  restarting the wrapper or copy-truncating the file.
 
 ## Release Helper
 

@@ -85,6 +85,7 @@ equals_output="$(
 )"
 
 assert_contains "$equals_output" "--root-dir $tmp_dir/wiki-equals" "equals dry-run"
+assert_contains "$equals_output" "--log-target stderr" "equals dry-run"
 assert_contains "$equals_output" "--endpoint http://127.0.0.1:18082/mcp" "equals dry-run"
 assert_contains "$equals_output" "--api-key lwk_equals_secret" "equals dry-run"
 
@@ -95,7 +96,26 @@ set -e
 [[ "$bad_combined_arg_status" -ne 0 ]] || fail "combined flag/value argument unexpectedly succeeded"
 assert_contains "$bad_combined_arg_output" "split flags and values into separate args" "combined arg error"
 
-dry_run_output="$(
+dry_run_stdout="$tmp_dir/dry-run.stdout"
+dry_run_stderr="$tmp_dir/dry-run.stderr"
+"$script" \
+  --dry-run \
+  --leafwiki-bin /tmp/fake-leafwiki \
+  --mcp-stdio-bin /tmp/fake-stdio \
+  --host 127.0.0.1 \
+  --port 18081 \
+  --root-dir "$tmp_dir/wiki" \
+  --data-dir "$tmp_dir/data" \
+  --jwt-secret test-secret \
+  --admin-password admin \
+  --api-key lwk_test_secret \
+  --server-log "$tmp_dir/server.log" \
+  > "$dry_run_stdout" \
+  2> "$dry_run_stderr"
+[[ ! -s "$dry_run_stdout" ]] || fail "dry-run wrote to stdout: $(cat "$dry_run_stdout")"
+dry_run_output="$(cat "$dry_run_stderr")"
+
+merged_dry_run_output="$(
   "$script" \
     --dry-run \
     --leafwiki-bin /tmp/fake-leafwiki \
@@ -115,10 +135,12 @@ assert_contains "$dry_run_output" "Would start LeafWiki and then run leafwiki-mc
 assert_contains "$dry_run_output" "/tmp/fake-leafwiki" "dry-run"
 assert_contains "$dry_run_output" "--enable-mcp" "dry-run"
 assert_contains "$dry_run_output" "--root-dir $tmp_dir/wiki" "dry-run"
+assert_contains "$dry_run_output" "--log-target stderr" "dry-run"
 assert_contains "$dry_run_output" "--jwt-secret test-secret" "dry-run"
 assert_contains "$dry_run_output" "/tmp/fake-stdio" "dry-run"
 assert_contains "$dry_run_output" "--endpoint http://127.0.0.1:18081/mcp" "dry-run"
 assert_contains "$dry_run_output" "--api-key lwk_test_secret" "dry-run"
+assert_contains "$merged_dry_run_output" "--log-target stderr" "merged dry-run"
 [[ ! -e "$tmp_dir/server.log" ]] || fail "dry-run created server log"
 
 fake_bin="$tmp_dir/bin"
@@ -130,6 +152,8 @@ set -euo pipefail
 
 port="8080"
 printf '%s\n' "$@" > "$FAKE_LEAFWIKI_ARGS"
+printf 'fake leafwiki stdout\n'
+printf 'fake leafwiki stderr\n' >&2
 if [[ -n "${FAKE_LEAFWIKI_PID:-}" ]]; then
   printf '%s\n' "$$" > "$FAKE_LEAFWIKI_PID"
 fi
@@ -238,12 +262,16 @@ assert_contains "$(cat "$leafwiki_args_file")" "--port" "leafwiki args"
 assert_contains "$(cat "$leafwiki_args_file")" "$port" "leafwiki args"
 assert_contains "$(cat "$leafwiki_args_file")" "--root-dir" "leafwiki args"
 assert_contains "$(cat "$leafwiki_args_file")" "$tmp_dir/wiki" "leafwiki args"
+assert_contains "$(cat "$leafwiki_args_file")" "--log-target" "leafwiki args"
+assert_contains "$(cat "$leafwiki_args_file")" "stderr" "leafwiki args"
 assert_contains "$(cat "$leafwiki_args_file")" "--jwt-secret" "leafwiki args"
 assert_contains "$(cat "$leafwiki_args_file")" "test-secret" "leafwiki args"
 assert_contains "$(cat "$stdio_args_file")" "--endpoint" "stdio args"
 assert_contains "$(cat "$stdio_args_file")" "http://127.0.0.1:$port/mcp" "stdio args"
 assert_contains "$(cat "$stdio_args_file")" "--api-key" "stdio args"
 assert_contains "$(cat "$stdio_args_file")" "lwk_test_secret" "stdio args"
+assert_contains "$(cat "$tmp_dir/server.log")" "fake leafwiki stdout" "server log"
+assert_contains "$(cat "$tmp_dir/server.log")" "fake leafwiki stderr" "server log"
 
 long_port="$(python3 - <<'PY'
 import socket

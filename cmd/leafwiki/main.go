@@ -15,6 +15,7 @@ import (
 	"github.com/perber/wiki/internal/core/tools"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/wiki"
 )
 
@@ -42,6 +43,9 @@ func writeUsage(w io.Writer) {
 	                         WARNING: Use only with trusted code to avoid XSS vulnerabilities. No sanitization is performed.
 	--custom-stylesheet      Path to a .css file inside the data dir, served publicly as /custom.css
 	                         (or <base-path>/custom.css when --base-path is set) (default: "")
+	--log-target             Log target: file, stderr, or stdout (default: file)
+	--log-file               Log file path when --log-target=file; relative paths resolve under --data-dir
+	                         (default: <data-dir>/.leafwiki/logs/leafwiki.log)
 	--disable-auth                Disable authentication completely (default: false) (WARNING: only use in trusted networks!)
 	--hide-link-metadata-section  Hide link metadata section in the frontend UI (default: false)
 	--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: "")
@@ -68,6 +72,8 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_ALLOW_INSECURE
 	LEAFWIKI_INJECT_CODE_IN_HEADER
 	LEAFWIKI_CUSTOM_STYLESHEET
+	LEAFWIKI_LOG_TARGET
+	LEAFWIKI_LOG_FILE
 	LEAFWIKI_ACCESS_TOKEN_TIMEOUT
 	LEAFWIKI_REFRESH_TOKEN_TIMEOUT
 	LEAFWIKI_DISABLE_AUTH
@@ -92,27 +98,43 @@ func printUsage() {
 	writeUsage(os.Stdout)
 }
 
-func setupLogger() {
-	level := slog.LevelInfo
-	if os.Getenv("LEAFWIKI_LOG_LEVEL") == "debug" {
-		level = slog.LevelDebug
-	} else if (os.Getenv("LEAFWIKI_LOG_LEVEL")) == "error" {
-		level = slog.LevelError
-	} else if (os.Getenv("LEAFWIKI_LOG_LEVEL")) == "warn" {
-		level = slog.LevelWarn
-	}
-
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     level,
+func setupBootstrapLogger(stderr io.Writer) {
+	handler := slog.NewJSONHandler(stderr, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
 		AddSource: true,
 	})
 
 	slog.SetDefault(slog.New(handler))
 }
 
+func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io.Closer, error) {
+	logger, closer, err := leaflogging.Open(cfg, leaflogging.Streams{
+		Stdout: stdout,
+		Stderr: stderr,
+	})
+	if err != nil {
+		return nil, err
+	}
+	slog.SetDefault(logger)
+	return closer, nil
+}
+
 func fail(msg string, args ...any) {
 	slog.Default().Error(msg, args...)
+	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
 	os.Exit(1)
+}
+
+func failureMessage(msg string, args ...any) string {
+	var b strings.Builder
+	b.WriteString(msg)
+	for i := 0; i+1 < len(args); i += 2 {
+		b.WriteByte(' ')
+		b.WriteString(fmt.Sprint(args[i]))
+		b.WriteByte('=')
+		b.WriteString(fmt.Sprint(args[i+1]))
+	}
+	return b.String()
 }
 
 type cliFlags struct {
@@ -126,6 +148,8 @@ type cliFlags struct {
 	allowInsecure           *bool
 	injectCodeInHeader      *string
 	customStylesheet        *string
+	logTarget               *string
+	logFile                 *string
 	disableAuth             *bool
 	hideLinkMetadataSection *bool
 	accessTokenTimeout      *time.Duration
@@ -155,6 +179,8 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		allowInsecure:           fs.Bool("allow-insecure", false, "allow insecure HTTP connections (default: false)"),
 		injectCodeInHeader:      fs.String("inject-code-in-header", "", "raw string injected into <head> (default: \"\")"),
 		customStylesheet:        fs.String("custom-stylesheet", "", "path to a custom CSS file served as /custom.css"),
+		logTarget:               fs.String("log-target", "", "log target: file, stderr, or stdout"),
+		logFile:                 fs.String("log-file", "", "log file path when --log-target=file"),
 		disableAuth:             fs.Bool("disable-auth", false, "disable authentication completely (default: false) (WARNING: only use in trusted networks!)"),
 		hideLinkMetadataSection: fs.Bool("hide-link-metadata-section", false, "hide link metadata section (default: false)"),
 		accessTokenTimeout:      fs.Duration("access-token-timeout", 15*time.Minute, "access token timeout duration (e.g. 24h, 15m) (default: 15m)"),
@@ -174,7 +200,12 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 }
 
 func main() {
-	setupLogger()
+	setupBootstrapLogger(os.Stderr)
+	if shouldPrintUsage(os.Args[1:]) {
+		printUsage()
+		return
+	}
+
 	flag.Usage = func() {
 		writeUsage(flag.CommandLine.Output())
 	}
@@ -186,9 +217,31 @@ func main() {
 	visited := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
 
+	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
+	args := flag.Args()
+	if len(args) > 0 {
+		switch args[0] {
+		case "reset-admin-password":
+			user, err := tools.ResetAdminPassword(dataDir)
+			if err != nil {
+				fail("Password reset failed", "error", err)
+			}
+
+			fmt.Println("Admin password reset successfully.")
+			fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
+			return
+		case "--help", "-h", "help":
+			printUsage()
+			return
+		default:
+			fmt.Printf("Unknown command: %s\n\n", args[0])
+			printUsage()
+			return
+		}
+	}
+
 	host := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1")
 	port := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080")
-	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	workspace, shouldStartWiki, err := resolveStartupWorkspace(flags, visited, flag.Args())
 	if err != nil {
 		fail("Invalid workspace configuration", "error", err)
@@ -230,33 +283,34 @@ func main() {
 		fail("Invalid HTTP remote user configuration", "error", err)
 	}
 
+	loggingConfig, err := resolveLoggingConfig(flags, visited, dataDir)
+	if err != nil {
+		fail("Invalid logging configuration", "error", err)
+	}
+	dataDirMissingBeforeLogger := false
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		dataDirMissingBeforeLogger = true
+	}
+	logCloser, err := setupLogger(loggingConfig, os.Stdout, os.Stderr)
+	if err != nil {
+		fail("Invalid logging configuration", "error", err)
+	}
+	defer func() {
+		if err := logCloser.Close(); err != nil {
+			slog.Default().Error("Failed to close log sink", "error", err)
+		}
+	}()
+	if dataDirMissingBeforeLogger {
+		if _, err := os.Stat(dataDir); err == nil {
+			slog.Default().Info("Data directory created", "path", dataDir)
+		}
+	}
+
 	if enableHTTPRemoteUser {
 		slog.Default().Info("Reverse-proxy authentication enabled",
 			"header", httpRemoteUserHeader,
 			"trusted_proxies", trustedProxyIPsRaw,
 		)
-	}
-
-	args := flag.Args()
-	if len(args) > 0 {
-		switch args[0] {
-		case "reset-admin-password":
-			user, err := tools.ResetAdminPassword(dataDir)
-			if err != nil {
-				fail("Password reset failed", "error", err)
-			}
-
-			fmt.Println("Admin password reset successfully.")
-			fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
-			return
-		case "--help", "-h", "help":
-			printUsage()
-			return
-		default:
-			fmt.Printf("Unknown command: %s\n\n", args[0])
-			printUsage()
-			return
-		}
 	}
 
 	if disableAuth {
@@ -347,6 +401,17 @@ func main() {
 	}
 }
 
+func shouldPrintUsage(args []string) bool {
+	if len(args) == 1 && args[0] == "help" {
+		return true
+	}
+
+	fs := flag.NewFlagSet("leafwiki-help-check", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	registerFlags(fs)
+	return fs.Parse(args) == flag.ErrHelp
+}
+
 func buildListenAddress(host, port string) string {
 	return net.JoinHostPort(host, port)
 }
@@ -388,6 +453,30 @@ func resolveStartupWorkspace(flags *cliFlags, visited map[string]bool, args []st
 		return wiki.Workspace{}, true, err
 	}
 	return workspace, true, nil
+}
+
+func resolveLoggingConfig(flags *cliFlags, visited map[string]bool, dataDir string) (leaflogging.Config, error) {
+	envTargetSet := strings.TrimSpace(os.Getenv("LEAFWIKI_LOG_TARGET")) != ""
+	logTarget := resolveString("log-target", *flags.logTarget, visited, "LEAFWIKI_LOG_TARGET", "file")
+
+	envLogFileSet := false
+	if envLogFile, ok := os.LookupEnv("LEAFWIKI_LOG_FILE"); ok && strings.TrimSpace(envLogFile) != "" {
+		envLogFileSet = true
+	}
+	logFile := resolveString("log-file", *flags.logFile, visited, "LEAFWIKI_LOG_FILE", "")
+	if visited["log-target"] && !visited["log-file"] && strings.TrimSpace(strings.ToLower(logTarget)) != string(leaflogging.TargetFile) {
+		envLogFileSet = false
+		logFile = ""
+	}
+
+	return leaflogging.Resolve(leaflogging.ConfigInput{
+		Target:          logTarget,
+		TargetSet:       visited["log-target"] || envTargetSet,
+		FilePath:        logFile,
+		FilePathSet:     visited["log-file"] || envLogFileSet,
+		LevelFromConfig: os.Getenv("LEAFWIKI_LOG_LEVEL"),
+		DataDir:         dataDir,
+	})
 }
 
 func validateWorkspaceDirs(dataDir string, rootDir string) error {

@@ -191,6 +191,7 @@ leafwiki \
   --port 8080 \
   --data-dir ./data \
   --root-dir ./wiki \
+  --log-target stderr \
   --jwt-secret p4lyOlQU643BRUc2HBiCrr55L6ygh4pJlVQ8z5LEnfT \
   --admin-password admin \
   --allow-insecure \
@@ -203,13 +204,22 @@ Default stdio proxy command shape:
 leafwiki-mcp-stdio --endpoint http://127.0.0.1:8080/mcp
 ```
 
-The wrapper redirects the LeafWiki server's stdout and stderr to `--server-log`,
-writes its own diagnostics to stderr, waits for `/api/health`, and leaves the
-MCP client's stdin/stdout connected to `leafwiki-mcp-stdio`. When the stdio
-proxy exits, the wrapper stops the LeafWiki server process it started. When the
-wrapper receives `SIGINT` or `SIGTERM`, it stops the stdio proxy first and then
-stops the LeafWiki server. `SIGKILL` cannot be trapped, so `kill -9` can still
-bypass cleanup.
+The wrapper starts LeafWiki with `--log-target stderr`, redirects the LeafWiki
+server's stdout and stderr to `--server-log`, writes its own diagnostics to
+stderr, waits for `/api/health`, and leaves the MCP client's stdin/stdout
+connected to `leafwiki-mcp-stdio`. This keeps wrapper stdout reserved for the
+STDIO protocol. When the stdio proxy exits, the wrapper stops the LeafWiki
+server process it started. When the wrapper receives `SIGINT` or `SIGTERM`, it
+stops the stdio proxy first and then stops the LeafWiki server. `SIGKILL` cannot
+be trapped, so `kill -9` can still bypass cleanup.
+
+LeafWiki and `run-mcp.sh` do not rotate `--server-log`. The wrapper truncates
+`--server-log` at startup so each run starts with a fresh server log. If you
+point `--server-log` at a stable path and need retention, rotate or archive it
+externally before starting the wrapper with your host, container, or supervisor
+tooling. If rotation happens while the wrapper is running, use a strategy that
+accounts for the open redirected file descriptor, such as restarting the wrapper
+or copy-truncating the file.
 
 Authentication choices:
 

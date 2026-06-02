@@ -60,7 +60,7 @@ Options:
   --shutdown-timeout <dur>  leafwiki-mcp-stdio shutdown timeout
   --max-frame-size <size>   leafwiki-mcp-stdio max frame size
   --ready-timeout <sec>     Seconds to wait for LeafWiki readiness (default: 30)
-  --server-log <path>       LeafWiki server stdout/stderr log path
+  --server-log <path>       LeafWiki server stdout/stderr log path (truncated on start)
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
   --stdio-arg <arg>         Extra argument passed to leafwiki-mcp-stdio; repeatable
   --dry-run                 Print the planned commands without starting anything
@@ -423,6 +423,7 @@ server_cmd=(
   --port "$port"
   --data-dir "$data_dir"
   --root-dir "$root_dir"
+  --log-target stderr
 )
 if truthy "$disable_auth"; then
   server_cmd+=(--disable-auth)
@@ -473,6 +474,8 @@ require_executable "$mcp_stdio_bin"
 command_exists curl || fail "curl is required to wait for LeafWiki readiness"
 
 mkdir -p "$(dirname -- "$server_log")"
+# Keep each wrapper run's server log self-contained. Rotate or archive stable
+# --server-log paths before starting the wrapper if you need retention.
 : > "$server_log"
 
 trap cleanup_children EXIT

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,14 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 	wikiauth "github.com/perber/wiki/internal/wiki/auth"
 )
+
+type panicRegistrar struct{}
+
+func (panicRegistrar) RegisterRoutes(ctx httpinternal.RouterContext) {
+	ctx.Base.GET("/panic", func(c *gin.Context) {
+		panic("panic route")
+	})
+}
 
 func pageNodeKind() *tree.NodeKind {
 	kind := tree.NodeKindPage
@@ -655,6 +664,7 @@ func createZipFromDir(t *testing.T, root string) []byte {
 }
 
 func TestDisableRequestLog_DoesNotCrash(t *testing.T) {
+	logs := captureDefaultLogs(t)
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
@@ -671,6 +681,65 @@ func TestDisableRequestLog_DoesNotCrash(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(logs.String(), "http request") {
+		t.Fatalf("request log was written despite DisableRequestLog: %s", logs.String())
+	}
+}
+
+func TestRequestLogsGoToDefaultSlogSink(t *testing.T) {
+	logs := captureDefaultLogs(t)
+	w := createWikiTestInstance(t)
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		AllowInsecure:           true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	entry := findJSONLogEntry(t, logs.String(), "http request")
+	for _, key := range []string{"method", "path", "status", "latency", "ip"} {
+		if _, ok := entry[key]; !ok {
+			t.Fatalf("http request log missing %q: %#v", key, entry)
+		}
+	}
+	if entry["method"] != http.MethodGet {
+		t.Fatalf("method = %v, want GET", entry["method"])
+	}
+	if entry["path"] != "/api/health" {
+		t.Fatalf("path = %v, want /api/health", entry["path"])
+	}
+	if entry["status"] != float64(http.StatusOK) {
+		t.Fatalf("status = %v, want 200", entry["status"])
+	}
+}
+
+func TestGinRecoveryLogsGoToDefaultSlogSink(t *testing.T) {
+	logs := captureDefaultLogs(t)
+	router := httpinternal.NewRouter([]httpinternal.RouteRegistrar{panicRegistrar{}}, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{
+		AllowInsecure:           true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "panic route") {
+		t.Fatalf("recovery log did not include panic text: %s", logs.String())
 	}
 }
 
@@ -4667,4 +4736,35 @@ func TestBuildCustomStylesheetTag_WhitespacePath(t *testing.T) {
 	if tag != "" {
 		t.Fatalf("expected empty tag for whitespace path, got %q", tag)
 	}
+}
+
+func captureDefaultLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+	return &logs
+}
+
+func findJSONLogEntry(t *testing.T, logs string, msg string) map[string]any {
+	t.Helper()
+
+	for _, line := range strings.Split(strings.TrimSpace(logs), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line is not JSON: %v\n%s", err, line)
+		}
+		if entry["msg"] == msg {
+			return entry
+		}
+	}
+	t.Fatalf("logs did not contain msg %q:\n%s", msg, logs)
+	return nil
 }
