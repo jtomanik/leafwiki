@@ -1,7 +1,5 @@
 BINARY_NAME=leafwiki
 CMD_DIR=./cmd/leafwiki
-SIDECAR_NAME=leafwiki-mcp-stdio
-SIDECAR_CMD_DIR=./cmd/leafwiki-mcp-stdio
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || printf 'v0.1.0')
 RELEASE_DIR := releases
 DOCKER_BUILDER := Dockerfile.builder
@@ -18,14 +16,11 @@ all: build
 build:
 	go build -o $(BINARY_NAME) $(CMD_DIR)
 
-build-sidecar:
-	go build -o $(SIDECAR_NAME) $(SIDECAR_CMD_DIR)
-
 run:
 	go run $(CMD_DIR)
 
 clean:
-	rm -f $(BINARY_NAME) $(SIDECAR_NAME)
+	rm -f $(BINARY_NAME)
 	rm -rf $(RELEASE_DIR)
 
 test:
@@ -44,28 +39,24 @@ $(PLATFORMS):
 	@GOOS=$(word 1,$(subst /, ,$@)) ; \
 	 GOARCH=$(word 2,$(subst /, ,$@)) ; \
 	 EXT=$$( [ "$$GOOS" = "windows" ] && echo ".exe" || echo "" ) ; \
-	 for target in "$(BINARY_NAME):$(CMD_DIR)" "$(SIDECAR_NAME):$(SIDECAR_CMD_DIR)"; do \
-		NAME=$${target%%:*} ; \
-		CMD=$${target#*:} ; \
-		OUTPUT=$$NAME-$(VERSION)-$$GOOS-$$GOARCH$$EXT ; \
-		IMAGE=leafwiki-builder-$$NAME-$$GOOS-$$GOARCH ; \
-		echo "📦 Building $$OUTPUT..." ; \
-		docker build -f $(DOCKER_BUILDER) \
-			--build-arg GOOS=$$GOOS \
-			--build-arg GOARCH=$$GOARCH \
-			--build-arg APP_VERSION=$(VERSION) \
-			--build-arg OUTPUT=$$NAME \
-			--build-arg CMD_PATH=$$CMD \
-			-t $$IMAGE . ; \
-		ID=$$(docker create $$IMAGE) ; \
-		docker cp $$ID:/out/$$NAME $(RELEASE_DIR)/$$OUTPUT ; \
-		docker rm $$ID ; \
-		echo "✅ Binary done: $(RELEASE_DIR)/$$OUTPUT" ; \
-		sha256sum $(RELEASE_DIR)/$$OUTPUT > $(RELEASE_DIR)/$$OUTPUT.sha256 ; \
-		zip -j $(RELEASE_DIR)/$$OUTPUT.zip $(RELEASE_DIR)/$$OUTPUT ; \
-		tar -czf $(RELEASE_DIR)/$$OUTPUT.tar.gz -C $(RELEASE_DIR) $$OUTPUT ; \
-		echo "📦 Compressed: zip and tar.gz" ; \
-	 done
+	 OUTPUT=$(BINARY_NAME)-$(VERSION)-$$GOOS-$$GOARCH$$EXT ; \
+	 IMAGE=leafwiki-builder-$(BINARY_NAME)-$$GOOS-$$GOARCH ; \
+	 echo "📦 Building $$OUTPUT..." ; \
+	 docker build -f $(DOCKER_BUILDER) \
+		--build-arg GOOS=$$GOOS \
+		--build-arg GOARCH=$$GOARCH \
+		--build-arg APP_VERSION=$(VERSION) \
+		--build-arg OUTPUT=$(BINARY_NAME) \
+		--build-arg CMD_PATH=$(CMD_DIR) \
+		-t $$IMAGE . ; \
+	 ID=$$(docker create $$IMAGE) ; \
+	 docker cp $$ID:/out/$(BINARY_NAME) $(RELEASE_DIR)/$$OUTPUT ; \
+	 docker rm $$ID ; \
+	 echo "✅ Binary done: $(RELEASE_DIR)/$$OUTPUT" ; \
+	 sha256sum $(RELEASE_DIR)/$$OUTPUT > $(RELEASE_DIR)/$$OUTPUT.sha256 ; \
+	 zip -j $(RELEASE_DIR)/$$OUTPUT.zip $(RELEASE_DIR)/$$OUTPUT ; \
+	 tar -czf $(RELEASE_DIR)/$$OUTPUT.tar.gz -C $(RELEASE_DIR) $$OUTPUT ; \
+	 echo "📦 Compressed: zip and tar.gz"
 
 # Final production Docker image
 docker-build-publish:
@@ -117,13 +108,12 @@ run-e2e-root-dir:
 	@E2E_RUN_MODE=local E2E_ENABLE_SEPARATE_ROOT_DIR=1 ./e2e/run.sh --grep "Separate root dir"
 
 run-e2e-root-dir-stdio:
-	@echo "🗂️ Starting root-dir MCP STDIO sidecar E2E smoke..."
-	@E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_SEPARATE_ROOT_DIR=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-disable-auth.spec.ts --grep "mcp stdio sidecar seeds"
+	@echo "🗂️ Starting root-dir native MCP STDIO E2E smoke..."
+	@E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_SEPARATE_ROOT_DIR=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-disable-auth.spec.ts --grep "mcp stdio seeds"
 
 help:
 	@echo "Available commands:"
 	@echo "  make build                – Build binary for current system"
-	@echo "  make build-sidecar        – Build optional MCP STDIO sidecar for current system"
 	@echo "  make release              – Cross-compile binaries for all platforms (via Docker)"
 	@echo "  make clean                – Clean all generated files"
 	@echo "  make test                 – Run all Go tests"
@@ -139,4 +129,4 @@ help:
 	@echo "  make docker-build-publish – Build and push multi-arch Docker image"
 	@echo "  make changelog            – Generate changelog"
 
-.PHONY: all build build-sidecar run clean test bench fmt lint help docker-build-publish changelog run-e2e run-e2e-local run-e2e-local-fast run-e2e-root-dir run-e2e-root-dir-stdio run-proxy-e2e
+.PHONY: all build run clean test bench fmt lint help docker-build-publish changelog run-e2e run-e2e-local run-e2e-local-fast run-e2e-root-dir run-e2e-root-dir-stdio run-proxy-e2e

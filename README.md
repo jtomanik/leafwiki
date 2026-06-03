@@ -256,8 +256,8 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
 | `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
-| `--enable-mcp`                   | Enable the local-only MCP endpoint; requires loopback host              | `false`       | v0.11.0 |
-| `--mcp-stdio`                    | Enable native MCP STDIO while also serving the HTTP UI                  | `false`       | v0.11.0 |
+| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; requires loopback host when enabled | `none` | v0.11.0 |
+| `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
@@ -292,8 +292,8 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_HIDE_LINK_METADATA_SECTION`   | Hide backlinks and link status panel                 | `false`       | –       |
 | `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
-| `LEAFWIKI_ENABLE_MCP`                   | Local-only MCP endpoint; requires loopback host                   | `false`       | v0.11.0 |
-| `LEAFWIKI_MCP_STDIO`                    | Native MCP STDIO plus HTTP UI                         | `false`       | v0.11.0 |
+| `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
+| `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
 | `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
@@ -369,12 +369,12 @@ LeafWiki can run as a project-local MCP STDIO process while also serving the HTT
 ./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
 ```
 
-Native STDIO mode is disabled-auth only in v1, keeps stdout reserved for MCP JSON-RPC frames, and locks `<data-dir>/.leafwiki/leafwiki.lock` so two active processes cannot share state.
+Native STDIO keeps stdout reserved for MCP JSON-RPC frames and locks `<data-dir>/.leafwiki/leafwiki.lock` so two active processes cannot share state. It can run with disabled auth for isolated local workflows, or with an MCP API key through `LEAFWIKI_MCP_API_KEY`.
 
 LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
 
 ```bash
-./leafwiki --enable-mcp --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
+./leafwiki --mcp=http --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
 ```
 
 The endpoint is `http://127.0.0.1:8080/mcp`, or `${base-path}/mcp` when `--base-path` is set. Plain local HTTP requires `--allow-insecure=true` so login and OAuth cookies work without TLS. Authenticated MCP uses OAuth Authorization Code + PKCE with Dynamic Client Registration for OAuth-capable clients and scope `leafwiki:mcp`. The fixed public client ID `leafwiki-local-mcp` remains available for manual testing and backward compatibility. Authorization requires a logged-in web user and explicit local approval before tokens are issued. MCP-only API keys are also available for manual clients that can send `Authorization: Bearer lwk_<id>_<secret>`.
@@ -382,12 +382,12 @@ The endpoint is `http://127.0.0.1:8080/mcp`, or `${base-path}/mcp` when `--base-
 The legacy disabled-auth mode remains available for isolated local workflows:
 
 ```bash
-./leafwiki --disable-auth --enable-mcp --host=127.0.0.1
+./leafwiki --disable-auth --mcp=http --host=127.0.0.1
 ```
 
-For clients that need STDIO but also require API-key auth or an already-running HTTP MCP server, `scripts/run-mcp.sh --mode sidecar` or the optional `leafwiki-mcp-stdio` binary bridges STDIO JSON-RPC to the same `/mcp` endpoint. OAuth-capable clients should use Streamable HTTP directly.
+For clients that need STDIO with API-key auth, run native STDIO and provide `LEAFWIKI_MCP_API_KEY`. OAuth-capable clients should use Streamable HTTP directly.
 
-See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, sidecar compatibility, the tool surface, safety gates, and the parity contract.
+See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, the tool surface, safety gates, and the parity contract.
 
 ### Operations notes
 

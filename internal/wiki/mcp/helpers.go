@@ -60,6 +60,16 @@ func (r *Routes) actorForMissingTokenInfo() (*coreauth.User, error) {
 	if r.authDisabled {
 		return publicEditor(), nil
 	}
+	if strings.TrimSpace(r.stdioAPIKey) != "" {
+		if r.apiKeys == nil {
+			return nil, fmt.Errorf("authenticated MCP user service is unavailable")
+		}
+		verified, err := r.apiKeys.VerifyAPIKey(r.stdioAPIKey)
+		if err != nil {
+			return nil, fmt.Errorf("authenticated MCP user not found")
+		}
+		return verified.User, nil
+	}
 	return nil, fmt.Errorf("authenticated MCP token info missing")
 }
 

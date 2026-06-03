@@ -20,9 +20,10 @@ docker_data_volume=""
 docker_root_volume=""
 mcp_stdio_dir=""
 mcp_stdio_command=""
+mcp_stdio_seed_file=""
 
-is_native_stdio_e2e() {
-  [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ] && [ "${E2E_MCP_STDIO_NATIVE:-0}" = "1" ]
+is_stdio_e2e() {
+  [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ]
 }
 
 print_runner_diagnostics() {
@@ -77,56 +78,83 @@ prepare_mcp_stdio_command() {
     exit 1
   fi
   if [ "${E2E_ENABLE_MCP_OAUTH_LOCAL:-0}" = "1" ]; then
-    echo "❌ The MCP STDIO sidecar supports disabled-auth and API-key modes only; keep OAuth E2E on Streamable HTTP."
-    exit 1
-  fi
-  if is_native_stdio_e2e && [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
-    echo "❌ Native MCP STDIO is disabled-auth only in v1; keep API-key STDIO E2E on sidecar mode."
+    echo "❌ MCP OAuth E2E must use Streamable HTTP; STDIO uses disabled-auth or API-key identity."
     exit 1
   fi
 
-  mcp_stdio_dir="$(mktemp -d /tmp/leafwiki-mcp-stdio-e2e.XXXXXX)"
-  if is_native_stdio_e2e; then
-    local leafwiki_bin="$mcp_stdio_dir/leafwiki"
-    mcp_stdio_command="$mcp_stdio_dir/leafwiki-native-stdio"
-    echo "🔨 Building native LeafWiki STDIO binary for E2E..."
-    (
-      cd "$repo_root"
-      go build -ldflags="-X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X github.com/perber/wiki/internal/wiki/auth.DisableRefreshTokenRateLimit=true" -o "$leafwiki_bin" ./cmd/leafwiki
+  mcp_stdio_dir="$(mktemp -d /tmp/leafwiki-mcp-e2e.XXXXXX)"
+  local leafwiki_bin="$mcp_stdio_dir/leafwiki"
+  mcp_stdio_command="$mcp_stdio_dir/leafwiki-native-stdio"
+  echo "🔨 Building native LeafWiki STDIO binary for E2E..."
+  (
+    cd "$repo_root"
+    go build -ldflags="-X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X github.com/perber/wiki/internal/wiki/auth.DisableRefreshTokenRateLimit=true" -o "$leafwiki_bin" ./cmd/leafwiki
+  )
+  local native_args=(
+    --mcp=stdio
+    --host 127.0.0.1
+    --port "$app_port"
+    --data-dir "$local_data_dir"
+    --allow-insecure=true
+    --enable-revision=true
+    --enable-link-refactor=true
+    --log-target stderr
+    --disable-request-log
+  )
+  if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+    native_args+=(
+      --jwt-secret=e2e-tests-secret
+      --admin-password=admin
     )
-    local native_args=(
-      --mcp-stdio
-      --disable-auth=true
-      --host 127.0.0.1
-      --port "$app_port"
-      --data-dir "$local_data_dir"
-      --allow-insecure=true
-      --enable-revision=true
-      --enable-link-refactor=true
-      --log-target stderr
-      --disable-request-log
-    )
-    if [ -n "$local_root_dir" ]; then
-      native_args+=(--root-dir "$local_root_dir")
-    fi
-    if [ -n "$app_base_path" ]; then
-      native_args+=(--base-path "$app_base_path")
-    fi
-    {
-      printf '#!/usr/bin/env bash\n'
-      printf 'set -euo pipefail\n'
-      printf 'exec %q' "$leafwiki_bin"
-      printf ' %q' "${native_args[@]}"
-      printf '\n'
-    } >"$mcp_stdio_command"
-    chmod +x "$mcp_stdio_command"
   else
-    mcp_stdio_command="$mcp_stdio_dir/leafwiki-mcp-stdio"
-    echo "🔨 Building MCP STDIO sidecar for E2E..."
-    (
-      cd "$repo_root"
-      go build -o "$mcp_stdio_command" ./cmd/leafwiki-mcp-stdio
-    )
+    native_args+=(--disable-auth=true)
+  fi
+  if [ -n "$local_root_dir" ]; then
+    native_args+=(--root-dir "$local_root_dir")
+  fi
+  if [ -n "$app_base_path" ]; then
+    native_args+=(--base-path "$app_base_path")
+  fi
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'exec %q' "$leafwiki_bin"
+    printf ' %q' "${native_args[@]}"
+    printf '\n'
+  } >"$mcp_stdio_command"
+  chmod +x "$mcp_stdio_command"
+}
+
+seed_mcp_stdio_api_keys() {
+  if [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" != "stdio" ] || [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" != "1" ]; then
+    return
+  fi
+  mcp_stdio_seed_file="$(mktemp /tmp/leafwiki-mcp-seed.XXXXXX.json)"
+  echo "🌱 Seeding native STDIO MCP API-key users..."
+  (
+    cd "$repo_root"
+    go run ./e2e/seed_mcp_api_keys.go --data-dir "$local_data_dir" --output "$mcp_stdio_seed_file"
+  )
+}
+
+validate_mcp_mode_selection() {
+  local mcp_modes_enabled=0
+  if [ "${E2E_ENABLE_MCP_LOCAL:-0}" = "1" ]; then
+    mcp_modes_enabled=$((mcp_modes_enabled + 1))
+  fi
+  if [ "${E2E_ENABLE_MCP_OAUTH_LOCAL:-0}" = "1" ]; then
+    mcp_modes_enabled=$((mcp_modes_enabled + 1))
+  fi
+  if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+    mcp_modes_enabled=$((mcp_modes_enabled + 1))
+  fi
+  if [ "$mcp_modes_enabled" -gt 1 ]; then
+    echo "❌ Set only one MCP E2E mode: E2E_ENABLE_MCP_LOCAL, E2E_ENABLE_MCP_OAUTH_LOCAL, or E2E_ENABLE_MCP_API_KEYS_LOCAL."
+    exit 1
+  fi
+  if is_stdio_e2e && [ "$mcp_modes_enabled" -eq 0 ]; then
+    echo "❌ STDIO MCP E2E requires E2E_ENABLE_MCP_LOCAL=1 or E2E_ENABLE_MCP_API_KEYS_LOCAL=1."
+    exit 1
   fi
 }
 
@@ -211,42 +239,27 @@ start_local() {
     server_args+=(--base-path "$app_base_path")
   fi
 
-  if is_native_stdio_e2e; then
-    echo "✅ Native STDIO mode will start LeafWiki from the MCP client command."
+  if is_stdio_e2e; then
+    echo "✅ STDIO mode will start LeafWiki from the MCP client command."
     return
-  fi
-
-  local mcp_modes_enabled=0
-  if [ "${E2E_ENABLE_MCP_LOCAL:-0}" = "1" ]; then
-    mcp_modes_enabled=$((mcp_modes_enabled + 1))
-  fi
-  if [ "${E2E_ENABLE_MCP_OAUTH_LOCAL:-0}" = "1" ]; then
-    mcp_modes_enabled=$((mcp_modes_enabled + 1))
-  fi
-  if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
-    mcp_modes_enabled=$((mcp_modes_enabled + 1))
-  fi
-  if [ "$mcp_modes_enabled" -gt 1 ]; then
-    echo "❌ Set only one MCP E2E mode: E2E_ENABLE_MCP_LOCAL, E2E_ENABLE_MCP_OAUTH_LOCAL, or E2E_ENABLE_MCP_API_KEYS_LOCAL."
-    exit 1
   fi
 
   if [ "${E2E_ENABLE_MCP_LOCAL:-0}" = "1" ]; then
     auth_args=(
       --disable-auth=true
-      --enable-mcp=true
+      --mcp=http
     )
   elif [ "${E2E_ENABLE_MCP_OAUTH_LOCAL:-0}" = "1" ]; then
     auth_args=(
       --jwt-secret=e2e-tests-secret
       --admin-password=admin
-      --enable-mcp=true
+      --mcp=http
     )
   elif [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
     auth_args=(
       --jwt-secret=e2e-tests-secret
       --admin-password=admin
-      --enable-mcp=true
+      --mcp=http
     )
   fi
 
@@ -277,6 +290,9 @@ stop_local() {
   fi
   if [ -n "$local_root_dir" ] && [ -d "$local_root_dir" ]; then
     rm -rf "$local_root_dir"
+  fi
+  if [ -n "$mcp_stdio_seed_file" ] && [ -f "$mcp_stdio_seed_file" ]; then
+    rm -f "$mcp_stdio_seed_file"
   fi
 
   if [ -n "$server_log" ] && [ -f "$server_log" ]; then
@@ -405,6 +421,7 @@ run_playwright_tests() {
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       stdbuf -oL -eL npx playwright test --workers="$workers" --reporter="$reporter" "$@"
     else
@@ -418,6 +435,7 @@ run_playwright_tests() {
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       npx playwright test --workers="$workers" --reporter="$reporter" "$@"
     fi
@@ -457,6 +475,8 @@ if nc -z localhost "$app_port" >/dev/null 2>&1; then
   fi
 fi
 
+validate_mcp_mode_selection
+
 if [ "$run_mode" = "docker" ]; then
   start_docker
 else
@@ -466,7 +486,8 @@ fi
 trap cleanup_runner EXIT
 
 prepare_mcp_stdio_command
-if ! is_native_stdio_e2e; then
+seed_mcp_stdio_api_keys
+if ! is_stdio_e2e; then
   wait_until_reachable
 fi
 run_playwright_tests "$@"

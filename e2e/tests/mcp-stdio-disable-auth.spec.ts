@@ -9,8 +9,10 @@ import { connectMCPStdioClient, requestMCPStdioFrame } from './mcpClient';
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
     process.env.E2E_ENABLE_MCP_LOCAL !== '1' ||
+    process.env.E2E_ENABLE_MCP_API_KEYS_LOCAL === '1' ||
+    process.env.E2E_ENABLE_MCP_OAUTH_LOCAL === '1' ||
     process.env.E2E_MCP_CLIENT_TRANSPORT !== 'stdio',
-  'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_LOCAL=1, and E2E_MCP_CLIENT_TRANSPORT=stdio to run the MCP stdio disabled-auth smoke test.',
+  'Set only E2E_ENABLE_MCP_LOCAL=1 with E2E_RUN_MODE=local and E2E_MCP_CLIENT_TRANSPORT=stdio to run the MCP stdio disabled-auth smoke test.',
 );
 
 const assertRootFiles = process.env.E2E_ASSERT_SEPARATE_ROOT_FILES === '1';
@@ -80,7 +82,7 @@ test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }
   }
 });
 
-test('mcp stdio raw lifecycle exits after stdin closes', async () => {
+test('mcp stdio raw lifecycle exits after stdin closes', async ({ request }) => {
   const result = await requestMCPStdioFrame(appURL('/mcp'), {
     jsonrpc: '2.0',
     id: 1,
@@ -97,6 +99,23 @@ test('mcp stdio raw lifecycle exits after stdin closes', async () => {
   expect(result.responses).toHaveLength(1);
   expect(result.response?.result).toBeTruthy();
   expect(result.stderr).not.toContain('shutdown delete failed');
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await request.get(appURL('/api/health'), {
+            failOnStatusCode: false,
+            timeout: 250,
+          });
+          await response.dispose();
+          return 'reachable';
+        } catch {
+          return 'unavailable';
+        }
+      },
+      { timeout: 5000 },
+    )
+    .toBe('unavailable');
 });
 
 test('mcp stdio uses a base-path endpoint', async () => {

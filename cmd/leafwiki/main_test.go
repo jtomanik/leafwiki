@@ -13,16 +13,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/wiki"
+	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 )
 
-func TestWriteUsage_UsesLongFlags(t *testing.T) {
+func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 	var buf bytes.Buffer
 
 	writeUsage(&buf)
@@ -39,16 +42,26 @@ func TestWriteUsage_UsesLongFlags(t *testing.T) {
 		"--root-dir",
 		"--log-target",
 		"--log-file",
-		"--enable-mcp",
-		"--mcp-stdio",
+		"--mcp",
+		"--api-key",
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
 		"LEAFWIKI_LOG_FILE",
-		"LEAFWIKI_ENABLE_MCP",
-		"LEAFWIKI_MCP_STDIO",
+		"LEAFWIKI_MCP",
+		"LEAFWIKI_MCP_API_KEY",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected usage output to contain %q, got %q", expected, output)
+		}
+	}
+	for _, removed := range []string{
+		"--enable-mcp",
+		"--mcp-stdio",
+		"LEAFWIKI_ENABLE_MCP",
+		"LEAFWIKI_MCP_STDIO",
+	} {
+		if strings.Contains(output, removed) {
+			t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
 		}
 	}
 }
@@ -252,10 +265,10 @@ func TestMainProcess_RejectsExplicitLogFileForStreamTarget(t *testing.T) {
 	}
 }
 
-func TestMainProcess_NativeStdioRejectsAuthenticatedStartup(t *testing.T) {
+func TestMainProcess_NativeStdioAuthEnabledRequiresAPIKey(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--data-dir", dataDir,
 		"--jwt-secret", "test-secret",
 		"--admin-password", "admin-password",
@@ -267,14 +280,39 @@ func TestMainProcess_NativeStdioRejectsAuthenticatedStartup(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "native STDIO requires disabled auth in v1") {
-		t.Fatalf("stderr = %q, want native stdio disabled-auth error", stderr)
+	if !strings.Contains(stderr, "native STDIO requires either disabled auth or an API key") {
+		t.Fatalf("stderr = %q, want native stdio API-key requirement", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioRejectsInvalidAPIKeyWithoutLeakingSecret(t *testing.T) {
+	secret := "lwk_secret_bad"
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--mcp=stdio",
+		"--api-key", secret,
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--jwt-secret", "test-secret",
+		"--admin-password", "admin-password",
+		"--log-target", "stderr",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("expected native stdio with invalid API key to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+		t.Fatalf("process output leaked API key\nstdout=%q\nstderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "invalid native STDIO API key") {
+		t.Fatalf("stderr = %q, want invalid API-key error", stderr)
 	}
 }
 
 func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", filepath.Join(t.TempDir(), "data"),
 		"--log-target", "stdout",
@@ -293,7 +331,7 @@ func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
 
 func TestMainProcess_NativeStdioRejectsNonLoopbackHost(t *testing.T) {
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--host", "0.0.0.0",
 		"--data-dir", filepath.Join(t.TempDir(), "data"),
@@ -306,19 +344,38 @@ func TestMainProcess_NativeStdioRejectsNonLoopbackHost(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "native STDIO requires a loopback host") {
-		t.Fatalf("stderr = %q, want loopback host error", stderr)
+	if !strings.Contains(stderr, "MCP requires a loopback host") {
+		t.Fatalf("stderr = %q, want unified MCP loopback host error", stderr)
 	}
 }
 
 func TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly(t *testing.T) {
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"bogus",
 	}, nil)
 
 	if err == nil {
 		t.Fatalf("expected native stdio with a positional command to exit non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "native STDIO does not support positional commands") {
+		t.Fatalf("stderr = %q, want positional-command error", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioEnvironmentRejectsPositionalCommandWithStderrOnly(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"bogus",
+	}, map[string]string{
+		"LEAFWIKI_MCP": "stdio",
+	})
+
+	if err == nil {
+		t.Fatalf("expected env-enabled native stdio with a positional command to exit non-zero")
 	}
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
@@ -334,7 +391,7 @@ func TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer(t *testing.T)
 	rootDir := filepath.Join(t.TempDir(), "content")
 	port := freeTCPPort(t)
 	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
@@ -355,14 +412,147 @@ func TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer(t *testing.T)
 	waitForLeafwikiUnavailable(t, port)
 }
 
+func TestMainProcess_NativeStdioOnlyKeepsHTTPMCPRouteDisabled(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinWriter.Close()
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp=stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--root-dir", filepath.Join(t.TempDir(), "content"),
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil, stdinReader)
+
+	waitForLeafwikiReady(t, proc, port)
+	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
+	if err != nil {
+		t.Fatalf("GET /mcp: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	proc.waitForExit(t)
+	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+	}
+}
+
+func TestMainProcess_CombinedNativeStdioHTTPExposesHTTPMCPToolSurface(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinWriter.Close()
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp=stdio,http",
+		"--disable-auth",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--root-dir", filepath.Join(t.TempDir(), "content"),
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil, stdinReader)
+
+	waitForLeafwikiReady(t, proc, port)
+	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp")
+	assertToolNamesMatch(t, toolNames, wikimcp.BaseToolNames())
+
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	proc.waitForExit(t)
+	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+	}
+}
+
+func TestMainProcess_LegacyMCPFlagsAreIgnored(t *testing.T) {
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--enable-mcp",
+		"--mcp-stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--root-dir", filepath.Join(t.TempDir(), "content"),
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+
+	waitForLeafwikiReady(t, proc, port)
+	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
+	if err != nil {
+		t.Fatalf("GET /mcp: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+	proc.stop(t)
+
+	stdout := readFileString(t, proc.stdoutPath)
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	stderr := readFileString(t, proc.stderrPath)
+	if strings.Contains(stderr, "LeafWiki HTTP listening") {
+		t.Fatalf("stderr = %q, want no native STDIO HTTP diagnostic", stderr)
+	}
+}
+
+func TestMainProcess_NativeStdioMalformedJSONReturnsParseErrorAndContinues(t *testing.T) {
+	proc, stdin := startLeafwikiHelperWithStdinPipe(t, []string{
+		"--mcp=stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--root-dir", filepath.Join(t.TempDir(), "content"),
+		"--host", "127.0.0.1",
+		"--port", freeTCPPort(t),
+		"--log-target", "stderr",
+	}, nil)
+
+	if _, err := io.WriteString(stdin, "not-json\n"); err != nil {
+		t.Fatalf("write malformed frame: %v", err)
+	}
+	if _, err := io.WriteString(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`+"\n"); err != nil {
+		t.Fatalf("write initialize frame: %v", err)
+	}
+	waitForFileContaining(t, proc.stdoutPath, `"id":1`)
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+	proc.waitForExit(t)
+
+	stdout := readFileString(t, proc.stdoutPath)
+	if !strings.Contains(stdout, `"code":-32700`) {
+		t.Fatalf("stdout = %q, want JSON-RPC parse error", stdout)
+	}
+	if !strings.Contains(stdout, `"id":null`) {
+		t.Fatalf("stdout = %q, want parse error id null", stdout)
+	}
+	if !strings.Contains(stdout, `"id":1`) {
+		t.Fatalf("stdout = %q, want initialize response after malformed frame", stdout)
+	}
+	if stderr := readFileString(t, proc.stderrPath); strings.Contains(stderr, "MCP STDIO failed") {
+		t.Fatalf("stderr = %q, want malformed JSON to stay protocol-level", stderr)
+	}
+}
+
 func TestMainProcess_NativeStdioRejectsSecondProcessWithSameDataDir(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
+	defer stdinWriter.Close()
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
 	firstPort := freeTCPPort(t)
 	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
@@ -373,7 +563,7 @@ func TestMainProcess_NativeStdioRejectsSecondProcessWithSameDataDir(t *testing.T
 	waitForLeafwikiReady(t, first, firstPort)
 
 	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
@@ -401,6 +591,52 @@ func TestMainProcess_NativeStdioRejectsSecondProcessWithSameDataDir(t *testing.T
 	first.waitForExit(t)
 }
 
+func TestMainProcess_NativeStdioRejectsSecondProcessWithSameRootDir(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinWriter.Close()
+	baseDir := t.TempDir()
+	rootDir := filepath.Join(baseDir, "content")
+	firstPort := freeTCPPort(t)
+	first := startLeafwikiHelperWithStdin(t, []string{
+		"--mcp=stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(baseDir, "data-a"),
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", firstPort,
+		"--log-target", "stderr",
+	}, nil, stdinReader)
+	waitForLeafwikiReady(t, first, firstPort)
+
+	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+		"--mcp=stdio",
+		"--disable-auth",
+		"--data-dir", filepath.Join(baseDir, "data-b"),
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", freeTCPPort(t),
+		"--log-target", "stderr",
+	}, nil, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("expected second process with same root dir to exit non-zero")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second process did not exit; expected root directory lock rejection\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "root directory is already in use") {
+		t.Fatalf("stderr = %q, want root directory lock error", stderr)
+	}
+
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	first.waitForExit(t)
+}
+
 func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 	if !supportsGracefulProcessSignal() {
 		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
@@ -411,7 +647,7 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 	rootDir := filepath.Join(baseDir, "content")
 	firstPort := freeTCPPort(t)
 	first, firstStdinWriter := startLeafwikiHelperWithStdinPipe(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
@@ -431,7 +667,7 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 	secondStdinReader, secondStdinWriter := io.Pipe()
 	secondPort := freeTCPPort(t)
 	second := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp-stdio",
+		"--mcp=stdio",
 		"--disable-auth",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
@@ -773,106 +1009,175 @@ func TestResolveStartupWorkspace_SkipsWorkspaceValidationForResetAdminPassword(t
 	}
 }
 
-func TestValidateMCPStartupOptions_RequiresLoopbackHost(t *testing.T) {
-	t.Parallel()
+func TestResolveMCPTransports_DefaultEnvCLIAndOldOptions(t *testing.T) {
+	t.Run("default none", func(t *testing.T) {
+		got, err := resolveMCPTransportsForArgs(t, nil)
+		if err != nil {
+			t.Fatalf("resolveMCPTransports: %v", err)
+		}
+		if got.HTTP || got.Stdio {
+			t.Fatalf("default transports = %#v, want none", got)
+		}
+	})
 
+	t.Run("env enables http", func(t *testing.T) {
+		t.Setenv("LEAFWIKI_MCP", "http")
+		got, err := resolveMCPTransportsForArgs(t, nil)
+		if err != nil {
+			t.Fatalf("resolveMCPTransports: %v", err)
+		}
+		if !got.HTTP || got.Stdio {
+			t.Fatalf("env transports = %#v, want http only", got)
+		}
+	})
+
+	t.Run("cli overrides env", func(t *testing.T) {
+		t.Setenv("LEAFWIKI_MCP", "http")
+		got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=stdio"})
+		if err != nil {
+			t.Fatalf("resolveMCPTransports: %v", err)
+		}
+		if got.HTTP || !got.Stdio {
+			t.Fatalf("CLI transports = %#v, want stdio only", got)
+		}
+	})
+
+	t.Run("combined orderings", func(t *testing.T) {
+		for _, raw := range []string{"--mcp=stdio,http", "--mcp=http,stdio"} {
+			got, err := resolveMCPTransportsForArgs(t, []string{raw})
+			if err != nil {
+				t.Fatalf("resolveMCPTransports(%s): %v", raw, err)
+			}
+			if !got.HTTP || !got.Stdio {
+				t.Fatalf("%s transports = %#v, want both", raw, got)
+			}
+		}
+	})
+
+	t.Run("old flags and env ignored", func(t *testing.T) {
+		t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
+		t.Setenv("LEAFWIKI_MCP_STDIO", "true")
+		got, err := resolveMCPTransportsForArgs(t, []string{"--enable-mcp", "--mcp-stdio", "--disable-auth"})
+		if err != nil {
+			t.Fatalf("resolveMCPTransports: %v", err)
+		}
+		if got.HTTP || got.Stdio {
+			t.Fatalf("old MCP options transports = %#v, want none", got)
+		}
+	})
+
+	t.Run("selector overrides legacy env", func(t *testing.T) {
+		t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
+		t.Setenv("LEAFWIKI_MCP_STDIO", "true")
+		got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=none"})
+		if err != nil {
+			t.Fatalf("resolveMCPTransports: %v", err)
+		}
+		if got.HTTP || got.Stdio {
+			t.Fatalf("selector transports = %#v, want none", got)
+		}
+	})
+}
+
+func TestParseMCPTransports_RejectsInvalidValues(t *testing.T) {
 	tests := []struct {
-		name        string
-		enableMCP   bool
-		disableAuth bool
-		remoteUser  bool
-		host        string
-		wantErr     bool
+		name      string
+		raw       string
+		wantError string
 	}{
-		{name: "disabled MCP ignores host/auth", enableMCP: false, disableAuth: false, host: "0.0.0.0"},
-		{name: "MCP allows normal auth on loopback", enableMCP: true, disableAuth: false, host: "127.0.0.1"},
-		{name: "MCP allows legacy disabled auth on loopback", enableMCP: true, disableAuth: true, host: "127.0.0.1"},
-		{name: "MCP rejects wildcard host", enableMCP: true, disableAuth: true, host: "0.0.0.0", wantErr: true},
-		{name: "MCP allows remote user middleware on loopback", enableMCP: true, disableAuth: false, remoteUser: true, host: "127.0.0.1"},
-		{name: "MCP allows localhost", enableMCP: true, disableAuth: true, host: "localhost"},
-		{name: "MCP allows IPv4 loopback", enableMCP: true, disableAuth: true, host: "127.0.0.1"},
-		{name: "MCP allows IPv6 loopback", enableMCP: true, disableAuth: true, host: "::1"},
+		{name: "unknown", raw: "websocket", wantError: "invalid MCP transport"},
+		{name: "none combined", raw: "none,stdio", wantError: "none cannot be combined"},
+		{name: "duplicate", raw: "stdio,stdio", wantError: "duplicate MCP transport"},
+		{name: "empty part", raw: "stdio,", wantError: "invalid MCP transport"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateLocalMCPOptions(localMCPOptions{
-				EnableMCP:        tt.enableMCP,
-				DisableAuth:      tt.disableAuth,
-				HTTPRemoteUserOn: tt.remoteUser,
-				Host:             tt.host,
-			})
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("validateLocalMCPOptions() error = %v, wantErr %v", err, tt.wantErr)
+			if _, err := parseMCPTransports(tt.raw); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("parseMCPTransports(%q) error = %v, want %q", tt.raw, err, tt.wantError)
 			}
 		})
 	}
 }
 
-func TestValidateNativeStdioOptions_RequiresLoopbackHost(t *testing.T) {
-	t.Parallel()
-
+func TestValidateMCPTransportOptions(t *testing.T) {
 	tests := []struct {
-		name    string
-		host    string
-		wantErr bool
+		name      string
+		opts      mcpTransportOptions
+		wantError string
 	}{
-		{name: "localhost", host: "localhost"},
-		{name: "IPv4 loopback", host: "127.0.0.1"},
-		{name: "IPv6 loopback", host: "::1"},
-		{name: "wildcard", host: "0.0.0.0", wantErr: true},
-		{name: "external", host: "192.0.2.10", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateNativeStdioOptions(nativeStdioOptions{
-				Enabled:     true,
+		{
+			name: "HTTP requires loopback",
+			opts: mcpTransportOptions{
+				Transports: mcpTransports{HTTP: true},
+				Host:       "0.0.0.0",
+				LogTarget:  leaflogging.TargetStderr,
+			},
+			wantError: "MCP requires a loopback host",
+		},
+		{
+			name: "STDIO requires loopback",
+			opts: mcpTransportOptions{
+				Transports:  mcpTransports{Stdio: true},
 				DisableAuth: true,
+				Host:        "0.0.0.0",
 				LogTarget:   leaflogging.TargetStderr,
-				Host:        tt.host,
-			})
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("validateNativeStdioOptions() error = %v, wantErr %v", err, tt.wantErr)
+			},
+			wantError: "MCP requires a loopback host",
+		},
+		{
+			name: "STDIO rejects stdout logging",
+			opts: mcpTransportOptions{
+				Transports:  mcpTransports{Stdio: true},
+				DisableAuth: true,
+				Host:        "127.0.0.1",
+				LogTarget:   leaflogging.TargetStdout,
+			},
+			wantError: "stdout is reserved for MCP STDIO",
+		},
+		{
+			name: "STDIO auth enabled requires key",
+			opts: mcpTransportOptions{
+				Transports: mcpTransports{Stdio: true},
+				Host:       "127.0.0.1",
+				LogTarget:  leaflogging.TargetStderr,
+			},
+			wantError: "native STDIO requires either disabled auth or an API key",
+		},
+		{
+			name: "STDIO disabled auth rejects key",
+			opts: mcpTransportOptions{
+				Transports:  mcpTransports{Stdio: true},
+				DisableAuth: true,
+				APIKey:      "lwk_fake",
+				Host:        "127.0.0.1",
+				LogTarget:   leaflogging.TargetStderr,
+			},
+			wantError: "disabled auth and API-key STDIO identity cannot be combined",
+		},
+		{
+			name: "HTTP ignores API key",
+			opts: mcpTransportOptions{
+				Transports: mcpTransports{HTTP: true},
+				APIKey:     "lwk_invalid",
+				Host:       "127.0.0.1",
+				LogTarget:  leaflogging.TargetStderr,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMCPTransportOptions(tt.opts)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("validateMCPTransportOptions() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("validateMCPTransportOptions() error = %v, want %q", err, tt.wantError)
 			}
 		})
-	}
-}
-
-func TestResolveLocalMCPOptions_UsesFlagEnvPrecedenceBeforeValidation(t *testing.T) {
-	t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
-	t.Setenv("LEAFWIKI_DISABLE_AUTH", "true")
-	t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
-
-	opts := resolveLocalMCPOptionsForArgs(t, nil)
-	if !opts.EnableMCP || !opts.DisableAuth || opts.Host != "0.0.0.0" {
-		t.Fatalf("resolved MCP opts from env = %#v, want env-enabled MCP on wildcard host", opts)
-	}
-	if err := validateLocalMCPOptions(opts); err == nil || !strings.Contains(err.Error(), "loopback") {
-		t.Fatalf("validate env-resolved MCP opts = %v, want loopback error", err)
-	}
-
-	opts = resolveLocalMCPOptionsForArgs(t, []string{"--host=127.0.0.1"})
-	if opts.Host != "127.0.0.1" {
-		t.Fatalf("CLI host did not override env host: %#v", opts)
-	}
-	if err := validateLocalMCPOptions(opts); err != nil {
-		t.Fatalf("validate CLI-overridden MCP opts: %v", err)
-	}
-}
-
-func TestResolveLocalMCPOptions_EnvRemoteUserCombinationIsAllowed(t *testing.T) {
-	t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
-	t.Setenv("LEAFWIKI_DISABLE_AUTH", "false")
-	t.Setenv("LEAFWIKI_HOST", "127.0.0.1")
-	t.Setenv("LEAFWIKI_ENABLE_HTTP_REMOTE_USER", "true")
-
-	opts := resolveLocalMCPOptionsForArgs(t, nil)
-	if !opts.HTTPRemoteUserOn {
-		t.Fatalf("resolved MCP opts = %#v, want remote-user enabled from env", opts)
-	}
-	if err := validateLocalMCPOptions(opts); err != nil {
-		t.Fatalf("validate env-resolved MCP opts with remote-user auth: %v", err)
 	}
 }
 
@@ -1046,7 +1351,7 @@ func TestRegisterFlags_AcceptsLoggingFlags(t *testing.T) {
 	}
 }
 
-func resolveLocalMCPOptionsForArgs(t *testing.T, args []string) localMCPOptions {
+func resolveMCPTransportsForArgs(t *testing.T, args []string) (mcpTransports, error) {
 	t.Helper()
 
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
@@ -1058,7 +1363,7 @@ func resolveLocalMCPOptionsForArgs(t *testing.T, args []string) localMCPOptions 
 	}
 	visited := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-	return resolveLocalMCPOptions(flags, visited)
+	return resolveMCPTransports(flags, visited)
 }
 
 func resolveWorkspaceForArgs(t *testing.T, args []string) wiki.Workspace {
@@ -1385,6 +1690,52 @@ func waitForLeafwikiUnavailable(t *testing.T, port string) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("LeafWiki stayed reachable at %s after shutdown", url)
+}
+
+func listProcessHTTPMCPToolNames(t *testing.T, endpoint string) []string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-main-test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &sdkmcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		HTTPClient:           &http.Client{Timeout: 5 * time.Second},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect HTTP MCP client: %v", err)
+	}
+	defer session.Close()
+
+	var names []string
+	cursor := ""
+	for {
+		result, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			t.Fatalf("list HTTP MCP tools: %v", err)
+		}
+		for _, tool := range result.Tools {
+			names = append(names, tool.Name)
+		}
+		if result.NextCursor == "" {
+			break
+		}
+		cursor = result.NextCursor
+	}
+	sort.Strings(names)
+	return names
+}
+
+func assertToolNamesMatch(t *testing.T, got []string, want []string) {
+	t.Helper()
+
+	sortedWant := append([]string{}, want...)
+	sort.Strings(sortedWant)
+	if strings.Join(got, "\n") != strings.Join(sortedWant, "\n") {
+		t.Fatalf("tool names mismatch\n got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(sortedWant, "\n"))
+	}
 }
 
 func freeTCPPort(t *testing.T) string {

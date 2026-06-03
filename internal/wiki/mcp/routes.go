@@ -32,6 +32,7 @@ type Routes struct {
 	apiKeys      *coreauth.APIKeyService
 	oauthService *wikioauth.Service
 	authDisabled bool
+	stdioAPIKey  string
 	createPage   *wikipages.CreatePageUseCase
 	updatePage   *wikipages.UpdatePageUseCase
 	getPage      *wikipages.GetPageUseCase
@@ -207,6 +208,19 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 func (r *Routes) NewServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
 	serverRoutes := *r
 	serverRoutes.authDisabled = opts.AuthDisabled
+	serverRoutes.stdioAPIKey = ""
+	return serverRoutes.newServer(opts)
+}
+
+type StdioAuth struct {
+	DisabledAuth bool
+	APIKey       string
+}
+
+func (r *Routes) NewStdioServer(opts httpinternal.RouterOptions, auth StdioAuth) *sdkmcp.Server {
+	serverRoutes := *r
+	serverRoutes.authDisabled = auth.DisabledAuth
+	serverRoutes.stdioAPIKey = auth.APIKey
 	return serverRoutes.newServer(opts)
 }
 

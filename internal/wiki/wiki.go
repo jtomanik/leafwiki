@@ -576,10 +576,14 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 }
 
 func (w *Wiki) RunMCPStdio(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport) error {
+	return w.RunMCPStdioWithAuth(ctx, opts, transport, wikimcp.StdioAuth{DisabledAuth: opts.AuthDisabled})
+}
+
+func (w *Wiki) RunMCPStdioWithAuth(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport, stdioAuth wikimcp.StdioAuth) error {
 	if opts.MCPToolListPageSize <= 0 {
 		opts.MCPToolListPageSize = 100
 	}
-	server := w.mcpRoutes.NewServer(opts)
+	server := w.mcpRoutes.NewStdioServer(opts, stdioAuth)
 	return server.Run(ctx, transport)
 }
 

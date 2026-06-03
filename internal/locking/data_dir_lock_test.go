@@ -47,3 +47,35 @@ func TestAcquireDataDirLockRejectsSecondOwner(t *testing.T) {
 		t.Fatalf("second AcquireDataDirLock error = %v, want in-use message", err)
 	}
 }
+
+func TestAcquireRootDirLockRejectsSecondOwnerAndReleases(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+
+	first, err := AcquireRootDirLock(rootDir)
+	if err != nil {
+		t.Fatalf("first AcquireRootDirLock failed: %v", err)
+	}
+	if first.Path() == "" {
+		t.Fatalf("root lock path is empty")
+	}
+
+	second, err := AcquireRootDirLock(rootDir)
+	if err == nil {
+		_ = second.Release()
+		t.Fatalf("second AcquireRootDirLock succeeded, want root-dir in-use error")
+	}
+	if !strings.Contains(err.Error(), "root directory is already in use") {
+		t.Fatalf("second AcquireRootDirLock error = %v, want in-use message", err)
+	}
+
+	if err := first.Release(); err != nil {
+		t.Fatalf("Release failed: %v", err)
+	}
+	again, err := AcquireRootDirLock(rootDir)
+	if err != nil {
+		t.Fatalf("AcquireRootDirLock after release failed: %v", err)
+	}
+	if err := again.Release(); err != nil {
+		t.Fatalf("second Release failed: %v", err)
+	}
+}

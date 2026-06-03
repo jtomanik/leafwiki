@@ -34,14 +34,11 @@ dry_run_output="$(
     --build-dir "$tmp_dir/releases"
 )"
 
-[[ "$dry_run_output" == *"Would install LeafWiki, leafwiki-mcp-stdio, and run-mcp.sh v9.9.9 for darwin/arm64"* ]] || fail "dry-run omits aggregate target"
+[[ "$dry_run_output" == *"Would install LeafWiki and run-mcp.sh v9.9.9 for darwin/arm64"* ]] || fail "dry-run omits aggregate target"
 [[ "$dry_run_output" == *"scripts/install-macos.sh"* ]] || fail "dry-run omits main installer"
-[[ "$dry_run_output" == *"scripts/install-mcp-stdio.sh"* ]] || fail "dry-run omits MCP STDIO installer"
 [[ "$dry_run_output" == *"$tmp_dir/bin/leafwiki"* ]] || fail "dry-run omits leafwiki install target"
-[[ "$dry_run_output" == *"$tmp_dir/bin/leafwiki-mcp-stdio"* ]] || fail "dry-run omits sidecar install target"
 [[ "$dry_run_output" == *"$tmp_dir/bin/run-mcp.sh"* ]] || fail "dry-run omits run-mcp.sh install target"
 [[ ! -e "$tmp_dir/bin/leafwiki" ]] || fail "dry-run installed leafwiki"
-[[ ! -e "$tmp_dir/bin/leafwiki-mcp-stdio" ]] || fail "dry-run installed leafwiki-mcp-stdio"
 [[ ! -e "$tmp_dir/bin/run-mcp.sh" ]] || fail "dry-run installed run-mcp.sh"
 
 printf 'PASS: install-all-macos script checks\n'

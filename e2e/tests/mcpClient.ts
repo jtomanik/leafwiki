@@ -77,20 +77,11 @@ function stdioCommand(): string {
   return command;
 }
 
-function nativeStdioMode(): boolean {
-  return process.env.E2E_MCP_STDIO_NATIVE === '1';
-}
-
 function leafwikiStdioEnv(
-  endpoint: string,
+  _endpoint: string,
   options: ConnectMCPClientOptions,
 ): Record<string, string> {
-  if (nativeStdioMode()) {
-    return {};
-  }
-  const env: Record<string, string> = {
-    LEAFWIKI_MCP_ENDPOINT: endpoint,
-  };
+  const env: Record<string, string> = {};
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
   }
@@ -98,18 +89,11 @@ function leafwikiStdioEnv(
 }
 
 function leafwikiStdioProcessEnv(
-  endpoint: string,
+  _endpoint: string,
   options: ConnectMCPClientOptions,
 ): NodeJS.ProcessEnv {
-  if (nativeStdioMode()) {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    delete env.LEAFWIKI_MCP_ENDPOINT;
-    delete env.LEAFWIKI_MCP_API_KEY;
-    return env;
-  }
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    LEAFWIKI_MCP_ENDPOINT: endpoint,
   };
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
@@ -186,7 +170,6 @@ export async function requestMCPStdioFrame(
   child.stdout.on('data', (chunk: string) => {
     stdout += chunk;
     if (
-      nativeStdioMode() &&
       stdout
         .split(/\r?\n/)
         .map((line) => line.trim())
@@ -215,14 +198,12 @@ export async function requestMCPStdioFrame(
   }, timeoutMs);
 
   child.stdin.write(`${JSON.stringify(frame)}\n`);
-  if (nativeStdioMode()) {
-    await firstStdoutLine;
-  }
+  await firstStdoutLine;
   child.stdin.end();
   const closed = await close;
   clearTimeout(timer);
   if (timedOut) {
-    throw new Error(`leafwiki-mcp-stdio did not exit within ${timeoutMs}ms; stderr=${stderr}`);
+    throw new Error(`native leafwiki stdio did not exit within ${timeoutMs}ms; stderr=${stderr}`);
   }
 
   const stdoutLines = stdout
