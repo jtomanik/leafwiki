@@ -33,6 +33,21 @@ func IsSQLiteRecoverableError(err error) bool {
 	return false
 }
 
+// IsSQLiteTransientLockError reports whether err is caused by a temporary
+// SQLITE_BUSY or SQLITE_LOCKED condition.
+func IsSQLiteTransientLockError(err error) bool {
+	var e *sqlite.Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	switch e.Code() & 0xFF {
+	case 5, 6:
+		return true
+	default:
+		return false
+	}
+}
+
 // RemoveSQLiteFiles deletes a SQLite database and any sidecar files
 // (-journal, -wal, -shm) that may have been left behind by a crashed run.
 func RemoveSQLiteFiles(dbPath string) {

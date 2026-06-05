@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/perber/wiki/internal/core/shared/sqliteutil"
 )
 
 const (
@@ -108,16 +110,21 @@ func (s *APIKeyService) RevokeAPIKey(userID, keyID string) error {
 }
 
 func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
-	if s == nil || s.store == nil || s.users == nil {
+	if s == nil || s.store == nil || s.users == nil || s.users.store == nil {
 		return nil, ErrInvalidToken
 	}
 	keyID, err := parseAPIKeyID(raw)
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
-	stored, err := s.store.GetAPIKeyByID(keyID)
+	stored, err := retryAPIKeyTransientLocks(func() (*storedAPIKey, error) {
+		return s.store.GetAPIKeyByID(keyID)
+	})
 	if err != nil {
-		return nil, ErrInvalidToken
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, ErrInvalidToken
+		}
+		return nil, err
 	}
 	if stored.key.RevokedAt != nil {
 		return nil, ErrInvalidToken
@@ -125,12 +132,17 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 	if subtle.ConstantTimeCompare([]byte(hashAPIKey(raw)), []byte(stored.secretHash)) != 1 {
 		return nil, ErrInvalidToken
 	}
-	user, err := s.users.GetUserByID(stored.key.UserID)
+	user, err := retryAPIKeyTransientLocks(func() (*User, error) {
+		return s.users.store.GetUserByID(stored.key.UserID)
+	})
 	if err != nil {
-		return nil, ErrInvalidToken
+		if errors.Is(err, ErrUserNotFound) {
+			return nil, ErrInvalidToken
+		}
+		return nil, err
 	}
 	usedAt := s.now().UTC()
-	if err := s.store.MarkAPIKeyUsed(stored.key.ID, usedAt); err != nil {
+	if err := s.markAPIKeyUsedWithRetry(stored.key.ID, usedAt); err != nil {
 		if errors.Is(err, ErrAPIKeyNotFound) {
 			return nil, ErrInvalidToken
 		}
@@ -138,6 +150,34 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 	}
 	stored.key.LastUsedAt = &usedAt
 	return &APIKeyVerification{Key: stored.key, User: user}, nil
+}
+
+func (s *APIKeyService) markAPIKeyUsedWithRetry(keyID string, usedAt time.Time) error {
+	_, err := retryAPIKeyTransientLocks(func() (struct{}, error) {
+		return struct{}{}, s.store.MarkAPIKeyUsed(keyID, usedAt)
+	})
+	return err
+}
+
+func retryAPIKeyTransientLocks[T any](operation func() (T, error)) (T, error) {
+	const (
+		maxAttempts = 100
+		delay       = 20 * time.Millisecond
+	)
+	var zero T
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+		if !sqliteutil.IsSQLiteTransientLockError(err) {
+			return zero, err
+		}
+		lastErr = err
+		time.Sleep(delay)
+	}
+	return zero, lastErr
 }
 
 func IsAPIKeyBearer(token string) bool {

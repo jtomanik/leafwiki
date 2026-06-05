@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { Page, expect, test } from '@playwright/test';
 import LoginPage from '../pages/LoginPage';
 import { toAppPath } from '../pages/appPath';
@@ -9,21 +11,43 @@ const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
     process.env.E2E_ENABLE_MCP_API_KEYS_LOCAL !== '1' ||
+    process.env.E2E_ENABLE_MCP_LOCAL === '1' ||
+    process.env.E2E_ENABLE_MCP_OAUTH_LOCAL === '1' ||
     process.env.E2E_MCP_CLIENT_TRANSPORT !== 'stdio',
-  'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_API_KEYS_LOCAL=1, and E2E_MCP_CLIENT_TRANSPORT=stdio to run the MCP stdio API-key smoke test.',
+  'Set only E2E_ENABLE_MCP_API_KEYS_LOCAL=1 with E2E_RUN_MODE=local and E2E_MCP_CLIENT_TRANSPORT=stdio to run native MCP stdio API-key tests.',
 );
+
+type SeededUser = {
+  id: string;
+  username: string;
+  email: string;
+  role: 'admin' | 'editor' | 'viewer';
+  apiKeyId: string;
+  apiKey: string;
+};
+
+type SeededKeys = {
+  admin: SeededUser;
+  editor: SeededUser;
+  viewer: SeededUser;
+  revoked: SeededUser;
+  deleted: SeededUser;
+};
+
+const liveRevocationError =
+  /authenticated MCP user|Upstream MCP request failed|unauthorized|Connection closed|Not connected/i;
 
 function appURL(path: string): string {
   return new URL(toAppPath(path), process.env.E2E_BASE_URL || 'http://localhost:8080').toString();
 }
 
-type TestUser = {
-  id: string;
-  username: string;
-  email: string;
-  role: 'admin' | 'editor' | 'viewer';
-  password: string;
-};
+function seededKeys(): SeededKeys {
+  const path = process.env.E2E_MCP_STDIO_SEED_FILE;
+  if (!path) {
+    throw new Error('E2E_MCP_STDIO_SEED_FILE must be set for native stdio API-key tests');
+  }
+  return JSON.parse(readFileSync(path, 'utf8')) as SeededKeys;
+}
 
 async function loginAsAdmin(page: Page) {
   const loginPage = new LoginPage(page);
@@ -40,45 +64,27 @@ async function csrfHeaders(page: Page): Promise<Record<string, string>> {
   return csrf ? { 'X-CSRF-Token': csrf.value } : {};
 }
 
-async function createUserViaAPI(page: Page, role: TestUser['role']): Promise<TestUser> {
-  const suffix = `${Date.now()}${Math.floor(Math.random() * 100000)}`;
-  const testUser = {
-    username: `${role}stdio${suffix}`,
-    email: `${role}stdio${suffix}@example.com`,
-    password: `${role}pass${suffix}`,
-    role,
-  };
-  const response = await page.request.post(appURL('/api/users'), {
-    data: testUser,
-    headers: await csrfHeaders(page),
-  });
-  const body = await response.text();
-  expect(response.status(), body).toBe(201);
-  return { ...(JSON.parse(body) as Omit<TestUser, 'password'>), password: testUser.password };
-}
-
-async function deleteUserViaAPI(page: Page, userID: string) {
-  const response = await page.request.delete(appURL(`/api/users/${userID}`), {
-    headers: await csrfHeaders(page),
-  });
+async function revokeAPIKey(page: Page, owner: SeededUser) {
+  const response = await page.request.delete(
+    appURL(`/api/users/${owner.id}/mcp-api-keys/${owner.apiKeyId}`),
+    { headers: await csrfHeaders(page) },
+  );
   expect(response.status(), await response.text()).toBe(204);
 }
 
-async function openSelfAPIKeysDialog(page: Page) {
-  await page.getByTestId('user-toolbar-avatar').click();
-  await page.getByRole('menuitem', { name: 'MCP API Keys' }).click();
-  await expect(page.getByRole('heading', { name: 'MCP API Keys' })).toBeVisible();
+async function updateUserRole(page: Page, owner: SeededUser, role: SeededUser['role']) {
+  const response = await page.request.put(appURL(`/api/users/${owner.id}`), {
+    data: {
+      username: owner.username,
+      email: owner.email,
+      role,
+    },
+    headers: await csrfHeaders(page),
+  });
+  expect(response.status(), await response.text()).toBe(200);
 }
 
-async function openAdminAPIKeysDialog(page: Page, username: string) {
-  await page.goto(appURL('/users'));
-  const row = page.getByRole('row', { name: new RegExp(username) });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'MCP API Keys' }).click();
-  await expect(page.getByRole('heading', { name: `MCP API Keys: ${username}` })).toBeVisible();
-}
-
-async function expectRawStdioUnauthorized(apiKey: string) {
+async function expectRawStartupRejected(apiKey: string) {
   const result = await requestMCPStdioFrame(
     appURL('/mcp'),
     {
@@ -92,128 +98,65 @@ async function expectRawStdioUnauthorized(apiKey: string) {
     },
     { accessToken: apiKey },
   );
-  expect(result.exitCode).toBe(0);
-  expect(result.signal).toBeNull();
-  expect(result.stdoutLines).toHaveLength(1);
-  expect(result.responses).toHaveLength(1);
   expect(result.stdout).not.toContain(apiKey);
   expect(result.stderr).not.toContain(apiKey);
-  expect(result.response?.error?.code).toBe(-32000);
-  expect([401, 403]).toContain(result.response?.error?.data?.status);
-  expect(result.stderr).toMatch(/HTTP (401|403)/);
+  expect(result.exitCode, `stderr=${result.stderr}\nstdout=${result.stdout}`).not.toBe(0);
+  expect(result.signal).toBeNull();
+  expect(result.stdoutLines).toHaveLength(0);
+  expect(result.stderr).toMatch(/invalid native STDIO API key|unauthorized|upstream/i);
 }
 
-async function expectSDKStdioConnectRejected(apiKey: string, clientName: string) {
-  let timeout: NodeJS.Timeout | undefined;
-  let connected = false;
-  try {
-    const client = await Promise.race([
-      connectMCPStdioClient(appURL('/mcp'), {
-        accessToken: apiKey,
-        clientName,
-      }),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          reject(new Error('timed out waiting for SDK stdio connect rejection'));
-        }, 5000);
-      }),
-    ]);
-    connected = true;
-    await client.close();
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('timed out')) {
-      throw error;
-    }
-    if (connected) {
-      throw error;
-    }
-    return;
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-  throw new Error('SDK stdio connect unexpectedly succeeded');
-}
-
-test('self-service api key works through the stdio sidecar and fails after revoke', async ({
+test('admin api key authenticates native stdio and live revocation affects later tools', async ({
   page,
 }) => {
-  await loginAsAdmin(page);
-  await openSelfAPIKeysDialog(page);
-
-  const keyName = `E2E stdio self key ${Date.now()}`;
-  await page.getByTestId('mcp-api-keys-dialog-name-input').fill(keyName);
-  await page.getByTestId('mcp-api-keys-dialog-current-password-input').fill(password);
-  await page.getByTestId('mcp-api-keys-dialog-button-create').click();
-
-  const secretInput = page.getByTestId('mcp-api-keys-dialog-secret-input');
-  await expect(secretInput).toBeVisible();
-  const apiKey = await secretInput.inputValue();
-  expect(apiKey).toMatch(/^lwk_/);
-
+  const seeds = seededKeys();
   const mcp = await connectMCPStdioClient(appURL('/mcp'), {
-    accessToken: apiKey,
-    clientName: 'leafwiki-e2e-stdio-api-key',
+    accessToken: seeds.admin.apiKey,
+    clientName: 'leafwiki-e2e-native-stdio-admin-api-key',
   });
   try {
     const current = await mcp.callTool('get_current_user');
     const currentUser = current.user as { username: string; role: string };
-    expect(currentUser.username).toBe(user);
+    expect(currentUser.username).toBe('admin');
     expect(currentUser.role).toBe('admin');
 
-    const slug = `mcp-stdio-api-key-e2e-${Date.now()}`;
-    const created = await mcp.callTool('create_page', {
-      title: 'MCP STDIO API Key E2E Page',
+    const slug = `mcp-stdio-admin-api-key-e2e-${Date.now()}`;
+    await mcp.callTool('create_page', {
+      title: 'MCP STDIO Admin API Key E2E Page',
       slug,
       kind: 'page',
     });
-    const createdPage = created.page as { id: string };
-    expect(createdPage.id).toBeTruthy();
 
+    await loginAsAdmin(page);
     await page.goto(appURL(`/${slug}`));
     await page.locator('article').waitFor({ state: 'visible' });
-    await expect(page.locator('article')).toContainText('MCP STDIO API Key E2E Page');
+    await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
+
+    await revokeAPIKey(page, seeds.admin);
+    await expect(mcp.callTool('get_tree')).rejects.toThrow(liveRevocationError);
+    await expect(
+      mcp.callTool('create_page', {
+        title: 'Revoked Admin STDIO API Key Write',
+        slug: `revoked-admin-stdio-api-key-write-${Date.now()}`,
+      }),
+    ).rejects.toThrow(liveRevocationError);
   } finally {
     await mcp.close();
   }
-
-  await openSelfAPIKeysDialog(page);
-  await page
-    .locator('[data-testid^="mcp-api-key-row-"]')
-    .filter({ hasText: keyName })
-    .getByRole('button', { name: `Revoke API key ${keyName}` })
-    .click();
-  await expect(page.getByText('No active keys.')).toBeVisible();
-  await expectRawStdioUnauthorized(apiKey);
-  await expectSDKStdioConnectRejected(apiKey, 'leafwiki-e2e-stdio-api-key-revoked');
 });
 
-test('viewer api key can read through stdio but cannot mutate and can be revoked', async ({
-  page,
-}) => {
-  await loginAsAdmin(page);
-  const viewer = await createUserViaAPI(page, 'viewer');
-  await openAdminAPIKeysDialog(page, viewer.username);
-
-  const keyName = `E2E stdio viewer key ${Date.now()}`;
-  await page.getByTestId('mcp-api-keys-dialog-name-input').fill(keyName);
-  await page.getByTestId('mcp-api-keys-dialog-button-create').click();
-
-  const secretInput = page.getByTestId('mcp-api-keys-dialog-secret-input');
-  await expect(secretInput).toBeVisible();
-  const apiKey = await secretInput.inputValue();
-  expect(apiKey).toMatch(/^lwk_/);
-
-  await page.getByTestId('mcp-api-keys-dialog-button-cancel').click();
-  await openAdminAPIKeysDialog(page, viewer.username);
-  await expect(page.getByTestId('mcp-api-keys-dialog-secret-input')).toHaveCount(0);
-
+test('viewer api key can read through native stdio but cannot mutate', async () => {
+  const seeds = seededKeys();
   const mcp = await connectMCPStdioClient(appURL('/mcp'), {
-    accessToken: apiKey,
-    clientName: 'leafwiki-e2e-stdio-viewer-api-key',
+    accessToken: seeds.viewer.apiKey,
+    clientName: 'leafwiki-e2e-native-stdio-viewer-api-key',
   });
   try {
+    const current = await mcp.callTool('get_current_user');
+    const currentUser = current.user as { username: string; role: string };
+    expect(currentUser.username).toBe(seeds.viewer.username);
+    expect(currentUser.role).toBe('viewer');
+
     await expect(mcp.callTool('get_tree')).resolves.toBeTruthy();
     await expect(
       mcp.callTool('create_page', {
@@ -224,35 +167,104 @@ test('viewer api key can read through stdio but cannot mutate and can be revoked
   } finally {
     await mcp.close();
   }
-
-  await page
-    .locator('[data-testid^="mcp-api-key-row-"]')
-    .filter({ hasText: keyName })
-    .getByRole('button', { name: `Revoke API key ${keyName}` })
-    .click();
-  await expect(page.getByText('No active keys.')).toBeVisible();
-  await expectRawStdioUnauthorized(apiKey);
-  await expectSDKStdioConnectRejected(apiKey, 'leafwiki-e2e-stdio-viewer-api-key-revoked');
 });
 
-test('deleted-user api key fails through the stdio sidecar', async ({ page }) => {
-  await loginAsAdmin(page);
-  const editor = await createUserViaAPI(page, 'editor');
-  await openAdminAPIKeysDialog(page, editor.username);
+test('concurrent native stdio api-key clients keep separate identities', async () => {
+  const seeds = seededKeys();
+  const [editorA, editorB, viewer] = await Promise.all([
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.editor.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-editor-a',
+    }),
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.editor.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-editor-b',
+    }),
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.viewer.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-viewer',
+    }),
+  ]);
+  try {
+    const [editorACurrent, editorBCurrent, viewerCurrent] = await Promise.all([
+      editorA.callTool('get_current_user'),
+      editorB.callTool('get_current_user'),
+      viewer.callTool('get_current_user'),
+    ]);
+    expect((editorACurrent.user as { username: string; role: string }).username).toBe(
+      seeds.editor.username,
+    );
+    expect((editorACurrent.user as { username: string; role: string }).role).toBe('editor');
+    expect((editorBCurrent.user as { username: string; role: string }).username).toBe(
+      seeds.editor.username,
+    );
+    expect((editorBCurrent.user as { username: string; role: string }).role).toBe('editor');
+    expect((viewerCurrent.user as { username: string; role: string }).username).toBe(
+      seeds.viewer.username,
+    );
+    expect((viewerCurrent.user as { username: string; role: string }).role).toBe('viewer');
 
-  await page
-    .getByTestId('mcp-api-keys-dialog-name-input')
-    .fill(`E2E stdio deleted-user key ${Date.now()}`);
-  await page.getByTestId('mcp-api-keys-dialog-button-create').click();
+    await expect(editorA.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(editorB.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(viewer.callTool('get_tree')).resolves.toBeTruthy();
 
-  const secretInput = page.getByTestId('mcp-api-keys-dialog-secret-input');
-  await expect(secretInput).toBeVisible();
-  const apiKey = await secretInput.inputValue();
-  expect(apiKey).toMatch(/^lwk_/);
+    const editorSlug = `mcp-stdio-concurrent-editor-write-${Date.now()}`;
+    await expect(
+      editorA.callTool('create_page', {
+        title: 'Concurrent Editor STDIO API Key Write',
+        slug: editorSlug,
+        kind: 'page',
+      }),
+    ).resolves.toBeTruthy();
+    await expect(
+      editorB.callTool('get_page_by_path', {
+        path: editorSlug,
+      }),
+    ).resolves.toBeTruthy();
+    await expect(viewer.callTool('get_page_by_path', { path: editorSlug })).resolves.toBeTruthy();
+  } finally {
+    await Promise.all([editorA.close(), editorB.close(), viewer.close()]);
+  }
+});
 
-  await page.getByTestId('mcp-api-keys-dialog-button-cancel').click();
-  await deleteUserViaAPI(page, editor.id);
+test('role downgrade takes effect during a live native stdio session', async ({ page }) => {
+  const seeds = seededKeys();
+  const mcp = await connectMCPStdioClient(appURL('/mcp'), {
+    accessToken: seeds.editor.apiKey,
+    clientName: 'leafwiki-e2e-native-stdio-editor-api-key',
+  });
+  try {
+    const current = await mcp.callTool('get_current_user');
+    const currentUser = current.user as { username: string; role: string };
+    expect(currentUser.username).toBe(seeds.editor.username);
+    expect(currentUser.role).toBe('editor');
 
-  await expectRawStdioUnauthorized(apiKey);
-  await expectSDKStdioConnectRejected(apiKey, 'leafwiki-e2e-stdio-deleted-user-api-key');
+    const editorSlug = `editor-stdio-api-key-write-${Date.now()}`;
+    await expect(
+      mcp.callTool('create_page', {
+        title: 'Editor STDIO API Key Write',
+        slug: editorSlug,
+        kind: 'page',
+      }),
+    ).resolves.toBeTruthy();
+
+    await loginAsAdmin(page);
+    await updateUserRole(page, seeds.editor, 'viewer');
+
+    await expect(
+      mcp.callTool('create_page', {
+        title: 'Downgraded Editor STDIO API Key Write',
+        slug: `downgraded-editor-stdio-api-key-write-${Date.now()}`,
+      }),
+    ).rejects.toThrow(/editor|admin/i);
+    await expect(mcp.callTool('get_tree')).resolves.toBeTruthy();
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('revoked and deleted-user api keys fail native stdio startup', async () => {
+  const seeds = seededKeys();
+  await expectRawStartupRejected(seeds.revoked.apiKey);
+  await expectRawStartupRejected(seeds.deleted.apiKey);
 });

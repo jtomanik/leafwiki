@@ -16,7 +16,8 @@ If you've looked at Wiki.js or Outline and thought "this is too much to operate 
 ```bash
 docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
   ghcr.io/perber/leafwiki:latest \
-  --jwt-secret=yoursecret --admin-password=yourpassword --allow-insecure=true
+  --jwt-secret=yoursecret --admin-password=yourpassword --allow-insecure=true \
+  --log-target=stderr
 ```
 
 → [All install options](#install) (Docker Compose, Linux installer, binary)
@@ -96,7 +97,8 @@ docker run -p 8080:8080 \
     ghcr.io/perber/leafwiki:latest \
     --jwt-secret=yoursecret \
     --admin-password=yourpassword \
-    --allow-insecure=true
+    --allow-insecure=true \
+    --log-target=stderr
 ```
 
 `--allow-insecure=true` is required for plain HTTP. Omit it when serving over HTTPS (make sure your reverse proxy forwards `X-Forwarded-Proto: https`).
@@ -110,7 +112,8 @@ docker run -p 8080:8080 \
     ghcr.io/perber/leafwiki:latest \
     --jwt-secret=yoursecret \
     --admin-password=yourpassword \
-    --allow-insecure=true
+    --allow-insecure=true \
+    --log-target=stderr
 ```
 
 The data directory must be writable by the specified user.
@@ -131,6 +134,7 @@ services:
       - LEAFWIKI_JWT_SECRET=yourSecret
       - LEAFWIKI_ADMIN_PASSWORD=yourPassword
       - LEAFWIKI_ALLOW_INSECURE=true  # Required for plain HTTP. Omit for HTTPS (ensure `X-Forwarded-Proto: https` is forwarded).
+      - LEAFWIKI_LOG_TARGET=stderr
     volumes:
       - ${HOME}/leafwiki-data:/app/data
     restart: unless-stopped
@@ -246,16 +250,21 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--refresh-token-timeout`        | Refresh token duration (e.g. `168h`, `7d`)                              | `7d`          | v0.7.0  |
 | `--max-asset-upload-size`        | Max upload size (e.g. `50MiB`, `52428800`)                              | `50MiB`       | v0.8.5  |
 | `--custom-stylesheet`            | Path to a `.css` file inside the data dir                               | `""`          | v0.8.5  |
+| `--log-target`                   | Log target: `file`, `stderr`, or `stdout`                               | `file`        | v0.11.0 |
+| `--log-file`                     | Log file path when `--log-target=file`; relative paths use data dir      | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `--inject-code-in-header`        | Raw HTML/JS injected into `<head>`                                      | `""`          | v0.6.0  |
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
 | `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
-| `--enable-mcp`                   | Enable the local-only MCP endpoint; requires loopback host              | `false`       | v0.11.0 |
+| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP requires a loopback host | `none` | v0.11.0 |
+| `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
+| `--daemon-idle-timeout`          | Project daemon idle timeout after the last session exits; `0` = immediate | `10m`       | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
 | `--trusted-proxy-ips`            | Trusted proxy IPs/CIDRs for remote-user header                          | `""`          | v0.10.0 |
 | `--http-remote-user-logout-url`  | Logout redirect when reverse-proxy auth is active                       | `""`          | v0.10.0 |
+| `--disable-request-log`          | Suppress per-request HTTP access logs                                   | `false`       | v0.11.0 |
 
 > Docker image default: `LEAFWIKI_HOST` is set to `0.0.0.0` automatically by the container entrypoint if neither `--host` nor `LEAFWIKI_HOST` is provided.
 
@@ -277,16 +286,30 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_REFRESH_TOKEN_TIMEOUT`        | Refresh token duration                               | `7d`          | v0.7.0  |
 | `LEAFWIKI_MAX_ASSET_UPLOAD_SIZE`        | Max upload size                                      | `50MiB`       | v0.8.5  |
 | `LEAFWIKI_CUSTOM_STYLESHEET`            | Path to `.css` file inside data dir                  | `""`          | v0.8.5  |
+| `LEAFWIKI_LOG_LEVEL`                    | Log level: `debug`, `info`, `warn`, or `error`       | `info`        | –       |
+| `LEAFWIKI_LOG_TARGET`                   | Log target: `file`, `stderr`, or `stdout`            | `file`        | v0.11.0 |
+| `LEAFWIKI_LOG_FILE`                     | File path when log target is `file`                  | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `LEAFWIKI_INJECT_CODE_IN_HEADER`        | HTML/JS injected into `<head>`                       | `""`          | v0.6.0  |
 | `LEAFWIKI_HIDE_LINK_METADATA_SECTION`   | Hide backlinks and link status panel                 | `false`       | –       |
 | `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
-| `LEAFWIKI_ENABLE_MCP`                   | Local-only MCP endpoint; requires loopback host                   | `false`       | v0.11.0 |
+| `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
+| `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
+| `LEAFWIKI_DAEMON_IDLE_TIMEOUT`          | Project daemon idle timeout after last session exits  | `10m`         | v0.11.0 |
 | `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
 | `LEAFWIKI_TRUSTED_PROXY_IPS`            | Trusted proxy IPs/CIDRs                              | `""`          | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL`  | Logout redirect URL                                  | `""`          | v0.10.0 |
+| `LEAFWIKI_DISABLE_REQUEST_LOG`          | Suppress per-request HTTP access logs                | `false`       | v0.11.0 |
+
+### Logging
+
+By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. Native STDIO owners are detached with stdout reserved for protocol traffic, so their owner logs are retained in the log file. `--log-target stdout` is available only when you explicitly want server logs on stdout.
+
+LeafWiki does not rotate log files in-process. Configure external rotation with your service manager, container runtime, or a tool such as `logrotate`.
+
+See [Logging](docs/logging.md) for examples.
 
 ### Custom Stylesheet
 
@@ -342,10 +365,20 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki can expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
+LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner exits after the last session disconnects and `--daemon-idle-timeout` elapses.
+
+The easiest project-local STDIO setup is the wrapper script:
 
 ```bash
-./leafwiki --enable-mcp --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
+./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+```
+
+Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.
+
+LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
+
+```bash
+./leafwiki --mcp=http --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
 ```
 
 The endpoint is `http://127.0.0.1:8080/mcp`, or `${base-path}/mcp` when `--base-path` is set. Plain local HTTP requires `--allow-insecure=true` so login and OAuth cookies work without TLS. Authenticated MCP uses OAuth Authorization Code + PKCE with Dynamic Client Registration for OAuth-capable clients and scope `leafwiki:mcp`. The fixed public client ID `leafwiki-local-mcp` remains available for manual testing and backward compatibility. Authorization requires a logged-in web user and explicit local approval before tokens are issued. MCP-only API keys are also available for manual clients that can send `Authorization: Bearer lwk_<id>_<secret>`.
@@ -353,12 +386,12 @@ The endpoint is `http://127.0.0.1:8080/mcp`, or `${base-path}/mcp` when `--base-
 The legacy disabled-auth mode remains available for isolated local workflows:
 
 ```bash
-./leafwiki --disable-auth --enable-mcp --host=127.0.0.1
+./leafwiki --disable-auth --mcp=http --host=127.0.0.1
 ```
 
-For clients that only support spawning a local STDIO MCP process, the optional `leafwiki-mcp-stdio` sidecar bridges STDIO JSON-RPC to the same `/mcp` endpoint. It supports disabled-auth and MCP API-key bearer auth; OAuth-capable clients should use Streamable HTTP directly.
+For clients that need STDIO with API-key auth, run native STDIO and provide `LEAFWIKI_MCP_API_KEY`. OAuth-capable clients should use Streamable HTTP directly.
 
-See [Local MCP Interface](docs/mcp.md) for OAuth client settings, API-key behavior, STDIO sidecar setup, the tool surface, safety gates, and the parity contract.
+See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, the tool surface, safety gates, and the parity contract.
 
 ### Operations notes
 

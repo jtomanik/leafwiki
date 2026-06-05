@@ -17,28 +17,11 @@ assert_contains() {
   [[ "$haystack" == *"$needle"* ]] || fail "$label missing '$needle': $haystack"
 }
 
-wait_for_file() {
-  local path="$1"
-  local label="$2"
-  local attempt
-  for attempt in {1..50}; do
-    [[ -s "$path" ]] && return 0
-    sleep 0.1
-  done
-  fail "timed out waiting for $label at $path"
-}
-
-wait_for_process_exit() {
-  local pid="$1"
-  local label="$2"
-  local attempt
-  for attempt in {1..50}; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  fail "$label process $pid did not exit"
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+  [[ "$haystack" != *"$needle"* ]] || fail "$label unexpectedly contained '$needle': $haystack"
 }
 
 [[ -f "$script" ]] || fail "missing scripts/run-mcp.sh"
@@ -47,46 +30,92 @@ bash -n "$script"
 
 help_output="$("$script" --help)"
 assert_contains "$help_output" "--leafwiki-bin" "help"
-assert_contains "$help_output" "--mcp-stdio-bin" "help"
-assert_contains "$help_output" "--endpoint" "help"
 assert_contains "$help_output" "--api-key" "help"
+assert_contains "$help_output" "--daemon-idle-timeout" "help"
 assert_contains "$help_output" "--server-arg" "help"
-assert_contains "$help_output" "--stdio-arg" "help"
 assert_contains "$help_output" "--dry-run" "help"
+removed_binary="leafwiki""-mcp-stdio"
+legacy_bin_flag="--mcp""-stdio-bin"
+assert_not_contains "$help_output" "$removed_binary" "help"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
-  local pid
-  for pid in "${wrapper_pid:-}" "${long_stdio_pid:-}" "${long_leafwiki_pid:-}"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      sleep 0.1
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
-  done
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
-equals_output="$(
+native_default_output="$("$script" --dry-run --leafwiki-bin /tmp/fake-leafwiki 2>&1)"
+assert_contains "$native_default_output" "Would run LeafWiki native MCP STDIO" "native dry-run"
+assert_contains "$native_default_output" "/tmp/fake-leafwiki" "native dry-run"
+assert_contains "$native_default_output" "--mcp=stdio" "native dry-run"
+assert_contains "$native_default_output" "--disable-auth=true" "native dry-run"
+assert_contains "$native_default_output" "--data-dir ./.wiki" "native dry-run"
+assert_contains "$native_default_output" "--root-dir ./wiki" "native dry-run"
+assert_contains "$native_default_output" "--daemon-idle-timeout 10m" "native dry-run"
+assert_contains "$native_default_output" "--log-target file" "native dry-run"
+assert_not_contains "$native_default_output" "--log-target stderr" "native dry-run"
+assert_not_contains "$native_default_output" "$removed_binary" "native dry-run"
+
+legacy_output="$(
   "$script" \
     --dry-run \
-    --leafwiki-bin=/tmp/fake-leafwiki \
-    --mcp-stdio-bin=/tmp/fake-stdio \
-    --host=127.0.0.1 \
-    --port=18082 \
-    --root-dir="$tmp_dir/wiki-equals" \
-    --data-dir="$tmp_dir/data-equals" \
-    --jwt-secret=test-secret \
-    --admin-password=admin \
-    --api-key=lwk_equals_secret \
-    --server-log="$tmp_dir/server-equals.log" \
+    --mode legacy \
+    --endpoint http://127.0.0.1:8080/mcp \
+    "$legacy_bin_flag" /tmp/old \
+    --request-timeout 1s \
+    --shutdown-timeout 1s \
+    --max-frame-size 1MiB \
+    --stdio-arg ignored \
+    --leafwiki-bin /tmp/fake-leafwiki \
     2>&1
 )"
+assert_contains "$legacy_output" "--mcp=stdio" "legacy dry-run"
+assert_not_contains "$legacy_output" "$removed_binary" "legacy dry-run"
+assert_not_contains "$legacy_output" "--endpoint" "legacy dry-run"
+assert_not_contains "$legacy_output" "/tmp/old" "legacy dry-run"
 
-assert_contains "$equals_output" "--root-dir $tmp_dir/wiki-equals" "equals dry-run"
-assert_contains "$equals_output" "--endpoint http://127.0.0.1:18082/mcp" "equals dry-run"
-assert_contains "$equals_output" "--api-key lwk_equals_secret" "equals dry-run"
+api_key_output="$(
+  LEAFWIKI_RUN_MCP_API_KEY=lwk_secret \
+  "$script" \
+    --dry-run \
+    --leafwiki-bin /tmp/fake-leafwiki \
+    2>&1
+)"
+assert_contains "$api_key_output" "LEAFWIKI_MCP_API_KEY=REDACTED" "api-key dry-run"
+assert_not_contains "$api_key_output" "LEAFWIKI_JWT_SECRET" "api-key dry-run"
+assert_not_contains "$api_key_output" "LEAFWIKI_ADMIN_PASSWORD" "api-key dry-run"
+assert_contains "$api_key_output" "--mcp=stdio" "api-key dry-run"
+assert_not_contains "$api_key_output" "--api-key" "api-key dry-run"
+assert_not_contains "$api_key_output" "lwk_secret" "api-key dry-run"
+assert_not_contains "$api_key_output" "test-secret" "api-key dry-run"
+
+bootstrap_output="$(
+  LEAFWIKI_RUN_MCP_API_KEY=lwk_secret \
+  "$script" \
+    --dry-run \
+    --leafwiki-bin /tmp/fake-leafwiki \
+    --jwt-secret test-secret \
+    --admin-password admin \
+    2>&1
+)"
+assert_contains "$bootstrap_output" "LEAFWIKI_MCP_API_KEY=REDACTED" "bootstrap dry-run"
+assert_contains "$bootstrap_output" "LEAFWIKI_JWT_SECRET=REDACTED" "bootstrap dry-run"
+assert_contains "$bootstrap_output" "LEAFWIKI_ADMIN_PASSWORD=REDACTED" "bootstrap dry-run"
+assert_not_contains "$bootstrap_output" "lwk_secret" "bootstrap dry-run"
+assert_not_contains "$bootstrap_output" "test-secret" "bootstrap dry-run"
+
+set +e
+bad_auth_output="$("$script" --dry-run --api-key lwk_secret --disable-auth 2>&1)"
+bad_auth_status=$?
+set -e
+[[ "$bad_auth_status" -ne 0 ]] || fail "disabled-auth plus API key unexpectedly succeeded"
+assert_contains "$bad_auth_output" "cannot be combined" "disabled-auth api-key error"
+assert_not_contains "$bad_auth_output" "lwk_secret" "disabled-auth api-key error"
+
+non_loopback_host_output="$("$script" --dry-run --host 0.0.0.0 --leafwiki-bin /tmp/fake-leafwiki 2>&1)"
+assert_contains "$non_loopback_host_output" "--host 0.0.0.0" "non-loopback stdio dry-run"
+assert_contains "$non_loopback_host_output" "--mcp=stdio" "non-loopback stdio dry-run"
+assert_not_contains "$non_loopback_host_output" "requires a loopback host" "non-loopback stdio dry-run"
 
 set +e
 bad_combined_arg_output="$("$script" --dry-run "--root-dir ./wiki" 2>&1)"
@@ -95,32 +124,6 @@ set -e
 [[ "$bad_combined_arg_status" -ne 0 ]] || fail "combined flag/value argument unexpectedly succeeded"
 assert_contains "$bad_combined_arg_output" "split flags and values into separate args" "combined arg error"
 
-dry_run_output="$(
-  "$script" \
-    --dry-run \
-    --leafwiki-bin /tmp/fake-leafwiki \
-    --mcp-stdio-bin /tmp/fake-stdio \
-    --host 127.0.0.1 \
-    --port 18081 \
-    --root-dir "$tmp_dir/wiki" \
-    --data-dir "$tmp_dir/data" \
-    --jwt-secret test-secret \
-    --admin-password admin \
-    --api-key lwk_test_secret \
-    --server-log "$tmp_dir/server.log" \
-    2>&1
-)"
-
-assert_contains "$dry_run_output" "Would start LeafWiki and then run leafwiki-mcp-stdio" "dry-run"
-assert_contains "$dry_run_output" "/tmp/fake-leafwiki" "dry-run"
-assert_contains "$dry_run_output" "--enable-mcp" "dry-run"
-assert_contains "$dry_run_output" "--root-dir $tmp_dir/wiki" "dry-run"
-assert_contains "$dry_run_output" "--jwt-secret test-secret" "dry-run"
-assert_contains "$dry_run_output" "/tmp/fake-stdio" "dry-run"
-assert_contains "$dry_run_output" "--endpoint http://127.0.0.1:18081/mcp" "dry-run"
-assert_contains "$dry_run_output" "--api-key lwk_test_secret" "dry-run"
-[[ ! -e "$tmp_dir/server.log" ]] || fail "dry-run created server log"
-
 fake_bin="$tmp_dir/bin"
 mkdir -p "$fake_bin"
 
@@ -128,168 +131,57 @@ cat > "$fake_bin/leafwiki" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-port="8080"
 printf '%s\n' "$@" > "$FAKE_LEAFWIKI_ARGS"
-if [[ -n "${FAKE_LEAFWIKI_PID:-}" ]]; then
-  printf '%s\n' "$$" > "$FAKE_LEAFWIKI_PID"
+if [[ -n "${FAKE_LEAFWIKI_ENV:-}" ]]; then
+  env | sort > "$FAKE_LEAFWIKI_ENV"
 fi
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --port)
-      port="$2"
-      shift 2
-      ;;
-    --port=*)
-      port="${1#--port=}"
-      shift
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-
-exec python3 - "$port" <<'PY'
-import http.server
-import socketserver
-import sys
-
-port = int(sys.argv[1])
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/api/health":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-
-with socketserver.TCPServer(("127.0.0.1", port), Handler) as server:
-    server.serve_forever()
-PY
+if [[ -n "${FAKE_NATIVE_STDIN_FILE:-}" ]]; then
+  cat > "$FAKE_NATIVE_STDIN_FILE"
+else
+  cat >/dev/null
+fi
+printf 'native protocol stdout\n'
+printf 'native diagnostic stderr\n' >&2
 EOF
 
-cat > "$fake_bin/leafwiki-mcp-stdio" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$@" > "$FAKE_STDIO_ARGS"
-if [[ "${FAKE_STDIO_MODE:-}" == "wait" ]]; then
-  printf '%s\n' "$$" > "$FAKE_STDIO_PID"
-  trap 'printf "terminated\n" > "$FAKE_STDIO_TERM_FILE"; exit 143' TERM INT
-  trap '' HUP
-  while :; do
-    sleep 1
-  done
-fi
-if [[ -n "${FAKE_STDIO_STDIN_FILE:-}" ]]; then
-  cat > "$FAKE_STDIO_STDIN_FILE"
-fi
-printf 'stdio stdout\n'
-printf 'stdio stderr\n' >&2
-EOF
+chmod +x "$fake_bin/leafwiki"
 
-chmod +x "$fake_bin/leafwiki" "$fake_bin/leafwiki-mcp-stdio"
+native_stdout_file="$tmp_dir/native.stdout"
+native_stderr_file="$tmp_dir/native.stderr"
+native_stdin_file="$tmp_dir/native.stdin"
+native_args_file="$tmp_dir/native.args"
+native_env_file="$tmp_dir/native.env"
 
-port="$(python3 - <<'PY'
-import socket
-with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)"
-
-stdout_file="$tmp_dir/stdout"
-stderr_file="$tmp_dir/stderr"
-stdio_stdin_file="$tmp_dir/stdio.stdin"
-leafwiki_args_file="$tmp_dir/leafwiki.args"
-stdio_args_file="$tmp_dir/stdio.args"
-
-FAKE_LEAFWIKI_ARGS="$leafwiki_args_file" \
-FAKE_STDIO_ARGS="$stdio_args_file" \
-FAKE_STDIO_STDIN_FILE="$stdio_stdin_file" \
+FAKE_LEAFWIKI_ARGS="$native_args_file" \
+FAKE_LEAFWIKI_ENV="$native_env_file" \
+FAKE_NATIVE_STDIN_FILE="$native_stdin_file" \
+LEAFWIKI_RUN_MCP_API_KEY=lwk_runtime_secret \
 "$script" \
   --leafwiki-bin "$fake_bin/leafwiki" \
-  --mcp-stdio-bin "$fake_bin/leafwiki-mcp-stdio" \
   --host 127.0.0.1 \
-  --port "$port" \
+  --port 18081 \
   --root-dir "$tmp_dir/wiki" \
   --data-dir "$tmp_dir/data" \
-  --jwt-secret test-secret \
-  --admin-password admin \
-  --api-key lwk_test_secret \
-  --server-log "$tmp_dir/server.log" \
-  --ready-timeout 5 \
+  --daemon-idle-timeout 1s \
   <<< '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-  > "$stdout_file" \
-  2> "$stderr_file"
+  > "$native_stdout_file" \
+  2> "$native_stderr_file"
 
-[[ "$(cat "$stdout_file")" == "stdio stdout" ]] || fail "stdout was not reserved for stdio proxy: $(cat "$stdout_file")"
-[[ "$(cat "$stdio_stdin_file")" == '{"jsonrpc":"2.0","id":1,"method":"initialize"}' ]] || fail "stdin was not passed to stdio proxy: $(cat "$stdio_stdin_file")"
-assert_contains "$(cat "$stderr_file")" "stdio stderr" "stderr"
-assert_contains "$(cat "$leafwiki_args_file")" "--enable-mcp" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "--host" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "127.0.0.1" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "--port" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "$port" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "--root-dir" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "$tmp_dir/wiki" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "--jwt-secret" "leafwiki args"
-assert_contains "$(cat "$leafwiki_args_file")" "test-secret" "leafwiki args"
-assert_contains "$(cat "$stdio_args_file")" "--endpoint" "stdio args"
-assert_contains "$(cat "$stdio_args_file")" "http://127.0.0.1:$port/mcp" "stdio args"
-assert_contains "$(cat "$stdio_args_file")" "--api-key" "stdio args"
-assert_contains "$(cat "$stdio_args_file")" "lwk_test_secret" "stdio args"
-
-long_port="$(python3 - <<'PY'
-import socket
-with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)"
-
-long_leafwiki_pid_file="$tmp_dir/long-leafwiki.pid"
-long_stdio_pid_file="$tmp_dir/long-stdio.pid"
-long_stdio_term_file="$tmp_dir/long-stdio.term"
-long_stdout_file="$tmp_dir/long-stdout"
-long_stderr_file="$tmp_dir/long-stderr"
-
-FAKE_LEAFWIKI_ARGS="$tmp_dir/long-leafwiki.args" \
-FAKE_LEAFWIKI_PID="$long_leafwiki_pid_file" \
-FAKE_STDIO_ARGS="$tmp_dir/long-stdio.args" \
-FAKE_STDIO_MODE=wait \
-FAKE_STDIO_PID="$long_stdio_pid_file" \
-FAKE_STDIO_TERM_FILE="$long_stdio_term_file" \
-"$script" \
-  --leafwiki-bin "$fake_bin/leafwiki" \
-  --mcp-stdio-bin "$fake_bin/leafwiki-mcp-stdio" \
-  --host 127.0.0.1 \
-  --port "$long_port" \
-  --root-dir "$tmp_dir/wiki-long" \
-  --data-dir "$tmp_dir/data-long" \
-  --jwt-secret test-secret \
-  --admin-password admin \
-  --api-key lwk_test_secret \
-  --server-log "$tmp_dir/long-server.log" \
-  --ready-timeout 5 \
-  > "$long_stdout_file" \
-  2> "$long_stderr_file" &
-wrapper_pid=$!
-
-wait_for_file "$long_leafwiki_pid_file" "long LeafWiki pid"
-wait_for_file "$long_stdio_pid_file" "long stdio pid"
-long_leafwiki_pid="$(cat "$long_leafwiki_pid_file")"
-long_stdio_pid="$(cat "$long_stdio_pid_file")"
-
-kill -TERM "$wrapper_pid"
-wait_for_process_exit "$wrapper_pid" "run-mcp wrapper"
-wait_for_process_exit "$long_stdio_pid" "leafwiki-mcp-stdio child"
-wait_for_process_exit "$long_leafwiki_pid" "LeafWiki child"
-[[ -f "$long_stdio_term_file" ]] || fail "leafwiki-mcp-stdio child did not receive termination"
+[[ "$(cat "$native_stdout_file")" == "native protocol stdout" ]] || fail "native stdout was not direct protocol: $(cat "$native_stdout_file")"
+[[ "$(cat "$native_stdin_file")" == '{"jsonrpc":"2.0","id":1,"method":"initialize"}' ]] || fail "native stdin was not passed to leafwiki: $(cat "$native_stdin_file")"
+assert_contains "$(cat "$native_stderr_file")" "native diagnostic stderr" "native stderr"
+assert_contains "$(cat "$native_args_file")" "--mcp=stdio" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "--daemon-idle-timeout" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "1s" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "--log-target" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "file" "native leafwiki args"
+assert_not_contains "$(cat "$native_args_file")" "stderr" "native leafwiki args"
+assert_not_contains "$(cat "$native_args_file")" "--api-key" "native leafwiki args"
+assert_not_contains "$(cat "$native_args_file")" "lwk_runtime_secret" "native leafwiki args"
+assert_contains "$(cat "$native_env_file")" "LEAFWIKI_MCP_API_KEY=lwk_runtime_secret" "native env"
+assert_not_contains "$(cat "$native_env_file")" "LEAFWIKI_JWT_SECRET=" "native env"
+assert_not_contains "$(cat "$native_env_file")" "LEAFWIKI_ADMIN_PASSWORD=" "native env"
+assert_not_contains "$(cat "$native_stderr_file")" "lwk_runtime_secret" "native stderr"
+assert_not_contains "$(cat "$native_stderr_file")" "runtime-secret" "native stderr"
 
 printf 'PASS: run-mcp script checks\n'

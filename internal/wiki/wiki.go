@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/branding"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/auth"
@@ -572,6 +574,32 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 		w.oauthRoutes,
 		w.mcpRoutes,
 	}
+}
+
+func (w *Wiki) RunMCPStdio(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport) error {
+	return w.RunMCPStdioWithAuth(ctx, opts, transport, wikimcp.StdioAuth{DisabledAuth: opts.AuthDisabled})
+}
+
+func (w *Wiki) RunMCPStdioWithAuth(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport, stdioAuth wikimcp.StdioAuth) error {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	server := w.mcpRoutes.NewStdioServer(opts, stdioAuth)
+	return server.Run(ctx, transport)
+}
+
+func (w *Wiki) MCPHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	return w.mcpRoutes.NewHTTPHandler(opts)
+}
+
+func (w *Wiki) PrivateMCPHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	return w.mcpRoutes.NewPrivateHTTPHandler(opts)
 }
 
 // FrontendConfig returns the minimal runtime data required by the router to serve the SPA.

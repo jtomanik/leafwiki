@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +34,7 @@ type Routes struct {
 	apiKeys      *coreauth.APIKeyService
 	oauthService *wikioauth.Service
 	authDisabled bool
+	stdioAPIKey  string
 	createPage   *wikipages.CreatePageUseCase
 	updatePage   *wikipages.UpdatePageUseCase
 	getPage      *wikipages.GetPageUseCase
@@ -159,33 +162,88 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 		return
 	}
 
-	serverRoutes := *r
-	serverRoutes.authDisabled = ctx.Opts.AuthDisabled
-	server := serverRoutes.newServer(ctx.Opts)
+	httpHandler := r.NewHTTPHandler(ctx.Opts)
+	wrapped := gin.WrapH(httpHandler)
+	ctx.Base.GET("/mcp", wrapped)
+	ctx.Base.POST("/mcp", wrapped)
+	ctx.Base.DELETE("/mcp", wrapped)
+}
+
+func (r *Routes) NewHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	server := r.NewServer(opts)
 	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
 		return server
-	}, &sdkmcp.StreamableHTTPOptions{
-		Stateless:                  false,
-		JSONResponse:               true,
-		SessionTimeout:             30 * time.Minute,
-		DisableLocalhostProtection: false,
-	})
+	}, streamableHTTPOptions())
 
 	var httpHandler http.Handler = handler
-	if !ctx.Opts.AuthDisabled {
+	if !opts.AuthDisabled {
 		httpHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			authenticated := sdkauth.RequireBearerToken(r.verifyBearerToken, &sdkauth.RequireBearerTokenOptions{
-				ResourceMetadataURL: wikioauth.ProtectedResourceMetadataURL(req, ctx.Opts.BasePath),
+				ResourceMetadataURL: wikioauth.ProtectedResourceMetadataURL(req, opts.BasePath),
 				Scopes:              []string{wikioauth.ScopeMCP},
 			})(handler)
 			authenticated.ServeHTTP(w, req)
 		})
 	}
+	return httpHandler
+}
 
-	wrapped := gin.WrapH(httpHandler)
-	ctx.Base.GET("/mcp", wrapped)
-	ctx.Base.POST("/mcp", wrapped)
-	ctx.Base.DELETE("/mcp", wrapped)
+func (r *Routes) NewPrivateHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	handler := sdkmcp.NewStreamableHTTPHandler(func(req *http.Request) *sdkmcp.Server {
+		auth := StdioAuth{DisabledAuth: opts.AuthDisabled}
+		if !opts.AuthDisabled {
+			auth.APIKey = bearerTokenFromRequest(req)
+		}
+		return r.NewStdioServer(opts, auth)
+	}, streamableHTTPOptions())
+	if opts.AuthDisabled {
+		return handler
+	}
+	return r.requirePrivateStdioAPIKey(handler)
+}
+
+func streamableHTTPOptions() *sdkmcp.StreamableHTTPOptions {
+	return &sdkmcp.StreamableHTTPOptions{
+		Stateless:                  false,
+		JSONResponse:               true,
+		SessionTimeout:             30 * time.Minute,
+		DisableLocalhostProtection: false,
+	}
+}
+
+func bearerTokenFromRequest(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	header := strings.TrimSpace(req.Header.Get("Authorization"))
+	prefix := "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(header[len(prefix):])
+}
+
+func (r *Routes) requirePrivateStdioAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		token := bearerTokenFromRequest(req)
+		if token == "" || !coreauth.IsAPIKeyBearer(token) {
+			http.Error(w, "native STDIO requires an API key", http.StatusUnauthorized)
+			return
+		}
+		if r.apiKeys == nil {
+			http.Error(w, "api key verifier unavailable", http.StatusInternalServerError)
+			return
+		}
+		if _, err := r.apiKeys.VerifyAPIKey(token); err != nil {
+			if errors.Is(err, coreauth.ErrInvalidToken) {
+				http.Error(w, "invalid api key", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, fmt.Sprintf("api key verifier failed: %v", err), http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.Request) (*sdkauth.TokenInfo, error) {
@@ -195,6 +253,9 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 		}
 		verified, err := r.apiKeys.VerifyAPIKey(token)
 		if err != nil {
+			if !errors.Is(err, coreauth.ErrInvalidToken) {
+				return nil, fmt.Errorf("api key verifier failed: %w", err)
+			}
 			return nil, fmt.Errorf("%w: invalid api key", sdkauth.ErrInvalidToken)
 		}
 		return &sdkauth.TokenInfo{
@@ -204,6 +265,25 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 		}, nil
 	}
 	return r.oauthService.VerifyBearerToken(ctx, token, req)
+}
+
+func (r *Routes) NewServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
+	serverRoutes := *r
+	serverRoutes.authDisabled = opts.AuthDisabled
+	serverRoutes.stdioAPIKey = ""
+	return serverRoutes.newServer(opts)
+}
+
+type StdioAuth struct {
+	DisabledAuth bool
+	APIKey       string
+}
+
+func (r *Routes) NewStdioServer(opts httpinternal.RouterOptions, auth StdioAuth) *sdkmcp.Server {
+	serverRoutes := *r
+	serverRoutes.authDisabled = auth.DisabledAuth
+	serverRoutes.stdioAPIKey = auth.APIKey
+	return serverRoutes.newServer(opts)
 }
 
 func (r *Routes) newServer(opts httpinternal.RouterOptions) *sdkmcp.Server {

@@ -78,12 +78,10 @@ function stdioCommand(): string {
 }
 
 function leafwikiStdioEnv(
-  endpoint: string,
+  _endpoint: string,
   options: ConnectMCPClientOptions,
 ): Record<string, string> {
-  const env: Record<string, string> = {
-    LEAFWIKI_MCP_ENDPOINT: endpoint,
-  };
+  const env: Record<string, string> = {};
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
   }
@@ -91,12 +89,11 @@ function leafwikiStdioEnv(
 }
 
 function leafwikiStdioProcessEnv(
-  endpoint: string,
+  _endpoint: string,
   options: ConnectMCPClientOptions,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    LEAFWIKI_MCP_ENDPOINT: endpoint,
   };
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
@@ -164,10 +161,22 @@ export async function requestMCPStdioFrame(
   let stderr = '';
   let timedOut = false;
   const timeoutMs = options.timeoutMs ?? 5000;
+  let firstStdoutLineResolve: (() => void) | undefined;
+  const firstStdoutLine = new Promise<void>((resolve) => {
+    firstStdoutLineResolve = resolve;
+  });
 
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
     stdout += chunk;
+    if (
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .some((line) => line !== '')
+    ) {
+      firstStdoutLineResolve?.();
+    }
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
@@ -178,6 +187,7 @@ export async function requestMCPStdioFrame(
     (resolve, reject) => {
       child.once('error', reject);
       child.once('close', (exitCode, signal) => {
+        firstStdoutLineResolve?.();
         resolve({ exitCode, signal });
       });
     },
@@ -187,11 +197,13 @@ export async function requestMCPStdioFrame(
     child.kill('SIGTERM');
   }, timeoutMs);
 
-  child.stdin.end(`${JSON.stringify(frame)}\n`);
+  child.stdin.write(`${JSON.stringify(frame)}\n`);
+  await firstStdoutLine;
+  child.stdin.end();
   const closed = await close;
   clearTimeout(timer);
   if (timedOut) {
-    throw new Error(`leafwiki-mcp-stdio did not exit within ${timeoutMs}ms; stderr=${stderr}`);
+    throw new Error(`native leafwiki stdio did not exit within ${timeoutMs}ms; stderr=${stderr}`);
   }
 
   const stdoutLines = stdout

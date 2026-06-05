@@ -15,6 +15,8 @@ ENV_FILE_PATH="${LEAFWIKI_ENV_FILE_PATH:-/etc/leafwiki/.env}"
 ENABLE_LINK_REFACTORING="false"
 ENABLE_REVISION="false"
 MAX_REVISION_HISTORY="100"
+LOG_TARGET="file"
+LOG_FILE=""
 RELEASE_LINK="https://github.com/perber/leafwiki/"
 PATH_TO_BINARY="/usr/local/bin/leafwiki"
 
@@ -131,6 +133,25 @@ validate_workspace_dirs(){
     done
 }
 
+validate_logging_config(){
+    LOG_TARGET="$(trim_value "$LOG_TARGET")"
+    LOG_FILE="$(trim_value "$LOG_FILE")"
+
+    case "$LOG_TARGET" in
+        file|stderr|stdout)
+            ;;
+        *)
+            echo "Error: invalid LEAFWIKI_LOG_TARGET '$LOG_TARGET'. Supported values are: file, stderr, stdout."
+            exit 1
+            ;;
+    esac
+
+    if [[ "$LOG_TARGET" != "file" && -n "$LOG_FILE" ]]; then
+        echo "Error: LEAFWIKI_LOG_FILE requires LEAFWIKI_LOG_TARGET=file."
+        exit 1
+    fi
+}
+
 write_interactive_env_file(){
     mkdir -p "$(dirname "$ENV_FILE_PATH")"
 
@@ -142,6 +163,8 @@ write_interactive_env_file(){
     echo "LEAFWIKI_HOST=\"$HOST\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_JWT_SECRET=\"$JWT_SECRET\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_ADMIN_PASSWORD=\"$ADMIN_PASSWORD\"" >> "$ENV_FILE_PATH"
+    echo "LEAFWIKI_LOG_TARGET=\"$LOG_TARGET\"" >> "$ENV_FILE_PATH"
+    echo "LEAFWIKI_LOG_FILE=\"$LOG_FILE\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_ENABLE_REVISION=\"$ENABLE_REVISION\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_MAX_REVISION_HISTORY=\"$MAX_REVISION_HISTORY\"" >> "$ENV_FILE_PATH"
 }
@@ -259,6 +282,8 @@ if [[ "$INTERACTIVE" == 0 ]]; then
     ENABLE_REVISION=${LEAFWIKI_ENABLE_REVISION:-false}
     MAX_REVISION_HISTORY=${LEAFWIKI_MAX_REVISION_HISTORY:-"100"}
     ENABLE_LINK_REFACTORING=${LEAFWIKI_ENABLE_LINK_REFACTOR:-false}
+    LOG_TARGET=${LEAFWIKI_LOG_TARGET:-$LOG_TARGET}
+    LOG_FILE=${LEAFWIKI_LOG_FILE:-$LOG_FILE}
 
     validate_architecture
     validate_requirements_non_interactive "$ARCH" "LEAFWIKI_ARCH"
@@ -343,6 +368,7 @@ fi
 
 trim_workspace_dirs
 validate_workspace_dirs
+validate_logging_config
 if [[ "$INTERACTIVE" == 1 ]]; then
     write_interactive_env_file
 fi

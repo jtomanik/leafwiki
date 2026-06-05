@@ -901,6 +901,32 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID+"_wrongsecret")
 }
 
+func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testing.T) {
+	w := newLocalMCPAuthTestWiki(t)
+
+	editor, err := w.UserService().CreateUser("private-stdio-editor", "private-stdio-editor@example.com", "editorpass", coreauth.RoleEditor)
+	if err != nil {
+		t.Fatalf("create private stdio editor user: %v", err)
+	}
+	apiKey, err := w.APIKeyService().CreateAPIKey(editor.ID, "Private STDIO MCP", editor.ID)
+	if err != nil {
+		t.Fatalf("create private stdio api key: %v", err)
+	}
+
+	session := connectLocalMCPWithToken(t, w.PrivateMCPHTTPHandler(oauthRouterOptions("")), "/mcp", apiKey.Secret)
+	_ = callToolStructured(t, session, "get_tree", nil)
+
+	if err := w.APIKeyService().RevokeAPIKey(editor.ID, apiKey.Key.ID); err != nil {
+		t.Fatalf("revoke private stdio api key: %v", err)
+	}
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name: "get_tree",
+	})
+	if err == nil && !result.IsError {
+		t.Fatalf("revoked private STDIO API key get_tree succeeded: %#v", result.StructuredContent)
+	}
+}
+
 func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))

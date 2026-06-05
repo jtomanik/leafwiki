@@ -3,13 +3,15 @@ package auth
 import (
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/perber/wiki/internal/test_utils"
 )
 
-func setupTestAPIKeyService(t *testing.T) (*UserService, *APIKeyStore, *APIKeyService, *User) {
+func setupTestAPIKeyService(t *testing.T) (string, *UserService, *APIKeyStore, *APIKeyService, *User) {
 	t.Helper()
 
 	storageDir := t.TempDir()
@@ -31,11 +33,11 @@ func setupTestAPIKeyService(t *testing.T) (*UserService, *APIKeyStore, *APIKeySe
 	if err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
-	return userService, apiKeyStore, apiKeyService, user
+	return storageDir, userService, apiKeyStore, apiKeyService, user
 }
 
 func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
-	_, store, service, user := setupTestAPIKeyService(t)
+	_, _, store, service, user := setupTestAPIKeyService(t)
 
 	created, err := service.CreateAPIKey(user.ID, "  Local Codex  ", user.ID)
 	if err != nil {
@@ -88,7 +90,7 @@ func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 }
 
 func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *testing.T) {
-	userService, _, service, user := setupTestAPIKeyService(t)
+	_, userService, _, service, user := setupTestAPIKeyService(t)
 
 	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
 	if err != nil {
@@ -154,8 +156,123 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 	}
 }
 
+func TestAPIKeyServiceVerifyRetriesTransientLastUsedLock(t *testing.T) {
+	storageDir, _, _, service, user := setupTestAPIKeyService(t)
+	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+
+	blocker, err := sql.Open("sqlite", filepath.Join(storageDir, "api_keys.db"))
+	if err != nil {
+		t.Fatalf("open blocking connection: %v", err)
+	}
+	defer blocker.Close()
+	if _, err := blocker.Exec("BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("begin blocking transaction: %v", err)
+	}
+
+	errs := make(chan error, 1)
+	go func() {
+		verified, err := service.VerifyAPIKey(created.Secret)
+		if err != nil {
+			errs <- err
+			return
+		}
+		if verified.User.ID != user.ID {
+			errs <- errors.New("verified wrong user")
+			return
+		}
+		errs <- nil
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if _, err := blocker.Exec("ROLLBACK"); err != nil {
+		t.Fatalf("rollback blocking transaction: %v", err)
+	}
+
+	select {
+	case err := <-errs:
+		if err != nil {
+			t.Fatalf("VerifyAPIKey returned %v, want retry through transient last_used_at lock", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("VerifyAPIKey did not return after transient last_used_at lock was released")
+	}
+}
+
+func TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock(t *testing.T) {
+	storageDir, _, _, service, user := setupTestAPIKeyService(t)
+	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+
+	blocker := beginExclusiveSQLiteTransaction(t, filepath.Join(storageDir, "api_keys.db"))
+	errs := make(chan error, 1)
+	go func() {
+		verified, err := service.VerifyAPIKey(created.Secret)
+		if err != nil {
+			errs <- err
+			return
+		}
+		if verified.User.ID != user.ID {
+			errs <- errors.New("verified wrong user")
+			return
+		}
+		errs <- nil
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	blocker.rollback(t)
+
+	select {
+	case err := <-errs:
+		if err != nil {
+			t.Fatalf("VerifyAPIKey returned %v, want retry through transient api key lookup lock", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("VerifyAPIKey did not return after transient api key lookup lock was released")
+	}
+}
+
+func TestAPIKeyServiceVerifyRetriesTransientUserLookupLock(t *testing.T) {
+	storageDir, _, _, service, user := setupTestAPIKeyService(t)
+	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+
+	blocker := beginExclusiveSQLiteTransaction(t, filepath.Join(storageDir, "users.db"))
+	errs := make(chan error, 1)
+	go func() {
+		verified, err := service.VerifyAPIKey(created.Secret)
+		if err != nil {
+			errs <- err
+			return
+		}
+		if verified.User.ID != user.ID {
+			errs <- errors.New("verified wrong user")
+			return
+		}
+		errs <- nil
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	blocker.rollback(t)
+
+	select {
+	case err := <-errs:
+		if err != nil {
+			t.Fatalf("VerifyAPIKey returned %v, want retry through transient user lookup lock", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("VerifyAPIKey did not return after transient user lookup lock was released")
+	}
+}
+
 func TestAPIKeyStoreRevocationIsScopedToUser(t *testing.T) {
-	userService, _, service, user := setupTestAPIKeyService(t)
+	_, userService, _, service, user := setupTestAPIKeyService(t)
 	other, err := userService.CreateUser("other", "other@example.com", "password123", RoleEditor)
 	if err != nil {
 		t.Fatalf("CreateUser other failed: %v", err)
@@ -174,8 +291,35 @@ func TestAPIKeyStoreRevocationIsScopedToUser(t *testing.T) {
 	}
 }
 
+type sqliteExclusiveBlocker struct {
+	db *sql.DB
+}
+
+func beginExclusiveSQLiteTransaction(t *testing.T, path string) sqliteExclusiveBlocker {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open blocking connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec("ROLLBACK")
+		_ = db.Close()
+	})
+	if _, err := db.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("begin blocking transaction: %v", err)
+	}
+	return sqliteExclusiveBlocker{db: db}
+}
+
+func (b sqliteExclusiveBlocker) rollback(t *testing.T) {
+	t.Helper()
+	if _, err := b.db.Exec("ROLLBACK"); err != nil {
+		t.Fatalf("rollback blocking transaction: %v", err)
+	}
+}
+
 func TestAPIKeyStoreMarkUsedRejectsRevokedKey(t *testing.T) {
-	_, store, service, user := setupTestAPIKeyService(t)
+	_, _, store, service, user := setupTestAPIKeyService(t)
 
 	created, err := service.CreateAPIKey(user.ID, "Race key", user.ID)
 	if err != nil {

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -51,6 +52,9 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 	}
 	user, err := r.userService.GetUserByID(tokenInfo.UserID)
 	if err != nil {
+		if !errors.Is(err, coreauth.ErrUserNotFound) {
+			return nil, fmt.Errorf("authenticated MCP user lookup failed: %w", err)
+		}
 		return nil, fmt.Errorf("authenticated MCP user not found")
 	}
 	return user, nil
@@ -59,6 +63,19 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 func (r *Routes) actorForMissingTokenInfo() (*coreauth.User, error) {
 	if r.authDisabled {
 		return publicEditor(), nil
+	}
+	if strings.TrimSpace(r.stdioAPIKey) != "" {
+		if r.apiKeys == nil {
+			return nil, fmt.Errorf("authenticated MCP user service is unavailable")
+		}
+		verified, err := r.apiKeys.VerifyAPIKey(r.stdioAPIKey)
+		if err != nil {
+			if !errors.Is(err, coreauth.ErrInvalidToken) {
+				return nil, fmt.Errorf("authenticated MCP user lookup failed: %w", err)
+			}
+			return nil, fmt.Errorf("authenticated MCP user not found")
+		}
+		return verified.User, nil
 	}
 	return nil, fmt.Errorf("authenticated MCP token info missing")
 }
