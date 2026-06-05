@@ -166,7 +166,8 @@ case "$arch" in
     ;;
 esac
 
-ui_dir="$repo_root/ui/leafwiki-ui"
+ui_rel_dir="ui/leafwiki-ui"
+ui_dir="$repo_root/$ui_rel_dir"
 ui_dist="$ui_dir/dist"
 embedded_dist="$repo_root/internal/http/dist"
 output_binary="$build_dir/$binary_name-$version-darwin-$arch"
@@ -181,10 +182,10 @@ log "Build output: $output_binary"
 log "Install target: $target_binary"
 
 if [[ "$skip_npm_ci" -eq 0 ]]; then
-  run npm --prefix "$ui_dir" ci --ignore-scripts
+  run_in_repo npm --prefix "$ui_rel_dir" ci --ignore-scripts
 fi
 
-run env VITE_API_URL=/ APP_VERSION="$version" npm --prefix "$ui_dir" run build
+run_in_repo env VITE_API_URL=/ APP_VERSION="$version" npm --prefix "$ui_rel_dir" run build
 
 run mkdir -p "$embedded_dist"
 run find "$embedded_dist" -mindepth 1 ! -name .gitkeep -exec rm -rf '{}' +
