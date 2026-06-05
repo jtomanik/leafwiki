@@ -12,6 +12,18 @@ import (
 var errDataDirLockHeld = errors.New("data directory is already in use")
 var errRootDirLockHeld = errors.New("root directory is already in use")
 
+func IsDataDirLockHeld(err error) bool {
+	return errors.Is(err, errDataDirLockHeld)
+}
+
+func IsRootDirLockHeld(err error) bool {
+	return errors.Is(err, errRootDirLockHeld)
+}
+
+func IsLockHeld(err error) bool {
+	return IsDataDirLockHeld(err) || IsRootDirLockHeld(err)
+}
+
 type DataDirLock struct {
 	file  *os.File
 	path  string

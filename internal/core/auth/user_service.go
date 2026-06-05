@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,6 +85,9 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 func (s *UserService) GetUserByID(id string) (*User, error) {
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
+		if !errors.Is(err, ErrUserNotFound) {
+			return nil, err
+		}
 		return nil, ErrUserNotFound
 	}
 

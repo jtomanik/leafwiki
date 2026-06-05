@@ -37,7 +37,7 @@ This script builds the frontend, copies it into `internal/http/dist`, builds the
 
 ### Run LeafWiki As An MCP STDIO Command
 
-Use this when an MCP client wants a single command that starts LeafWiki and then speaks MCP over STDIO. The script execs one `leafwiki --mcp=stdio` process, so the same LeafWiki instance serves the HTTP UI and MCP STDIO.
+Use this when an MCP client wants a single command that speaks MCP over STDIO. The script execs a foreground `leafwiki --mcp=stdio` session frontend, which attaches to the per-project owner daemon that serves the HTTP UI.
 
 ```bash
 ./scripts/run-mcp.sh
@@ -49,7 +49,7 @@ Example MCP client command:
 /path/to/leafwiki/scripts/run-mcp.sh --root-dir /path/to/wiki
 ```
 
-The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames and writes diagnostics to stderr. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
+The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; owner startup and server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
 
 ## Script Reference
 
@@ -110,7 +110,7 @@ Important side effects:
 
 ### `run-mcp.sh`
 
-Starts a project-local MCP STDIO command for clients that spawn one process. One `leafwiki` process serves MCP over STDIO and the HTTP UI.
+Starts a project-local MCP STDIO command for clients that spawn one process. The foreground `leafwiki --mcp=stdio` process speaks MCP over STDIO and attaches to the per-project owner daemon that serves the HTTP UI.
 
 Default disabled-auth command shape:
 
@@ -122,7 +122,8 @@ leafwiki \
   --port 8080 \
   --data-dir ./.wiki \
   --root-dir ./wiki \
-  --log-target stderr \
+  --daemon-idle-timeout 10m \
+  --log-target file \
   --allow-insecure \
   --disable-request-log
 ```
@@ -132,15 +133,14 @@ API-key command shape:
 ```bash
 env \
   LEAFWIKI_MCP_API_KEY=<api-key> \
-  LEAFWIKI_JWT_SECRET=<secret> \
-  LEAFWIKI_ADMIN_PASSWORD=<password> \
 leafwiki \
   --mcp=stdio \
   --host 127.0.0.1 \
   --port 8080 \
   --data-dir ./.wiki \
   --root-dir ./wiki \
-  --log-target stderr \
+  --daemon-idle-timeout 10m \
+  --log-target file \
   --allow-insecure \
   --disable-request-log
 ```
@@ -157,9 +157,13 @@ LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> ./scripts/run-mcp.sh --root-dir "$PWD/wik
 Wrapper behavior:
 
 - `--api-key` and `LEAFWIKI_RUN_MCP_API_KEY` are translated into `LEAFWIKI_MCP_API_KEY` for the child process.
-- API-key mode also passes `LEAFWIKI_JWT_SECRET` and `LEAFWIKI_ADMIN_PASSWORD` to the child process. Dry-run output redacts these values.
+- API-key attach mode does not need `LEAFWIKI_JWT_SECRET` or `LEAFWIKI_ADMIN_PASSWORD` when a compatible owner is already running.
+- If this invocation must bootstrap a new auth-enabled owner, pass `--jwt-secret` and `--admin-password`; dry-run output redacts these values.
 - `--disable-auth` cannot be combined with an API key.
-- The host must be loopback.
+- `--daemon-idle-timeout` controls how long the owner daemon remains alive after the last STDIO/server session exits. Use `0` for immediate shutdown.
+- Wrapper diagnostics and foreground validation errors go to stderr. The detached owner writes startup and server logs to the LeafWiki log file by default.
+- When the wrapper attaches to an existing owner, the owner's host, public MCP, log target/file, and request-log settings remain authoritative.
+- Public HTTP MCP must use a loopback host, but this wrapper starts only a native STDIO frontend and may attach to an owner bound to a non-loopback web host through private loopback control.
 - `--log-target stdout` is not used because stdout is reserved for MCP protocol frames.
 - Repeated `--server-arg <arg>` values are appended to the `leafwiki` command.
 
@@ -186,7 +190,7 @@ bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/
 Related Go and E2E checks:
 
 ```bash
-go test ./cmd/leafwiki ./internal/wiki ./internal/wiki/mcp ./internal/locking
+go test ./cmd/leafwiki ./internal/projectdaemon ./internal/wiki ./internal/wiki/mcp ./internal/locking
 E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-disable-auth.spec.ts
 E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-api-keys.spec.ts
 ```
@@ -197,4 +201,6 @@ E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdi
 | --- | --- |
 | `install-all-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
 | `install-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
-| `run-mcp.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY`, `LEAFWIKI_RUN_MCP_SERVER_LOG` |
+| `run-mcp.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY`, `LEAFWIKI_RUN_MCP_SERVER_LOG` |
+
+`LEAFWIKI_RUN_MCP_SERVER_LOG` is accepted only for compatibility with older wrapper configurations. The native wrapper ignores it and uses the LeafWiki log target configured in the child command.

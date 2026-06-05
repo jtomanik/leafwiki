@@ -8,11 +8,12 @@ port="${LEAFWIKI_RUN_MCP_PORT:-${LEAFWIKI_PORT:-8080}}"
 base_path="${LEAFWIKI_RUN_MCP_BASE_PATH:-${LEAFWIKI_BASE_PATH:-}}"
 data_dir="${LEAFWIKI_RUN_MCP_DATA_DIR:-${LEAFWIKI_DATA_DIR:-./.wiki}}"
 root_dir="${LEAFWIKI_RUN_MCP_ROOT_DIR:-${LEAFWIKI_ROOT_DIR:-./wiki}}"
-jwt_secret="${LEAFWIKI_RUN_MCP_JWT_SECRET:-${LEAFWIKI_JWT_SECRET:-p4lyOlQU643BRUc2HBiCrr55L6ygh4pJlVQ8z5LEnfT}}"
-admin_password="${LEAFWIKI_RUN_MCP_ADMIN_PASSWORD:-${LEAFWIKI_ADMIN_PASSWORD:-admin}}"
+jwt_secret="${LEAFWIKI_RUN_MCP_JWT_SECRET:-${LEAFWIKI_JWT_SECRET:-}}"
+admin_password="${LEAFWIKI_RUN_MCP_ADMIN_PASSWORD:-${LEAFWIKI_ADMIN_PASSWORD:-}}"
 allow_insecure="${LEAFWIKI_RUN_MCP_ALLOW_INSECURE:-${LEAFWIKI_ALLOW_INSECURE:-1}}"
 disable_auth="${LEAFWIKI_RUN_MCP_DISABLE_AUTH:-${LEAFWIKI_DISABLE_AUTH:-}}"
 disable_request_log="${LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG:-${LEAFWIKI_DISABLE_REQUEST_LOG:-1}}"
+daemon_idle_timeout="${LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT:-${LEAFWIKI_DAEMON_IDLE_TIMEOUT:-10m}}"
 api_key="${LEAFWIKI_RUN_MCP_API_KEY:-${LEAFWIKI_MCP_API_KEY:-}}"
 server_log="${LEAFWIKI_RUN_MCP_SERVER_LOG:-}"
 dry_run=0
@@ -23,8 +24,9 @@ usage() {
   cat <<EOF
 Usage: scripts/run-mcp.sh [options]
 
-Starts one native LeafWiki MCP STDIO process. The same leafwiki process serves
-the HTTP UI and MCP STDIO; stdout is reserved for MCP JSON-RPC.
+Starts one native LeafWiki MCP STDIO frontend. LeafWiki keeps one project
+daemon owner for the HTTP UI; stdout from this frontend is reserved for MCP
+JSON-RPC.
 
 Options:
   --leafwiki-bin <path>     LeafWiki executable (default: leafwiki)
@@ -34,15 +36,16 @@ Options:
   --base-path <path>        LeafWiki base path, if any
   --data-dir <path>         LeafWiki data directory (default: ./.wiki)
   --root-dir <path>         LeafWiki root markdown directory (default: ./wiki)
-  --jwt-secret <secret>     LeafWiki JWT secret for API-key STDIO (default: local development secret)
-  --admin-password <pass>   LeafWiki initial admin password for API-key STDIO (default: admin)
+  --jwt-secret <secret>     JWT secret only when this run must bootstrap an auth-enabled owner
+  --admin-password <pass>   Admin password only when this run must bootstrap an auth-enabled owner
   --disable-auth            Force disabled-auth STDIO identity
   --allow-insecure          Pass --allow-insecure to LeafWiki (default)
   --no-allow-insecure       Do not pass --allow-insecure
   --request-log             Keep LeafWiki request logs enabled
   --disable-request-log     Pass --disable-request-log to LeafWiki (default)
+  --daemon-idle-timeout <d> Project daemon idle timeout after last session exits (default: 10m)
   --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
-  --server-log <path>       Accepted for compatibility; native LeafWiki writes diagnostics to stderr
+  --server-log <path>       Accepted and ignored for compatibility; use --server-arg for logging overrides
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
   --dry-run                 Print the planned command without starting anything
   -h, --help                Show this help
@@ -115,17 +118,6 @@ require_executable() {
   else
     command_exists "$executable" || fail "executable not found on PATH: $executable"
   fi
-}
-
-is_loopback_host() {
-  case "$1" in
-    localhost|127.0.0.1|::1)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
 }
 
 normalize_base_path() {
@@ -262,6 +254,15 @@ while [[ $# -gt 0 ]]; do
       disable_request_log=1
       shift
       ;;
+    --daemon-idle-timeout=*)
+      daemon_idle_timeout="${1#*=}"
+      shift
+      ;;
+    --daemon-idle-timeout)
+      [[ $# -ge 2 ]] || fail "--daemon-idle-timeout requires a duration"
+      daemon_idle_timeout="$2"
+      shift 2
+      ;;
     --api-key=*)
       api_key="${1#*=}"
       shift
@@ -303,8 +304,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-is_loopback_host "$host" || fail "native MCP STDIO requires a loopback host (localhost, 127.0.0.1, or ::1)"
-
 base_path="$(normalize_base_path "$base_path")"
 url_host_value="$(url_host "$host")"
 http_url="$scheme://$url_host_value:$port$base_path"
@@ -327,7 +326,8 @@ native_cmd=(
   --port "$port"
   --data-dir "$data_dir"
   --root-dir "$root_dir"
-  --log-target stderr
+  --daemon-idle-timeout "$daemon_idle_timeout"
+  --log-target file
 )
 if truthy "$disable_auth"; then
   native_cmd+=(--disable-auth=true)
@@ -348,8 +348,16 @@ fi
 child_env=()
 print_env=()
 if [[ -n "$api_key" ]]; then
-  child_env+=(LEAFWIKI_MCP_API_KEY="$api_key" LEAFWIKI_JWT_SECRET="$jwt_secret" LEAFWIKI_ADMIN_PASSWORD="$admin_password")
-  print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED LEAFWIKI_JWT_SECRET=REDACTED LEAFWIKI_ADMIN_PASSWORD=REDACTED)
+  child_env+=(LEAFWIKI_MCP_API_KEY="$api_key")
+  print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED)
+  if [[ -n "$jwt_secret" ]]; then
+    child_env+=(LEAFWIKI_JWT_SECRET="$jwt_secret")
+    print_env+=(LEAFWIKI_JWT_SECRET=REDACTED)
+  fi
+  if [[ -n "$admin_password" ]]; then
+    child_env+=(LEAFWIKI_ADMIN_PASSWORD="$admin_password")
+    print_env+=(LEAFWIKI_ADMIN_PASSWORD=REDACTED)
+  fi
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then

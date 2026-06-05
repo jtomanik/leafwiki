@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -585,6 +586,20 @@ func (w *Wiki) RunMCPStdioWithAuth(ctx context.Context, opts httpinternal.Router
 	}
 	server := w.mcpRoutes.NewStdioServer(opts, stdioAuth)
 	return server.Run(ctx, transport)
+}
+
+func (w *Wiki) MCPHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	return w.mcpRoutes.NewHTTPHandler(opts)
+}
+
+func (w *Wiki) PrivateMCPHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	return w.mcpRoutes.NewPrivateHTTPHandler(opts)
 }
 
 // FrontendConfig returns the minimal runtime data required by the router to serve the SPA.

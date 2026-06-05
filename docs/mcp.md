@@ -1,6 +1,6 @@
 # Local MCP Interface
 
-LeafWiki can expose MCP through a local Streamable HTTP endpoint, native STDIO, or both from one `leafwiki` process. MCP is disabled by default.
+LeafWiki can expose MCP through a local Streamable HTTP endpoint, native STDIO, or both through one per-project owner daemon. MCP is disabled by default.
 
 Use the transport selector:
 
@@ -20,11 +20,19 @@ http://127.0.0.1:8080/mcp
 
 When `--base-path /wiki` is configured, the endpoint is `http://127.0.0.1:8080/wiki/mcp`.
 
-Transport unification is tracked by `codex://threads/019e8a0f-9674-7780-b6ee-1cfd7be07f67`.
+Transport unification is tracked by `codex://threads/019e8a0f-9674-7780-b6ee-1cfd7be07f67`. The transparent project daemon design is tracked by `codex://threads/019e8df8-d944-71f3-956e-59eb999abdff`.
+
+## Transparent Project Daemon
+
+Every normal LeafWiki startup joins a per-project owner daemon. The project identity is the canonical resolved `(data-dir, root-dir)` pair. The first compatible startup starts the owner and writes `<data-dir>/.leafwiki/project-daemon.json` with mode `0600`; later compatible startups register session handles and attach without taking data/root ownership locks themselves.
+
+Daemon-relevant configuration must match the first owner for owner-affecting starts: auth mode, host, port, base path, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, revision/link-refactor settings, max revision history, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change owner settings, so they inherit the owner value for host, public HTTP MCP, log target/file, and request logging while still matching the rest of the project identity. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
+
+The owner exits after the last session handle disconnects and `--daemon-idle-timeout` elapses. The default is `10m`; `0` stops immediately after the last handle. Stale descriptors are ignored when the private control endpoint is unreachable and the project locks are free.
 
 ## Security Model
 
-MCP only starts on a loopback host: `localhost`, `127.0.0.1`, or `::1`. Do not expose MCP through Docker port publishing, a public reverse proxy, or a public network.
+Public HTTP MCP only starts on a loopback host: `localhost`, `127.0.0.1`, or `::1`. Native STDIO may attach to an owner bound to a non-loopback web host because STDIO traffic goes through the private loopback control server, not public `/mcp`. Do not expose public HTTP MCP through Docker port publishing, a public reverse proxy, or a public network.
 
 HTTP MCP accepts bearer tokens from OAuth or MCP-only API keys. Missing, invalid, expired, revoked, or insufficient-scope credentials are rejected before MCP requests reach tools. MCP requests do not use LeafWiki CSRF middleware, and MCP bearer credentials are separate from LeafWiki web JWT cookies.
 
@@ -33,13 +41,13 @@ Native STDIO supports two identities:
 - Disabled auth: `--mcp=stdio --disable-auth=true` uses the same `public-editor` actor as the disabled-auth web UI.
 - API key: set `LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret>` or pass `--api-key`. Prefer the environment variable because CLI arguments can appear in process listings.
 
-Native STDIO rejects `--log-target stdout` because stdout is reserved for newline-delimited JSON-RPC frames. Diagnostics go to stderr or the configured log file.
+Native STDIO rejects `--log-target stdout` because stdout is reserved for newline-delimited JSON-RPC frames. Foreground STDIO validation and bridge diagnostics can go to stderr, but a STDIO-spawned detached owner writes startup and server logs to the configured log file even when the frontend requested `--log-target stderr`.
 
-The `--api-key` flag and `LEAFWIKI_MCP_API_KEY` apply only to native STDIO. HTTP MCP remains bearer/OAuth protected through normal request headers.
+The `--api-key` flag and `LEAFWIKI_MCP_API_KEY` apply only to native STDIO session frontends. They are never written to the project daemon descriptor and are not used for daemon config matching. HTTP MCP remains bearer/OAuth protected through normal request headers.
 
 ## Native STDIO Wrapper
 
-For project-local MCP clients, use `scripts/run-mcp.sh`. It starts one native `leafwiki --mcp=stdio` process. The same process serves the browser UI on `127.0.0.1:8080` and MCP over STDIO.
+For project-local MCP clients, use `scripts/run-mcp.sh`. It starts an agent-owned `leafwiki --mcp=stdio` session frontend. That foreground process speaks MCP over stdin/stdout and attaches to the project owner daemon that serves the browser UI on `127.0.0.1:8080`.
 
 ```bash
 ./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
@@ -67,14 +75,16 @@ Authenticated native STDIO:
 
 ```bash
 LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> \
-LEAFWIKI_JWT_SECRET=<secret> \
-LEAFWIKI_ADMIN_PASSWORD=<password> \
 ./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
 ```
 
-The wrapper keeps stdout reserved for MCP protocol frames. Wrapper diagnostics and LeafWiki startup messages go to stderr. Use absolute paths in MCP client configuration unless you know the client process has the expected working directory and `PATH`.
+`LEAFWIKI_JWT_SECRET` and `LEAFWIKI_ADMIN_PASSWORD` are only needed when this
+wrapper invocation must bootstrap a new auth-enabled owner. Existing compatible
+owners accept API-key STDIO attaches without those bootstrap secrets.
 
-Path safety matters: `--root-dir ./wiki --data-dir ./.wiki` keeps managed Markdown and app state separate. `--root-dir . --data-dir ./.wiki` is invalid because the root directory would contain the data directory. LeafWiki locks both the data directory and root directory so a second active process using the same state fails fast.
+The wrapper keeps stdout reserved for MCP protocol frames. Wrapper diagnostics and foreground validation errors go to stderr. Wrapper-launched owner startup and server logs go to `<data-dir>/.leafwiki/logs/leafwiki.log` by default. Use absolute paths in MCP client configuration unless you know the client process has the expected working directory and `PATH`.
+
+Path safety matters: `--root-dir ./wiki --data-dir ./.wiki` keeps managed Markdown and app state separate. `--root-dir . --data-dir ./.wiki` is invalid because the root directory would contain the data directory. The project owner daemon holds both data and root locks; compatible session frontends attach to it instead of creating lock conflicts.
 
 ## OAuth Client Settings
 
@@ -202,18 +212,21 @@ Asset reads return:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Startup rejects MCP | Host is not loopback | Bind to `127.0.0.1`, `localhost`, or `::1` |
-| Native STDIO rejects logging | `--log-target stdout` is set | Use `file` or `stderr` |
+| Startup rejects HTTP MCP | Host is not loopback | Bind public HTTP MCP to `127.0.0.1`, `localhost`, or `::1`; native STDIO can attach through private loopback control |
+| Native STDIO rejects logging | `--log-target stdout` is set | Use `file`; `stderr` is accepted for foreground STDIO diagnostics, while detached owner logs are retained in the log file |
 | Native STDIO rejects API-key auth | Missing or invalid `LEAFWIKI_MCP_API_KEY` | Create a current MCP API key and pass it in the child environment |
+| Startup rejects with config mismatch | A project owner already exists with different daemon-relevant settings | Stop existing LeafWiki sessions or restart the owner with the desired host/port/base-path/auth/MCP settings |
+| `--mcp=http` cannot attach | The existing owner was started without public HTTP MCP | Stop/restart the owner with `--mcp=http` or `--mcp=stdio,http` |
+| Stale descriptor confusion | `<data-dir>/.leafwiki/project-daemon.json` points to a dead owner | Restart LeafWiki; unreachable descriptors are ignored and replaced once the project locks are free |
 | Viewer key can read but writes fail | Viewer role lacks mutation permission | Use an editor/admin key for write tools |
-| JSON parse errors | Something wrote non-protocol text to stdout | Ensure wrappers and launch scripts write diagnostics to stderr only |
+| JSON parse errors | Something wrote non-protocol text to stdout | Ensure wrappers and launch scripts keep diagnostics off stdout |
 
 ## Verification Contract
 
 The local MCP surface is complete only when every defined MCP tool has HTTP/MCP parity coverage or is correctly absent when gated, OAuth coverage passes, native STDIO coverage passes, and the full project verification passes:
 
 ```bash
-rtk go test ./cmd/leafwiki ./internal/wiki ./internal/wiki/mcp ./internal/locking
+rtk go test ./cmd/leafwiki ./internal/projectdaemon ./internal/wiki ./internal/wiki/mcp ./internal/locking
 rtk go test ./...
 rtk bash -n scripts/run-mcp.sh scripts/test-run-mcp.sh scripts/install-all-macos.sh scripts/test-install-all-macos.sh
 rtk bash scripts/test-run-mcp.sh

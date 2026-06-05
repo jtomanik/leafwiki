@@ -34,6 +34,9 @@ type SeededKeys = {
   deleted: SeededUser;
 };
 
+const liveRevocationError =
+  /authenticated MCP user|Upstream MCP request failed|unauthorized|Connection closed|Not connected/i;
+
 function appURL(path: string): string {
   return new URL(toAppPath(path), process.env.E2E_BASE_URL || 'http://localhost:8080').toString();
 }
@@ -130,12 +133,13 @@ test('admin api key authenticates native stdio and live revocation affects later
     await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
 
     await revokeAPIKey(page, seeds.admin);
+    await expect(mcp.callTool('get_tree')).rejects.toThrow(liveRevocationError);
     await expect(
       mcp.callTool('create_page', {
         title: 'Revoked Admin STDIO API Key Write',
         slug: `revoked-admin-stdio-api-key-write-${Date.now()}`,
       }),
-    ).rejects.toThrow(/authenticated MCP user|Upstream MCP request failed/i);
+    ).rejects.toThrow(liveRevocationError);
   } finally {
     await mcp.close();
   }
@@ -165,6 +169,64 @@ test('viewer api key can read through native stdio but cannot mutate', async () 
   }
 });
 
+test('concurrent native stdio api-key clients keep separate identities', async () => {
+  const seeds = seededKeys();
+  const [editorA, editorB, viewer] = await Promise.all([
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.editor.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-editor-a',
+    }),
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.editor.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-editor-b',
+    }),
+    connectMCPStdioClient(appURL('/mcp'), {
+      accessToken: seeds.viewer.apiKey,
+      clientName: 'leafwiki-e2e-native-stdio-concurrent-viewer',
+    }),
+  ]);
+  try {
+    const [editorACurrent, editorBCurrent, viewerCurrent] = await Promise.all([
+      editorA.callTool('get_current_user'),
+      editorB.callTool('get_current_user'),
+      viewer.callTool('get_current_user'),
+    ]);
+    expect((editorACurrent.user as { username: string; role: string }).username).toBe(
+      seeds.editor.username,
+    );
+    expect((editorACurrent.user as { username: string; role: string }).role).toBe('editor');
+    expect((editorBCurrent.user as { username: string; role: string }).username).toBe(
+      seeds.editor.username,
+    );
+    expect((editorBCurrent.user as { username: string; role: string }).role).toBe('editor');
+    expect((viewerCurrent.user as { username: string; role: string }).username).toBe(
+      seeds.viewer.username,
+    );
+    expect((viewerCurrent.user as { username: string; role: string }).role).toBe('viewer');
+
+    await expect(editorA.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(editorB.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(viewer.callTool('get_tree')).resolves.toBeTruthy();
+
+    const editorSlug = `mcp-stdio-concurrent-editor-write-${Date.now()}`;
+    await expect(
+      editorA.callTool('create_page', {
+        title: 'Concurrent Editor STDIO API Key Write',
+        slug: editorSlug,
+        kind: 'page',
+      }),
+    ).resolves.toBeTruthy();
+    await expect(
+      editorB.callTool('get_page_by_path', {
+        path: editorSlug,
+      }),
+    ).resolves.toBeTruthy();
+    await expect(viewer.callTool('get_page_by_path', { path: editorSlug })).resolves.toBeTruthy();
+  } finally {
+    await Promise.all([editorA.close(), editorB.close(), viewer.close()]);
+  }
+});
+
 test('role downgrade takes effect during a live native stdio session', async ({ page }) => {
   const seeds = seededKeys();
   const mcp = await connectMCPStdioClient(appURL('/mcp'), {
@@ -176,6 +238,15 @@ test('role downgrade takes effect during a live native stdio session', async ({ 
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(seeds.editor.username);
     expect(currentUser.role).toBe('editor');
+
+    const editorSlug = `editor-stdio-api-key-write-${Date.now()}`;
+    await expect(
+      mcp.callTool('create_page', {
+        title: 'Editor STDIO API Key Write',
+        slug: editorSlug,
+        kind: 'page',
+      }),
+    ).resolves.toBeTruthy();
 
     await loginAsAdmin(page);
     await updateUserRole(page, seeds.editor, 'viewer');

@@ -256,8 +256,9 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
 | `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
-| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; requires loopback host when enabled | `none` | v0.11.0 |
+| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP requires a loopback host | `none` | v0.11.0 |
 | `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
+| `--daemon-idle-timeout`          | Project daemon idle timeout after the last session exits; `0` = immediate | `10m`       | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
@@ -294,6 +295,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
 | `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
 | `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
+| `LEAFWIKI_DAEMON_IDLE_TIMEOUT`          | Project daemon idle timeout after last session exits  | `10m`         | v0.11.0 |
 | `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
@@ -303,7 +305,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 
 ### Logging
 
-By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. `--log-target stdout` is available only when you explicitly want server logs on stdout.
+By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. Native STDIO owners are detached with stdout reserved for protocol traffic, so their owner logs are retained in the log file. `--log-target stdout` is available only when you explicitly want server logs on stdout.
 
 LeafWiki does not rotate log files in-process. Configure external rotation with your service manager, container runtime, or a tool such as `logrotate`.
 
@@ -363,13 +365,15 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki can run as a project-local MCP STDIO process while also serving the HTTP UI from the same `Wiki` instance. The easiest setup is the wrapper script:
+LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner exits after the last session disconnects and `--daemon-idle-timeout` elapses.
+
+The easiest project-local STDIO setup is the wrapper script:
 
 ```bash
 ./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
 ```
 
-Native STDIO keeps stdout reserved for MCP JSON-RPC frames and locks `<data-dir>/.leafwiki/leafwiki.lock` so two active processes cannot share state. It can run with disabled auth for isolated local workflows, or with an MCP API key through `LEAFWIKI_MCP_API_KEY`.
+Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.
 
 LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
 

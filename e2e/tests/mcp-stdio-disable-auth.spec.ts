@@ -99,6 +99,12 @@ test('mcp stdio raw lifecycle exits after stdin closes', async ({ request }) => 
   expect(result.responses).toHaveLength(1);
   expect(result.response?.result).toBeTruthy();
   expect(result.stderr).not.toContain('shutdown delete failed');
+  const immediateHealth = await request.get(appURL('/api/health'), {
+    failOnStatusCode: false,
+    timeout: 1000,
+  });
+  expect(immediateHealth.status()).toBe(200);
+  await immediateHealth.dispose();
   await expect
     .poll(
       async () => {
@@ -113,7 +119,7 @@ test('mcp stdio raw lifecycle exits after stdin closes', async ({ request }) => 
           return 'unavailable';
         }
       },
-      { timeout: 5000 },
+      { timeout: 8000 },
     )
     .toBe('unavailable');
 });

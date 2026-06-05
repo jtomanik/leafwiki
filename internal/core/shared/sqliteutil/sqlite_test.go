@@ -63,6 +63,27 @@ func TestIsSQLiteRecoverableError(t *testing.T) {
 	}
 }
 
+func TestIsSQLiteTransientLockError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "SQLITE_BUSY", err: sqliteErrorWithCode(5), want: true},
+		{name: "SQLITE_LOCKED", err: sqliteErrorWithCode(6), want: true},
+		{name: "SQLITE_IOERR", err: sqliteErrorWithCode(10), want: false},
+		{name: "non-sqlite error", err: errors.New("boom"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSQLiteTransientLockError(tt.err); got != tt.want {
+				t.Fatalf("IsSQLiteTransientLockError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRemoveSQLiteFiles(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "search.db")

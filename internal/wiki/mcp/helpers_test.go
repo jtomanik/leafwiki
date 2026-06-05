@@ -1,9 +1,14 @@
 package mcp
 
 import (
+	"context"
+	"database/sql"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 )
@@ -63,7 +68,52 @@ func TestActorForMissingTokenInfoUsesStdioAPIKeyAndReloadsCurrentUser(t *testing
 	}
 }
 
+func TestAPIKeyBearerVerificationPreservesStorageErrors(t *testing.T) {
+	_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
+	blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
+	defer blocker.rollback(t)
+	routes := &Routes{apiKeys: apiKeyService}
+
+	_, err := routes.verifyBearerToken(context.Background(), created.Secret, nil)
+	if err == nil {
+		t.Fatalf("verifyBearerToken unexpectedly succeeded")
+	}
+	if errors.Is(err, sdkauth.ErrInvalidToken) {
+		t.Fatalf("verifyBearerToken error = %v, want storage error not invalid-token classification", err)
+	}
+	if !strings.Contains(err.Error(), "api key verifier") && !strings.Contains(err.Error(), "database") {
+		t.Fatalf("verifyBearerToken error = %v, want storage failure context", err)
+	}
+}
+
+func TestActorForMissingTokenInfoPreservesAPIKeyStorageErrors(t *testing.T) {
+	_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
+	blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
+	defer blocker.rollback(t)
+	routes := &Routes{
+		apiKeys:     apiKeyService,
+		stdioAPIKey: created.Secret,
+	}
+
+	_, err := routes.actorForRequest(nil)
+	if err == nil {
+		t.Fatalf("actorForRequest unexpectedly succeeded")
+	}
+	if strings.Contains(err.Error(), "authenticated MCP user not found") {
+		t.Fatalf("actorForRequest error = %v, want storage failure not not-found classification", err)
+	}
+	if !strings.Contains(err.Error(), "authenticated MCP user") || !strings.Contains(err.Error(), "database") {
+		t.Fatalf("actorForRequest error = %v, want authenticated-user storage failure context", err)
+	}
+}
+
 func newMCPAuthServices(t *testing.T) (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User) {
+	t.Helper()
+	userService, apiKeyService, editor, _, _ := newMCPAPIKeyAuthFixture(t)
+	return userService, apiKeyService, editor
+}
+
+func newMCPAPIKeyAuthFixture(t *testing.T) (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User, *coreauth.APIKeyCreateResult, string) {
 	t.Helper()
 
 	store, err := coreauth.NewUserStore(t.TempDir())
@@ -81,7 +131,8 @@ func newMCPAuthServices(t *testing.T) (*coreauth.UserService, *coreauth.APIKeySe
 		t.Fatalf("CreateUser editor failed: %v", err)
 	}
 
-	apiKeyStore, err := coreauth.NewAPIKeyStore(t.TempDir())
+	apiKeyDir := t.TempDir()
+	apiKeyStore, err := coreauth.NewAPIKeyStore(apiKeyDir)
 	if err != nil {
 		t.Fatalf("NewAPIKeyStore failed: %v", err)
 	}
@@ -91,5 +142,36 @@ func newMCPAuthServices(t *testing.T) (*coreauth.UserService, *coreauth.APIKeySe
 			t.Fatalf("close api key service: %v", err)
 		}
 	})
-	return userService, apiKeyService, editor
+	created, err := apiKeyService.CreateAPIKey(editor.ID, "Native STDIO", editor.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+	return userService, apiKeyService, editor, created, filepath.Join(apiKeyDir, "api_keys.db")
+}
+
+type mcpTestSQLiteBlocker struct {
+	db *sql.DB
+}
+
+func beginExclusiveMCPTestSQLiteTransaction(t *testing.T, path string) mcpTestSQLiteBlocker {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open blocking connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec("ROLLBACK")
+		_ = db.Close()
+	})
+	if _, err := db.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("begin blocking transaction: %v", err)
+	}
+	return mcpTestSQLiteBlocker{db: db}
+}
+
+func (b mcpTestSQLiteBlocker) rollback(t *testing.T) {
+	t.Helper()
+	if _, err := b.db.Exec("ROLLBACK"); err != nil {
+		t.Fatalf("rollback blocking transaction: %v", err)
+	}
 }

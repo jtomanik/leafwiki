@@ -1,6 +1,8 @@
 package locking
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,5 +79,48 @@ func TestAcquireRootDirLockRejectsSecondOwnerAndReleases(t *testing.T) {
 	}
 	if err := again.Release(); err != nil {
 		t.Fatalf("second Release failed: %v", err)
+	}
+}
+
+func TestLockHeldPredicatesRecognizeWrappedSentinelErrors(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	dataLock, err := AcquireDataDirLock(dataDir)
+	if err != nil {
+		t.Fatalf("first AcquireDataDirLock failed: %v", err)
+	}
+	defer dataLock.Release()
+	_, dataErr := AcquireDataDirLock(dataDir)
+	if dataErr == nil {
+		t.Fatalf("second AcquireDataDirLock succeeded, want held error")
+	}
+	wrappedDataErr := fmt.Errorf("acquire data directory lock: %w", dataErr)
+	if !IsDataDirLockHeld(wrappedDataErr) || !IsLockHeld(wrappedDataErr) {
+		t.Fatalf("data lock predicates rejected wrapped held error: %v", wrappedDataErr)
+	}
+	if IsRootDirLockHeld(wrappedDataErr) {
+		t.Fatalf("root lock predicate accepted data lock error: %v", wrappedDataErr)
+	}
+
+	rootDir := filepath.Join(t.TempDir(), "content")
+	rootLock, err := AcquireRootDirLock(rootDir)
+	if err != nil {
+		t.Fatalf("first AcquireRootDirLock failed: %v", err)
+	}
+	defer rootLock.Release()
+	_, rootErr := AcquireRootDirLock(rootDir)
+	if rootErr == nil {
+		t.Fatalf("second AcquireRootDirLock succeeded, want held error")
+	}
+	wrappedRootErr := fmt.Errorf("acquire root directory lock: %w", rootErr)
+	if !IsRootDirLockHeld(wrappedRootErr) || !IsLockHeld(wrappedRootErr) {
+		t.Fatalf("root lock predicates rejected wrapped held error: %v", wrappedRootErr)
+	}
+	if IsDataDirLockHeld(wrappedRootErr) {
+		t.Fatalf("data lock predicate accepted root lock error: %v", wrappedRootErr)
+	}
+
+	otherErr := errors.New("open lock file: permission denied")
+	if IsLockHeld(otherErr) || IsDataDirLockHeld(otherErr) || IsRootDirLockHeld(otherErr) {
+		t.Fatalf("lock predicates accepted non-held error: %v", otherErr)
 	}
 }

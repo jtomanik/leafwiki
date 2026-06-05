@@ -13,8 +13,12 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,13 +26,14 @@ import (
 
 	"github.com/dustin/go-humanize"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tools"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
-	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 )
 
 func writeUsage(w io.Writer) {
@@ -67,6 +72,7 @@ func writeUsage(w io.Writer) {
 	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
 	--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)
 	--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY
+	--daemon-idle-timeout         Project daemon idle timeout after last session exits; 0 stops immediately (default: 10m)
 	--max-revision-history        Maximum revisions kept per page; 0 = unlimited (default: 100)
 	--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)
 	--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)
@@ -98,6 +104,7 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_ENABLE_LINK_REFACTOR
 	LEAFWIKI_MCP
 	LEAFWIKI_MCP_API_KEY
+	LEAFWIKI_DAEMON_IDLE_TIMEOUT
 	LEAFWIKI_MAX_REVISION_HISTORY
 	LEAFWIKI_ENABLE_HTTP_REMOTE_USER
 	LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME
@@ -152,6 +159,10 @@ func failureMessage(msg string, args ...any) string {
 	return b.String()
 }
 
+var projectDaemonExecutable = os.Executable
+
+var projectDaemonStartupConfigPostStartCleanupDelay = 30 * time.Second
+
 type cliFlags struct {
 	host                    *string
 	port                    *string
@@ -175,6 +186,8 @@ type cliFlags struct {
 	enableLinkRefactor      *bool
 	mcp                     *string
 	apiKey                  *string
+	daemonIdleTimeout       *time.Duration
+	internalProjectDaemon   *string
 	enableMCP               *bool
 	mcpStdio                *bool
 	maxRevisionHistory      *int
@@ -183,6 +196,37 @@ type cliFlags struct {
 	trustedProxyIPs         *string
 	httpRemoteUserLogoutURL *string
 	disableRequestLog       *bool
+}
+
+type leafwikiRuntimeConfig struct {
+	Workspace               wiki.Workspace
+	Host                    string
+	Port                    string
+	AdminPassword           string
+	JWTSecret               string
+	PublicAccess            bool
+	AllowInsecure           bool
+	InjectCodeInHeader      string
+	CustomStylesheet        string
+	Logging                 leaflogging.Config
+	DisableAuth             bool
+	HideLinkMetadataSection bool
+	AccessTokenTimeout      time.Duration
+	RefreshTokenTimeout     time.Duration
+	BasePath                string
+	MaxAssetUploadSize      int64
+	EnableRevision          bool
+	EnableLinkRefactor      bool
+	MCPTransports           mcpTransports
+	APIKey                  string
+	MaxRevisionHistory      int
+	EnableHTTPRemoteUser    bool
+	HTTPRemoteUserHeader    string
+	TrustedProxyIPsRaw      string
+	HTTPRemoteUserLogoutURL string
+	DisableRequestLog       bool
+	DaemonIdleTimeout       time.Duration
+	DaemonStartupErrorPath  string
 }
 
 func registerFlags(fs *flag.FlagSet) *cliFlags {
@@ -209,6 +253,8 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		enableLinkRefactor:      fs.Bool("enable-link-refactor", false, "enable the link refactoring dialog and rewrite flow (default: false)"),
 		mcp:                     fs.String("mcp", "", "MCP transports: none, http, stdio, http,stdio, or stdio,http"),
 		apiKey:                  fs.String("api-key", "", "native STDIO MCP API key; prefer LEAFWIKI_MCP_API_KEY"),
+		daemonIdleTimeout:       fs.Duration("daemon-idle-timeout", projectdaemon.DefaultIdleTimeout, "project daemon idle timeout after last session exits; 0 stops immediately"),
+		internalProjectDaemon:   fs.String("internal-project-daemon", "", "internal project daemon startup config path"),
 		enableMCP:               fs.Bool("enable-mcp", false, "compatibility flag for local MCP Streamable HTTP endpoint"),
 		mcpStdio:                fs.Bool("mcp-stdio", false, "compatibility flag for native MCP STDIO"),
 		maxRevisionHistory:      fs.Int("max-revision-history", 100, "maximum revisions kept per page; 0 = unlimited (default: 100)"),
@@ -234,6 +280,12 @@ func main() {
 
 	flags := registerFlags(flag.CommandLine)
 	flag.Parse()
+	if strings.TrimSpace(*flags.internalProjectDaemon) != "" {
+		if err := runInternalProjectDaemon(context.Background(), *flags.internalProjectDaemon); err != nil {
+			fail("Project daemon failed", "error", err)
+		}
+		return
+	}
 
 	// Track which flags were explicitly set on CLI
 	visited := map[string]bool{}
@@ -287,6 +339,7 @@ func main() {
 	hideLinkMetadataSection := resolveBool("hide-link-metadata-section", *flags.hideLinkMetadataSection, visited, "LEAFWIKI_HIDE_LINK_METADATA_SECTION")
 	accessTokenTimeout := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT")
 	refreshTokenTimeout := resolveDuration("refresh-token-timeout", *flags.refreshTokenTimeout, visited, "LEAFWIKI_REFRESH_TOKEN_TIMEOUT")
+	daemonIdleTimeout := resolveDuration("daemon-idle-timeout", *flags.daemonIdleTimeout, visited, "LEAFWIKI_DAEMON_IDLE_TIMEOUT")
 	// If disable-auth is set, later logic will override publicAccess accordingly
 	disableAuth := resolveBool("disable-auth", *flags.disableAuth, visited, "LEAFWIKI_DISABLE_AUTH")
 	basePath := normalizeBasePath(resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""))
@@ -296,10 +349,8 @@ func main() {
 	)
 	enableRevision := resolveBool("enable-revision", *flags.enableRevision, visited, "LEAFWIKI_ENABLE_REVISION")
 	enableLinkRefactor := resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR")
-	enableMCP := mcpTransports.HTTP
-	mcpStdio := mcpTransports.Stdio
 	apiKey := ""
-	if mcpStdio {
+	if mcpTransports.Stdio {
 		apiKey = resolveString("api-key", *flags.apiKey, visited, "LEAFWIKI_MCP_API_KEY", "")
 	}
 	maxRevisionHistory := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100)
@@ -308,8 +359,7 @@ func main() {
 	trustedProxyIPsRaw := resolveString("trusted-proxy-ips", *flags.trustedProxyIPs, visited, "LEAFWIKI_TRUSTED_PROXY_IPS", "")
 	httpRemoteUserLogoutURL := resolveString("http-remote-user-logout-url", *flags.httpRemoteUserLogoutURL, visited, "LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL", "")
 	disableRequestLog := resolveBool("disable-request-log", *flags.disableRequestLog, visited, "LEAFWIKI_DISABLE_REQUEST_LOG")
-	trustedProxies, err := authmw.ParseTrustedProxies(trustedProxyIPsRaw)
-	if err != nil {
+	if _, err := authmw.ParseTrustedProxies(trustedProxyIPsRaw); err != nil {
 		fail("invalid --trusted-proxy-ips value", "error", err)
 	}
 
@@ -330,159 +380,41 @@ func main() {
 	}); err != nil {
 		fail("Invalid MCP configuration", "error", err)
 	}
-	dataDirMissingBeforeLogger := false
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		dataDirMissingBeforeLogger = true
-	}
-	dataLock, err := locking.AcquireDataDirLock(dataDir)
-	if err != nil {
-		fail("Failed to acquire data directory lock", "error", err)
-	}
-	defer func() {
-		if err := dataLock.Release(); err != nil {
-			slog.Default().Error("Failed to release data directory lock", "error", err)
-		}
-	}()
-	logCloser, err := setupLogger(loggingConfig, os.Stdout, os.Stderr)
-	if err != nil {
-		fail("Invalid logging configuration", "error", err)
-	}
-	defer func() {
-		if err := logCloser.Close(); err != nil {
-			slog.Default().Error("Failed to close log sink", "error", err)
-		}
-	}()
-	if dataDirMissingBeforeLogger {
-		if _, err := os.Stat(dataDir); err == nil {
-			slog.Default().Info("Data directory created", "path", dataDir)
-		}
-	}
-
-	if enableHTTPRemoteUser {
-		slog.Default().Info("Reverse-proxy authentication enabled",
-			"header", httpRemoteUserHeader,
-			"trusted_proxies", trustedProxyIPsRaw,
-		)
-	}
-
 	if disableAuth {
 		publicAccess = true
-		slog.Default().Warn("Authentication disabled. Wiki is publicly accessible without authentication.")
 	}
 
-	if allowInsecure {
-		slog.Default().Warn("allow-insecure enabled. Auth cookies may be transmitted over plain HTTP (INSECURE).")
+	cfg := leafwikiRuntimeConfig{
+		Workspace:               workspace,
+		Host:                    host,
+		Port:                    port,
+		AdminPassword:           adminPassword,
+		JWTSecret:               jwtSecret,
+		PublicAccess:            publicAccess,
+		AllowInsecure:           allowInsecure,
+		InjectCodeInHeader:      injectCodeInHeader,
+		CustomStylesheet:        customStylesheet,
+		Logging:                 loggingConfig,
+		DisableAuth:             disableAuth,
+		HideLinkMetadataSection: hideLinkMetadataSection,
+		AccessTokenTimeout:      accessTokenTimeout,
+		RefreshTokenTimeout:     refreshTokenTimeout,
+		BasePath:                basePath,
+		MaxAssetUploadSize:      maxAssetUploadSize,
+		EnableRevision:          enableRevision,
+		EnableLinkRefactor:      enableLinkRefactor,
+		MCPTransports:           mcpTransports,
+		APIKey:                  apiKey,
+		MaxRevisionHistory:      maxRevisionHistory,
+		EnableHTTPRemoteUser:    enableHTTPRemoteUser,
+		HTTPRemoteUserHeader:    httpRemoteUserHeader,
+		TrustedProxyIPsRaw:      trustedProxyIPsRaw,
+		HTTPRemoteUserLogoutURL: httpRemoteUserLogoutURL,
+		DisableRequestLog:       disableRequestLog,
+		DaemonIdleTimeout:       daemonIdleTimeout,
 	}
-
-	// Check if data directory exists
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			fail("Failed to create data directory", "error", err)
-		}
-		slog.Default().Info("Data directory created", "path", dataDir)
-	}
-	if _, err := os.Stat(workspace.RootDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(workspace.RootDir, 0755); err != nil {
-			fail("Failed to create root directory", "error", err)
-		}
-	}
-	rootLock, err := locking.AcquireRootDirLock(workspace.RootDir)
-	if err != nil {
-		fail("Failed to acquire root directory lock", "error", err)
-	}
-	defer func() {
-		if err := rootLock.Release(); err != nil {
-			slog.Default().Error("Failed to release root directory lock", "error", err)
-		}
-	}()
-
-	if !disableAuth {
-		if jwtSecret == "" {
-			fail("JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
-		}
-
-		if adminPassword == "" {
-			fail("admin password is required. Set it using --admin-password or LEAFWIKI_ADMIN_PASSWORD environment variable.")
-		}
-	}
-
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           workspace,
-		StorageDir:          dataDir,
-		AdminPassword:       adminPassword,
-		JWTSecret:           jwtSecret,
-		AccessTokenTimeout:  accessTokenTimeout,
-		RefreshTokenTimeout: refreshTokenTimeout,
-		AuthDisabled:        disableAuth,
-		EnableRevision:      enableRevision,
-		MaxRevisionHistory:  maxRevisionHistory,
-	})
-	if err != nil {
-		fail("Failed to initialize Wiki", "error", err)
-	}
-	defer func() {
-		if err := w.Close(); err != nil {
-			slog.Default().Error("Failed to close Wiki", "error", err)
-		}
-	}()
-	stdioAuth := wikimcp.StdioAuth{
-		DisabledAuth: disableAuth,
-		APIKey:       apiKey,
-	}
-	if mcpStdio && apiKey != "" {
-		if _, err := w.APIKeyService().VerifyAPIKey(apiKey); err != nil {
-			fail("invalid native STDIO API key")
-		}
-	}
-
-	routerOpts := buildHTTPRouterOptions(httpRouterOptionsInput{
-		publicAccess:            publicAccess,
-		injectCodeInHeader:      injectCodeInHeader,
-		customStylesheet:        customStylesheet,
-		allowInsecure:           allowInsecure,
-		hideLinkMetadataSection: hideLinkMetadataSection,
-		accessTokenTimeout:      accessTokenTimeout,
-		refreshTokenTimeout:     refreshTokenTimeout,
-		authDisabled:            disableAuth,
-		basePath:                basePath,
-		maxAssetUploadSize:      maxAssetUploadSize,
-		enableRevision:          enableRevision,
-		enableLinkRefactor:      enableLinkRefactor,
-		enableMCP:               enableMCP,
-		host:                    host,
-		httpRemoteUser: httpinternal.HTTPRemoteUserConfig{
-			Enabled:        enableHTTPRemoteUser,
-			HeaderName:     httpRemoteUserHeader,
-			TrustedProxies: trustedProxies,
-			UserService:    w.UserService(),
-			LogoutURL:      httpRemoteUserLogoutURL,
-		},
-		disableRequestLog: disableRequestLog,
-	})
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), routerOpts)
-
-	listenAddr := buildListenAddress(host, port)
-	slog.Default().Info("Starting LeafWiki", "address", listenAddr, "data_dir", dataDir)
-	if mcpStdio {
-		if err := runNativeStdioRuntime(context.Background(), nativeStdioRuntime{
-			Wiki:       w,
-			Router:     router,
-			RouterOpts: routerOpts,
-			ListenAddr: listenAddr,
-			Host:       host,
-			Port:       port,
-			BasePath:   basePath,
-			Stdin:      os.Stdin,
-			Stdout:     os.Stdout,
-			Stderr:     os.Stderr,
-			StdioAuth:  stdioAuth,
-		}); err != nil {
-			fail("Native STDIO runtime failed", "error", err)
-		}
-		return
-	}
-	if err := router.Run(listenAddr); err != nil {
-		fail("Failed to start server", "error", err)
+	if err := runProjectDaemonLauncher(context.Background(), cfg); err != nil {
+		fail("LeafWiki startup failed", "error", err)
 	}
 }
 
@@ -499,144 +431,6 @@ func shouldPrintUsage(args []string) bool {
 
 func buildListenAddress(host, port string) string {
 	return net.JoinHostPort(host, port)
-}
-
-type nativeStdioRuntime struct {
-	Wiki       *wiki.Wiki
-	Router     http.Handler
-	RouterOpts httpinternal.RouterOptions
-	ListenAddr string
-	Host       string
-	Port       string
-	BasePath   string
-	Stdin      io.ReadCloser
-	Stdout     io.Writer
-	Stderr     io.Writer
-	StdioAuth  wikimcp.StdioAuth
-}
-
-func runNativeStdioRuntime(parent context.Context, cfg nativeStdioRuntime) error {
-	if cfg.Wiki == nil {
-		return fmt.Errorf("wiki is required")
-	}
-	if cfg.Router == nil {
-		return fmt.Errorf("router is required")
-	}
-	if cfg.Stdin == nil {
-		cfg.Stdin = os.Stdin
-	}
-	if cfg.Stdout == nil {
-		cfg.Stdout = os.Stdout
-	}
-	if cfg.Stderr == nil {
-		cfg.Stderr = io.Discard
-	}
-
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	var closeStdin sync.Once
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	go func() {
-		select {
-		case <-signals:
-			cancel()
-			closeStdin.Do(func() {
-				_ = cfg.Stdin.Close()
-			})
-		case <-ctx.Done():
-			closeStdin.Do(func() {
-				_ = cfg.Stdin.Close()
-			})
-		}
-	}()
-
-	listener, err := net.Listen("tcp", cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("start HTTP listener: %w", err)
-	}
-
-	server := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: cfg.Router,
-	}
-	serverDone := make(chan error, 1)
-	go func() {
-		err := server.Serve(listener)
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		serverDone <- err
-	}()
-
-	fmt.Fprintf(cfg.Stderr, "LeafWiki HTTP listening at %s\n", nativeStdioHTTPURL(cfg.Host, cfg.Port, cfg.BasePath))
-
-	protocolStdout := &lockedWriter{Writer: cfg.Stdout}
-	filteredStdin, filterDone := newNativeStdioJSONFilter(cfg.Stdin, protocolStdout)
-	stdioDone := make(chan error, 1)
-	go func() {
-		stdioDone <- cfg.Wiki.RunMCPStdioWithAuth(ctx, cfg.RouterOpts, &sdkmcp.IOTransport{
-			Reader: filteredStdin,
-			Writer: nopWriteCloser{Writer: protocolStdout},
-		}, cfg.StdioAuth)
-	}()
-
-	var stdioErr error
-	stdioComplete := false
-	serverAlreadyDone := false
-	select {
-	case stdioErr = <-stdioDone:
-		stdioComplete = true
-		closeStdin.Do(func() {})
-	case serverErr := <-serverDone:
-		serverAlreadyDone = true
-		if serverErr != nil {
-			return fmt.Errorf("HTTP server failed: %w", serverErr)
-		}
-	case <-ctx.Done():
-		stdioErr = ctx.Err()
-	}
-	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	shutdownErr := server.Shutdown(shutdownCtx)
-
-	if !serverAlreadyDone {
-		select {
-		case serverErr := <-serverDone:
-			if serverErr != nil {
-				return fmt.Errorf("HTTP server failed: %w", serverErr)
-			}
-		case <-shutdownCtx.Done():
-			return fmt.Errorf("HTTP server shutdown timed out: %w", shutdownCtx.Err())
-		}
-	}
-
-	if !stdioComplete {
-		select {
-		case stdioErr = <-stdioDone:
-			stdioComplete = true
-		case <-shutdownCtx.Done():
-			return fmt.Errorf("MCP STDIO shutdown timed out: %w", shutdownCtx.Err())
-		}
-	}
-
-	if shutdownErr != nil {
-		return fmt.Errorf("shut down HTTP server: %w", shutdownErr)
-	}
-	select {
-	case filterErr := <-filterDone:
-		if filterErr != nil && !isCleanNativeStdioClose(filterErr) {
-			return fmt.Errorf("MCP STDIO input failed: %w", filterErr)
-		}
-	default:
-	}
-	if !isCleanNativeStdioClose(stdioErr) {
-		return fmt.Errorf("MCP STDIO failed: %w", stdioErr)
-	}
-	return nil
 }
 
 func newNativeStdioJSONFilter(stdin io.ReadCloser, stdout io.Writer) (io.ReadCloser, <-chan error) {
@@ -696,6 +490,1170 @@ func isCleanNativeStdioClose(err error) bool {
 
 func nativeStdioHTTPURL(host, port, basePath string) string {
 	return "http://" + net.JoinHostPort(host, port) + basePath
+}
+
+func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	var closeStdin sync.Once
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			cancel()
+			if cfg.MCPTransports.Stdio {
+				closeStdin.Do(func() {
+					_ = os.Stdin.Close()
+				})
+			}
+		case <-ctx.Done():
+		}
+	}()
+	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+	desc, err := attachOrStartProjectDaemon(ctx, cfg, ownerCfg, descriptorPath)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
+		return err
+	}
+	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+	if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
+		if err := client.VerifyStdioAuth(ctx, cfg.APIKey); err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			if !projectdaemon.IsControlStatus(err, http.StatusUnauthorized) {
+				return fmt.Errorf("verify native STDIO API key: %w", err)
+			}
+			return fmt.Errorf("invalid native STDIO API key")
+		}
+	}
+	handle, err := client.RegisterSession(ctx)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("register project daemon session: %w", err)
+	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	heartbeatErr := make(chan error, 1)
+	go func() {
+		heartbeatErr <- runDaemonHeartbeat(heartbeatCtx, client, handle.ID, 2*time.Second)
+	}()
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = client.ReleaseSession(releaseCtx, handle.ID)
+	}()
+
+	if cfg.MCPTransports.Stdio {
+		bridgeCtx, stopBridge := context.WithCancel(ctx)
+		defer stopBridge()
+		bridgeErr := make(chan error, 1)
+		go func() {
+			bridgeErr <- runDaemonStdioBridge(bridgeCtx, daemonStdioBridgeConfig(desc, cfg))
+		}()
+		select {
+		case err := <-bridgeErr:
+			return err
+		case err := <-heartbeatErr:
+			stopBridge()
+			if err == nil || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return fmt.Errorf("project daemon heartbeat failed: %w", err)
+		case <-ctx.Done():
+			stopBridge()
+			return nil
+		}
+	}
+	if err := waitForForegroundSession(ctx, heartbeatErr); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
+}
+
+func daemonStdioBridgeConfig(desc *projectdaemon.Descriptor, cfg leafwikiRuntimeConfig) daemonStdioBridge {
+	return daemonStdioBridge{
+		ControlURL:   desc.ControlURL,
+		ControlToken: desc.ControlToken,
+		APIKey:       cfg.APIKey,
+		Stdin:        os.Stdin,
+		Stdout:       os.Stdout,
+		Stderr:       os.Stderr,
+	}
+}
+
+func validateAuthStartupConfig(cfg leafwikiRuntimeConfig) error {
+	if cfg.DisableAuth {
+		return nil
+	}
+	if cfg.JWTSecret == "" {
+		return fmt.Errorf("JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
+	}
+	if cfg.AdminPassword == "" {
+		return fmt.Errorf("admin password is required. Set it using --admin-password or LEAFWIKI_ADMIN_PASSWORD environment variable.")
+	}
+	return nil
+}
+
+func logStartupValidationFailure(cfg leaflogging.Config, msg string) {
+	if cfg.Target != leaflogging.TargetFile {
+		return
+	}
+	logger, closer, err := leaflogging.Open(cfg, leaflogging.Streams{Stdout: os.Stdout, Stderr: os.Stderr})
+	if err != nil {
+		return
+	}
+	defer closer.Close()
+	logger.Error(msg)
+}
+
+func attachOrStartProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config, descriptorPath string) (*projectdaemon.Descriptor, error) {
+	desc, healthy, err := readHealthyProjectDaemon(ctx, descriptorPath, ownerCfg)
+	if err != nil {
+		return nil, err
+	}
+	if healthy {
+		if mismatches := compareProjectDaemonConfigForRequest(desc.Config, ownerCfg, cfg.MCPTransports); len(mismatches) > 0 {
+			return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+		}
+		return desc, nil
+	}
+	if desc != nil {
+		_ = projectdaemon.RemoveDescriptor(descriptorPath)
+	}
+	if err := validateAuthStartupConfig(cfg); err != nil {
+		logStartupValidationFailure(cfg.Logging, err.Error())
+		return nil, err
+	}
+	if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
+		if err := verifyStdioAPIKeyFromStorage(ownerCfg.DataDir, cfg.APIKey); err != nil {
+			if errors.Is(err, coreauth.ErrInvalidToken) {
+				return nil, fmt.Errorf("invalid native STDIO API key")
+			}
+			return nil, fmt.Errorf("verify native STDIO API key: %w", err)
+		}
+	}
+	spawnCfg, err := daemonOwnerRuntimeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	spawnOwnerCfg, err := daemonConfigForRuntime(spawnCfg)
+	if err != nil {
+		return nil, err
+	}
+	errorPath, err := spawnProjectDaemonOwner(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return waitForProjectDaemon(ctx, descriptorPath, errorPath, spawnOwnerCfg, cfg.MCPTransports)
+}
+
+func readHealthyProjectDaemon(ctx context.Context, descriptorPath string, ownerCfg projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
+	desc, err := projectdaemon.ReadTrustedDescriptor(descriptorPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		locksFree, lockErr := projectDaemonLocksFree(ownerCfg.DataDir, ownerCfg.RootDir)
+		if lockErr != nil {
+			return nil, false, lockErr
+		}
+		if !locksFree {
+			return nil, false, fmt.Errorf("read project daemon descriptor: %w", err)
+		}
+		_ = projectdaemon.RemoveDescriptor(descriptorPath)
+		return nil, false, nil
+	}
+	if desc.SchemaVersion != projectdaemon.DescriptorSchemaVersion {
+		locksFree, lockErr := projectDaemonLocksFree(ownerCfg.DataDir, ownerCfg.RootDir)
+		if lockErr != nil {
+			return nil, false, lockErr
+		}
+		if !locksFree {
+			return nil, false, fmt.Errorf("project daemon descriptor schema version = %d, want %d while project locks are held", desc.SchemaVersion, projectdaemon.DescriptorSchemaVersion)
+		}
+		return desc, false, nil
+	}
+	if desc.DataDir != ownerCfg.DataDir || desc.RootDir != ownerCfg.RootDir {
+		healthy, err := projectDaemonDescriptorHealthy(ctx, desc)
+		if err != nil {
+			return nil, false, err
+		}
+		if healthy {
+			return nil, false, projectDaemonIdentityMismatch(desc, ownerCfg)
+		}
+		return desc, false, nil
+	}
+	healthy, err := projectDaemonDescriptorHealthy(ctx, desc)
+	if err != nil {
+		return nil, false, err
+	}
+	return desc, healthy, nil
+}
+
+func projectDaemonDescriptorHealthy(ctx context.Context, desc *projectdaemon.Descriptor) (bool, error) {
+	if desc == nil {
+		return false, nil
+	}
+	locksHeld, err := projectDaemonLocksHeld(desc.DataDir, desc.RootDir)
+	if err != nil {
+		return false, err
+	}
+	if !locksHeld {
+		return false, nil
+	}
+	if !isTrustedDaemonControlURL(desc.ControlURL) {
+		return false, fmt.Errorf("project daemon locks are held but descriptor control URL is not trusted")
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	health, err := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken).Health(pingCtx)
+	if err != nil {
+		return false, fmt.Errorf("project daemon locks are held but control health is unreachable: %w", err)
+	}
+	if !daemonHealthMatchesDescriptor(desc, health) {
+		return false, fmt.Errorf("project daemon locks are held but control health does not match descriptor")
+	}
+	return true, nil
+}
+
+func projectDaemonIdentityMismatch(desc *projectdaemon.Descriptor, ownerCfg projectdaemon.Config) error {
+	var mismatches []projectdaemon.Mismatch
+	if desc.DataDir != ownerCfg.DataDir {
+		mismatches = append(mismatches, projectdaemon.Mismatch{
+			Field: "data-dir",
+			Want:  desc.DataDir,
+			Got:   ownerCfg.DataDir,
+		})
+	}
+	if desc.RootDir != ownerCfg.RootDir {
+		mismatches = append(mismatches, projectdaemon.Mismatch{
+			Field: "root-dir",
+			Want:  desc.RootDir,
+			Got:   ownerCfg.RootDir,
+		})
+	}
+	return errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+}
+
+func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath string, ownerCfg projectdaemon.Config, requestTransports mcpTransports) (*projectdaemon.Descriptor, error) {
+	deadlineCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	defer os.Remove(errorPath)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	var startupErr projectDaemonStartupError
+	for {
+		desc, healthy, err := readHealthyProjectDaemon(deadlineCtx, descriptorPath, ownerCfg)
+		if err != nil {
+			lastErr = err
+		} else if healthy {
+			if mismatches := compareProjectDaemonConfigForRequest(desc.Config, ownerCfg, requestTransports); len(mismatches) > 0 {
+				return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+			}
+			return desc, nil
+		}
+		if raw, err := os.ReadFile(errorPath); err == nil && len(raw) > 0 {
+			if startupErr.Message == "" {
+				startupErr = parseProjectDaemonStartupError(raw)
+			}
+			if startupErr.Message != "" && !startupErr.IsLock() {
+				return nil, formatProjectDaemonStartupError(startupErr)
+			}
+		}
+		select {
+		case <-deadlineCtx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, ctx.Err()
+			}
+			if startupErr.Message != "" {
+				return nil, formatProjectDaemonStartupError(startupErr)
+			}
+			if lastErr != nil {
+				return nil, fmt.Errorf("project is locked but no attachable daemon was found: %w", lastErr)
+			}
+			return nil, fmt.Errorf("project is locked but no attachable daemon was found")
+		case <-ticker.C:
+		}
+	}
+}
+
+const (
+	projectDaemonStartupErrorKindStartup = "startup"
+	projectDaemonStartupErrorKindLock    = "lock"
+)
+
+type projectDaemonStartupError struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
+func (e projectDaemonStartupError) IsLock() bool {
+	return e.Kind == projectDaemonStartupErrorKindLock
+}
+
+func parseProjectDaemonStartupError(raw []byte) projectDaemonStartupError {
+	trimmed := strings.TrimSpace(string(raw))
+	var structured projectDaemonStartupError
+	if err := json.Unmarshal(raw, &structured); err == nil && strings.TrimSpace(structured.Message) != "" {
+		structured.Message = strings.TrimSpace(structured.Message)
+		if structured.Kind == "" {
+			structured.Kind = projectDaemonStartupErrorKindStartup
+		}
+		return structured
+	}
+	kind := projectDaemonStartupErrorKindStartup
+	if isLegacyProjectDaemonLockStartupMessage(trimmed) {
+		kind = projectDaemonStartupErrorKindLock
+	}
+	return projectDaemonStartupError{Kind: kind, Message: trimmed}
+}
+
+func formatProjectDaemonStartupError(startupErr projectDaemonStartupError) error {
+	if startupErr.IsLock() {
+		return fmt.Errorf("project is locked but no attachable daemon was found: %s", startupErr.Message)
+	}
+	return fmt.Errorf("project daemon failed to start: %s", startupErr.Message)
+}
+
+func writeProjectDaemonStartupError(path string, err error) {
+	if strings.TrimSpace(path) == "" || err == nil {
+		return
+	}
+	kind := projectDaemonStartupErrorKindStartup
+	if locking.IsLockHeld(err) {
+		kind = projectDaemonStartupErrorKindLock
+	}
+	raw, marshalErr := json.Marshal(projectDaemonStartupError{Kind: kind, Message: err.Error()})
+	if marshalErr != nil {
+		raw = []byte(err.Error())
+	}
+	_ = os.WriteFile(path, raw, 0o600)
+}
+
+func isLegacyProjectDaemonLockStartupMessage(msg string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(msg))
+	return strings.Contains(normalized, "acquire data directory lock:") ||
+		strings.Contains(normalized, "acquire root directory lock:") ||
+		strings.Contains(normalized, "data directory is already in use") ||
+		strings.Contains(normalized, "root directory is already in use")
+}
+
+func isTrustedDaemonControlURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "http" {
+		return false
+	}
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func projectDaemonLocksHeld(dataDir string, rootDir string) (bool, error) {
+	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	if err == nil {
+		_ = dataLock.Release()
+		return false, nil
+	}
+	if !locking.IsDataDirLockHeld(err) {
+		return false, err
+	}
+	rootLock, err := locking.AcquireRootDirLock(rootDir)
+	if err == nil {
+		_ = rootLock.Release()
+		return false, nil
+	}
+	if !locking.IsRootDirLockHeld(err) {
+		return false, err
+	}
+	return true, nil
+}
+
+func projectDaemonLocksFree(dataDir string, rootDir string) (bool, error) {
+	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	if err != nil {
+		if locking.IsDataDirLockHeld(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer dataLock.Release()
+
+	rootLock, err := locking.AcquireRootDirLock(rootDir)
+	if err != nil {
+		if locking.IsRootDirLockHeld(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := rootLock.Release(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func daemonHealthMatchesDescriptor(desc *projectdaemon.Descriptor, health *projectdaemon.DaemonHealth) bool {
+	if desc == nil || health == nil {
+		return false
+	}
+	return health.SchemaVersion == desc.SchemaVersion &&
+		health.PID == desc.PID &&
+		health.DataDir == desc.DataDir &&
+		health.RootDir == desc.RootDir &&
+		health.ConfigHash == desc.ConfigHash
+}
+
+func compareProjectDaemonConfigForRequest(owner projectdaemon.Config, requested projectdaemon.Config, requestTransports mcpTransports) []projectdaemon.Mismatch {
+	normalized := requested
+	if requestTransports.Stdio && !requestTransports.HTTP {
+		normalized.PublicMCPEnabled = owner.PublicMCPEnabled
+		normalized.Host = owner.Host
+		normalized.LogTarget = owner.LogTarget
+		normalized.LogFile = owner.LogFile
+		normalized.DisableRequestLog = owner.DisableRequestLog
+	}
+	return projectdaemon.CompareConfig(owner, normalized)
+}
+
+func verifyStdioAPIKeyFromStorage(dataDir string, apiKey string) error {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	userStore, err := coreauth.NewUserStore(dataDir)
+	if err != nil {
+		return err
+	}
+	defer userStore.Close()
+	userService := coreauth.NewUserService(userStore)
+	apiKeyStore, err := coreauth.NewAPIKeyStore(dataDir)
+	if err != nil {
+		return err
+	}
+	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
+	defer apiKeyService.Close()
+	_, err = apiKeyService.VerifyAPIKey(apiKey)
+	return err
+}
+
+func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, error) {
+	dataDir, rootDir, err := projectdaemon.CanonicalizeProject(cfg.Workspace.DataDir, cfg.Workspace.RootDir)
+	if err != nil {
+		return projectdaemon.Config{}, err
+	}
+	logFile := daemonLogFileForConfig(cfg, dataDir)
+	return projectdaemon.Config{
+		DataDir:                 dataDir,
+		RootDir:                 rootDir,
+		AuthDisabled:            cfg.DisableAuth,
+		PublicMCPEnabled:        cfg.MCPTransports.HTTP,
+		Host:                    cfg.Host,
+		Port:                    cfg.Port,
+		BasePath:                cfg.BasePath,
+		PublicAccess:            cfg.PublicAccess,
+		AllowInsecure:           cfg.AllowInsecure,
+		AccessTokenTimeout:      cfg.AccessTokenTimeout.String(),
+		RefreshTokenTimeout:     cfg.RefreshTokenTimeout.String(),
+		InjectCodeInHeaderHash:  projectdaemon.HashSecret(cfg.InjectCodeInHeader),
+		CustomStylesheet:        cfg.CustomStylesheet,
+		LogTarget:               string(cfg.Logging.Target),
+		LogFile:                 logFile,
+		HideLinkMetadataSection: cfg.HideLinkMetadataSection,
+		MaxAssetUploadSizeBytes: cfg.MaxAssetUploadSize,
+		EnableRevision:          cfg.EnableRevision,
+		EnableLinkRefactor:      cfg.EnableLinkRefactor,
+		MaxRevisionHistory:      cfg.MaxRevisionHistory,
+		EnableHTTPRemoteUser:    cfg.EnableHTTPRemoteUser,
+		HTTPRemoteUserHeader:    cfg.HTTPRemoteUserHeader,
+		TrustedProxyIPs:         cfg.TrustedProxyIPsRaw,
+		HTTPRemoteUserLogoutURL: cfg.HTTPRemoteUserLogoutURL,
+		DisableRequestLog:       cfg.DisableRequestLog,
+		DaemonIdleTimeout:       cfg.DaemonIdleTimeout.String(),
+	}, nil
+}
+
+func daemonRequestConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, error) {
+	ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
+	if err != nil {
+		return projectdaemon.Config{}, err
+	}
+	return daemonConfigForRuntime(ownerCfg)
+}
+
+func daemonLogFileForConfig(cfg leafwikiRuntimeConfig, canonicalDataDir string) string {
+	if cfg.Logging.Target != leaflogging.TargetFile || strings.TrimSpace(cfg.Logging.FilePath) == "" {
+		return cfg.Logging.FilePath
+	}
+	logPath := filepath.Clean(cfg.Logging.FilePath)
+	absLogPath, err := filepath.Abs(logPath)
+	if err != nil {
+		return logPath
+	}
+	originalDataDir, err := filepath.Abs(filepath.Clean(cfg.Workspace.DataDir))
+	if err == nil {
+		if rel, ok := localRelativePath(originalDataDir, absLogPath); ok {
+			return filepath.Clean(filepath.Join(canonicalDataDir, rel))
+		}
+	}
+	if rel, ok := localRelativePath(canonicalDataDir, absLogPath); ok {
+		return filepath.Clean(filepath.Join(canonicalDataDir, rel))
+	}
+	return filepath.Clean(absLogPath)
+}
+
+func localRelativePath(base string, target string) (string, bool) {
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	if err != nil {
+		return "", false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+func spawnProjectDaemonOwner(cfg leafwikiRuntimeConfig) (string, error) {
+	ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+	errorFile, err := os.CreateTemp("", "leafwiki-project-daemon-*.err")
+	if err != nil {
+		return "", fmt.Errorf("create daemon startup error file: %w", err)
+	}
+	errorPath := errorFile.Name()
+	_ = errorFile.Close()
+	_ = os.Remove(errorPath)
+	ownerCfg.DaemonStartupErrorPath = errorPath
+	raw, err := json.Marshal(ownerCfg)
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp("", "leafwiki-project-daemon-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create daemon startup config: %w", err)
+	}
+	startupPath := tmp.Name()
+	removeStartupConfig := true
+	defer func() {
+		if removeStartupConfig {
+			_ = os.Remove(startupPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+
+	exe, err := projectDaemonExecutable()
+	if err != nil {
+		return "", err
+	}
+	args := []string{"--internal-project-daemon", startupPath}
+	if os.Getenv("GO_WANT_LEAFWIKI_HELPER_PROCESS") == "1" {
+		args = []string{"-test.run=TestLeafWikiHelperProcess", "--", "--internal-project-daemon", startupPath}
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Env = daemonOwnerEnv()
+	cleanupIO, err := configureDaemonOwnerIO(cmd, cfg)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupIO()
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start project daemon: %w", err)
+	}
+	removeStartupConfig = false
+	scheduleProjectDaemonStartupConfigCleanup(startupPath)
+	if cmd.Process != nil {
+		if err := cmd.Process.Release(); err != nil {
+			return "", fmt.Errorf("release project daemon process: %w", err)
+		}
+	}
+	return errorPath, nil
+}
+
+func scheduleProjectDaemonStartupConfigCleanup(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	delay := projectDaemonStartupConfigPostStartCleanupDelay
+	if delay <= 0 {
+		delay = 30 * time.Second
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		<-timer.C
+		_ = os.Remove(path)
+	}()
+}
+
+func daemonOwnerRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig, error) {
+	ownerCfg := cfg
+	ownerCfg.APIKey = ""
+	if ownerCfg.MCPTransports.Stdio && ownerCfg.Logging.Target == leaflogging.TargetStderr {
+		fileLogging, err := leaflogging.Resolve(leaflogging.ConfigInput{
+			Target:    string(leaflogging.TargetFile),
+			TargetSet: true,
+			DataDir:   ownerCfg.Workspace.DataDir,
+		})
+		if err != nil {
+			return leafwikiRuntimeConfig{}, err
+		}
+		fileLogging.Level = ownerCfg.Logging.Level
+		ownerCfg.Logging = fileLogging
+	}
+	return ownerCfg, nil
+}
+
+func configureDaemonOwnerIO(cmd *exec.Cmd, cfg leafwikiRuntimeConfig) (func(), error) {
+	configureDaemonOwnerProcessGroup(cmd)
+	if !cfg.MCPTransports.Stdio {
+		cmd.Stdin = nil
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return func() {}, nil
+	}
+
+	nullDevice, closeNullDevice, err := openDaemonNullDevice()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stdin = nullDevice
+	cmd.Stdout = nullDevice
+	cmd.Stderr = nullDevice
+	return closeNullDevice, nil
+}
+
+func configureDaemonOwnerProcessGroup(cmd *exec.Cmd) {
+	attr := &syscall.SysProcAttr{}
+	if setSysProcAttrBool(attr, "Setpgid", true) {
+		cmd.SysProcAttr = attr
+	}
+}
+
+func setSysProcAttrBool(attr *syscall.SysProcAttr, field string, value bool) bool {
+	if attr == nil {
+		return false
+	}
+	v := reflect.ValueOf(attr).Elem().FieldByName(field)
+	if !v.IsValid() || !v.CanSet() || v.Kind() != reflect.Bool {
+		return false
+	}
+	v.SetBool(value)
+	return true
+}
+
+func openDaemonNullDevice() (*os.File, func(), error) {
+	nullDevice, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open daemon null device: %w", err)
+	}
+	return nullDevice, func() {
+		_ = nullDevice.Close()
+	}, nil
+}
+
+func daemonOwnerEnv() []string {
+	env := []string{}
+	secretKeys := map[string]bool{
+		"LEAFWIKI_MCP_API_KEY":            true,
+		"LEAFWIKI_RUN_MCP_API_KEY":        true,
+		"LEAFWIKI_JWT_SECRET":             true,
+		"LEAFWIKI_RUN_MCP_JWT_SECRET":     true,
+		"LEAFWIKI_ADMIN_PASSWORD":         true,
+		"LEAFWIKI_RUN_MCP_ADMIN_PASSWORD": true,
+	}
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && secretKeys[key] {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
+
+func runDaemonHeartbeat(ctx context.Context, client *projectdaemon.Client, sessionID string, interval time.Duration) error {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := client.HeartbeatSession(ctx, sessionID); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+type daemonStdioBridge struct {
+	ControlURL   string
+	ControlToken string
+	APIKey       string
+	Stdin        io.ReadCloser
+	Stdout       io.Writer
+	Stderr       io.Writer
+}
+
+func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
+	if cfg.Stdin == nil {
+		cfg.Stdin = os.Stdin
+	}
+	if cfg.Stdout == nil {
+		cfg.Stdout = os.Stdout
+	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	var closeStdin sync.Once
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			cancel()
+			closeStdin.Do(func() {
+				_ = cfg.Stdin.Close()
+			})
+		case <-ctx.Done():
+			closeStdin.Do(func() {
+				_ = cfg.Stdin.Close()
+			})
+		}
+	}()
+	protocolStdout := &lockedWriter{Writer: cfg.Stdout}
+	filteredStdin, filterDone := newNativeStdioJSONFilter(cfg.Stdin, protocolStdout)
+	stdioTransport := &sdkmcp.IOTransport{
+		Reader: filteredStdin,
+		Writer: nopWriteCloser{Writer: protocolStdout},
+	}
+	httpTransport := &sdkmcp.StreamableClientTransport{
+		Endpoint:             strings.TrimRight(cfg.ControlURL, "/") + "/mcp",
+		HTTPClient:           daemonStdioBridgeHTTPClient(cfg),
+		DisableStandaloneSSE: true,
+		MaxRetries:           -1,
+	}
+	err := bridgeTransports(ctx, stdioTransport, httpTransport)
+	cancel()
+	select {
+	case filterErr := <-filterDone:
+		if filterErr != nil && !isCleanNativeStdioClose(filterErr) {
+			return fmt.Errorf("MCP STDIO input failed: %w", filterErr)
+		}
+	default:
+	}
+	if !isCleanNativeStdioClose(err) {
+		return fmt.Errorf("MCP STDIO failed: %w", err)
+	}
+	return nil
+}
+
+func daemonStdioBridgeHTTPClient(cfg daemonStdioBridge) *http.Client {
+	return &http.Client{
+		Transport: projectdaemon.AuthRoundTripper{
+			Base: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
+			ControlToken: cfg.ControlToken,
+			BearerToken:  cfg.APIKey,
+		},
+	}
+}
+
+func bridgeTransports(ctx context.Context, left sdkmcp.Transport, right sdkmcp.Transport) error {
+	leftConn, err := left.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer leftConn.Close()
+	rightConn, err := right.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer rightConn.Close()
+
+	errs := make(chan error, 2)
+	pump := func(from sdkmcp.Connection, to sdkmcp.Connection) {
+		for {
+			msg, err := from.Read(ctx)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if err := to.Write(ctx, msg); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}
+	go pump(leftConn, rightConn)
+	go pump(rightConn, leftConn)
+	err = <-errs
+	_ = leftConn.Close()
+	_ = rightConn.Close()
+	return err
+}
+
+func waitForForegroundSession(ctx context.Context, heartbeatErr <-chan error) error {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-heartbeatErr:
+		if err == nil || errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("project daemon heartbeat failed: %w", err)
+	case <-signals:
+		return nil
+	}
+}
+
+func runInternalProjectDaemon(ctx context.Context, startupPath string) error {
+	raw, err := os.ReadFile(startupPath)
+	if err != nil {
+		return fmt.Errorf("read daemon startup config: %w", err)
+	}
+	_ = os.Remove(startupPath)
+	var cfg leafwikiRuntimeConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("decode daemon startup config: %w", err)
+	}
+	err = runProjectDaemonOwner(ctx, cfg)
+	if err != nil {
+		writeProjectDaemonStartupError(cfg.DaemonStartupErrorPath, err)
+	}
+	return err
+}
+
+func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) error {
+	ownerCfg, err := daemonConfigForRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	dataDirMissingBeforeLock := false
+	if _, err := os.Stat(ownerCfg.DataDir); os.IsNotExist(err) {
+		dataDirMissingBeforeLock = true
+	}
+	dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("acquire data directory lock: %w", err)
+	}
+	defer dataLock.Release()
+
+	logCloser, err := setupLogger(cfg.Logging, os.Stdout, os.Stderr)
+	if err != nil {
+		return fmt.Errorf("invalid logging configuration: %w", err)
+	}
+	defer logCloser.Close()
+
+	if cfg.DisableAuth {
+		slog.Default().Warn("Authentication disabled. Wiki is publicly accessible without authentication.")
+	}
+	if cfg.AllowInsecure {
+		slog.Default().Warn("allow-insecure enabled. Auth cookies may be transmitted over plain HTTP (INSECURE).")
+	}
+	if cfg.EnableHTTPRemoteUser {
+		slog.Default().Info("Reverse-proxy authentication enabled",
+			"header", cfg.HTTPRemoteUserHeader,
+			"trusted_proxies", cfg.TrustedProxyIPsRaw,
+		)
+	}
+	if dataDirMissingBeforeLock {
+		slog.Default().Info("Data directory created", "path", cfg.Workspace.DataDir)
+	}
+	if _, err := os.Stat(ownerCfg.DataDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(ownerCfg.DataDir, 0o755); err != nil {
+			return fmt.Errorf("create data directory: %w", err)
+		}
+	}
+	if _, err := os.Stat(ownerCfg.RootDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(ownerCfg.RootDir, 0o755); err != nil {
+			return fmt.Errorf("create root directory: %w", err)
+		}
+	}
+	rootLock, err := locking.AcquireRootDirLock(ownerCfg.RootDir)
+	if err != nil {
+		return fmt.Errorf("acquire root directory lock: %w", err)
+	}
+	defer rootLock.Release()
+
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{ID: cfg.Workspace.ID, DataDir: ownerCfg.DataDir, RootDir: ownerCfg.RootDir},
+		StorageDir:          ownerCfg.DataDir,
+		AdminPassword:       cfg.AdminPassword,
+		JWTSecret:           cfg.JWTSecret,
+		AccessTokenTimeout:  cfg.AccessTokenTimeout,
+		RefreshTokenTimeout: cfg.RefreshTokenTimeout,
+		AuthDisabled:        cfg.DisableAuth,
+		EnableRevision:      cfg.EnableRevision,
+		MaxRevisionHistory:  cfg.MaxRevisionHistory,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize Wiki: %w", err)
+	}
+	defer w.Close()
+
+	trustedProxies, err := authmw.ParseTrustedProxies(cfg.TrustedProxyIPsRaw)
+	if err != nil {
+		return fmt.Errorf("invalid trusted proxies: %w", err)
+	}
+	publicRouterOpts := buildHTTPRouterOptions(httpRouterOptionsInput{
+		publicAccess:            cfg.PublicAccess,
+		injectCodeInHeader:      cfg.InjectCodeInHeader,
+		customStylesheet:        cfg.CustomStylesheet,
+		allowInsecure:           cfg.AllowInsecure,
+		hideLinkMetadataSection: cfg.HideLinkMetadataSection,
+		accessTokenTimeout:      cfg.AccessTokenTimeout,
+		refreshTokenTimeout:     cfg.RefreshTokenTimeout,
+		authDisabled:            cfg.DisableAuth,
+		basePath:                cfg.BasePath,
+		maxAssetUploadSize:      cfg.MaxAssetUploadSize,
+		enableRevision:          cfg.EnableRevision,
+		enableLinkRefactor:      cfg.EnableLinkRefactor,
+		enableMCP:               cfg.MCPTransports.HTTP,
+		host:                    cfg.Host,
+		httpRemoteUser: httpinternal.HTTPRemoteUserConfig{
+			Enabled:        cfg.EnableHTTPRemoteUser,
+			HeaderName:     cfg.HTTPRemoteUserHeader,
+			TrustedProxies: trustedProxies,
+			UserService:    w.UserService(),
+			LogoutURL:      cfg.HTTPRemoteUserLogoutURL,
+		},
+		disableRequestLog: cfg.DisableRequestLog,
+	})
+	publicRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), publicRouterOpts)
+	privateRouterOpts := publicRouterOpts
+	privateRouterOpts.MCPEnabled = true
+	privateMCP := w.PrivateMCPHTTPHandler(privateRouterOpts)
+
+	publicListener, err := net.Listen("tcp", buildListenAddress(cfg.Host, cfg.Port))
+	if err != nil {
+		return fmt.Errorf("start HTTP listener: %w", err)
+	}
+	controlListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = publicListener.Close()
+		return fmt.Errorf("start control listener: %w", err)
+	}
+	defer publicListener.Close()
+	defer controlListener.Close()
+
+	controlToken, err := projectdaemon.RandomToken()
+	if err != nil {
+		_ = publicListener.Close()
+		_ = controlListener.Close()
+		return err
+	}
+	hash, err := projectdaemon.ConfigHash(ownerCfg)
+	if err != nil {
+		_ = publicListener.Close()
+		_ = controlListener.Close()
+		return err
+	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	var sessions *projectdaemon.SessionRegistry
+	sessions = projectdaemon.NewSessionRegistry(projectdaemon.DefaultHeartbeatTTL, idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
+		if sessions == nil {
+			return 0
+		}
+		return sessions.Count()
+	}))
+	go sessions.RunExpiryLoop(ctx, 0)
+
+	publicServer := &http.Server{Addr: buildListenAddress(cfg.Host, cfg.Port), Handler: publicRouter}
+	controlServer := &http.Server{Addr: controlListener.Addr().String(), Handler: projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
+		Token:        controlToken,
+		Sessions:     sessions,
+		PrivateMCP:   privateMCP,
+		AuthDisabled: cfg.DisableAuth,
+		Health: projectdaemon.DaemonHealth{
+			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+			PID:           os.Getpid(),
+			DataDir:       ownerCfg.DataDir,
+			RootDir:       ownerCfg.RootDir,
+			ConfigHash:    hash,
+		},
+		VerifyAPIKey: func(key string) error {
+			_, err := w.APIKeyService().VerifyAPIKey(key)
+			if errors.Is(err, coreauth.ErrInvalidToken) {
+				return projectdaemon.ErrInvalidAPIKey
+			}
+			return err
+		},
+	})}
+	serverDone := make(chan error, 2)
+	go func() {
+		err := controlServer.Serve(controlListener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serverDone <- err
+	}()
+
+	desc := &projectdaemon.Descriptor{
+		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+		PID:              os.Getpid(),
+		StartedAt:        time.Now().UTC(),
+		DataDir:          ownerCfg.DataDir,
+		RootDir:          ownerCfg.RootDir,
+		PublicURL:        nativeStdioHTTPURL(cfg.Host, cfg.Port, cfg.BasePath),
+		PublicMCPEnabled: cfg.MCPTransports.HTTP,
+		BasePath:         cfg.BasePath,
+		ControlURL:       "http://" + controlListener.Addr().String(),
+		ConfigHash:       hash,
+		IdleTimeout:      cfg.DaemonIdleTimeout.String(),
+		ControlToken:     controlToken,
+		Config:           ownerCfg,
+	}
+	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
+		return err
+	}
+	defer projectdaemon.RemoveDescriptor(descriptorPath)
+	go func() {
+		if err := waitForFirstProjectDaemonSession(ctx, sessions, 25*time.Millisecond); err != nil {
+			return
+		}
+		err := publicServer.Serve(publicListener)
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+			err = nil
+		}
+		serverDone <- err
+	}()
+	go cancelIfNoSessionAfterStartupGrace(ctx, cancel, sessions, projectdaemon.DefaultHeartbeatTTL)
+
+	slog.Default().Info("Starting LeafWiki", "address", buildListenAddress(cfg.Host, cfg.Port), "data_dir", ownerCfg.DataDir)
+	select {
+	case <-ctx.Done():
+	case err := <-serverDone:
+		if err != nil {
+			return err
+		}
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	err = errors.Join(controlServer.Shutdown(shutdownCtx), publicServer.Shutdown(shutdownCtx))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForFirstProjectDaemonSession(ctx context.Context, sessions *projectdaemon.SessionRegistry, interval time.Duration) error {
+	if interval <= 0 {
+		interval = 25 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if sessions.SeenSession() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func idleShutdownCallback(ctx context.Context, cancel context.CancelFunc, idleTimeout time.Duration, currentCount func() int) func(count int) {
+	var mu sync.Mutex
+	var timer *time.Timer
+	lastCount := -1
+	return func(count int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if currentCount != nil && currentCount() != count {
+			return
+		}
+		if count == lastCount {
+			return
+		}
+		lastCount = count
+		if timer != nil {
+			timer.Stop()
+			timer = nil
+		}
+		if count > 0 {
+			return
+		}
+		if idleTimeout == 0 {
+			if currentCount == nil || currentCount() == 0 {
+				cancel()
+			}
+			return
+		}
+		timer = time.AfterFunc(idleTimeout, func() {
+			if ctx.Err() == nil && (currentCount == nil || currentCount() == 0) {
+				cancel()
+			}
+		})
+	}
+}
+
+func cancelIfNoSessionAfterStartupGrace(ctx context.Context, cancel context.CancelFunc, sessions *projectdaemon.SessionRegistry, grace time.Duration) {
+	if grace <= 0 {
+		grace = projectdaemon.DefaultHeartbeatTTL
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		seen, _ := sessions.SeenSessionCount()
+		if seen {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-timer.C:
+			seen, count := sessions.SeenSessionCount()
+			if !seen && count == 0 {
+				cancel()
+			}
+			return
+		}
+	}
 }
 
 type nopWriteCloser struct {
@@ -891,7 +1849,7 @@ type mcpTransportOptions struct {
 }
 
 func validateMCPTransportOptions(opts mcpTransportOptions) error {
-	if opts.Transports.any() && !httpinternal.IsLoopbackHost(opts.Host) {
+	if opts.Transports.HTTP && !httpinternal.IsLoopbackHost(opts.Host) {
 		return fmt.Errorf("MCP requires a loopback host (localhost, 127.0.0.1, or ::1)")
 	}
 	if !opts.Transports.Stdio {
