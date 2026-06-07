@@ -3,7 +3,6 @@ package projectdaemon
 import (
 	"context"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +32,7 @@ type AgentPresenceRegistry struct {
 }
 
 func NewAgentPresenceRegistry(ttl time.Duration, onChange func(count int)) *AgentPresenceRegistry {
-	if ttl <= 0 {
+	if ttl < 0 {
 		ttl = DefaultIdleTimeout
 	}
 	return &AgentPresenceRegistry{
@@ -45,7 +44,7 @@ func NewAgentPresenceRegistry(ttl time.Duration, onChange func(count int)) *Agen
 }
 
 func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
-	if strings.TrimSpace(event.Provider) == "" || strings.TrimSpace(event.SessionIDHash) == "" {
+	if !agenthooks.IsNormalizedEvent(event) {
 		return
 	}
 	seenAt := event.SeenAt

@@ -83,6 +83,28 @@ func AllowResponse(provider string) []byte {
 	}
 }
 
+func IsNormalizedEvent(event Event) bool {
+	provider := strings.TrimSpace(event.Provider)
+	eventName := strings.TrimSpace(event.EventName)
+	toolName := strings.TrimSpace(event.ToolName)
+	if provider != event.Provider || eventName != event.EventName || toolName != event.ToolName {
+		return false
+	}
+	if !isSupportedProvider(provider) || !isSupportedEvent(provider, eventName) {
+		return false
+	}
+	if !isSessionIDHash(event.SessionIDHash) {
+		return false
+	}
+	if event.IsMCPTool != isMCPToolEvent(eventName, toolName) {
+		return false
+	}
+	if event.SubagentDelta != subagentDelta(eventName) {
+		return false
+	}
+	return event.EndsSession == endsSession(provider, eventName)
+}
+
 func isSupportedProvider(provider string) bool {
 	switch provider {
 	case ProviderCodex, ProviderClaude, ProviderCursor:
@@ -153,4 +175,16 @@ func endsSession(provider string, eventName string) bool {
 func hashSessionID(provider string, rawSessionID string) string {
 	sum := sha256.Sum256([]byte(provider + "\x00" + rawSessionID))
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func isSessionIDHash(value string) bool {
+	if strings.TrimSpace(value) != value || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	digest := strings.TrimPrefix(value, "sha256:")
+	if len(digest) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }

@@ -1124,7 +1124,7 @@ func TestMainProcess_AgentPresenceControlStartsOwnerActivity(t *testing.T) {
 
 	if err := client.RecordAgentPresence(ctx, agenthooks.Event{
 		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: "sha256:codex",
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
 		EventName:     "SessionStart",
 		SeenAt:        time.Now(),
 	}); err != nil {
@@ -1134,7 +1134,7 @@ func TestMainProcess_AgentPresenceControlStartsOwnerActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgentPresence failed: %v", err)
 	}
-	if len(sessions) != 1 || sessions[0].SessionIDHash != "sha256:codex" {
+	if len(sessions) != 1 || sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "codex") {
 		t.Fatalf("agent presence sessions = %#v, want recorded codex presence", sessions)
 	}
 	waitForLeafwikiReady(t, first, port)
@@ -1355,6 +1355,30 @@ func TestMainProcessAgentHookPreDispatchFailuresFailOpen(t *testing.T) {
 		t.Fatalf("stdout = %q, want Codex allow response", stdout)
 	}
 	if strings.Contains(stderr, "pre-dispatch-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-first-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--disable-auth",
+		"--data-dir", sameDir,
+		"--root-dir", sameDir,
+		"--log-target", "stderr",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("flag-first agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "flag-first-secret") {
 		t.Fatalf("stderr leaked hook payload data: %s", stderr)
 	}
 }
@@ -3018,7 +3042,7 @@ func TestProjectDaemonActivityCountCombinesSessionsAndAgentPresence(t *testing.T
 	}
 	presence.Record(agenthooks.Event{
 		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: "sha256:codex",
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
 		EventName:     "SessionStart",
 		SeenAt:        time.Now(),
 	})
@@ -3045,7 +3069,7 @@ func TestCancelIfNoActivityAfterStartupGraceWaitsForFirstAgentPresence(t *testin
 
 	presence.Record(agenthooks.Event{
 		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: "sha256:codex",
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
 		EventName:     "SessionStart",
 		SeenAt:        time.Now(),
 	})

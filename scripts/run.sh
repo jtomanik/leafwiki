@@ -351,8 +351,15 @@ base_path="$(normalize_base_path "$base_path")"
 url_host_value="$(url_host "$host")"
 http_url="$scheme://$url_host_value:$port$base_path"
 
+auth_bootstrap_configured=0
+if [[ -n "$jwt_secret" || -n "$admin_password" ]]; then
+  auth_bootstrap_configured=1
+fi
+
 if [[ -z "$disable_auth" ]]; then
   if [[ -n "$api_key" ]]; then
+    disable_auth=0
+  elif [[ "$mode" == "agent-hook" && "$auth_bootstrap_configured" -eq 1 ]]; then
     disable_auth=0
   else
     disable_auth=1
@@ -402,14 +409,14 @@ print_env=()
 if [[ -n "$api_key" ]]; then
   child_env+=(LEAFWIKI_MCP_API_KEY="$api_key")
   print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED)
-  if [[ -n "$jwt_secret" ]]; then
-    child_env+=(LEAFWIKI_JWT_SECRET="$jwt_secret")
-    print_env+=(LEAFWIKI_JWT_SECRET=REDACTED)
-  fi
-  if [[ -n "$admin_password" ]]; then
-    child_env+=(LEAFWIKI_ADMIN_PASSWORD="$admin_password")
-    print_env+=(LEAFWIKI_ADMIN_PASSWORD=REDACTED)
-  fi
+fi
+if [[ -n "$jwt_secret" ]]; then
+  child_env+=(LEAFWIKI_JWT_SECRET="$jwt_secret")
+  print_env+=(LEAFWIKI_JWT_SECRET=REDACTED)
+fi
+if [[ -n "$admin_password" ]]; then
+  child_env+=(LEAFWIKI_ADMIN_PASSWORD="$admin_password")
+  print_env+=(LEAFWIKI_ADMIN_PASSWORD=REDACTED)
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then

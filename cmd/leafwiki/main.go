@@ -326,6 +326,11 @@ func main() {
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	args := flag.Args()
 	agentHookRequested := isAgentHookCommand(args)
+	if agentHookRequested {
+		if provider, ok := agentHookProviderFromArgs(args); ok {
+			failOpenAgentHookProvider = provider
+		}
+	}
 	resolvedMCPTransports := mcpTransports{}
 	if !agentHookRequested {
 		var err error

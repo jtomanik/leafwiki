@@ -17,16 +17,9 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 		return now
 	}
 
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: "sha256:codex",
-		EventName:     "PreToolUse",
-		Model:         "gpt-5.4",
-		Source:        "cli",
-		ToolName:      "mcp__leafwiki__get_page",
-		IsMCPTool:     true,
-		SeenAt:        now,
-	})
+	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","source":"cli","tool_name":"mcp__leafwiki__get_page"}`)
+	event.SeenAt = now
+	registry.Record(event)
 
 	if registry.Count() != 1 {
 		t.Fatalf("Count = %d, want 1", registry.Count())
@@ -36,8 +29,8 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 		t.Fatalf("List length = %d, want 1", len(sessions))
 	}
 	session := sessions[0]
-	if session.Provider != agenthooks.ProviderCodex || session.SessionIDHash != "sha256:codex" {
-		t.Fatalf("identity = %q/%q, want codex/sha256:codex", session.Provider, session.SessionIDHash)
+	if session.Provider != agenthooks.ProviderCodex || session.SessionIDHash != event.SessionIDHash {
+		t.Fatalf("identity = %q/%q, want codex/%s", session.Provider, session.SessionIDHash, event.SessionIDHash)
 	}
 	if session.FirstSeenAt != now || session.LastSeenAt != now || session.LastEvent != "PreToolUse" {
 		t.Fatalf("timestamps/event = %s/%s/%q", session.FirstSeenAt, session.LastSeenAt, session.LastEvent)
@@ -60,21 +53,13 @@ func TestAgentPresenceRegistryUpdatesLifecycleAndExpires(t *testing.T) {
 		return now
 	}
 
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "SessionStart",
-		Model:         "claude-opus-4",
-		SeenAt:        now,
-	})
+	event := normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SessionStart","session_id":"claude-session","model":"claude-opus-4"}`)
+	event.SeenAt = now
+	registry.Record(event)
 	now = now.Add(10 * time.Second)
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "PreToolUse",
-		ToolName:      "Read",
-		SeenAt:        now,
-	})
+	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read"}`)
+	event.SeenAt = now
+	registry.Record(event)
 
 	session := registry.List()[0]
 	if session.FirstSeenAt != time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC) {
@@ -87,51 +72,32 @@ func TestAgentPresenceRegistryUpdatesLifecycleAndExpires(t *testing.T) {
 		t.Fatalf("counts after update = %s, want %s", got, want)
 	}
 
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "SubagentStop",
-		SubagentDelta: -1,
-		SeenAt:        now.Add(1 * time.Second),
-	})
+	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
+	event.SeenAt = now.Add(1 * time.Second)
+	registry.Record(event)
 	if got := registry.List()[0].ActiveSubagents; got != 0 {
 		t.Fatalf("ActiveSubagents after early stop = %d, want 0", got)
 	}
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "SubagentStart",
-		SubagentDelta: 1,
-		SeenAt:        now.Add(2 * time.Second),
-	})
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "SubagentStop",
-		SubagentDelta: -1,
-		SeenAt:        now.Add(3 * time.Second),
-	})
+	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStart","session_id":"claude-session"}`)
+	event.SeenAt = now.Add(2 * time.Second)
+	registry.Record(event)
+	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
+	event.SeenAt = now.Add(3 * time.Second)
+	registry.Record(event)
 	if got := registry.List()[0].ActiveSubagents; got != 0 {
 		t.Fatalf("ActiveSubagents after start/stop = %d, want 0", got)
 	}
 
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderClaude,
-		SessionIDHash: "sha256:claude",
-		EventName:     "SessionEnd",
-		EndsSession:   true,
-		SeenAt:        now.Add(4 * time.Second),
-	})
+	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-session"}`)
+	event.SeenAt = now.Add(4 * time.Second)
+	registry.Record(event)
 	if registry.Count() != 0 {
 		t.Fatalf("Count after SessionEnd = %d, want 0", registry.Count())
 	}
 
-	registry.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCursor,
-		SessionIDHash: "sha256:cursor",
-		EventName:     "sessionStart",
-		SeenAt:        now,
-	})
+	event = normalizedPresenceEvent(t, agenthooks.ProviderCursor, `{"hook_event_name":"sessionStart","session_id":"cursor-session"}`)
+	event.SeenAt = now
+	registry.Record(event)
 	now = now.Add(2 * time.Minute)
 	if got := registry.PruneExpired(); got != 0 {
 		t.Fatalf("PruneExpired count = %d, want 0 after TTL expiry", got)
@@ -179,4 +145,103 @@ func TestAgentPresenceRegistryIgnoresMissingEndEventsAsFirstActivity(t *testing.
 			}
 		})
 	}
+}
+
+func TestAgentPresenceRegistryRejectsUnsafeControlEvents(t *testing.T) {
+	valid := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+	tests := []struct {
+		name  string
+		event agenthooks.Event
+	}{
+		{
+			name: "raw session id",
+			event: agenthooks.Event{
+				Provider:      agenthooks.ProviderCodex,
+				SessionIDHash: "raw-session-secret",
+				EventName:     "SessionStart",
+			},
+		},
+		{
+			name: "unsupported provider",
+			event: func() agenthooks.Event {
+				event := valid
+				event.Provider = "sidecar"
+				return event
+			}(),
+		},
+		{
+			name: "unsupported event",
+			event: func() agenthooks.Event {
+				event := valid
+				event.EventName = "MadeUpHook"
+				return event
+			}(),
+		},
+		{
+			name: "mismatched subagent delta",
+			event: func() agenthooks.Event {
+				event := valid
+				event.SubagentDelta = 1
+				return event
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var counts []int
+			registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+				counts = append(counts, count)
+			})
+
+			registry.Record(tt.event)
+
+			if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
+				t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
+			}
+			if got := joinCounts(counts); got != "" {
+				t.Fatalf("counts = %s, want no notifications", got)
+			}
+		})
+	}
+}
+
+func TestAgentPresenceRegistryZeroTTLExpiresImmediately(t *testing.T) {
+	now := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
+	var counts []int
+	registry := NewAgentPresenceRegistry(0, func(count int) {
+		counts = append(counts, count)
+	})
+	registry.now = func() time.Time {
+		return now
+	}
+	event, ok := agenthooks.Normalize(
+		agenthooks.ProviderCodex,
+		[]byte(`{"hook_event_name":"SessionStart","session_id":"zero-ttl-session"}`),
+		now,
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
+	}
+
+	registry.Record(event)
+	if registry.Count() != 1 {
+		t.Fatalf("Count after Record = %d, want 1 before pruning", registry.Count())
+	}
+
+	if got := registry.PruneExpired(); got != 0 {
+		t.Fatalf("PruneExpired count = %d, want 0 for zero TTL", got)
+	}
+	if got, want := joinCounts(counts), "1,0"; got != want {
+		t.Fatalf("counts = %s, want %s", got, want)
+	}
+}
+
+func normalizedPresenceEvent(t *testing.T, provider string, payload string) agenthooks.Event {
+	t.Helper()
+	event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
+	if !ok {
+		t.Fatalf("Normalize(%s, %s) returned false", provider, payload)
+	}
+	return event
 }

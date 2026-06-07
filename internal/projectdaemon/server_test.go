@@ -103,12 +103,13 @@ func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *tes
 		AuthDisabled:  true,
 	})
 
-	rawEvent := agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: "sha256:codex",
-		EventName:     "SessionStart",
-		Model:         "gpt-5.4",
-		SeenAt:        time.Date(2026, 6, 7, 15, 0, 0, 0, time.UTC),
+	rawEvent, ok := agenthooks.Normalize(
+		agenthooks.ProviderCodex,
+		[]byte(`{"hook_event_name":"SessionStart","session_id":"codex-session","model":"gpt-5.4"}`),
+		time.Date(2026, 6, 7, 15, 0, 0, 0, time.UTC),
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
 	}
 	body, err := json.Marshal(rawEvent)
 	if err != nil {
@@ -143,7 +144,7 @@ func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *tes
 	if err := json.Unmarshal(resp.Body.Bytes(), &sessions); err != nil {
 		t.Fatalf("decode presence sessions: %v", err)
 	}
-	if len(sessions) != 1 || sessions[0].SessionIDHash != "sha256:codex" || sessions[0].Provider != agenthooks.ProviderCodex {
+	if len(sessions) != 1 || sessions[0].SessionIDHash != rawEvent.SessionIDHash || sessions[0].Provider != agenthooks.ProviderCodex {
 		t.Fatalf("sessions = %#v, want one sanitized codex session", sessions)
 	}
 	if strings.Contains(resp.Body.String(), "raw") || strings.Contains(resp.Body.String(), "session_id") {
@@ -267,19 +268,22 @@ func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 	if err := client.VerifyStdioAuth(ctx, "lwk_valid"); err != nil {
 		t.Fatalf("VerifyStdioAuth failed: %v", err)
 	}
-	if err := client.RecordAgentPresence(ctx, agenthooks.Event{
-		Provider:      agenthooks.ProviderCursor,
-		SessionIDHash: "sha256:cursor",
-		EventName:     "sessionStart",
-		SeenAt:        time.Date(2026, 6, 7, 15, 30, 0, 0, time.UTC),
-	}); err != nil {
+	cursorEvent, ok := agenthooks.Normalize(
+		agenthooks.ProviderCursor,
+		[]byte(`{"hook_event_name":"sessionStart","session_id":"cursor-session"}`),
+		time.Date(2026, 6, 7, 15, 30, 0, 0, time.UTC),
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
+	}
+	if err := client.RecordAgentPresence(ctx, cursorEvent); err != nil {
 		t.Fatalf("RecordAgentPresence failed: %v", err)
 	}
 	presenceSessions, err := client.ListAgentPresence(ctx)
 	if err != nil {
 		t.Fatalf("ListAgentPresence failed: %v", err)
 	}
-	if len(presenceSessions) != 1 || presenceSessions[0].SessionIDHash != "sha256:cursor" {
+	if len(presenceSessions) != 1 || presenceSessions[0].SessionIDHash != cursorEvent.SessionIDHash {
 		t.Fatalf("presence sessions = %#v, want cursor session", presenceSessions)
 	}
 	if verifiedKey != "lwk_valid" {

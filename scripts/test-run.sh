@@ -129,6 +129,23 @@ assert_contains "$bootstrap_output" "LEAFWIKI_ADMIN_PASSWORD=REDACTED" "bootstra
 assert_not_contains "$bootstrap_output" "lwk_secret" "bootstrap dry-run"
 assert_not_contains "$bootstrap_output" "test-secret" "bootstrap dry-run"
 
+hook_bootstrap_output="$(
+  "$script" \
+    agent-hook codex \
+    --dry-run \
+    --leafwiki-bin /tmp/fake-leafwiki \
+    --jwt-secret hook-jwt-secret \
+    --admin-password hook-admin-password \
+    2>&1
+)"
+assert_contains "$hook_bootstrap_output" "agent-hook codex" "hook bootstrap dry-run"
+assert_contains "$hook_bootstrap_output" "LEAFWIKI_JWT_SECRET=REDACTED" "hook bootstrap dry-run"
+assert_contains "$hook_bootstrap_output" "LEAFWIKI_ADMIN_PASSWORD=REDACTED" "hook bootstrap dry-run"
+assert_not_contains "$hook_bootstrap_output" "--disable-auth=true" "hook bootstrap dry-run"
+assert_not_contains "$hook_bootstrap_output" "LEAFWIKI_MCP_API_KEY" "hook bootstrap dry-run"
+assert_not_contains "$hook_bootstrap_output" "hook-jwt-secret" "hook bootstrap dry-run"
+assert_not_contains "$hook_bootstrap_output" "hook-admin-password" "hook bootstrap dry-run"
+
 set +e
 bad_auth_output="$("$script" mcp --dry-run --api-key lwk_secret --disable-auth 2>&1)"
 bad_auth_status=$?
@@ -251,8 +268,10 @@ hook_stdout_file="$tmp_dir/hook.stdout"
 hook_stderr_file="$tmp_dir/hook.stderr"
 hook_stdin_file="$tmp_dir/hook.stdin"
 hook_args_file="$tmp_dir/hook.args"
+hook_env_file="$tmp_dir/hook.env"
 
 FAKE_LEAFWIKI_ARGS="$hook_args_file" \
+FAKE_LEAFWIKI_ENV="$hook_env_file" \
 FAKE_NATIVE_STDIN_FILE="$hook_stdin_file" \
 "$script" \
   agent-hook codex \
@@ -261,6 +280,8 @@ FAKE_NATIVE_STDIN_FILE="$hook_stdin_file" \
   --port 18082 \
   --root-dir "$tmp_dir/wiki" \
   --data-dir "$tmp_dir/data" \
+  --jwt-secret hook-runtime-jwt \
+  --admin-password hook-runtime-admin \
   <<< '{"hook_event_name":"SessionStart","session_id":"s1"}' \
   > "$hook_stdout_file" \
   2> "$hook_stderr_file"
@@ -270,6 +291,14 @@ FAKE_NATIVE_STDIN_FILE="$hook_stdin_file" \
 assert_contains "$(cat "$hook_args_file")" "agent-hook" "hook leafwiki args"
 assert_contains "$(cat "$hook_args_file")" "codex" "hook leafwiki args"
 assert_contains "$(cat "$hook_args_file")" "--data-dir" "hook leafwiki args"
+assert_not_contains "$(cat "$hook_args_file")" "--disable-auth=true" "hook leafwiki args"
+assert_not_contains "$(cat "$hook_args_file")" "hook-runtime-jwt" "hook leafwiki args"
+assert_not_contains "$(cat "$hook_args_file")" "hook-runtime-admin" "hook leafwiki args"
+assert_contains "$(cat "$hook_env_file")" "LEAFWIKI_JWT_SECRET=hook-runtime-jwt" "hook env"
+assert_contains "$(cat "$hook_env_file")" "LEAFWIKI_ADMIN_PASSWORD=hook-runtime-admin" "hook env"
+assert_not_contains "$(cat "$hook_env_file")" "LEAFWIKI_MCP_API_KEY=" "hook env"
 assert_not_contains "$(cat "$hook_stderr_file")" "session_id" "hook stderr"
+assert_not_contains "$(cat "$hook_stderr_file")" "hook-runtime-jwt" "hook stderr"
+assert_not_contains "$(cat "$hook_stderr_file")" "hook-runtime-admin" "hook stderr"
 
 printf 'PASS: run script checks\n'
