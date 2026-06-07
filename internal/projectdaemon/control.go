@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/perber/wiki/internal/agenthooks"
 )
 
 type SessionHandle struct {
@@ -98,6 +100,18 @@ func (c *Client) ReleaseSession(ctx context.Context, id string) error {
 
 func (c *Client) VerifyStdioAuth(ctx context.Context, apiKey string) error {
 	return c.doJSON(ctx, http.MethodPost, "/stdio-auth/verify", map[string]string{"apiKey": apiKey}, nil)
+}
+
+func (c *Client) RecordAgentPresence(ctx context.Context, event agenthooks.Event) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent-presence/events", event, nil)
+}
+
+func (c *Client) ListAgentPresence(ctx context.Context) ([]AgentPresenceSession, error) {
+	var out []AgentPresenceSession
+	if err := c.doJSON(ctx, http.MethodGet, "/agent-presence", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, in any, out any) error {

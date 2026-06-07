@@ -239,6 +239,8 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 				!strings.HasPrefix(path, "/static") &&
 				!strings.HasPrefix(path, "/branding") &&
 				!strings.HasPrefix(path, "/.well-known") &&
+				path != "/agent-presence" &&
+				!strings.HasPrefix(path, "/agent-presence/") &&
 				path != "/mcp" &&
 				!strings.HasPrefix(path, "/mcp/") {
 

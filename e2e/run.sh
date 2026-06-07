@@ -21,6 +21,8 @@ docker_data_volume=""
 docker_root_volume=""
 mcp_stdio_dir=""
 mcp_stdio_command=""
+mcp_agent_hook_command=""
+mcp_stdio_root_dir=""
 mcp_stdio_seed_dir=""
 mcp_stdio_seed_file=""
 
@@ -115,6 +117,11 @@ prepare_mcp_stdio_command() {
   mcp_stdio_dir="$(mktemp -d /tmp/leafwiki-mcp-e2e.XXXXXX)"
   local leafwiki_bin="$mcp_stdio_dir/leafwiki"
   mcp_stdio_command="$mcp_stdio_dir/leafwiki-native-stdio"
+  mcp_agent_hook_command="$mcp_stdio_dir/leafwiki-agent-hook"
+  mcp_stdio_root_dir="$local_root_dir"
+  if [ -z "$mcp_stdio_root_dir" ]; then
+    mcp_stdio_root_dir="$local_data_dir/root"
+  fi
   echo "🔨 Building native LeafWiki STDIO binary for E2E..."
   build_leafwiki_binary "$leafwiki_bin"
   local native_args=(
@@ -139,9 +146,7 @@ prepare_mcp_stdio_command() {
   else
     native_args+=(--disable-auth=true)
   fi
-  if [ -n "$local_root_dir" ]; then
-    native_args+=(--root-dir "$local_root_dir")
-  fi
+  native_args+=(--root-dir "$mcp_stdio_root_dir")
   if [ -n "$app_base_path" ]; then
     native_args+=(--base-path "$app_base_path")
   fi
@@ -153,6 +158,33 @@ prepare_mcp_stdio_command() {
     printf '\n'
   } >"$mcp_stdio_command"
   chmod +x "$mcp_stdio_command"
+
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'provider="${1:-}"\n'
+    printf 'shift || true\n'
+    printf 'exec %q agent-hook "$provider"' "$repo_root/scripts/run.sh"
+    printf ' %q' --leafwiki-bin "$leafwiki_bin" --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log --server-arg --enable-link-refactor=true
+    for arg in "${sync_args[@]}"; do
+      if [ "$arg" = "--enable-workspace-sync" ]; then
+        printf ' %q' --enable-workspace-sync
+      else
+        printf ' %q' --disable-workspace-sync --server-arg "$arg"
+      fi
+    done
+    if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+      printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
+    else
+      printf ' %q' --disable-auth
+    fi
+    printf ' %q' --root-dir "$mcp_stdio_root_dir"
+    if [ -n "$app_base_path" ]; then
+      printf ' %q' --base-path "$app_base_path"
+    fi
+    printf ' "$@"\n'
+  } >"$mcp_agent_hook_command"
+  chmod +x "$mcp_agent_hook_command"
 }
 
 seed_mcp_stdio_api_keys() {
@@ -459,10 +491,11 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
-      E2E_ROOT_DIR="$local_root_dir" \
+      E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       stdbuf -oL -eL npx playwright test --workers="$workers" --reporter="$reporter" "$@"
@@ -473,10 +506,11 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
-      E2E_ROOT_DIR="$local_root_dir" \
+      E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       npx playwright test --workers="$workers" --reporter="$reporter" "$@"

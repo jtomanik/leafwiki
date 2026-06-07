@@ -18,7 +18,7 @@ Use this when you want the main LeafWiki server and MCP wrapper in the same loca
 This installs:
 
 - `leafwiki`
-- `run-mcp.sh`
+- `run.sh`
 
 It delegates to `install-macos.sh` for the application binary, then installs the MCP wrapper script next to the binary so clients can spawn it from a stable path.
 
@@ -40,37 +40,37 @@ This script builds the frontend, copies it into `internal/http/dist`, builds the
 Use this when an MCP client wants a single command that speaks MCP over STDIO. The script execs a foreground `leafwiki --mcp=stdio` session frontend, which attaches to the per-project owner daemon that serves the HTTP UI.
 
 ```bash
-./scripts/run-mcp.sh
+./scripts/run.sh mcp
 ```
 
 Example MCP client command:
 
 ```bash
-/path/to/leafwiki/scripts/run-mcp.sh --root-dir /path/to/wiki
+/path/to/leafwiki/scripts/run.sh mcp --root-dir /path/to/wiki
 ```
 
 The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; owner startup and server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
 
-`run-mcp.sh` enables workspace sync by default, so markdown files under `--root-dir` are synchronized and recorded in LeafWiki's internal Git history. Pass `--disable-workspace-sync` or set `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` when you explicitly need the legacy no-sync behavior.
+`run.sh mcp` enables workspace sync by default, so markdown files under `--root-dir` are synchronized and recorded in LeafWiki's internal Git history. Pass `--disable-workspace-sync` or set `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` when you explicitly need the legacy no-sync behavior.
 
 ## Script Reference
 
 | Script | Purpose | Typical command | Notes |
 | --- | --- | --- | --- |
-| `install-all-macos.sh` | Build and install `leafwiki` plus `run-mcp.sh`. | `./scripts/install-all-macos.sh --install-dir "$HOME/.local/bin"` | Delegates to `install-macos.sh`, then installs the wrapper script. |
+| `install-all-macos.sh` | Build and install `leafwiki` plus `run.sh`. | `./scripts/install-all-macos.sh --install-dir "$HOME/.local/bin"` | Delegates to `install-macos.sh`, then installs the wrapper script. |
 | `install-macos.sh` | Build and install the main `leafwiki` executable from this checkout on macOS. | `./scripts/install-macos.sh` | Builds the UI, updates ignored frontend build output, builds the server with production embedding, and installs to `/usr/local/bin` by default. |
-| `run-mcp.sh` | Run native `leafwiki --mcp=stdio` for MCP clients that spawn one STDIO command. | `./scripts/run-mcp.sh --root-dir ./wiki` | Intended as an MCP client command. Supports disabled-auth and API-key native STDIO. |
+| `run.sh` | Run native MCP STDIO or one agent hook invocation. | `./scripts/run.sh mcp --root-dir ./wiki` | Intended as an MCP client or user-managed hook command. Supports disabled-auth and API-key native STDIO. |
 | `changelog.sh` | Generate categorized release notes from commits between two tags. | `./scripts/changelog.sh v0.10.0 v0.11.0` | Writes `current_release_changelog.md` in the current working directory. Used by the release workflow. |
 | `test-install.sh` | Validate root `install.sh` configuration handling without performing a real system install. | `./scripts/test-install.sh` | Uses fake `systemctl`/`wget` and `LEAFWIKI_INSTALL_VALIDATE_ONLY=1`. This tests the Linux installer at repo root, not the macOS installer. |
 | `test-install-macos.sh` | Lightweight checks for `install-macos.sh`. | `./scripts/test-install-macos.sh` | Checks syntax, help text, and dry-run planning without installing. |
 | `test-install-all-macos.sh` | Lightweight checks for `install-all-macos.sh`. | `./scripts/test-install-all-macos.sh` | Checks syntax, help text, and dry-run planning without installing. |
-| `test-run-mcp.sh` | Lightweight checks for `run-mcp.sh`. | `./scripts/test-run-mcp.sh` | Checks syntax, help text, dry-run planning, redaction, and stdout hygiene with fake binaries. |
+| `test-run.sh` | Lightweight checks for `run.sh`. | `./scripts/test-run.sh` | Checks syntax, help text, dry-run planning, redaction, stdin forwarding, and stdout hygiene with fake binaries. |
 
 ## Build And Install Scripts
 
 ### `install-all-macos.sh`
 
-Builds and installs local macOS helpers from the current checkout: `leafwiki` and `run-mcp.sh`.
+Builds and installs local macOS helpers from the current checkout: `leafwiki` and `run.sh`.
 
 Useful commands:
 
@@ -110,7 +110,7 @@ Important side effects:
 - Writes the built binary under `releases/` by default.
 - Installs `leafwiki` into the selected install directory.
 
-### `run-mcp.sh`
+### `run.sh`
 
 Starts a project-local MCP STDIO command for clients that spawn one process. The foreground `leafwiki --mcp=stdio` process speaks MCP over STDIO and attaches to the per-project owner daemon that serves the HTTP UI.
 
@@ -152,11 +152,12 @@ leafwiki \
 Useful commands:
 
 ```bash
-./scripts/run-mcp.sh --help
-./scripts/run-mcp.sh --dry-run
-./scripts/run-mcp.sh --dry-run --disable-workspace-sync
-./scripts/run-mcp.sh --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
-LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> ./scripts/run-mcp.sh --root-dir "$PWD/wiki"
+./scripts/run.sh --help
+./scripts/run.sh mcp --dry-run
+./scripts/run.sh mcp --dry-run --disable-workspace-sync
+./scripts/run.sh mcp --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
+./scripts/run.sh agent-hook codex --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
+LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> ./scripts/run.sh mcp --root-dir "$PWD/wiki"
 ```
 
 Wrapper behavior:
@@ -183,14 +184,14 @@ The script smoke tests are intentionally lightweight and do not require real ins
 ./scripts/test-install.sh
 ./scripts/test-install-macos.sh
 ./scripts/test-install-all-macos.sh
-./scripts/test-run-mcp.sh
+./scripts/test-run.sh
 ```
 
 Focused shell checks:
 
 ```bash
-bash -n scripts/install-macos.sh scripts/install-all-macos.sh scripts/run-mcp.sh
-bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/test-run-mcp.sh
+bash -n scripts/install-macos.sh scripts/install-all-macos.sh scripts/run.sh
+bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/test-run.sh
 ```
 
 Related Go and E2E checks:
@@ -207,6 +208,6 @@ E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdi
 | --- | --- |
 | `install-all-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
 | `install-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
-| `run-mcp.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY`, `LEAFWIKI_RUN_MCP_SERVER_LOG` |
+| `run.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY`, `LEAFWIKI_RUN_MCP_SERVER_LOG` |
 
 `LEAFWIKI_RUN_MCP_SERVER_LOG` is accepted only for compatibility with older wrapper configurations. The native wrapper ignores it and uses the LeafWiki log target configured in the child command.

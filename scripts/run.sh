@@ -23,11 +23,11 @@ server_extra_args=()
 
 usage() {
   cat <<EOF
-Usage: scripts/run-mcp.sh [options]
+Usage: scripts/run.sh <mcp|agent-hook> [options]
 
-Starts one native LeafWiki MCP STDIO frontend. LeafWiki keeps one project
-daemon owner for the HTTP UI; stdout from this frontend is reserved for MCP
-JSON-RPC.
+Modes:
+  mcp                     Run native LeafWiki MCP STDIO frontend
+  agent-hook <provider>   Run one LeafWiki agent hook invocation
 
 Options:
   --leafwiki-bin <path>     LeafWiki executable (default: leafwiki)
@@ -66,6 +66,17 @@ log() {
 }
 
 fail() {
+  if [[ "${mode:-}" == "agent-hook" ]]; then
+    case "${hook_provider:-}" in
+      codex|claude)
+        printf '{}\n'
+        ;;
+      cursor)
+        printf '{"permission":"allow"}\n'
+        ;;
+    esac
+    exit 0
+  fi
   printf 'Error: %s\n' "$1" >&2
   exit 1
 }
@@ -142,6 +153,27 @@ url_host() {
   fi
   printf '%s\n' "$value"
 }
+
+mode="${1:-}"
+hook_provider=""
+case "$mode" in
+  mcp)
+    shift
+    ;;
+  agent-hook)
+    shift
+    [[ $# -ge 1 ]] || fail "agent-hook requires a provider"
+    hook_provider="$1"
+    shift
+    ;;
+  -h|--help|"")
+    usage
+    exit 0
+    ;;
+  *)
+    fail "first argument must be mcp or agent-hook"
+    ;;
+esac
 
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == --*" "* ]]; then
@@ -330,9 +362,15 @@ if truthy "$disable_auth" && [[ -n "$api_key" ]]; then
   fail "--disable-auth cannot be combined with --api-key or LEAFWIKI_MCP_API_KEY"
 fi
 
-native_cmd=(
+leafwiki_cmd=(
   "$leafwiki_bin"
-  --mcp=stdio
+)
+if [[ "$mode" == "mcp" ]]; then
+  leafwiki_cmd+=(--mcp=stdio)
+else
+  leafwiki_cmd+=(agent-hook "$hook_provider")
+fi
+leafwiki_cmd+=(
   --host "$host"
   --port "$port"
   --data-dir "$data_dir"
@@ -341,22 +379,22 @@ native_cmd=(
   --log-target file
 )
 if truthy "$disable_auth"; then
-  native_cmd+=(--disable-auth=true)
+  leafwiki_cmd+=(--disable-auth=true)
 fi
 if truthy "$allow_insecure"; then
-  native_cmd+=(--allow-insecure)
+  leafwiki_cmd+=(--allow-insecure)
 fi
 if [[ -n "$base_path" ]]; then
-  native_cmd+=(--base-path "$base_path")
+  leafwiki_cmd+=(--base-path "$base_path")
 fi
 if truthy "$disable_request_log"; then
-  native_cmd+=(--disable-request-log)
+  leafwiki_cmd+=(--disable-request-log)
 fi
 if truthy "$enable_workspace_sync"; then
-  native_cmd+=(--enable-workspace-sync)
+  leafwiki_cmd+=(--enable-workspace-sync)
 fi
 if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
-  native_cmd+=("${server_extra_args[@]}")
+  leafwiki_cmd+=("${server_extra_args[@]}")
 fi
 
 child_env=()
@@ -375,21 +413,25 @@ if [[ -n "$api_key" ]]; then
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  log "Would run LeafWiki native MCP STDIO"
+  if [[ "$mode" == "mcp" ]]; then
+    log "Would run LeafWiki native MCP STDIO"
+  else
+    log "Would run LeafWiki agent hook"
+  fi
   log "HTTP UI: $http_url"
   if [[ -n "$server_log" ]]; then
     log "Server log option ignored in native-only wrapper: $server_log"
   fi
   if [[ "${#print_env[@]}" -gt 0 ]]; then
-    print_command_with_env "${#print_env[@]}" "${print_env[@]}" "${native_cmd[@]}"
+    print_command_with_env "${#print_env[@]}" "${print_env[@]}" "${leafwiki_cmd[@]}"
   else
-    print_command_with_env 0 "${native_cmd[@]}"
+    print_command_with_env 0 "${leafwiki_cmd[@]}"
   fi
   exit 0
 fi
 
 require_executable "$leafwiki_bin"
 if [[ "${#child_env[@]}" -gt 0 ]]; then
-  exec env "${child_env[@]}" "${native_cmd[@]}"
+  exec env "${child_env[@]}" "${leafwiki_cmd[@]}"
 fi
-exec "${native_cmd[@]}"
+exec "${leafwiki_cmd[@]}"

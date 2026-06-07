@@ -6,7 +6,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 initial_cwd="$(pwd)"
 
 leafwiki_installer="$script_dir/install-macos.sh"
-run_mcp_script="$script_dir/run-mcp.sh"
+run_script="$script_dir/run.sh"
 install_dir="${LEAFWIKI_INSTALL_DIR:-/usr/local/bin}"
 build_dir="${LEAFWIKI_BUILD_DIR:-$repo_root/releases}"
 version="${LEAFWIKI_VERSION:-}"
@@ -20,7 +20,7 @@ Usage: scripts/install-all-macos.sh [options]
 
 Builds and installs local macOS helpers from this checkout:
   - leafwiki
-  - run-mcp.sh
+  - run.sh
 
 Options:
   --install-dir <path>       Directory to install files into (default: /usr/local/bin)
@@ -120,7 +120,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -x "$leafwiki_installer" ]] || fail "missing executable installer at $leafwiki_installer"
-[[ -x "$run_mcp_script" ]] || fail "missing executable wrapper at $run_mcp_script"
+[[ -x "$run_script" ]] || fail "missing executable wrapper at $run_script"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   if [[ "$dry_run" -eq 1 ]]; then
@@ -166,7 +166,7 @@ esac
 
 install_dir="$(absolute_path "$install_dir")"
 build_dir="$(absolute_path "$build_dir")"
-run_mcp_target="$install_dir/run-mcp.sh"
+run_target="$install_dir/run.sh"
 
 leafwiki_args=(
   --install-dir "$install_dir"
@@ -182,24 +182,24 @@ if [[ "$dry_run" -eq 1 ]]; then
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  log "Would install LeafWiki and run-mcp.sh $version for darwin/$arch"
+  log "Would install LeafWiki and run.sh $version for darwin/$arch"
 else
-  log "Installing LeafWiki and run-mcp.sh $version for darwin/$arch"
+  log "Installing LeafWiki and run.sh $version for darwin/$arch"
 fi
 log "Install directory: $install_dir"
 log "LeafWiki build directory: $build_dir"
-log "run-mcp.sh install target: $run_mcp_target"
+log "run.sh install target: $run_target"
 
 run "$leafwiki_installer" "${leafwiki_args[@]}"
 
 if [[ "$dry_run" -eq 1 ]]; then
   if [[ -d "$install_dir" && -w "$install_dir" ]]; then
     printf '+ '
-    quote_command install -m 0755 "$run_mcp_script" "$run_mcp_target"
+    quote_command install -m 0755 "$run_script" "$run_target"
     printf '\n'
   else
     printf '+ '
-    quote_command sudo install -m 0755 "$run_mcp_script" "$run_mcp_target"
+    quote_command sudo install -m 0755 "$run_script" "$run_target"
     printf '\n'
   fi
 else
@@ -215,17 +215,17 @@ else
   fi
 
   if [[ -w "$install_dir" ]]; then
-    run install -m 0755 "$run_mcp_script" "$run_mcp_target"
+    run install -m 0755 "$run_script" "$run_target"
   else
     require_command sudo
-    run sudo install -m 0755 "$run_mcp_script" "$run_mcp_target"
+    run sudo install -m 0755 "$run_script" "$run_target"
   fi
 fi
 
 if [[ "$dry_run" -eq 0 ]]; then
   [[ -x "$install_dir/leafwiki" ]] || fail "leafwiki was not installed at $install_dir/leafwiki"
-  [[ -x "$run_mcp_target" ]] || fail "run-mcp.sh was not installed at $run_mcp_target"
-  log "Installed LeafWiki and run-mcp.sh to $install_dir"
+  [[ -x "$run_target" ]] || fail "run.sh was not installed at $run_target"
+  log "Installed LeafWiki and run.sh to $install_dir"
 else
-  log "Dry run complete for LeafWiki and run-mcp.sh into $install_dir"
+  log "Dry run complete for LeafWiki and run.sh into $install_dir"
 fi

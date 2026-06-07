@@ -365,12 +365,12 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner exits after the last session disconnects and `--daemon-idle-timeout` elapses.
+LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner tracks active session handles plus in-memory agent presence, and exits after both reach zero and `--daemon-idle-timeout` elapses. Agent presence expires on the same idle-timeout cadence.
 
 The easiest project-local STDIO setup is the wrapper script:
 
 ```bash
-./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
 ```
 
 Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.

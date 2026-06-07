@@ -28,7 +28,7 @@ Every normal LeafWiki startup joins a per-project owner daemon. The project iden
 
 Daemon-relevant configuration must match the first owner for owner-affecting starts: auth mode, host, port, base path, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, revision/link-refactor settings, max revision history, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change owner settings, so they inherit the owner value for host, public HTTP MCP, log target/file, and request logging while still matching the rest of the project identity. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
 
-The owner exits after the last session handle disconnects and `--daemon-idle-timeout` elapses. The default is `10m`; `0` stops immediately after the last handle. Stale descriptors are ignored when the private control endpoint is unreachable and the project locks are free.
+The owner exits after active project activity reaches zero and `--daemon-idle-timeout` elapses. Project activity is the sum of registered session handles and active in-memory agent presence. Agent presence records expire on the same idle-timeout cadence, so a hook-started owner stays alive while the observed agent session is fresh and can shut down once that presence expires. The default is `10m`; `0` stops immediately after the last handle or presence record is gone. Stale descriptors are ignored when the private control endpoint is unreachable and the project locks are free.
 
 ## Security Model
 
@@ -47,10 +47,10 @@ The `--api-key` flag and `LEAFWIKI_MCP_API_KEY` apply only to native STDIO sessi
 
 ## Native STDIO Wrapper
 
-For project-local MCP clients, use `scripts/run-mcp.sh`. It starts an agent-owned `leafwiki --mcp=stdio` session frontend. That foreground process speaks MCP over stdin/stdout and attaches to the project owner daemon that serves the browser UI on `127.0.0.1:8080`.
+For project-local MCP clients, use `scripts/run.sh mcp`. It starts an agent-owned `leafwiki --mcp=stdio` session frontend. That foreground process speaks MCP over stdin/stdout and attaches to the project owner daemon that serves the browser UI on `127.0.0.1:8080`.
 
 ```bash
-./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
 ```
 
 MCP client JSON:
@@ -59,8 +59,9 @@ MCP client JSON:
 {
   "mcpServers": {
     "leafwiki": {
-      "command": "/Users/<you>/github/leafwiki/scripts/run-mcp.sh",
+      "command": "/Users/<you>/github/leafwiki/scripts/run.sh",
       "args": [
+        "mcp",
         "--root-dir",
         "./wiki",
         "--data-dir",
@@ -75,7 +76,7 @@ Authenticated native STDIO:
 
 ```bash
 LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> \
-./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
 ```
 
 `LEAFWIKI_JWT_SECRET` and `LEAFWIKI_ADMIN_PASSWORD` are only needed when this
@@ -228,8 +229,8 @@ The local MCP surface is complete only when every defined MCP tool has HTTP/MCP 
 ```bash
 rtk go test ./cmd/leafwiki ./internal/projectdaemon ./internal/wiki ./internal/wiki/mcp ./internal/locking
 rtk go test ./...
-rtk bash -n scripts/run-mcp.sh scripts/test-run-mcp.sh scripts/install-all-macos.sh scripts/test-install-all-macos.sh
-rtk bash scripts/test-run-mcp.sh
+rtk bash -n scripts/run.sh scripts/test-run.sh scripts/install-all-macos.sh scripts/test-install-all-macos.sh
+rtk bash scripts/test-run.sh
 rtk bash scripts/test-install-all-macos.sh
 rtk npm --prefix e2e run lint
 rtk npm --prefix e2e run format:check

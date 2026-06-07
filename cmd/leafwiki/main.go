@@ -26,6 +26,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tools"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -43,6 +44,7 @@ func writeUsage(w io.Writer) {
 	leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki --mcp=stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
+	leafwiki agent-hook <codex|claude|cursor|unknown> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki reset-admin-password
 	leafwiki --help
 
@@ -143,7 +145,17 @@ func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io
 	return closer, nil
 }
 
+var failOpenAgentHookProvider string
+
 func fail(msg string, args ...any) {
+	if failOpenAgentHookProvider != "" {
+		provider := failOpenAgentHookProvider
+		slog.Default().Warn("Agent hook failed open", "provider", provider, "reason", msg)
+		if allowResponse := agenthooks.AllowResponse(provider); len(allowResponse) > 0 {
+			_, _ = os.Stdout.Write(allowResponse)
+		}
+		os.Exit(0)
+	}
 	slog.Default().Error(msg, args...)
 	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
 	os.Exit(1)
@@ -164,6 +176,8 @@ func failureMessage(msg string, args ...any) string {
 var projectDaemonExecutable = os.Executable
 
 var projectDaemonStartupConfigPostStartCleanupDelay = 30 * time.Second
+
+const agentHookMaxPayloadBytes = 1024 * 1024
 
 type cliFlags struct {
 	host                    *string
@@ -231,6 +245,7 @@ type leafwikiRuntimeConfig struct {
 	DisableRequestLog       bool
 	DaemonIdleTimeout       time.Duration
 	DaemonStartupErrorPath  string
+	DetachDaemonOwnerIO     bool
 }
 
 func registerFlags(fs *flag.FlagSet) *cliFlags {
@@ -273,18 +288,30 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 
 func main() {
 	setupBootstrapLogger(os.Stderr)
+	failOpenAgentHookProvider = ""
 	rawArgs := os.Args[1:]
+	if provider, ok := agentHookProviderFromArgs(rawArgs); ok {
+		failOpenAgentHookProvider = provider
+	}
+	rawArgs = normalizeAgentHookRawArgs(rawArgs)
 	if shouldPrintUsage(rawArgs) {
 		printUsage()
 		return
 	}
 
-	flag.Usage = func() {
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flag.CommandLine.SetOutput(os.Stderr)
+	flag.CommandLine.Usage = func() {
 		writeUsage(flag.CommandLine.Output())
 	}
 
 	flags := registerFlags(flag.CommandLine)
-	flag.Parse()
+	if err := flag.CommandLine.Parse(rawArgs); err != nil {
+		if failOpenAgentHookProvider != "" {
+			fail("Invalid agent hook arguments", "error", err)
+		}
+		os.Exit(2)
+	}
 	if strings.TrimSpace(*flags.internalProjectDaemon) != "" {
 		if err := runInternalProjectDaemon(context.Background(), *flags.internalProjectDaemon); err != nil {
 			fail("Project daemon failed", "error", err)
@@ -298,14 +325,19 @@ func main() {
 
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	args := flag.Args()
-	mcpTransports, err := resolveMCPTransports(flags, visited)
-	if err != nil {
-		fail("Invalid MCP configuration", "error", err)
+	agentHookRequested := isAgentHookCommand(args)
+	resolvedMCPTransports := mcpTransports{}
+	if !agentHookRequested {
+		var err error
+		resolvedMCPTransports, err = resolveMCPTransports(flags, visited)
+		if err != nil {
+			fail("Invalid MCP configuration", "error", err)
+		}
 	}
-	if mcpTransports.Stdio && len(args) > 0 {
+	if resolvedMCPTransports.Stdio && len(args) > 0 {
 		fail("Invalid native STDIO configuration", "error", fmt.Errorf("native STDIO does not support positional commands"))
 	}
-	if len(args) > 0 {
+	if len(args) > 0 && !agentHookRequested {
 		switch args[0] {
 		case "reset-admin-password":
 			user, err := tools.ResetAdminPassword(dataDir)
@@ -359,7 +391,7 @@ func main() {
 	}
 	enableLinkRefactor := resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR")
 	apiKey := ""
-	if mcpTransports.Stdio {
+	if resolvedMCPTransports.Stdio {
 		apiKey = resolveString("api-key", *flags.apiKey, visited, "LEAFWIKI_MCP_API_KEY", "")
 	}
 	maxRevisionHistory := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100)
@@ -381,7 +413,7 @@ func main() {
 		fail("Invalid logging configuration", "error", err)
 	}
 	if err := validateMCPTransportOptions(mcpTransportOptions{
-		Transports:  mcpTransports,
+		Transports:  resolvedMCPTransports,
 		DisableAuth: disableAuth,
 		LogTarget:   loggingConfig.Target,
 		Host:        host,
@@ -413,7 +445,7 @@ func main() {
 		EnableRevision:          enableRevision,
 		EnableWorkspaceSync:     enableWorkspaceSync,
 		EnableLinkRefactor:      enableLinkRefactor,
-		MCPTransports:           mcpTransports,
+		MCPTransports:           resolvedMCPTransports,
 		APIKey:                  apiKey,
 		MaxRevisionHistory:      maxRevisionHistory,
 		EnableHTTPRemoteUser:    enableHTTPRemoteUser,
@@ -423,9 +455,43 @@ func main() {
 		DisableRequestLog:       disableRequestLog,
 		DaemonIdleTimeout:       daemonIdleTimeout,
 	}
+	if agentHookRequested {
+		provider := agenthooks.ProviderUnknown
+		if len(args) >= 2 {
+			provider = args[1]
+		}
+		if err := runAgentHookCommand(context.Background(), cfg, provider, os.Stdin, os.Stdout); err != nil {
+			slog.Default().Warn("Agent hook failed open", "provider", provider, "error", err)
+		}
+		return
+	}
 	if err := runProjectDaemonLauncher(context.Background(), cfg); err != nil {
 		fail("LeafWiki startup failed", "error", err)
 	}
+}
+
+func normalizeAgentHookRawArgs(args []string) []string {
+	if len(args) >= 2 && args[0] == "agent-hook" {
+		normalized := make([]string, 0, len(args))
+		normalized = append(normalized, args[2:]...)
+		normalized = append(normalized, args[0], args[1])
+		return normalized
+	}
+	return args
+}
+
+func agentHookProviderFromArgs(args []string) (string, bool) {
+	if len(args) == 0 || args[0] != "agent-hook" {
+		return "", false
+	}
+	if len(args) >= 2 {
+		return args[1], true
+	}
+	return agenthooks.ProviderUnknown, true
+}
+
+func isAgentHookCommand(args []string) bool {
+	return len(args) > 0 && args[0] == "agent-hook"
 }
 
 func shouldPrintUsage(args []string) bool {
@@ -587,6 +653,49 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 	}
 	if err := waitForForegroundSession(ctx, heartbeatErr); err != nil && !errors.Is(err, context.Canceled) {
 		return err
+	}
+	return nil
+}
+
+func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, provider string, stdin io.Reader, stdout io.Writer) (err error) {
+	allowResponse := agenthooks.AllowResponse(provider)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("agent hook panic: %v", recovered)
+		}
+		if len(allowResponse) > 0 {
+			if _, writeErr := stdout.Write(allowResponse); writeErr != nil && err == nil {
+				err = fmt.Errorf("write hook allow response: %w", writeErr)
+			}
+		}
+	}()
+
+	raw, err := io.ReadAll(io.LimitReader(stdin, agentHookMaxPayloadBytes+1))
+	if err != nil {
+		return fmt.Errorf("read hook payload: %w", err)
+	}
+	if len(raw) > agentHookMaxPayloadBytes {
+		return fmt.Errorf("hook payload exceeds %d bytes", agentHookMaxPayloadBytes)
+	}
+	event, ok := agenthooks.Normalize(provider, raw, time.Now().UTC())
+	if !ok {
+		return nil
+	}
+
+	cfg.DetachDaemonOwnerIO = true
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	desc, err := attachOrStartProjectDaemon(ctx, cfg, ownerCfg, projectdaemon.DescriptorPath(ownerCfg.DataDir))
+	if err != nil {
+		return err
+	}
+	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+	if err := client.RecordAgentPresence(ctx, event); err != nil {
+		return fmt.Errorf("record agent presence: %w", err)
 	}
 	return nil
 }
@@ -1140,7 +1249,7 @@ func daemonOwnerRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig,
 
 func configureDaemonOwnerIO(cmd *exec.Cmd, cfg leafwikiRuntimeConfig) (func(), error) {
 	configureDaemonOwnerProcessGroup(cmd)
-	if !cfg.MCPTransports.Stdio {
+	if !cfg.MCPTransports.Stdio && !cfg.DetachDaemonOwnerIO {
 		cmd.Stdin = nil
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -1502,20 +1611,25 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var sessions *projectdaemon.SessionRegistry
-	sessions = projectdaemon.NewSessionRegistry(projectdaemon.DefaultHeartbeatTTL, idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
-		if sessions == nil {
-			return 0
-		}
-		return sessions.Count()
-	}))
+	var agentPresence *projectdaemon.AgentPresenceRegistry
+	activityChanged := idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
+		return projectDaemonActivityCount(sessions, agentPresence)
+	})
+	notifyActivityChanged := func(int) {
+		activityChanged(projectDaemonActivityCount(sessions, agentPresence))
+	}
+	sessions = projectdaemon.NewSessionRegistry(projectdaemon.DefaultHeartbeatTTL, notifyActivityChanged)
+	agentPresence = projectdaemon.NewAgentPresenceRegistry(cfg.DaemonIdleTimeout, notifyActivityChanged)
 	go sessions.RunExpiryLoop(ctx, 0)
+	go agentPresence.RunExpiryLoop(ctx, 0)
 
 	publicServer := &http.Server{Addr: buildListenAddress(cfg.Host, cfg.Port), Handler: publicRouter}
 	controlServer := &http.Server{Addr: controlListener.Addr().String(), Handler: projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
-		Token:        controlToken,
-		Sessions:     sessions,
-		PrivateMCP:   privateMCP,
-		AuthDisabled: cfg.DisableAuth,
+		Token:         controlToken,
+		Sessions:      sessions,
+		AgentPresence: agentPresence,
+		PrivateMCP:    privateMCP,
+		AuthDisabled:  cfg.DisableAuth,
 		Health: projectdaemon.DaemonHealth{
 			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
 			PID:           os.Getpid(),
@@ -1561,7 +1675,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	}
 	defer projectdaemon.RemoveDescriptor(descriptorPath)
 	go func() {
-		if err := waitForFirstProjectDaemonSession(ctx, sessions, 25*time.Millisecond); err != nil {
+		if err := waitForFirstProjectDaemonActivity(ctx, sessions, agentPresence, 25*time.Millisecond); err != nil {
 			return
 		}
 		err := publicServer.Serve(publicListener)
@@ -1570,7 +1684,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 		}
 		serverDone <- err
 	}()
-	go cancelIfNoSessionAfterStartupGrace(ctx, cancel, sessions, projectdaemon.DefaultHeartbeatTTL)
+	go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, agentPresence, projectdaemon.DefaultHeartbeatTTL)
 
 	slog.Default().Info("Starting LeafWiki", "address", buildListenAddress(cfg.Host, cfg.Port), "data_dir", ownerCfg.DataDir)
 	select {
@@ -1597,6 +1711,25 @@ func waitForFirstProjectDaemonSession(ctx context.Context, sessions *projectdaem
 	defer ticker.Stop()
 	for {
 		if sessions.SeenSession() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForFirstProjectDaemonActivity(ctx context.Context, sessions *projectdaemon.SessionRegistry, presence *projectdaemon.AgentPresenceRegistry, interval time.Duration) error {
+	if interval <= 0 {
+		interval = 25 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		seen, _ := projectDaemonSeenActivityCount(sessions, presence)
+		if seen {
 			return nil
 		}
 		select {
@@ -1642,6 +1775,33 @@ func idleShutdownCallback(ctx context.Context, cancel context.CancelFunc, idleTi
 	}
 }
 
+func projectDaemonActivityCount(sessions *projectdaemon.SessionRegistry, presence *projectdaemon.AgentPresenceRegistry) int {
+	count := 0
+	if sessions != nil {
+		count += sessions.Count()
+	}
+	if presence != nil {
+		count += presence.Count()
+	}
+	return count
+}
+
+func projectDaemonSeenActivityCount(sessions *projectdaemon.SessionRegistry, presence *projectdaemon.AgentPresenceRegistry) (bool, int) {
+	seen := false
+	count := 0
+	if sessions != nil {
+		sessionSeen, sessionCount := sessions.SeenSessionCount()
+		seen = seen || sessionSeen
+		count += sessionCount
+	}
+	if presence != nil {
+		presenceSeen, presenceCount := presence.SeenPresenceCount()
+		seen = seen || presenceSeen
+		count += presenceCount
+	}
+	return seen, count
+}
+
 func cancelIfNoSessionAfterStartupGrace(ctx context.Context, cancel context.CancelFunc, sessions *projectdaemon.SessionRegistry, grace time.Duration) {
 	if grace <= 0 {
 		grace = projectdaemon.DefaultHeartbeatTTL
@@ -1661,6 +1821,33 @@ func cancelIfNoSessionAfterStartupGrace(ctx context.Context, cancel context.Canc
 		case <-ticker.C:
 		case <-timer.C:
 			seen, count := sessions.SeenSessionCount()
+			if !seen && count == 0 {
+				cancel()
+			}
+			return
+		}
+	}
+}
+
+func cancelIfNoActivityAfterStartupGrace(ctx context.Context, cancel context.CancelFunc, sessions *projectdaemon.SessionRegistry, presence *projectdaemon.AgentPresenceRegistry, grace time.Duration) {
+	if grace <= 0 {
+		grace = projectdaemon.DefaultHeartbeatTTL
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		seen, _ := projectDaemonSeenActivityCount(sessions, presence)
+		if seen {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-timer.C:
+			seen, count := projectDaemonSeenActivityCount(sessions, presence)
 			if !seen && count == 0 {
 				cancel()
 			}
@@ -1715,7 +1902,7 @@ func resolveWorkspace(flags *cliFlags, visited map[string]bool) (wiki.Workspace,
 }
 
 func resolveStartupWorkspace(flags *cliFlags, visited map[string]bool, args []string) (wiki.Workspace, bool, error) {
-	if len(args) > 0 {
+	if len(args) > 0 && !isAgentHookCommand(args) {
 		return wiki.Workspace{}, false, nil
 	}
 	workspace, err := resolveWorkspace(flags, visited)

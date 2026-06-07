@@ -20,7 +20,7 @@ LEAFWIKI_ENABLE_WORKSPACE_SYNC=true
 
 Workspace sync is mutually exclusive with legacy page-snapshot revisions. Starting with both `--enable-revision` and `--enable-workspace-sync` fails.
 
-`scripts/run-mcp.sh` enables workspace sync by default for native STDIO MCP sessions. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit it.
+`scripts/run.sh mcp` enables workspace sync by default for native STDIO MCP sessions. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit it.
 
 ## Internal Git Layout
 

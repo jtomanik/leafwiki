@@ -6,38 +6,43 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/perber/wiki/internal/agenthooks"
 )
 
 var ErrInvalidAPIKey = errors.New("invalid api key")
 
 type ControlServerOptions struct {
-	Token        string
-	Sessions     *SessionRegistry
-	PrivateMCP   http.Handler
-	AuthDisabled bool
-	VerifyAPIKey func(string) error
-	Health       DaemonHealth
+	Token         string
+	Sessions      *SessionRegistry
+	AgentPresence *AgentPresenceRegistry
+	PrivateMCP    http.Handler
+	AuthDisabled  bool
+	VerifyAPIKey  func(string) error
+	Health        DaemonHealth
 }
 
 type ControlServer struct {
-	token        string
-	sessions     *SessionRegistry
-	mcp          http.Handler
-	authDisabled bool
-	verifyAPIKey func(string) error
-	health       DaemonHealth
+	token         string
+	sessions      *SessionRegistry
+	agentPresence *AgentPresenceRegistry
+	mcp           http.Handler
+	authDisabled  bool
+	verifyAPIKey  func(string) error
+	health        DaemonHealth
 }
 
 func NewControlServer(opts ControlServerOptions) http.Handler {
 	health := opts.Health
 	health.OK = true
 	return &ControlServer{
-		token:        opts.Token,
-		sessions:     opts.Sessions,
-		mcp:          opts.PrivateMCP,
-		authDisabled: opts.AuthDisabled,
-		verifyAPIKey: opts.VerifyAPIKey,
-		health:       health,
+		token:         opts.Token,
+		sessions:      opts.Sessions,
+		agentPresence: opts.AgentPresence,
+		mcp:           opts.PrivateMCP,
+		authDisabled:  opts.AuthDisabled,
+		verifyAPIKey:  opts.VerifyAPIKey,
+		health:        health,
 	}
 }
 
@@ -68,6 +73,10 @@ func (s *ControlServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		id := strings.TrimPrefix(path, "/sessions/")
 		s.sessions.Release(id)
 		writeJSON(w, map[string]any{"ok": true})
+	case req.Method == http.MethodPost && path == "/agent-presence/events" && s.agentPresence != nil:
+		s.recordAgentPresence(w, req)
+	case req.Method == http.MethodGet && path == "/agent-presence" && s.agentPresence != nil:
+		writeJSON(w, s.agentPresence.List())
 	case req.Method == http.MethodPost && path == "/stdio-auth/verify":
 		s.verifyStdioAuth(w, req)
 	case path == "/mcp" && s.mcp != nil:
@@ -75,6 +84,16 @@ func (s *ControlServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	default:
 		http.NotFound(w, req)
 	}
+}
+
+func (s *ControlServer) recordAgentPresence(w http.ResponseWriter, req *http.Request) {
+	var event agenthooks.Event
+	if err := json.NewDecoder(req.Body).Decode(&event); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	s.agentPresence.Record(event)
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func (s *ControlServer) verifyStdioAuth(w http.ResponseWriter, req *http.Request) {
