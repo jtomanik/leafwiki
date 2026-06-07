@@ -31,6 +31,10 @@ func (e *SearchIndexSideEffect) Apply(event PageSaveEvent) {
 	case PageOperationCreate, PageOperationUpdate, PageOperationRestore:
 		if event.After != nil {
 			e.indexPage(event.After)
+			return
+		}
+		for _, page := range event.AffectedPages {
+			e.indexPage(page)
 		}
 
 	case PageOperationMove:

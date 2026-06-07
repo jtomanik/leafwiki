@@ -14,6 +14,7 @@ allow_insecure="${LEAFWIKI_RUN_MCP_ALLOW_INSECURE:-${LEAFWIKI_ALLOW_INSECURE:-1}
 disable_auth="${LEAFWIKI_RUN_MCP_DISABLE_AUTH:-${LEAFWIKI_DISABLE_AUTH:-}}"
 disable_request_log="${LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG:-${LEAFWIKI_DISABLE_REQUEST_LOG:-1}}"
 daemon_idle_timeout="${LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT:-${LEAFWIKI_DAEMON_IDLE_TIMEOUT:-10m}}"
+enable_workspace_sync="${LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC:-1}"
 api_key="${LEAFWIKI_RUN_MCP_API_KEY:-${LEAFWIKI_MCP_API_KEY:-}}"
 server_log="${LEAFWIKI_RUN_MCP_SERVER_LOG:-}"
 dry_run=0
@@ -44,6 +45,8 @@ Options:
   --request-log             Keep LeafWiki request logs enabled
   --disable-request-log     Pass --disable-request-log to LeafWiki (default)
   --daemon-idle-timeout <d> Project daemon idle timeout after last session exits (default: 10m)
+  --enable-workspace-sync   Pass --enable-workspace-sync to LeafWiki (default)
+  --disable-workspace-sync  Do not pass --enable-workspace-sync
   --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
   --server-log <path>       Accepted and ignored for compatibility; use --server-arg for logging overrides
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
@@ -263,6 +266,14 @@ while [[ $# -gt 0 ]]; do
       daemon_idle_timeout="$2"
       shift 2
       ;;
+    --enable-workspace-sync)
+      enable_workspace_sync=1
+      shift
+      ;;
+    --disable-workspace-sync)
+      enable_workspace_sync=0
+      shift
+      ;;
     --api-key=*)
       api_key="${1#*=}"
       shift
@@ -340,6 +351,9 @@ if [[ -n "$base_path" ]]; then
 fi
 if truthy "$disable_request_log"; then
   native_cmd+=(--disable-request-log)
+fi
+if truthy "$enable_workspace_sync"; then
+  native_cmd+=(--enable-workspace-sync)
 fi
 if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
   native_cmd+=("${server_extra_args[@]}")

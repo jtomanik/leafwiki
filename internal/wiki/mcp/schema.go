@@ -156,6 +156,7 @@ func toolOutputSchema(name string) *jsonschema.Schema {
 			"hideLinkMetadataSection": booleanSchema(),
 			"maxAssetUploadSizeBytes": integerSchema(),
 			"enableRevision":          booleanSchema(),
+			"enableWorkspaceSync":     booleanSchema(),
 			"enableLinkRefactor":      booleanSchema(),
 			"httpRemoteUserEnabled":   booleanSchema(),
 			"httpRemoteUserLogoutUrl": stringSchema(),

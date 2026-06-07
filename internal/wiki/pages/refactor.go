@@ -56,6 +56,7 @@ type RefactorAffectedPage struct {
 // RefactorApplyInput extends the preview with apply options.
 type RefactorApplyInput struct {
 	UserID  string
+	Source  string
 	Version string
 	RefactorPreviewInput
 	RewriteLinks bool
@@ -242,12 +243,13 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, excludeID
 
 // ApplyPageRefactorUseCase applies a rename or move with optional link rewriting.
 type ApplyPageRefactorUseCase struct {
-	tree     *tree.TreeService
-	slug     *tree.SlugService
-	revision *revision.Service
-	links    *links.LinkService
-	log      *slog.Logger
-	preview  *PreviewPageRefactorUseCase
+	tree         *tree.TreeService
+	slug         *tree.SlugService
+	revision     *revision.Service
+	links        *links.LinkService
+	orchestrator *pagesave.PageSaveOrchestrator
+	log          *slog.Logger
+	preview      *PreviewPageRefactorUseCase
 }
 
 // NewApplyPageRefactorUseCase constructs an ApplyPageRefactorUseCase.
@@ -258,7 +260,7 @@ func NewApplyPageRefactorUseCase(
 	l *links.LinkService,
 	log *slog.Logger,
 ) *ApplyPageRefactorUseCase {
-	return &ApplyPageRefactorUseCase{
+	uc := &ApplyPageRefactorUseCase{
 		tree:     t,
 		slug:     s,
 		revision: r,
@@ -266,6 +268,25 @@ func NewApplyPageRefactorUseCase(
 		log:      log,
 		preview:  NewPreviewPageRefactorUseCase(t, s, l, log),
 	}
+	uc.orchestrator = uc.defaultOrchestrator()
+	return uc
+}
+
+// NewApplyPageRefactorUseCaseWithOrchestrator constructs an ApplyPageRefactorUseCase
+// with the same page-save side effects used by the caller's mutation surface.
+func NewApplyPageRefactorUseCaseWithOrchestrator(
+	t *tree.TreeService,
+	s *tree.SlugService,
+	r *revision.Service,
+	l *links.LinkService,
+	o *pagesave.PageSaveOrchestrator,
+	log *slog.Logger,
+) *ApplyPageRefactorUseCase {
+	uc := NewApplyPageRefactorUseCase(t, s, r, l, log)
+	if o != nil {
+		uc.orchestrator = o
+	}
+	return uc
 }
 
 // Execute applies the refactor operation to the page tree.
@@ -295,16 +316,14 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 		return nil, err
 	}
 
-	o := pagesave.NewPageSaveOrchestrator(
-		pagesave.NewLinkIndexSideEffect(uc.links, uc.log),
-		pagesave.NewRevisionSideEffect(uc.revision, uc.log),
-	)
+	o := uc.pageOrchestrator()
 
 	switch in.Kind {
 	case RefactorKindRename:
 		updateUC := NewUpdatePageUseCase(uc.tree, uc.slug, o, uc.log)
 		updated, err := updateUC.Execute(ctx, UpdatePageInput{
 			UserID:  in.UserID,
+			Source:  in.Source,
 			ID:      in.PageID,
 			Version: in.Version,
 			Title:   in.Title,
@@ -318,7 +337,7 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 		if err := uc.rewriteIncomingLinks(in, plan); err != nil {
 			return nil, err
 		}
-		if err := uc.rewritePathChangedSubtree(in.UserID, snapshots, plan.oldPath, plan.newPath); err != nil {
+		if err := uc.rewritePathChangedSubtree(in.UserID, in.Source, snapshots, plan.oldPath, plan.newPath); err != nil {
 			return nil, err
 		}
 		return uc.tree.GetPage(updated.Page.ID)
@@ -329,13 +348,13 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 			parentID = *in.NewParentID
 		}
 		moveUC := NewMovePageUseCase(uc.tree, o, uc.log)
-		if err := moveUC.Execute(ctx, MovePageInput{UserID: in.UserID, ID: in.PageID, Version: in.Version, ParentID: parentID}); err != nil {
+		if err := moveUC.Execute(ctx, MovePageInput{UserID: in.UserID, Source: in.Source, ID: in.PageID, Version: in.Version, ParentID: parentID}); err != nil {
 			return nil, err
 		}
 		if err := uc.rewriteIncomingLinks(in, plan); err != nil {
 			return nil, err
 		}
-		if err := uc.rewritePathChangedSubtree(in.UserID, snapshots, plan.oldPath, plan.newPath); err != nil {
+		if err := uc.rewritePathChangedSubtree(in.UserID, in.Source, snapshots, plan.oldPath, plan.newPath); err != nil {
 			return nil, err
 		}
 		return uc.tree.GetPage(in.PageID)
@@ -345,12 +364,27 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 	}
 }
 
+func (uc *ApplyPageRefactorUseCase) defaultOrchestrator() *pagesave.PageSaveOrchestrator {
+	return pagesave.NewPageSaveOrchestrator(
+		pagesave.NewLinkIndexSideEffect(uc.links, uc.log),
+		pagesave.NewRevisionSideEffect(uc.revision, uc.log),
+	)
+}
+
+func (uc *ApplyPageRefactorUseCase) pageOrchestrator() *pagesave.PageSaveOrchestrator {
+	if uc.orchestrator != nil {
+		return uc.orchestrator
+	}
+	uc.orchestrator = uc.defaultOrchestrator()
+	return uc.orchestrator
+}
+
 func (uc *ApplyPageRefactorUseCase) rewriteIncomingLinks(in RefactorApplyInput, plan *applyRefactorPlan) error {
 	if !in.RewriteLinks {
 		return nil
 	}
 	rules := []links.RewriteRule{{OldPath: plan.oldPath, NewPath: plan.newPath}}
-	return uc.rewriteAffectedPages(in.UserID, plan.affectedPageIDs, rules)
+	return uc.rewriteAffectedPages(in.UserID, in.Source, plan.affectedPageIDs, rules)
 }
 
 type applyRefactorPlan struct {
@@ -445,7 +479,7 @@ func (uc *ApplyPageRefactorUseCase) captureSnapshots(page *tree.Page, in Refacto
 	return snapshots, nil
 }
 
-func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, affectedPageIDs []string, rules []links.RewriteRule) error {
+func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source string, affectedPageIDs []string, rules []links.RewriteRule) error {
 	engine := links.NewMarkdownRefactorEngine()
 
 	type pending struct {
@@ -475,42 +509,24 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, affected
 	}
 
 	errs := uc.tree.BulkUpdateContent(userID, bulk)
-	updatedPages := make([]*tree.Page, 0, len(items))
+	updatedIDs := make([]string, 0, len(items))
 
 	for i, item := range items {
 		if errs[i] != nil {
 			uc.log.Warn("failed to rewrite links in page", "pageID", item.page.ID, "error", errs[i])
 			continue
 		}
-		updatedPages = append(updatedPages, &tree.Page{
-			PageNode: item.page.PageNode,
-			Content:  item.content,
-		})
+		updatedIDs = append(updatedIDs, item.page.ID)
 	}
 
-	if uc.revision != nil {
-		revErrs := uc.revision.RecordContentUpdates(updatedPages, userID, "")
-		for i, err := range revErrs {
-			if err != nil {
-				uc.log.Warn("failed to record content revision", "pageID", updatedPages[i].ID, "error", err)
-			}
-		}
-	}
-
-	if uc.links != nil && len(updatedPages) > 0 {
-		if err := uc.links.UpdateRewrittenLinksAndHealForPages(updatedPages, rules); err != nil {
-			uc.log.Warn(
-				"failed to update link index after rewrite",
-				"pageCount", len(updatedPages),
-				"pageIDSample", samplePageIDs(updatedPages, 5),
-				"error", err,
-			)
-		}
+	updatedPages := uc.loadPagesInOrder(updatedIDs, "failed to get rewritten page for side effects")
+	if err := uc.runBulkContentUpdateSideEffects(userID, source, updatedPages); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, snapshots []pathChangeSnapshot, oldPath, newPath string) error {
+func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, source string, snapshots []pathChangeSnapshot, oldPath, newPath string) error {
 	engine := links.NewMarkdownRefactorEngine()
 	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath}}
 
@@ -545,39 +561,35 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sna
 	}
 
 	errs := uc.tree.BulkUpdateContent(userID, bulk)
-	updatedPages := make([]*tree.Page, 0, len(items))
+	updatedIDs := make([]string, 0, len(items))
 
 	for i, item := range items {
 		if errs[i] != nil {
 			uc.log.Warn("failed to rewrite relative links in subtree page", "pageID", item.page.ID, "error", errs[i])
 			continue
 		}
-		updatedPages = append(updatedPages, &tree.Page{
-			PageNode: item.page.PageNode,
-			Content:  item.content,
-		})
+		updatedIDs = append(updatedIDs, item.page.ID)
 	}
 
-	if uc.revision != nil {
-		revErrs := uc.revision.RecordContentUpdates(updatedPages, userID, "")
-		for i, err := range revErrs {
-			if err != nil {
-				uc.log.Warn("failed to record content revision", "pageID", updatedPages[i].ID, "error", err)
-			}
-		}
-	}
-
-	if uc.links != nil && len(updatedPages) > 0 {
-		if err := uc.links.UpdateLinksAndHealForPages(updatedPages); err != nil {
-			uc.log.Warn(
-				"failed to update link index after subtree rewrite",
-				"pageCount", len(updatedPages),
-				"pageIDSample", samplePageIDs(updatedPages, 5),
-				"error", err,
-			)
-		}
+	updatedPages := uc.loadPagesInOrder(updatedIDs, "failed to get rewritten subtree page for side effects")
+	if err := uc.runBulkContentUpdateSideEffects(userID, source, updatedPages); err != nil {
+		return err
 	}
 	return nil
+}
+
+func (uc *ApplyPageRefactorUseCase) runBulkContentUpdateSideEffects(userID string, source string, pages []*tree.Page) error {
+	if len(pages) == 0 {
+		return nil
+	}
+	return uc.pageOrchestrator().Run(pagesave.PageSaveEvent{
+		Operation:      pagesave.PageOperationUpdate,
+		UserID:         userID,
+		Source:         source,
+		ContentChanged: true,
+		AffectedPages:  pages,
+		Summary:        "links rewritten",
+	})
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -642,6 +654,25 @@ func (uc *ApplyPageRefactorUseCase) loadPagesByID(ids []string, warningMessage s
 		loaded[id] = pages[i]
 	}
 
+	return loaded
+}
+
+func (uc *ApplyPageRefactorUseCase) loadPagesInOrder(ids []string, warningMessage string) []*tree.Page {
+	if len(ids) == 0 {
+		return nil
+	}
+	pages, errs := uc.tree.GetPages(ids)
+	loaded := make([]*tree.Page, 0, len(ids))
+	for i, id := range ids {
+		if errs[i] != nil {
+			uc.log.Warn(warningMessage, "pageID", id, "error", errs[i])
+			continue
+		}
+		if pages[i] == nil {
+			continue
+		}
+		loaded = append(loaded, pages[i])
+	}
 	return loaded
 }
 

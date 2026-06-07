@@ -28,6 +28,10 @@ func (e *PropertiesSideEffect) Apply(event PageSaveEvent) {
 	case PageOperationCreate, PageOperationUpdate, PageOperationRestore:
 		if event.After != nil {
 			e.setProperties(event.After)
+			return
+		}
+		for _, p := range event.AffectedPages {
+			e.setProperties(p)
 		}
 
 	case PageOperationMove:

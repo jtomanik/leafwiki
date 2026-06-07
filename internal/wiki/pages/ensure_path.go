@@ -14,6 +14,7 @@ import (
 // EnsurePathInput is the input for EnsurePathUseCase.
 type EnsurePathInput struct {
 	UserID      string
+	Source      string
 	TargetPath  string
 	TargetTitle string
 	Kind        *tree.NodeKind
@@ -128,12 +129,15 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 			uc.log.Warn("failed to get page for post-create processing", "pageID", n.ID, "error", tree.ErrPageNotFound)
 			continue
 		}
-		uc.orchestrator.Run(pagesave.PageSaveEvent{
+		if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 			Operation: pagesave.PageOperationCreate,
 			UserID:    in.UserID,
+			Source:    in.Source,
 			After:     p,
 			Summary:   "page created via ensure path",
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	return &EnsurePathOutput{Page: page}, nil

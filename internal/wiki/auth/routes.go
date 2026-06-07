@@ -166,6 +166,7 @@ func (r *Routes) handleConfig(ctx httpinternal.RouterContext) gin.HandlerFunc {
 			"basePath":                opts.BasePath,
 			"maxAssetUploadSizeBytes": opts.MaxAssetUploadSizeBytes,
 			"enableRevision":          opts.EnableRevision,
+			"enableWorkspaceSync":     opts.EnableWorkspaceSync,
 			"enableLinkRefactor":      opts.EnableLinkRefactor,
 			"httpRemoteUserEnabled":   opts.HTTPRemoteUser.Enabled,
 			"httpRemoteUserLogoutUrl": opts.HTTPRemoteUser.LogoutURL,

@@ -15,6 +15,7 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
+	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/test_utils"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	"github.com/perber/wiki/internal/wiki/pages"
@@ -502,6 +503,57 @@ func TestMovePageUseCase_Root_ReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when moving root, got nil")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ConvertPageUseCase
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestConvertPageUseCase_UsesOrchestratorWithMutationSource(t *testing.T) {
+	deps := newTestDeps(t)
+	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	capture := &captureEffect{}
+	convertUC := pages.NewConvertPageUseCase(deps.tree, deps.revision, pagesave.NewPageSaveOrchestrator(capture), slog.Default())
+
+	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "user1", Title: "Convert Me", Slug: "convert-me", Kind: pageKind(),
+	})
+	if err != nil {
+		t.Fatalf("CreatePage failed: %v", err)
+	}
+
+	if err := convertUC.Execute(context.Background(), pages.ConvertPageInput{
+		UserID:     "mcp-user",
+		Source:     pagesave.PageMutationSourceMCP,
+		ID:         page.Page.ID,
+		Version:    page.Page.Version(),
+		TargetKind: tree.NodeKindSection,
+	}); err != nil {
+		t.Fatalf("ConvertPage failed: %v", err)
+	}
+
+	if len(capture.events) != 1 {
+		t.Fatalf("captured events = %#v, want one convert event", capture.events)
+	}
+	event := capture.events[0]
+	if event.Operation != pagesave.PageOperationUpdate {
+		t.Fatalf("event operation = %q, want update", event.Operation)
+	}
+	if event.UserID != "mcp-user" {
+		t.Fatalf("event user = %q, want mcp-user", event.UserID)
+	}
+	if event.Source != pagesave.PageMutationSourceMCP {
+		t.Fatalf("event source = %q, want mcp", event.Source)
+	}
+	if event.Before == nil || event.After == nil {
+		t.Fatalf("event before/after missing: %#v", event)
+	}
+	if len(event.AffectedPages) != 1 || event.AffectedPages[0].ID != page.Page.ID {
+		t.Fatalf("event affected pages = %#v, want converted page", event.AffectedPages)
+	}
+	if event.After.Kind != tree.NodeKindSection {
+		t.Fatalf("event after kind = %q, want section", event.After.Kind)
 	}
 }
 
@@ -1269,6 +1321,122 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 	}
 	if afterRefRevision.Type != revision.RevisionTypeContentUpdate {
 		t.Fatalf("expected rewritten ref page latest revision type %q, got %q", revision.RevisionTypeContentUpdate, afterRefRevision.Type)
+	}
+}
+
+func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *testing.T) {
+	deps := newTestDeps(t)
+	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	capture := &captureEffect{}
+	orchestrator := pagesave.NewPageSaveOrchestrator(
+		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
+		pagesave.NewRevisionSideEffect(deps.revision, slog.Default()),
+		capture,
+	)
+	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.revision, deps.links, orchestrator, slog.Default())
+
+	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+	})
+	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+	})
+	content := "[Target](/target)"
+	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+	}); err != nil {
+		t.Fatalf("UpdatePage failed: %v", err)
+	}
+
+	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+		UserID:  "mcp-user",
+		Source:  pagesave.PageMutationSourceMCP,
+		Version: target.Page.Version(),
+		RefactorPreviewInput: pages.RefactorPreviewInput{
+			PageID:  target.Page.ID,
+			Kind:    pages.RefactorKindRename,
+			Title:   "Target Renamed",
+			Slug:    "target-renamed",
+			Content: &target.Page.Content,
+		},
+		RewriteLinks: true,
+	}); err != nil {
+		t.Fatalf("ApplyPageRefactor failed: %v", err)
+	}
+
+	var sawRewriteBatch bool
+	for _, event := range capture.events {
+		if event.Operation != pagesave.PageOperationUpdate || !event.ContentChanged || event.After != nil {
+			continue
+		}
+		if len(event.AffectedPages) != 1 || event.AffectedPages[0].ID != ref.Page.ID {
+			continue
+		}
+		if event.UserID != "mcp-user" {
+			t.Fatalf("rewrite batch user id = %q, want mcp-user", event.UserID)
+		}
+		if event.Source != pagesave.PageMutationSourceMCP {
+			t.Fatalf("rewrite batch source = %q, want MCP", event.Source)
+		}
+		sawRewriteBatch = true
+	}
+	if !sawRewriteBatch {
+		t.Fatalf("did not see orchestrated rewrite batch event; events = %#v", capture.events)
+	}
+}
+
+func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *testing.T) {
+	deps := newTestDeps(t)
+	searchIndex, err := search.NewSQLiteIndex(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSQLiteIndex failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(searchIndex.Close, t)
+
+	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	orchestrator := pagesave.NewPageSaveOrchestrator(
+		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
+		pagesave.NewRevisionSideEffect(deps.revision, slog.Default()),
+		pagesave.NewSearchIndexSideEffect(searchIndex, deps.tree, slog.Default()),
+	)
+	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.revision, deps.links, orchestrator, slog.Default())
+
+	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+	})
+	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+	})
+	content := "refactorsearchtoken [Target](/target)"
+	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+	}); err != nil {
+		t.Fatalf("UpdatePage failed: %v", err)
+	}
+
+	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+		UserID:  "system",
+		Version: target.Page.Version(),
+		RefactorPreviewInput: pages.RefactorPreviewInput{
+			PageID:  target.Page.ID,
+			Kind:    pages.RefactorKindRename,
+			Title:   "Target Renamed",
+			Slug:    "target-renamed",
+			Content: &target.Page.Content,
+		},
+		RewriteLinks: true,
+	}); err != nil {
+		t.Fatalf("ApplyPageRefactor failed: %v", err)
+	}
+
+	result, err := searchIndex.Search("refactorsearchtoken", nil, 0, 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].PageID != ref.Page.ID {
+		t.Fatalf("search result = %#v, want rewritten ref page", result.Items)
 	}
 }
 

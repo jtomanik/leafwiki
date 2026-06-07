@@ -16,6 +16,7 @@ import { PageRefactorDialog } from '@/features/page/PageRefactorDialog'
 import { SortPagesDialog } from '@/features/page/SortPagesDialog'
 import Search from '@/features/search/Search'
 import TreeView from '@/features/tree/TreeView'
+import { WorkspaceSnapshotsDialog } from '@/features/tree/WorkspaceSnapshotsDialog'
 import { ChangeOwnPasswordDialog } from '@/features/users/ChangeOwnPasswordDialog'
 import { ChangePasswordDialog } from '@/features/users/ChangePasswordDialog'
 import { DeleteUserDialog } from '@/features/users/DeleteUserDialog'
@@ -79,6 +80,7 @@ export const DIALOG_PAGE_PERMALINK = 'page-permalink'
 export const DIALOG_RESTORE_REVISION_CONFIRMATION =
   'restore-revision-confirmation'
 export const DIALOG_LINK_INSERT = 'link-insert'
+export const DIALOG_WORKSPACE_SNAPSHOTS = 'workspace-snapshots'
 
 dialogRegistry.register({
   type: DIALOG_ADD_PAGE,
@@ -311,5 +313,12 @@ dialogRegistry.register({
         {...typedProps}
       />
     )
+  },
+})
+
+dialogRegistry.register({
+  type: DIALOG_WORKSPACE_SNAPSHOTS,
+  render: () => {
+    return <WorkspaceSnapshotsDialog key={DIALOG_WORKSPACE_SNAPSHOTS} />
   },
 })

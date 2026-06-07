@@ -20,6 +20,7 @@ func (r *Routes) registerConfigTools(server *sdkmcp.Server, opts httpinternal.Ro
 			BasePath:                opts.BasePath,
 			MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
 			EnableRevision:          opts.EnableRevision,
+			EnableWorkspaceSync:     opts.EnableWorkspaceSync,
 			EnableLinkRefactor:      opts.EnableLinkRefactor,
 			HTTPRemoteUserEnabled:   opts.HTTPRemoteUser.Enabled,
 			HTTPRemoteUserLogoutURL: opts.HTTPRemoteUser.LogoutURL,

@@ -13,6 +13,7 @@ import (
 // DeletePageInput is the input for DeletePageUseCase.
 type DeletePageInput struct {
 	UserID    string
+	Source    string
 	ID        string
 	Version   string
 	Recursive bool
@@ -81,13 +82,16 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 			return err
 		}
 
-		uc.orchestrator.Run(pagesave.PageSaveEvent{
+		if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 			Operation:     pagesave.PageOperationDelete,
 			UserID:        in.UserID,
+			Source:        in.Source,
 			Before:        page,
 			OldPath:       oldPath,
 			AffectedPages: affectedPages,
-		})
+		}); err != nil {
+			return err
+		}
 
 		for _, p := range affectedPages {
 			if err := uc.assets.DeleteAllAssetsForPage(p.PageNode); err != nil {
@@ -105,13 +109,16 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 		return err
 	}
 
-	uc.orchestrator.Run(pagesave.PageSaveEvent{
+	if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 		Operation:     pagesave.PageOperationDelete,
 		UserID:        in.UserID,
+		Source:        in.Source,
 		Before:        page,
 		OldPath:       oldPath,
 		AffectedPages: []*tree.Page{page},
-	})
+	}); err != nil {
+		return err
+	}
 
 	if err := uc.assets.DeleteAllAssetsForPage(page.PageNode); err != nil {
 		uc.log.Warn("failed to delete assets for page", "pageID", page.ID, "error", err)

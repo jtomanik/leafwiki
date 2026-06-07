@@ -12,6 +12,7 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	corerevision "github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
@@ -22,6 +23,7 @@ import (
 	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 const defaultToolListPageSize = 100
@@ -68,6 +70,10 @@ type Routes struct {
 	getRevAsset  *wikirevisions.GetRevisionAssetUseCase
 	getLatestRev *wikirevisions.GetLatestRevisionUseCase
 	restoreRev   *wikirevisions.RestoreRevisionUseCase
+
+	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	getWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
+	restoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 }
 
 type RoutesConfig struct {
@@ -109,6 +115,10 @@ type RoutesConfig struct {
 	GetRevAsset  *wikirevisions.GetRevisionAssetUseCase
 	GetLatestRev *wikirevisions.GetLatestRevisionUseCase
 	RestoreRev   *wikirevisions.RestoreRevisionUseCase
+
+	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	GetWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
+	RestoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 }
 
 func NewRoutes(cfg RoutesConfig) *Routes {
@@ -151,6 +161,10 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 		getRevAsset:  cfg.GetRevAsset,
 		getLatestRev: cfg.GetLatestRev,
 		restoreRev:   cfg.RestoreRev,
+
+		listWorkspaceRevisions:   cfg.ListWorkspaceRevisions,
+		getWorkspaceRevision:     cfg.GetWorkspaceRevision,
+		restoreWorkspaceRevision: cfg.RestoreWorkspaceRevision,
 	}
 }
 
@@ -304,8 +318,8 @@ func (r *Routes) newServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
 	r.registerPropertyTools(server)
 	r.registerLinkTools(server)
 	r.registerAssetTools(server, opts)
-	if opts.EnableRevision {
-		r.registerRevisionTools(server)
+	if opts.EnableRevision || opts.EnableWorkspaceSync {
+		r.registerRevisionTools(server, opts)
 	}
 	if opts.EnableLinkRefactor {
 		r.registerRefactorTools(server)

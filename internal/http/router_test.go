@@ -3,6 +3,7 @@ package http_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -24,6 +25,7 @@ import (
 	"github.com/perber/wiki/internal/test_utils"
 	"github.com/perber/wiki/internal/wiki"
 	wikiauth "github.com/perber/wiki/internal/wiki/auth"
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 type panicRegistrar struct{}
@@ -1036,6 +1038,703 @@ func TestConfigEndpoint_IncludesEnableLinkRefactor(t *testing.T) {
 
 	if !gotEnabled {
 		t.Fatalf("Expected enableLinkRefactor=true, got %v", gotEnabled)
+	}
+}
+
+func TestConfigEndpoint_IncludesEnableWorkspaceSyncWhenDisabled(t *testing.T) {
+	w := createWikiTestInstance(t)
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		InjectCodeInHeader:      "",
+		AllowInsecure:           true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		HideLinkMetadataSection: false,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+
+	gotEnabled, ok := resp["enableWorkspaceSync"].(bool)
+	if !ok {
+		t.Fatalf("Expected enableWorkspaceSync in config response, got %v", resp)
+	}
+
+	if gotEnabled {
+		t.Fatalf("Expected enableWorkspaceSync=false, got %v", gotEnabled)
+	}
+}
+
+func TestWorkspaceSyncStatusEndpoint_WhenEnabled(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
+			t.Fatalf("write page: %v", err)
+		}
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace: wiki.Workspace{
+			DataDir: dataDir,
+			RootDir: rootDir,
+		},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if resp["enabled"] != true {
+		t.Fatalf("enabled = %v, want true: %#v", resp["enabled"], resp)
+	}
+	if resp["lastCommitHash"] == "" {
+		t.Fatalf("lastCommitHash missing: %#v", resp)
+	}
+}
+
+func TestWorkspaceSyncRefreshEndpoint_SyncsDirectMarkdownCreate(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace: wiki.Workspace{
+			DataDir: dataDir,
+			RootDir: rootDir,
+		},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	if err := os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644); err != nil {
+		t.Fatalf("write direct markdown: %v", err)
+	}
+	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	configRec := httptest.NewRecorder()
+	router.ServeHTTP(configRec, configReq)
+	csrfToken := configRec.Header().Get("X-CSRF-Token")
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/refresh", nil)
+	req.Header.Set("X-CSRF-Token", csrfToken)
+	for _, cookie := range configRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST refresh = %d: %s", rec.Code, rec.Body.String())
+	}
+	pageReq := httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=direct", nil)
+	pageRec := httptest.NewRecorder()
+	router.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("GET synced page = %d: %s", pageRec.Code, pageRec.Body.String())
+	}
+	var page apiPage
+	if err := json.Unmarshal(pageRec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode synced page: %v", err)
+	}
+	if page.ID != "direct" || page.Title != "Direct" {
+		t.Fatalf("synced page = %#v, want direct page", page)
+	}
+}
+
+func TestWorkspaceSyncSnapshotsEndpoint_WhenEnabled(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
+		t.Fatalf("write page: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshots = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Snapshots  []map[string]any `json:"snapshots"`
+		NextCursor string           `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode snapshots: %v", err)
+	}
+	if len(resp.Snapshots) == 0 || resp.Snapshots[0]["id"] == "" {
+		t.Fatalf("snapshots missing commit id: %#v", resp)
+	}
+}
+
+func TestWorkspaceSyncSnapshotsEndpoint_RespectsLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
+		t.Fatalf("write page: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644); err != nil {
+		t.Fatalf("write page update: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh: %v", err)
+	}
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshots limit = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Snapshots  []map[string]any `json:"snapshots"`
+		NextCursor string           `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode snapshots: %v", err)
+	}
+	if len(resp.Snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
+	}
+	if resp.NextCursor == "" {
+		t.Fatalf("next cursor is empty, want second page cursor: %#v", resp)
+	}
+	firstID := resp.Snapshots[0]["id"]
+
+	req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
+	}
+	resp = struct {
+		Snapshots  []map[string]any `json:"snapshots"`
+		NextCursor string           `json:"nextCursor"`
+	}{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode second page snapshots: %v", err)
+	}
+	if len(resp.Snapshots) != 1 {
+		t.Fatalf("second page snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
+	}
+	if resp.Snapshots[0]["id"] == firstID {
+		t.Fatalf("second page returned same snapshot id %v", firstID)
+	}
+}
+
+func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 1\n"), 0o644); err != nil {
+		t.Fatalf("write page: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	initialCommit := w.WorkspaceSyncStatus().LastCommitHash
+	if initialCommit == "" {
+		t.Fatalf("initial workspace commit is empty")
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644); err != nil {
+		t.Fatalf("write page update: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh page 2: %v", err)
+	}
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshots first page = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Snapshots  []map[string]any `json:"snapshots"`
+		NextCursor string           `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode first page snapshots: %v", err)
+	}
+	if len(resp.Snapshots) != 1 || resp.NextCursor == "" {
+		t.Fatalf("first page response = %#v, want one snapshot with cursor", resp)
+	}
+	firstPageID, _ := resp.Snapshots[0]["id"].(string)
+
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 3\n"), 0o644); err != nil {
+		t.Fatalf("write page newer update: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh page 3: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
+	}
+	resp = struct {
+		Snapshots  []map[string]any `json:"snapshots"`
+		NextCursor string           `json:"nextCursor"`
+	}{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode second page snapshots: %v", err)
+	}
+	if len(resp.Snapshots) != 1 {
+		t.Fatalf("second page snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
+	}
+	secondPageID, _ := resp.Snapshots[0]["id"].(string)
+	if secondPageID == firstPageID {
+		t.Fatalf("second page duplicated first page snapshot %s after newer commit", firstPageID)
+	}
+	if secondPageID != initialCommit {
+		t.Fatalf("second page snapshot = %s, want original older commit %s", secondPageID, initialCommit)
+	}
+}
+
+func TestWorkspaceSyncStatusEndpoint_PublicAccessAllowsUnauthenticatedRead(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
+		t.Fatalf("write page: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET public workspace status = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkspaceSyncSnapshotRestoreEndpoint_RestoresMarkdownOnly(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One A\n"), 0o644); err != nil {
+		t.Fatalf("write one.md: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+	status := w.WorkspaceSyncStatus()
+	if status.LastCommitHash == "" {
+		t.Fatalf("missing initial snapshot hash")
+	}
+
+	if err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One current\n"), 0o644); err != nil {
+		t.Fatalf("write current one.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "two.md"), []byte("---\nleafwiki_id: two\nleafwiki_title: Two\n---\n# Two current\n"), 0o644); err != nil {
+		t.Fatalf("write two.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "image.png"), []byte("png"), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	configRec := httptest.NewRecorder()
+	router.ServeHTTP(configRec, configReq)
+	csrfToken := configRec.Header().Get("X-CSRF-Token")
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/snapshots/"+status.LastCommitHash+"/restore", nil)
+	req.Header.Set("X-CSRF-Token", csrfToken)
+	for _, cookie := range configRec.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST restore = %d: %s", rec.Code, rec.Body.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "one.md"))
+	if err != nil {
+		t.Fatalf("read restored one.md: %v", err)
+	}
+	if !strings.Contains(string(raw), "# One A") {
+		t.Fatalf("one.md was not restored: %q", string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "two.md")); !os.IsNotExist(err) {
+		t.Fatalf("two.md state = %v, want removed", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(rootDir, "image.png")); err != nil || string(raw) != "png" {
+		t.Fatalf("image.png = %q, %v; want untouched png", string(raw), err)
+	}
+	snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
+	}
+	if len(snapshots) == 0 {
+		t.Fatalf("snapshots empty after restore")
+	}
+	if snapshots[0].Source != string(workspacesync.SourceWeb) {
+		t.Fatalf("restore snapshot source = %q, want web", snapshots[0].Source)
+	}
+}
+
+func TestWorkspaceSyncPageRevisionsEndpoint_UsesGitBackedHistory(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	configRec := httptest.NewRecorder()
+	router.ServeHTTP(configRec, configReq)
+	if configRec.Code != http.StatusOK {
+		t.Fatalf("GET config = %d: %s", configRec.Code, configRec.Body.String())
+	}
+	csrfToken := configRec.Header().Get("X-CSRF-Token")
+	createReq := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Git History","slug":"git-history"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-CSRF-Token", csrfToken)
+	for _, cookie := range configRec.Result().Cookies() {
+		createReq.AddCookie(cookie)
+	}
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST page = %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var page apiPage
+	if err := json.Unmarshal(createRec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode page: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/revisions", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET workspace revisions = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Revisions  []map[string]any `json:"revisions"`
+		NextCursor string           `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode revisions: %v", err)
+	}
+	if len(resp.Revisions) == 0 {
+		t.Fatalf("expected at least one Git-backed revision: %#v", resp)
+	}
+	if resp.Revisions[0]["id"] == "" || resp.Revisions[0]["pageId"] != page.ID {
+		t.Fatalf("unexpected workspace revision: %#v", resp.Revisions[0])
+	}
+}
+
+func TestWorkspaceSyncRevisionSnapshotAndRestoreEndpoint_UseGitBackend(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	previous := `---
+leafwiki_id: restore-page
+leafwiki_title: Restore Page
+---
+
+# Restore Page
+
+previous content`
+	if err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(previous), 0o644); err != nil {
+		t.Fatalf("write previous markdown: %v", err)
+	}
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		AuthDisabled:            true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+	})
+
+	revisionsReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions", nil)
+	revisionsRec := httptest.NewRecorder()
+	router.ServeHTTP(revisionsRec, revisionsReq)
+	if revisionsRec.Code != http.StatusOK {
+		t.Fatalf("GET revisions = %d: %s", revisionsRec.Code, revisionsRec.Body.String())
+	}
+	var revisionsResp struct {
+		Revisions []map[string]any `json:"revisions"`
+	}
+	if err := json.Unmarshal(revisionsRec.Body.Bytes(), &revisionsResp); err != nil {
+		t.Fatalf("decode revisions: %v", err)
+	}
+	if len(revisionsResp.Revisions) == 0 {
+		t.Fatalf("expected initial revision: %#v", revisionsResp)
+	}
+	oldRevisionID, _ := revisionsResp.Revisions[0]["id"].(string)
+	if oldRevisionID == "" {
+		t.Fatalf("old revision id missing: %#v", revisionsResp.Revisions[0])
+	}
+
+	current := strings.Replace(previous, "previous content", "current content", 1)
+	if err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(current), 0o644); err != nil {
+		t.Fatalf("write current markdown: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh current: %v", err)
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions/"+oldRevisionID, nil)
+	snapshotRec := httptest.NewRecorder()
+	router.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("GET revision snapshot = %d: %s", snapshotRec.Code, snapshotRec.Body.String())
+	}
+	var snapshot struct {
+		Content string `json:"content"`
+		Assets  []any  `json:"assets"`
+	}
+	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if !strings.Contains(snapshot.Content, "previous content") || len(snapshot.Assets) != 0 {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+
+	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	configRec := httptest.NewRecorder()
+	router.ServeHTTP(configRec, configReq)
+	csrfToken := configRec.Header().Get("X-CSRF-Token")
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/pages/restore-page/revisions/"+oldRevisionID+"/restore", nil)
+	restoreReq.Header.Set("X-CSRF-Token", csrfToken)
+	for _, cookie := range configRec.Result().Cookies() {
+		restoreReq.AddCookie(cookie)
+	}
+	restoreRec := httptest.NewRecorder()
+	router.ServeHTTP(restoreRec, restoreReq)
+	if restoreRec.Code != http.StatusOK {
+		t.Fatalf("POST restore = %d: %s", restoreRec.Code, restoreRec.Body.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "restore-page.md"))
+	if err != nil {
+		t.Fatalf("read restored markdown: %v", err)
+	}
+	if !strings.Contains(string(raw), "previous content") {
+		t.Fatalf("restored markdown = %q, want previous content", string(raw))
 	}
 }
 

@@ -25,6 +25,7 @@ type configOutput struct {
 	BasePath                string `json:"basePath"`
 	MaxAssetUploadSizeBytes int64  `json:"maxAssetUploadSizeBytes"`
 	EnableRevision          bool   `json:"enableRevision"`
+	EnableWorkspaceSync     bool   `json:"enableWorkspaceSync"`
 	EnableLinkRefactor      bool   `json:"enableLinkRefactor"`
 	HTTPRemoteUserEnabled   bool   `json:"httpRemoteUserEnabled"`
 	HTTPRemoteUserLogoutURL string `json:"httpRemoteUserLogoutUrl"`

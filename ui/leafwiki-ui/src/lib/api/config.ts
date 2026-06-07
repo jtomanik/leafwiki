@@ -11,6 +11,7 @@ export type Config = {
   authDisabled: boolean
   maxAssetUploadSizeBytes: number
   enableRevision: boolean
+  enableWorkspaceSync: boolean
   enableLinkRefactor: boolean
   httpRemoteUserEnabled: boolean
   httpRemoteUserLogoutUrl: string

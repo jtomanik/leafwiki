@@ -49,11 +49,13 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		"--root-dir",
 		"--log-target",
 		"--log-file",
+		"--enable-workspace-sync",
 		"--mcp",
 		"--api-key",
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
 		"LEAFWIKI_LOG_FILE",
+		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
 		"LEAFWIKI_MCP",
 		"LEAFWIKI_MCP_API_KEY",
 	} {
@@ -70,6 +72,30 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		if strings.Contains(output, removed) {
 			t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
 		}
+	}
+}
+
+func TestRegisterFlagsParsesEnableWorkspaceSync(t *testing.T) {
+	fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := registerFlags(fs)
+
+	if err := fs.Parse([]string{"--enable-workspace-sync"}); err != nil {
+		t.Fatalf("parse --enable-workspace-sync: %v", err)
+	}
+
+	if !*flags.enableWorkspaceSync {
+		t.Fatalf("enableWorkspaceSync = false, want true")
+	}
+}
+
+func TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent(t *testing.T) {
+	t.Setenv("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "true")
+
+	got := resolveBool("enable-workspace-sync", false, map[string]bool{}, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
+
+	if !got {
+		t.Fatalf("enableWorkspaceSync from env = false, want true")
 	}
 }
 
@@ -1471,6 +1497,102 @@ func TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecifie
 	proc.stop(t)
 }
 
+func TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	if !desc.Config.EnableWorkspaceSync {
+		t.Fatalf("descriptor config EnableWorkspaceSync = false, want true")
+	}
+	proc.stop(t)
+}
+
+func TestMainProcess_RejectsRevisionAndWorkspaceSyncTogether(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+		"--disable-auth",
+		"--enable-revision",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", freeTCPPort(t),
+		"--log-target", "stderr",
+	}, nil, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("combined revision/workspace-sync startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("combined revision/workspace-sync startup hung; expected immediate validation error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "enable-revision and enable-workspace-sync cannot be combined") {
+		t.Fatalf("stderr = %q, want mutual exclusion error", stderr)
+	}
+}
+
+func TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--allow-insecure",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
+	if err != nil {
+		t.Fatalf("GET /api/config: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
+	}
+	var config map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if config["enableWorkspaceSync"] != true {
+		t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
+	}
+	proc.stop(t)
+}
+
 func TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor(t *testing.T) {
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
@@ -2264,6 +2386,27 @@ func TestCompareProjectDaemonConfigForPlainServerPreservesPublicMCPMismatch(t *t
 
 	if len(mismatches) != 1 || mismatches[0].Field != "public-mcp-enabled" {
 		t.Fatalf("mismatches = %#v, want public MCP mismatch for plain server startup", mismatches)
+	}
+}
+
+func TestDaemonConfigForRuntimeIncludesWorkspaceSync(t *testing.T) {
+	baseDir := t.TempDir()
+	cfg := testRuntimeConfig(
+		filepath.Join(baseDir, "data"),
+		filepath.Join(baseDir, "content"),
+		"8080",
+		mcpTransports{},
+		true,
+	)
+	cfg.EnableWorkspaceSync = true
+
+	daemonCfg, err := daemonConfigForRuntime(cfg)
+	if err != nil {
+		t.Fatalf("daemon config: %v", err)
+	}
+
+	if !daemonCfg.EnableWorkspaceSync {
+		t.Fatalf("EnableWorkspaceSync = false, want true")
 	}
 }
 

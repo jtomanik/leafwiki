@@ -6,6 +6,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
@@ -27,6 +28,7 @@ func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
 	addEditorTool[applyRefactorInput, pageOutput](r, server, toolApplyRefactor, func(ctx context.Context, actor toolActor, in applyRefactorInput) (pageOutput, error) {
 		page, err := r.applyRef.Execute(ctx, wikipages.RefactorApplyInput{
 			UserID:       actor.ID,
+			Source:       pagesave.PageMutationSourceMCP,
 			Version:      strings.TrimSpace(in.Version),
 			RewriteLinks: in.RewriteLinks,
 			RefactorPreviewInput: wikipages.RefactorPreviewInput{

@@ -11,6 +11,7 @@ import (
 // MovePageInput is the input for MovePageUseCase.
 type MovePageInput struct {
 	UserID   string
+	Source   string
 	ID       string
 	Version  string
 	ParentID string
@@ -79,6 +80,7 @@ func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
 	event := pagesave.PageSaveEvent{
 		Operation: pagesave.PageOperationMove,
 		UserID:    in.UserID,
+		Source:    in.Source,
 		OldPath:   oldPath,
 	}
 
@@ -91,7 +93,9 @@ func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
 		event.AffectedPages = append(event.AffectedPages, p)
 	}
 
-	uc.orchestrator.Run(event)
+	if err := uc.orchestrator.Run(event); err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -6,11 +6,13 @@ import (
 
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 // ConvertPageInput is the input for ConvertPageUseCase.
 type ConvertPageInput struct {
 	UserID     string
+	Source     string
 	ID         string
 	Version    string
 	TargetKind tree.NodeKind
@@ -18,14 +20,20 @@ type ConvertPageInput struct {
 
 // ConvertPageUseCase converts a page to a different node kind (page ↔ section).
 type ConvertPageUseCase struct {
-	tree     *tree.TreeService
-	revision *revision.Service
-	log      *slog.Logger
+	tree         *tree.TreeService
+	revision     *revision.Service
+	orchestrator *pagesave.PageSaveOrchestrator
+	log          *slog.Logger
 }
 
 // NewConvertPageUseCase constructs a ConvertPageUseCase.
-func NewConvertPageUseCase(t *tree.TreeService, r *revision.Service, log *slog.Logger) *ConvertPageUseCase {
-	return &ConvertPageUseCase{tree: t, revision: r, log: log}
+func NewConvertPageUseCase(
+	t *tree.TreeService,
+	r *revision.Service,
+	o *pagesave.PageSaveOrchestrator,
+	log *slog.Logger,
+) *ConvertPageUseCase {
+	return &ConvertPageUseCase{tree: t, revision: r, orchestrator: o, log: log}
 }
 
 // Execute converts the node kind and records a structure revision.
@@ -34,8 +42,31 @@ func (uc *ConvertPageUseCase) Execute(_ context.Context, in ConvertPageInput) er
 		return newPageRootOperationError("convert")
 	}
 	in.Version = sanitizeClientVersion(in.Version)
+	before, err := uc.tree.GetPage(in.ID)
+	if err != nil {
+		return err
+	}
+	oldPath := before.CalculatePath()
 	if err := uc.tree.ConvertNode(in.UserID, in.ID, in.TargetKind, in.Version); err != nil {
 		return err
+	}
+	after, err := uc.tree.GetPage(in.ID)
+	if err != nil {
+		return err
+	}
+	if uc.orchestrator != nil {
+		if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
+			Operation:     pagesave.PageOperationUpdate,
+			UserID:        in.UserID,
+			Source:        in.Source,
+			Before:        snapshotPage(before),
+			After:         after,
+			OldPath:       oldPath,
+			AffectedPages: []*tree.Page{after},
+			Summary:       "page converted",
+		}); err != nil {
+			return err
+		}
 	}
 	if uc.revision != nil {
 		if _, _, err := uc.revision.RecordStructureChange(in.ID, in.UserID, ""); err != nil {
@@ -43,4 +74,16 @@ func (uc *ConvertPageUseCase) Execute(_ context.Context, in ConvertPageInput) er
 		}
 	}
 	return nil
+}
+
+func snapshotPage(page *tree.Page) *tree.Page {
+	if page == nil || page.PageNode == nil {
+		return page
+	}
+	node := *page.PageNode
+	return &tree.Page{
+		PageNode:   &node,
+		Content:    page.Content,
+		RawContent: page.RawContent,
+	}
 }

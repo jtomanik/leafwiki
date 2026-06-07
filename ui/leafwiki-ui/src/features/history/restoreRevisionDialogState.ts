@@ -5,6 +5,7 @@ import { useDialogsStore } from '@/stores/dialogs'
 export function confirmRestoreRevision(
   revision: Revision,
   currentSlug: string,
+  gitBackedWorkspace = false,
 ): Promise<boolean | null> {
   return new Promise((resolve) => {
     useDialogsStore
@@ -12,6 +13,7 @@ export function confirmRestoreRevision(
       .openDialog(DIALOG_RESTORE_REVISION_CONFIRMATION, {
         revision,
         currentSlug,
+        gitBackedWorkspace,
         onResolve: (confirmed: boolean | null) => {
           resolve(confirmed)
         },

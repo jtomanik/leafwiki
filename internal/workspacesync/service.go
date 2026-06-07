@@ -1,0 +1,1075 @@
+package workspacesync
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/revision"
+	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
+)
+
+type Reason = gitrevisions.Reason
+
+const (
+	ReasonStartup  = gitrevisions.ReasonStartup
+	ReasonWatcher  = gitrevisions.ReasonWatcher
+	ReasonExplicit = gitrevisions.ReasonExplicit
+	ReasonWebWrite = gitrevisions.ReasonWebWrite
+	ReasonRestore  = gitrevisions.ReasonRestore
+)
+
+type Source = gitrevisions.Source
+
+const (
+	SourceFilesystem = gitrevisions.SourceFilesystem
+	SourceWeb        = gitrevisions.SourceWeb
+	SourceMCP        = gitrevisions.SourceMCP
+	SourceSystem     = gitrevisions.SourceSystem
+	SourceUnknown    = gitrevisions.SourceUnknown
+)
+
+const watcherBatchDebounce = 250 * time.Millisecond
+
+type Actor = gitrevisions.Actor
+
+type treeReconstructor interface {
+	ReconstructTreeFromFS() error
+}
+
+type revisionStore interface {
+	Capture(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	Amend(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	ListCommits(context.Context, gitrevisions.ListRequest) ([]gitrevisions.Commit, error)
+	ForEachCommit(context.Context, func(gitrevisions.Commit) (bool, error)) error
+	ChangedMarkdownPaths(context.Context, string) ([]string, error)
+	ChangedMarkdownContents(context.Context, string) (map[string]string, error)
+	GetCommit(context.Context, string) (gitrevisions.Commit, error)
+	RestoreWorkspace(context.Context, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocument(context.Context, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocumentToPath(context.Context, string, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocumentContentToPath(context.Context, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	FilesAt(context.Context, string) (map[string]string, error)
+}
+
+type watcherEvent struct {
+	Path    string
+	Dropped bool
+}
+
+type fileWatcher interface {
+	Watch(context.Context) error
+	Events() <-chan watcherEvent
+	Dropped() <-chan watcherEvent
+}
+
+type watcherFactory func(rootDir string) (fileWatcher, error)
+
+type ServiceOptions struct {
+	Enabled        bool
+	DataDir        string
+	RootDir        string
+	Tree           treeReconstructor
+	Store          revisionStore
+	WatcherFactory watcherFactory
+	AfterSync      func() error
+}
+
+type SyncRequest struct {
+	Reason           Reason
+	Source           Source
+	Actor            Actor
+	AdditionalActors []Actor
+}
+
+type ValidationError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+type SyncStatus struct {
+	Enabled                    bool
+	WatcherEnabled             bool
+	WatcherRunning             bool
+	PendingEventCount          int
+	LastSyncTime               time.Time
+	LastError                  string
+	LastCommitHash             string
+	RecentChangedMarkdownPaths []string
+	ValidationErrors           []ValidationError
+}
+
+type Snapshot struct {
+	ID                   string    `json:"id"`
+	Message              string    `json:"message,omitempty"`
+	AuthorID             string    `json:"authorId,omitempty"`
+	AuthorName           string    `json:"author,omitempty"`
+	AuthorEmail          string    `json:"authorEmail,omitempty"`
+	CreatedAt            time.Time `json:"createdAt,omitempty"`
+	Source               string    `json:"source,omitempty"`
+	Reason               string    `json:"reason,omitempty"`
+	ChangedMarkdownCount int       `json:"changedMarkdownCount,omitempty"`
+}
+
+type SnapshotList struct {
+	Snapshots  []Snapshot
+	NextCursor string
+}
+
+type PageRevisionList struct {
+	Revisions  []*revision.Revision
+	NextCursor string
+}
+
+type Service struct {
+	enabled        bool
+	rootDir        string
+	tree           treeReconstructor
+	store          revisionStore
+	watcherFactory watcherFactory
+	afterSync      func() error
+
+	mu            sync.Mutex
+	status        SyncStatus
+	watcherCancel context.CancelFunc
+	watcherDone   chan struct{}
+}
+
+func PublicEditorActor() Actor {
+	return gitrevisions.PublicEditorActor()
+}
+
+func NewService(options ServiceOptions) (*Service, error) {
+	status := SyncStatus{Enabled: options.Enabled}
+	service := &Service{
+		enabled:        options.Enabled,
+		rootDir:        strings.TrimSpace(options.RootDir),
+		tree:           options.Tree,
+		watcherFactory: options.WatcherFactory,
+		afterSync:      options.AfterSync,
+		status:         status,
+	}
+	if !options.Enabled {
+		return service, nil
+	}
+	if options.Tree == nil {
+		return nil, fmt.Errorf("tree service is required")
+	}
+	if options.Store != nil {
+		service.store = options.Store
+	} else {
+		store, err := gitrevisions.Open(gitrevisions.StoreOptions{
+			DataDir: options.DataDir,
+			RootDir: options.RootDir,
+		})
+		if err != nil {
+			return nil, err
+		}
+		service.store = store
+	}
+	return service, nil
+}
+
+func (s *Service) SetAfterSync(fn func() error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.afterSync = fn
+}
+
+func (s *Service) StartWatcher(ctx context.Context) error {
+	if !s.enabled {
+		return nil
+	}
+	factory := s.watcherFactory
+	if factory == nil {
+		factory = newFileWatcher
+	}
+	watcher, err := factory(s.rootDir)
+	if err != nil {
+		s.mu.Lock()
+		s.status.WatcherEnabled = true
+		s.status.WatcherRunning = false
+		s.status.LastError = err.Error()
+		s.mu.Unlock()
+		return err
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	s.mu.Lock()
+	s.status.WatcherEnabled = true
+	s.status.WatcherRunning = true
+	s.watcherCancel = cancel
+	s.watcherDone = done
+	s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := watcher.Watch(watchCtx); err != nil && watchCtx.Err() == nil {
+			s.mu.Lock()
+			s.status.LastError = err.Error()
+			s.mu.Unlock()
+			if _, syncErr := s.SyncNow(context.Background(), SyncRequest{
+				Reason: ReasonWatcher,
+				Source: SourceFilesystem,
+				Actor:  PublicEditorActor(),
+			}); syncErr != nil {
+				s.mu.Lock()
+				s.status.LastError = err.Error() + ": " + syncErr.Error()
+				s.mu.Unlock()
+			} else {
+				s.mu.Lock()
+				s.status.LastError = err.Error()
+				s.mu.Unlock()
+			}
+		}
+		s.mu.Lock()
+		s.status.WatcherRunning = false
+		s.mu.Unlock()
+	}()
+	go func() {
+		defer wg.Done()
+		s.consumeWatcherEvents(watchCtx, watcher)
+	}()
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	return nil
+}
+
+func (s *Service) StopWatcher() {
+	s.mu.Lock()
+	cancel := s.watcherCancel
+	done := s.watcherDone
+	s.watcherCancel = nil
+	s.watcherDone = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+func (s *Service) consumeWatcherEvents(ctx context.Context, watcher fileWatcher) {
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	pendingCount := 0
+	dropped := false
+	droppedPath := ""
+
+	stopTimer := func() {
+		if timer == nil {
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer = nil
+		timerC = nil
+	}
+	queue := func(event watcherEvent) {
+		relPath, managed := managedMarkdownEventPath(s.rootDir, event.Path)
+		if !managed && !event.Dropped {
+			return
+		}
+		pendingCount++
+		if event.Dropped {
+			dropped = true
+			if relPath != "" {
+				droppedPath = relPath
+			}
+		}
+		s.mu.Lock()
+		s.status.PendingEventCount++
+		s.mu.Unlock()
+		if timer == nil {
+			timer = time.NewTimer(watcherBatchDebounce)
+			timerC = timer.C
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(watcherBatchDebounce)
+	}
+	flush := func() {
+		if pendingCount == 0 {
+			return
+		}
+		stopTimer()
+		s.handleWatcherBatch(ctx, pendingCount, dropped, droppedPath)
+		pendingCount = 0
+		dropped = false
+		droppedPath = ""
+	}
+
+	defer stopTimer()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timerC:
+			flush()
+		case event, ok := <-watcher.Events():
+			if !ok {
+				flush()
+				return
+			}
+			queue(event)
+		case event, ok := <-watcher.Dropped():
+			if !ok {
+				flush()
+				return
+			}
+			event.Dropped = true
+			queue(event)
+		}
+	}
+}
+
+func (s *Service) handleWatcherBatch(ctx context.Context, eventCount int, dropped bool, droppedPath string) {
+	_, err := s.SyncNow(ctx, SyncRequest{
+		Reason: ReasonWatcher,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+
+	s.mu.Lock()
+	s.status.PendingEventCount -= eventCount
+	if s.status.PendingEventCount < 0 {
+		s.status.PendingEventCount = 0
+	}
+	if dropped {
+		if droppedPath == "" {
+			s.status.LastError = "watcher dropped events"
+		} else {
+			s.status.LastError = "watcher dropped events for " + droppedPath
+		}
+	} else if err != nil {
+		s.status.LastError = err.Error()
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.enabled {
+		return s.status, nil
+	}
+	commitReq := gitrevisions.CommitRequest{
+		Reason:           req.Reason,
+		Source:           req.Source,
+		Actor:            req.Actor,
+		AdditionalActors: req.AdditionalActors,
+	}
+	commit, err := s.store.Capture(ctx, commitReq)
+	if err != nil {
+		s.status.LastError = err.Error()
+		s.status.LastSyncTime = time.Now().UTC()
+		return s.status, err
+	}
+	s.status.LastCommitHash = commit.Hash
+	s.status.LastSyncTime = time.Now().UTC()
+	s.status.LastError = ""
+	s.status.ValidationErrors = nil
+	s.recordChangedMarkdownPaths(commit.ChangedMarkdownPaths)
+
+	if err := s.tree.ReconstructTreeFromFS(); err != nil {
+		s.status.LastError = err.Error()
+		s.status.ValidationErrors = s.validationErrorsFromError(err)
+		return s.status, nil
+	}
+	if err := s.captureWritebacksLocked(ctx, commitReq, commit); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	if err := s.validateAndRunAfterSyncLocked(); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	return s.status, nil
+}
+
+func (s *Service) recordChangedMarkdownPaths(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(s.status.RecentChangedMarkdownPaths)+len(paths))
+	recent := make([]string, 0, len(s.status.RecentChangedMarkdownPaths)+len(paths))
+	for _, path := range append(s.status.RecentChangedMarkdownPaths, paths...) {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		recent = append(recent, trimmed)
+	}
+	if len(recent) > 20 {
+		recent = recent[len(recent)-20:]
+	}
+	s.status.RecentChangedMarkdownPaths = recent
+}
+
+func managedMarkdownEventPath(rootDir string, path string) (string, bool) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", false
+	}
+	normalizedRoot := strings.TrimSpace(rootDir)
+	if normalizedRoot != "" && filepath.IsAbs(trimmed) {
+		rel, err := filepath.Rel(normalizedRoot, trimmed)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+			trimmed = rel
+		}
+	}
+	rel := filepath.ToSlash(filepath.Clean(trimmed))
+	if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
+		return "", false
+	}
+	parts := strings.Split(rel, "/")
+	for _, part := range parts {
+		if part == ".git" || part == ".leafwiki" {
+			return "", false
+		}
+	}
+	base := parts[len(parts)-1]
+	if strings.HasPrefix(base, ".") {
+		return "", false
+	}
+	if isTemporaryPath(base) {
+		return "", false
+	}
+	if !gitrevisions.IsManagedMarkdownRelPath(rel) {
+		return "", false
+	}
+	return rel, true
+}
+
+func isTemporaryPath(base string) bool {
+	switch {
+	case strings.HasSuffix(base, "~"):
+		return true
+	case strings.EqualFold(filepath.Ext(base), ".swp"):
+		return true
+	case strings.EqualFold(filepath.Ext(base), ".tmp"):
+		return true
+	case strings.HasSuffix(strings.ToLower(base), ".download"):
+		return true
+	case strings.HasSuffix(strings.ToLower(base), ".partial"):
+		return true
+	case strings.HasSuffix(strings.ToLower(base), ".crdownload"):
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) Status() SyncStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status
+}
+
+func (s *Service) ListSnapshots(ctx context.Context, limit int) ([]Snapshot, error) {
+	out, err := s.ListSnapshotPage(ctx, "", limit)
+	if err != nil {
+		return nil, err
+	}
+	return out.Snapshots, nil
+}
+
+func (s *Service) ListSnapshotPage(ctx context.Context, cursor string, limit int) (SnapshotList, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled {
+		return SnapshotList{}, nil
+	}
+	requestedLimit := limit
+	if requestedLimit <= 0 {
+		requestedLimit = 50
+	}
+	commits, err := s.store.ListCommits(ctx, gitrevisions.ListRequest{
+		Cursor: strings.TrimSpace(cursor),
+		Limit:  requestedLimit + 1,
+	})
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	snapshots := make([]Snapshot, 0, len(commits))
+	for _, commit := range commits {
+		snapshots = append(snapshots, Snapshot{
+			ID:                   commit.Hash,
+			Message:              commit.Message,
+			AuthorID:             commit.AuthorID,
+			AuthorName:           commit.AuthorName,
+			AuthorEmail:          commit.AuthorEmail,
+			CreatedAt:            commit.CreatedAt,
+			Source:               string(commit.Source),
+			Reason:               string(commit.Reason),
+			ChangedMarkdownCount: commit.ChangedMarkdownCount,
+		})
+	}
+	nextCursor := ""
+	if len(snapshots) > requestedLimit {
+		nextCursor = snapshots[requestedLimit-1].ID
+		snapshots = snapshots[:requestedLimit]
+	}
+	return SnapshotList{Snapshots: snapshots, NextCursor: nextCursor}, nil
+}
+
+func (s *Service) RestoreWorkspace(ctx context.Context, commitID string, actor Actor) (SyncStatus, error) {
+	return s.RestoreWorkspaceWithSource(ctx, commitID, actor, SourceSystem)
+}
+
+func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID string, actor Actor, source Source) (SyncStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled {
+		return s.status, fmt.Errorf("workspace sync is not enabled")
+	}
+	if source == "" {
+		source = SourceSystem
+	}
+	commit, err := s.store.RestoreWorkspace(ctx, commitID, gitrevisions.CommitRequest{
+		Reason: gitrevisions.ReasonRestore,
+		Source: source,
+		Actor:  actor,
+	})
+	if err != nil {
+		s.status.LastError = err.Error()
+		s.status.LastSyncTime = time.Now().UTC()
+		return s.status, err
+	}
+	s.status.LastCommitHash = commit.Hash
+	s.status.LastSyncTime = time.Now().UTC()
+	s.status.LastError = ""
+	s.status.ValidationErrors = nil
+	if err := s.tree.ReconstructTreeFromFS(); err != nil {
+		s.status.LastError = err.Error()
+		s.status.ValidationErrors = s.validationErrorsFromError(err)
+		return s.status, nil
+	}
+	s.recordChangedMarkdownPaths(commit.ChangedMarkdownPaths)
+	if err := s.captureWritebacksLocked(ctx, gitrevisions.CommitRequest{
+		Reason: gitrevisions.ReasonRestore,
+		Source: source,
+		Actor:  actor,
+	}, commit); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	if err := s.validateAndRunAfterSyncLocked(); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	return s.status, nil
+}
+
+func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, commitID string) (*revision.RevisionSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled || page == nil || page.PageNode == nil {
+		return nil, fmt.Errorf("workspace sync is not enabled")
+	}
+	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID)
+	if err != nil {
+		return nil, err
+	}
+	content, revisionPath, ok := changedContentForPageAtCommit(page, pageMarkdownPath(page), changedFiles)
+	if !ok {
+		return nil, fmt.Errorf("document %s did not change in commit %s", pageMarkdownPath(page), commitID)
+	}
+	commit, err := s.store.GetCommit(ctx, commitID)
+	if err != nil {
+		return nil, err
+	}
+	return &revision.RevisionSnapshot{
+		Revision: revisionForPageContent(page, commit, revisionPath, content),
+		Content:  content,
+		Assets:   nil,
+	}, nil
+}
+
+func (s *Service) RestoreDocument(ctx context.Context, page *tree.Page, commitID string, actor Actor) (SyncStatus, error) {
+	return s.RestoreDocumentWithSource(ctx, page, commitID, actor, SourceSystem)
+}
+
+func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page, commitID string, actor Actor, source Source) (SyncStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled || page == nil || page.PageNode == nil {
+		return s.status, fmt.Errorf("workspace sync is not enabled")
+	}
+	if source == "" {
+		source = SourceSystem
+	}
+	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID)
+	if err != nil {
+		s.status.LastError = err.Error()
+		s.status.LastSyncTime = time.Now().UTC()
+		return s.status, err
+	}
+	targetRelPath := s.currentPageMarkdownPath(page)
+	content, _, ok := changedContentForPageAtCommit(page, targetRelPath, changedFiles)
+	if !ok {
+		err := fmt.Errorf("document %s did not change in commit %s", targetRelPath, commitID)
+		s.status.LastError = err.Error()
+		s.status.LastSyncTime = time.Now().UTC()
+		return s.status, err
+	}
+	commit, err := s.store.RestoreDocumentContentToPath(ctx, targetRelPath, content, gitrevisions.CommitRequest{
+		Reason: gitrevisions.ReasonRestore,
+		Source: source,
+		Actor:  actor,
+	})
+	if err != nil {
+		s.status.LastError = err.Error()
+		s.status.LastSyncTime = time.Now().UTC()
+		return s.status, err
+	}
+	s.status.LastCommitHash = commit.Hash
+	s.status.LastSyncTime = time.Now().UTC()
+	s.status.LastError = ""
+	s.status.ValidationErrors = nil
+	s.recordChangedMarkdownPaths(commit.ChangedMarkdownPaths)
+	if err := s.tree.ReconstructTreeFromFS(); err != nil {
+		s.status.LastError = err.Error()
+		s.status.ValidationErrors = s.validationErrorsFromError(err)
+		return s.status, err
+	}
+	if err := s.captureWritebacksLocked(ctx, gitrevisions.CommitRequest{
+		Reason: gitrevisions.ReasonRestore,
+		Source: source,
+		Actor:  actor,
+	}, commit); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	if err := s.validateAndRunAfterSyncLocked(); err != nil {
+		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	return s.status, nil
+}
+
+func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.CommitRequest, commit *gitrevisions.Commit) error {
+	if commit == nil {
+		return nil
+	}
+	req.BatchID = commit.BatchID
+	req.ChangedMarkdownPaths = commit.ChangedMarkdownPaths
+	var (
+		writebackCommit *gitrevisions.Commit
+		err             error
+	)
+	if commit.Created {
+		writebackCommit, err = s.store.Amend(ctx, req)
+	} else {
+		writebackCommit, err = s.store.Capture(ctx, req)
+	}
+	if err != nil {
+		return err
+	}
+	if writebackCommit != nil && writebackCommit.Hash != "" {
+		s.status.LastCommitHash = writebackCommit.Hash
+		s.recordChangedMarkdownPaths(writebackCommit.ChangedMarkdownPaths)
+	}
+	return nil
+}
+
+func (s *Service) validateAndRunAfterSyncLocked() error {
+	if validationErrors := s.validateWorkspaceMarkdownFiles(); len(validationErrors) > 0 {
+		s.status.LastError = validationErrors[0].Message
+		s.status.ValidationErrors = validationErrors
+	}
+	return s.runAfterSyncLocked()
+}
+
+func (s *Service) runAfterSyncLocked() error {
+	if s.afterSync == nil {
+		return nil
+	}
+	return s.afterSync()
+}
+
+func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor string, limit int) (PageRevisionList, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.enabled || page == nil || page.PageNode == nil {
+		return PageRevisionList{}, nil
+	}
+	requestedLimit := limit
+	if requestedLimit <= 0 {
+		requestedLimit = 50
+	}
+	relPath := pageMarkdownPath(page)
+	scanLimit := requestedLimit + 1
+	revisions := make([]*revision.Revision, 0, scanLimit)
+	cursor = strings.TrimSpace(cursor)
+	foundCursor := cursor == ""
+	err := s.store.ForEachCommit(ctx, func(commit gitrevisions.Commit) (bool, error) {
+		if !foundCursor {
+			if commit.Hash == cursor {
+				foundCursor = true
+			}
+			return true, nil
+		}
+		changedFiles, err := s.store.ChangedMarkdownContents(ctx, commit.Hash)
+		if err != nil {
+			return false, err
+		}
+		content, revisionPath, ok := changedContentForPageAtCommit(page, relPath, changedFiles)
+		if !ok {
+			return true, nil
+		}
+		revisions = append(revisions, revisionForPageContent(page, commit, revisionPath, content))
+		if len(revisions) >= scanLimit {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return PageRevisionList{}, err
+	}
+	nextCursor := ""
+	if len(revisions) > requestedLimit {
+		nextCursor = revisions[requestedLimit-1].ID
+		revisions = revisions[:requestedLimit]
+	}
+	return PageRevisionList{Revisions: revisions, NextCursor: nextCursor}, nil
+}
+
+func pageMarkdownPath(page *tree.Page) string {
+	path := strings.TrimPrefix(page.CalculatePath(), "/")
+	if page != nil && page.Kind == tree.NodeKindSection {
+		if path == "" {
+			return "index.md"
+		}
+		return path + "/index.md"
+	}
+	return path + ".md"
+}
+
+func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
+	preferred := pageMarkdownPath(page)
+	rootDir := strings.TrimSpace(s.rootDir)
+	if rootDir == "" {
+		return preferred
+	}
+	dir, base := filepath.Split(filepath.FromSlash(preferred))
+	entries, err := os.ReadDir(filepath.Join(rootDir, dir))
+	if err != nil {
+		return preferred
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.EqualFold(entry.Name(), base) {
+			continue
+		}
+		candidate := filepath.ToSlash(filepath.Join(filepath.ToSlash(dir), entry.Name()))
+		if gitrevisions.IsManagedMarkdownRelPath(candidate) {
+			return candidate
+		}
+	}
+	return preferred
+}
+
+func contentForPageAtCommit(page *tree.Page, files map[string]string) (string, string, bool) {
+	return contentForPageAtCommitPath(page, pageMarkdownPath(page), files)
+}
+
+func contentForPageAtCommitPath(page *tree.Page, preferredPath string, files map[string]string) (string, string, bool) {
+	if content, ok := files[preferredPath]; ok {
+		if contentMatchesLeafWikiID(page, content) {
+			return content, preferredPath, true
+		}
+	}
+	for path, content := range files {
+		if !gitrevisions.IsManagedMarkdownRelPath(path) {
+			continue
+		}
+		fm, _, _, err := markdown.ParseFrontmatter(content)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(fm.LeafWikiID) == page.ID {
+			return content, path, true
+		}
+	}
+	return "", "", false
+}
+
+func changedContentForPageAtCommit(page *tree.Page, preferredPath string, changedFiles map[string]string) (string, string, bool) {
+	if len(changedFiles) == 0 {
+		return "", "", false
+	}
+	if content, ok := changedFiles[preferredPath]; ok {
+		if contentMatchesLeafWikiID(page, content) {
+			return content, preferredPath, true
+		}
+	}
+	paths := make([]string, 0, len(changedFiles))
+	for path := range changedFiles {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if !gitrevisions.IsManagedMarkdownRelPath(path) {
+			continue
+		}
+		content := changedFiles[path]
+		fm, _, _, err := markdown.ParseFrontmatter(content)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(fm.LeafWikiID) == page.ID {
+			return content, path, true
+		}
+	}
+	return "", "", false
+}
+
+func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
+	fm, _, _, err := markdown.ParseFrontmatter(content)
+	if err != nil {
+		return false
+	}
+	leafWikiID := strings.TrimSpace(fm.LeafWikiID)
+	return leafWikiID == "" || leafWikiID == page.ID
+}
+
+func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
+	sum := sha256.Sum256([]byte(content))
+	authorID := strings.TrimSpace(commit.AuthorID)
+	if authorID == "" {
+		authorID = PublicEditorActor().ID
+	}
+	summary := strings.TrimSpace(commit.Message)
+	if summary == "" {
+		summary = "workspace sync"
+	}
+	title := page.Title
+	if mdFile, err := markdown.NewMarkdownFileFromRaw(relPath, content); err == nil {
+		if historicalTitle, err := mdFile.GetTitle(); err == nil && strings.TrimSpace(historicalTitle) != "" {
+			title = strings.TrimSpace(historicalTitle)
+		}
+	}
+	path, slug, kind := revisionRoutePathSlugAndKind(relPath, page)
+	return &revision.Revision{
+		ID:            commit.Hash,
+		PageID:        page.ID,
+		Type:          revision.RevisionTypeContentUpdate,
+		AuthorID:      authorID,
+		CreatedAt:     commit.CreatedAt,
+		Title:         title,
+		Slug:          slug,
+		Kind:          string(kind),
+		Path:          path,
+		ContentHash:   hex.EncodeToString(sum[:]),
+		PageCreatedAt: page.Metadata.CreatedAt,
+		PageUpdatedAt: page.Metadata.UpdatedAt,
+		CreatorID:     firstNonEmpty(page.Metadata.CreatorID, authorID),
+		LastAuthorID:  firstNonEmpty(page.Metadata.LastAuthorID, authorID),
+		Summary:       summary,
+	}
+}
+
+func revisionRoutePathSlugAndKind(relPath string, page *tree.Page) (string, string, tree.NodeKind) {
+	path := strings.TrimPrefix(filepath.ToSlash(relPath), "/")
+	path = trimMarkdownExtension(path)
+	kind := tree.NodeKindPage
+	if strings.EqualFold(filepath.Base(path), "index") {
+		kind = tree.NodeKindSection
+		dir := filepath.Dir(path)
+		if dir == "." {
+			path = ""
+		} else {
+			path = filepath.ToSlash(dir)
+		}
+	}
+	slug := ""
+	if path != "" {
+		slug = filepath.Base(path)
+	}
+	if slug == "" && page != nil {
+		slug = page.Slug
+	}
+	return path, slug, kind
+}
+
+func trimMarkdownExtension(path string) string {
+	ext := filepath.Ext(path)
+	if strings.EqualFold(ext, ".md") {
+		return strings.TrimSuffix(path, ext)
+	}
+	return path
+}
+
+func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
+	rootDir := strings.TrimSpace(s.rootDir)
+	if rootDir == "" {
+		return nil
+	}
+	slugger := tree.NewSlugService()
+	var validationErrors []ValidationError
+	add := func(path string, message string) {
+		validationErrors = append(validationErrors, ValidationError{
+			Path:    normalizeValidationPath(rootDir, path),
+			Message: message,
+		})
+	}
+	err := filepath.WalkDir(rootDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			add(path, walkErr.Error())
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == rootDir {
+			return nil
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			if strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			if err := slugger.IsValidSlug(name); err != nil {
+				add(path, fmt.Sprintf("invalid directory slug %q: %s", name, err.Error()))
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".md") {
+			return nil
+		}
+		base := strings.TrimSuffix(name, filepath.Ext(name))
+		if !strings.EqualFold(base, "index") {
+			if err := slugger.IsValidSlug(base); err != nil {
+				add(path, fmt.Sprintf("invalid markdown slug %q: %s", base, err.Error()))
+				return nil
+			}
+		}
+		mdFile, err := markdown.LoadMarkdownFile(path)
+		if err != nil {
+			add(path, err.Error())
+			return nil
+		}
+		if _, err := mdFile.GetTitle(); err != nil {
+			add(path, err.Error())
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		return append(validationErrors, ValidationError{Path: "workspace", Message: err.Error()})
+	}
+	return validationErrors
+}
+
+func (s *Service) validationErrorsFromError(err error) []ValidationError {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	paths := markdownPathsInError(s.rootDir, message)
+	if len(paths) == 0 {
+		return []ValidationError{{Path: "workspace", Message: message}}
+	}
+	errors := make([]ValidationError, 0, len(paths))
+	for _, path := range paths {
+		errors = append(errors, ValidationError{Path: path, Message: message})
+	}
+	return errors
+}
+
+func markdownPathsInError(rootDir string, message string) []string {
+	seen := make(map[string]struct{})
+	var paths []string
+	for _, token := range strings.Fields(message) {
+		candidate := cleanErrorTokenMarkdownPath(token)
+		if candidate == "" {
+			continue
+		}
+		path := normalizeValidationPath(rootDir, candidate)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func cleanErrorTokenMarkdownPath(token string) string {
+	cleaned := strings.Trim(token, "\"'`()[]{}.,;:")
+	index := strings.Index(strings.ToLower(cleaned), ".md")
+	if index < 0 {
+		return ""
+	}
+	cleaned = cleaned[:index+len(".md")]
+	for _, prefix := range []string{"path=", "file="} {
+		cleaned = strings.TrimPrefix(cleaned, prefix)
+	}
+	return strings.Trim(cleaned, "\"'`()[]{}.,;:")
+}
+
+func normalizeValidationPath(rootDir string, candidate string) string {
+	candidate = filepath.Clean(candidate)
+	if filepath.IsAbs(candidate) {
+		if rootDir != "" {
+			if rel, err := filepath.Rel(rootDir, candidate); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				return filepath.ToSlash(rel)
+			}
+		}
+		return filepath.ToSlash(candidate)
+	}
+	candidate = filepath.ToSlash(candidate)
+	candidate = strings.TrimPrefix(candidate, "./")
+	if candidate == "." || strings.HasPrefix(candidate, "../") {
+		return ""
+	}
+	return candidate
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}

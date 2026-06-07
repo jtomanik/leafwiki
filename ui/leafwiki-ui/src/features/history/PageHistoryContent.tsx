@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildHistoryUrl, withBasePath } from '@/lib/routePath'
 import { useIsMobile } from '@/lib/useIsMobile'
+import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import {
   type MouseEvent as ReactMouseEvent,
@@ -33,6 +34,7 @@ import {
   History,
   Loader2,
   PanelLeftOpen,
+  RotateCcw,
 } from 'lucide-react'
 import { useLinkStatusStore } from '../links/linkstatus_store'
 import { AssetPreviewTooltip } from '../assets/AssetPreviewTooltip'
@@ -412,7 +414,13 @@ function DiffView({ comparison }: { comparison: RevisionComparison }) {
   )
 }
 
-function ChangesPanel({ comparison }: { comparison: RevisionComparison }) {
+function ChangesPanel({
+  comparison,
+  gitBackedWorkspace,
+}: {
+  comparison: RevisionComparison
+  gitBackedWorkspace: boolean
+}) {
   const diff = useMemo(
     () => buildLineDiff(comparison.base.content, comparison.target.content),
     [comparison.base.content, comparison.target.content],
@@ -443,11 +451,13 @@ function ChangesPanel({ comparison }: { comparison: RevisionComparison }) {
             emphasized={diff.summary.removedLines > 0}
             tone="removed"
           />
-          <SummaryStat
-            label="Assets changed"
-            value={String(comparison.assetChanges.length)}
-            emphasized={comparison.assetChanges.length > 0}
-          />
+          {!gitBackedWorkspace ? (
+            <SummaryStat
+              label="Assets changed"
+              value={String(comparison.assetChanges.length)}
+              emphasized={comparison.assetChanges.length > 0}
+            />
+          ) : null}
         </div>
       </section>
 
@@ -461,7 +471,7 @@ function ChangesPanel({ comparison }: { comparison: RevisionComparison }) {
         <DiffView comparison={comparison} />
       </section>
 
-      {comparison.assetChanges.length > 0 ? (
+      {!gitBackedWorkspace && comparison.assetChanges.length > 0 ? (
         <details className="page-history__asset-details">
           <summary className="page-history__asset-summary">
             Assets ({comparison.assetChanges.length})
@@ -496,12 +506,20 @@ function ChangesPanel({ comparison }: { comparison: RevisionComparison }) {
   )
 }
 
-function PreviewPanel({ snapshot }: { snapshot: RevisionSnapshot }) {
+function PreviewPanel({
+  snapshot,
+  gitBackedWorkspace,
+}: {
+  snapshot: RevisionSnapshot
+  gitBackedWorkspace: boolean
+}) {
   const pageId = snapshot.revision.pageId
   const revisionId = snapshot.revision.id
 
   const resolveAssetUrl = useCallback(
     (src: string) => {
+      if (gitBackedWorkspace) return src
+
       const normalizedSrc = src.startsWith('assets/') ? `/${src}` : src
       const assetPrefix = `/assets/${pageId}/`
 
@@ -515,7 +533,7 @@ function PreviewPanel({ snapshot }: { snapshot: RevisionSnapshot }) {
         normalizedSrc.slice(assetPrefix.length),
       )
     },
-    [pageId, revisionId],
+    [gitBackedWorkspace, pageId, revisionId],
   )
 
   return (
@@ -656,6 +674,9 @@ export function PageHistoryContent({
 }: PageHistoryContentProps) {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
+  const enableWorkspaceSync = useConfigStore(
+    (state) => state.enableWorkspaceSync,
+  )
   const revisions = usePageHistoryStore((state) => state.revisions)
   const selectedRevisionId = usePageHistoryStore(
     (state) => state.selectedRevisionId,
@@ -699,7 +720,9 @@ export function PageHistoryContent({
     if (!selectedRevision) return []
 
     const result = [
-      `Revision slug: ${selectedRevision.slug || '/'}`,
+      `${enableWorkspaceSync ? 'Version' : 'Revision'} slug: ${
+        selectedRevision.slug || '/'
+      }`,
       getPathLeaf(selectedRevision.path),
       revisionTriggerLabel(selectedRevision.type),
     ]
@@ -708,14 +731,14 @@ export function PageHistoryContent({
       result.unshift(`Current slug: ${pageSlug}`)
     }
 
-    if (comparison) {
+    if (!enableWorkspaceSync && comparison) {
       result.push(`${comparison.assetChanges.length} asset changes`)
-    } else if (snapshot) {
+    } else if (!enableWorkspaceSync && snapshot) {
       result.push(`${snapshot.assets.length} Assets`)
     }
 
     return result
-  }, [comparison, pageSlug, selectedRevision, snapshot])
+  }, [comparison, enableWorkspaceSync, pageSlug, selectedRevision, snapshot])
 
   const structureChanges = useMemo(() => {
     if (!comparison) return []
@@ -747,13 +770,21 @@ export function PageHistoryContent({
     { id: 'preview', label: 'Preview' },
     { id: 'changes', label: 'Changes' },
     { id: 'raw', label: 'Raw Text' },
-    { id: 'assets', label: 'Assets' },
   ]
+  if (!enableWorkspaceSync) {
+    tabs.push({ id: 'assets', label: 'Assets' })
+  }
 
   const detailLoading =
-    activeTab === 'changes' || activeTab === 'assets'
+    activeTab === 'changes' || (!enableWorkspaceSync && activeTab === 'assets')
       ? compareLoading
       : previewLoading
+
+  useEffect(() => {
+    if (enableWorkspaceSync && activeTab === 'assets') {
+      setActiveTab('preview')
+    }
+  }, [activeTab, enableWorkspaceSync, setActiveTab])
 
   useEffect(() => {
     liveListWidthRef.current = listWidth
@@ -808,6 +839,7 @@ export function PageHistoryContent({
     const confirmed = await confirmRestoreRevision(
       selectedRevision,
       pageSlug || '',
+      enableWorkspaceSync,
     )
     if (confirmed !== true) return
 
@@ -833,7 +865,9 @@ export function PageHistoryContent({
         replace: true,
         state: createNavigationVisitState(),
       })
-      toast.success('Revision restored')
+      toast.success(
+        enableWorkspaceSync ? 'Document version restored' : 'Revision restored',
+      )
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to restore revision')
       toast.error(mapped.message)
@@ -911,7 +945,10 @@ export function PageHistoryContent({
 
     if (activeTab === 'preview') {
       return snapshot ? (
-        <PreviewPanel snapshot={snapshot} />
+        <PreviewPanel
+          snapshot={snapshot}
+          gitBackedWorkspace={enableWorkspaceSync}
+        />
       ) : (
         <div className="page-history__empty-message page-history__empty-message--padded">
           No preview available.
@@ -929,7 +966,10 @@ export function PageHistoryContent({
       }
 
       return comparison ? (
-        <ChangesPanel comparison={comparison} />
+        <ChangesPanel
+          comparison={comparison}
+          gitBackedWorkspace={enableWorkspaceSync}
+        />
       ) : (
         <div className="page-history__empty-message page-history__empty-message--padded">
           No comparison data available.
@@ -943,6 +983,14 @@ export function PageHistoryContent({
       ) : (
         <div className="page-history__empty-message page-history__empty-message--padded">
           No raw text available.
+        </div>
+      )
+    }
+
+    if (enableWorkspaceSync) {
+      return (
+        <div className="page-history__empty-message page-history__empty-message--padded">
+          Assets are not tracked by workspace sync.
         </div>
       )
     }
@@ -978,8 +1026,12 @@ export function PageHistoryContent({
       return (
         <div className="page-history__list-status">
           {latestRevisionId
-            ? 'No previous revisions yet. Older versions will appear here after more changes.'
-            : 'No revisions yet. They will appear here after the page changes.'}
+            ? `No previous ${
+                enableWorkspaceSync ? 'versions' : 'revisions'
+              } yet. Older versions will appear here after more changes.`
+            : `No ${
+                enableWorkspaceSync ? 'versions' : 'revisions'
+              } yet. They will appear here after the page changes.`}
         </div>
       )
     }
@@ -1055,7 +1107,9 @@ export function PageHistoryContent({
               <div className="page-history__list-header">
                 <div className="page-history__list-title">
                   <History className="h-4 w-4" />
-                  Revision History
+                  {enableWorkspaceSync
+                    ? 'Document History'
+                    : 'Revision History'}
                 </div>
                 {isMobile && selectedRevision ? (
                   <Button
@@ -1113,7 +1167,8 @@ export function PageHistoryContent({
               </div>
               {selectedRevision ? (
                 <div className="page-history__header-subtitle">
-                  Revision by {displayAuthor(selectedRevision)} ·{' '}
+                  {enableWorkspaceSync ? 'Version' : 'Revision'} by{' '}
+                  {displayAuthor(selectedRevision)} ·{' '}
                   {formatRelativeTime(selectedRevision.createdAt) ||
                     formatTimestamp(selectedRevision.createdAt)}
                 </div>
@@ -1164,6 +1219,7 @@ export function PageHistoryContent({
                 onClick={() => void handleRestore()}
                 data-testid={`${testidPrefix}-restore`}
               >
+                <RotateCcw className="h-4 w-4" />
                 {restoreLoading
                   ? 'Restoring...'
                   : isSelectedRevisionLatest

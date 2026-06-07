@@ -28,6 +28,10 @@ func (e *TagsSideEffect) Apply(event PageSaveEvent) {
 	case PageOperationCreate, PageOperationUpdate, PageOperationRestore:
 		if event.After != nil {
 			e.setTags(event.After)
+			return
+		}
+		for _, p := range event.AffectedPages {
+			e.setTags(p)
 		}
 
 	case PageOperationMove:

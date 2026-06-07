@@ -69,6 +69,7 @@ func writeUsage(w io.Writer) {
 	--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: "")
 	--max-asset-upload-size       Maximum size for asset uploads (for example 50MiB, 50MB, 52428800) (default: 50MiB)
 	--enable-revision             Enable the revision / page history feature (default: false)
+	--enable-workspace-sync       Enable workspace sync and Git-backed Markdown history (default: false)
 	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
 	--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)
 	--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY
@@ -101,6 +102,7 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_BASE_PATH
 	LEAFWIKI_MAX_ASSET_UPLOAD_SIZE
 	LEAFWIKI_ENABLE_REVISION
+	LEAFWIKI_ENABLE_WORKSPACE_SYNC
 	LEAFWIKI_ENABLE_LINK_REFACTOR
 	LEAFWIKI_MCP
 	LEAFWIKI_MCP_API_KEY
@@ -183,6 +185,7 @@ type cliFlags struct {
 	basePath                *string
 	maxAssetUploadSize      *string
 	enableRevision          *bool
+	enableWorkspaceSync     *bool
 	enableLinkRefactor      *bool
 	mcp                     *string
 	apiKey                  *string
@@ -216,6 +219,7 @@ type leafwikiRuntimeConfig struct {
 	BasePath                string
 	MaxAssetUploadSize      int64
 	EnableRevision          bool
+	EnableWorkspaceSync     bool
 	EnableLinkRefactor      bool
 	MCPTransports           mcpTransports
 	APIKey                  string
@@ -250,6 +254,7 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		basePath:                fs.String("base-path", "", "URL prefix when served behind a reverse proxy (e.g. /wiki)"),
 		maxAssetUploadSize:      fs.String("max-asset-upload-size", "", "maximum size for asset uploads (for example 50MiB, 50MB, 52428800)"),
 		enableRevision:          fs.Bool("enable-revision", false, "enable the revision / page history feature (default: false)"),
+		enableWorkspaceSync:     fs.Bool("enable-workspace-sync", false, "enable workspace sync and Git-backed Markdown history (default: false)"),
 		enableLinkRefactor:      fs.Bool("enable-link-refactor", false, "enable the link refactoring dialog and rewrite flow (default: false)"),
 		mcp:                     fs.String("mcp", "", "MCP transports: none, http, stdio, http,stdio, or stdio,http"),
 		apiKey:                  fs.String("api-key", "", "native STDIO MCP API key; prefer LEAFWIKI_MCP_API_KEY"),
@@ -348,6 +353,10 @@ func main() {
 		"max asset upload size",
 	)
 	enableRevision := resolveBool("enable-revision", *flags.enableRevision, visited, "LEAFWIKI_ENABLE_REVISION")
+	enableWorkspaceSync := resolveBool("enable-workspace-sync", *flags.enableWorkspaceSync, visited, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
+	if enableRevision && enableWorkspaceSync {
+		fail("Invalid revision configuration", "error", fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined"))
+	}
 	enableLinkRefactor := resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR")
 	apiKey := ""
 	if mcpTransports.Stdio {
@@ -402,6 +411,7 @@ func main() {
 		BasePath:                basePath,
 		MaxAssetUploadSize:      maxAssetUploadSize,
 		EnableRevision:          enableRevision,
+		EnableWorkspaceSync:     enableWorkspaceSync,
 		EnableLinkRefactor:      enableLinkRefactor,
 		MCPTransports:           mcpTransports,
 		APIKey:                  apiKey,
@@ -974,6 +984,7 @@ func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, er
 		HideLinkMetadataSection: cfg.HideLinkMetadataSection,
 		MaxAssetUploadSizeBytes: cfg.MaxAssetUploadSize,
 		EnableRevision:          cfg.EnableRevision,
+		EnableWorkspaceSync:     cfg.EnableWorkspaceSync,
 		EnableLinkRefactor:      cfg.EnableLinkRefactor,
 		MaxRevisionHistory:      cfg.MaxRevisionHistory,
 		EnableHTTPRemoteUser:    cfg.EnableHTTPRemoteUser,
@@ -1422,6 +1433,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 		RefreshTokenTimeout: cfg.RefreshTokenTimeout,
 		AuthDisabled:        cfg.DisableAuth,
 		EnableRevision:      cfg.EnableRevision,
+		EnableWorkspaceSync: cfg.EnableWorkspaceSync,
 		MaxRevisionHistory:  cfg.MaxRevisionHistory,
 	})
 	if err != nil {
@@ -1445,6 +1457,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 		basePath:                cfg.BasePath,
 		maxAssetUploadSize:      cfg.MaxAssetUploadSize,
 		enableRevision:          cfg.EnableRevision,
+		enableWorkspaceSync:     cfg.EnableWorkspaceSync,
 		enableLinkRefactor:      cfg.EnableLinkRefactor,
 		enableMCP:               cfg.MCPTransports.HTTP,
 		host:                    cfg.Host,
@@ -1931,6 +1944,7 @@ type httpRouterOptionsInput struct {
 	basePath                string
 	maxAssetUploadSize      int64
 	enableRevision          bool
+	enableWorkspaceSync     bool
 	enableLinkRefactor      bool
 	enableMCP               bool
 	host                    string
@@ -1952,6 +1966,7 @@ func buildHTTPRouterOptions(in httpRouterOptionsInput) httpinternal.RouterOption
 		BasePath:                in.basePath,
 		MaxAssetUploadSizeBytes: in.maxAssetUploadSize,
 		EnableRevision:          in.enableRevision,
+		EnableWorkspaceSync:     in.enableWorkspaceSync,
 		EnableLinkRefactor:      in.enableLinkRefactor,
 		MCPEnabled:              in.enableMCP,
 		MCPBindHost:             in.host,

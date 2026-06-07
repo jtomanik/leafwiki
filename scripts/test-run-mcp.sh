@@ -31,6 +31,8 @@ bash -n "$script"
 help_output="$("$script" --help)"
 assert_contains "$help_output" "--leafwiki-bin" "help"
 assert_contains "$help_output" "--api-key" "help"
+assert_contains "$help_output" "--enable-workspace-sync" "help"
+assert_contains "$help_output" "--disable-workspace-sync" "help"
 assert_contains "$help_output" "--daemon-idle-timeout" "help"
 assert_contains "$help_output" "--server-arg" "help"
 assert_contains "$help_output" "--dry-run" "help"
@@ -53,8 +55,24 @@ assert_contains "$native_default_output" "--data-dir ./.wiki" "native dry-run"
 assert_contains "$native_default_output" "--root-dir ./wiki" "native dry-run"
 assert_contains "$native_default_output" "--daemon-idle-timeout 10m" "native dry-run"
 assert_contains "$native_default_output" "--log-target file" "native dry-run"
+assert_contains "$native_default_output" "--enable-workspace-sync" "native dry-run"
 assert_not_contains "$native_default_output" "--log-target stderr" "native dry-run"
 assert_not_contains "$native_default_output" "$removed_binary" "native dry-run"
+
+native_disabled_workspace_output="$("$script" --dry-run --leafwiki-bin /tmp/fake-leafwiki --disable-workspace-sync 2>&1)"
+assert_not_contains "$native_disabled_workspace_output" "--enable-workspace-sync" "native disable workspace dry-run"
+
+native_env_disabled_workspace_output="$(
+  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0 \
+  "$script" --dry-run --leafwiki-bin /tmp/fake-leafwiki 2>&1
+)"
+assert_not_contains "$native_env_disabled_workspace_output" "--enable-workspace-sync" "native env disable workspace dry-run"
+
+native_env_enabled_workspace_output="$(
+  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0 \
+  "$script" --dry-run --leafwiki-bin /tmp/fake-leafwiki --enable-workspace-sync 2>&1
+)"
+assert_contains "$native_env_enabled_workspace_output" "--enable-workspace-sync" "native env overridden workspace dry-run"
 
 legacy_output="$(
   "$script" \

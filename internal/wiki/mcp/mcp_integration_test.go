@@ -276,7 +276,7 @@ var featureToolInputAlternativeRequiredProperties = map[string][]string{
 }
 
 var baseToolOutputProperties = map[string][]string{
-	"get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl"},
+	"get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl"},
 	"get_current_user":      {"user"},
 	"get_tree":              {"tree"},
 	"get_page":              {"linkStatus", "page"},
@@ -584,6 +584,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		PublicAccess:            true,
 		AllowInsecure:           true,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
@@ -884,6 +885,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		PublicAccess:            true,
 		AllowInsecure:           true,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
@@ -904,6 +906,9 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if config["maxAssetUploadSizeBytes"] != float64(assets.DefaultMaxUploadSizeBytes) {
 		t.Fatalf("config maxAssetUploadSizeBytes = %v, want default", config["maxAssetUploadSizeBytes"])
 	}
+	if config["enableWorkspaceSync"] != true {
+		t.Fatalf("config enableWorkspaceSync = %v, want true", config["enableWorkspaceSync"])
+	}
 	httpConfig := getHTTPMap(t, router, "/api/config")
 	assertMapFieldsEqual(t, "get_config", config, httpConfig, []string{
 		"publicAccess",
@@ -912,6 +917,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"basePath",
 		"maxAssetUploadSizeBytes",
 		"enableRevision",
+		"enableWorkspaceSync",
 		"enableLinkRefactor",
 		"httpRemoteUserEnabled",
 		"httpRemoteUserLogoutUrl",
