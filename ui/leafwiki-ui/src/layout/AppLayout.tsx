@@ -5,14 +5,20 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import UserToolbar from '@/components/UserToolbar'
 import DesignToggle from '@/features/designtoggle/DesignToggle'
 import { EditorTitleBar } from '@/features/editor/EditorTitleBar'
+import {
+  isDirtyState,
+  usePageEditorStore,
+} from '@/features/editor/pageEditorStore'
 import { PageQuickSwitcherTrigger } from '@/features/page-switcher/PageQuickSwitcherTrigger'
 import Progressbar from '@/features/progressbar/Progressbar'
 import Sidebar from '@/features/sidebar/Sidebar'
 import { Toolbar } from '@/features/toolbar/Toolbar'
-import { withBasePath } from '@/lib/routePath'
-import { useAppMode } from '@/lib/useAppMode'
+import type { PresenceMode } from '@/lib/api/presence'
+import { buildViewUrl, withBasePath } from '@/lib/routePath'
+import { useAppMode, type AppMode } from '@/lib/useAppMode'
 import { useAutoCloseSidebarOnMobile } from '@/lib/useAutoCloseSidebarOnMobile'
 import { useIsMobile } from '@/lib/useIsMobile'
+import { usePresenceHeartbeat } from '@/lib/usePresenceHeartbeat'
 import { useBrandingStore } from '@/stores/branding'
 import {
   MAX_SIDEBAR_WIDTH,
@@ -21,13 +27,15 @@ import {
 } from '@/stores/sidebar'
 import { MenuIcon } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 export const MOBILE_SIDEBAR_WIDTH = 320
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const appMode = useAppMode()
+  const location = useLocation()
   const [isEditor, setIsEditor] = useState(appMode === 'edit')
+  const editorDirty = usePageEditorStore(isDirtyState)
 
   // store resize handler in onMouseMove, onMouseUp in useRef
   const resizeHandlerRef = useRef<{
@@ -47,6 +55,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebarVisibleBeforePrintRef = useRef<boolean | null>(null)
 
   useAutoCloseSidebarOnMobile()
+  usePresenceHeartbeat({
+    mode: presenceModeForAppMode(appMode),
+    path: presencePathForAppMode(appMode, location.pathname),
+    dirty: appMode === 'edit' && editorDirty,
+  })
 
   const { siteName, logoFile, logoVersion } = useBrandingStore()
 
@@ -287,4 +300,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </TooltipProvider>
   )
+}
+
+function presenceModeForAppMode(appMode: AppMode): PresenceMode {
+  if (appMode === 'user-management') return 'settings'
+  if (appMode === 'dialog') return 'unknown'
+  return appMode
+}
+
+function presencePathForAppMode(appMode: AppMode, pathname: string) {
+  if (appMode !== 'view' && appMode !== 'edit' && appMode !== 'history') {
+    return undefined
+  }
+  const viewPath = buildViewUrl(pathname)
+  return viewPath === '/' ? undefined : viewPath
 }

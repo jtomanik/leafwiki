@@ -10,6 +10,7 @@ import (
 	"github.com/perber/wiki/internal/http/dto"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 func (r *Routes) registerPageTools(server *sdkmcp.Server) {
@@ -25,7 +26,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pageIDInput, pageOutput](server, toolGetPage, func(ctx context.Context, in pageIDInput) (pageOutput, error) {
-		out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))})
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return pageOutput{}, err
+		}
+		out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: pageID})
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -33,7 +38,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, pageOutput](server, toolGetPageByPath, func(ctx context.Context, in pathInput) (pageOutput, error) {
-		routePath, err := wikipages.ValidatePageRoutePath(in.Path)
+		routePath, err := wikipages.ValidatePageRoutePath(normalizeToolRoutePath(in.Path))
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -49,7 +54,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, lookupPathOutput](server, toolLookupPath, func(ctx context.Context, in pathInput) (lookupPathOutput, error) {
-		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: strings.TrimSpace(in.Path)})
+		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: normalizeToolRoutePath(in.Path)})
 		if err != nil {
 			return lookupPathOutput{}, err
 		}
@@ -57,7 +62,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pageIDInput, resolvePermalinkOutput](server, toolResolvePermalink, func(ctx context.Context, in pageIDInput) (resolvePermalinkOutput, error) {
-		out, err := r.resolveLink.Execute(ctx, wikipages.ResolvePermalinkInput{ID: strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))})
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return resolvePermalinkOutput{}, err
+		}
+		out, err := r.resolveLink.Execute(ctx, wikipages.ResolvePermalinkInput{ID: pageID})
 		if err != nil {
 			return resolvePermalinkOutput{}, err
 		}
@@ -87,6 +96,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		out, err := r.createPage.Execute(ctx, wikipages.CreatePageInput{
 			UserID:   actor.ID,
+			Source:   pagesave.PageMutationSourceMCP,
 			ParentID: in.ParentID,
 			Title:    in.Title,
 			Slug:     in.Slug,
@@ -115,6 +125,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		kind := tree.NodeKindPage
 		out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
 			UserID:     actor.ID,
+			Source:     pagesave.PageMutationSourceMCP,
 			ID:         strings.TrimSpace(in.ID),
 			Version:    strings.TrimSpace(in.Version),
 			Title:      in.Title,
@@ -132,6 +143,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	addEditorTool[deletePageInput, messageOutput](r, server, toolDeletePage, func(ctx context.Context, actor toolActor, in deletePageInput) (messageOutput, error) {
 		if err := r.deletePage.Execute(ctx, wikipages.DeletePageInput{
 			UserID:    actor.ID,
+			Source:    pagesave.PageMutationSourceMCP,
 			ID:        strings.TrimSpace(in.ID),
 			Version:   strings.TrimSpace(in.Version),
 			Recursive: in.Recursive,
@@ -148,6 +160,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		if err := r.movePage.Execute(ctx, wikipages.MovePageInput{
 			UserID:   actor.ID,
+			Source:   pagesave.PageMutationSourceMCP,
 			ID:       strings.TrimSpace(in.ID),
 			Version:  strings.TrimSpace(in.Version),
 			ParentID: parentID,
@@ -174,6 +187,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
 			UserID:      actor.ID,
+			Source:      pagesave.PageMutationSourceMCP,
 			TargetPath:  strings.TrimSpace(in.Path),
 			TargetTitle: in.Title,
 			Kind:        &kind,
@@ -191,6 +205,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		if err := r.convertPage.Execute(ctx, wikipages.ConvertPageInput{
 			UserID:     actor.ID,
+			Source:     pagesave.PageMutationSourceMCP,
 			ID:         strings.TrimSpace(in.ID),
 			Version:    strings.TrimSpace(in.Version),
 			TargetKind: targetKind,
@@ -203,6 +218,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	addEditorTool[copyPageInput, pageOutput](r, server, toolCopyPage, func(ctx context.Context, actor toolActor, in copyPageInput) (pageOutput, error) {
 		out, err := r.copyPage.Execute(ctx, wikipages.CopyPageInput{
 			UserID:         actor.ID,
+			Source:         pagesave.PageMutationSourceMCP,
 			SourcePageID:   strings.TrimSpace(in.ID),
 			TargetParentID: in.TargetParentID,
 			Title:          in.Title,

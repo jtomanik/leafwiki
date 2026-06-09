@@ -13,10 +13,16 @@ const (
 	PageOperationRestore PageOperationType = "restore"
 )
 
+const (
+	PageMutationSourceWeb = "web"
+	PageMutationSourceMCP = "mcp"
+)
+
 // PageSaveEvent carries all context a side effect needs to react to a page mutation.
 type PageSaveEvent struct {
 	Operation PageOperationType
 	UserID    string
+	Source    string
 
 	// Before is the page state prior to the operation; nil for Create.
 	Before *tree.Page

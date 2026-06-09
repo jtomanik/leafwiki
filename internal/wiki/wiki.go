@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,6 +19,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	coreimporter "github.com/perber/wiki/internal/importer"
 	"github.com/perber/wiki/internal/links"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/properties"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/tags"
@@ -31,46 +33,55 @@ import (
 	wikioauth "github.com/perber/wiki/internal/wiki/oauth"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
+	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
 	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
+	wikiworkspacesync "github.com/perber/wiki/internal/wiki/workspacesync"
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 type Wiki struct {
-	tree         *tree.TreeService
-	slug         *tree.SlugService
-	auth         *auth.AuthService
-	apiKeys      *auth.APIKeyService
-	userResolver *auth.UserResolver
-	user         *auth.UserService
-	asset        *assets.AssetService
-	branding     *branding.BrandingService
-	searchIndex  *search.SQLiteIndex
-	status       *search.IndexingStatus
-	storageDir   string
-	workspace    Workspace
+	tree                *tree.TreeService
+	slug                *tree.SlugService
+	auth                *auth.AuthService
+	apiKeys             *auth.APIKeyService
+	userResolver        *auth.UserResolver
+	user                *auth.UserService
+	asset               *assets.AssetService
+	branding            *branding.BrandingService
+	searchIndex         *search.SQLiteIndex
+	status              *search.IndexingStatus
+	storageDir          string
+	workspace           Workspace
+	workspaceSync       *workspacesync.Service
+	workspaceSyncCancel context.CancelFunc
+	webPresence         *wikipresence.WebPresenceRegistry
+	agentPresence       *projectdaemon.AgentPresenceRegistry
 
 	// Domain route registrars (populated by NewWiki).
-	pagesRoutes      *wikipages.Routes
-	authRoutes       *wikiauth.Routes
-	assetsRoutes     *wikiassets.Routes
-	revisionsRoutes  *wikirevisions.Routes
-	searchRoutes     *wikisearch.Routes
-	linksRoutes      *wikilinks.Routes
-	tagsRoutes       *wikitags.Routes
-	propertiesRoutes *wikiproperties.Routes
-	brandingRoutes   *wikibranding.Routes
-	importerRoutes   *wikiimporter.Routes
-	healthRoutes     *wikihealth.Routes
-	mcpRoutes        *wikimcp.Routes
-	oauthRoutes      *wikioauth.Routes
-	revision         *revision.Service
-	links            *links.LinkService
-	tags             *tags.TagsService
-	props            *properties.PropertiesService
-	oauth            *wikioauth.Service
-	log              *slog.Logger
+	pagesRoutes         *wikipages.Routes
+	authRoutes          *wikiauth.Routes
+	assetsRoutes        *wikiassets.Routes
+	revisionsRoutes     *wikirevisions.Routes
+	searchRoutes        *wikisearch.Routes
+	linksRoutes         *wikilinks.Routes
+	tagsRoutes          *wikitags.Routes
+	propertiesRoutes    *wikiproperties.Routes
+	brandingRoutes      *wikibranding.Routes
+	importerRoutes      *wikiimporter.Routes
+	healthRoutes        *wikihealth.Routes
+	workspaceSyncRoutes *wikiworkspacesync.Routes
+	presenceRoutes      *wikipresence.Routes
+	mcpRoutes           *wikimcp.Routes
+	oauthRoutes         *wikioauth.Routes
+	revision            *revision.Service
+	links               *links.LinkService
+	tags                *tags.TagsService
+	props               *properties.PropertiesService
+	oauth               *wikioauth.Service
+	log                 *slog.Logger
 }
 
 const SYSTEM_USER_ID = "system"
@@ -84,11 +95,15 @@ type WikiOptions struct {
 	RefreshTokenTimeout     time.Duration // Refresh token timeout duration
 	AuthDisabled            bool          // Whether authentication is disabled
 	EnableRevision          bool          // Whether revision recording/storage is enabled
+	EnableWorkspaceSync     bool          // Whether workspace sync is enabled
 	MaxRevisionHistory      int           // Max revisions kept per page; 0 = unlimited
 	MaxAssetUploadSizeBytes int64         // Maximum allowed size in bytes for asset/import uploads; 0 = default
 }
 
 func NewWiki(options *WikiOptions) (*Wiki, error) {
+	if options.EnableRevision && options.EnableWorkspaceSync {
+		return nil, fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined")
+	}
 	workspace := resolveWorkspaceOptions(options)
 	if err := ValidateWorkspace(workspace); err != nil {
 		return nil, err
@@ -123,12 +138,18 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 	if err := w.initSearch(); err != nil {
 		return nil, err
 	}
+	w.configureWorkspaceSyncRebuilder()
 	if err := w.initBranding(); err != nil {
 		return nil, err
 	}
+	w.webPresence = wikipresence.NewWebPresenceRegistry(wikipresence.DefaultWebPresenceTTL, nil)
 	// Welcome page must exist before the revision service starts recording.
-	if err := w.EnsureWelcomePage(); err != nil {
-		return nil, err
+	if !options.EnableWorkspaceSync || w.tree.IsLoaded() {
+		if err := w.EnsureWelcomePage(); err != nil {
+			return nil, err
+		}
+	} else {
+		w.log.Warn("skipping welcome page creation because workspace sync validation left the tree unloaded")
 	}
 	if options.EnableRevision {
 		w.revision = revision.NewService(w.storageDir, w.tree, w.log,
@@ -136,6 +157,7 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		w.ensureBaselineRevisions()
 	}
 	w.buildRoutes(options)
+	w.startWorkspaceSyncWatcher(options)
 	return w, nil
 }
 
@@ -241,8 +263,28 @@ func (w *Wiki) initCoreServices(options *WikiOptions) error {
 		DataDir: w.workspace.DataDir,
 		RootDir: w.workspace.RootDir,
 	})
-	if err := w.tree.LoadTree(); err != nil {
-		return err
+	if options.EnableWorkspaceSync {
+		service, err := workspacesync.NewService(workspacesync.ServiceOptions{
+			Enabled: true,
+			DataDir: w.workspace.DataDir,
+			RootDir: w.workspace.RootDir,
+			Tree:    w.tree,
+		})
+		if err != nil {
+			return err
+		}
+		w.workspaceSync = service
+		if _, err := w.workspaceSync.SyncNow(context.Background(), workspacesync.SyncRequest{
+			Reason: workspacesync.ReasonStartup,
+			Source: workspacesync.SourceFilesystem,
+			Actor:  workspacesync.PublicEditorActor(),
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := w.tree.LoadTree(); err != nil {
+			return err
+		}
 	}
 	w.slug = tree.NewSlugService()
 	w.asset = assets.NewAssetService(w.storageDir, w.slug)
@@ -282,21 +324,24 @@ func (w *Wiki) initPropertiesService() error {
 // bootstrapTagsAndProperties clears and rebuilds tag and property indexes in a single
 // parallel GetPages pass — avoids two sequential ReadPageRaw loops at startup.
 func (w *Wiki) bootstrapTagsAndProperties() {
+	if err := w.rebuildTagsAndProperties(); err != nil {
+		w.log.Warn("failed to rebuild tags/properties during bootstrap", "error", err)
+	}
+}
+
+func (w *Wiki) rebuildTagsAndProperties() error {
 	if err := w.tags.ClearIndex(); err != nil {
-		w.log.Warn("failed to clear tags index before bootstrap", "error", err)
-		return
+		return err
 	}
 	if err := w.props.ClearIndex(); err != nil {
-		w.log.Warn("failed to clear properties index before bootstrap", "error", err)
-		return
+		return err
 	}
 	var ids []string
 	if err := w.tree.WalkNodes(func(id string) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
-		w.log.Warn("failed to walk pages for tags/properties bootstrap", "error", err)
-		return
+		return err
 	}
 	pages, errs := w.tree.GetPages(ids)
 	for i, page := range pages {
@@ -311,6 +356,7 @@ func (w *Wiki) bootstrapTagsAndProperties() {
 			w.log.Warn("failed to index properties", "pageID", page.ID, "error", err)
 		}
 	}
+	return nil
 }
 
 func (w *Wiki) initSearch() error {
@@ -345,6 +391,38 @@ func (w *Wiki) initBranding() error {
 	return nil
 }
 
+func (w *Wiki) configureWorkspaceSyncRebuilder() {
+	if w.workspaceSync == nil {
+		return
+	}
+	w.workspaceSync.SetAfterSync(w.rebuildDerivedIndexes)
+}
+
+func (w *Wiki) rebuildDerivedIndexes() error {
+	if err := w.links.IndexAllPages(); err != nil {
+		return fmt.Errorf("rebuild links: %w", err)
+	}
+	if err := w.rebuildTagsAndProperties(); err != nil {
+		return fmt.Errorf("rebuild tags/properties: %w", err)
+	}
+	searchEffect := pagesave.NewSearchIndexSideEffect(w.searchIndex, w.tree, w.log)
+	if err := searchEffect.IndexAllPages(); err != nil {
+		return fmt.Errorf("rebuild search: %w", err)
+	}
+	return nil
+}
+
+func (w *Wiki) startWorkspaceSyncWatcher(options *WikiOptions) {
+	if !options.EnableWorkspaceSync || w.workspaceSync == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.workspaceSyncCancel = cancel
+	if err := w.workspaceSync.StartWatcher(ctx); err != nil {
+		w.log.Warn("workspace sync watcher failed to start", "error", err)
+	}
+}
+
 func (w *Wiki) buildRoutes(options *WikiOptions) {
 	w.pagesRoutes = w.buildPagesRoutes()
 	w.authRoutes = w.buildAuthRoutes()
@@ -361,6 +439,18 @@ func (w *Wiki) buildRoutes(options *WikiOptions) {
 		Status:     w.status,
 		StorageDir: w.storageDir,
 	})
+	w.workspaceSyncRoutes = wikiworkspacesync.NewRoutes(wikiworkspacesync.RoutesConfig{
+		Status:           w.WorkspaceSyncStatus,
+		Refresh:          w.WorkspaceSyncRefresh,
+		ListSnapshots:    w.WorkspaceSyncSnapshotPage,
+		RestoreWorkspace: w.WorkspaceSyncRestoreWorkspace,
+		AuthService:      w.auth,
+	})
+	w.presenceRoutes = wikipresence.NewRoutes(wikipresence.RoutesConfig{
+		Registry:    w.webPresence,
+		TreeService: w.tree,
+		AuthService: w.auth,
+	})
 	w.oauthRoutes = wikioauth.NewRoutes(w.oauth)
 	w.mcpRoutes = w.buildMCPRoutes()
 }
@@ -368,13 +458,32 @@ func (w *Wiki) buildRoutes(options *WikiOptions) {
 // ─── Domain route builder helpers ────────────────────────────────────────────
 
 func (w *Wiki) newPageOrchestrator() *pagesave.PageSaveOrchestrator {
-	return pagesave.NewPageSaveOrchestrator(
+	effects := make([]pagesave.PageSideEffect, 0, 6)
+	if w.workspaceSync != nil {
+		effects = append(effects, pagesave.NewWorkspaceSyncSideEffectWithActorLookup(w.workspaceSync, w.log, w.workspaceSyncActorForUser))
+	}
+	effects = append(effects,
 		pagesave.NewSearchIndexSideEffect(w.searchIndex, w.tree, w.log),
 		pagesave.NewLinkIndexSideEffect(w.links, w.log),
 		pagesave.NewRevisionSideEffect(w.revision, w.log),
 		pagesave.NewTagsSideEffect(w.tags, w.log),
 		pagesave.NewPropertiesSideEffect(w.props, w.log),
 	)
+	return pagesave.NewPageSaveOrchestrator(effects...)
+}
+
+func (w *Wiki) workspaceSyncActorForUser(userID string) workspacesync.Actor {
+	actor := workspacesync.Actor{ID: userID}
+	if w.user == nil || strings.TrimSpace(userID) == "" {
+		return actor
+	}
+	user, err := w.user.GetUserByID(userID)
+	if err != nil || user == nil {
+		return actor
+	}
+	actor.Name = user.Username
+	actor.Email = user.Email
+	return actor
 }
 
 func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
@@ -385,7 +494,7 @@ func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
 		UpdatePage:       wikipages.NewUpdatePageUseCase(w.tree, w.slug, o, w.log),
 		DeletePage:       wikipages.NewDeletePageUseCase(w.tree, w.revision, w.asset, o, w.log),
 		MovePage:         wikipages.NewMovePageUseCase(w.tree, o, w.log),
-		ConvertPage:      wikipages.NewConvertPageUseCase(w.tree, w.revision, w.log),
+		ConvertPage:      wikipages.NewConvertPageUseCase(w.tree, w.revision, o, w.log),
 		CopyPage:         wikipages.NewCopyPageUseCase(w.tree, w.slug, o, w.asset, w.log),
 		GetPage:          wikipages.NewGetPageUseCase(w.tree),
 		FindByPath:       wikipages.NewFindByPathUseCase(w.tree),
@@ -395,7 +504,7 @@ func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
 		EnsurePath:       wikipages.NewEnsurePathUseCase(w.tree, w.slug, o, w.log),
 		SuggestSlug:      wikipages.NewSuggestSlugUseCase(w.tree, w.slug),
 		PreviewRefactor:  wikipages.NewPreviewPageRefactorUseCase(w.tree, w.slug, w.links, w.log),
-		ApplyRefactor:    wikipages.NewApplyPageRefactorUseCase(w.tree, w.slug, w.revision, w.links, w.log),
+		ApplyRefactor:    wikipages.NewApplyPageRefactorUseCaseWithOrchestrator(w.tree, w.slug, w.revision, w.links, o, w.log),
 		UserResolver:     w.userResolver,
 		AuthService:      w.auth,
 	})
@@ -433,16 +542,19 @@ func (w *Wiki) buildAssetsRoutes() *wikiassets.Routes {
 
 func (w *Wiki) buildRevisionsRoutes() *wikirevisions.Routes {
 	return wikirevisions.NewRoutes(wikirevisions.RoutesConfig{
-		ListRevisions:    wikirevisions.NewListRevisionsUseCase(w.revision),
-		GetRevision:      wikirevisions.NewGetRevisionUseCase(w.revision),
-		CompareRevisions: wikirevisions.NewCompareRevisionsUseCase(w.revision),
-		GetRevisionAsset: wikirevisions.NewGetRevisionAssetUseCase(w.revision),
-		GetLatest:        wikirevisions.NewGetLatestRevisionUseCase(w.revision),
-		RestoreRevision:  wikirevisions.NewRestoreRevisionUseCase(w.revision, w.tree, w.newPageOrchestrator(), w.log),
-		CheckIntegrity:   wikirevisions.NewCheckIntegrityUseCase(w.revision),
-		UserResolver:     w.userResolver,
-		AuthService:      w.auth,
-		TreeService:      w.tree,
+		ListRevisions:            wikirevisions.NewListRevisionsUseCase(w.revision),
+		GetRevision:              wikirevisions.NewGetRevisionUseCase(w.revision),
+		CompareRevisions:         wikirevisions.NewCompareRevisionsUseCase(w.revision),
+		GetRevisionAsset:         wikirevisions.NewGetRevisionAssetUseCase(w.revision),
+		GetLatest:                wikirevisions.NewGetLatestRevisionUseCase(w.revision),
+		RestoreRevision:          wikirevisions.NewRestoreRevisionUseCase(w.revision, w.tree, w.newPageOrchestrator(), w.log),
+		CheckIntegrity:           wikirevisions.NewCheckIntegrityUseCase(w.revision),
+		ListWorkspaceRevisions:   w.WorkspaceSyncPageRevisions,
+		GetWorkspaceRevision:     w.WorkspaceSyncPageRevision,
+		RestoreWorkspaceRevision: w.WorkspaceSyncRestorePageRevision,
+		UserResolver:             w.userResolver,
+		AuthService:              w.auth,
+		TreeService:              w.tree,
 	})
 }
 
@@ -527,10 +639,10 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		MovePage:     wikipages.NewMovePageUseCase(w.tree, o, w.log),
 		SortPages:    wikipages.NewSortPagesUseCase(w.tree),
 		EnsurePath:   wikipages.NewEnsurePathUseCase(w.tree, w.slug, o, w.log),
-		ConvertPage:  wikipages.NewConvertPageUseCase(w.tree, w.revision, w.log),
+		ConvertPage:  wikipages.NewConvertPageUseCase(w.tree, w.revision, o, w.log),
 		CopyPage:     wikipages.NewCopyPageUseCase(w.tree, w.slug, o, w.asset, w.log),
 		PreviewRef:   wikipages.NewPreviewPageRefactorUseCase(w.tree, w.slug, w.links, w.log),
-		ApplyRef:     wikipages.NewApplyPageRefactorUseCase(w.tree, w.slug, w.revision, w.links, w.log),
+		ApplyRef:     wikipages.NewApplyPageRefactorUseCaseWithOrchestrator(w.tree, w.slug, w.revision, w.links, o, w.log),
 		Search:       wikisearch.NewSearchUseCase(w.searchIndex, w.tags, w.tree),
 		SearchStatus: wikisearch.NewGetIndexingStatusUseCase(w.status),
 		GetTags:      wikitags.NewGetTagsUseCase(w.tags),
@@ -549,9 +661,20 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		GetRevAsset:  wikirevisions.NewGetRevisionAssetUseCase(w.revision),
 		GetLatestRev: wikirevisions.NewGetLatestRevisionUseCase(w.revision),
 		RestoreRev:   wikirevisions.NewRestoreRevisionUseCase(w.revision, w.tree, w.newPageOrchestrator(), w.log),
-		UserService:  w.user,
-		APIKeys:      w.apiKeys,
-		OAuthService: w.oauth,
+
+		ListWorkspaceRevisions:   w.WorkspaceSyncPageRevisions,
+		GetWorkspaceRevision:     w.WorkspaceSyncPageRevision,
+		RestoreWorkspaceRevision: w.WorkspaceSyncRestorePageRevision,
+		WorkspaceSyncStatus:      w.WorkspaceSyncStatus,
+		WorkspaceSyncRefresh:     w.WorkspaceSyncRefresh,
+		ListWorkspaceSnapshots:   w.WorkspaceSyncSnapshotPage,
+		WorkspaceRootDir:         w.workspace.RootDir,
+		WorkspaceDataDir:         w.workspace.DataDir,
+		WebPresenceProvider:      w.WebPresenceSessions,
+		AgentPresenceProvider:    w.AgentPresenceSessions,
+		UserService:              w.user,
+		APIKeys:                  w.apiKeys,
+		OAuthService:             w.oauth,
 	})
 }
 
@@ -571,9 +694,29 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 		w.brandingRoutes,
 		w.importerRoutes,
 		w.healthRoutes,
+		w.workspaceSyncRoutes,
+		w.presenceRoutes,
 		w.oauthRoutes,
 		w.mcpRoutes,
 	}
+}
+
+func (w *Wiki) SetAgentPresenceRegistry(registry *projectdaemon.AgentPresenceRegistry) {
+	w.agentPresence = registry
+}
+
+func (w *Wiki) WebPresenceSessions(viewer *auth.User) ([]wikipresence.Session, error) {
+	if w.webPresence == nil {
+		return nil, fmt.Errorf("web presence is unavailable")
+	}
+	return w.webPresence.List(viewer), nil
+}
+
+func (w *Wiki) AgentPresenceSessions() ([]projectdaemon.AgentPresenceSession, error) {
+	if w.agentPresence == nil {
+		return nil, fmt.Errorf("agent presence is unavailable")
+	}
+	return w.agentPresence.List(), nil
 }
 
 func (w *Wiki) RunMCPStdio(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport) error {
@@ -621,6 +764,65 @@ func (w *Wiki) FrontendConfig() httpinternal.FrontendConfig {
 			return cfg.FaviconFile
 		},
 	}
+}
+
+func (w *Wiki) WorkspaceSyncStatus() workspacesync.SyncStatus {
+	if w.workspaceSync == nil {
+		return workspacesync.SyncStatus{Enabled: false}
+	}
+	return w.workspaceSync.Status()
+}
+
+func (w *Wiki) WorkspaceSyncRefresh(ctx context.Context, req workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
+	if w.workspaceSync == nil {
+		return workspacesync.SyncStatus{Enabled: false}, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.SyncNow(ctx, req)
+}
+
+func (w *Wiki) WorkspaceSyncSnapshots(ctx context.Context, limit int) ([]workspacesync.Snapshot, error) {
+	if w.workspaceSync == nil {
+		return nil, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.ListSnapshots(ctx, limit)
+}
+
+func (w *Wiki) WorkspaceSyncSnapshotPage(ctx context.Context, cursor string, limit int) (workspacesync.SnapshotList, error) {
+	if w.workspaceSync == nil {
+		return workspacesync.SnapshotList{}, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.ListSnapshotPage(ctx, cursor, limit)
+}
+
+func (w *Wiki) WorkspaceSyncRestoreWorkspace(ctx context.Context, commitID string, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
+	if w.workspaceSync == nil {
+		return workspacesync.SyncStatus{Enabled: false}, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.RestoreWorkspaceWithSource(ctx, commitID, actor, source)
+}
+
+func (w *Wiki) WorkspaceSyncPageRevisions(ctx context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
+	if w.workspaceSync == nil {
+		return workspacesync.PageRevisionList{}, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.ListPageRevisions(ctx, page, cursor, limit)
+}
+
+func (w *Wiki) WorkspaceSyncPageRevision(ctx context.Context, page *tree.Page, revisionID string) (*revision.RevisionSnapshot, error) {
+	if w.workspaceSync == nil {
+		return nil, fmt.Errorf("workspace sync is not enabled")
+	}
+	return w.workspaceSync.GetPageRevisionSnapshot(ctx, page, revisionID)
+}
+
+func (w *Wiki) WorkspaceSyncRestorePageRevision(ctx context.Context, page *tree.Page, revisionID string, actor workspacesync.Actor, source workspacesync.Source) (*tree.Page, error) {
+	if w.workspaceSync == nil {
+		return nil, fmt.Errorf("workspace sync is not enabled")
+	}
+	if _, err := w.workspaceSync.RestoreDocumentWithSource(ctx, page, revisionID, actor, source); err != nil {
+		return nil, err
+	}
+	return w.tree.GetPage(page.ID)
 }
 
 func (w *Wiki) EnsureWelcomePage() error {
@@ -708,6 +910,12 @@ func (w *Wiki) APIKeyService() *auth.APIKeyService {
 }
 
 func (w *Wiki) Close() error {
+	if w.workspaceSyncCancel != nil {
+		w.workspaceSyncCancel()
+	}
+	if w.workspaceSync != nil {
+		w.workspaceSync.StopWatcher()
+	}
 	w.status.Finish()
 	if err := w.user.Close(); err != nil {
 		return err

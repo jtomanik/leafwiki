@@ -13,16 +13,21 @@ func (r *Routes) registerConfigTools(server *sdkmcp.Server, opts httpinternal.Ro
 	})
 
 	addTypedTool[emptyInput, configOutput](server, toolGetConfig, func(context.Context, emptyInput) (configOutput, error) {
-		return configOutput{
-			PublicAccess:            opts.PublicAccess,
-			HideLinkMetadataSection: opts.HideLinkMetadataSection,
-			AuthDisabled:            opts.AuthDisabled,
-			BasePath:                opts.BasePath,
-			MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
-			EnableRevision:          opts.EnableRevision,
-			EnableLinkRefactor:      opts.EnableLinkRefactor,
-			HTTPRemoteUserEnabled:   opts.HTTPRemoteUser.Enabled,
-			HTTPRemoteUserLogoutURL: opts.HTTPRemoteUser.LogoutURL,
-		}, nil
+		return configOutputForOptions(opts), nil
 	})
+}
+
+func configOutputForOptions(opts httpinternal.RouterOptions) configOutput {
+	return configOutput{
+		PublicAccess:            opts.PublicAccess,
+		HideLinkMetadataSection: opts.HideLinkMetadataSection,
+		AuthDisabled:            opts.AuthDisabled,
+		BasePath:                opts.BasePath,
+		MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
+		EnableRevision:          opts.EnableRevision,
+		EnableWorkspaceSync:     opts.EnableWorkspaceSync,
+		EnableLinkRefactor:      opts.EnableLinkRefactor,
+		HTTPRemoteUserEnabled:   opts.HTTPRemoteUser.Enabled,
+		HTTPRemoteUserLogoutURL: opts.HTTPRemoteUser.LogoutURL,
+	}
 }

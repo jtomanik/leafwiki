@@ -103,17 +103,17 @@ test('self-service api key works with the official mcp typescript client and fai
   });
   try {
     const tools = await mcp.listTools();
-    expect(tools).toContain('get_current_user');
-    expect(tools).toContain('create_page');
-    expect(tools).toContain('get_page');
+    expect(tools).toContain('wiki_get_current_user');
+    expect(tools).toContain('wiki_create_page');
+    expect(tools).toContain('wiki_get_page');
 
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(user);
     expect(currentUser.role).toBe('admin');
 
     const slug = `mcp-api-key-e2e-${Date.now()}`;
-    const created = await mcp.callTool('create_page', {
+    const created = await mcp.callTool('wiki_create_page', {
       title: 'MCP API Key E2E Page',
       slug,
       kind: 'page',
@@ -284,9 +284,9 @@ test('admin-created viewer api key can read through mcp but cannot mutate and ca
     clientName: 'leafwiki-e2e-viewer-api-key',
   });
   try {
-    await expect(mcp.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(mcp.callTool('wiki_get_tree')).resolves.toBeTruthy();
     await expect(
-      mcp.callTool('create_page', {
+      mcp.callTool('wiki_create_page', {
         title: 'Viewer API Key Write',
         slug: `viewer-api-key-write-${Date.now()}`,
       }),

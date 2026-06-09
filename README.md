@@ -51,7 +51,8 @@ docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
 - Dark mode and mobile-friendly UI
 
 **Opt-in via feature flags:**
-- Revision history (`--enable-revision`)
+- Revision history (`--enable-revision`; mutually exclusive with `--enable-workspace-sync`)
+- Workspace sync and Git-backed Markdown history (`--enable-workspace-sync`; mutually exclusive with `--enable-revision`; see [docs/workspace-sync.md](docs/workspace-sync.md))
 - Automatic link rewriting when pages are renamed or moved (`--enable-link-refactor`)
 
 **Markdown import:**
@@ -254,7 +255,8 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--log-file`                     | Log file path when `--log-target=file`; relative paths use data dir      | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `--inject-code-in-header`        | Raw HTML/JS injected into `<head>`                                      | `""`          | v0.6.0  |
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
-| `--enable-revision`              | Enable revision history                                                 | `false`       | v0.9.0  |
+| `--enable-revision`              | Enable revision history; mutually exclusive with workspace sync          | `false`       | v0.9.0  |
+| `--enable-workspace-sync`        | Enable workspace sync and Git-backed Markdown history; mutually exclusive with revision history | `false` | v0.11.0 |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
 | `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP requires a loopback host | `none` | v0.11.0 |
 | `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
@@ -292,6 +294,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `LEAFWIKI_INJECT_CODE_IN_HEADER`        | HTML/JS injected into `<head>`                       | `""`          | v0.6.0  |
 | `LEAFWIKI_HIDE_LINK_METADATA_SECTION`   | Hide backlinks and link status panel                 | `false`       | –       |
 | `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
+| `LEAFWIKI_ENABLE_WORKSPACE_SYNC`        | Workspace sync and Git-backed Markdown history       | `false`       | v0.11.0 |
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
 | `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
 | `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
@@ -365,12 +368,12 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner exits after the last session disconnects and `--daemon-idle-timeout` elapses.
+LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner tracks active session handles plus in-memory agent presence, and exits after both reach zero and `--daemon-idle-timeout` elapses. Agent presence expires on the same idle-timeout cadence.
 
 The easiest project-local STDIO setup is the wrapper script:
 
 ```bash
-./scripts/run-mcp.sh --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
 ```
 
 Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.
@@ -391,7 +394,7 @@ The legacy disabled-auth mode remains available for isolated local workflows:
 
 For clients that need STDIO with API-key auth, run native STDIO and provide `LEAFWIKI_MCP_API_KEY`. OAuth-capable clients should use Streamable HTTP directly.
 
-See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, the tool surface, safety gates, and the parity contract.
+See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client settings, API-key behavior, the tool surface, safety gates, and the parity contract. See [Agent Collaboration](docs/agent-collaboration.md) for the context-first workflow, presence privacy, direct Markdown sync flow, validation, and partial-edit guidance. Agents that support repo-local skills should use the [LeafWiki agent skill](skills/llmwiki/SKILL.md) when editing or validating LeafWiki content.
 
 ### Operations notes
 

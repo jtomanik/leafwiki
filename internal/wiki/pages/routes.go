@@ -14,6 +14,7 @@ import (
 	"github.com/perber/wiki/internal/http/dto"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 // Routes is the RouteRegistrar for the pages domain.
@@ -433,7 +434,7 @@ func (r *Routes) handleConvert(c *gin.Context) {
 		return
 	}
 	if err := r.convertPage.Execute(c.Request.Context(), ConvertPageInput{
-		UserID: user.ID, ID: id, Version: req.Version, TargetKind: targetKind,
+		UserID: user.ID, Source: pagesave.PageMutationSourceWeb, ID: id, Version: req.Version, TargetKind: targetKind,
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -525,6 +526,7 @@ func (r *Routes) handleRefactorApply(c *gin.Context) {
 	page, err := r.applyRefactor.Execute(c.Request.Context(), RefactorApplyInput{
 		Version: req.Version,
 		UserID:  user.ID,
+		Source:  pagesave.PageMutationSourceWeb,
 		RefactorPreviewInput: RefactorPreviewInput{
 			PageID: id, Kind: req.Kind, Title: req.Title, Slug: req.Slug,
 			Content: req.Content, NewParentID: req.NewParentID,

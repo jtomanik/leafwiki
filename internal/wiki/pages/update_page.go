@@ -12,6 +12,7 @@ import (
 // UpdatePageInput is the input for UpdatePageUseCase.
 type UpdatePageInput struct {
 	UserID     string
+	Source     string
 	ID         string
 	Version    string
 	Title      string
@@ -93,6 +94,7 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 	event := pagesave.PageSaveEvent{
 		Operation:      pagesave.PageOperationUpdate,
 		UserID:         in.UserID,
+		Source:         in.Source,
 		After:          after,
 		OldPath:        oldPath,
 		ContentChanged: contentChanged,
@@ -111,7 +113,9 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 		}
 	}
 
-	uc.orchestrator.Run(event)
+	if err := uc.orchestrator.Run(event); err != nil {
+		return nil, err
+	}
 
 	return &UpdatePageOutput{Page: after}, nil
 }

@@ -6,6 +6,12 @@ type PageSideEffect interface {
 	Apply(event PageSaveEvent)
 }
 
+// RequiredPageSideEffect can veto the remaining side effects when the mutation
+// must not be treated as fully processed after a failure.
+type RequiredPageSideEffect interface {
+	ApplyRequired(event PageSaveEvent) error
+}
+
 // PageSaveOrchestrator fans out a PageSaveEvent to all registered side effects.
 type PageSaveOrchestrator struct {
 	sideEffects []PageSideEffect
@@ -17,8 +23,15 @@ func NewPageSaveOrchestrator(effects ...PageSideEffect) *PageSaveOrchestrator {
 }
 
 // Run delivers the event to each side effect in registration order.
-func (o *PageSaveOrchestrator) Run(event PageSaveEvent) {
+func (o *PageSaveOrchestrator) Run(event PageSaveEvent) error {
 	for _, se := range o.sideEffects {
+		if required, ok := se.(RequiredPageSideEffect); ok {
+			if err := required.ApplyRequired(event); err != nil {
+				return err
+			}
+			continue
+		}
 		se.Apply(event)
 	}
+	return nil
 }

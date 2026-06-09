@@ -348,11 +348,13 @@ func (uc *RestoreRevisionUseCase) Execute(_ context.Context, in RestoreRevisionI
 	if err != nil {
 		return nil, err
 	}
-	uc.orchestrator.Run(pagesave.PageSaveEvent{
+	if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 		Operation: pagesave.PageOperationRestore,
 		UserID:    in.UserID,
 		After:     page,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return &RestoreRevisionOutput{Page: page}, nil
 }
 

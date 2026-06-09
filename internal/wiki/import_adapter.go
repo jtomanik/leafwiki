@@ -8,10 +8,6 @@ import (
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
-	"github.com/perber/wiki/internal/links"
-	"github.com/perber/wiki/internal/properties"
-	"github.com/perber/wiki/internal/search"
-	"github.com/perber/wiki/internal/tags"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
@@ -20,30 +16,24 @@ import (
 // WikiImportAdapter implements the importer.ImporterWiki interface using
 // the wiki's internal services directly via use cases.
 type WikiImportAdapter struct {
-	tree        *tree.TreeService
-	slug        *tree.SlugService
-	revision    *revision.Service
-	links       *links.LinkService
-	asset       *assets.AssetService
-	tags        *tags.TagsService
-	props       *properties.PropertiesService
-	searchIndex *search.SQLiteIndex
-	log         *slog.Logger
+	tree      *tree.TreeService
+	slug      *tree.SlugService
+	revision  *revision.Service
+	asset     *assets.AssetService
+	pageSaves *pagesave.PageSaveOrchestrator
+	log       *slog.Logger
 }
 
 // NewWikiImportAdapter constructs an importer adapter backed by the wiki's
 // internal services.
 func NewWikiImportAdapter(w *Wiki) *WikiImportAdapter {
 	return &WikiImportAdapter{
-		tree:        w.tree,
-		slug:        w.slug,
-		revision:    w.revision,
-		links:       w.links,
-		asset:       w.asset,
-		tags:        w.tags,
-		props:       w.props,
-		searchIndex: w.searchIndex,
-		log:         w.log,
+		tree:      w.tree,
+		slug:      w.slug,
+		revision:  w.revision,
+		asset:     w.asset,
+		pageSaves: w.newPageOrchestrator(),
+		log:       w.log,
 	}
 }
 
@@ -68,13 +58,7 @@ func (a *WikiImportAdapter) ListAssets(pageID string) ([]string, error) {
 }
 
 func (a *WikiImportAdapter) orchestrator() *pagesave.PageSaveOrchestrator {
-	return pagesave.NewPageSaveOrchestrator(
-		pagesave.NewSearchIndexSideEffect(a.searchIndex, a.tree, a.log),
-		pagesave.NewLinkIndexSideEffect(a.links, a.log),
-		pagesave.NewTagsSideEffect(a.tags, a.log),
-		pagesave.NewPropertiesSideEffect(a.props, a.log),
-		pagesave.NewRevisionSideEffect(a.revision, a.log),
-	)
+	return a.pageSaves
 }
 
 func (a *WikiImportAdapter) EnsurePath(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error) {

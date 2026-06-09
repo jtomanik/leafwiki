@@ -45,6 +45,10 @@ func (e *LinkIndexSideEffect) Apply(event PageSaveEvent) {
 					e.log.Warn("failed to update links for page", "pageID", event.After.ID, "error", err)
 				}
 				e.healExact(event.After)
+				return
+			}
+			for _, p := range event.AffectedPages {
+				e.updateAndHeal(p)
 			}
 		}
 

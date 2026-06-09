@@ -115,13 +115,13 @@ test('admin api key authenticates native stdio and live revocation affects later
     clientName: 'leafwiki-e2e-native-stdio-admin-api-key',
   });
   try {
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe('admin');
     expect(currentUser.role).toBe('admin');
 
     const slug = `mcp-stdio-admin-api-key-e2e-${Date.now()}`;
-    await mcp.callTool('create_page', {
+    await mcp.callTool('wiki_create_page', {
       title: 'MCP STDIO Admin API Key E2E Page',
       slug,
       kind: 'page',
@@ -133,9 +133,9 @@ test('admin api key authenticates native stdio and live revocation affects later
     await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
 
     await revokeAPIKey(page, seeds.admin);
-    await expect(mcp.callTool('get_tree')).rejects.toThrow(liveRevocationError);
+    await expect(mcp.callTool('wiki_get_tree')).rejects.toThrow(liveRevocationError);
     await expect(
-      mcp.callTool('create_page', {
+      mcp.callTool('wiki_create_page', {
         title: 'Revoked Admin STDIO API Key Write',
         slug: `revoked-admin-stdio-api-key-write-${Date.now()}`,
       }),
@@ -152,14 +152,14 @@ test('viewer api key can read through native stdio but cannot mutate', async () 
     clientName: 'leafwiki-e2e-native-stdio-viewer-api-key',
   });
   try {
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(seeds.viewer.username);
     expect(currentUser.role).toBe('viewer');
 
-    await expect(mcp.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(mcp.callTool('wiki_get_tree')).resolves.toBeTruthy();
     await expect(
-      mcp.callTool('create_page', {
+      mcp.callTool('wiki_create_page', {
         title: 'Viewer STDIO API Key Write',
         slug: `viewer-stdio-api-key-write-${Date.now()}`,
       }),
@@ -187,9 +187,9 @@ test('concurrent native stdio api-key clients keep separate identities', async (
   ]);
   try {
     const [editorACurrent, editorBCurrent, viewerCurrent] = await Promise.all([
-      editorA.callTool('get_current_user'),
-      editorB.callTool('get_current_user'),
-      viewer.callTool('get_current_user'),
+      editorA.callTool('wiki_get_current_user'),
+      editorB.callTool('wiki_get_current_user'),
+      viewer.callTool('wiki_get_current_user'),
     ]);
     expect((editorACurrent.user as { username: string; role: string }).username).toBe(
       seeds.editor.username,
@@ -204,24 +204,26 @@ test('concurrent native stdio api-key clients keep separate identities', async (
     );
     expect((viewerCurrent.user as { username: string; role: string }).role).toBe('viewer');
 
-    await expect(editorA.callTool('get_tree')).resolves.toBeTruthy();
-    await expect(editorB.callTool('get_tree')).resolves.toBeTruthy();
-    await expect(viewer.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(editorA.callTool('wiki_get_tree')).resolves.toBeTruthy();
+    await expect(editorB.callTool('wiki_get_tree')).resolves.toBeTruthy();
+    await expect(viewer.callTool('wiki_get_tree')).resolves.toBeTruthy();
 
     const editorSlug = `mcp-stdio-concurrent-editor-write-${Date.now()}`;
     await expect(
-      editorA.callTool('create_page', {
+      editorA.callTool('wiki_create_page', {
         title: 'Concurrent Editor STDIO API Key Write',
         slug: editorSlug,
         kind: 'page',
       }),
     ).resolves.toBeTruthy();
     await expect(
-      editorB.callTool('get_page_by_path', {
+      editorB.callTool('wiki_get_page_by_path', {
         path: editorSlug,
       }),
     ).resolves.toBeTruthy();
-    await expect(viewer.callTool('get_page_by_path', { path: editorSlug })).resolves.toBeTruthy();
+    await expect(
+      viewer.callTool('wiki_get_page_by_path', { path: editorSlug }),
+    ).resolves.toBeTruthy();
   } finally {
     await Promise.all([editorA.close(), editorB.close(), viewer.close()]);
   }
@@ -234,14 +236,14 @@ test('role downgrade takes effect during a live native stdio session', async ({ 
     clientName: 'leafwiki-e2e-native-stdio-editor-api-key',
   });
   try {
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(seeds.editor.username);
     expect(currentUser.role).toBe('editor');
 
     const editorSlug = `editor-stdio-api-key-write-${Date.now()}`;
     await expect(
-      mcp.callTool('create_page', {
+      mcp.callTool('wiki_create_page', {
         title: 'Editor STDIO API Key Write',
         slug: editorSlug,
         kind: 'page',
@@ -252,12 +254,12 @@ test('role downgrade takes effect during a live native stdio session', async ({ 
     await updateUserRole(page, seeds.editor, 'viewer');
 
     await expect(
-      mcp.callTool('create_page', {
+      mcp.callTool('wiki_create_page', {
         title: 'Downgraded Editor STDIO API Key Write',
         slug: `downgraded-editor-stdio-api-key-write-${Date.now()}`,
       }),
     ).rejects.toThrow(/editor|admin/i);
-    await expect(mcp.callTool('get_tree')).resolves.toBeTruthy();
+    await expect(mcp.callTool('wiki_get_tree')).resolves.toBeTruthy();
   } finally {
     await mcp.close();
   }

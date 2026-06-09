@@ -32,6 +32,10 @@ export function useToolbarActions({
   const appMode = useAppMode()
   const readOnlyMode = useIsReadOnly()
   const enableRevision = useConfigStore((state) => state.enableRevision)
+  const enableWorkspaceSync = useConfigStore(
+    (state) => state.enableWorkspaceSync,
+  )
+  const enablePageHistory = enableRevision || enableWorkspaceSync
   const registerHotkey = useHotKeysStore((s) => s.registerHotkey)
   const unregisterHotkey = useHotKeysStore((s) => s.unregisterHotkey)
   const itemLabel = pageKind === NODE_KIND_PAGE ? 'Page' : 'Section'
@@ -85,7 +89,7 @@ export function useToolbarActions({
       },
     ]
 
-    if (enableRevision) {
+    if (enablePageHistory) {
       toolbarButtons.splice(2, 0, {
         id: 'page-history',
         label: `${itemLabel} History`,
@@ -144,7 +148,7 @@ export function useToolbarActions({
     registerHotkey(permalinkHotkey)
     registerHotkey(copyHotkey)
     registerHotkey(printHotkey)
-    if (enableRevision) {
+    if (enablePageHistory) {
       registerHotkey(historyHotkey)
     }
     registerHotkey(deleteHotkey)
@@ -154,7 +158,7 @@ export function useToolbarActions({
       unregisterHotkey(permalinkHotkey.keyCombo)
       unregisterHotkey(copyHotkey.keyCombo)
       unregisterHotkey(printHotkey.keyCombo)
-      if (enableRevision) {
+      if (enablePageHistory) {
         unregisterHotkey(historyHotkey.keyCombo)
       }
       unregisterHotkey(deleteHotkey.keyCombo)
@@ -163,6 +167,8 @@ export function useToolbarActions({
     appMode,
     readOnlyMode,
     enableRevision,
+    enableWorkspaceSync,
+    enablePageHistory,
     setButtons,
     deletePage,
     copyPage,

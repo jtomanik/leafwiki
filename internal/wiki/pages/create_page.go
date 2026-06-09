@@ -12,6 +12,7 @@ import (
 // CreatePageInput is the input for CreatePageUseCase.
 type CreatePageInput struct {
 	UserID   string
+	Source   string
 	ParentID *string
 	Title    string
 	Slug     string
@@ -83,12 +84,15 @@ func (uc *CreatePageUseCase) Execute(_ context.Context, in CreatePageInput) (*Cr
 		return nil, err
 	}
 
-	uc.orchestrator.Run(pagesave.PageSaveEvent{
+	if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 		Operation: pagesave.PageOperationCreate,
 		UserID:    in.UserID,
+		Source:    in.Source,
 		After:     page,
 		Summary:   "page created",
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return &CreatePageOutput{Page: page}, nil
 }

@@ -14,6 +14,7 @@ import (
 // CopyPageInput is the input for CopyPageUseCase.
 type CopyPageInput struct {
 	UserID         string
+	Source         string
 	SourcePageID   string
 	TargetParentID *string
 	Title          string
@@ -100,12 +101,15 @@ func (uc *CopyPageUseCase) Execute(_ context.Context, in CopyPageInput) (*CopyPa
 		return nil, err
 	}
 
-	uc.orchestrator.Run(pagesave.PageSaveEvent{
+	if err := uc.orchestrator.Run(pagesave.PageSaveEvent{
 		Operation: pagesave.PageOperationCreate,
 		UserID:    in.UserID,
+		Source:    in.Source,
 		After:     copyPage,
 		Summary:   "page copied",
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return &CopyPageOutput{Page: copyPage}, nil
 }

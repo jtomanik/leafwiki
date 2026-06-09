@@ -20,6 +20,41 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
+func (f *NodeStore) sectionIndexPathInDir(sectionDir string) (string, bool, error) {
+	defaultPath := filepath.Join(sectionDir, "index.md")
+	entries, err := os.ReadDir(sectionDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return defaultPath, false, nil
+		}
+		return defaultPath, false, err
+	}
+
+	var existingPath string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		if !strings.EqualFold(base, "index") || !strings.EqualFold(ext, ".md") {
+			continue
+		}
+		candidate := filepath.Join(sectionDir, name)
+		if name == "index.md" {
+			return candidate, true, nil
+		}
+		if existingPath == "" {
+			existingPath = candidate
+		}
+	}
+	if existingPath != "" {
+		return existingPath, true, nil
+	}
+	return defaultPath, false, nil
+}
+
 func ensureUniqueReconstructedID(seenIDs map[string]string, id string, path string) error {
 	trimmedID := strings.TrimSpace(id)
 	if trimmedID == "" {
@@ -335,20 +370,24 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 				continue
 			}
 
-			indexPath := filepath.Join(currentPath, name, "index.md")
+			sectionDir := filepath.Join(currentPath, name)
+			indexPath, hasIndex, err := f.sectionIndexPathInDir(sectionDir)
+			if err != nil {
+				return fmt.Errorf("resolve section index for %s: %w", sectionDir, err)
+			}
 			var sectionMdFile *markdown.MarkdownFile
 			needsWriteback := false
-			if fileExists(indexPath) {
+			if hasIndex {
 				mdFile, err := markdown.LoadMarkdownFile(indexPath)
 				if err != nil {
-					f.log.Error("could not load index.md", "path", indexPath, "error", err)
+					f.log.Error("could not load section index", "path", indexPath, "error", err)
 					// fall back to default title and generated ID, but still add the section and recurse
 				} else {
 					fm := mdFile.GetFrontmatter()
 					metadata = f.metadataFromFrontmatter(fm, reconstructNow, indexPath)
 					title, err = mdFile.GetTitle()
 					if err != nil {
-						f.log.Error("could not extract title from index.md", "path", indexPath, "error", err)
+						f.log.Error("could not extract title from section index", "path", indexPath, "error", err)
 						// keep default title; still add the section and recurse
 					}
 					if fm.LeafWikiID != "" {
@@ -383,7 +422,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 				f.writeReconstructedFrontmatter(sectionMdFile, child)
 			}
 
-			if !fileExists(indexPath) {
+			if !hasIndex {
 				if _, err := f.ensureSectionIndex(child); err != nil {
 					return fmt.Errorf("materialize missing section index for %s: %w", indexPath, err)
 				}
@@ -1193,7 +1232,7 @@ func resolvePathForContainment(path string) (string, error) {
 // contentPathForNodeRead returns the expected content file path for a node
 // based purely on the tree Kind (NO side effects, NO mkdir):
 // - page   => <base>.md
-// - section => <base>/index.md
+// - section => existing <base>/index.md case variant, or <base>/index.md
 func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeRead", Reason: "an entry is required"}
@@ -1205,7 +1244,10 @@ func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 	}
 	switch entry.Kind {
 	case NodeKindSection:
-		path := filepath.Join(base, "index.md")
+		path, _, err := f.sectionIndexPathInDir(base)
+		if err != nil {
+			return "", err
+		}
 		if err := f.requirePathInRoot("contentPathForNodeRead", path); err != nil {
 			return "", err
 		}
@@ -1224,7 +1266,7 @@ func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 // contentPathForNodeWrite returns the expected content file path for a node
 // based purely on the tree Kind (MAY create dirs for sections):
 // - page   => <base>.md
-// - section => <base>/index.md (ensures directory exists)
+// - section => existing <base>/index.md case variant, or <base>/index.md (ensures directory exists)
 func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeWrite", Reason: "an entry is required"}
@@ -1236,7 +1278,10 @@ func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 	}
 	switch entry.Kind {
 	case NodeKindSection:
-		path := filepath.Join(base, "index.md")
+		path, _, err := f.sectionIndexPathInDir(base)
+		if err != nil {
+			return "", err
+		}
 		if err := f.requirePathInRoot("contentPathForNodeWrite", path); err != nil {
 			return "", err
 		}
@@ -1279,8 +1324,11 @@ func (f *NodeStore) resolveNode(entry *PageNode) (*ResolvedNode, error) {
 
 	// 2) Folder?
 	if info, err := os.Stat(basePath); err == nil && info.IsDir() {
-		index := filepath.Join(basePath, "index.md")
-		if _, err := os.Stat(index); err == nil {
+		index, hasIndex, err := f.sectionIndexPathInDir(basePath)
+		if err != nil {
+			return nil, err
+		}
+		if hasIndex {
 			f.log.Debug("resolved as section node with content", "dirPath", basePath, "filePath", index)
 			return &ResolvedNode{
 				Kind:       NodeKindSection,

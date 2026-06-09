@@ -575,6 +575,64 @@
     @apply mt-6 flex justify-end gap-2;
   }
 
+  .workspace-snapshots-dialog {
+    @apply flex min-h-0 flex-col gap-3;
+  }
+
+  .workspace-snapshots-dialog__toolbar {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  .workspace-snapshots-dialog__heading {
+    @apply text-interface-text flex items-center gap-2 text-sm font-medium;
+  }
+
+  .workspace-snapshots-dialog__reload {
+    @apply border-surface-border text-interface-text hover:bg-surface-alt inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .workspace-snapshots-dialog__status,
+  .workspace-snapshots-dialog__empty {
+    @apply text-muted-foreground flex items-center gap-2 rounded-md px-1 py-6 text-sm;
+  }
+
+  .workspace-snapshots-dialog__error {
+    @apply border-error/30 bg-error/10 text-error rounded-md border px-3 py-2 text-sm;
+  }
+
+  .workspace-snapshots-dialog__list {
+    @apply border-surface-border flex max-h-[360px] flex-col overflow-y-auto rounded-md border;
+  }
+
+  .workspace-snapshots-dialog__load-more {
+    @apply pt-1;
+  }
+
+  .workspace-snapshots-dialog__item {
+    @apply border-surface-border hover:bg-surface-alt flex min-h-[4.25rem] flex-col items-start gap-1 border-b px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .workspace-snapshots-dialog__item:last-child {
+    @apply border-b-0;
+  }
+
+  .workspace-snapshots-dialog__item--selected {
+    @apply bg-surface-alt;
+    box-shadow: inset 3px 0 0 hsl(var(--brand));
+  }
+
+  .workspace-snapshots-dialog__commit {
+    @apply text-interface-text inline-flex items-center gap-2 font-mono text-sm font-medium;
+  }
+
+  .workspace-snapshots-dialog__message {
+    @apply text-interface-text text-sm;
+  }
+
+  .workspace-snapshots-dialog__meta {
+    @apply text-muted-foreground text-xs;
+  }
+
   /* Form Input Styles */
   .form-input {
     @apply space-y-1;
@@ -2335,6 +2393,54 @@
 
   .tree-view {
     @apply w-full;
+  }
+
+  .workspace-sync-status {
+    @apply border-warning/30 bg-warning/10 text-interface-text mb-3 flex flex-col gap-3 rounded-md border px-3 py-3 text-sm;
+  }
+
+  .workspace-sync-status__summary {
+    @apply flex items-start gap-2;
+  }
+
+  .workspace-sync-status__icon {
+    @apply text-warning mt-0.5 shrink-0;
+  }
+
+  .workspace-sync-status__copy {
+    @apply min-w-0 flex-1;
+  }
+
+  .workspace-sync-status__title {
+    @apply leading-5 font-medium;
+  }
+
+  .workspace-sync-status__details {
+    @apply mt-1;
+  }
+
+  .workspace-sync-status__details-summary {
+    @apply text-muted-foreground hover:text-interface-text cursor-pointer text-xs;
+  }
+
+  .workspace-sync-status__list {
+    @apply mt-2 flex flex-col gap-2;
+  }
+
+  .workspace-sync-status__item {
+    @apply border-warning/30 bg-surface/70 flex flex-col gap-1 rounded border px-2 py-2;
+  }
+
+  .workspace-sync-status__path {
+    @apply text-interface-text font-mono text-xs font-medium break-words;
+  }
+
+  .workspace-sync-status__message {
+    @apply text-muted-foreground text-xs leading-5;
+  }
+
+  .workspace-sync-status__sync-button {
+    @apply border-warning/40 bg-surface/80 hover:bg-surface inline-flex h-8 w-fit items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .tree-view__toolbar {

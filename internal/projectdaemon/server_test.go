@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/perber/wiki/internal/agenthooks"
 )
 
 func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
@@ -92,6 +94,64 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *testing.T) {
+	presence := NewAgentPresenceRegistry(time.Minute, nil)
+	handler := NewControlServer(ControlServerOptions{
+		Token:         "control-token",
+		Sessions:      NewSessionRegistry(time.Minute, nil),
+		AgentPresence: presence,
+		AuthDisabled:  true,
+	})
+
+	rawEvent, ok := agenthooks.Normalize(
+		agenthooks.ProviderCodex,
+		[]byte(`{"hook_event_name":"SessionStart","session_id":"codex-session","model":"gpt-5.4"}`),
+		time.Date(2026, 6, 7, 15, 0, 0, 0, time.UTC),
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
+	}
+	body, err := json.Marshal(rawEvent)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	resp := controlServerRequest(t, handler, http.MethodPost, "/agent-presence/events", "", bytes.NewReader(body))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized POST status = %d, want %d", resp.Code, http.StatusUnauthorized)
+	}
+	if presence.Count() != 0 {
+		t.Fatalf("presence count after unauthorized POST = %d, want 0", presence.Count())
+	}
+	resp = controlServerRequest(t, handler, http.MethodGet, "/agent-presence", "wrong-token", nil)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized GET status = %d, want %d", resp.Code, http.StatusUnauthorized)
+	}
+
+	resp = controlServerRequest(t, handler, http.MethodPost, "/agent-presence/events", "control-token", bytes.NewReader(body))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("authorized POST status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	if presence.Count() != 1 {
+		t.Fatalf("presence count after authorized POST = %d, want 1", presence.Count())
+	}
+
+	resp = controlServerRequest(t, handler, http.MethodGet, "/agent-presence", "control-token", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("authorized GET status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	var sessions []AgentPresenceSession
+	if err := json.Unmarshal(resp.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("decode presence sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionIDHash != rawEvent.SessionIDHash || sessions[0].Provider != agenthooks.ProviderCodex {
+		t.Fatalf("sessions = %#v, want one sanitized codex session", sessions)
+	}
+	if strings.Contains(resp.Body.String(), "raw") || strings.Contains(resp.Body.String(), "session_id") {
+		t.Fatalf("presence response leaked raw-ish fields: %s", resp.Body.String())
+	}
+}
+
 func TestControlServerForwardsPrivateMCPAfterControlToken(t *testing.T) {
 	var seenPath, seenAuth, seenBody string
 	handler := NewControlServer(ControlServerOptions{
@@ -168,8 +228,9 @@ func TestControlServerVerifyStdioAuthBoundary(t *testing.T) {
 func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 	var verifiedKey string
 	handler := NewControlServer(ControlServerOptions{
-		Token:    "control-token",
-		Sessions: NewSessionRegistry(time.Minute, nil),
+		Token:         "control-token",
+		Sessions:      NewSessionRegistry(time.Minute, nil),
+		AgentPresence: NewAgentPresenceRegistry(time.Minute, nil),
 		Health: DaemonHealth{
 			SchemaVersion: DescriptorSchemaVersion,
 			PID:           123,
@@ -206,6 +267,24 @@ func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 	}
 	if err := client.VerifyStdioAuth(ctx, "lwk_valid"); err != nil {
 		t.Fatalf("VerifyStdioAuth failed: %v", err)
+	}
+	cursorEvent, ok := agenthooks.Normalize(
+		agenthooks.ProviderCursor,
+		[]byte(`{"hook_event_name":"sessionStart","session_id":"cursor-session"}`),
+		time.Date(2026, 6, 7, 15, 30, 0, 0, time.UTC),
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
+	}
+	if err := client.RecordAgentPresence(ctx, cursorEvent); err != nil {
+		t.Fatalf("RecordAgentPresence failed: %v", err)
+	}
+	presenceSessions, err := client.ListAgentPresence(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentPresence failed: %v", err)
+	}
+	if len(presenceSessions) != 1 || presenceSessions[0].SessionIDHash != cursorEvent.SessionIDHash {
+		t.Fatalf("presence sessions = %#v, want cursor session", presenceSessions)
 	}
 	if verifiedKey != "lwk_valid" {
 		t.Fatalf("verified key = %q, want lwk_valid", verifiedKey)

@@ -101,7 +101,19 @@ run-e2e-local:
 # e.g.: make run-e2e-local-fast GREP="shoutout"
 run-e2e-local-fast:
 	@echo "⚡ Starting end-to-end tests (local, skip UI build)..."
-	@E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh $(if $(GREP),--grep "$(GREP)",)
+	@if printf '%s\n' "$(GREP)" | grep -q "Workspace Sync"; then \
+		non_workspace_grep=$$(printf '%s\n' "$(GREP)" | sed 's/Workspace Sync//g; s/||/|/g; s/^|//; s/|$$//'); \
+		if [ -n "$$non_workspace_grep" ]; then \
+			E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh --grep "$$non_workspace_grep"; \
+		fi; \
+		E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh --grep "Workspace Sync"; \
+	else \
+		E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh $(if $(GREP),--grep "$(GREP)",); \
+	fi
+
+run-e2e-workspace-sync:
+	@echo "🗂️ Starting workspace sync E2E smoke..."
+	@E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh --grep "Workspace Sync"
 
 run-e2e-root-dir:
 	@echo "🗂️ Starting root-dir storage boundary E2E smoke..."
@@ -123,10 +135,11 @@ help:
 	@echo "  make run-e2e-local        – Run end-to-end tests via local fast path"
 	@echo "  make run-e2e-local-fast   – Run E2E tests locally, skip UI build (use when dist/ is current)"
 	@echo "                              Optional: GREP=<pattern> to filter tests"
+	@echo "  make run-e2e-workspace-sync – Run focused E2E smoke for workspace sync"
 	@echo "  make run-e2e-root-dir     – Run focused E2E smoke for separate root dir storage"
 	@echo "  make run-e2e-root-dir-stdio – Run focused MCP STDIO smoke with separate root dir storage"
 	@echo "  make run                  – Run development server"
 	@echo "  make docker-build-publish – Build and push multi-arch Docker image"
 	@echo "  make changelog            – Generate changelog"
 
-.PHONY: all build run clean test bench fmt lint help docker-build-publish changelog run-e2e run-e2e-local run-e2e-local-fast run-e2e-root-dir run-e2e-root-dir-stdio run-proxy-e2e
+.PHONY: all build run clean test bench fmt lint help docker-build-publish changelog run-e2e run-e2e-local run-e2e-local-fast run-e2e-workspace-sync run-e2e-root-dir run-e2e-root-dir-stdio run-proxy-e2e

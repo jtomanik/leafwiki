@@ -8,19 +8,15 @@ import (
 )
 
 func ValidatePageRoutePath(routePath string) (string, error) {
-	routePath = strings.TrimSpace(routePath)
-	if routePath == "" {
+	validPath, err := tree.ValidateRoutePath(routePath)
+	if err == nil {
+		return validPath, nil
+	}
+	trimmed := strings.TrimSpace(routePath)
+	if trimmed == "" {
 		return "", sharederrors.NewLocalizedError(ErrCodePageMissingPath, "Missing path", "missing path", nil)
 	}
-	if strings.Contains(routePath, `\`) {
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidPath, "Invalid path", "invalid path %s", nil, routePath)
-	}
-	for _, segment := range strings.Split(routePath, "/") {
-		if segment == "" || segment == "." || segment == ".." || strings.TrimSpace(segment) != segment {
-			return "", sharederrors.NewLocalizedError(ErrCodePageInvalidPath, "Invalid path", "invalid path %s", nil, routePath)
-		}
-	}
-	return routePath, nil
+	return "", sharederrors.NewLocalizedError(ErrCodePageInvalidPath, "Invalid path", "invalid path %s", nil, trimmed)
 }
 
 func ValidatePageKind(kind *string) (tree.NodeKind, error) {

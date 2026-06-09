@@ -14,6 +14,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/test_utils"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 func createWikiTestInstance(t *testing.T) *Wiki {
@@ -210,6 +211,310 @@ func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testin
 	}
 }
 
+func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	invalidA := "---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"
+	invalidB := "---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"
+	if err := os.WriteFile(filepath.Join(rootDir, "a.md"), []byte(invalidA), 0o644); err != nil {
+		t.Fatalf("write a.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "b.md"), []byte(invalidB), 0o644); err != nil {
+		t.Fatalf("write b.md: %v", err)
+	}
+
+	w, err := NewWiki(&WikiOptions{
+		Workspace: Workspace{
+			DataDir: dataDir,
+			RootDir: rootDir,
+		},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki with invalid workspace sync state returned error: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	status := w.WorkspaceSyncStatus()
+	if status.LastCommitHash == "" {
+		t.Fatalf("workspace sync status missing commit hash: %#v", status)
+	}
+	if len(status.ValidationErrors) == 0 {
+		t.Fatalf("workspace sync status missing validation errors: %#v", status)
+	}
+	var hasPath bool
+	for _, validationErr := range status.ValidationErrors {
+		if validationErr.Path == "a.md" || validationErr.Path == "b.md" {
+			hasPath = true
+			break
+		}
+	}
+	if !hasPath {
+		t.Fatalf("workspace sync validation errors missing markdown path: %#v", status.ValidationErrors)
+	}
+}
+
+func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	before := w.WorkspaceSyncStatus().LastCommitHash
+	if before == "" {
+		t.Fatalf("initial workspace sync commit hash is empty")
+	}
+
+	page := createPageForTest(t, w, "alice", nil, "Synced Web Page", "synced-web-page", pageNodeKind())
+
+	after := w.WorkspaceSyncStatus().LastCommitHash
+	if after == "" || after == before {
+		t.Fatalf("workspace sync commit hash after create = %q, before %q", after, before)
+	}
+	result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
+	if err != nil {
+		t.Fatalf("WorkspaceSyncPageRevisions: %v", err)
+	}
+	revisions := result.Revisions
+	if len(revisions) == 0 {
+		t.Fatalf("workspace sync revisions missing for web-created page")
+	}
+	if revisions[0].AuthorID != "alice" {
+		t.Fatalf("workspace sync revision author = %q, want alice", revisions[0].AuthorID)
+	}
+}
+
+func TestWiki_WorkspaceSyncCommitsImportedPages(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	before := w.WorkspaceSyncStatus().LastCommitHash
+	if before == "" {
+		t.Fatalf("initial workspace sync commit hash is empty")
+	}
+
+	adapter := NewWikiImportAdapter(w)
+	page, err := adapter.EnsurePath("importer-user", "imported-page", "Imported Page", pageNodeKind())
+	if err != nil {
+		t.Fatalf("EnsurePath: %v", err)
+	}
+	content := "Imported body\n"
+	page, err = adapter.UpdatePage("importer-user", page.ID, page.Title, page.Slug, &content, &page.Kind)
+	if err != nil {
+		t.Fatalf("UpdatePage: %v", err)
+	}
+
+	after := w.WorkspaceSyncStatus().LastCommitHash
+	if after == "" || after == before {
+		t.Fatalf("workspace sync commit hash after import = %q, before %q", after, before)
+	}
+	result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
+	if err != nil {
+		t.Fatalf("WorkspaceSyncPageRevisions: %v", err)
+	}
+	revisions := result.Revisions
+	if len(revisions) == 0 {
+		t.Fatalf("workspace sync revisions missing for imported page")
+	}
+	if revisions[0].AuthorID != "importer-user" {
+		t.Fatalf("workspace sync revision author = %q, want importer-user", revisions[0].AuthorID)
+	}
+	snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
+	}
+	if len(snapshots) == 0 || snapshots[0].ID != after {
+		t.Fatalf("latest workspace snapshot = %#v, want commit %s", snapshots, after)
+	}
+	if snapshots[0].AuthorID != "importer-user" {
+		t.Fatalf("latest workspace snapshot author = %q, want importer-user", snapshots[0].AuthorID)
+	}
+	if snapshots[0].Source != string(workspacesync.SourceWeb) {
+		t.Fatalf("latest workspace snapshot source = %q, want web", snapshots[0].Source)
+	}
+}
+
+func TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	raw := `---
+leafwiki_id: indexed-page
+leafwiki_title: Indexed Page
+tags:
+  - synced
+status: draft
+---
+
+# Indexed Page
+
+workspace-sync-search-token`
+	if err := os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write direct markdown: %v", err)
+	}
+
+	status, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("WorkspaceSyncRefresh: %v", err)
+	}
+	if status.LastCommitHash == "" {
+		t.Fatalf("sync status missing commit hash: %#v", status)
+	}
+
+	if _, err := w.tree.GetPage("indexed-page"); err != nil {
+		t.Fatalf("GetPage indexed-page: %v", err)
+	}
+	tagged, err := w.tags.GetPageIDsByTags([]string{"synced"})
+	if err != nil {
+		t.Fatalf("GetPageIDsByTags: %v", err)
+	}
+	if len(tagged) != 1 || tagged[0] != "indexed-page" {
+		t.Fatalf("tagged pages = %#v, want indexed-page", tagged)
+	}
+	props, err := w.props.GetPropertiesForPages([]string{"indexed-page"})
+	if err != nil {
+		t.Fatalf("GetPropertiesForPages: %v", err)
+	}
+	if props["indexed-page"]["status"].Value != "draft" {
+		t.Fatalf("properties = %#v, want status draft", props)
+	}
+	result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if result.Count == 0 {
+		t.Fatalf("search result count = 0, want indexed direct markdown")
+	}
+
+	updatedRaw := `---
+leafwiki_id: indexed-page
+leafwiki_title: Indexed Page
+tags:
+  - resynced
+status: published
+---
+
+# Indexed Page
+
+workspace-sync-updated-token`
+	if err := os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(updatedRaw), 0o644); err != nil {
+		t.Fatalf("write updated direct markdown: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh after update: %v", err)
+	}
+	tagged, err = w.tags.GetPageIDsByTags([]string{"synced"})
+	if err != nil {
+		t.Fatalf("GetPageIDsByTags synced after update: %v", err)
+	}
+	if len(tagged) != 0 {
+		t.Fatalf("synced tagged pages after update = %#v, want none", tagged)
+	}
+	tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
+	if err != nil {
+		t.Fatalf("GetPageIDsByTags resynced after update: %v", err)
+	}
+	if len(tagged) != 1 || tagged[0] != "indexed-page" {
+		t.Fatalf("resynced tagged pages = %#v, want indexed-page", tagged)
+	}
+	props, err = w.props.GetPropertiesForPages([]string{"indexed-page"})
+	if err != nil {
+		t.Fatalf("GetPropertiesForPages after update: %v", err)
+	}
+	if props["indexed-page"]["status"].Value != "published" {
+		t.Fatalf("properties after update = %#v, want status published", props)
+	}
+	result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
+	if err != nil {
+		t.Fatalf("Search old token after update: %v", err)
+	}
+	if result.Count != 0 {
+		t.Fatalf("old search result count = %d, want 0", result.Count)
+	}
+	result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
+	if err != nil {
+		t.Fatalf("Search updated token: %v", err)
+	}
+	if result.Count == 0 {
+		t.Fatalf("updated search result count = 0, want indexed updated markdown")
+	}
+
+	if err := os.Remove(filepath.Join(rootDir, "indexed-page.md")); err != nil {
+		t.Fatalf("remove direct markdown: %v", err)
+	}
+	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonExplicit,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("WorkspaceSyncRefresh after delete: %v", err)
+	}
+	if _, err := w.tree.GetPage("indexed-page"); err == nil {
+		t.Fatalf("GetPage indexed-page after delete succeeded, want missing page")
+	}
+	tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
+	if err != nil {
+		t.Fatalf("GetPageIDsByTags resynced after delete: %v", err)
+	}
+	if len(tagged) != 0 {
+		t.Fatalf("resynced tagged pages after delete = %#v, want none", tagged)
+	}
+	result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
+	if err != nil {
+		t.Fatalf("Search updated token after delete: %v", err)
+	}
+	if result.Count != 0 {
+		t.Fatalf("deleted search result count = %d, want 0", result.Count)
+	}
+}
+
 func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
@@ -249,11 +554,11 @@ func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if !mcpToolNamesContain(tools.Tools, "create_page") || !mcpToolNamesContain(tools.Tools, "get_current_user") {
+	if !mcpToolNamesContain(tools.Tools, "wiki_create_page") || !mcpToolNamesContain(tools.Tools, "wiki_get_current_user") {
 		t.Fatalf("native stdio tools = %#v, want shared LeafWiki tools", tools.Tools)
 	}
 
-	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_current_user"})
+	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "wiki_get_current_user"})
 	if err != nil {
 		t.Fatalf("get_current_user failed: %v", err)
 	}
@@ -263,6 +568,110 @@ func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	}
 	if currentUser["username"] != "public-editor" || currentUser["role"] != "editor" {
 		t.Fatalf("native stdio current user = %#v, want public-editor editor", currentUser)
+	}
+
+	session.Close()
+	select {
+	case err := <-serverDone:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunMCPStdio returned %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
+	}
+}
+
+func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AuthDisabled:            true,
+			EnableWorkspaceSync:     true,
+			MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
+		}, serverTransport)
+	}()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("Connect MCP client failed: %v", err)
+	}
+	defer session.Close()
+
+	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+	if !mcpToolNamesContain(tools.Tools, "wiki_list_revisions") {
+		t.Fatalf("workspace sync MCP tools missing list_revisions: %#v", tools.Tools)
+	}
+
+	created, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "wiki_create_page",
+		Arguments: map[string]any{
+			"title": "MCP Synced",
+			"slug":  "mcp-synced",
+			"kind":  "page",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create_page failed: %v", err)
+	}
+	if created.IsError {
+		t.Fatalf("create_page returned tool error: %#v", created.Content)
+	}
+	createdPage, ok := created.StructuredContent.(map[string]any)["page"].(map[string]any)
+	if !ok {
+		t.Fatalf("create_page structured content = %#v, want page map", created.StructuredContent)
+	}
+	pageID, _ := createdPage["id"].(string)
+	if pageID == "" {
+		t.Fatalf("created page missing id: %#v", createdPage)
+	}
+
+	snapshots, err := w.WorkspaceSyncSnapshots(ctx, 5)
+	if err != nil {
+		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
+	}
+	if len(snapshots) == 0 || snapshots[0].Source != string(workspacesync.SourceMCP) {
+		t.Fatalf("latest workspace snapshot = %#v, want source mcp", snapshots)
+	}
+
+	revisions, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "wiki_list_revisions",
+		Arguments: map[string]any{
+			"pageId": pageID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("list_revisions failed: %v", err)
+	}
+	if revisions.IsError {
+		t.Fatalf("list_revisions returned tool error: %#v", revisions.Content)
+	}
+	revisionsContent, ok := revisions.StructuredContent.(map[string]any)["revisions"].([]any)
+	if !ok || len(revisionsContent) == 0 {
+		t.Fatalf("list_revisions structured content = %#v, want non-empty revisions", revisions.StructuredContent)
 	}
 
 	session.Close()

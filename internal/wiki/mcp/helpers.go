@@ -101,13 +101,23 @@ func mcpToolError(err error) error {
 	return err
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+func exactlyOneIDOrPageID(id string, pageID string) (string, error) {
+	id = strings.TrimSpace(id)
+	pageID = strings.TrimSpace(pageID)
+	if id != "" && pageID != "" {
+		return "", fmt.Errorf("id and pageId cannot both be supplied")
 	}
-	return ""
+	if id == "" && pageID == "" {
+		return "", fmt.Errorf("id or pageId is required")
+	}
+	if pageID != "" {
+		return pageID, nil
+	}
+	return id, nil
+}
+
+func normalizeToolRoutePath(path string) string {
+	return strings.Trim(strings.TrimSpace(path), "/")
 }
 
 func base64DecodedSize(encoded string) int64 {

@@ -21,8 +21,26 @@ docker_data_volume=""
 docker_root_volume=""
 mcp_stdio_dir=""
 mcp_stdio_command=""
+mcp_agent_hook_command=""
+mcp_stdio_root_dir=""
 mcp_stdio_seed_dir=""
 mcp_stdio_seed_file=""
+
+revision_or_workspace_sync_args() {
+  if [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
+    printf '%s\n' "--enable-workspace-sync"
+    return
+  fi
+  printf '%s\n' "--enable-revision=true"
+}
+
+collect_revision_or_workspace_sync_args() {
+  local arg
+  sync_args=()
+  while IFS= read -r arg; do
+    sync_args+=("$arg")
+  done < <(revision_or_workspace_sync_args)
+}
 
 is_stdio_e2e() {
   [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ]
@@ -99,6 +117,11 @@ prepare_mcp_stdio_command() {
   mcp_stdio_dir="$(mktemp -d /tmp/leafwiki-mcp-e2e.XXXXXX)"
   local leafwiki_bin="$mcp_stdio_dir/leafwiki"
   mcp_stdio_command="$mcp_stdio_dir/leafwiki-native-stdio"
+  mcp_agent_hook_command="$mcp_stdio_dir/leafwiki-agent-hook"
+  mcp_stdio_root_dir="$local_root_dir"
+  if [ -z "$mcp_stdio_root_dir" ]; then
+    mcp_stdio_root_dir="$local_data_dir/root"
+  fi
   echo "🔨 Building native LeafWiki STDIO binary for E2E..."
   build_leafwiki_binary "$leafwiki_bin"
   local native_args=(
@@ -108,11 +131,13 @@ prepare_mcp_stdio_command() {
     --data-dir "$local_data_dir"
     --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}"
     --allow-insecure=true
-    --enable-revision=true
     --enable-link-refactor=true
     --log-target stderr
     --disable-request-log
   )
+  local sync_args=()
+  collect_revision_or_workspace_sync_args
+  native_args+=("${sync_args[@]}")
   if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
     native_args+=(
       --jwt-secret=e2e-tests-secret
@@ -121,9 +146,7 @@ prepare_mcp_stdio_command() {
   else
     native_args+=(--disable-auth=true)
   fi
-  if [ -n "$local_root_dir" ]; then
-    native_args+=(--root-dir "$local_root_dir")
-  fi
+  native_args+=(--root-dir "$mcp_stdio_root_dir")
   if [ -n "$app_base_path" ]; then
     native_args+=(--base-path "$app_base_path")
   fi
@@ -135,6 +158,33 @@ prepare_mcp_stdio_command() {
     printf '\n'
   } >"$mcp_stdio_command"
   chmod +x "$mcp_stdio_command"
+
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'provider="${1:-}"\n'
+    printf 'shift || true\n'
+    printf 'exec %q agent-hook "$provider"' "$repo_root/scripts/run.sh"
+    printf ' %q' --leafwiki-bin "$leafwiki_bin" --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log --server-arg --enable-link-refactor=true
+    for arg in "${sync_args[@]}"; do
+      if [ "$arg" = "--enable-workspace-sync" ]; then
+        printf ' %q' --enable-workspace-sync
+      else
+        printf ' %q' --disable-workspace-sync --server-arg "$arg"
+      fi
+    done
+    if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+      printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
+    else
+      printf ' %q' --disable-auth
+    fi
+    printf ' %q' --root-dir "$mcp_stdio_root_dir"
+    if [ -n "$app_base_path" ]; then
+      printf ' %q' --base-path "$app_base_path"
+    fi
+    printf ' "$@"\n'
+  } >"$mcp_agent_hook_command"
+  chmod +x "$mcp_agent_hook_command"
 }
 
 seed_mcp_stdio_api_keys() {
@@ -192,13 +242,15 @@ start_docker() {
   )
   local server_args=(
     --allow-insecure=true
-    --enable-revision=true
     --enable-link-refactor=true
     --jwt-secret=e2e-tests-secret
     --admin-password=admin
   )
+  local sync_args=()
+  collect_revision_or_workspace_sync_args
+  server_args+=("${sync_args[@]}")
 
-  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
+  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ] || [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
     docker_root_volume="wiki-e2e-tests-root-${RANDOM}${RANDOM}"
     docker volume create "$docker_root_volume" >/dev/null
     docker_args+=(-v "$docker_root_volume":/app/root)
@@ -245,13 +297,15 @@ start_local() {
     --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-0}"
   )
 
-  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
+  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ] || [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
     local_root_dir="$(mktemp -d /tmp/leafwiki-e2e-root.XXXXXX)"
     server_args+=(--root-dir "$local_root_dir")
   fi
   if [ -n "$app_base_path" ]; then
     server_args+=(--base-path "$app_base_path")
   fi
+  local sync_args=()
+  collect_revision_or_workspace_sync_args
 
   if is_stdio_e2e; then
     echo "✅ STDIO mode will start LeafWiki from the MCP client command."
@@ -287,8 +341,8 @@ start_local() {
       "${server_args[@]}" \
       --allow-insecure=true \
       "${auth_args[@]}" \
-      --enable-revision=true \
-      --enable-link-refactor=true
+      --enable-link-refactor=true \
+      "${sync_args[@]}"
   ) >"$server_log" 2>&1 &
 
   server_pid=$!
@@ -437,10 +491,11 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
-      E2E_ROOT_DIR="$local_root_dir" \
+      E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       stdbuf -oL -eL npx playwright test --workers="$workers" --reporter="$reporter" "$@"
@@ -451,10 +506,11 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
-      E2E_ROOT_DIR="$local_root_dir" \
+      E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
       npx playwright test --workers="$workers" --reporter="$reporter" "$@"

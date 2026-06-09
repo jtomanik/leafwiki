@@ -141,6 +141,89 @@ leafwiki_title: Readme
 	}
 }
 
+func TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	sectionDir := filepath.Join(tmp, "root", "docs")
+	mustMkdir(t, sectionDir)
+	indexPath := filepath.Join(sectionDir, "INDEX.MD")
+	mustWriteFile(t, indexPath, `---
+leafwiki_id: sec-docs
+leafwiki_title: Documentation
+---
+# Section
+`, 0o644)
+	mustWriteFile(t, filepath.Join(sectionDir, "intro.md"), `---
+leafwiki_id: page-intro
+leafwiki_title: Introduction
+---
+# Intro
+`, 0o644)
+
+	resolvedIndexPath, hasIndex, err := store.sectionIndexPathInDir(sectionDir)
+	if err != nil {
+		t.Fatalf("sectionIndexPathInDir: %v", err)
+	}
+	if !hasIndex {
+		t.Fatalf("sectionIndexPathInDir did not find INDEX.MD")
+	}
+	if filepath.Base(resolvedIndexPath) != "INDEX.MD" {
+		t.Fatalf("sectionIndexPathInDir path = %q, want INDEX.MD", resolvedIndexPath)
+	}
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	docs := findChildBySlug(t, tree, "docs")
+	if docs.Kind != NodeKindSection {
+		t.Fatalf("expected docs to be section, got %q", docs.Kind)
+	}
+	if docs.ID != "sec-docs" {
+		t.Fatalf("expected docs.ID=sec-docs, got %q", docs.ID)
+	}
+	if docs.Title != "Documentation" {
+		t.Fatalf("expected docs.Title=Documentation, got %q", docs.Title)
+	}
+	for _, ch := range docs.Children {
+		if strings.EqualFold(ch.Slug, "index") {
+			t.Fatalf("INDEX.MD must be skipped as page, but found slug %q", ch.Slug)
+		}
+	}
+
+	raw, err := store.ReadPageRaw(docs)
+	if err != nil {
+		t.Fatalf("ReadPageRaw section: %v", err)
+	}
+	if !strings.Contains(raw, "# Section") {
+		t.Fatalf("section raw content = %q, want INDEX.MD body", raw)
+	}
+
+	entries, err := os.ReadDir(sectionDir)
+	if err != nil {
+		t.Fatalf("ReadDir section: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "index.md" {
+			t.Fatalf("reconstruct materialized lowercase index.md alongside INDEX.MD")
+		}
+	}
+
+	mdFile, err := markdown.LoadMarkdownFile(indexPath)
+	if err != nil {
+		t.Fatalf("LoadMarkdownFile INDEX.MD: %v", err)
+	}
+	fm := mdFile.GetFrontmatter()
+	if fm.LeafWikiID != "sec-docs" || fm.LeafWikiTitle != "Documentation" {
+		t.Fatalf("unexpected frontmatter after writeback: %#v", fm)
+	}
+	if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
+		t.Fatalf("expected metadata writeback to update INDEX.MD timestamps, got %#v", fm)
+	}
+}
+
 func TestNodeStore_ReconstructTreeFromFS_SectionWithoutIndex_UsesDirNameAsTitleAndMaterializesIndex(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)

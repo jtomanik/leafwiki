@@ -1,6 +1,8 @@
 package revisions
 
 import (
+	"context"
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
@@ -10,55 +12,66 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 // Routes is the RouteRegistrar for the revisions domain.
 type Routes struct {
-	listRevisions    *ListRevisionsUseCase
-	getRevision      *GetRevisionUseCase
-	compareRevisions *CompareRevisionsUseCase
-	getRevisionAsset *GetRevisionAssetUseCase
-	getLatest        *GetLatestRevisionUseCase
-	restoreRevision  *RestoreRevisionUseCase
-	checkIntegrity   *CheckIntegrityUseCase
-	userResolver     *coreauth.UserResolver
-	authService      *coreauth.AuthService
-	treeService      *tree.TreeService
+	listRevisions            *ListRevisionsUseCase
+	getRevision              *GetRevisionUseCase
+	compareRevisions         *CompareRevisionsUseCase
+	getRevisionAsset         *GetRevisionAssetUseCase
+	getLatest                *GetLatestRevisionUseCase
+	restoreRevision          *RestoreRevisionUseCase
+	checkIntegrity           *CheckIntegrityUseCase
+	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	getWorkspaceRevision     func(context.Context, *tree.Page, string) (*revision.RevisionSnapshot, error)
+	restoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	userResolver             *coreauth.UserResolver
+	authService              *coreauth.AuthService
+	treeService              *tree.TreeService
 }
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
 type RoutesConfig struct {
-	ListRevisions    *ListRevisionsUseCase
-	GetRevision      *GetRevisionUseCase
-	CompareRevisions *CompareRevisionsUseCase
-	GetRevisionAsset *GetRevisionAssetUseCase
-	GetLatest        *GetLatestRevisionUseCase
-	RestoreRevision  *RestoreRevisionUseCase
-	CheckIntegrity   *CheckIntegrityUseCase
-	UserResolver     *coreauth.UserResolver
-	AuthService      *coreauth.AuthService
-	TreeService      *tree.TreeService
+	ListRevisions            *ListRevisionsUseCase
+	GetRevision              *GetRevisionUseCase
+	CompareRevisions         *CompareRevisionsUseCase
+	GetRevisionAsset         *GetRevisionAssetUseCase
+	GetLatest                *GetLatestRevisionUseCase
+	RestoreRevision          *RestoreRevisionUseCase
+	CheckIntegrity           *CheckIntegrityUseCase
+	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	GetWorkspaceRevision     func(context.Context, *tree.Page, string) (*revision.RevisionSnapshot, error)
+	RestoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	UserResolver             *coreauth.UserResolver
+	AuthService              *coreauth.AuthService
+	TreeService              *tree.TreeService
 }
 
 // NewRoutes constructs the revisions RouteRegistrar.
 func NewRoutes(cfg RoutesConfig) *Routes {
 	return &Routes{
-		listRevisions:    cfg.ListRevisions,
-		getRevision:      cfg.GetRevision,
-		compareRevisions: cfg.CompareRevisions,
-		getRevisionAsset: cfg.GetRevisionAsset,
-		getLatest:        cfg.GetLatest,
-		restoreRevision:  cfg.RestoreRevision,
-		checkIntegrity:   cfg.CheckIntegrity,
-		userResolver:     cfg.UserResolver,
-		authService:      cfg.AuthService,
-		treeService:      cfg.TreeService,
+		listRevisions:            cfg.ListRevisions,
+		getRevision:              cfg.GetRevision,
+		compareRevisions:         cfg.CompareRevisions,
+		getRevisionAsset:         cfg.GetRevisionAsset,
+		getLatest:                cfg.GetLatest,
+		restoreRevision:          cfg.RestoreRevision,
+		checkIntegrity:           cfg.CheckIntegrity,
+		listWorkspaceRevisions:   cfg.ListWorkspaceRevisions,
+		getWorkspaceRevision:     cfg.GetWorkspaceRevision,
+		restoreWorkspaceRevision: cfg.RestoreWorkspaceRevision,
+		userResolver:             cfg.UserResolver,
+		authService:              cfg.AuthService,
+		treeService:              cfg.TreeService,
 	}
 }
 
@@ -73,14 +86,20 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 		security.CSRFMiddleware(ctx.CSRFCookie),
 	)
 
-	// Revision routes are behind the EnableRevision feature flag.
-	if opts.EnableRevision {
-		authGroup.GET("/pages/:id/revisions", r.handleListRevisions)
-		authGroup.GET("/pages/:id/revisions/latest", r.handleGetLatestRevision)
-		authGroup.GET("/pages/:id/revisions/compare", r.handleCompareRevisions)
-		authGroup.GET("/pages/:id/revisions/:revisionId/assets/*name", r.handleGetRevisionAsset)
-		authGroup.GET("/pages/:id/revisions/:revisionId", r.handleGetRevision)
-		authGroup.POST("/pages/:id/revisions/:revisionId/restore", authmw.RequireEditorOrAdmin(), r.handleRestoreRevision)
+	// Revision routes are behind the legacy revision or workspace sync feature flags.
+	if opts.EnableRevision || opts.EnableWorkspaceSync {
+		withMode := func(handler gin.HandlerFunc) gin.HandlerFunc {
+			return func(c *gin.Context) {
+				c.Set("leafwiki.enableRevision", opts.EnableRevision)
+				handler(c)
+			}
+		}
+		authGroup.GET("/pages/:id/revisions", withMode(r.handleListRevisions))
+		authGroup.GET("/pages/:id/revisions/latest", withMode(r.handleGetLatestRevision))
+		authGroup.GET("/pages/:id/revisions/compare", withMode(r.handleCompareRevisions))
+		authGroup.GET("/pages/:id/revisions/:revisionId/assets/*name", withMode(r.handleGetRevisionAsset))
+		authGroup.GET("/pages/:id/revisions/:revisionId", withMode(r.handleGetRevision))
+		authGroup.POST("/pages/:id/revisions/:revisionId/restore", authmw.RequireEditorOrAdmin(), withMode(r.handleRestoreRevision))
 	}
 
 }
@@ -109,6 +128,11 @@ func (r *Routes) handleListRevisions(c *gin.Context) {
 		limit = normalized
 	}
 
+	if r.usesWorkspaceRevisions(c) {
+		r.handleListWorkspaceRevisions(c, pageID, strings.TrimSpace(c.Query("cursor")), limit)
+		return
+	}
+
 	out, err := r.listRevisions.Execute(c.Request.Context(), ListRevisionsInput{
 		PageID: pageID,
 		Cursor: strings.TrimSpace(c.Query("cursor")),
@@ -129,10 +153,43 @@ func (r *Routes) handleListRevisions(c *gin.Context) {
 	})
 }
 
+func (r *Routes) usesWorkspaceRevisions(c *gin.Context) bool {
+	return !c.GetBool("leafwiki.enableRevision") && r.listWorkspaceRevisions != nil
+}
+
+func (r *Routes) handleListWorkspaceRevisions(c *gin.Context, pageID string, cursor string, limit int) {
+	if r.treeService == nil {
+		respondWithRevisionStatusError(c, http.StatusInternalServerError, ErrCodeRevisionInternalError, "Failed to list revisions", "tree service is unavailable")
+		return
+	}
+	page, err := r.treeService.GetPage(pageID)
+	if err != nil {
+		respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Page not found", "page %s not found", pageID)
+		return
+	}
+	out, err := r.listWorkspaceRevisions(c.Request.Context(), page, cursor, limit)
+	if err != nil {
+		respondWithRevisionStatusError(c, http.StatusInternalServerError, ErrCodeRevisionInternalError, "Failed to list revisions", "failed to list workspace revisions for page %s", pageID)
+		return
+	}
+	result := make([]*RevisionResponse, 0, len(out.Revisions))
+	for _, rev := range out.Revisions {
+		result = append(result, ToRevisionResponse(rev, r.userResolver))
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"revisions":  result,
+		"nextCursor": out.NextCursor,
+	})
+}
+
 func (r *Routes) handleGetRevision(c *gin.Context) {
 	pageID, revisionID, err := ValidateRevisionLookupInput(c.Param("id"), c.Param("revisionId"))
 	if err != nil {
 		respondWithRevisionError(c, err)
+		return
+	}
+	if r.usesWorkspaceRevisions(c) {
+		r.handleGetWorkspaceRevision(c, pageID, revisionID)
 		return
 	}
 
@@ -148,10 +205,38 @@ func (r *Routes) handleGetRevision(c *gin.Context) {
 	c.JSON(http.StatusOK, ToSnapshotResponse(out.Snapshot, r.userResolver))
 }
 
+func (r *Routes) handleGetWorkspaceRevision(c *gin.Context, pageID string, revisionID string) {
+	page, err := r.workspacePage(pageID)
+	if err != nil {
+		respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision %s for page %s not found", revisionID, pageID)
+		return
+	}
+	snapshot, err := r.getWorkspaceRevision(c.Request.Context(), page, revisionID)
+	if err != nil {
+		respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision %s for page %s not found", revisionID, pageID)
+		return
+	}
+	c.JSON(http.StatusOK, ToSnapshotResponse(snapshot, r.userResolver))
+}
+
 func (r *Routes) handleGetLatestRevision(c *gin.Context) {
 	pageID := strings.TrimSpace(c.Param("id"))
 	if pageID == "" {
 		respondWithRevisionStatusError(c, http.StatusBadRequest, ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required")
+		return
+	}
+	if r.usesWorkspaceRevisions(c) {
+		page, err := r.workspacePage(pageID)
+		if err != nil {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision for page %s not found", pageID)
+			return
+		}
+		out, err := r.listWorkspaceRevisions(c.Request.Context(), page, "", 1)
+		if err != nil || len(out.Revisions) == 0 {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision for page %s not found", pageID)
+			return
+		}
+		c.JSON(http.StatusOK, ToRevisionResponse(out.Revisions[0], r.userResolver))
 		return
 	}
 
@@ -173,6 +258,26 @@ func (r *Routes) handleCompareRevisions(c *gin.Context) {
 		respondWithRevisionError(c, err)
 		return
 	}
+	if r.usesWorkspaceRevisions(c) {
+		page, err := r.workspacePage(pageID)
+		if err != nil {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision compare resource for page %s not found", pageID)
+			return
+		}
+		base, baseErr := r.getWorkspaceRevision(c.Request.Context(), page, baseRevisionID)
+		target, targetErr := r.getWorkspaceRevision(c.Request.Context(), page, targetRevisionID)
+		if baseErr != nil || targetErr != nil {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision compare resource for page %s not found", pageID)
+			return
+		}
+		c.JSON(http.StatusOK, ToComparisonResponse(&revision.RevisionComparison{
+			Base:           base,
+			Target:         target,
+			ContentChanged: base.Content != target.Content,
+			AssetChanges:   nil,
+		}, r.userResolver))
+		return
+	}
 
 	out, err := r.compareRevisions.Execute(c.Request.Context(), CompareRevisionsInput{
 		PageID: pageID, BaseRevisionID: baseRevisionID, TargetRevisionID: targetRevisionID,
@@ -192,6 +297,10 @@ func (r *Routes) handleGetRevisionAsset(c *gin.Context) {
 	pageID, revisionID, assetName, err := ValidateRevisionAssetInput(c.Param("id"), c.Param("revisionId"), c.Param("name"))
 	if err != nil {
 		respondWithRevisionError(c, err)
+		return
+	}
+	if r.usesWorkspaceRevisions(c) {
+		respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionPreviewAssetNotFound, "Revision asset not found", "workspace sync revisions do not track assets")
 		return
 	}
 
@@ -246,6 +355,30 @@ func (r *Routes) handleRestoreRevision(c *gin.Context) {
 	if user == nil {
 		return
 	}
+	if r.usesWorkspaceRevisions(c) {
+		page, err := r.workspacePage(pageID)
+		if err != nil {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision %s for page %s not found", revisionID, pageID)
+			return
+		}
+		restored, err := r.restoreWorkspaceRevision(
+			c.Request.Context(),
+			page,
+			revisionID,
+			workspacesync.Actor{ID: user.ID, Name: user.Username, Email: user.Email},
+			workspacesync.SourceWeb,
+		)
+		if err != nil {
+			respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Revision not found", "revision %s for page %s not found", revisionID, pageID)
+			return
+		}
+		apiPage := dto.ToAPIPage(restored, r.userResolver)
+		if r.treeService != nil {
+			wikipages.EnrichPageMetadata(apiPage, r.treeService.ReadPageRaw)
+		}
+		c.JSON(http.StatusOK, apiPage)
+		return
+	}
 
 	out, err := r.restoreRevision.Execute(c.Request.Context(), RestoreRevisionInput{
 		UserID: user.ID, PageID: pageID, RevisionID: revisionID,
@@ -259,4 +392,11 @@ func (r *Routes) handleRestoreRevision(c *gin.Context) {
 		wikipages.EnrichPageMetadata(apiPage, r.treeService.ReadPageRaw)
 	}
 	c.JSON(http.StatusOK, apiPage)
+}
+
+func (r *Routes) workspacePage(pageID string) (*tree.Page, error) {
+	if r.treeService == nil {
+		return nil, fmt.Errorf("tree service is unavailable")
+	}
+	return r.treeService.GetPage(pageID)
 }

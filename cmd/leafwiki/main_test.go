@@ -24,6 +24,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
@@ -49,11 +50,14 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		"--root-dir",
 		"--log-target",
 		"--log-file",
+		"--enable-workspace-sync",
 		"--mcp",
 		"--api-key",
+		"leafwiki agent-hook <codex|claude|cursor|unknown>",
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
 		"LEAFWIKI_LOG_FILE",
+		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
 		"LEAFWIKI_MCP",
 		"LEAFWIKI_MCP_API_KEY",
 	} {
@@ -70,6 +74,30 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		if strings.Contains(output, removed) {
 			t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
 		}
+	}
+}
+
+func TestRegisterFlagsParsesEnableWorkspaceSync(t *testing.T) {
+	fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := registerFlags(fs)
+
+	if err := fs.Parse([]string{"--enable-workspace-sync"}); err != nil {
+		t.Fatalf("parse --enable-workspace-sync: %v", err)
+	}
+
+	if !*flags.enableWorkspaceSync {
+		t.Fatalf("enableWorkspaceSync = false, want true")
+	}
+}
+
+func TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent(t *testing.T) {
+	t.Setenv("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "true")
+
+	got := resolveBool("enable-workspace-sync", false, map[string]bool{}, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
+
+	if !got {
+		t.Fatalf("enableWorkspaceSync from env = false, want true")
 	}
 }
 
@@ -1076,6 +1104,517 @@ func TestMainProcess_PlainWebOwnerSupportsLaterPrivateStdioAttach(t *testing.T) 
 	}
 }
 
+func TestMainProcess_AgentPresenceControlStartsOwnerActivity(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	first := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.RecordAgentPresence(ctx, agenthooks.Event{
+		Provider:      agenthooks.ProviderCodex,
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+		EventName:     "SessionStart",
+		SeenAt:        time.Now(),
+	}); err != nil {
+		t.Fatalf("RecordAgentPresence failed: %v\nstderr:\n%s", err, readFileString(t, first.stderrPath))
+	}
+	sessions, err := client.ListAgentPresence(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentPresence failed: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "codex") {
+		t.Fatalf("agent presence sessions = %#v, want recorded codex presence", sessions)
+	}
+	waitForLeafwikiReady(t, first, port)
+}
+
+func TestMainProcessAgentHookMalformedJSONFailsOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"agent-hook", "codex",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil, "{", 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook malformed JSON err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "{") {
+		t.Fatalf("stderr leaked raw malformed payload: %s", stderr)
+	}
+	if _, err := os.Stat(projectdaemon.DescriptorPath(dataDir)); !os.IsNotExist(err) {
+		t.Fatalf("descriptor err = %v, want no daemon descriptor for malformed hook", err)
+	}
+}
+
+func TestMainProcessAgentHookStartsDaemonAndRecordsPresence(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	payload := `{"hook_event_name":"SessionStart","session_id":"raw-codex-session","model":"gpt-5.4","source":"startup","prompt":"private prompt"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"agent-hook", "codex",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil, payload, 10*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook valid payload err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "raw-codex-session") || strings.Contains(stderr, "private prompt") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, desc.PID)
+	})
+	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessions, err := client.ListAgentPresence(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentPresence failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("presence session count = %d, want 1: %#v", len(sessions), sessions)
+	}
+	if sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "raw-codex-session") {
+		t.Fatalf("session hash = %q, want hash of raw session id", sessions[0].SessionIDHash)
+	}
+	if sessions[0].Provider != agenthooks.ProviderCodex || sessions[0].LastEvent != "SessionStart" || sessions[0].Model != "gpt-5.4" || sessions[0].Source != "startup" {
+		t.Fatalf("presence session = %#v", sessions[0])
+	}
+	if strings.Contains(fmt.Sprintf("%#v", sessions[0]), "raw-codex-session") || strings.Contains(fmt.Sprintf("%#v", sessions[0]), "private prompt") {
+		t.Fatalf("presence session leaked raw payload data: %#v", sessions[0])
+	}
+}
+
+func TestMainProcessAgentHookReplacesStaleDescriptorAndFailsOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	received := make(chan string, 4)
+	staleControl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		raw, _ := io.ReadAll(req.Body)
+		select {
+		case received <- req.URL.Path + " " + req.Header.Get(projectdaemon.ControlTokenHeader) + " " + string(raw):
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(staleControl.Close)
+
+	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
+	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
+	if err != nil {
+		t.Fatalf("daemonRequestConfigForRuntime: %v", err)
+	}
+	hash, err := projectdaemon.ConfigHash(ownerCfg)
+	if err != nil {
+		t.Fatalf("ConfigHash: %v", err)
+	}
+	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+		PID:              os.Getpid(),
+		StartedAt:        time.Now().UTC(),
+		DataDir:          ownerCfg.DataDir,
+		RootDir:          ownerCfg.RootDir,
+		PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
+		PublicMCPEnabled: false,
+		ControlURL:       staleControl.URL,
+		ConfigHash:       hash,
+		IdleTimeout:      "0s",
+		ControlToken:     "stale-token",
+		Config:           ownerCfg,
+	}); err != nil {
+		t.Fatalf("write stale descriptor: %v", err)
+	}
+	payload := `{"hook_event_name":"SessionStart","session_id":"stale-descriptor-secret","prompt":"private prompt"}`
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"agent-hook", "codex",
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", ownerCfg.Port,
+		"--log-target", "stderr",
+	}, nil, payload, 10*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook stale descriptor should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "stale-descriptor-secret") || strings.Contains(stderr, "private prompt") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+	replaced := readFileString(t, descriptorPath)
+	if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
+		t.Fatalf("descriptor was not replaced:\n%s", replaced)
+	}
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, desc.PID)
+	})
+	select {
+	case got := <-received:
+		t.Fatalf("stale descriptor endpoint received request before replacement: %q", got)
+	default:
+	}
+}
+
+func TestRunAgentHookCommandRecoversPanicAndAllows(t *testing.T) {
+	var stdout bytes.Buffer
+	err := runAgentHookCommand(context.Background(), testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true), agenthooks.ProviderCodex, panicReader{}, &stdout)
+
+	if err == nil {
+		t.Fatalf("runAgentHookCommand err = nil, want panic surfaced as fail-open error")
+	}
+	if stdout.String() != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response after panic", stdout.String())
+	}
+}
+
+func TestRunAgentHookCommandReadErrorFailsOpen(t *testing.T) {
+	var stdout bytes.Buffer
+	err := runAgentHookCommand(
+		context.Background(),
+		testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true),
+		agenthooks.ProviderClaude,
+		errorReader{err: errors.New("synthetic read failure")},
+		&stdout,
+	)
+
+	if err == nil {
+		t.Fatalf("runAgentHookCommand err = nil, want read error")
+	}
+	if stdout.String() != "{}\n" {
+		t.Fatalf("stdout = %q, want Claude allow response after read error", stdout.String())
+	}
+}
+
+func TestMainProcessAgentHookPreDispatchFailuresFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	payload := `{"hook_event_name":"SessionStart","session_id":"pre-dispatch-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"agent-hook", "codex",
+		"--disable-auth",
+		"--data-dir", sameDir,
+		"--root-dir", sameDir,
+		"--log-target", "stderr",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "pre-dispatch-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-first-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--disable-auth",
+		"--data-dir", sameDir,
+		"--root-dir", sameDir,
+		"--log-target", "stderr",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("flag-first agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "flag-first-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessNonHookFlagValueNamedAgentHookDoesNotFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	if err := os.MkdirAll(sameDir, 0o755); err != nil {
+		t.Fatalf("mkdir sameDir: %v", err)
+	}
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--log-file", "agent-hook",
+		"--disable-auth",
+		"--data-dir", sameDir,
+		"--root-dir", sameDir,
+		"--log-target", "stderr",
+	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("non-hook startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "Invalid workspace configuration") {
+		t.Fatalf("stderr = %q, want workspace configuration error", stderr)
+	}
+}
+
+func TestMainProcessNonHookFlagValueNamedAgentHookParseErrorDoesNotFailOpen(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--log-file", "agent-hook",
+		"--not-a-real-flag",
+	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("non-hook parse error unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "not-a-real-flag") {
+		t.Fatalf("stderr = %q, want flag parse error", stderr)
+	}
+}
+
+func TestMainProcessAgentHookFlagFirstParseErrorsFailOpen(t *testing.T) {
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-parse-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--not-a-real-flag",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("flag-first agent-hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "flag-parse-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessAgentHookProviderAllowResponsesFailOpen(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		payload    string
+		wantStdout string
+	}{
+		{name: "claude malformed", provider: agenthooks.ProviderClaude, payload: "{", wantStdout: "{}\n"},
+		{name: "cursor malformed", provider: agenthooks.ProviderCursor, payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
+		{name: "unknown provider", provider: agenthooks.ProviderUnknown, payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseDir := t.TempDir()
+			dataDir := filepath.Join(baseDir, "data")
+			rootDir := filepath.Join(baseDir, "content")
+			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+				"agent-hook", tt.provider,
+				"--disable-auth",
+				"--data-dir", dataDir,
+				"--root-dir", rootDir,
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, tt.payload, 5*time.Second)
+
+			if err != nil {
+				t.Fatalf("agent-hook should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+			}
+			if stdout != tt.wantStdout {
+				t.Fatalf("stdout = %q, want %q", stdout, tt.wantStdout)
+			}
+			if strings.Contains(stderr, "unknown-secret") {
+				t.Fatalf("stderr leaked hook payload data: %s", stderr)
+			}
+		})
+	}
+}
+
+func TestRunAgentHookCommandOversizedPayloadFailsOpen(t *testing.T) {
+	var stdout bytes.Buffer
+	baseDir := t.TempDir()
+	err := runAgentHookCommand(
+		context.Background(),
+		testRuntimeConfig(filepath.Join(baseDir, "data"), filepath.Join(baseDir, "root"), freeTCPPort(t), mcpTransports{}, true),
+		agenthooks.ProviderCursor,
+		strings.NewReader(strings.Repeat("x", agentHookMaxPayloadBytes+1)),
+		&stdout,
+	)
+
+	if err == nil {
+		t.Fatalf("runAgentHookCommand err = nil, want oversized payload error")
+	}
+	if stdout.String() != "{\"permission\":\"allow\"}\n" {
+		t.Fatalf("stdout = %q, want Cursor allow response", stdout.String())
+	}
+}
+
+func TestRunAgentHookCommandLockedProjectFailsOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+	if err != nil {
+		t.Fatalf("canonicalize project: %v", err)
+	}
+	dataLock, err := locking.AcquireDataDirLock(canonicalData)
+	if err != nil {
+		t.Fatalf("acquire data lock: %v", err)
+	}
+	defer dataLock.Release()
+	rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
+	if err != nil {
+		t.Fatalf("acquire root lock: %v", err)
+	}
+	defer rootLock.Release()
+
+	var stdout bytes.Buffer
+	err = runAgentHookCommand(
+		context.Background(),
+		testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true),
+		agenthooks.ProviderCodex,
+		strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"locked-secret"}`),
+		&stdout,
+	)
+
+	if err == nil {
+		t.Fatalf("runAgentHookCommand err = nil, want locked project error")
+	}
+	if stdout.String() != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
+	}
+	if strings.Contains(err.Error(), "locked-secret") {
+		t.Fatalf("error leaked hook payload data: %v", err)
+	}
+}
+
+func TestRunAgentHookCommandControlRecordFailuresFailOpen(t *testing.T) {
+	tests := []struct {
+		name          string
+		recordHandler func(http.ResponseWriter, *http.Request)
+		parentTimeout time.Duration
+	}{
+		{name: "control 401", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}},
+		{name: "control 400", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "bad event", http.StatusBadRequest)
+		}},
+		{name: "control 500", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}},
+		{name: "control timeout", parentTimeout: 50 * time.Millisecond, recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(250 * time.Millisecond)
+			w.WriteHeader(http.StatusNoContent)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(t, tt.recordHandler)
+			defer cleanup()
+			ctx := context.Background()
+			if tt.parentTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tt.parentTimeout)
+				defer cancel()
+			}
+
+			var stdout bytes.Buffer
+			err := runAgentHookCommand(
+				ctx,
+				cfg,
+				agenthooks.ProviderCodex,
+				strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`),
+				&stdout,
+			)
+
+			if err == nil {
+				t.Fatalf("runAgentHookCommand err = nil, want control failure")
+			}
+			if stdout.String() != "{}\n" {
+				t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
+			}
+			if strings.Contains(err.Error(), "control-secret") {
+				t.Fatalf("error leaked hook payload data: %v", err)
+			}
+		})
+	}
+}
+
+type panicReader struct{}
+
+func (panicReader) Read([]byte) (int, error) {
+	panic("boom")
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
 func TestMainProcess_DisabledAuthOwnerRejectsAPIKeyStdioAttach(t *testing.T) {
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
@@ -1269,7 +1808,7 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--port", port,
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, nativeStdioToolCallInput(2, "get_current_user", map[string]any{}), 8*time.Second)
+	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
 
 	if err != nil {
 		t.Fatalf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
@@ -1298,7 +1837,7 @@ func TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner(t *testing.
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "create_page", map[string]any{
+	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_create_page", map[string]any{
 		"title": title,
 		"slug":  slug,
 		"kind":  "page",
@@ -1318,7 +1857,7 @@ func TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner(t *testing.
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
+	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
 	if err != nil {
 		t.Fatalf("reader STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, readerStdout, readerStderr)
 	}
@@ -1467,6 +2006,102 @@ func TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecifie
 	}
 	if desc.Config.DaemonIdleTimeout != "10m0s" {
 		t.Fatalf("descriptor config daemon idle timeout = %q, want core CLI default 10m0s", desc.Config.DaemonIdleTimeout)
+	}
+	proc.stop(t)
+}
+
+func TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	if !desc.Config.EnableWorkspaceSync {
+		t.Fatalf("descriptor config EnableWorkspaceSync = false, want true")
+	}
+	proc.stop(t)
+}
+
+func TestMainProcess_RejectsRevisionAndWorkspaceSyncTogether(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+		"--disable-auth",
+		"--enable-revision",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", freeTCPPort(t),
+		"--log-target", "stderr",
+	}, nil, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("combined revision/workspace-sync startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("combined revision/workspace-sync startup hung; expected immediate validation error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "enable-revision and enable-workspace-sync cannot be combined") {
+		t.Fatalf("stderr = %q, want mutual exclusion error", stderr)
+	}
+}
+
+func TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--allow-insecure",
+		"--enable-workspace-sync",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, nil)
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
+	if err != nil {
+		t.Fatalf("GET /api/config: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
+	}
+	var config map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if config["enableWorkspaceSync"] != true {
+		t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
 	}
 	proc.stop(t)
 }
@@ -2267,6 +2902,27 @@ func TestCompareProjectDaemonConfigForPlainServerPreservesPublicMCPMismatch(t *t
 	}
 }
 
+func TestDaemonConfigForRuntimeIncludesWorkspaceSync(t *testing.T) {
+	baseDir := t.TempDir()
+	cfg := testRuntimeConfig(
+		filepath.Join(baseDir, "data"),
+		filepath.Join(baseDir, "content"),
+		"8080",
+		mcpTransports{},
+		true,
+	)
+	cfg.EnableWorkspaceSync = true
+
+	daemonCfg, err := daemonConfigForRuntime(cfg)
+	if err != nil {
+		t.Fatalf("daemon config: %v", err)
+	}
+
+	if !daemonCfg.EnableWorkspaceSync {
+		t.Fatalf("EnableWorkspaceSync = false, want true")
+	}
+}
+
 func TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields(t *testing.T) {
 	owner := completeDaemonCompareConfig()
 	tests := []struct {
@@ -2432,6 +3088,83 @@ func TestCancelIfNoSessionAfterStartupGraceCancelsWhenNoSessionRegisters(t *test
 	case <-ctx.Done():
 	case <-time.After(250 * time.Millisecond):
 		t.Fatalf("startup grace did not cancel idle daemon with no sessions")
+	}
+}
+
+func TestProjectDaemonActivityCountCombinesSessionsAndAgentPresence(t *testing.T) {
+	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+
+	if got := projectDaemonActivityCount(sessions, presence); got != 0 {
+		t.Fatalf("activity count = %d, want 0", got)
+	}
+	handle, err := sessions.Register()
+	if err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+	presence.Record(agenthooks.Event{
+		Provider:      agenthooks.ProviderCodex,
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+		EventName:     "SessionStart",
+		SeenAt:        time.Now(),
+	})
+	if got := projectDaemonActivityCount(sessions, presence); got != 2 {
+		t.Fatalf("activity count = %d, want 2", got)
+	}
+	sessions.Release(handle)
+	if got := projectDaemonActivityCount(sessions, presence); got != 1 {
+		t.Fatalf("activity count after session release = %d, want 1", got)
+	}
+}
+
+func TestCancelIfNoActivityAfterStartupGraceWaitsForFirstAgentPresence(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+
+	done := make(chan struct{})
+	go func() {
+		cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 25*time.Millisecond)
+		close(done)
+	}()
+
+	presence.Record(agenthooks.Event{
+		Provider:      agenthooks.ProviderCodex,
+		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+		EventName:     "SessionStart",
+		SeenAt:        time.Now(),
+	})
+	select {
+	case <-ctx.Done():
+		t.Fatalf("startup grace canceled after first agent presence")
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("startup grace goroutine did not exit after first agent presence")
+	}
+}
+
+func TestCancelIfNoActivityAfterStartupGraceIgnoresMissingAgentEnd(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+	event, ok := agenthooks.Normalize(
+		agenthooks.ProviderClaude,
+		[]byte(`{"hook_event_name":"SessionEnd","session_id":"ended-before-start"}`),
+		time.Now(),
+	)
+	if !ok {
+		t.Fatalf("Normalize returned false")
+	}
+	presence.Record(event)
+
+	go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 10*time.Millisecond)
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatalf("startup grace did not cancel after missing agent end event")
 	}
 }
 
@@ -3855,6 +4588,11 @@ func sha256Hex(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func agentHookSessionHash(provider, rawSessionID string) string {
+	sum := sha256.Sum256([]byte(provider + "\x00" + rawSessionID))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 func testRuntimeConfig(dataDir string, rootDir string, port string, transports mcpTransports, disableAuth bool) leafwikiRuntimeConfig {
 	return leafwikiRuntimeConfig{
 		Workspace: wiki.Workspace{
@@ -3875,6 +4613,90 @@ func testRuntimeConfig(dataDir string, rootDir string, port string, transports m
 		HTTPRemoteUserHeader: "Remote-User",
 		DaemonIdleTimeout:    0,
 	}
+}
+
+func testRuntimeConfigWithHealthyControlDescriptor(t *testing.T, recordHandler http.HandlerFunc) (leafwikiRuntimeConfig, func()) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("create root dir: %v", err)
+	}
+	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
+	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
+	if err != nil {
+		t.Fatalf("daemon request config: %v", err)
+	}
+	configHash, err := projectdaemon.ConfigHash(ownerCfg)
+	if err != nil {
+		t.Fatalf("config hash: %v", err)
+	}
+	dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
+	if err != nil {
+		t.Fatalf("acquire data lock: %v", err)
+	}
+	rootLock, err := locking.AcquireRootDirLock(ownerCfg.RootDir)
+	if err != nil {
+		_ = dataLock.Release()
+		t.Fatalf("acquire root lock: %v", err)
+	}
+
+	token := "control-token"
+	pid := os.Getpid()
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get(projectdaemon.ControlTokenHeader) != token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if req.Method == http.MethodGet && req.URL.Path == "/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(projectdaemon.DaemonHealth{
+				OK:            true,
+				SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+				PID:           pid,
+				DataDir:       ownerCfg.DataDir,
+				RootDir:       ownerCfg.RootDir,
+				ConfigHash:    configHash,
+			})
+			return
+		}
+		if req.Method == http.MethodPost && req.URL.Path == "/agent-presence/events" {
+			recordHandler(w, req)
+			return
+		}
+		http.NotFound(w, req)
+	}))
+	if err := projectdaemon.WriteDescriptorAtomic(projectdaemon.DescriptorPath(ownerCfg.DataDir), &projectdaemon.Descriptor{
+		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+		PID:              pid,
+		StartedAt:        time.Now().UTC(),
+		DataDir:          ownerCfg.DataDir,
+		RootDir:          ownerCfg.RootDir,
+		PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
+		PublicMCPEnabled: ownerCfg.PublicMCPEnabled,
+		ControlURL:       control.URL,
+		ConfigHash:       configHash,
+		IdleTimeout:      ownerCfg.DaemonIdleTimeout,
+		ControlToken:     token,
+		Config:           ownerCfg,
+	}); err != nil {
+		control.Close()
+		_ = rootLock.Release()
+		_ = dataLock.Release()
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	cleanup := func() {
+		control.Close()
+		_ = rootLock.Release()
+		_ = dataLock.Release()
+	}
+	return cfg, cleanup
 }
 
 func assertJSONLogContains(t *testing.T, path string, msg string) map[string]any {

@@ -50,7 +50,11 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 	})
 
 	addTypedTool[pageIDInput, listAssetsOutput](server, toolListAssets, func(ctx context.Context, in pageIDInput) (listAssetsOutput, error) {
-		out, err := r.getAssets.Execute(ctx, wikiassets.ListAssetsInput{PageID: strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))})
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return listAssetsOutput{}, err
+		}
+		out, err := r.getAssets.Execute(ctx, wikiassets.ListAssetsInput{PageID: pageID})
 		if err != nil {
 			return listAssetsOutput{}, err
 		}

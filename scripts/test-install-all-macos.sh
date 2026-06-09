@@ -19,7 +19,7 @@ help_output="$("$script" --help)"
 [[ "$help_output" == *"--build-dir"* ]] || fail "help omits --build-dir"
 [[ "$help_output" == *"--skip-npm-ci"* ]] || fail "help omits --skip-npm-ci"
 [[ "$help_output" == *"--dry-run"* ]] || fail "help omits --dry-run"
-[[ "$help_output" == *"run-mcp.sh"* ]] || fail "help omits run-mcp.sh"
+[[ "$help_output" == *"run.sh"* ]] || fail "help omits run.sh"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -34,11 +34,11 @@ dry_run_output="$(
     --build-dir "$tmp_dir/releases"
 )"
 
-[[ "$dry_run_output" == *"Would install LeafWiki and run-mcp.sh v9.9.9 for darwin/arm64"* ]] || fail "dry-run omits aggregate target"
+[[ "$dry_run_output" == *"Would install LeafWiki and run.sh v9.9.9 for darwin/arm64"* ]] || fail "dry-run omits aggregate target"
 [[ "$dry_run_output" == *"scripts/install-macos.sh"* ]] || fail "dry-run omits main installer"
 [[ "$dry_run_output" == *"$tmp_dir/bin/leafwiki"* ]] || fail "dry-run omits leafwiki install target"
-[[ "$dry_run_output" == *"$tmp_dir/bin/run-mcp.sh"* ]] || fail "dry-run omits run-mcp.sh install target"
+[[ "$dry_run_output" == *"$tmp_dir/bin/run.sh"* ]] || fail "dry-run omits run.sh install target"
 [[ ! -e "$tmp_dir/bin/leafwiki" ]] || fail "dry-run installed leafwiki"
-[[ ! -e "$tmp_dir/bin/run-mcp.sh" ]] || fail "dry-run installed run-mcp.sh"
+[[ ! -e "$tmp_dir/bin/run.sh" ]] || fail "dry-run installed run.sh"
 
 printf 'PASS: install-all-macos script checks\n'
