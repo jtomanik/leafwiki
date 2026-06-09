@@ -64,6 +64,61 @@ func addEditorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descripto
 
 func toolInputSchema(name string) *jsonschema.Schema {
 	switch name {
+	case ToolGetContext:
+		return objectSchema(map[string]*jsonschema.Schema{
+			"sinceToken":         stringSchema(),
+			"syncMode":           stringSchema(),
+			"treeDepth":          integerSchema(),
+			"recentChangesLimit": integerSchema(),
+		}, nil)
+	case ToolRefresh:
+		return objectSchema(map[string]*jsonschema.Schema{
+			"validate": booleanSchema(),
+			"source":   stringSchema(),
+		}, nil)
+	case ToolGetSubtree:
+		return objectSchema(map[string]*jsonschema.Schema{
+			"pageId":                stringSchema(),
+			"path":                  stringSchema(),
+			"depth":                 integerSchema(),
+			"includeMetadata":       booleanSchema(),
+			"includeLinkCounts":     booleanSchema(),
+			"includeContentPreview": booleanSchema(),
+		}, nil)
+	case ToolValidatePage:
+		return pagePathSchemaWith(nil, nil)
+	case ToolValidateContent:
+		return objectSchema(map[string]*jsonschema.Schema{
+			"path":           stringSchema(),
+			"content":        stringSchema(),
+			"existingPageId": stringSchema(),
+		}, []string{"path", "content"})
+	case ToolValidateWiki:
+		return objectSchema(map[string]*jsonschema.Schema{
+			"includeWarnings": booleanSchema(),
+		}, nil)
+	case ToolUpdatePageMetadata:
+		return pagePathSchemaWith(map[string]*jsonschema.Schema{
+			"version":           stringSchema(),
+			"setTags":           stringArraySchema(),
+			"addTags":           stringArraySchema(),
+			"removeTags":        stringArraySchema(),
+			"setProperties":     stringMapSchema(),
+			"removeProperties":  stringArraySchema(),
+			"includePage":       booleanSchema(),
+			"includeValidation": booleanSchema(),
+			"includeLinkStatus": booleanSchema(),
+		}, []string{"version"})
+	case ToolReplacePageSection:
+		return pagePathSchemaWith(map[string]*jsonschema.Schema{
+			"version":           stringSchema(),
+			"headingPath":       stringArraySchema(),
+			"occurrence":        integerSchema(),
+			"content":           stringSchema(),
+			"includePage":       booleanSchema(),
+			"includeValidation": booleanSchema(),
+			"includeLinkStatus": booleanSchema(),
+		}, []string{"version", "headingPath", "content"})
 	case ToolCreatePage:
 		return objectSchema(map[string]*jsonschema.Schema{
 			"parentId": nullableStringSchema(),
@@ -139,13 +194,70 @@ func pageIDSchemaWith(extra map[string]*jsonschema.Schema, required []string) *j
 	for name, schema := range extra {
 		props[name] = schema
 	}
-	schema := objectSchema(props, required)
-	schema.AnyOf = requiredAlternatives("id", "pageId")
-	return schema
+	return objectSchema(props, required)
+}
+
+func pagePathSchemaWith(extra map[string]*jsonschema.Schema, required []string) *jsonschema.Schema {
+	props := map[string]*jsonschema.Schema{
+		"pageId": stringSchema(),
+		"path":   stringSchema(),
+	}
+	for name, schema := range extra {
+		props[name] = schema
+	}
+	return objectSchema(props, required)
 }
 
 func toolOutputSchema(name string) *jsonschema.Schema {
 	switch name {
+	case ToolGetContext:
+		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
+			"contextToken":                stringSchema(),
+			"previousContextToken":        stringSchema(),
+			"changesSincePreviousContext": arrayValueSchema(),
+			"contextHistory":              arrayValueSchema(),
+			"user":                        objectValueSchema(),
+			"config":                      objectValueSchema(),
+			"server":                      objectValueSchema(),
+			"syncStatus":                  objectValueSchema(),
+			"validation":                  objectValueSchema(),
+			"recentChanges":               arrayValueSchema(),
+			"activeSessions":              arrayValueSchema(),
+			"presenceStatus":              objectValueSchema(),
+			"tree":                        objectValueSchema(),
+			"recommendedTools":            arrayValueSchema(),
+			"warnings":                    arrayValueSchema(),
+		}, []string{"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools"})
+	case ToolRefresh:
+		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
+			"syncStatus":         objectValueSchema(),
+			"recentChangedPaths": arrayValueSchema(),
+			"validation":         objectValueSchema(),
+			"lastCommitHash":     stringSchema(),
+		}, []string{"syncStatus", "recentChangedPaths", "lastCommitHash"})
+	case ToolGetSubtree:
+		return outputSchema(map[string]*jsonschema.Schema{
+			"root":        objectValueSchema(),
+			"breadcrumbs": arrayValueSchema(),
+			"depth":       integerSchema(),
+			"truncated":   booleanSchema(),
+		})
+	case ToolValidatePage, ToolValidateContent, ToolValidateWiki:
+		return outputSchema(map[string]*jsonschema.Schema{
+			"ok":      booleanSchema(),
+			"summary": objectValueSchema(),
+			"issues":  arrayValueSchema(),
+		})
+	case ToolUpdatePageMetadata, ToolReplacePageSection:
+		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
+			"pageId":     stringSchema(),
+			"path":       stringSchema(),
+			"title":      stringSchema(),
+			"version":    stringSchema(),
+			"validation": objectValueSchema(),
+			"page":       objectValueSchema(),
+			"linkStatus": objectValueSchema(),
+		}, []string{"pageId", "path", "title", "version"})
 	case ToolGetCurrentUser:
 		return outputSchema(map[string]*jsonschema.Schema{"user": objectValueSchema()})
 	case ToolGetConfig:
@@ -250,6 +362,12 @@ func outputSchema(properties map[string]*jsonschema.Schema) *jsonschema.Schema {
 		required = append(required, name)
 	}
 	sort.Strings(required)
+	return outputSchemaWithRequired(properties, required)
+}
+
+func outputSchemaWithRequired(properties map[string]*jsonschema.Schema, required []string) *jsonschema.Schema {
+	required = append([]string{}, required...)
+	sort.Strings(required)
 	return objectSchema(properties, required)
 }
 
@@ -265,14 +383,6 @@ func objectSchema(properties map[string]*jsonschema.Schema, required []string) *
 		Required:      append([]string{}, required...),
 		PropertyOrder: order,
 	}
-}
-
-func requiredAlternatives(names ...string) []*jsonschema.Schema {
-	out := make([]*jsonschema.Schema, 0, len(names))
-	for _, name := range names {
-		out = append(out, &jsonschema.Schema{Required: []string{name}})
-	}
-	return out
 }
 
 func stringSchema() *jsonschema.Schema {
@@ -301,4 +411,18 @@ func nullableObjectSchema() *jsonschema.Schema {
 
 func arrayValueSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "array"}
+}
+
+func stringArraySchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:  "array",
+		Items: stringSchema(),
+	}
+}
+
+func stringMapSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:                 "object",
+		AdditionalProperties: stringSchema(),
+	}
 }

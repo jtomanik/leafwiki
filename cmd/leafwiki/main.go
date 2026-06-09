@@ -290,7 +290,7 @@ func main() {
 	setupBootstrapLogger(os.Stderr)
 	failOpenAgentHookProvider = ""
 	rawArgs := os.Args[1:]
-	if provider, ok := agentHookProviderFromArgs(rawArgs); ok {
+	if provider, ok := agentHookProviderFromRawArgs(rawArgs); ok {
 		failOpenAgentHookProvider = provider
 	}
 	rawArgs = normalizeAgentHookRawArgs(rawArgs)
@@ -326,6 +326,9 @@ func main() {
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	args := flag.Args()
 	agentHookRequested := isAgentHookCommand(args)
+	if !agentHookRequested {
+		failOpenAgentHookProvider = ""
+	}
 	if agentHookRequested {
 		if provider, ok := agentHookProviderFromArgs(args); ok {
 			failOpenAgentHookProvider = provider
@@ -486,13 +489,83 @@ func normalizeAgentHookRawArgs(args []string) []string {
 }
 
 func agentHookProviderFromArgs(args []string) (string, bool) {
-	if len(args) == 0 || args[0] != "agent-hook" {
-		return "", false
+	for i, arg := range args {
+		if arg != "agent-hook" {
+			continue
+		}
+		if len(args) > i+1 {
+			return args[i+1], true
+		}
+		return agenthooks.ProviderUnknown, true
 	}
-	if len(args) >= 2 {
-		return args[1], true
+	return "", false
+}
+
+func agentHookProviderFromRawArgs(args []string) (string, bool) {
+	skipNext := false
+	for i, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if name, hasInlineValue, ok := rawFlagName(arg); ok {
+			if _, takesValue := valueTakingFlagNames()[name]; takesValue && !hasInlineValue {
+				skipNext = true
+			}
+			continue
+		}
+		if arg != "agent-hook" {
+			continue
+		}
+		if len(args) > i+1 {
+			return args[i+1], true
+		}
+		return agenthooks.ProviderUnknown, true
 	}
-	return agenthooks.ProviderUnknown, true
+	return "", false
+}
+
+func rawFlagName(arg string) (string, bool, bool) {
+	if !strings.HasPrefix(arg, "-") || arg == "-" {
+		return "", false, false
+	}
+	trimmed := strings.TrimLeft(arg, "-")
+	if trimmed == "" {
+		return "", false, false
+	}
+	name, value, hasInlineValue := strings.Cut(trimmed, "=")
+	if strings.TrimSpace(name) == "" {
+		return "", false, false
+	}
+	_ = value
+	return name, hasInlineValue, true
+}
+
+func valueTakingFlagNames() map[string]struct{} {
+	return map[string]struct{}{
+		"access-token-timeout":         {},
+		"admin-password":               {},
+		"api-key":                      {},
+		"base-path":                    {},
+		"custom-stylesheet":            {},
+		"daemon-idle-timeout":          {},
+		"data-dir":                     {},
+		"host":                         {},
+		"http-remote-user-header-name": {},
+		"http-remote-user-logout-url":  {},
+		"inject-code-in-header":        {},
+		"internal-project-daemon":      {},
+		"jwt-secret":                   {},
+		"log-file":                     {},
+		"log-target":                   {},
+		"max-asset-upload-size":        {},
+		"max-revision-history":         {},
+		"mcp":                          {},
+		"port":                         {},
+		"refresh-token-timeout":        {},
+		"root-dir":                     {},
+		"trusted-proxy-ips":            {},
+	}
 }
 
 func isAgentHookCommand(args []string) bool {
@@ -1625,6 +1698,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	}
 	sessions = projectdaemon.NewSessionRegistry(projectdaemon.DefaultHeartbeatTTL, notifyActivityChanged)
 	agentPresence = projectdaemon.NewAgentPresenceRegistry(cfg.DaemonIdleTimeout, notifyActivityChanged)
+	w.SetAgentPresenceRegistry(agentPresence)
 	go sessions.RunExpiryLoop(ctx, 0)
 	go agentPresence.RunExpiryLoop(ctx, 0)
 

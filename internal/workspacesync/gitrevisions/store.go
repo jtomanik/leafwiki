@@ -27,11 +27,12 @@ import (
 type Reason string
 
 const (
-	ReasonStartup  Reason = "startup"
-	ReasonWatcher  Reason = "watcher"
-	ReasonExplicit Reason = "explicit"
-	ReasonWebWrite Reason = "web_write"
-	ReasonRestore  Reason = "restore"
+	ReasonStartup         Reason = "startup"
+	ReasonWatcher         Reason = "watcher"
+	ReasonExplicit        Reason = "explicit"
+	ReasonExplicitRefresh Reason = "explicit_refresh"
+	ReasonWebWrite        Reason = "web_write"
+	ReasonRestore         Reason = "restore"
 )
 
 type Source string

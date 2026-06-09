@@ -45,14 +45,14 @@ test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }
 
   try {
     const tools = await mcp.listTools();
-    expect(tools).toContain('create_page');
-    expect(tools).toContain('update_page');
-    expect(tools).toContain('get_page');
+    expect(tools).toContain('wiki_create_page');
+    expect(tools).toContain('wiki_update_page');
+    expect(tools).toContain('wiki_get_page');
 
-    const created = await mcp.callTool('create_page', { title, slug, kind: 'page' });
+    const created = await mcp.callTool('wiki_create_page', { title, slug, kind: 'page' });
     const createdPage = created.page as { id: string; version: string };
 
-    await mcp.callTool('update_page', {
+    await mcp.callTool('wiki_update_page', {
       id: createdPage.id,
       version: createdPage.version,
       title,
@@ -74,7 +74,7 @@ test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }
     await editPage.savePage();
     await editPage.closeEditor();
 
-    const readBack = await mcp.callTool('get_page', { id: createdPage.id });
+    const readBack = await mcp.callTool('wiki_get_page', { id: createdPage.id });
     const pageFromMCP = readBack.page as { content: string };
     expect(pageFromMCP.content).toContain('Updated from the UI');
   } finally {
@@ -129,10 +129,10 @@ test('mcp stdio uses a base-path endpoint', async () => {
 
   const mcp = await connectMCPStdioClient(appURL('/mcp'));
   try {
-    const config = await mcp.callTool('get_config');
+    const config = await mcp.callTool('wiki_get_config');
     expect(config.basePath).toBe('/wiki');
 
-    const created = await mcp.callTool('create_page', {
+    const created = await mcp.callTool('wiki_create_page', {
       title: 'MCP STDIO Base Path',
       slug: `mcp-stdio-base-path-${Date.now()}`,
       kind: 'page',

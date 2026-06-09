@@ -83,16 +83,16 @@ async function exerciseMCPUIRoundTrip(
   const slug = `${slugPrefix}-${Date.now()}`;
   const targetSlug = `${slug}-target`;
   const title = 'MCP OAuth E2E Page';
-  const target = await mcp.callTool('create_page', {
+  const target = await mcp.callTool('wiki_create_page', {
     title: 'MCP OAuth E2E Target',
     slug: targetSlug,
     kind: 'page',
   });
   const targetPage = target.page as { id: string };
-  const created = await mcp.callTool('create_page', { title, slug, kind: 'page' });
+  const created = await mcp.callTool('wiki_create_page', { title, slug, kind: 'page' });
   const createdPage = created.page as { id: string; version: string };
 
-  await mcp.callTool('update_page', {
+  await mcp.callTool('wiki_update_page', {
     id: createdPage.id,
     version: createdPage.version,
     title,
@@ -111,23 +111,23 @@ async function exerciseMCPUIRoundTrip(
   await editPage.savePage();
   await editPage.closeEditor();
 
-  const readBack = await mcp.callTool('get_page', { id: createdPage.id });
+  const readBack = await mcp.callTool('wiki_get_page', { id: createdPage.id });
   const pageFromMCP = readBack.page as { content: string };
   expect(pageFromMCP.content).toContain('Updated from the UI while authenticated');
 
-  const sourceStatus = await mcp.callTool('get_link_status', { id: createdPage.id });
+  const sourceStatus = await mcp.callTool('wiki_get_link_status', { id: createdPage.id });
   const sourceStatusValue = sourceStatus.status as {
     counts?: { broken_outgoings?: number };
   };
   expect(readBack.linkStatus).toEqual(sourceStatus.status);
   expect(sourceStatusValue.counts?.broken_outgoings).toBe(1);
 
-  const sourceByPath = await mcp.callTool('get_page_by_path', { path: slug });
+  const sourceByPath = await mcp.callTool('wiki_get_page_by_path', { path: slug });
   expect(sourceByPath.linkStatus).toEqual(sourceStatus.status);
 
-  const targetStatus = await mcp.callTool('get_link_status', { id: targetPage.id });
-  const targetByID = await mcp.callTool('get_page', { id: targetPage.id });
-  const targetByPath = await mcp.callTool('get_page_by_path', { path: targetSlug });
+  const targetStatus = await mcp.callTool('wiki_get_link_status', { id: targetPage.id });
+  const targetByID = await mcp.callTool('wiki_get_page', { id: targetPage.id });
+  const targetByPath = await mcp.callTool('wiki_get_page_by_path', { path: targetSlug });
   expect(targetByID.linkStatus).toEqual(targetStatus.status);
   expect(targetByPath.linkStatus).toEqual(targetStatus.status);
   const targetStatusValue = targetStatus.status as {
@@ -200,12 +200,12 @@ test('mcp oauth creates page and UI edit is readable through mcp', async ({ page
 
   try {
     const tools = await mcp.listTools();
-    expect(tools).toContain('get_current_user');
-    expect(tools).toContain('create_page');
-    expect(tools).toContain('update_page');
-    expect(tools).toContain('get_page');
+    expect(tools).toContain('wiki_get_current_user');
+    expect(tools).toContain('wiki_create_page');
+    expect(tools).toContain('wiki_update_page');
+    expect(tools).toContain('wiki_get_page');
 
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(user);
     expect(currentUser.role).toBe('admin');
@@ -261,11 +261,11 @@ test('mcp oauth sdk dynamically registers, discovers protected resource metadata
 
   const mcp = await oauthFlow.finishAuth(code || '');
   try {
-    const current = await mcp.callTool('get_current_user');
+    const current = await mcp.callTool('wiki_get_current_user');
     const currentUser = current.user as { username: string; role: string };
     expect(currentUser.username).toBe(user);
     expect(currentUser.role).toBe('admin');
-    expect(await mcp.listTools()).toContain('get_page');
+    expect(await mcp.listTools()).toContain('wiki_get_page');
     await exerciseMCPUIRoundTrip(page, mcp, 'mcp-oauth-dcr-e2e', loopbackAppURL);
   } finally {
     await mcp.close();

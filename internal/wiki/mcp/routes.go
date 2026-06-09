@@ -15,10 +15,12 @@ import (
 	corerevision "github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	"github.com/perber/wiki/internal/projectdaemon"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
 	wikioauth "github.com/perber/wiki/internal/wiki/oauth"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
 	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
@@ -74,6 +76,14 @@ type Routes struct {
 	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
 	getWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
 	restoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	workspaceSyncStatus      func() workspacesync.SyncStatus
+	workspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
+	listWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
+	workspaceRootDir         string
+	workspaceDataDir         string
+	webPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
+	agentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
+	contextStore             *contextCheckpointStore
 }
 
 type RoutesConfig struct {
@@ -119,6 +129,13 @@ type RoutesConfig struct {
 	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
 	GetWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
 	RestoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	WorkspaceSyncStatus      func() workspacesync.SyncStatus
+	WorkspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
+	ListWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
+	WorkspaceRootDir         string
+	WorkspaceDataDir         string
+	WebPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
+	AgentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
 }
 
 func NewRoutes(cfg RoutesConfig) *Routes {
@@ -165,6 +182,14 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 		listWorkspaceRevisions:   cfg.ListWorkspaceRevisions,
 		getWorkspaceRevision:     cfg.GetWorkspaceRevision,
 		restoreWorkspaceRevision: cfg.RestoreWorkspaceRevision,
+		workspaceSyncStatus:      cfg.WorkspaceSyncStatus,
+		workspaceSyncRefresh:     cfg.WorkspaceSyncRefresh,
+		listWorkspaceSnapshots:   cfg.ListWorkspaceSnapshots,
+		workspaceRootDir:         cfg.WorkspaceRootDir,
+		workspaceDataDir:         cfg.WorkspaceDataDir,
+		webPresenceProvider:      cfg.WebPresenceProvider,
+		agentPresenceProvider:    cfg.AgentPresenceProvider,
+		contextStore:             newContextCheckpointStore(10),
 	}
 }
 
@@ -312,18 +337,65 @@ func (r *Routes) newServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
 	}, &sdkmcp.ServerOptions{PageSize: pageSize})
 
 	r.registerConfigTools(server, opts)
+	r.registerContextTools(server, opts)
+	r.registerNavigationTools(server)
+	r.registerValidationTools(server)
+	r.registerPartialEditTools(server)
 	r.registerPageTools(server)
 	r.registerSearchTools(server)
 	r.registerTagTools(server)
 	r.registerPropertyTools(server)
 	r.registerLinkTools(server)
 	r.registerAssetTools(server, opts)
-	if opts.EnableRevision || opts.EnableWorkspaceSync {
-		r.registerRevisionTools(server, opts)
-	}
-	if opts.EnableLinkRefactor {
-		r.registerRefactorTools(server)
-	}
+	r.registerOptionalTools(server, opts)
 
 	return server
+}
+
+type optionalToolGate string
+
+const (
+	optionalToolGateWorkspaceSync optionalToolGate = "workspace_sync"
+	optionalToolGateRevision      optionalToolGate = "revision"
+	optionalToolGateLinkRefactor  optionalToolGate = "link_refactor"
+)
+
+func optionalToolGatesForOptions(opts httpinternal.RouterOptions) []optionalToolGate {
+	gates := []optionalToolGate{}
+	if opts.EnableWorkspaceSync {
+		gates = append(gates, optionalToolGateWorkspaceSync)
+	}
+	if opts.EnableRevision || opts.EnableWorkspaceSync {
+		gates = append(gates, optionalToolGateRevision)
+	}
+	if opts.EnableLinkRefactor {
+		gates = append(gates, optionalToolGateLinkRefactor)
+	}
+	return gates
+}
+
+func (r *Routes) registerOptionalTools(server *sdkmcp.Server, opts httpinternal.RouterOptions) {
+	for _, gate := range optionalToolGatesForOptions(opts) {
+		switch gate {
+		case optionalToolGateWorkspaceSync:
+			r.registerWorkspaceSyncTools(server)
+		case optionalToolGateRevision:
+			r.registerRevisionTools(server, opts)
+		case optionalToolGateLinkRefactor:
+			r.registerRefactorTools(server)
+		}
+	}
+}
+
+func toolNamesForGate(gate optionalToolGate) []string {
+	switch gate {
+	case optionalToolGateWorkspaceSync:
+		return WorkspaceSyncToolNames()
+	case optionalToolGateRevision:
+		return RevisionToolNames()
+	case optionalToolGateLinkRefactor:
+		return LinkRefactorToolNames()
+	default:
+		return nil
+	}
 }

@@ -17,7 +17,10 @@ import (
 
 func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.RouterOptions) {
 	addTypedTool[listRevisionsInput, listRevisionsOutput](server, toolListRevisions, func(ctx context.Context, in listRevisionsInput) (listRevisionsOutput, error) {
-		pageID := strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return listRevisionsOutput{}, err
+		}
 		limit, err := wikirevisions.NormalizeRevisionListLimit(in.Limit, pageID)
 		if err != nil {
 			return listRevisionsOutput{}, err
@@ -53,7 +56,10 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 	})
 
 	addTypedTool[pageIDInput, revisionOutput](server, toolGetLatestRevision, func(ctx context.Context, in pageIDInput) (revisionOutput, error) {
-		pageID := strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return revisionOutput{}, err
+		}
 		if opts.EnableWorkspaceSync {
 			page, err := r.workspaceRevisionPage(ctx, pageID)
 			if err != nil {
@@ -76,7 +82,11 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 	})
 
 	addTypedTool[revisionIDInput, *wikirevisions.RevisionSnapshotResponse](server, toolGetRevision, func(ctx context.Context, in revisionIDInput) (*wikirevisions.RevisionSnapshotResponse, error) {
-		pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(firstNonEmpty(in.PageID, in.ID), in.RevisionID)
+		rawPageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return nil, err
+		}
+		pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(rawPageID, in.RevisionID)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +115,11 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 	})
 
 	addTypedTool[compareRevisionsInput, *wikirevisions.RevisionComparisonResponse](server, toolCompareRevisions, func(ctx context.Context, in compareRevisionsInput) (*wikirevisions.RevisionComparisonResponse, error) {
-		pageID, baseRevisionID, targetRevisionID, err := wikirevisions.ValidateRevisionCompareInput(firstNonEmpty(in.PageID, in.ID), in.BaseRevisionID, in.TargetRevisionID)
+		rawPageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return nil, err
+		}
+		pageID, baseRevisionID, targetRevisionID, err := wikirevisions.ValidateRevisionCompareInput(rawPageID, in.BaseRevisionID, in.TargetRevisionID)
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +155,11 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 	})
 
 	addTypedTool[revisionAssetInput, assetOutput](server, toolGetRevisionAsset, func(ctx context.Context, in revisionAssetInput) (assetOutput, error) {
-		pageID, revisionID, assetName, err := wikirevisions.ValidateRevisionAssetInput(firstNonEmpty(in.PageID, in.ID), in.RevisionID, in.AssetName)
+		rawPageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return assetOutput{}, err
+		}
+		pageID, revisionID, assetName, err := wikirevisions.ValidateRevisionAssetInput(rawPageID, in.RevisionID, in.AssetName)
 		if err != nil {
 			return assetOutput{}, err
 		}
@@ -172,8 +190,12 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 	})
 
 	addEditorTool[revisionIDInput, pageOutput](r, server, toolRestoreRevision, func(ctx context.Context, actor toolActor, in revisionIDInput) (pageOutput, error) {
+		rawPageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return pageOutput{}, err
+		}
 		if opts.EnableWorkspaceSync {
-			pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(firstNonEmpty(in.PageID, in.ID), in.RevisionID)
+			pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(rawPageID, in.RevisionID)
 			if err != nil {
 				return pageOutput{}, err
 			}
@@ -193,7 +215,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, opts httpinternal.
 		}
 		out, err := r.restoreRev.Execute(ctx, wikirevisions.RestoreRevisionInput{
 			UserID:     actor.ID,
-			PageID:     strings.TrimSpace(firstNonEmpty(in.PageID, in.ID)),
+			PageID:     rawPageID,
 			RevisionID: strings.TrimSpace(in.RevisionID),
 		})
 		if err != nil {

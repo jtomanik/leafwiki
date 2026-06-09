@@ -85,3 +85,7 @@ func (a *fsWatcherAdapter) Events() <-chan watcherEvent {
 func (a *fsWatcherAdapter) Dropped() <-chan watcherEvent {
 	return a.dropped
 }
+
+func (a *fsWatcherAdapter) Close() {
+	a.watcher.Close()
+}

@@ -17,7 +17,7 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 		return now
 	}
 
-	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","source":"cli","tool_name":"mcp__leafwiki__get_page"}`)
+	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","source":"cli","tool_name":"mcp__leafwiki__wiki_get_page"}`)
 	event.SeenAt = now
 	registry.Record(event)
 
@@ -35,11 +35,28 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 	if session.FirstSeenAt != now || session.LastSeenAt != now || session.LastEvent != "PreToolUse" {
 		t.Fatalf("timestamps/event = %s/%s/%q", session.FirstSeenAt, session.LastSeenAt, session.LastEvent)
 	}
-	if session.Model != "gpt-5.4" || session.Source != "cli" || session.ToolName != "mcp__leafwiki__get_page" || !session.IsMCPTool {
+	if session.Model != "gpt-5.4" || session.Source != "cli" || session.ToolName != "mcp__leafwiki__wiki_get_page" || !session.IsMCPTool {
 		t.Fatalf("metadata = %#v", session)
 	}
 	if got, want := joinCounts(counts), "1"; got != want {
 		t.Fatalf("counts = %s, want %s", got, want)
+	}
+}
+
+func TestAgentPresenceRegistryRedactsUnsafeMetadata(t *testing.T) {
+	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
+	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","tool_name":"mcp__leafwiki__wiki_get_page"}`)
+	event.Model = "/Users/example/token-model"
+	event.Source = "/Users/example/.codex/session.jsonl"
+
+	registry.Record(event)
+
+	sessions := registry.List()
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, want one", sessions)
+	}
+	if sessions[0].Model != "" || sessions[0].Source != "" || sessions[0].ToolName != "mcp__leafwiki__wiki_get_page" || !sessions[0].IsMCPTool {
+		t.Fatalf("unsafe metadata was not redacted: %#v", sessions[0])
 	}
 }
 

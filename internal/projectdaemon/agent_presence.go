@@ -3,6 +3,7 @@ package projectdaemon
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,10 +81,16 @@ func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
 	}
 	session.LastSeenAt = seenAt
 	session.LastEvent = event.EventName
-	session.Model = event.Model
-	session.Source = event.Source
-	session.ToolName = event.ToolName
-	session.IsMCPTool = event.IsMCPTool
+	if model := safeAgentMetadata(event.Model, 80); model != "" {
+		session.Model = model
+	}
+	if source := safeAgentSource(event.Source); source != "" {
+		session.Source = source
+	}
+	if toolName := safeAgentMetadata(event.ToolName, 160); toolName != "" {
+		session.ToolName = toolName
+		session.IsMCPTool = event.IsMCPTool
+	}
 	session.ActiveSubagents += event.SubagentDelta
 	if session.ActiveSubagents < 0 {
 		session.ActiveSubagents = 0
@@ -175,4 +182,37 @@ func (r *AgentPresenceRegistry) notify(count int) {
 
 func presenceKey(provider string, sessionIDHash string) string {
 	return provider + "\x00" + sessionIDHash
+}
+
+func safeAgentSource(raw string) string {
+	source := strings.ToLower(safeAgentMetadata(raw, 40))
+	switch source {
+	case "", "cli", "startup", "hook", "mcp", "tool", "user", "ide", "agent":
+		return source
+	default:
+		return "unknown"
+	}
+}
+
+func safeAgentMetadata(raw string, maxLen int) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.Contains(value, "/") ||
+		strings.Contains(value, `\`) ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "api_key") ||
+		strings.Contains(lower, "apikey") ||
+		strings.Contains(lower, "bearer ") ||
+		strings.Contains(lower, "password") {
+		return ""
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > maxLen {
+		value = value[:maxLen]
+	}
+	return value
 }

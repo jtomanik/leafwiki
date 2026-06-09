@@ -1383,6 +1383,68 @@ func TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen(t *testing.T) 
 	}
 }
 
+func TestMainProcessNonHookFlagValueNamedAgentHookDoesNotFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	if err := os.MkdirAll(sameDir, 0o755); err != nil {
+		t.Fatalf("mkdir sameDir: %v", err)
+	}
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--log-file", "agent-hook",
+		"--disable-auth",
+		"--data-dir", sameDir,
+		"--root-dir", sameDir,
+		"--log-target", "stderr",
+	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("non-hook startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "Invalid workspace configuration") {
+		t.Fatalf("stderr = %q, want workspace configuration error", stderr)
+	}
+}
+
+func TestMainProcessNonHookFlagValueNamedAgentHookParseErrorDoesNotFailOpen(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--log-file", "agent-hook",
+		"--not-a-real-flag",
+	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("non-hook parse error unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "not-a-real-flag") {
+		t.Fatalf("stderr = %q, want flag parse error", stderr)
+	}
+}
+
+func TestMainProcessAgentHookFlagFirstParseErrorsFailOpen(t *testing.T) {
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-parse-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--not-a-real-flag",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("flag-first agent-hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "flag-parse-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
 func TestMainProcessAgentHookProviderAllowResponsesFailOpen(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1746,7 +1808,7 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--port", port,
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, nativeStdioToolCallInput(2, "get_current_user", map[string]any{}), 8*time.Second)
+	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
 
 	if err != nil {
 		t.Fatalf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
@@ -1775,7 +1837,7 @@ func TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner(t *testing.
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "create_page", map[string]any{
+	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_create_page", map[string]any{
 		"title": title,
 		"slug":  slug,
 		"kind":  "page",
@@ -1795,7 +1857,7 @@ func TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner(t *testing.
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
+	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
 	if err != nil {
 		t.Fatalf("reader STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, readerStdout, readerStderr)
 	}

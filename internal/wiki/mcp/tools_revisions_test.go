@@ -78,10 +78,10 @@ func TestListRevisionsToolPassesWorkspaceCursorAndReturnsNextCursor(t *testing.T
 		Arguments: map[string]any{"pageId": *pageID, "cursor": "rev-5", "limit": float64(1)},
 	})
 	if err != nil {
-		t.Fatalf("CallTool list_revisions: %v", err)
+		t.Fatalf("CallTool wiki_list_revisions: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("CallTool list_revisions returned tool error: %#v", result.Content)
+		t.Fatalf("CallTool wiki_list_revisions returned tool error: %#v", result.Content)
 	}
 	body, ok := result.StructuredContent.(map[string]any)
 	if !ok {

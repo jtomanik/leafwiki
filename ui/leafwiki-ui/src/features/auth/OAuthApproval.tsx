@@ -1,5 +1,8 @@
 import { Button } from '@/components/ui/button'
-import { fetchOAuthApprovalDetails, OAuthApprovalDetails } from '@/lib/api/oauth'
+import {
+  fetchOAuthApprovalDetails,
+  OAuthApprovalDetails,
+} from '@/lib/api/oauth'
 import { withBasePath } from '@/lib/routePath'
 import { useBrandingStore } from '@/stores/branding'
 import { useSessionStore } from '@/stores/session'
@@ -47,7 +50,8 @@ export default function OAuthApproval() {
         }
       })
       .catch(() => {
-        if (!cancelled) setError('Approval request expired or is no longer valid')
+        if (!cancelled)
+          setError('Approval request expired or is no longer valid')
       })
 
     return () => {
@@ -59,7 +63,11 @@ export default function OAuthApproval() {
     <>
       <title>Authorize MCP - {siteName}</title>
       <div className="oauth-approval">
-        <form method="post" action={withBasePath('/oauth/authorize')} className="oauth-approval__form">
+        <form
+          method="post"
+          action={withBasePath('/oauth/authorize')}
+          className="oauth-approval__form"
+        >
           <div className="oauth-approval__brand">
             {logoFile ? (
               <img
@@ -76,7 +84,8 @@ export default function OAuthApproval() {
           <h1 className="oauth-approval__title">Authorize MCP access</h1>
 
           <p className="oauth-approval__prompt">
-            Allow {details?.clientLabel || 'this MCP client'} to access {siteName}
+            Allow {details?.clientLabel || 'this MCP client'} to access{' '}
+            {siteName}
             {user?.username ? ` as ${user.username}` : ''}?
           </p>
 
@@ -93,7 +102,9 @@ export default function OAuthApproval() {
             </dl>
           ) : (
             <p className="oauth-approval__status">
-              {!approvalToken ? 'Invalid approval request' : error || 'Loading approval request...'}
+              {!approvalToken
+                ? 'Invalid approval request'
+                : error || 'Loading approval request...'}
             </p>
           )}
 
@@ -106,13 +117,28 @@ export default function OAuthApproval() {
               readOnly
             />
           ))}
-          <input type="hidden" name="approval_token" value={approvalToken} readOnly />
+          <input
+            type="hidden"
+            name="approval_token"
+            value={approvalToken}
+            readOnly
+          />
 
           <div className="oauth-approval__actions">
-            <Button type="submit" name="decision" value="deny" variant="outline">
+            <Button
+              type="submit"
+              name="decision"
+              value="deny"
+              variant="outline"
+            >
               Cancel
             </Button>
-            <Button type="submit" name="decision" value="approve" disabled={!details}>
+            <Button
+              type="submit"
+              name="decision"
+              value="approve"
+              disabled={!details}
+            >
               Approve
             </Button>
           </div>

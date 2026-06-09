@@ -17,7 +17,7 @@ func TestNormalizeCodexToolEventSanitizesSessionAndMetadata(t *testing.T) {
 		"transcript_path":"/Users/example/.codex/transcript.jsonl",
 		"cwd":"/Users/example/private-project",
 		"model":"gpt-5.4",
-		"tool_name":"mcp__leafwiki__get_page",
+		"tool_name":"mcp__leafwiki__wiki_get_page",
 		"tool_input":{"path":"/secret/page","query":"private prompt"}
 	}`)
 
@@ -32,7 +32,7 @@ func TestNormalizeCodexToolEventSanitizesSessionAndMetadata(t *testing.T) {
 	if event.SessionIDHash != testSessionHash(ProviderCodex, "raw-codex-session") {
 		t.Fatalf("SessionIDHash = %q, want provider-scoped sha256 hash", event.SessionIDHash)
 	}
-	if event.EventName != "PreToolUse" || event.Model != "gpt-5.4" || event.ToolName != "mcp__leafwiki__get_page" {
+	if event.EventName != "PreToolUse" || event.Model != "gpt-5.4" || event.ToolName != "mcp__leafwiki__wiki_get_page" {
 		t.Fatalf("metadata = event:%q model:%q tool:%q", event.EventName, event.Model, event.ToolName)
 	}
 	if !event.IsMCPTool {
@@ -40,6 +40,22 @@ func TestNormalizeCodexToolEventSanitizesSessionAndMetadata(t *testing.T) {
 	}
 	if !event.SeenAt.Equal(seenAt) {
 		t.Fatalf("SeenAt = %s, want %s", event.SeenAt, seenAt)
+	}
+}
+
+func TestNormalizeRedactsUnsafeModelSourceAndToolMetadata(t *testing.T) {
+	event, ok := Normalize(ProviderCodex, []byte(`{
+		"hook_event_name":"PreToolUse",
+		"session_id":"raw-codex-session",
+		"model":"/Users/example/token-model",
+		"source":"/Users/example/.codex/session.jsonl",
+		"tool_name":"Read /secret/token"
+	}`), time.Now())
+	if !ok {
+		t.Fatalf("Normalize returned ok=false")
+	}
+	if event.Model != "" || event.Source != "" || event.ToolName != "" || event.IsMCPTool {
+		t.Fatalf("unsafe metadata was not redacted: %#v", event)
 	}
 }
 
@@ -57,7 +73,7 @@ func TestNormalizeSupportedProviderEvents(t *testing.T) {
 	}{
 		{name: "codex session start", provider: ProviderCodex, payload: `{"hook_event_name":"SessionStart","session_id":"codex-session","model":"gpt-5.4","source":"cli"}`, wantEvent: "SessionStart"},
 		{name: "codex permission request", provider: ProviderCodex, payload: `{"hook_event_name":"PermissionRequest","session_id":"codex-session","tool_name":"Shell"}`, wantEvent: "PermissionRequest", wantToolName: "Shell"},
-		{name: "codex post tool use", provider: ProviderCodex, payload: `{"hook_event_name":"PostToolUse","session_id":"codex-session","tool_name":"mcp__leafwiki__update_page","tool_response":"secret output"}`, wantEvent: "PostToolUse", wantToolName: "mcp__leafwiki__update_page", wantMCPTool: true},
+		{name: "codex post tool use", provider: ProviderCodex, payload: `{"hook_event_name":"PostToolUse","session_id":"codex-session","tool_name":"mcp__leafwiki__wiki_update_page","tool_response":"secret output"}`, wantEvent: "PostToolUse", wantToolName: "mcp__leafwiki__wiki_update_page", wantMCPTool: true},
 		{name: "codex user prompt submit", provider: ProviderCodex, payload: `{"hook_event_name":"UserPromptSubmit","session_id":"codex-session","prompt":"private prompt"}`, wantEvent: "UserPromptSubmit"},
 		{name: "codex stop", provider: ProviderCodex, payload: `{"hook_event_name":"Stop","session_id":"codex-session","last_assistant_message":"private output"}`, wantEvent: "Stop"},
 		{name: "codex subagent start", provider: ProviderCodex, payload: `{"hook_event_name":"SubagentStart","session_id":"codex-session"}`, wantEvent: "SubagentStart", wantSubagentDelta: 1},
@@ -65,7 +81,7 @@ func TestNormalizeSupportedProviderEvents(t *testing.T) {
 		{name: "claude session start", provider: ProviderClaude, payload: `{"hook_event_name":"SessionStart","session_id":"claude-session","model":"claude-opus-4","source":"startup"}`, wantEvent: "SessionStart"},
 		{name: "claude session end", provider: ProviderClaude, payload: `{"hook_event_name":"SessionEnd","session_id":"claude-session","reason":"clear"}`, wantEvent: "SessionEnd", wantEndsSession: true},
 		{name: "claude pre tool use", provider: ProviderClaude, payload: `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read","tool_input":{"file_path":"/secret"}}`, wantEvent: "PreToolUse", wantToolName: "Read"},
-		{name: "claude post tool use", provider: ProviderClaude, payload: `{"hook_event_name":"PostToolUse","session_id":"claude-session","tool_name":"mcp__leafwiki__get_page","tool_response":"private"}`, wantEvent: "PostToolUse", wantToolName: "mcp__leafwiki__get_page", wantMCPTool: true},
+		{name: "claude post tool use", provider: ProviderClaude, payload: `{"hook_event_name":"PostToolUse","session_id":"claude-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_response":"private"}`, wantEvent: "PostToolUse", wantToolName: "mcp__leafwiki__wiki_get_page", wantMCPTool: true},
 		{name: "claude user prompt submit", provider: ProviderClaude, payload: `{"hook_event_name":"UserPromptSubmit","session_id":"claude-session","prompt":"private prompt"}`, wantEvent: "UserPromptSubmit"},
 		{name: "claude stop", provider: ProviderClaude, payload: `{"hook_event_name":"Stop","session_id":"claude-session","last_assistant_message":"private"}`, wantEvent: "Stop"},
 		{name: "claude subagent start", provider: ProviderClaude, payload: `{"hook_event_name":"SubagentStart","session_id":"claude-session","agent_transcript_path":"/secret"}`, wantEvent: "SubagentStart", wantSubagentDelta: 1},
@@ -73,7 +89,7 @@ func TestNormalizeSupportedProviderEvents(t *testing.T) {
 		{name: "cursor session start", provider: ProviderCursor, payload: `{"hook_event_name":"sessionStart","session_id":"cursor-session","conversation_id":"cursor-conversation","model":"gpt-5.4","user_email":"secret@example.com"}`, wantEvent: "sessionStart"},
 		{name: "cursor session end", provider: ProviderCursor, payload: `{"hook_event_name":"sessionEnd","session_id":"cursor-session","reason":"stop"}`, wantEvent: "sessionEnd", wantEndsSession: true},
 		{name: "cursor pre tool use", provider: ProviderCursor, payload: `{"hook_event_name":"preToolUse","session_id":"cursor-session","tool_name":"Read","tool_input":{"path":"/secret"}}`, wantEvent: "preToolUse", wantToolName: "Read"},
-		{name: "cursor post tool use", provider: ProviderCursor, payload: `{"hook_event_name":"postToolUse","session_id":"cursor-session","tool_name":"mcp__leafwiki__get_page","tool_output":"private"}`, wantEvent: "postToolUse", wantToolName: "mcp__leafwiki__get_page", wantMCPTool: true},
+		{name: "cursor post tool use", provider: ProviderCursor, payload: `{"hook_event_name":"postToolUse","session_id":"cursor-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_output":"private"}`, wantEvent: "postToolUse", wantToolName: "mcp__leafwiki__wiki_get_page", wantMCPTool: true},
 		{name: "cursor before mcp execution", provider: ProviderCursor, payload: `{"hook_event_name":"beforeMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page"}`, wantEvent: "beforeMCPExecution", wantToolName: "leafwiki.get_page", wantMCPTool: true},
 		{name: "cursor after mcp execution", provider: ProviderCursor, payload: `{"hook_event_name":"afterMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page","tool_output":"private"}`, wantEvent: "afterMCPExecution", wantToolName: "leafwiki.get_page", wantMCPTool: true},
 		{name: "cursor before submit prompt", provider: ProviderCursor, payload: `{"hook_event_name":"beforeSubmitPrompt","session_id":"cursor-session","prompt":"private prompt"}`, wantEvent: "beforeSubmitPrompt"},

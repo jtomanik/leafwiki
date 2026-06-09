@@ -19,6 +19,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	coreimporter "github.com/perber/wiki/internal/importer"
 	"github.com/perber/wiki/internal/links"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/properties"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/tags"
@@ -32,6 +33,7 @@ import (
 	wikioauth "github.com/perber/wiki/internal/wiki/oauth"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
+	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
 	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
@@ -55,6 +57,8 @@ type Wiki struct {
 	workspace           Workspace
 	workspaceSync       *workspacesync.Service
 	workspaceSyncCancel context.CancelFunc
+	webPresence         *wikipresence.WebPresenceRegistry
+	agentPresence       *projectdaemon.AgentPresenceRegistry
 
 	// Domain route registrars (populated by NewWiki).
 	pagesRoutes         *wikipages.Routes
@@ -69,6 +73,7 @@ type Wiki struct {
 	importerRoutes      *wikiimporter.Routes
 	healthRoutes        *wikihealth.Routes
 	workspaceSyncRoutes *wikiworkspacesync.Routes
+	presenceRoutes      *wikipresence.Routes
 	mcpRoutes           *wikimcp.Routes
 	oauthRoutes         *wikioauth.Routes
 	revision            *revision.Service
@@ -137,6 +142,7 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 	if err := w.initBranding(); err != nil {
 		return nil, err
 	}
+	w.webPresence = wikipresence.NewWebPresenceRegistry(wikipresence.DefaultWebPresenceTTL, nil)
 	// Welcome page must exist before the revision service starts recording.
 	if !options.EnableWorkspaceSync || w.tree.IsLoaded() {
 		if err := w.EnsureWelcomePage(); err != nil {
@@ -440,6 +446,11 @@ func (w *Wiki) buildRoutes(options *WikiOptions) {
 		RestoreWorkspace: w.WorkspaceSyncRestoreWorkspace,
 		AuthService:      w.auth,
 	})
+	w.presenceRoutes = wikipresence.NewRoutes(wikipresence.RoutesConfig{
+		Registry:    w.webPresence,
+		TreeService: w.tree,
+		AuthService: w.auth,
+	})
 	w.oauthRoutes = wikioauth.NewRoutes(w.oauth)
 	w.mcpRoutes = w.buildMCPRoutes()
 }
@@ -654,6 +665,13 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		ListWorkspaceRevisions:   w.WorkspaceSyncPageRevisions,
 		GetWorkspaceRevision:     w.WorkspaceSyncPageRevision,
 		RestoreWorkspaceRevision: w.WorkspaceSyncRestorePageRevision,
+		WorkspaceSyncStatus:      w.WorkspaceSyncStatus,
+		WorkspaceSyncRefresh:     w.WorkspaceSyncRefresh,
+		ListWorkspaceSnapshots:   w.WorkspaceSyncSnapshotPage,
+		WorkspaceRootDir:         w.workspace.RootDir,
+		WorkspaceDataDir:         w.workspace.DataDir,
+		WebPresenceProvider:      w.WebPresenceSessions,
+		AgentPresenceProvider:    w.AgentPresenceSessions,
 		UserService:              w.user,
 		APIKeys:                  w.apiKeys,
 		OAuthService:             w.oauth,
@@ -677,9 +695,28 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 		w.importerRoutes,
 		w.healthRoutes,
 		w.workspaceSyncRoutes,
+		w.presenceRoutes,
 		w.oauthRoutes,
 		w.mcpRoutes,
 	}
+}
+
+func (w *Wiki) SetAgentPresenceRegistry(registry *projectdaemon.AgentPresenceRegistry) {
+	w.agentPresence = registry
+}
+
+func (w *Wiki) WebPresenceSessions(viewer *auth.User) ([]wikipresence.Session, error) {
+	if w.webPresence == nil {
+		return nil, fmt.Errorf("web presence is unavailable")
+	}
+	return w.webPresence.List(viewer), nil
+}
+
+func (w *Wiki) AgentPresenceSessions() ([]projectdaemon.AgentPresenceSession, error) {
+	if w.agentPresence == nil {
+		return nil, fmt.Errorf("agent presence is unavailable")
+	}
+	return w.agentPresence.List(), nil
 }
 
 func (w *Wiki) RunMCPStdio(ctx context.Context, opts httpinternal.RouterOptions, transport sdkmcp.Transport) error {

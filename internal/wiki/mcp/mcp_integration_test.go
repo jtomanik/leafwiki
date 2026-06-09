@@ -21,9 +21,11 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
@@ -34,46 +36,65 @@ import (
 
 var baseToolNames = wikimcp.BaseToolNames()
 
+var mcpOnlyToolNames = map[string]struct{}{
+	wikimcp.ToolGetContext:         {},
+	wikimcp.ToolRefresh:            {},
+	wikimcp.ToolGetSubtree:         {},
+	wikimcp.ToolValidatePage:       {},
+	wikimcp.ToolValidateContent:    {},
+	wikimcp.ToolValidateWiki:       {},
+	wikimcp.ToolUpdatePageMetadata: {},
+	wikimcp.ToolReplacePageSection: {},
+}
+
 var baseToolInputProperties = map[string][]string{
-	"get_config":            {},
-	"get_current_user":      {},
-	"get_tree":              {"depth"},
-	"get_page":              {"id", "pageId"},
-	"get_page_by_path":      {"path"},
-	"lookup_path":           {"path"},
-	"resolve_permalink":     {"id", "pageId"},
-	"suggest_slug":          {"parentId", "currentId", "title"},
-	"create_page":           {"parentId", "title", "slug", "kind"},
-	"update_page":           {"id", "version", "title", "slug", "content", "tags", "properties"},
-	"delete_page":           {"id", "version", "recursive"},
-	"move_page":             {"id", "version", "parentId"},
-	"sort_pages":            {"parentId", "orderedIds"},
-	"ensure_page":           {"path", "title", "kind"},
-	"convert_page":          {"id", "version", "targetKind"},
-	"copy_page":             {"id", "targetParentId", "title", "slug"},
-	"search_pages":          {"q", "tags", "offset", "limit"},
-	"get_search_status":     {},
-	"list_tags":             {"q", "selected", "limit"},
-	"get_pages_by_tags":     {"tags"},
-	"list_property_keys":    {"q", "limit"},
-	"get_pages_by_property": {"key", "value"},
-	"get_link_status":       {"id", "pageId"},
-	"upload_asset":          {"pageId", "filename", "contentBase64"},
-	"get_asset":             {"pageId", "filename"},
-	"list_assets":           {"id", "pageId"},
-	"rename_asset":          {"pageId", "oldFilename", "newFilename"},
-	"delete_asset":          {"pageId", "filename"},
+	"wiki_get_context":           {"sinceToken", "syncMode", "treeDepth", "recentChangesLimit"},
+	"wiki_get_subtree":           {"pageId", "path", "depth", "includeMetadata", "includeLinkCounts", "includeContentPreview"},
+	"wiki_validate_page":         {"pageId", "path"},
+	"wiki_validate_content":      {"path", "content", "existingPageId"},
+	"wiki_validate_wiki":         {"includeWarnings"},
+	"wiki_update_page_metadata":  {"pageId", "path", "version", "setTags", "addTags", "removeTags", "setProperties", "removeProperties", "includePage", "includeValidation", "includeLinkStatus"},
+	"wiki_replace_page_section":  {"pageId", "path", "version", "headingPath", "occurrence", "content", "includePage", "includeValidation", "includeLinkStatus"},
+	"wiki_get_config":            {},
+	"wiki_get_current_user":      {},
+	"wiki_get_tree":              {"depth"},
+	"wiki_get_page":              {"id", "pageId"},
+	"wiki_get_page_by_path":      {"path"},
+	"wiki_lookup_path":           {"path"},
+	"wiki_resolve_permalink":     {"id", "pageId"},
+	"wiki_suggest_slug":          {"parentId", "currentId", "title"},
+	"wiki_create_page":           {"parentId", "title", "slug", "kind"},
+	"wiki_update_page":           {"id", "version", "title", "slug", "content", "tags", "properties"},
+	"wiki_delete_page":           {"id", "version", "recursive"},
+	"wiki_move_page":             {"id", "version", "parentId"},
+	"wiki_sort_pages":            {"parentId", "orderedIds"},
+	"wiki_ensure_page":           {"path", "title", "kind"},
+	"wiki_convert_page":          {"id", "version", "targetKind"},
+	"wiki_copy_page":             {"id", "targetParentId", "title", "slug"},
+	"wiki_search_pages":          {"q", "tags", "offset", "limit"},
+	"wiki_get_search_status":     {},
+	"wiki_list_tags":             {"q", "selected", "limit"},
+	"wiki_get_pages_by_tags":     {"tags"},
+	"wiki_list_property_keys":    {"q", "limit"},
+	"wiki_get_pages_by_property": {"key", "value"},
+	"wiki_get_link_status":       {"id", "pageId"},
+	"wiki_upload_asset":          {"pageId", "filename", "contentBase64"},
+	"wiki_get_asset":             {"pageId", "filename"},
+	"wiki_list_assets":           {"id", "pageId"},
+	"wiki_rename_asset":          {"pageId", "oldFilename", "newFilename"},
+	"wiki_delete_asset":          {"pageId", "filename"},
 }
 
 var featureToolInputProperties = map[string][]string{
-	"list_revisions":        {"id", "pageId", "cursor", "limit"},
-	"get_latest_revision":   {"id", "pageId"},
-	"get_revision":          {"id", "pageId", "revisionId"},
-	"compare_revisions":     {"id", "pageId", "baseRevisionId", "targetRevisionId"},
-	"get_revision_asset":    {"id", "pageId", "revisionId", "assetName"},
-	"restore_revision":      {"id", "pageId", "revisionId"},
-	"preview_page_refactor": {"id", "pageId", "kind", "title", "slug", "content", "parentId"},
-	"apply_page_refactor":   {"id", "pageId", "version", "kind", "title", "slug", "content", "parentId", "rewriteLinks"},
+	"wiki_refresh":               {"validate", "source"},
+	"wiki_list_revisions":        {"id", "pageId", "cursor", "limit"},
+	"wiki_get_latest_revision":   {"id", "pageId"},
+	"wiki_get_revision":          {"id", "pageId", "revisionId"},
+	"wiki_compare_revisions":     {"id", "pageId", "baseRevisionId", "targetRevisionId"},
+	"wiki_get_revision_asset":    {"id", "pageId", "revisionId", "assetName"},
+	"wiki_restore_revision":      {"id", "pageId", "revisionId"},
+	"wiki_preview_page_refactor": {"id", "pageId", "kind", "title", "slug", "content", "parentId"},
+	"wiki_apply_page_refactor":   {"id", "pageId", "version", "kind", "title", "slug", "content", "parentId", "rewriteLinks"},
 }
 
 type httpMCPParityCase struct {
@@ -83,42 +104,42 @@ type httpMCPParityCase struct {
 }
 
 var mcpHTTPParityCases = []httpMCPParityCase{
-	{Tool: "get_config", HTTPRoute: "GET /api/config", Assertion: "selected config fields match"},
-	{Tool: "get_current_user", HTTPRoute: "GET /api/auth/me", Assertion: "current user payloads match"},
-	{Tool: "get_tree", HTTPRoute: "GET /api/tree", Assertion: "tree payloads match"},
-	{Tool: "get_page", HTTPRoute: "GET /api/pages/:id", Assertion: "page payloads match"},
-	{Tool: "get_page_by_path", HTTPRoute: "GET /api/pages/by-path", Assertion: "page payloads match"},
-	{Tool: "lookup_path", HTTPRoute: "GET /api/pages/lookup", Assertion: "lookup payloads match"},
-	{Tool: "resolve_permalink", HTTPRoute: "GET /api/pages/permalink/:id", Assertion: "target payloads match"},
-	{Tool: "suggest_slug", HTTPRoute: "GET /api/pages/slug-suggestion", Assertion: "slug payloads match"},
-	{Tool: "create_page", HTTPRoute: "POST /api/pages", Assertion: "created page is visible through HTTP with matching payload"},
-	{Tool: "update_page", HTTPRoute: "PUT /api/pages/:id", Assertion: "updated page is visible through HTTP and stale page_version_conflict errors match"},
-	{Tool: "delete_page", HTTPRoute: "DELETE /api/pages/:id", Assertion: "success payloads, deleted state, and optimistic page_version_conflict errors match"},
-	{Tool: "move_page", HTTPRoute: "PUT /api/pages/:id/move", Assertion: "success payloads, final route lookup, parent placement, and stale page_version_conflict errors match"},
-	{Tool: "sort_pages", HTTPRoute: "PUT /api/pages/:id/sort", Assertion: "message payloads match"},
-	{Tool: "ensure_page", HTTPRoute: "POST /api/pages/ensure", Assertion: "ensured page payloads match"},
-	{Tool: "convert_page", HTTPRoute: "POST /api/pages/convert/:id", Assertion: "HTTP no-content result, final page, and stale page_version_conflict errors match"},
-	{Tool: "copy_page", HTTPRoute: "POST /api/pages/copy/:id", Assertion: "copied page fields, route lookup, and source preservation match"},
-	{Tool: "search_pages", HTTPRoute: "GET /api/search", Assertion: "count, pagination, facets, hasMore, and items match"},
-	{Tool: "get_search_status", HTTPRoute: "GET /api/search/status", Assertion: "status payloads match"},
-	{Tool: "list_tags", HTTPRoute: "GET /api/tags", Assertion: "tag payloads match"},
-	{Tool: "get_pages_by_tags", HTTPRoute: "GET /api/tags/pages", Assertion: "page payloads match"},
-	{Tool: "list_property_keys", HTTPRoute: "GET /api/properties", Assertion: "key payloads match"},
-	{Tool: "get_pages_by_property", HTTPRoute: "GET /api/properties/pages", Assertion: "page payloads match"},
-	{Tool: "get_link_status", HTTPRoute: "GET /api/pages/:id/links", Assertion: "link status payloads match"},
-	{Tool: "upload_asset", HTTPRoute: "POST /api/pages/:id/assets", Assertion: "upload result, exact bytes, MIME type, and list visibility match"},
-	{Tool: "get_asset", HTTPRoute: "GET /assets/:pageId/:filename", Assertion: "asset content and type match"},
-	{Tool: "list_assets", HTTPRoute: "GET /api/pages/:id/assets", Assertion: "asset lists match"},
-	{Tool: "rename_asset", HTTPRoute: "PUT /api/pages/:id/assets/rename", Assertion: "rename result, exact bytes, old-name absence, and new-name presence match"},
-	{Tool: "delete_asset", HTTPRoute: "DELETE /api/pages/:id/assets/:name", Assertion: "delete payloads and exact asset absence match"},
-	{Tool: "list_revisions", HTTPRoute: "GET /api/pages/:id/revisions", Assertion: "revision list payloads match"},
-	{Tool: "get_latest_revision", HTTPRoute: "GET /api/pages/:id/revisions/latest", Assertion: "revision payloads match"},
-	{Tool: "get_revision", HTTPRoute: "GET /api/pages/:id/revisions/:revisionId", Assertion: "snapshot payloads match"},
-	{Tool: "compare_revisions", HTTPRoute: "GET /api/pages/:id/revisions/compare", Assertion: "comparison payloads match"},
-	{Tool: "get_revision_asset", HTTPRoute: "GET /api/pages/:id/revisions/:revisionId/assets/:name", Assertion: "asset content and type match"},
-	{Tool: "restore_revision", HTTPRoute: "POST /api/pages/:id/revisions/:revisionId/restore", Assertion: "stable restored page fields match"},
-	{Tool: "preview_page_refactor", HTTPRoute: "POST /api/pages/:id/refactor/preview", Assertion: "preview payloads match"},
-	{Tool: "apply_page_refactor", HTTPRoute: "POST /api/pages/:id/refactor/apply", Assertion: "successful apply payloads, rewritten links, and stale page_version_conflict errors match"},
+	{Tool: "wiki_get_config", HTTPRoute: "GET /api/config", Assertion: "selected config fields match"},
+	{Tool: "wiki_get_current_user", HTTPRoute: "GET /api/auth/me", Assertion: "current user payloads match"},
+	{Tool: "wiki_get_tree", HTTPRoute: "GET /api/tree", Assertion: "tree payloads match"},
+	{Tool: "wiki_get_page", HTTPRoute: "GET /api/pages/:id", Assertion: "page payloads match"},
+	{Tool: "wiki_get_page_by_path", HTTPRoute: "GET /api/pages/by-path", Assertion: "page payloads match"},
+	{Tool: "wiki_lookup_path", HTTPRoute: "GET /api/pages/lookup", Assertion: "lookup payloads match"},
+	{Tool: "wiki_resolve_permalink", HTTPRoute: "GET /api/pages/permalink/:id", Assertion: "target payloads match"},
+	{Tool: "wiki_suggest_slug", HTTPRoute: "GET /api/pages/slug-suggestion", Assertion: "slug payloads match"},
+	{Tool: "wiki_create_page", HTTPRoute: "POST /api/pages", Assertion: "created page is visible through HTTP with matching payload"},
+	{Tool: "wiki_update_page", HTTPRoute: "PUT /api/pages/:id", Assertion: "updated page is visible through HTTP and stale page_version_conflict errors match"},
+	{Tool: "wiki_delete_page", HTTPRoute: "DELETE /api/pages/:id", Assertion: "success payloads, deleted state, and optimistic page_version_conflict errors match"},
+	{Tool: "wiki_move_page", HTTPRoute: "PUT /api/pages/:id/move", Assertion: "success payloads, final route lookup, parent placement, and stale page_version_conflict errors match"},
+	{Tool: "wiki_sort_pages", HTTPRoute: "PUT /api/pages/:id/sort", Assertion: "message payloads match"},
+	{Tool: "wiki_ensure_page", HTTPRoute: "POST /api/pages/ensure", Assertion: "ensured page payloads match"},
+	{Tool: "wiki_convert_page", HTTPRoute: "POST /api/pages/convert/:id", Assertion: "HTTP no-content result, final page, and stale page_version_conflict errors match"},
+	{Tool: "wiki_copy_page", HTTPRoute: "POST /api/pages/copy/:id", Assertion: "copied page fields, route lookup, and source preservation match"},
+	{Tool: "wiki_search_pages", HTTPRoute: "GET /api/search", Assertion: "count, pagination, facets, hasMore, and items match"},
+	{Tool: "wiki_get_search_status", HTTPRoute: "GET /api/search/status", Assertion: "status payloads match"},
+	{Tool: "wiki_list_tags", HTTPRoute: "GET /api/tags", Assertion: "tag payloads match"},
+	{Tool: "wiki_get_pages_by_tags", HTTPRoute: "GET /api/tags/pages", Assertion: "page payloads match"},
+	{Tool: "wiki_list_property_keys", HTTPRoute: "GET /api/properties", Assertion: "key payloads match"},
+	{Tool: "wiki_get_pages_by_property", HTTPRoute: "GET /api/properties/pages", Assertion: "page payloads match"},
+	{Tool: "wiki_get_link_status", HTTPRoute: "GET /api/pages/:id/links", Assertion: "link status payloads match"},
+	{Tool: "wiki_upload_asset", HTTPRoute: "POST /api/pages/:id/assets", Assertion: "upload result, exact bytes, MIME type, and list visibility match"},
+	{Tool: "wiki_get_asset", HTTPRoute: "GET /assets/:pageId/:filename", Assertion: "asset content and type match"},
+	{Tool: "wiki_list_assets", HTTPRoute: "GET /api/pages/:id/assets", Assertion: "asset lists match"},
+	{Tool: "wiki_rename_asset", HTTPRoute: "PUT /api/pages/:id/assets/rename", Assertion: "rename result, exact bytes, old-name absence, and new-name presence match"},
+	{Tool: "wiki_delete_asset", HTTPRoute: "DELETE /api/pages/:id/assets/:name", Assertion: "delete payloads and exact asset absence match"},
+	{Tool: "wiki_list_revisions", HTTPRoute: "GET /api/pages/:id/revisions", Assertion: "revision list payloads match"},
+	{Tool: "wiki_get_latest_revision", HTTPRoute: "GET /api/pages/:id/revisions/latest", Assertion: "revision payloads match"},
+	{Tool: "wiki_get_revision", HTTPRoute: "GET /api/pages/:id/revisions/:revisionId", Assertion: "snapshot payloads match"},
+	{Tool: "wiki_compare_revisions", HTTPRoute: "GET /api/pages/:id/revisions/compare", Assertion: "comparison payloads match"},
+	{Tool: "wiki_get_revision_asset", HTTPRoute: "GET /api/pages/:id/revisions/:revisionId/assets/:name", Assertion: "asset content and type match"},
+	{Tool: "wiki_restore_revision", HTTPRoute: "POST /api/pages/:id/revisions/:revisionId/restore", Assertion: "stable restored page fields match"},
+	{Tool: "wiki_preview_page_refactor", HTTPRoute: "POST /api/pages/:id/refactor/preview", Assertion: "preview payloads match"},
+	{Tool: "wiki_apply_page_refactor", HTTPRoute: "POST /api/pages/:id/refactor/apply", Assertion: "successful apply payloads, rewritten links, and stale page_version_conflict errors match"},
 }
 
 var parityCoverage = struct {
@@ -201,7 +222,13 @@ func expectedHTTPMCPParityCases(t *testing.T) (map[string]httpMCPParityCase, []s
 		seenCases[tc.Tool] = tc
 	}
 
-	expected := append([]string{}, baseToolNames...)
+	expected := make([]string, 0, len(baseToolNames)+len(wikimcp.RevisionToolNames())+len(wikimcp.LinkRefactorToolNames()))
+	for _, name := range baseToolNames {
+		if _, mcpOnly := mcpOnlyToolNames[name]; mcpOnly {
+			continue
+		}
+		expected = append(expected, name)
+	}
 	expected = append(expected, wikimcp.RevisionToolNames()...)
 	expected = append(expected, wikimcp.LinkRefactorToolNames()...)
 	sort.Strings(expected)
@@ -216,105 +243,110 @@ func expectedHTTPMCPParityCases(t *testing.T) (map[string]httpMCPParityCase, []s
 }
 
 var baseToolInputRequiredProperties = map[string][]string{
-	"get_config":            {},
-	"get_current_user":      {},
-	"get_tree":              {},
-	"get_page":              {},
-	"get_page_by_path":      {"path"},
-	"lookup_path":           {"path"},
-	"resolve_permalink":     {},
-	"suggest_slug":          {"title"},
-	"create_page":           {"title", "slug"},
-	"update_page":           {"id", "version", "title", "slug"},
-	"delete_page":           {"id", "version"},
-	"move_page":             {"id", "version"},
-	"sort_pages":            {"parentId", "orderedIds"},
-	"ensure_page":           {"path", "title"},
-	"convert_page":          {"id", "version", "targetKind"},
-	"copy_page":             {"id", "title", "slug"},
-	"search_pages":          {},
-	"get_search_status":     {},
-	"list_tags":             {},
-	"get_pages_by_tags":     {"tags"},
-	"list_property_keys":    {},
-	"get_pages_by_property": {"key", "value"},
-	"get_link_status":       {},
-	"upload_asset":          {"pageId", "filename", "contentBase64"},
-	"get_asset":             {"pageId", "filename"},
-	"list_assets":           {},
-	"rename_asset":          {"pageId", "oldFilename", "newFilename"},
-	"delete_asset":          {"pageId", "filename"},
+	"wiki_get_context":           {},
+	"wiki_get_subtree":           {},
+	"wiki_validate_page":         {},
+	"wiki_validate_content":      {"path", "content"},
+	"wiki_validate_wiki":         {},
+	"wiki_update_page_metadata":  {"version"},
+	"wiki_replace_page_section":  {"version", "headingPath", "content"},
+	"wiki_get_config":            {},
+	"wiki_get_current_user":      {},
+	"wiki_get_tree":              {},
+	"wiki_get_page":              {},
+	"wiki_get_page_by_path":      {"path"},
+	"wiki_lookup_path":           {"path"},
+	"wiki_resolve_permalink":     {},
+	"wiki_suggest_slug":          {"title"},
+	"wiki_create_page":           {"title", "slug"},
+	"wiki_update_page":           {"id", "version", "title", "slug"},
+	"wiki_delete_page":           {"id", "version"},
+	"wiki_move_page":             {"id", "version"},
+	"wiki_sort_pages":            {"parentId", "orderedIds"},
+	"wiki_ensure_page":           {"path", "title"},
+	"wiki_convert_page":          {"id", "version", "targetKind"},
+	"wiki_copy_page":             {"id", "title", "slug"},
+	"wiki_search_pages":          {},
+	"wiki_get_search_status":     {},
+	"wiki_list_tags":             {},
+	"wiki_get_pages_by_tags":     {"tags"},
+	"wiki_list_property_keys":    {},
+	"wiki_get_pages_by_property": {"key", "value"},
+	"wiki_get_link_status":       {},
+	"wiki_upload_asset":          {"pageId", "filename", "contentBase64"},
+	"wiki_get_asset":             {"pageId", "filename"},
+	"wiki_list_assets":           {},
+	"wiki_rename_asset":          {"pageId", "oldFilename", "newFilename"},
+	"wiki_delete_asset":          {"pageId", "filename"},
 }
 
 var featureToolInputRequiredProperties = map[string][]string{
-	"list_revisions":        {},
-	"get_latest_revision":   {},
-	"get_revision":          {"revisionId"},
-	"compare_revisions":     {"baseRevisionId", "targetRevisionId"},
-	"get_revision_asset":    {"revisionId", "assetName"},
-	"restore_revision":      {"revisionId"},
-	"preview_page_refactor": {"kind"},
-	"apply_page_refactor":   {"version", "kind"},
-}
-
-var baseToolInputAlternativeRequiredProperties = map[string][]string{
-	"get_page":          {"id", "pageId"},
-	"resolve_permalink": {"id", "pageId"},
-	"get_link_status":   {"id", "pageId"},
-	"list_assets":       {"id", "pageId"},
-}
-
-var featureToolInputAlternativeRequiredProperties = map[string][]string{
-	"list_revisions":        {"id", "pageId"},
-	"get_latest_revision":   {"id", "pageId"},
-	"get_revision":          {"id", "pageId"},
-	"compare_revisions":     {"id", "pageId"},
-	"get_revision_asset":    {"id", "pageId"},
-	"restore_revision":      {"id", "pageId"},
-	"preview_page_refactor": {"id", "pageId"},
-	"apply_page_refactor":   {"id", "pageId"},
+	"wiki_refresh":               {},
+	"wiki_list_revisions":        {},
+	"wiki_get_latest_revision":   {},
+	"wiki_get_revision":          {"revisionId"},
+	"wiki_compare_revisions":     {"baseRevisionId", "targetRevisionId"},
+	"wiki_get_revision_asset":    {"revisionId", "assetName"},
+	"wiki_restore_revision":      {"revisionId"},
+	"wiki_preview_page_refactor": {"kind"},
+	"wiki_apply_page_refactor":   {"version", "kind"},
 }
 
 var baseToolOutputProperties = map[string][]string{
-	"get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl"},
-	"get_current_user":      {"user"},
-	"get_tree":              {"tree"},
-	"get_page":              {"linkStatus", "page"},
-	"get_page_by_path":      {"linkStatus", "page"},
-	"lookup_path":           {"lookup"},
-	"resolve_permalink":     {"target"},
-	"suggest_slug":          {"slug"},
-	"create_page":           {"page"},
-	"update_page":           {"page"},
-	"delete_page":           {"message"},
-	"move_page":             {"message"},
-	"sort_pages":            {"message"},
-	"ensure_page":           {"page"},
-	"convert_page":          {"message"},
-	"copy_page":             {"page"},
-	"search_pages":          {"count", "items", "limit", "offset", "tagFacets", "hasMore"},
-	"get_search_status":     {"status"},
-	"list_tags":             {"tags"},
-	"get_pages_by_tags":     {"pages"},
-	"list_property_keys":    {"keys"},
-	"get_pages_by_property": {"pages"},
-	"get_link_status":       {"status"},
-	"upload_asset":          {"file"},
-	"get_asset":             {"filename", "mimeType", "contentBase64"},
-	"list_assets":           {"files"},
-	"rename_asset":          {"url"},
-	"delete_asset":          {"message"},
+	"wiki_get_context":           {"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools", "warnings"},
+	"wiki_get_subtree":           {"root", "breadcrumbs", "depth", "truncated"},
+	"wiki_validate_page":         {"ok", "summary", "issues"},
+	"wiki_validate_content":      {"ok", "summary", "issues"},
+	"wiki_validate_wiki":         {"ok", "summary", "issues"},
+	"wiki_update_page_metadata":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
+	"wiki_replace_page_section":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
+	"wiki_get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl"},
+	"wiki_get_current_user":      {"user"},
+	"wiki_get_tree":              {"tree"},
+	"wiki_get_page":              {"linkStatus", "page"},
+	"wiki_get_page_by_path":      {"linkStatus", "page"},
+	"wiki_lookup_path":           {"lookup"},
+	"wiki_resolve_permalink":     {"target"},
+	"wiki_suggest_slug":          {"slug"},
+	"wiki_create_page":           {"page"},
+	"wiki_update_page":           {"page"},
+	"wiki_delete_page":           {"message"},
+	"wiki_move_page":             {"message"},
+	"wiki_sort_pages":            {"message"},
+	"wiki_ensure_page":           {"page"},
+	"wiki_convert_page":          {"message"},
+	"wiki_copy_page":             {"page"},
+	"wiki_search_pages":          {"count", "items", "limit", "offset", "tagFacets", "hasMore"},
+	"wiki_get_search_status":     {"status"},
+	"wiki_list_tags":             {"tags"},
+	"wiki_get_pages_by_tags":     {"pages"},
+	"wiki_list_property_keys":    {"keys"},
+	"wiki_get_pages_by_property": {"pages"},
+	"wiki_get_link_status":       {"status"},
+	"wiki_upload_asset":          {"file"},
+	"wiki_get_asset":             {"filename", "mimeType", "contentBase64"},
+	"wiki_list_assets":           {"files"},
+	"wiki_rename_asset":          {"url"},
+	"wiki_delete_asset":          {"message"},
 }
 
 var featureToolOutputProperties = map[string][]string{
-	"list_revisions":        {"revisions", "nextCursor"},
-	"get_latest_revision":   {"revision"},
-	"get_revision":          {"revision", "content", "assets"},
-	"compare_revisions":     {"base", "target", "contentChanged", "assetChanges"},
-	"get_revision_asset":    {"filename", "mimeType", "contentBase64"},
-	"restore_revision":      {"page"},
-	"preview_page_refactor": {"kind", "pageId", "oldPath", "newPath", "affectedPages", "counts", "warnings"},
-	"apply_page_refactor":   {"page"},
+	"wiki_refresh":               {"syncStatus", "recentChangedPaths", "validation", "lastCommitHash"},
+	"wiki_list_revisions":        {"revisions", "nextCursor"},
+	"wiki_get_latest_revision":   {"revision"},
+	"wiki_get_revision":          {"revision", "content", "assets"},
+	"wiki_compare_revisions":     {"base", "target", "contentChanged", "assetChanges"},
+	"wiki_get_revision_asset":    {"filename", "mimeType", "contentBase64"},
+	"wiki_restore_revision":      {"page"},
+	"wiki_preview_page_refactor": {"kind", "pageId", "oldPath", "newPath", "affectedPages", "counts", "warnings"},
+	"wiki_apply_page_refactor":   {"page"},
+}
+
+var toolOutputOptionalProperties = map[string][]string{
+	"wiki_get_context":          {"warnings"},
+	"wiki_refresh":              {"validation"},
+	"wiki_update_page_metadata": {"validation", "page", "linkStatus"},
+	"wiki_replace_page_section": {"validation", "page", "linkStatus"},
 }
 
 func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing.T) {
@@ -395,7 +427,7 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 		},
 	})
 	remoteUserSession := connectLocalMCP(t, remoteUserRouter, "/mcp")
-	current := callToolStructured(t, remoteUserSession, "get_current_user", nil)
+	current := callToolStructured(t, remoteUserSession, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	if user["username"] != "public-editor" || user["role"] != "editor" {
 		t.Fatalf("remote-user disabled-auth MCP current user = %#v, want public-editor editor", user)
@@ -454,15 +486,42 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 
 	got := listAllToolNames(t, session)
 	assertToolNames(t, got, baseToolNames)
+	if contains(got, wikimcp.ToolRefresh) {
+		t.Fatalf("%s was registered without workspace sync enabled", wikimcp.ToolRefresh)
+	}
+	for _, name := range got {
+		if !strings.HasPrefix(name, "wiki_") {
+			t.Fatalf("tool %q does not use required wiki_ prefix", name)
+		}
+	}
 
 	tools := listAllTools(t, session)
-	assertInputSchemasMatch(t, tools, baseToolInputProperties, baseToolInputRequiredProperties, baseToolInputAlternativeRequiredProperties)
+	assertInputSchemasMatch(t, tools, baseToolInputProperties, baseToolInputRequiredProperties)
 	assertOutputSchemasMatch(t, tools, baseToolOutputProperties)
 
-	typeErr := callToolError(t, session, "get_page", map[string]any{"id": float64(12)})
-	if !strings.Contains(strings.ToLower(typeErr), "validating") && !strings.Contains(strings.ToLower(typeErr), "string") {
-		t.Fatalf("get_page invalid type error = %q, want schema validation detail", typeErr)
+	for _, legacyName := range []string{
+		strings.Join([]string{"get", "page"}, "_"),
+		strings.Join([]string{"get", "tree"}, "_"),
+		strings.Join([]string{"update", "page"}, "_"),
+		strings.Join([]string{"list", "revisions"}, "_"),
+	} {
+		legacyErr := callToolProtocolError(t, session, legacyName, map[string]any{"id": "missing"})
+		if !strings.Contains(strings.ToLower(legacyErr), "unknown") {
+			t.Fatalf("legacy %s error = %q, want unknown tool", legacyName, legacyErr)
+		}
 	}
+
+	typeErr := callToolError(t, session, "wiki_get_page", map[string]any{"id": float64(12)})
+	if !strings.Contains(strings.ToLower(typeErr), "validating") && !strings.Contains(strings.ToLower(typeErr), "string") {
+		t.Fatalf("wiki_get_page invalid type error = %q, want schema validation detail", typeErr)
+	}
+	ambiguousPageIDErr := callToolError(t, session, "wiki_get_page", map[string]any{
+		"id":     "missing-page",
+		"pageId": "missing-page",
+	})
+	assertErrorContainsAny(t, "wiki_get_page ambiguous id/pageId", ambiguousPageIDErr, "id and pageId cannot both be supplied")
+	missingPageIDErr := callToolError(t, session, "wiki_get_page", map[string]any{})
+	assertErrorContainsAny(t, "wiki_get_page missing id/pageId", missingPageIDErr, "id or pageId is required")
 
 	for _, name := range got {
 		if strings.HasPrefix(name, "leafwiki_") {
@@ -488,29 +547,38 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 }
 
 func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
+	workspaceSyncTools := wikimcp.WorkspaceSyncToolNames()
 	revisionTools := wikimcp.RevisionToolNames()
 	refactorTools := wikimcp.LinkRefactorToolNames()
 
 	tests := []struct {
-		name               string
-		enableRevision     bool
-		enableLinkRefactor bool
-		wantFeatureTools   []string
+		name                string
+		enableWorkspaceSync bool
+		enableRevision      bool
+		enableLinkRefactor  bool
+		wantFeatureTools    []string
 	}{
 		{name: "none"},
+		{name: "workspace sync only", enableWorkspaceSync: true, wantFeatureTools: append(append([]string{}, workspaceSyncTools...), revisionTools...)},
 		{name: "revision only", enableRevision: true, wantFeatureTools: revisionTools},
 		{name: "link refactor only", enableLinkRefactor: true, wantFeatureTools: refactorTools},
-		{name: "both", enableRevision: true, enableLinkRefactor: true, wantFeatureTools: append(append([]string{}, revisionTools...), refactorTools...)},
+		{name: "revision and link refactor", enableRevision: true, enableLinkRefactor: true, wantFeatureTools: append(append([]string{}, revisionTools...), refactorTools...)},
+		{name: "workspace sync and link refactor", enableWorkspaceSync: true, enableLinkRefactor: true, wantFeatureTools: append(append(append([]string{}, workspaceSyncTools...), revisionTools...), refactorTools...)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := newLocalMCPTestWiki(t, tt.enableRevision)
+			w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+				AuthDisabled:        true,
+				EnableRevision:      tt.enableRevision,
+				EnableWorkspaceSync: tt.enableWorkspaceSync,
+			})
 			router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 				AuthDisabled:            true,
 				PublicAccess:            true,
 				AllowInsecure:           true,
 				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+				EnableWorkspaceSync:     tt.enableWorkspaceSync,
 				EnableRevision:          tt.enableRevision,
 				EnableLinkRefactor:      tt.enableLinkRefactor,
 				MCPEnabled:              true,
@@ -521,23 +589,1620 @@ func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
 			want := append([]string{}, baseToolNames...)
 			want = append(want, tt.wantFeatureTools...)
 			assertToolNames(t, listAllToolNames(t, session), want)
+			contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
+			server := nestedMap(t, contextOut, "server")
+			assertStringSet(t, "wiki_get_context server.tools", stringSliceField(t, server, "tools"), want)
 
 			tools := listAllTools(t, session)
 			expectedSchemas := copyToolInputProperties(baseToolInputProperties)
 			expectedRequired := copyToolInputProperties(baseToolInputRequiredProperties)
-			expectedAlternatives := copyToolInputProperties(baseToolInputAlternativeRequiredProperties)
 			expectedOutputs := copyToolInputProperties(baseToolOutputProperties)
 			for _, name := range tt.wantFeatureTools {
 				expectedSchemas[name] = featureToolInputProperties[name]
 				expectedRequired[name] = featureToolInputRequiredProperties[name]
-				if props, ok := featureToolInputAlternativeRequiredProperties[name]; ok {
-					expectedAlternatives[name] = props
-				}
 				expectedOutputs[name] = featureToolOutputProperties[name]
 			}
-			assertInputSchemasMatch(t, tools, expectedSchemas, expectedRequired, expectedAlternatives)
+			assertInputSchemasMatch(t, tools, expectedSchemas, expectedRequired)
 			assertOutputSchemasMatch(t, tools, expectedOutputs)
 		})
+	}
+}
+
+func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	toolNames := listAllToolNames(t, session)
+	if !contains(toolNames, "wiki_get_context") {
+		t.Fatalf("wiki_get_context was not listed")
+	}
+
+	out := callToolStructured(t, session, "wiki_get_context", nil)
+	if token := stringField(t, out, "contextToken"); token == "" {
+		t.Fatalf("contextToken is empty in %#v", out)
+	}
+	for _, key := range []string{
+		"changesSincePreviousContext",
+		"contextHistory",
+		"user",
+		"config",
+		"server",
+		"syncStatus",
+		"validation",
+		"recentChanges",
+		"activeSessions",
+		"presenceStatus",
+		"tree",
+		"recommendedTools",
+	} {
+		if _, ok := out[key]; !ok {
+			t.Fatalf("wiki_get_context missing %s in %#v", key, out)
+		}
+	}
+	if sessions, ok := out["activeSessions"].([]any); !ok {
+		t.Fatalf("activeSessions has type %T, want array", out["activeSessions"])
+	} else if len(sessions) != 0 {
+		t.Fatalf("activeSessions = %#v, want no sessions in fresh fixture", sessions)
+	}
+	presence := nestedMap(t, out, "presenceStatus")
+	if presence["web"] == "" || presence["agentHooks"] == "" {
+		t.Fatalf("presenceStatus = %#v, want web and agentHooks states", presence)
+	}
+	status := nestedMap(t, out, "syncStatus")
+	if _, ok := status["enabled"]; !ok {
+		t.Fatalf("syncStatus = %#v, want camelCase enabled field", status)
+	}
+	if _, ok := status["Enabled"]; ok {
+		t.Fatalf("syncStatus = %#v, did not expect exported Go struct field names", status)
+	}
+	recommended, ok := out["recommendedTools"].([]any)
+	if !ok {
+		t.Fatalf("recommendedTools has type %T, want array", out["recommendedTools"])
+	}
+	for _, value := range recommended {
+		name, ok := value.(string)
+		if !ok {
+			t.Fatalf("recommendedTools contains non-string %T: %#v", value, recommended)
+		}
+		if !contains(toolNames, name) {
+			t.Fatalf("recommendedTools = %#v, recommended unregistered tool %q", recommended, name)
+		}
+	}
+	tree := nestedMap(t, out, "tree")
+	if tree["id"] == "" || tree["children"] == nil {
+		t.Fatalf("tree = %#v, want compact root node", tree)
+	}
+}
+
+func TestLocalMCPGetContext_DoesNotRecommendRefreshWhenWorkspaceSyncDisabled(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	out := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
+	server := nestedMap(t, out, "server")
+	if arrayContainsString(server["tools"], "wiki_refresh") {
+		t.Fatalf("server.tools = %#v, did not expect wiki_refresh when workspace sync is disabled", server["tools"])
+	}
+	recommended := arrayField(t, out, "recommendedTools")
+	if arrayContainsString(recommended, "wiki_refresh") {
+		t.Fatalf("recommendedTools = %#v, did not expect wiki_refresh when workspace sync is disabled", recommended)
+	}
+}
+
+func TestLocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	sessionA := connectLocalMCP(t, router, "/mcp")
+	sessionB := connectLocalMCP(t, router, "/mcp")
+
+	firstA := callToolStructured(t, sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
+	firstAToken := stringField(t, firstA, "contextToken")
+
+	postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title": "Omitted Token Delta",
+		"slug":  "omitted-token-delta",
+		"kind":  "page",
+	}, http.StatusCreated)
+
+	secondA := callToolStructured(t, sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
+	assertContextHistoryOpaque(t, secondA)
+	if secondA["previousContextToken"] != firstAToken {
+		t.Fatalf("session A previousContextToken = %#v, want first token %q", secondA["previousContextToken"], firstAToken)
+	}
+	pathsA := changedPathsFromContext(t, secondA)
+	if !pathsA["omitted-token-delta.md"] {
+		t.Fatalf("session A changesSincePreviousContext paths = %#v, missing omitted-token-delta.md", pathsA)
+	}
+
+	firstB := callToolStructured(t, sessionB, "wiki_get_context", map[string]any{"syncMode": "none"})
+	if firstB["previousContextToken"] != "" {
+		t.Fatalf("session B previousContextToken = %#v, want empty first-session checkpoint", firstB["previousContextToken"])
+	}
+	if changes := arrayField(t, firstB, "changesSincePreviousContext"); len(changes) != 0 {
+		t.Fatalf("session B changesSincePreviousContext = %#v, want no inherited session A delta", changes)
+	}
+	if history := arrayField(t, firstB, "contextHistory"); len(history) != 1 {
+		t.Fatalf("session B contextHistory len = %d, want isolated first checkpoint", len(history))
+	}
+}
+
+func TestLocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousContext(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	first := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
+	firstToken := stringField(t, first, "contextToken")
+	postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title": "Unknown Token Delta",
+		"slug":  "unknown-token-delta",
+		"kind":  "page",
+	}, http.StatusCreated)
+
+	second := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"syncMode":   "none",
+		"sinceToken": "not-a-token",
+	})
+	if second["previousContextToken"] != "" {
+		t.Fatalf("previousContextToken = %#v, want no implicit fallback from explicit unknown token", second["previousContextToken"])
+	}
+	if changes := arrayField(t, second, "changesSincePreviousContext"); len(changes) != 0 {
+		t.Fatalf("changesSincePreviousContext = %#v, want no implicit fallback delta from explicit unknown token", changes)
+	}
+	warnings := arrayField(t, second, "warnings")
+	if !arrayContainsString(warnings, "unknown sinceToken; returned current context") {
+		t.Fatalf("warnings = %#v, want unknown-token warning", warnings)
+	}
+	if stringField(t, first, "contextToken") != firstToken {
+		t.Fatalf("first context token changed unexpectedly")
+	}
+}
+
+func TestLocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	first := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"recentChangesLimit": float64(1),
+		"syncMode":           "none",
+	})
+	token := stringField(t, first, "contextToken")
+	for i := 0; i < 3; i++ {
+		slug := fmt.Sprintf("delta-page-%d", i)
+		callToolStructured(t, session, "wiki_create_page", map[string]any{
+			"title": fmt.Sprintf("Delta Page %d", i),
+			"slug":  slug,
+			"kind":  "page",
+		})
+	}
+
+	second := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"sinceToken":         token,
+		"recentChangesLimit": float64(1),
+		"syncMode":           "none",
+	})
+	recentChanges := arrayField(t, second, "recentChanges")
+	if len(recentChanges) != 1 {
+		t.Fatalf("recentChanges len = %d, want display limit 1 in %#v", len(recentChanges), second["recentChanges"])
+	}
+	changes := arrayField(t, second, "changesSincePreviousContext")
+	if len(changes) < 3 {
+		t.Fatalf("changesSincePreviousContext len = %d, want at least 3 changes after checkpoint: %#v", len(changes), second["changesSincePreviousContext"])
+	}
+	changedPaths := map[string]bool{}
+	for _, raw := range changes {
+		change, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("change has type %T: %#v", raw, raw)
+		}
+		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
+			path, ok := value.(string)
+			if !ok {
+				t.Fatalf("changed path has type %T: %#v", value, value)
+			}
+			changedPaths[path] = true
+		}
+	}
+	for i := 0; i < 3; i++ {
+		want := fmt.Sprintf("delta-page-%d.md", i)
+		if !changedPaths[want] {
+			t.Fatalf("changesSincePreviousContext paths = %#v, missing %s", changedPaths, want)
+		}
+	}
+	if warnings, ok := second["warnings"].([]any); ok && len(warnings) > 0 {
+		t.Fatalf("warnings = %#v, want no truncation warning when checkpoint is reachable", warnings)
+	}
+
+	tokenB := stringField(t, second, "contextToken")
+	callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Delta Page After B",
+		"slug":  "delta-page-after-b",
+		"kind":  "page",
+	})
+	third := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"sinceToken":         tokenB,
+		"recentChangesLimit": float64(1),
+		"syncMode":           "none",
+	})
+	changesAfterB := arrayField(t, third, "changesSincePreviousContext")
+	changedPathsAfterB := map[string]bool{}
+	for _, raw := range changesAfterB {
+		change, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("change after B has type %T: %#v", raw, raw)
+		}
+		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
+			path, ok := value.(string)
+			if !ok {
+				t.Fatalf("changed path after B has type %T: %#v", value, value)
+			}
+			changedPathsAfterB[path] = true
+		}
+	}
+	if !changedPathsAfterB["delta-page-after-b.md"] {
+		t.Fatalf("changesSincePreviousContext after token B paths = %#v, missing delta-page-after-b.md", changedPathsAfterB)
+	}
+	for i := 0; i < 3; i++ {
+		oldPath := fmt.Sprintf("delta-page-%d.md", i)
+		if changedPathsAfterB[oldPath] {
+			t.Fatalf("changesSincePreviousContext after token B paths = %#v, did not expect old path %s", changedPathsAfterB, oldPath)
+		}
+	}
+}
+
+func TestLocalMCPGetContext_IncludesWebHeartbeatPresence(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	page := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Docs API",
+		"slug":  "docs-api",
+		"kind":  "page",
+	}), "page")
+	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
+		"sessionId": "tab-web-1",
+		"mode":      "edit",
+		"pageId":    stringField(t, page, "id"),
+		"path":      "/docs-api",
+		"dirty":     true,
+	}, http.StatusOK)
+
+	out := callToolStructured(t, session, "wiki_get_context", nil)
+	presence := nestedMap(t, out, "presenceStatus")
+	if presence["web"] != "enabled" {
+		t.Fatalf("presenceStatus.web = %v, want enabled in %#v", presence["web"], presence)
+	}
+	sessions, ok := out["activeSessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("activeSessions = %#v, want one web session", out["activeSessions"])
+	}
+	webSession, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("activeSessions[0] = %T %#v, want object", sessions[0], sessions[0])
+	}
+	if webSession["type"] != "web" || webSession["sessionId"] != "tab-web-1" || webSession["mode"] != "edit" || webSession["dirty"] != true {
+		t.Fatalf("web session = %#v, want typed edit dirty session", webSession)
+	}
+	user := nestedMap(t, webSession, "user")
+	if user["id"] != "public-editor" || user["role"] != "editor" {
+		t.Fatalf("web session user = %#v, want public editor", user)
+	}
+	if _, leaked := user["email"]; leaked {
+		t.Fatalf("web session user = %#v, did not expect email for editor MCP caller", user)
+	}
+	pageOut := nestedMap(t, webSession, "page")
+	if pageOut["id"] != stringField(t, page, "id") || pageOut["path"] != "/docs-api" || pageOut["title"] != "Docs API" {
+		t.Fatalf("web session page = %#v, want resolved page context", pageOut)
+	}
+	if webSession["lastSeenAt"] == "" {
+		t.Fatalf("web session = %#v, want lastSeenAt", webSession)
+	}
+}
+
+func TestLocalMCPGetContext_MergesAgentHookPresence(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	agentPresence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+	sessionHash := "sha256:" + strings.Repeat("a", 64)
+	agentPresence.Record(agenthooks.Event{
+		Provider:      agenthooks.ProviderCodex,
+		SessionIDHash: sessionHash,
+		EventName:     "SessionStart",
+		Model:         "gpt-5",
+		Source:        "hook",
+		SeenAt:        time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC),
+	})
+	agentPresence.Record(agenthooks.Event{
+		Provider:      agenthooks.ProviderCodex,
+		SessionIDHash: sessionHash,
+		EventName:     "SubagentStart",
+		SubagentDelta: 1,
+		SeenAt:        time.Date(2026, 6, 8, 12, 0, 1, 0, time.UTC),
+	})
+	w.SetAgentPresenceRegistry(agentPresence)
+
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	out := callToolStructured(t, session, "wiki_get_context", nil)
+	presence := nestedMap(t, out, "presenceStatus")
+	if presence["agentHooks"] != "enabled" {
+		t.Fatalf("presenceStatus.agentHooks = %v, want enabled in %#v", presence["agentHooks"], presence)
+	}
+	sessions, ok := out["activeSessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("activeSessions = %#v, want one agent session", out["activeSessions"])
+	}
+	agentSession, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("activeSessions[0] = %T %#v, want object", sessions[0], sessions[0])
+	}
+	if agentSession["type"] != "agent" || agentSession["sessionId"] != sessionHash || agentSession["provider"] != "codex" {
+		t.Fatalf("agent session = %#v, want sanitized codex session", agentSession)
+	}
+	if agentSession["model"] != "gpt-5" || agentSession["source"] != "hook" || agentSession["lastEvent"] != "SubagentStart" || agentSession["activeSubagents"] != float64(1) {
+		t.Fatalf("agent session = %#v, want hook metadata", agentSession)
+	}
+}
+
+func TestPresenceHeartbeatRequiresAuthWhenAuthEnabled(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            false,
+		PublicAccess:            false,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-1","mode":"view"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /api/presence/heartbeat without auth = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoning(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-no-csrf","mode":"view"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /api/presence/heartbeat without CSRF = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+
+	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
+		"sessionId": "tab-valid",
+		"mode":      "view",
+	}, http.StatusOK)
+	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
+		"sessionId": "tab-invalid",
+		"mode":      "invalid",
+	}, http.StatusBadRequest)
+	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
+		"sessionId": "tab-missing-page",
+		"mode":      "view",
+		"path":      "/deleted-page",
+	}, http.StatusOK)
+
+	out := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
+	sessions, ok := out["activeSessions"].([]any)
+	if !ok || len(sessions) != 2 {
+		t.Fatalf("activeSessions = %#v, want valid plus missing-page sessions", out["activeSessions"])
+	}
+	if !arrayContainsObjectField(sessions, "sessionId", "tab-valid") {
+		t.Fatalf("activeSessions = %#v, want tab-valid", sessions)
+	}
+	missingPageSession := objectWithField(t, sessions, "sessionId", "tab-missing-page")
+	if _, exists := missingPageSession["page"]; exists {
+		t.Fatalf("missing-page session = %#v, did not expect unresolved page details", missingPageSession)
+	}
+}
+
+func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	if err := os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644); err != nil {
+		t.Fatalf("write direct markdown: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_refresh", nil)
+	status := nestedMap(t, out, "syncStatus")
+	if status["lastCommitHash"] == "" {
+		t.Fatalf("wiki_refresh syncStatus = %#v, want lastCommitHash", status)
+	}
+	if _, ok := status["LastCommitHash"]; ok {
+		t.Fatalf("wiki_refresh syncStatus = %#v, did not expect exported Go struct field names", status)
+	}
+	if _, ok := out["validation"]; !ok {
+		t.Fatalf("wiki_refresh missing validation in %#v", out)
+	}
+
+	readBack := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "direct"})
+	page := nestedMap(t, readBack, "page")
+	if page["id"] != "direct" || page["title"] != "Direct" {
+		t.Fatalf("readBack page = %#v, want synced Direct page", page)
+	}
+
+	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"syncMode":           "none",
+		"recentChangesLimit": float64(1),
+	})
+	recent := arrayField(t, contextOut, "recentChanges")
+	if len(recent) != 1 {
+		t.Fatalf("recentChanges = %#v, want one refresh entry", recent)
+	}
+	change, ok := recent[0].(map[string]any)
+	if !ok {
+		t.Fatalf("recentChanges[0] has type %T: %#v", recent[0], recent[0])
+	}
+	if change["source"] != "mcp" {
+		t.Fatalf("recent change source = %#v, want mcp in %#v", change["source"], change)
+	}
+	if change["reason"] != "explicit_refresh" {
+		t.Fatalf("recent change reason = %#v, want explicit_refresh in %#v", change["reason"], change)
+	}
+	if change["commitId"] == "" || change["timestamp"] == "" || change["actor"] == "" {
+		t.Fatalf("recent change provenance incomplete: %#v", change)
+	}
+	pageIDs := arrayFieldFromMap(t, change, "pageIds")
+	if !arrayContainsString(pageIDs, "direct") {
+		t.Fatalf("recent change pageIds = %#v, want direct", pageIDs)
+	}
+}
+
+func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	if err := os.WriteFile(filepath.Join(rootDir, "skip-validation.md"), []byte("---\nleafwiki_id: skip-validation\nleafwiki_title: Skip Validation\n---\n# Skip Validation\n"), 0o644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_refresh", map[string]any{"validate": false})
+	if _, exists := out["validation"]; exists {
+		t.Fatalf("wiki_refresh validate=false output = %#v, did not expect validation", out)
+	}
+}
+
+func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	if err := os.WriteFile(filepath.Join(rootDir, "a.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"), 0o644); err != nil {
+		t.Fatalf("write a.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "b.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"), 0o644); err != nil {
+		t.Fatalf("write b.md: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+	validation := nestedMap(t, out, "validation")
+	summary := nestedMap(t, validation, "summary")
+	if errors, ok := summary["errors"].(float64); !ok || errors == 0 {
+		t.Fatalf("wiki_refresh validation summary = %#v, want validation errors for duplicate IDs", summary)
+	}
+	assertValidationIssueCodes(t, validation, []string{"workspace_sync_validation"})
+
+	currentUser := callToolStructured(t, session, "wiki_get_current_user", nil)
+	user := nestedMap(t, currentUser, "user")
+	if user["username"] == "" {
+		t.Fatalf("wiki_get_current_user after failed refresh = %#v, want MCP still available", currentUser)
+	}
+}
+
+func TestLocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	for i := 0; i < 25; i++ {
+		slug := fmt.Sprintf("bulk-refresh-%02d", i)
+		if err := os.WriteFile(filepath.Join(rootDir, slug+".md"), []byte("---\nleafwiki_id: "+slug+"\nleafwiki_title: "+slug+"\n---\n# "+slug+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", slug, err)
+		}
+	}
+
+	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"syncMode":           "none",
+		"recentChangesLimit": float64(1),
+	})
+	recent := arrayField(t, contextOut, "recentChanges")
+	if len(recent) != 1 {
+		t.Fatalf("recentChanges = %#v, want one entry", recent)
+	}
+	change, ok := recent[0].(map[string]any)
+	if !ok {
+		t.Fatalf("recentChanges[0] has type %T: %#v", recent[0], recent[0])
+	}
+	if change["reason"] != "explicit_refresh" {
+		t.Fatalf("recent change reason = %#v, want explicit_refresh in %#v", change["reason"], change)
+	}
+	if change["source"] != "filesystem" {
+		t.Fatalf("recent change source = %#v, want filesystem in %#v", change["source"], change)
+	}
+	if got := int(change["changedCount"].(float64)); got < 25 {
+		t.Fatalf("changedCount = %d, want at least 25 in %#v", got, change)
+	}
+	if paths := arrayFieldFromMap(t, change, "changedPaths"); len(paths) != 20 {
+		t.Fatalf("changedPaths len = %d, want cap 20 in %#v", len(paths), paths)
+	}
+}
+
+func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	parentPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title": "Docs",
+		"slug":  "docs",
+		"kind":  "section",
+	}, http.StatusCreated)
+	childPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"parentId": stringField(t, parentPage, "id"),
+		"title":    "Reference",
+		"slug":     "reference",
+		"kind":     "page",
+	}, http.StatusCreated)
+	targetPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title": "Target",
+		"slug":  "target",
+		"kind":  "page",
+	}, http.StatusCreated)
+	_ = targetPage
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, childPage, "id"),
+		"version": stringField(t, childPage, "version"),
+		"title":   "Reference",
+		"slug":    "reference",
+		"content": "Reference content with [Target](/target).",
+	})
+
+	out := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path":  "/docs",
+		"depth": float64(1),
+	})
+	root := nestedMap(t, out, "root")
+	if root["path"] != "docs" || root["title"] != "Docs" {
+		t.Fatalf("root = %#v, want Docs subtree", root)
+	}
+	children, ok := root["children"].([]any)
+	if !ok || len(children) != 1 {
+		t.Fatalf("root children = %#v, want one Reference child", root["children"])
+	}
+	breadcrumbs, ok := out["breadcrumbs"].([]any)
+	if !ok || len(breadcrumbs) < 2 {
+		t.Fatalf("breadcrumbs = %#v, want root and docs", out["breadcrumbs"])
+	}
+	if out["depth"] != float64(1) || out["truncated"] != false {
+		t.Fatalf("depth/truncated = %#v/%#v, want 1/false", out["depth"], out["truncated"])
+	}
+
+	expanded := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path":                  "docs",
+		"depth":                 float64(1),
+		"includeMetadata":       false,
+		"includeLinkCounts":     true,
+		"includeContentPreview": true,
+	})
+	expandedRoot := nestedMap(t, expanded, "root")
+	if _, exists := expandedRoot["metadata"]; exists {
+		t.Fatalf("expanded root = %#v, did not expect metadata when includeMetadata=false", expandedRoot)
+	}
+	expandedChildren := expandedRoot["children"].([]any)
+	expandedChild := expandedChildren[0].(map[string]any)
+	if _, exists := expandedChild["metadata"]; exists {
+		t.Fatalf("expanded child = %#v, did not expect metadata when includeMetadata=false", expandedChild)
+	}
+	if expandedChild["contentPreview"] == "" {
+		t.Fatalf("expanded child = %#v, want contentPreview", expandedChild)
+	}
+	linkCounts := nestedMap(t, expandedChild, "linkCounts")
+	if linkCounts["outgoings"] != float64(1) {
+		t.Fatalf("linkCounts = %#v, want one outgoing link", linkCounts)
+	}
+
+	rootOut := callToolStructured(t, session, "wiki_get_subtree", nil)
+	wikiRoot := nestedMap(t, rootOut, "root")
+	if wikiRoot["slug"] != "root" || wikiRoot["path"] != "" {
+		t.Fatalf("root subtree = %#v, want wiki root", wikiRoot)
+	}
+	byID := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"pageId": stringField(t, parentPage, "id"),
+		"depth":  float64(0),
+	})
+	byIDRoot := nestedMap(t, byID, "root")
+	if byIDRoot["id"] != stringField(t, parentPage, "id") {
+		t.Fatalf("pageId subtree root = %#v, want Docs id", byIDRoot)
+	}
+	if errText := callToolError(t, session, "wiki_get_subtree", map[string]any{
+		"pageId": stringField(t, parentPage, "id"),
+		"path":   "docs",
+	}); !strings.Contains(errText, "pageId and path cannot both be supplied") {
+		t.Fatalf("both pageId/path error = %q", errText)
+	}
+	if errText := callToolError(t, session, "wiki_get_subtree", map[string]any{"path": "missing-subtree"}); !strings.Contains(strings.ToLower(errText), "not found") {
+		t.Fatalf("missing subtree error = %q, want not found detail", errText)
+	}
+	negativeDepthErr := callToolError(t, session, "wiki_get_subtree", map[string]any{
+		"path":  "docs",
+		"depth": float64(-1),
+	})
+	assertErrorContainsAny(t, "wiki_get_subtree negative depth", negativeDepthErr, "depth must be zero or greater")
+	hugeDepth := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path":  "docs",
+		"depth": float64(999),
+	})
+	if hugeDepth["depth"] != float64(4) {
+		t.Fatalf("huge subtree depth = %#v, want clamped depth 4", hugeDepth["depth"])
+	}
+}
+
+func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	page := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title":   "Link Source",
+		"slug":    "link-source",
+		"kind":    "page",
+		"content": "[Missing](/missing-target)",
+	}, http.StatusCreated)
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, page, "id"),
+		"version": stringField(t, page, "version"),
+		"title":   "Link Source",
+		"slug":    "link-source",
+		"content": "[Missing](/missing-target)",
+	})
+	if err := os.WriteFile(filepath.Join(rootDir, "link-source.md"), []byte("---\nleafwiki_id: "+stringField(t, page, "id")+"\nleafwiki_title: Link Source\n---\n# Link Source\n\n[Fixed](/fixed-target)\n"), 0o644); err != nil {
+		t.Fatalf("write fixed source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "fixed-target.md"), []byte("---\nleafwiki_id: fixed-target\nleafwiki_title: Fixed Target\n---\n# Fixed Target\n"), 0o644); err != nil {
+		t.Fatalf("write fixed target: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
+	validation := out
+	if ok, _ := validation["ok"].(bool); !ok {
+		t.Fatalf("wiki_validate_wiki = %#v, want current filesystem snapshot to validate without stale loaded-tree link", validation)
+	}
+}
+
+func TestLocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"title": "Stale Target",
+		"slug":  "stale-target",
+		"kind":  "page",
+	}, http.StatusCreated)
+	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), []byte("---\nleafwiki_id: source\nleafwiki_title: Source\n---\n# Source\n\n[Stale](/stale-target)\n"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := os.Remove(filepath.Join(rootDir, "stale-target.md")); err != nil {
+		t.Fatalf("remove stale target from filesystem: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
+	if ok, _ := out["ok"].(bool); ok {
+		t.Fatalf("wiki_validate_wiki = %#v, want broken link when target is absent from filesystem snapshot", out)
+	}
+	validation := out
+	assertValidationIssueCodes(t, validation, []string{"broken_link"})
+}
+
+func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Valid Page",
+		"slug":  "valid-page",
+		"kind":  "page",
+	}), "page")
+
+	pageValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
+		"pageId": stringField(t, created, "id"),
+	})
+	if pageValidation["ok"] != true {
+		t.Fatalf("wiki_validate_page = %#v, want ok", pageValidation)
+	}
+	issues, ok := pageValidation["issues"].([]any)
+	if !ok || len(issues) != 0 {
+		t.Fatalf("wiki_validate_page issues = %#v, want empty", pageValidation["issues"])
+	}
+
+	ambiguousErr := callToolError(t, session, "wiki_validate_page", map[string]any{
+		"pageId": stringField(t, created, "id"),
+		"path":   "valid-page",
+	})
+	assertErrorContainsAny(t, "wiki_validate_page ambiguous input", ambiguousErr, "pageId and path cannot both be supplied")
+	missingTargetErr := callToolError(t, session, "wiki_validate_page", map[string]any{})
+	assertErrorContainsAny(t, "wiki_validate_page missing target", missingTargetErr, "pageId or path is required")
+
+	proposed := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "draft",
+		"content": "---\nleafwiki_id: draft\nleafwiki_title: Draft\n---\n# Draft\n",
+	})
+	if proposed["ok"] != true {
+		t.Fatalf("wiki_validate_content valid = %#v, want ok", proposed)
+	}
+	missingDraft := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
+	assertErrorContainsAny(t, "wiki_validate_content does not write", missingDraft, "not found", "page_not_found")
+
+	invalid := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "broken",
+		"content": "---\nleafwiki_title: [unterminated\n---\n# Broken\n",
+	})
+	if invalid["ok"] != false {
+		t.Fatalf("wiki_validate_content invalid = %#v, want not ok", invalid)
+	}
+	invalidIssues, ok := invalid["issues"].([]any)
+	if !ok || len(invalidIssues) == 0 {
+		t.Fatalf("invalid issues = %#v, want parse issue", invalid["issues"])
+	}
+
+	semantic := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path": "draft-dupe",
+		"content": "---\nleafwiki_id: " + stringField(t, created, "id") + "\nleafwiki_private: true\n---\n" +
+			"[Missing](/does-not-exist)\n[Missing asset](missing.png)\n",
+	})
+	if semantic["ok"] != false {
+		t.Fatalf("semantic validation = %#v, want not ok", semantic)
+	}
+	assertValidationIssueCodes(t, semantic, []string{"duplicate_leafwiki_id", "reserved_frontmatter", "broken_link", "missing_asset"})
+
+	assetOwner := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Asset Owner",
+		"slug":  "asset-owner",
+		"kind":  "page",
+	}), "page")
+	assetBorrower := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Asset Borrower",
+		"slug":  "asset-borrower",
+		"kind":  "page",
+	}), "page")
+	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
+		"pageId":        stringField(t, assetOwner, "id"),
+		"filename":      "logo.png",
+		"contentBase64": base64.StdEncoding.EncodeToString([]byte("owner logo")),
+	})
+	wrongPageAsset := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"existingPageId": stringField(t, assetOwner, "id"),
+		"path":           "asset-owner",
+		"content":        "# Asset Owner\n\n![Wrong page asset](/assets/" + stringField(t, assetBorrower, "id") + "/logo.png)\n",
+	})
+	if wrongPageAsset["ok"] != false {
+		t.Fatalf("wrong-page asset validation = %#v, want not ok", wrongPageAsset)
+	}
+	assertValidationIssueCodes(t, wrongPageAsset, []string{"missing_asset"})
+
+	pathConflict := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "valid-page",
+		"content": "---\nleafwiki_id: draft-conflict\nleafwiki_title: Draft Conflict\n---\n# Draft\n",
+	})
+	assertValidationIssueCodes(t, pathConflict, []string{"path_conflict"})
+}
+
+func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Original Duplicate ID",
+		"slug":  "original-duplicate-id",
+		"kind":  "page",
+	}), "page")
+	duplicatePath := filepath.Join(w.GetRootDir(), "unsynced-duplicate-id.md")
+	if err := os.WriteFile(duplicatePath, []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: " + stringField(t, created, "id"),
+		"leafwiki_title: Unsynced Duplicate ID",
+		"---",
+		"# Unsynced Duplicate ID",
+		"",
+		"This file has not been refreshed into the tree yet.",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write unsynced duplicate: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
+	if out["ok"] != false {
+		t.Fatalf("wiki_validate_wiki = %#v, want duplicate ID error before refresh", out)
+	}
+	assertValidationIssueCodes(t, out, []string{"duplicate_leafwiki_id"})
+	duplicateIssue := validationIssueByCode(t, out, "duplicate_leafwiki_id")
+	if duplicateIssue["path"] != "unsynced-duplicate-id.md" {
+		t.Fatalf("duplicate_leafwiki_id path = %#v, want unsynced duplicate path in %#v", duplicateIssue["path"], duplicateIssue)
+	}
+	if duplicateIssue["pageId"] != stringField(t, created, "id") {
+		t.Fatalf("duplicate_leafwiki_id pageId = %#v, want existing page ID %q in %#v", duplicateIssue["pageId"], stringField(t, created, "id"), duplicateIssue)
+	}
+	if message, ok := duplicateIssue["message"].(string); !ok || !strings.Contains(message, "original-duplicate-id.md") {
+		t.Fatalf("duplicate_leafwiki_id message = %#v, want first path detail in %#v", duplicateIssue["message"], duplicateIssue)
+	}
+
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".hidden.md"), []byte("# Hidden\n"), 0o644); err != nil {
+		t.Fatalf("write hidden markdown: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), ".scratch"), 0o755); err != nil {
+		t.Fatalf("mkdir hidden scratch dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".scratch", "bad.md"), []byte("---\nleafwiki_private: true\n---\n[Missing](/missing-from-hidden-dir)\n"), 0o644); err != nil {
+		t.Fatalf("write hidden scratch markdown: %v", err)
+	}
+	withoutWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+	assertValidationIssueCodesAbsent(t, withoutWarnings, []string{"hidden_markdown_path"})
+	withWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": true})
+	assertValidationIssueCodes(t, withWarnings, []string{"hidden_markdown_path"})
+	assertNoValidationIssuePath(t, withWarnings, ".scratch/bad.md")
+
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "Bad Slug.md"), []byte("# Bad Slug\n"), 0o644); err != nil {
+		t.Fatalf("write invalid slug markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "missing-asset.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: missing-asset",
+		"leafwiki_title: Missing Asset",
+		"---",
+		"# Missing Asset",
+		"",
+		"[Missing asset](nope.png)",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write missing asset markdown: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), "route-conflict"), 0o755); err != nil {
+		t.Fatalf("mkdir route conflict: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict", "index.md"), []byte("# Route Conflict Section\n"), 0o644); err != nil {
+		t.Fatalf("write route conflict index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict.md"), []byte("# Route Conflict Page\n"), 0o644); err != nil {
+		t.Fatalf("write route conflict page: %v", err)
+	}
+	conflicts := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+	assertValidationIssueCodes(t, conflicts, []string{"invalid_slug", "missing_asset", "path_conflict"})
+
+	broken := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Broken Link",
+		"slug":  "broken-link",
+		"kind":  "page",
+	}), "page")
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, broken, "id"),
+		"version": stringField(t, broken, "version"),
+		"title":   "Broken Link",
+		"slug":    "broken-link",
+		"content": "[Missing](/missing-validation-target)\n",
+	})
+	duplicated := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+	if got := validationIssueCodeCount(t, duplicated, "broken_link", "broken-link"); got != 1 {
+		t.Fatalf("broken_link issue count for broken-link = %d, want 1 in %#v", got, duplicated["issues"])
+	}
+}
+
+func TestLocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	if err := os.WriteFile(filepath.Join(rootDir, "unsynced-a.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: unsynced-a",
+		"leafwiki_title: Unsynced A",
+		"---",
+		"# Unsynced A",
+		"",
+		"[Unsynced B route](/unsynced-b)",
+		"[Unsynced B absolute markdown](/unsynced-b.md)",
+		"[Unsynced B relative markdown](./unsynced-b.md)",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write unsynced-a.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "unsynced-b.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: unsynced-b",
+		"leafwiki_title: Unsynced B",
+		"---",
+		"# Unsynced B",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write unsynced-b.md: %v", err)
+	}
+
+	out := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+	assertValidationIssueCodesAbsent(t, out, []string{"broken_link"})
+}
+
+func TestLocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Metadata Target",
+		"slug":  "metadata-target",
+		"kind":  "page",
+	}), "page")
+	originalVersion := stringField(t, created, "version")
+	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, created, "id"),
+		"version": originalVersion,
+		"title":   "Metadata Target",
+		"slug":    "metadata-target",
+		"content": "Original body",
+		"tags":    []any{"old", "keep"},
+		"properties": map[string]any{
+			"status": "draft",
+			"owner":  "team",
+		},
+	}), "page")
+
+	result := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":           stringField(t, updated, "id"),
+		"version":          stringField(t, updated, "version"),
+		"addTags":          []any{"new"},
+		"removeTags":       []any{"old"},
+		"setProperties":    map[string]any{"status": "ready"},
+		"removeProperties": []any{"owner"},
+		"includePage":      true,
+	})
+	page := nestedMap(t, result, "page")
+	if page["content"] != "Original body" {
+		t.Fatalf("content = %#v, want unchanged body", page["content"])
+	}
+	assertStringSet(t, "metadata tags", stringSliceField(t, page, "tags"), []string{"keep", "new"})
+	props := nestedMap(t, page, "properties")
+	if props["status"] != "ready" {
+		t.Fatalf("properties = %#v, want status ready", props)
+	}
+	if _, exists := props["owner"]; exists {
+		t.Fatalf("properties = %#v, want owner removed", props)
+	}
+
+	compact := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
+		"path":              "/metadata-target",
+		"version":           stringField(t, result, "version"),
+		"addTags":           []any{"quiet"},
+		"includeValidation": false,
+	})
+	if _, exists := compact["validation"]; exists {
+		t.Fatalf("compact metadata output = %#v, did not expect validation when includeValidation=false", compact)
+	}
+
+	missingTargetErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+		"version": stringField(t, compact, "version"),
+		"addTags": []any{"missing-target"},
+	})
+	assertErrorContainsAny(t, "wiki_update_page_metadata missing target", missingTargetErr, "pageId or path is required")
+	ambiguousTargetErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":  stringField(t, updated, "id"),
+		"path":    "/metadata-target",
+		"version": stringField(t, compact, "version"),
+		"addTags": []any{"ambiguous-target"},
+	})
+	assertErrorContainsAny(t, "wiki_update_page_metadata ambiguous target", ambiguousTargetErr, "pageId and path cannot both be supplied")
+
+	beforeReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	reservedErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":        stringField(t, updated, "id"),
+		"version":       stringField(t, beforeReserved, "version"),
+		"setProperties": map[string]any{"leafwiki_private": "true"},
+	})
+	assertErrorContainsAny(t, "wiki_update_page_metadata reserved key", reservedErr, "reserved", "validation")
+	afterReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	if afterReserved["version"] != beforeReserved["version"] || afterReserved["content"] != beforeReserved["content"] {
+		t.Fatalf("page after reserved metadata edit = %#v, want unchanged %#v", afterReserved, beforeReserved)
+	}
+	assertStringSet(t, "metadata tags after reserved failure", stringSliceField(t, afterReserved, "tags"), []string{"keep", "new", "quiet"})
+	if props := nestedMap(t, afterReserved, "properties"); props["leafwiki_private"] != nil || props["status"] != "ready" {
+		t.Fatalf("properties after reserved metadata edit = %#v, want unchanged status and no reserved key", props)
+	}
+
+	setTagsResult := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     stringField(t, afterReserved, "version"),
+		"setTags":     []any{"final"},
+		"includePage": true,
+	})
+	setTagsPage := nestedMap(t, setTagsResult, "page")
+	assertStringSet(t, "metadata setTags replacement", stringSliceField(t, setTagsPage, "tags"), []string{"final"})
+
+	staleReservedErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":        stringField(t, updated, "id"),
+		"version":       originalVersion,
+		"setProperties": map[string]any{"leafwiki_private": "true"},
+	})
+	assertErrorContainsAny(t, "wiki_update_page_metadata stale version before reserved key", staleReservedErr, "page_version_conflict", "version conflict")
+	assertErrorDoesNotContainAny(t, "wiki_update_page_metadata stale version before reserved key", staleReservedErr, "reserved", "validation")
+
+	staleErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+		"pageId":  stringField(t, updated, "id"),
+		"version": originalVersion,
+		"addTags": []any{"late"},
+	})
+	assertErrorContainsAny(t, "wiki_update_page_metadata stale version", staleErr, "page_version_conflict", "version conflict")
+	assertErrorContainsAll(t, "wiki_update_page_metadata stale version context", staleErr, []string{
+		"currentPageId=" + stringField(t, updated, "id"),
+		"currentPath=metadata-target",
+		"currentTitle=Metadata Target",
+		"currentVersion=",
+	})
+	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	if slices := stringSliceField(t, afterStale, "tags"); contains(slices, "late") {
+		t.Fatalf("tags after stale metadata edit = %#v, did not expect failed tag", slices)
+	}
+	if afterStale["content"] != "Original body" {
+		t.Fatalf("content after stale metadata edit = %#v, want unchanged body", afterStale["content"])
+	}
+}
+
+func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Metadata Preserve",
+		"slug":  "metadata-preserve",
+		"kind":  "page",
+	}), "page")
+	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, created, "id"),
+		"version": stringField(t, created, "version"),
+		"title":   "Metadata Preserve",
+		"slug":    "metadata-preserve",
+		"content": "# Metadata Preserve\n\nBody",
+		"tags":    []any{"draft"},
+		"properties": map[string]any{
+			"status": "draft",
+		},
+	}), "page")
+	rawPath := filepath.Join(w.GetRootDir(), "metadata-preserve.md")
+	if err := os.WriteFile(rawPath, []byte(strings.Join([]string{
+		"---",
+		"tags:",
+		"  - draft",
+		"status: draft",
+		"pinned: true",
+		"audiences:",
+		"  - internal",
+		"  - external",
+		"nested:",
+		"  owner: docs",
+		"leafwiki_id: " + stringField(t, updated, "id"),
+		"leafwiki_title: Metadata Preserve",
+		"---",
+		"# Metadata Preserve",
+		"",
+		"Body",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write custom frontmatter: %v", err)
+	}
+	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+	refreshed := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/metadata-preserve"}), "page")
+
+	result := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
+		"path":          "/metadata-preserve",
+		"version":       stringField(t, refreshed, "version"),
+		"addTags":       []any{"ready"},
+		"setProperties": map[string]any{"status": "published"},
+		"includePage":   true,
+	})
+	page := nestedMap(t, result, "page")
+	if page["content"] != "# Metadata Preserve\n\nBody" {
+		t.Fatalf("page body = %#v, want body without frontmatter", page["content"])
+	}
+
+	raw := readPageMarkdownByRoutePath(t, w.GetRootDir(), "metadata-preserve")
+	for _, want := range []string{
+		"pinned: true",
+		"audiences:",
+		"- internal",
+		"- external",
+		"nested:",
+		"owner: docs",
+		"status: published",
+		"- ready",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("raw metadata after patch missing %q:\n%s", want, raw)
+		}
+	}
+	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
+		"syncMode":           "none",
+		"recentChangesLimit": float64(5),
+	})
+	assertRecentChangesIncludePath(t, contextOut, "metadata-preserve.md")
+}
+
+func TestLocalMCPReplacePageSection_PreservesFrontmatter(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Section Preserve",
+		"slug":  "section-preserve",
+		"kind":  "page",
+	}), "page")
+	rawPath := filepath.Join(w.GetRootDir(), "section-preserve.md")
+	if err := os.WriteFile(rawPath, []byte(strings.Join([]string{
+		"---",
+		"tags:",
+		"  - draft",
+		"status: draft",
+		"pinned: true",
+		"audiences:",
+		"  - internal",
+		"  - external",
+		"leafwiki_id: " + stringField(t, created, "id"),
+		"leafwiki_title: Section Preserve",
+		"---",
+		"# Section Preserve",
+		"",
+		"## API",
+		"",
+		"old api",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write section preserve frontmatter: %v", err)
+	}
+	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+	refreshed := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/section-preserve"}), "page")
+
+	result := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
+		"path":              "/section-preserve",
+		"version":           stringField(t, refreshed, "version"),
+		"headingPath":       []any{"API"},
+		"content":           "new api\n",
+		"includePage":       true,
+		"includeValidation": false,
+	})
+	page := nestedMap(t, result, "page")
+	assertStringSet(t, "section replacement tags", stringSliceField(t, page, "tags"), []string{"draft"})
+	props := nestedMap(t, page, "properties")
+	if props["status"] != "draft" {
+		t.Fatalf("section replacement properties = %#v, want status draft", props)
+	}
+
+	raw := readPageMarkdownByRoutePath(t, w.GetRootDir(), "section-preserve")
+	for _, want := range []string{
+		"pinned: true",
+		"audiences:",
+		"- internal",
+		"- external",
+		"status: draft",
+		"## API\nnew api",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("raw section replacement markdown missing %q:\n%s", want, raw)
+		}
+	}
+	if strings.Contains(raw, "old api") {
+		t.Fatalf("raw section replacement markdown kept old section body:\n%s", raw)
+	}
+}
+
+func TestLocalMCPReplacePageSection_ReplacesTargetSectionOnly(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Section Target",
+		"slug":  "section-target",
+		"kind":  "page",
+	}), "page")
+	originalVersion := stringField(t, created, "version")
+	body := "# Guide\n\nIntro\n\n```\n## API\nfake code heading\n```\n\n## API\n\nold api\n\n## Other\n\nkeep me\n"
+	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, created, "id"),
+		"version": originalVersion,
+		"title":   "Section Target",
+		"slug":    "section-target",
+		"content": body,
+	}), "page")
+
+	result := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
+		"path":              "/section-target",
+		"version":           stringField(t, updated, "version"),
+		"headingPath":       []any{"API"},
+		"content":           "new api\n",
+		"includePage":       true,
+		"includeValidation": false,
+	})
+	if _, exists := result["validation"]; exists {
+		t.Fatalf("compact section output = %#v, did not expect validation when includeValidation=false", result)
+	}
+	page := nestedMap(t, result, "page")
+	content := stringField(t, page, "content")
+	if !strings.Contains(content, "## API\nnew api\n") {
+		t.Fatalf("content after section replace = %q, want new API body", content)
+	}
+	if !strings.Contains(content, "```\n## API\nfake code heading\n```") {
+		t.Fatalf("content after section replace = %q, want fenced heading preserved", content)
+	}
+	if !strings.Contains(content, "## Other\n\nkeep me") {
+		t.Fatalf("content after section replace = %q, want unrelated section preserved", content)
+	}
+	if strings.Contains(content, "old api") {
+		t.Fatalf("content after section replace = %q, want old API body removed", content)
+	}
+
+	missingTargetErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"version":     stringField(t, result, "version"),
+		"headingPath": []any{"API"},
+		"content":     "missing target",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section missing target", missingTargetErr, "pageId or path is required")
+	ambiguousTargetErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"path":        "/section-target",
+		"version":     stringField(t, result, "version"),
+		"headingPath": []any{"API"},
+		"content":     "ambiguous target",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section ambiguous target", ambiguousTargetErr, "pageId and path cannot both be supplied")
+
+	withValidation := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
+		"path":              "/section-target",
+		"version":           stringField(t, result, "version"),
+		"headingPath":       []any{"API"},
+		"content":           "new api with [Missing](/missing-section-target)\n",
+		"includePage":       true,
+		"includeValidation": true,
+	})
+	validation := nestedMap(t, withValidation, "validation")
+	assertValidationIssueCodes(t, validation, []string{"broken_link"})
+
+	staleMissingHeadingErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     originalVersion,
+		"headingPath": []any{"Missing"},
+		"content":     "late missing",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section stale version before missing heading", staleMissingHeadingErr, "page_version_conflict", "version conflict")
+	assertErrorDoesNotContainAny(t, "wiki_replace_page_section stale version before missing heading", staleMissingHeadingErr, "heading_not_found")
+
+	staleErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     originalVersion,
+		"headingPath": []any{"API"},
+		"content":     "late change",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section stale version", staleErr, "page_version_conflict", "version conflict")
+	assertErrorContainsAll(t, "wiki_replace_page_section stale version context", staleErr, []string{
+		"currentPageId=" + stringField(t, updated, "id"),
+		"currentPath=section-target",
+		"currentTitle=Section Target",
+		"currentVersion=",
+	})
+	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	afterContent := stringField(t, afterStale, "content")
+	if strings.Contains(afterContent, "late change") || strings.Contains(afterContent, "old api") {
+		t.Fatalf("content after stale section edit = %q, want previously successful edit only", afterContent)
+	}
+}
+
+func TestLocalMCPReplacePageSection_FailuresDoNotMutate(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Section Failure Target",
+		"slug":  "section-failure-target",
+		"kind":  "page",
+	}), "page")
+	body := "# Guide\n\n## Notes\n\nfirst\n\n## Notes\n\nsecond\n"
+	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, created, "id"),
+		"version": stringField(t, created, "version"),
+		"title":   "Section Failure Target",
+		"slug":    "section-failure-target",
+		"content": body,
+	}), "page")
+
+	ambiguousErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     stringField(t, updated, "version"),
+		"headingPath": []any{"Notes"},
+		"content":     "ambiguous mutation",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section ambiguous heading", ambiguousErr, "ambiguous_heading")
+	afterAmbiguous := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	if afterAmbiguous["version"] != updated["version"] || afterAmbiguous["content"] != body {
+		t.Fatalf("page after ambiguous heading = %#v, want unchanged %#v", afterAmbiguous, updated)
+	}
+
+	missingErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     stringField(t, updated, "version"),
+		"headingPath": []any{"Missing"},
+		"content":     "missing mutation",
+	})
+	assertErrorContainsAny(t, "wiki_replace_page_section missing heading", missingErr, "heading_not_found")
+	afterMissing := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
+		"pageId": stringField(t, updated, "id"),
+	}), "page")
+	if afterMissing["version"] != updated["version"] || afterMissing["content"] != body {
+		t.Fatalf("page after missing heading = %#v, want unchanged %#v", afterMissing, updated)
+	}
+
+	replaced := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
+		"pageId":      stringField(t, updated, "id"),
+		"version":     stringField(t, updated, "version"),
+		"headingPath": []any{"Notes"},
+		"occurrence":  float64(2),
+		"content":     "second updated\n",
+		"includePage": true,
+	})
+	replacedPage := nestedMap(t, replaced, "page")
+	replacedContent := stringField(t, replacedPage, "content")
+	if !strings.Contains(replacedContent, "## Notes\n\nfirst") || !strings.Contains(replacedContent, "## Notes\nsecond updated") {
+		t.Fatalf("content after occurrence replace = %q, want second Notes replaced only", replacedContent)
 	}
 }
 
@@ -590,14 +2255,14 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	invalidCreateKindErr := callToolError(t, session, "create_page", map[string]any{
+	invalidCreateKindErr := callToolError(t, session, "wiki_create_page", map[string]any{
 		"title": "Invalid Kind",
 		"slug":  "invalid-kind",
 		"kind":  "folder",
 	})
 	assertErrorContainsAny(t, "MCP create_page invalid kind", invalidCreateKindErr, "page_invalid_kind", "invalid kind")
 	assertErrorDoesNotContainAny(t, "MCP create_page invalid kind", invalidCreateKindErr, "enum", "validating")
-	paddedCreateKindErr := callToolError(t, session, "create_page", map[string]any{
+	paddedCreateKindErr := callToolError(t, session, "wiki_create_page", map[string]any{
 		"title": "Padded Kind",
 		"slug":  "padded-kind",
 		"kind":  " page ",
@@ -620,7 +2285,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if !strings.Contains(paddedCreateKindHTTP, "page_invalid_kind") {
 		t.Fatalf("HTTP create_page padded kind error = %q, want page_invalid_kind", paddedCreateKindHTTP)
 	}
-	nullKindCreated := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	nullKindCreated := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Null Kind",
 		"slug":  "null-kind",
 		"kind":  nil,
@@ -629,7 +2294,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		t.Fatalf("MCP create_page null kind = %v, want page", got)
 	}
 
-	created := callToolStructured(t, session, "create_page", map[string]any{
+	created := callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "MCP Draft",
 		"slug":  "mcp-draft",
 		"kind":  "page",
@@ -644,7 +2309,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	}
 	assertJSONEqual(t, "create_page HTTP page", createdPage, getHTTPPageByID(t, router, pageID))
 
-	mcpCreateParent := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpCreateParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "MCP Create Parent",
 		"slug":  "mcp-create-parent",
 		"kind":  "section",
@@ -654,7 +2319,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		"slug":  "http-create-parent",
 		"kind":  "section",
 	}, http.StatusCreated)
-	whitespaceParentCreateErr := callToolError(t, session, "create_page", map[string]any{
+	whitespaceParentCreateErr := callToolError(t, session, "wiki_create_page", map[string]any{
 		"parentId": " ",
 		"title":    "Whitespace Parent",
 		"slug":     "whitespace-parent",
@@ -670,7 +2335,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if !strings.Contains(whitespaceParentCreateHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP create_page whitespace parentId error = %q, want page_invalid_parent_id", whitespaceParentCreateHTTP)
 	}
-	paddedParentCreateErr := callToolError(t, session, "create_page", map[string]any{
+	paddedParentCreateErr := callToolError(t, session, "wiki_create_page", map[string]any{
 		"parentId": " " + stringField(t, mcpCreateParent, "id") + " ",
 		"title":    "Padded Parent",
 		"slug":     "padded-parent",
@@ -686,7 +2351,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if !strings.Contains(paddedParentCreateHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP create_page padded parentId error = %q, want page_invalid_parent_id", paddedParentCreateHTTP)
 	}
-	mcpCreatedChild := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpCreatedChild := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": stringField(t, mcpCreateParent, "id"),
 		"title":    "Created Child",
 		"slug":     "created-child",
@@ -700,10 +2365,10 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	}, http.StatusCreated)
 	assertPageState(t, "MCP create_page child", getHTTPPageByPath(t, router, "mcp-create-parent/created-child"), stringField(t, mcpCreatedChild, "id"), "Created Child", "created-child", "mcp-create-parent/created-child", "section", "")
 	assertPageState(t, "HTTP create_page child", getHTTPPageByPath(t, router, "http-create-parent/created-child"), stringField(t, httpCreatedChild, "id"), "Created Child", "created-child", "http-create-parent/created-child", "section", "")
-	recordHTTPMCPParity(t, "create_page", "POST /api/pages")
+	recordHTTPMCPParity(t, "wiki_create_page", "POST /api/pages")
 
 	content := "Hello from MCP\n"
-	updated := callToolStructured(t, session, "update_page", map[string]any{
+	updated := callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": version,
 		"title":   "MCP Draft Updated",
@@ -726,7 +2391,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if got := httpPage["content"]; got != content {
 		t.Fatalf("HTTP content after MCP update = %v, want %q", got, content)
 	}
-	assertJSONEqual(t, "update_page HTTP page", updatedPage, getHTTPPageByID(t, router, pageID))
+	assertJSONEqual(t, "wiki_update_page HTTP page", updatedPage, getHTTPPageByID(t, router, pageID))
 	if got := stringSliceField(t, httpPage, "tags"); strings.Join(got, ",") != "mcp,parity" {
 		t.Fatalf("HTTP tags after MCP update = %v, want [mcp parity]", got)
 	}
@@ -764,9 +2429,9 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if !strings.Contains(rawHTTPMetadata, "tags:") || !strings.Contains(rawHTTPMetadata, "- http") || !strings.Contains(rawHTTPMetadata, "status: review") {
 		t.Fatalf("HTTP update raw markdown missing metadata frontmatter:\n%s", rawHTTPMetadata)
 	}
-	recordHTTPMCPParity(t, "update_page", "PUT /api/pages/:id")
+	recordHTTPMCPParity(t, "wiki_update_page", "PUT /api/pages/:id")
 
-	metadataErr := callToolError(t, session, "update_page", map[string]any{
+	metadataErr := callToolError(t, session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": stringField(t, updatedPage, "version"),
 		"title":   "MCP Draft Updated",
@@ -795,16 +2460,16 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		t.Fatalf("HTTP stale update status = %d, want 409: %s", staleHTTPRec.Code, staleHTTPRec.Body.String())
 	}
 
-	mcpErr := callToolError(t, session, "update_page", map[string]any{
+	mcpErr := callToolError(t, session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": version,
 		"title":   "MCP Draft Stale",
 		"slug":    "mcp-draft",
 		"content": "stale",
 	})
-	assertPageVersionConflictParity(t, "stale update_page", mcpErr, staleHTTPRec.Body.String())
+	assertPageVersionConflictParity(t, "stale wiki_update_page", mcpErr, staleHTTPRec.Body.String())
 
-	search := callToolStructured(t, session, "search_pages", map[string]any{
+	search := callToolStructured(t, session, "wiki_search_pages", map[string]any{
 		"q":      "Hello",
 		"offset": float64(0),
 		"limit":  float64(10),
@@ -829,7 +2494,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if got := item["page_id"]; got != pageID {
 		t.Fatalf("MCP search page_id = %v, want %q", got, pageID)
 	}
-	tagSearch := callToolStructured(t, session, "search_pages", map[string]any{
+	tagSearch := callToolStructured(t, session, "wiki_search_pages", map[string]any{
 		"tags":   []any{"mcp"},
 		"offset": float64(0),
 		"limit":  float64(10),
@@ -842,13 +2507,13 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	assertSearchResultsMatch(t, tagSearch, tagHTTPSearch)
 
 	for i := 1; i <= 2; i++ {
-		extra := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+		extra := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 			"title": "Hello Extra " + strconv.Itoa(i),
 			"slug":  "hello-extra-" + strconv.Itoa(i),
 			"kind":  "page",
 		}), "page")
 		extraContent := "Hello paginated search " + strconv.Itoa(i)
-		callToolStructured(t, session, "update_page", map[string]any{
+		callToolStructured(t, session, "wiki_update_page", map[string]any{
 			"id":      stringField(t, extra, "id"),
 			"version": stringField(t, extra, "version"),
 			"title":   extra["title"],
@@ -857,7 +2522,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 			"tags":    []any{"mcp"},
 		})
 	}
-	paginatedSearch := callToolStructured(t, session, "search_pages", map[string]any{
+	paginatedSearch := callToolStructured(t, session, "wiki_search_pages", map[string]any{
 		"q":      "Hello",
 		"offset": float64(0),
 		"limit":  float64(1),
@@ -871,7 +2536,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	if paginatedSearch["hasMore"] != true {
 		t.Fatalf("paginated MCP search hasMore = %v, want true", paginatedSearch["hasMore"])
 	}
-	recordHTTPMCPParity(t, "search_pages", "GET /api/search")
+	recordHTTPMCPParity(t, "wiki_search_pages", "GET /api/search")
 }
 
 func TestLocalMCPProtocol_PageOperationParity(t *testing.T) {
@@ -891,15 +2556,15 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	current := callToolStructured(t, session, "get_current_user", nil)
+	current := callToolStructured(t, session, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	if user["username"] != "public-editor" || user["role"] != "editor" {
 		t.Fatalf("current user = %#v, want public-editor editor", user)
 	}
 	httpUser := getHTTPMap(t, router, "/api/auth/me")
-	assertJSONEqual(t, "get_current_user", user, httpUser)
-	recordHTTPMCPParity(t, "get_current_user", "GET /api/auth/me")
-	config := callToolStructured(t, session, "get_config", nil)
+	assertJSONEqual(t, "wiki_get_current_user", user, httpUser)
+	recordHTTPMCPParity(t, "wiki_get_current_user", "GET /api/auth/me")
+	config := callToolStructured(t, session, "wiki_get_config", nil)
 	if config["authDisabled"] != true {
 		t.Fatalf("config authDisabled = %v, want true", config["authDisabled"])
 	}
@@ -910,7 +2575,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("config enableWorkspaceSync = %v, want true", config["enableWorkspaceSync"])
 	}
 	httpConfig := getHTTPMap(t, router, "/api/config")
-	assertMapFieldsEqual(t, "get_config", config, httpConfig, []string{
+	assertMapFieldsEqual(t, "wiki_get_config", config, httpConfig, []string{
 		"publicAccess",
 		"hideLinkMetadataSection",
 		"authDisabled",
@@ -922,16 +2587,16 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"httpRemoteUserEnabled",
 		"httpRemoteUserLogoutUrl",
 	})
-	recordHTTPMCPParity(t, "get_config", "GET /api/config")
+	recordHTTPMCPParity(t, "wiki_get_config", "GET /api/config")
 
-	slug := callToolStructured(t, session, "suggest_slug", map[string]any{"title": "Parent Section"})
+	slug := callToolStructured(t, session, "wiki_suggest_slug", map[string]any{"title": "Parent Section"})
 	httpSlug := getHTTPMap(t, router, "/api/pages/slug-suggestion?title=Parent+Section")
-	assertJSONEqual(t, "suggest_slug", slug, httpSlug)
-	recordHTTPMCPParity(t, "suggest_slug", "GET /api/pages/slug-suggestion")
+	assertJSONEqual(t, "wiki_suggest_slug", slug, httpSlug)
+	recordHTTPMCPParity(t, "wiki_suggest_slug", "GET /api/pages/slug-suggestion")
 	if got := slug["slug"]; got != "parent-section" {
 		t.Fatalf("suggest_slug = %v, want parent-section", got)
 	}
-	blankSlugErr := callToolError(t, session, "suggest_slug", map[string]any{"title": "   "})
+	blankSlugErr := callToolError(t, session, "wiki_suggest_slug", map[string]any{"title": "   "})
 	if !strings.Contains(strings.ToLower(blankSlugErr), "title") {
 		t.Fatalf("MCP blank suggest_slug error = %q, want title detail", blankSlugErr)
 	}
@@ -940,7 +2605,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if !strings.Contains(blankSlugHTTP, wikipages.ErrCodePageMissingTitle) {
 		t.Fatalf("HTTP blank suggest_slug error = %q, want %s", blankSlugHTTP, wikipages.ErrCodePageMissingTitle)
 	}
-	punctuationSlugErr := callToolError(t, session, "suggest_slug", map[string]any{"title": "!!!"})
+	punctuationSlugErr := callToolError(t, session, "wiki_suggest_slug", map[string]any{"title": "!!!"})
 	if !strings.Contains(strings.ToLower(punctuationSlugErr), "title") {
 		t.Fatalf("MCP punctuation-only suggest_slug error = %q, want title detail", punctuationSlugErr)
 	}
@@ -950,28 +2615,30 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("HTTP punctuation-only suggest_slug error = %q, want %s", punctuationSlugHTTP, wikipages.ErrCodePageInvalidTitle)
 	}
 
-	parent := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	parent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Parent Section",
 		"slug":  "parent-section",
 		"kind":  "section",
 	}), "page")
 	parentID := stringField(t, parent, "id")
-	parentViaGet := nestedMap(t, callToolStructured(t, session, "get_page", map[string]any{"id": parentID}), "page")
-	assertJSONEqual(t, "get_page", parentViaGet, getHTTPPageByID(t, router, parentID))
-	recordHTTPMCPParity(t, "get_page", "GET /api/pages/:id")
-	treeResult := callToolStructured(t, session, "get_tree", map[string]any{"depth": float64(1)})
+	parentViaGet := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": parentID}), "page")
+	assertJSONEqual(t, "wiki_get_page", parentViaGet, getHTTPPageByID(t, router, parentID))
+	recordHTTPMCPParity(t, "wiki_get_page", "GET /api/pages/:id")
+	treeResult := callToolStructured(t, session, "wiki_get_tree", map[string]any{"depth": float64(1)})
 	if treeResult["tree"] == nil {
-		t.Fatalf("get_tree returned no tree: %#v", treeResult)
+		t.Fatalf("wiki_get_tree returned no tree: %#v", treeResult)
 	}
 	httpTree := getHTTPMap(t, router, "/api/tree?depth=1")
-	assertJSONEqual(t, "get_tree", treeResult["tree"], httpTree)
-	recordHTTPMCPParity(t, "get_tree", "GET /api/tree")
+	assertJSONEqual(t, "wiki_get_tree", treeResult["tree"], httpTree)
+	recordHTTPMCPParity(t, "wiki_get_tree", "GET /api/tree")
 
-	pageByPath := nestedMap(t, callToolStructured(t, session, "get_page_by_path", map[string]any{"path": "parent-section"}), "page")
+	pageByPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "parent-section"}), "page")
 	httpPageByPath := getHTTPPageByPath(t, router, "parent-section")
-	assertJSONEqual(t, "get_page_by_path", pageByPath, httpPageByPath)
-	recordHTTPMCPParity(t, "get_page_by_path", "GET /api/pages/by-path")
-	blankPathErr := callToolError(t, session, "get_page_by_path", map[string]any{"path": "  "})
+	assertJSONEqual(t, "wiki_get_page_by_path", pageByPath, httpPageByPath)
+	leadingSlashPageByPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/parent-section"}), "page")
+	assertJSONEqual(t, "wiki_get_page_by_path leading slash", leadingSlashPageByPath, httpPageByPath)
+	recordHTTPMCPParity(t, "wiki_get_page_by_path", "GET /api/pages/by-path")
+	blankPathErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": "  "})
 	if !strings.Contains(blankPathErr, wikipages.ErrCodePageMissingPath) && !strings.Contains(strings.ToLower(blankPathErr), "missing path") {
 		t.Fatalf("MCP blank get_page_by_path error = %q, want %s", blankPathErr, wikipages.ErrCodePageMissingPath)
 	}
@@ -980,7 +2647,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("HTTP blank get_page_by_path error = %q, want %s", blankPathHTTP, wikipages.ErrCodePageMissingPath)
 	}
 	for _, invalidPath := range []string{"docs//intro", "docs/.", "docs/..", `docs\..\secret`} {
-		mcpPathErr := callToolError(t, session, "get_page_by_path", map[string]any{"path": invalidPath})
+		mcpPathErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": invalidPath})
 		if !strings.Contains(mcpPathErr, "page_invalid_path") && !strings.Contains(strings.ToLower(mcpPathErr), "invalid path") {
 			t.Fatalf("MCP invalid get_page_by_path path %q error = %q, want invalid path detail", invalidPath, mcpPathErr)
 		}
@@ -990,45 +2657,45 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		}
 	}
 
-	childA := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	childA := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "Child A",
 		"slug":     "child-a",
 		"kind":     "page",
 	}), "page")
-	childB := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	childB := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "Child B",
 		"slug":     "child-b",
 		"kind":     "page",
 	}), "page")
 
-	callToolStructured(t, session, "sort_pages", map[string]any{
+	callToolStructured(t, session, "wiki_sort_pages", map[string]any{
 		"parentId":   parentID,
 		"orderedIds": []any{stringField(t, childB, "id"), stringField(t, childA, "id")},
 	})
 	httpSort := putHTTPJSON(t, router, "/api/pages/"+parentID+"/sort", map[string]any{
 		"orderedIds": []string{stringField(t, childB, "id"), stringField(t, childA, "id")},
 	}, http.StatusOK)
-	mcpSort := callToolStructured(t, session, "sort_pages", map[string]any{
+	mcpSort := callToolStructured(t, session, "wiki_sort_pages", map[string]any{
 		"parentId":   parentID,
 		"orderedIds": []any{stringField(t, childB, "id"), stringField(t, childA, "id")},
 	})
-	assertJSONEqual(t, "sort_pages", mcpSort, httpSort)
-	parentAfterSort := nestedMap(t, callToolStructured(t, session, "get_page", map[string]any{"id": parentID}), "page")
+	assertJSONEqual(t, "wiki_sort_pages", mcpSort, httpSort)
+	parentAfterSort := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": parentID}), "page")
 	assertChildOrder(t, "sort_pages shared parent", parentAfterSort, stringField(t, childB, "id"), stringField(t, childA, "id"))
-	mcpSortParent := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpSortParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "MCP Sort Parent",
 		"slug":  "mcp-sort-parent",
 		"kind":  "section",
 	}), "page")
-	mcpSortA := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpSortA := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": stringField(t, mcpSortParent, "id"),
 		"title":    "MCP Sort A",
 		"slug":     "mcp-sort-a",
 		"kind":     "page",
 	}), "page")
-	mcpSortB := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpSortB := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": stringField(t, mcpSortParent, "id"),
 		"title":    "MCP Sort B",
 		"slug":     "mcp-sort-b",
@@ -1051,7 +2718,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"slug":     "http-sort-b",
 		"kind":     "page",
 	}, http.StatusCreated)
-	callToolStructured(t, session, "sort_pages", map[string]any{
+	callToolStructured(t, session, "wiki_sort_pages", map[string]any{
 		"parentId":   stringField(t, mcpSortParent, "id"),
 		"orderedIds": []any{stringField(t, mcpSortB, "id"), stringField(t, mcpSortA, "id")},
 	})
@@ -1060,13 +2727,13 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	}, http.StatusOK)
 	assertChildOrder(t, "MCP sort_pages parent", getHTTPPageByPath(t, router, "mcp-sort-parent"), stringField(t, mcpSortB, "id"), stringField(t, mcpSortA, "id"))
 	assertChildOrder(t, "HTTP sort_pages parent", getHTTPPageByPath(t, router, "http-sort-parent"), stringField(t, httpSortB, "id"), stringField(t, httpSortA, "id"))
-	recordHTTPMCPParity(t, "sort_pages", "PUT /api/pages/:id/sort")
-	parentByAlias := nestedMap(t, callToolStructured(t, session, "get_page", map[string]any{"pageId": parentID}), "page")
+	recordHTTPMCPParity(t, "wiki_sort_pages", "PUT /api/pages/:id/sort")
+	parentByAlias := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"pageId": parentID}), "page")
 	if parentByAlias["id"] != parentID {
-		t.Fatalf("get_page pageId alias returned id = %v, want %q", parentByAlias["id"], parentID)
+		t.Fatalf("wiki_get_page pageId alias returned id = %v, want %q", parentByAlias["id"], parentID)
 	}
 
-	ensured := nestedMap(t, callToolStructured(t, session, "ensure_page", map[string]any{
+	ensured := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured",
 		"title": "Ensured Page",
 		"kind":  "page",
@@ -1077,8 +2744,8 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"title": "Ensured Page",
 		"kind":  "page",
 	}, http.StatusOK)
-	assertJSONEqual(t, "ensure_page", ensured, httpEnsured)
-	mcpEnsuredIndependent := nestedMap(t, callToolStructured(t, session, "ensure_page", map[string]any{
+	assertJSONEqual(t, "wiki_ensure_page", ensured, httpEnsured)
+	mcpEnsuredIndependent := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured-mcp",
 		"title": "Ensured Independent",
 		"kind":  "section",
@@ -1090,7 +2757,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	}, http.StatusOK)
 	assertPageState(t, "MCP ensure_page independent", getHTTPPageByPath(t, router, "parent-section/ensured-mcp"), stringField(t, mcpEnsuredIndependent, "id"), "Ensured Independent", "ensured-mcp", "parent-section/ensured-mcp", "section", "")
 	assertPageState(t, "HTTP ensure_page independent", getHTTPPageByPath(t, router, "parent-section/ensured-http"), stringField(t, httpEnsuredIndependent, "id"), "Ensured Independent", "ensured-http", "parent-section/ensured-http", "section", "")
-	nullKindEnsured := nestedMap(t, callToolStructured(t, session, "ensure_page", map[string]any{
+	nullKindEnsured := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured-null-kind",
 		"title": "Ensured Null Kind",
 		"kind":  nil,
@@ -1098,30 +2765,30 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if got := nullKindEnsured["kind"]; got != "page" {
 		t.Fatalf("MCP ensure_page null kind = %v, want page", got)
 	}
-	recordHTTPMCPParity(t, "ensure_page", "POST /api/pages/ensure")
+	recordHTTPMCPParity(t, "wiki_ensure_page", "POST /api/pages/ensure")
 
-	lookup := callToolStructured(t, session, "lookup_path", map[string]any{"path": "parent-section/ensured"})
+	lookup := callToolStructured(t, session, "wiki_lookup_path", map[string]any{"path": "parent-section/ensured"})
 	httpLookup := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Fensured")
-	assertJSONEqual(t, "lookup_path", lookup["lookup"], httpLookup)
-	recordHTTPMCPParity(t, "lookup_path", "GET /api/pages/lookup")
+	assertJSONEqual(t, "wiki_lookup_path", lookup["lookup"], httpLookup)
+	recordHTTPMCPParity(t, "wiki_lookup_path", "GET /api/pages/lookup")
 	if lookup["lookup"] == nil {
 		t.Fatalf("lookup_path returned no lookup: %#v", lookup)
 	}
-	permalink := callToolStructured(t, session, "resolve_permalink", map[string]any{"id": ensuredID})
+	permalink := callToolStructured(t, session, "wiki_resolve_permalink", map[string]any{"id": ensuredID})
 	httpPermalink := getHTTPMap(t, router, "/api/pages/permalink/"+ensuredID)
-	assertJSONEqual(t, "resolve_permalink", permalink["target"], httpPermalink)
-	recordHTTPMCPParity(t, "resolve_permalink", "GET /api/pages/permalink/:id")
+	assertJSONEqual(t, "wiki_resolve_permalink", permalink["target"], httpPermalink)
+	recordHTTPMCPParity(t, "wiki_resolve_permalink", "GET /api/pages/permalink/:id")
 	target := nestedMap(t, permalink, "target")
 	if got := target["path"]; got != "parent-section/ensured" {
 		t.Fatalf("resolve_permalink path = %v, want parent-section/ensured", got)
 	}
-	permalinkByAlias := callToolStructured(t, session, "resolve_permalink", map[string]any{"pageId": ensuredID})
+	permalinkByAlias := callToolStructured(t, session, "wiki_resolve_permalink", map[string]any{"pageId": ensuredID})
 	targetByAlias := nestedMap(t, permalinkByAlias, "target")
 	if got := targetByAlias["path"]; got != "parent-section/ensured" {
 		t.Fatalf("resolve_permalink pageId alias path = %v, want parent-section/ensured", got)
 	}
 
-	invalidEnsureKindErr := callToolError(t, session, "ensure_page", map[string]any{
+	invalidEnsureKindErr := callToolError(t, session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/invalid-kind",
 		"title": "Invalid Ensure Kind",
 		"kind":  "folder",
@@ -1136,7 +2803,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("HTTP ensure_page invalid kind error = %q, want page_invalid_kind", invalidEnsureKindHTTP)
 	}
 
-	mcpMove := callToolStructured(t, session, "move_page", map[string]any{
+	mcpMove := callToolStructured(t, session, "wiki_move_page", map[string]any{
 		"id":       stringField(t, childA, "id"),
 		"version":  stringField(t, childA, "version"),
 		"parentId": "",
@@ -1145,14 +2812,14 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"version":  stringField(t, childB, "version"),
 		"parentId": "",
 	}, http.StatusOK)
-	assertJSONEqual(t, "move_page", mcpMove, httpMove)
+	assertJSONEqual(t, "wiki_move_page", mcpMove, httpMove)
 	httpMoved := getHTTPPageByPath(t, router, "child-a")
 	assertPageState(t, "MCP moved child A", httpMoved, stringField(t, childA, "id"), "Child A", "child-a", "child-a", "page", "")
 	httpMovedB := getHTTPPageByPath(t, router, "child-b")
 	assertPageState(t, "HTTP moved child B", httpMovedB, stringField(t, childB, "id"), "Child B", "child-b", "child-b", "page", "")
 	parentAfterMove := getHTTPPageByPath(t, router, "parent-section")
 	assertChildrenDoNotContain(t, "parent after move", parentAfterMove, stringField(t, childA, "id"), stringField(t, childB, "id"))
-	staleMoveErr := callToolError(t, session, "move_page", map[string]any{
+	staleMoveErr := callToolError(t, session, "wiki_move_page", map[string]any{
 		"id":       stringField(t, childA, "id"),
 		"version":  stringField(t, childA, "version"),
 		"parentId": parentID,
@@ -1162,12 +2829,12 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"parentId": parentID,
 	}, http.StatusConflict)
 	assertPageVersionConflictParity(t, "stale move_page", staleMoveErr, staleMoveHTTP)
-	mcpWhitespaceMove := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpWhitespaceMove := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "MCP Whitespace Move",
 		"slug":  "mcp-whitespace-move",
 		"kind":  "page",
 	}), "page")
-	whitespaceMoveErr := callToolError(t, session, "move_page", map[string]any{
+	whitespaceMoveErr := callToolError(t, session, "wiki_move_page", map[string]any{
 		"id":       stringField(t, mcpWhitespaceMove, "id"),
 		"version":  stringField(t, mcpWhitespaceMove, "version"),
 		"parentId": " ",
@@ -1185,13 +2852,13 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if !strings.Contains(whitespaceMoveHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP whitespace move parentId error = %q, want page_invalid_parent_id", whitespaceMoveHTTP)
 	}
-	mcpMissingParentMove := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpMissingParentMove := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "MCP Missing Parent Move",
 		"slug":     "mcp-missing-parent-move",
 		"kind":     "page",
 	}), "page")
-	missingParentMove := callToolStructured(t, session, "move_page", map[string]any{
+	missingParentMove := callToolStructured(t, session, "wiki_move_page", map[string]any{
 		"id":      stringField(t, mcpMissingParentMove, "id"),
 		"version": stringField(t, mcpMissingParentMove, "version"),
 	})
@@ -1199,14 +2866,14 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("MCP move_page missing parentId message = %v, want Page moved", missingParentMove["message"])
 	}
 	assertPageState(t, "MCP move_page missing parentId", getHTTPPageByPath(t, router, "mcp-missing-parent-move"), stringField(t, mcpMissingParentMove, "id"), "MCP Missing Parent Move", "mcp-missing-parent-move", "mcp-missing-parent-move", "page", "")
-	recordHTTPMCPParity(t, "move_page", "PUT /api/pages/:id/move")
+	recordHTTPMCPParity(t, "wiki_move_page", "PUT /api/pages/:id/move")
 
-	convertMe := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	convertMe := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Convert Me",
 		"slug":  "convert-me",
 		"kind":  "section",
 	}), "page")
-	mcpConvert := callToolStructured(t, session, "convert_page", map[string]any{
+	mcpConvert := callToolStructured(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, convertMe, "version"),
 		"targetKind": "page",
@@ -1219,7 +2886,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("converted kind = %v, want page", httpConverted["kind"])
 	}
 	assertPageState(t, "MCP converted page", httpConverted, stringField(t, convertMe, "id"), "Convert Me", "convert-me", "convert-me", "page", "")
-	convertHTTP := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	convertHTTP := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Convert HTTP",
 		"slug":  "convert-http",
 		"kind":  "section",
@@ -1230,7 +2897,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	}, http.StatusNoContent)
 	httpConvertedPeer := getHTTPPageByPath(t, router, "convert-http")
 	assertPageState(t, "HTTP converted page", httpConvertedPeer, stringField(t, convertHTTP, "id"), "Convert HTTP", "convert-http", "convert-http", "page", "")
-	staleConvertErr := callToolError(t, session, "convert_page", map[string]any{
+	staleConvertErr := callToolError(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, convertMe, "version"),
 		"targetKind": "section",
@@ -1240,14 +2907,14 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"targetKind": "section",
 	}, http.StatusConflict)
 	assertPageVersionConflictParity(t, "stale convert_page", staleConvertErr, staleConvertHTTP)
-	invalidConvertErr := callToolError(t, session, "convert_page", map[string]any{
+	invalidConvertErr := callToolError(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, httpConverted, "version"),
 		"targetKind": "folder",
 	})
 	assertErrorContainsAny(t, "MCP invalid convert_page targetKind", invalidConvertErr, wikipages.ErrCodePageInvalidTargetKind, "invalid target kind", "targetkind")
 	assertErrorDoesNotContainAny(t, "MCP invalid convert_page targetKind", invalidConvertErr, "enum", "validating")
-	paddedConvertErr := callToolError(t, session, "convert_page", map[string]any{
+	paddedConvertErr := callToolError(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, httpConverted, "version"),
 		"targetKind": " page ",
@@ -1268,9 +2935,9 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if !strings.Contains(paddedConvertHTTP, wikipages.ErrCodePageInvalidTargetKind) {
 		t.Fatalf("HTTP padded convert_page targetKind error = %q, want %s", paddedConvertHTTP, wikipages.ErrCodePageInvalidTargetKind)
 	}
-	recordHTTPMCPParity(t, "convert_page", "POST /api/pages/convert/:id")
+	recordHTTPMCPParity(t, "wiki_convert_page", "POST /api/pages/convert/:id")
 
-	copied := nestedMap(t, callToolStructured(t, session, "copy_page", map[string]any{
+	copied := nestedMap(t, callToolStructured(t, session, "wiki_copy_page", map[string]any{
 		"id":    stringField(t, childA, "id"),
 		"title": "Child A Copy",
 		"slug":  "child-a-copy",
@@ -1279,7 +2946,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"title": "Child A Copy",
 		"slug":  "child-a-http-copy",
 	}, http.StatusCreated)
-	whitespaceCopyErr := callToolError(t, session, "copy_page", map[string]any{
+	whitespaceCopyErr := callToolError(t, session, "wiki_copy_page", map[string]any{
 		"id":             stringField(t, childA, "id"),
 		"targetParentId": " ",
 		"title":          "Whitespace Copy",
@@ -1294,7 +2961,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if !strings.Contains(whitespaceCopyHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP copy_page whitespace targetParentId error = %q, want page_invalid_parent_id", whitespaceCopyHTTP)
 	}
-	paddedCopyErr := callToolError(t, session, "copy_page", map[string]any{
+	paddedCopyErr := callToolError(t, session, "wiki_copy_page", map[string]any{
 		"id":             stringField(t, childA, "id"),
 		"targetParentId": " " + parentID + " ",
 		"title":          "Padded Copy",
@@ -1309,13 +2976,13 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if !strings.Contains(paddedCopyHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP copy_page padded targetParentId error = %q, want page_invalid_parent_id", paddedCopyHTTP)
 	}
-	assertMapFieldsEqual(t, "copy_page", copied, httpCopied, []string{"title", "kind", "content"})
+	assertMapFieldsEqual(t, "wiki_copy_page", copied, httpCopied, []string{"title", "kind", "content"})
 	assertPageState(t, "MCP copied page", getHTTPPageByPath(t, router, "child-a-copy"), stringField(t, copied, "id"), "Child A Copy", "child-a-copy", "child-a-copy", "page", "")
 	assertPageState(t, "HTTP copied page", getHTTPPageByPath(t, router, "child-a-http-copy"), stringField(t, httpCopied, "id"), "Child A Copy", "child-a-http-copy", "child-a-http-copy", "page", "")
 	assertPageState(t, "copy_page source preserved", getHTTPPageByPath(t, router, "child-a"), stringField(t, childA, "id"), "Child A", "child-a", "child-a", "page", "")
-	recordHTTPMCPParity(t, "copy_page", "POST /api/pages/copy/:id")
+	recordHTTPMCPParity(t, "wiki_copy_page", "POST /api/pages/copy/:id")
 
-	missingDeleteVersionErr := callToolError(t, session, "delete_page", map[string]any{"id": stringField(t, copied, "id")})
+	missingDeleteVersionErr := callToolError(t, session, "wiki_delete_page", map[string]any{"id": stringField(t, copied, "id")})
 	if !strings.Contains(strings.ToLower(missingDeleteVersionErr), "version") {
 		t.Fatalf("MCP delete without version error = %q, want version detail", missingDeleteVersionErr)
 	}
@@ -1324,26 +2991,26 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		t.Fatalf("HTTP delete without version error = %q, want version detail", missingDeleteHTTP)
 	}
 
-	staleDelete := nestedMap(t, callToolStructured(t, session, "update_page", map[string]any{
+	staleDelete := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      stringField(t, copied, "id"),
 		"version": stringField(t, copied, "version"),
 		"title":   "Child A Copy Updated",
 		"slug":    "child-a-copy",
 		"content": "updated",
 	}), "page")
-	staleDeleteErr := callToolError(t, session, "delete_page", map[string]any{
+	staleDeleteErr := callToolError(t, session, "wiki_delete_page", map[string]any{
 		"id":      stringField(t, copied, "id"),
 		"version": stringField(t, copied, "version"),
 	})
 	staleDeleteHTTP := deleteHTTPStatus(t, router, "/api/pages/"+stringField(t, copied, "id")+"?version="+url.QueryEscape(stringField(t, copied, "version")), http.StatusConflict)
 	assertPageVersionConflictParity(t, "stale delete_page", staleDeleteErr, staleDeleteHTTP)
 
-	mcpDeletedPage := callToolStructured(t, session, "delete_page", map[string]any{
+	mcpDeletedPage := callToolStructured(t, session, "wiki_delete_page", map[string]any{
 		"id":      stringField(t, copied, "id"),
 		"version": stringField(t, staleDelete, "version"),
 	})
 	httpDeletedPageBody := deleteHTTPStatus(t, router, "/api/pages/"+stringField(t, httpCopied, "id")+"?version="+url.QueryEscape(stringField(t, httpCopied, "version")), http.StatusOK)
-	assertJSONEqual(t, "delete_page", mcpDeletedPage, decodeJSONMap(t, "HTTP delete_page", []byte(httpDeletedPageBody)))
+	assertJSONEqual(t, "wiki_delete_page", mcpDeletedPage, decodeJSONMap(t, "HTTP delete_page", []byte(httpDeletedPageBody)))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=child-a-copy", nil))
 	if rec.Code != http.StatusNotFound {
@@ -1354,7 +3021,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("GET HTTP-deleted copy = %d, want 404", rec.Code)
 	}
-	recordHTTPMCPParity(t, "delete_page", "DELETE /api/pages/:id")
+	recordHTTPMCPParity(t, "wiki_delete_page", "DELETE /api/pages/:id")
 }
 
 func TestLocalMCPProtocol_IndexAndAssetParity(t *testing.T) {
@@ -1373,28 +3040,28 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	searchErr := callToolError(t, session, "search_pages", map[string]any{})
+	searchErr := callToolError(t, session, "wiki_search_pages", map[string]any{})
 	if !strings.Contains(searchErr, "search_missing_query") && !strings.Contains(strings.ToLower(searchErr), "query") {
 		t.Fatalf("empty search_pages error = %q, want missing query detail", searchErr)
 	}
-	blankTagSearchErr := callToolError(t, session, "search_pages", map[string]any{"tags": []any{" "}})
+	blankTagSearchErr := callToolError(t, session, "wiki_search_pages", map[string]any{"tags": []any{" "}})
 	if !strings.Contains(blankTagSearchErr, "search_missing_query") && !strings.Contains(strings.ToLower(blankTagSearchErr), "query") {
 		t.Fatalf("blank-tag search_pages error = %q, want missing query detail", blankTagSearchErr)
 	}
 
-	target := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	target := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Target",
 		"slug":  "target",
 		"kind":  "page",
 	}), "page")
-	source := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	source := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Source",
 		"slug":  "source",
 		"kind":  "page",
 	}), "page")
 	sourceID := stringField(t, source, "id")
 	content := "Tagged source with [Target](/target) and [Missing](/missing-target)"
-	callToolStructured(t, session, "update_page", map[string]any{
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      sourceID,
 		"version": stringField(t, source, "version"),
 		"title":   "Source",
@@ -1406,29 +3073,29 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		},
 	})
 
-	status := callToolStructured(t, session, "get_search_status", nil)
+	status := callToolStructured(t, session, "wiki_get_search_status", nil)
 	httpStatus := getHTTPValue(t, router, "/api/search/status")
-	assertJSONEqual(t, "get_search_status", status["status"], httpStatus)
-	recordHTTPMCPParity(t, "get_search_status", "GET /api/search/status")
+	assertJSONEqual(t, "wiki_get_search_status", status["status"], httpStatus)
+	recordHTTPMCPParity(t, "wiki_get_search_status", "GET /api/search/status")
 	if status["status"] == nil {
 		t.Fatalf("get_search_status returned no status: %#v", status)
 	}
 
-	tags := callToolStructured(t, session, "list_tags", map[string]any{"q": "mc", "limit": float64(10)})
+	tags := callToolStructured(t, session, "wiki_list_tags", map[string]any{"q": "mc", "limit": float64(10)})
 	httpTags := getHTTPValue(t, router, "/api/tags?q=mc&limit=10")
-	assertJSONEqual(t, "list_tags", tags["tags"], httpTags)
-	recordHTTPMCPParity(t, "list_tags", "GET /api/tags")
+	assertJSONEqual(t, "wiki_list_tags", tags["tags"], httpTags)
+	recordHTTPMCPParity(t, "wiki_list_tags", "GET /api/tags")
 	if !arrayContainsObjectField(tags["tags"], "tag", "mcp") {
 		t.Fatalf("list_tags = %#v, want mcp tag", tags["tags"])
 	}
-	tagPages := callToolStructured(t, session, "get_pages_by_tags", map[string]any{"tags": []any{"mcp"}})
+	tagPages := callToolStructured(t, session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{"mcp"}})
 	httpTagPages := getHTTPValue(t, router, "/api/tags/pages?tags=mcp")
-	assertJSONEqual(t, "get_pages_by_tags", tagPages["pages"], httpTagPages)
-	recordHTTPMCPParity(t, "get_pages_by_tags", "GET /api/tags/pages")
+	assertJSONEqual(t, "wiki_get_pages_by_tags", tagPages["pages"], httpTagPages)
+	recordHTTPMCPParity(t, "wiki_get_pages_by_tags", "GET /api/tags/pages")
 	if !arrayContainsObjectField(tagPages["pages"], "id", sourceID) {
 		t.Fatalf("get_pages_by_tags = %#v, want source page", tagPages["pages"])
 	}
-	blankTagsErr := callToolError(t, session, "get_pages_by_tags", map[string]any{"tags": []any{" "}})
+	blankTagsErr := callToolError(t, session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{" "}})
 	if !strings.Contains(blankTagsErr, wikitags.ErrCodeTagsMissingParam) && !strings.Contains(strings.ToLower(blankTagsErr), "tags") {
 		t.Fatalf("MCP blank get_pages_by_tags error = %q, want tags missing detail", blankTagsErr)
 	}
@@ -1437,26 +3104,26 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		t.Fatalf("HTTP blank get_pages_by_tags error = %q, want %s", blankTagsHTTP, wikitags.ErrCodeTagsMissingParam)
 	}
 
-	keys := callToolStructured(t, session, "list_property_keys", map[string]any{"q": "sta", "limit": float64(10)})
+	keys := callToolStructured(t, session, "wiki_list_property_keys", map[string]any{"q": "sta", "limit": float64(10)})
 	httpKeys := getHTTPValue(t, router, "/api/properties?q=sta&limit=10")
-	assertJSONEqual(t, "list_property_keys", keys["keys"], httpKeys)
-	recordHTTPMCPParity(t, "list_property_keys", "GET /api/properties")
+	assertJSONEqual(t, "wiki_list_property_keys", keys["keys"], httpKeys)
+	recordHTTPMCPParity(t, "wiki_list_property_keys", "GET /api/properties")
 	if !arrayContainsObjectField(keys["keys"], "key", "status") {
 		t.Fatalf("list_property_keys = %#v, want status key", keys["keys"])
 	}
-	propertyPages := callToolStructured(t, session, "get_pages_by_property", map[string]any{"key": "status", "value": "draft"})
+	propertyPages := callToolStructured(t, session, "wiki_get_pages_by_property", map[string]any{"key": "status", "value": "draft"})
 	httpPropertyPages := getHTTPValue(t, router, "/api/properties/pages?key=status&value=draft")
-	assertJSONEqual(t, "get_pages_by_property", propertyPages["pages"], httpPropertyPages)
-	recordHTTPMCPParity(t, "get_pages_by_property", "GET /api/properties/pages")
+	assertJSONEqual(t, "wiki_get_pages_by_property", propertyPages["pages"], httpPropertyPages)
+	recordHTTPMCPParity(t, "wiki_get_pages_by_property", "GET /api/properties/pages")
 	if !arrayContainsObjectField(propertyPages["pages"], "id", sourceID) {
 		t.Fatalf("get_pages_by_property = %#v, want source page", propertyPages["pages"])
 	}
 
-	links := callToolStructured(t, session, "get_link_status", map[string]any{"pageId": sourceID})
+	links := callToolStructured(t, session, "wiki_get_link_status", map[string]any{"pageId": sourceID})
 	linkStatus := nestedMap(t, links, "status")
 	httpLinkStatus := getHTTPMap(t, router, "/api/pages/"+sourceID+"/links")
-	assertJSONEqual(t, "get_link_status", linkStatus, httpLinkStatus)
-	recordHTTPMCPParity(t, "get_link_status", "GET /api/pages/:id/links")
+	assertJSONEqual(t, "wiki_get_link_status", linkStatus, httpLinkStatus)
+	recordHTTPMCPParity(t, "wiki_get_link_status", "GET /api/pages/:id/links")
 	counts := nestedMap(t, linkStatus, "counts")
 	if counts["outgoings"] != float64(1) {
 		t.Fatalf("link outgoing count = %v, want 1; target=%s", counts["outgoings"], target["id"])
@@ -1466,26 +3133,26 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	}
 
 	targetID := stringField(t, target, "id")
-	targetStandaloneStatus := nestedMap(t, callToolStructured(t, session, "get_link_status", map[string]any{"pageId": targetID}), "status")
-	targetFromGet := callToolStructured(t, session, "get_page", map[string]any{"id": targetID})
-	assertJSONEqual(t, "get_page linkStatus", nestedMap(t, targetFromGet, "linkStatus"), targetStandaloneStatus)
+	targetStandaloneStatus := nestedMap(t, callToolStructured(t, session, "wiki_get_link_status", map[string]any{"pageId": targetID}), "status")
+	targetFromGet := callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID})
+	assertJSONEqual(t, "wiki_get_page linkStatus", nestedMap(t, targetFromGet, "linkStatus"), targetStandaloneStatus)
 	if !arrayContainsObjectField(nestedMap(t, targetFromGet, "linkStatus")["backlinks"], "from_page_id", sourceID) {
-		t.Fatalf("get_page linkStatus backlinks = %#v, want backlink from source %s", nestedMap(t, targetFromGet, "linkStatus")["backlinks"], sourceID)
+		t.Fatalf("wiki_get_page linkStatus backlinks = %#v, want backlink from source %s", nestedMap(t, targetFromGet, "linkStatus")["backlinks"], sourceID)
 	}
 
-	targetFromPath := callToolStructured(t, session, "get_page_by_path", map[string]any{"path": "target"})
+	targetFromPath := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "target"})
 	assertJSONEqual(t, "get_page_by_path linkStatus", nestedMap(t, targetFromPath, "linkStatus"), targetStandaloneStatus)
 
-	sourceFromGet := callToolStructured(t, session, "get_page", map[string]any{"id": sourceID})
-	assertJSONEqual(t, "get_page source linkStatus", nestedMap(t, sourceFromGet, "linkStatus"), linkStatus)
+	sourceFromGet := callToolStructured(t, session, "wiki_get_page", map[string]any{"id": sourceID})
+	assertJSONEqual(t, "wiki_get_page source linkStatus", nestedMap(t, sourceFromGet, "linkStatus"), linkStatus)
 
-	sourceFromPath := callToolStructured(t, session, "get_page_by_path", map[string]any{"path": "source"})
+	sourceFromPath := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "source"})
 	assertJSONEqual(t, "get_page_by_path source linkStatus", nestedMap(t, sourceFromPath, "linkStatus"), linkStatus)
 
 	assetContent := []byte("asset content")
 	cssContent := []byte("body { color: rebeccapurple; }\n")
 	httpAssetContent := []byte("asset content from http")
-	uploaded := callToolStructured(t, session, "upload_asset", map[string]any{
+	uploaded := callToolStructured(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        sourceID,
 		"filename":      "note.txt",
 		"contentBase64": base64.StdEncoding.EncodeToString(assetContent),
@@ -1494,9 +3161,9 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		t.Fatalf("upload_asset file = %v, want note asset URL", uploaded["file"])
 	}
 	httpUploaded := uploadHTTPAsset(t, router, sourceID, "http-note.txt", httpAssetContent, http.StatusCreated)
-	assertAssetURLResult(t, "upload_asset", uploaded, "file", sourceID)
+	assertAssetURLResult(t, "wiki_upload_asset", uploaded, "file", sourceID)
 	assertAssetURLResult(t, "HTTP upload asset", httpUploaded, "file", sourceID)
-	asset := callToolStructured(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"})
+	asset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"})
 	if asset["filename"] != "note.txt" {
 		t.Fatalf("get_asset filename = %v, want note.txt", asset["filename"])
 	}
@@ -1510,7 +3177,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	if !strings.HasPrefix(httpNoteContentType, asset["mimeType"].(string)) {
 		t.Fatalf("HTTP note content type = %q, want MCP mime type %q", httpNoteContentType, asset["mimeType"])
 	}
-	httpAsset := callToolStructured(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"})
+	httpAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"})
 	if got := httpAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(httpAssetContent) {
 		t.Fatalf("MCP read of HTTP-uploaded asset = %v, want HTTP uploaded content", got)
 	}
@@ -1521,7 +3188,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	if !strings.HasPrefix(httpAssetContentType, httpAsset["mimeType"].(string)) {
 		t.Fatalf("HTTP-uploaded content type = %q, want MCP mime type %q", httpAssetContentType, httpAsset["mimeType"])
 	}
-	listed := callToolStructured(t, session, "list_assets", map[string]any{"pageId": sourceID})
+	listed := callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	if !arrayContainsString(listed["files"], "/assets/"+sourceID+"/note.txt") {
 		t.Fatalf("list_assets = %#v, want uploaded note", listed["files"])
 	}
@@ -1529,16 +3196,16 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	if !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/note.txt") {
 		t.Fatalf("HTTP asset list = %#v, want uploaded note", httpListed["files"])
 	}
-	assertJSONEqual(t, "list_assets", listed, httpListed)
-	recordHTTPMCPParity(t, "upload_asset", "POST /api/pages/:id/assets")
-	recordHTTPMCPParity(t, "list_assets", "GET /api/pages/:id/assets")
-	recordHTTPMCPParity(t, "get_asset", "GET /assets/:pageId/:filename")
-	callToolStructured(t, session, "upload_asset", map[string]any{
+	assertJSONEqual(t, "wiki_list_assets", listed, httpListed)
+	recordHTTPMCPParity(t, "wiki_upload_asset", "POST /api/pages/:id/assets")
+	recordHTTPMCPParity(t, "wiki_list_assets", "GET /api/pages/:id/assets")
+	recordHTTPMCPParity(t, "wiki_get_asset", "GET /assets/:pageId/:filename")
+	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        sourceID,
 		"filename":      "style.css",
 		"contentBase64": base64.StdEncoding.EncodeToString(cssContent),
 	})
-	cssAsset := callToolStructured(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "style.css"})
+	cssAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "style.css"})
 	httpCSSBody, httpCSSContentType := getHTTPAssetWithContentType(t, router, sourceID, "style.css")
 	if httpCSSBody != string(cssContent) {
 		t.Fatalf("HTTP CSS asset content = %q, want uploaded CSS", httpCSSBody)
@@ -1547,7 +3214,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		t.Fatalf("HTTP CSS asset content type = %q, want MCP mime type %q", httpCSSContentType, cssAsset["mimeType"])
 	}
 
-	renamed := callToolStructured(t, session, "rename_asset", map[string]any{
+	renamed := callToolStructured(t, session, "wiki_rename_asset", map[string]any{
 		"pageId":      sourceID,
 		"oldFilename": "note.txt",
 		"newFilename": "renamed.txt",
@@ -1559,9 +3226,9 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		"old_filename": "http-note.txt",
 		"new_filename": "http-renamed.txt",
 	}, http.StatusOK)
-	assertAssetURLResult(t, "rename_asset", renamed, "url", sourceID)
+	assertAssetURLResult(t, "wiki_rename_asset", renamed, "url", sourceID)
 	assertAssetURLResult(t, "HTTP rename_asset", httpRenamed, "url", sourceID)
-	renamedAsset := callToolStructured(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
+	renamedAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
 	if got := renamedAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(assetContent) {
 		t.Fatalf("MCP renamed asset content = %v, want original MCP asset content", got)
 	}
@@ -1572,33 +3239,33 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	if !strings.HasPrefix(httpRenamedContentType, renamedAsset["mimeType"].(string)) {
 		t.Fatalf("HTTP renamed content type = %q, want MCP mime type %q", httpRenamedContentType, renamedAsset["mimeType"])
 	}
-	assertMCPToolErrorContains(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/note.txt", http.StatusNotFound)
-	httpRenamedAsset := callToolStructured(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
+	httpRenamedAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
 	if got := httpRenamedAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(httpAssetContent) {
 		t.Fatalf("MCP read of HTTP-renamed asset content = %v, want HTTP asset content", got)
 	}
 	if got := getHTTPAsset(t, router, sourceID, "http-renamed.txt"); got != string(httpAssetContent) {
 		t.Fatalf("HTTP-renamed asset content = %q, want HTTP asset content", got)
 	}
-	assertMCPToolErrorContains(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-note.txt", http.StatusNotFound)
 	httpListed = getHTTPAssets(t, router, sourceID)
-	listed = callToolStructured(t, session, "list_assets", map[string]any{"pageId": sourceID})
+	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	assertJSONEqual(t, "list_assets after rename", listed, httpListed)
 	if !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/renamed.txt") || !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/http-renamed.txt") {
 		t.Fatalf("HTTP asset list after rename = %#v, want renamed assets", httpListed["files"])
 	}
-	recordHTTPMCPParity(t, "rename_asset", "PUT /api/pages/:id/assets/rename")
-	mcpDeleted := callToolStructured(t, session, "delete_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
+	recordHTTPMCPParity(t, "wiki_rename_asset", "PUT /api/pages/:id/assets/rename")
+	mcpDeleted := callToolStructured(t, session, "wiki_delete_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
 	httpDeletedBody := deleteHTTPStatus(t, router, "/api/pages/"+sourceID+"/assets/http-renamed.txt", http.StatusOK)
 	httpDeleted := decodeJSONMap(t, "HTTP delete_asset", []byte(httpDeletedBody))
-	assertJSONEqual(t, "delete_asset", mcpDeleted, httpDeleted)
-	assertMCPToolErrorContains(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"}, "asset")
+	assertJSONEqual(t, "wiki_delete_asset", mcpDeleted, httpDeleted)
+	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/renamed.txt", http.StatusNotFound)
-	assertMCPToolErrorContains(t, session, "get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-renamed.txt", http.StatusNotFound)
-	listed = callToolStructured(t, session, "list_assets", map[string]any{"pageId": sourceID})
+	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	if arrayContainsString(listed["files"], "/assets/"+sourceID+"/renamed.txt") {
 		t.Fatalf("delete_asset left renamed asset in list: %#v", listed["files"])
 	}
@@ -1607,7 +3274,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	if arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/renamed.txt") || arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/http-renamed.txt") {
 		t.Fatalf("HTTP asset list after delete = %#v, want renamed assets absent", httpListed["files"])
 	}
-	recordHTTPMCPParity(t, "delete_asset", "DELETE /api/pages/:id/assets/:name")
+	recordHTTPMCPParity(t, "wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")
 }
 
 func TestLocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup(t *testing.T) {
@@ -1622,7 +3289,7 @@ func TestLocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup(t *te
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	errText := callToolError(t, session, "upload_asset", map[string]any{
+	errText := callToolError(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        "missing-page",
 		"filename":      "too-large.txt",
 		"contentBase64": base64.StdEncoding.EncodeToString([]byte("abc")),
@@ -1644,13 +3311,13 @@ func TestLocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload(t *tes
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	page := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	page := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Asset Payload",
 		"slug":  "asset-payload",
 		"kind":  "page",
 	}), "page")
 
-	errText := callToolError(t, session, "upload_asset", map[string]any{
+	errText := callToolError(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        stringField(t, page, "id"),
 		"filename":      "bad.txt",
 		"contentBase64": "not base64 %",
@@ -1680,7 +3347,7 @@ func TestLocalMCPProtocol_GetAssetUsesPageBoundaryValidation(t *testing.T) {
 		t.Fatalf("write orphan asset: %v", err)
 	}
 
-	errText := callToolError(t, session, "get_asset", map[string]any{"pageId": "missing-page", "filename": "orphan.txt"})
+	errText := callToolError(t, session, "wiki_get_asset", map[string]any{"pageId": "missing-page", "filename": "orphan.txt"})
 	if !strings.Contains(errText, "asset_page_not_found") && !strings.Contains(strings.ToLower(errText), "page not found") {
 		t.Fatalf("orphan get_asset error = %q, want page boundary validation", errText)
 	}
@@ -1704,7 +3371,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	missingLatestErr := callToolError(t, session, "get_latest_revision", map[string]any{"pageId": "missing-page"})
+	missingLatestErr := callToolError(t, session, "wiki_get_latest_revision", map[string]any{"pageId": "missing-page"})
 	if !strings.Contains(missingLatestErr, "revision_not_found") && !strings.Contains(strings.ToLower(missingLatestErr), "revision") {
 		t.Fatalf("missing latest revision error = %q, want revision_not_found detail", missingLatestErr)
 	}
@@ -1712,9 +3379,9 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{name: "get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision"}},
-		{name: "compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": "target-revision"}},
-		{name: "get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision", "assetName": "missing.txt"}},
+		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision"}},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": "target-revision"}},
+		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision", "assetName": "missing.txt"}},
 	} {
 		errText := callToolError(t, session, tc.name, tc.args)
 		lowerErr := strings.ToLower(errText)
@@ -1731,28 +3398,28 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		wantCode string
 		wantText string
 	}{
-		{name: "get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantText: "revision id is required"},
-		{name: "get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": " ", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantText: "revision id is required"},
-		{name: "compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": " ", "targetRevisionId": "target-revision"}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantText: "revision compare request is invalid"},
-		{name: "compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantText: "revision compare request is invalid"},
+		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantText: "revision id is required"},
+		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": " ", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantText: "revision id is required"},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": " ", "targetRevisionId": "target-revision"}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantText: "revision compare request is invalid"},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantText: "revision compare request is invalid"},
 	} {
 		errText := callToolError(t, session, tc.name, tc.args)
 		assertErrorContainsAny(t, tc.name+" blank revision input", errText, tc.wantCode, tc.wantText)
 	}
 
-	target := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	target := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Target",
 		"slug":  "target",
 		"kind":  "page",
 	}), "page")
 	targetID := stringField(t, target, "id")
-	ref := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	ref := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Ref",
 		"slug":  "ref",
 		"kind":  "page",
 	}), "page")
 	refID := stringField(t, ref, "id")
-	callToolStructured(t, session, "update_page", map[string]any{
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      refID,
 		"version": stringField(t, ref, "version"),
 		"title":   "Ref",
@@ -1760,14 +3427,14 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"content": "[Target](/target)",
 	})
 
-	first := nestedMap(t, callToolStructured(t, session, "update_page", map[string]any{
+	first := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      targetID,
 		"version": stringField(t, target, "version"),
 		"title":   "Target",
 		"slug":    "target",
 		"content": "First content",
 	}), "page")
-	second := nestedMap(t, callToolStructured(t, session, "update_page", map[string]any{
+	second := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      targetID,
 		"version": stringField(t, first, "version"),
 		"title":   "Target",
@@ -1781,50 +3448,50 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"content": "Third content from HTTP",
 	})
 
-	limitErr := callToolError(t, session, "list_revisions", map[string]any{"pageId": targetID, "limit": float64(201)})
+	limitErr := callToolError(t, session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(201)})
 	if !strings.Contains(limitErr, "revision_invalid_limit") && !strings.Contains(strings.ToLower(limitErr), "limit") {
-		t.Fatalf("invalid list_revisions limit error = %q, want invalid limit detail", limitErr)
+		t.Fatalf("invalid wiki_list_revisions limit error = %q, want invalid limit detail", limitErr)
 	}
 
-	revisions := callToolStructured(t, session, "list_revisions", map[string]any{"pageId": targetID, "limit": float64(20)})
+	revisions := callToolStructured(t, session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(20)})
 	httpRevisions := getHTTPMap(t, router, "/api/pages/"+targetID+"/revisions?limit=20")
-	assertJSONEqual(t, "list_revisions", revisions, httpRevisions)
-	recordHTTPMCPParity(t, "list_revisions", "GET /api/pages/:id/revisions")
+	assertJSONEqual(t, "wiki_list_revisions", revisions, httpRevisions)
+	recordHTTPMCPParity(t, "wiki_list_revisions", "GET /api/pages/:id/revisions")
 	revisionItems, ok := revisions["revisions"].([]any)
 	if !ok || len(revisionItems) < 2 {
-		t.Fatalf("list_revisions = %#v, want at least two revisions", revisions["revisions"])
+		t.Fatalf("wiki_list_revisions = %#v, want at least two revisions", revisions["revisions"])
 	}
 	firstRevision := revisionItems[0].(map[string]any)
 	if _, exists := firstRevision["page_id"]; exists {
-		t.Fatalf("list_revisions returned raw snake_case revision: %#v", firstRevision)
+		t.Fatalf("wiki_list_revisions returned raw snake_case revision: %#v", firstRevision)
 	}
 	if firstRevision["pageId"] != targetID {
-		t.Fatalf("list_revisions pageId = %v, want %q", firstRevision["pageId"], targetID)
+		t.Fatalf("wiki_list_revisions pageId = %v, want %q", firstRevision["pageId"], targetID)
 	}
-	latest := callToolStructured(t, session, "get_latest_revision", map[string]any{"pageId": targetID})
+	latest := callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": targetID})
 	latestRevision := nestedMap(t, latest, "revision")
 	httpLatestRevision := getHTTPLatestRevision(t, router, targetID)
-	assertJSONEqual(t, "get_latest_revision", latestRevision, httpLatestRevision)
-	recordHTTPMCPParity(t, "get_latest_revision", "GET /api/pages/:id/revisions/latest")
+	assertJSONEqual(t, "wiki_get_latest_revision", latestRevision, httpLatestRevision)
+	recordHTTPMCPParity(t, "wiki_get_latest_revision", "GET /api/pages/:id/revisions/latest")
 	latestRevisionID := stringField(t, latestRevision, "id")
 	if _, exists := latestRevision["page_id"]; exists {
-		t.Fatalf("get_latest_revision returned raw snake_case revision: %#v", latestRevision)
+		t.Fatalf("wiki_get_latest_revision returned raw snake_case revision: %#v", latestRevision)
 	}
 	if latestRevision["pageId"] != targetID {
-		t.Fatalf("get_latest_revision pageId = %v, want %q", latestRevision["pageId"], targetID)
+		t.Fatalf("wiki_get_latest_revision pageId = %v, want %q", latestRevision["pageId"], targetID)
 	}
-	snapshot := callToolStructured(t, session, "get_revision", map[string]any{"pageId": targetID, "revisionId": latestRevisionID})
+	snapshot := callToolStructured(t, session, "wiki_get_revision", map[string]any{"pageId": targetID, "revisionId": latestRevisionID})
 	httpSnapshotAtLatest := getHTTPRevision(t, router, targetID, latestRevisionID)
-	assertJSONEqual(t, "get_revision", snapshot, httpSnapshotAtLatest)
-	recordHTTPMCPParity(t, "get_revision", "GET /api/pages/:id/revisions/:revisionId")
+	assertJSONEqual(t, "wiki_get_revision", snapshot, httpSnapshotAtLatest)
+	recordHTTPMCPParity(t, "wiki_get_revision", "GET /api/pages/:id/revisions/:revisionId")
 	if snapshot["content"] != "Third content from HTTP" {
-		t.Fatalf("get_revision content = %v, want HTTP-updated content", snapshot["content"])
+		t.Fatalf("wiki_get_revision content = %v, want HTTP-updated content", snapshot["content"])
 	}
 	snapshotRevision := nestedMap(t, snapshot, "revision")
 	if snapshotRevision["pageId"] != targetID {
-		t.Fatalf("get_revision revision.pageId = %v, want %q", snapshotRevision["pageId"], targetID)
+		t.Fatalf("wiki_get_revision revision.pageId = %v, want %q", snapshotRevision["pageId"], targetID)
 	}
-	mcpAfterHTTP := nestedMap(t, callToolStructured(t, session, "update_page", map[string]any{
+	mcpAfterHTTP := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      targetID,
 		"version": stringField(t, httpUpdated, "version"),
 		"title":   "Target",
@@ -1842,41 +3509,41 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	}
 
 	olderRevision := revisionItems[1].(map[string]any)
-	comparison := callToolStructured(t, session, "compare_revisions", map[string]any{
+	comparison := callToolStructured(t, session, "wiki_compare_revisions", map[string]any{
 		"pageId":           targetID,
 		"baseRevisionId":   stringField(t, olderRevision, "id"),
 		"targetRevisionId": httpLatestRevisionID,
 	})
 	httpComparison := getHTTPMap(t, router, "/api/pages/"+targetID+"/revisions/compare?base="+url.QueryEscape(stringField(t, olderRevision, "id"))+"&target="+url.QueryEscape(httpLatestRevisionID))
-	assertJSONEqual(t, "compare_revisions", comparison, httpComparison)
-	recordHTTPMCPParity(t, "compare_revisions", "GET /api/pages/:id/revisions/compare")
+	assertJSONEqual(t, "wiki_compare_revisions", comparison, httpComparison)
+	recordHTTPMCPParity(t, "wiki_compare_revisions", "GET /api/pages/:id/revisions/compare")
 	if comparison["contentChanged"] != true {
-		t.Fatalf("compare_revisions contentChanged = %v, want true", comparison["contentChanged"])
+		t.Fatalf("wiki_compare_revisions contentChanged = %v, want true", comparison["contentChanged"])
 	}
 
 	assetContent := []byte("body { color: green; }\n")
-	callToolStructured(t, session, "upload_asset", map[string]any{
+	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        targetID,
 		"filename":      "style.css",
 		"contentBase64": base64.StdEncoding.EncodeToString(assetContent),
 	})
-	assetRevision := nestedMap(t, callToolStructured(t, session, "get_latest_revision", map[string]any{"pageId": targetID}), "revision")
+	assetRevision := nestedMap(t, callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": targetID}), "revision")
 	assetRevisionID := stringField(t, assetRevision, "id")
 	stripRevisionAssetManifestMIME(t, storageDir, stringField(t, assetRevision, "assetManifestHash"), "style.css")
-	revisionAsset := callToolStructured(t, session, "get_revision_asset", map[string]any{
+	revisionAsset := callToolStructured(t, session, "wiki_get_revision_asset", map[string]any{
 		"pageId":     targetID,
 		"revisionId": assetRevisionID,
 		"assetName":  "style.css",
 	})
 	if revisionAsset["contentBase64"] != base64.StdEncoding.EncodeToString(assetContent) {
-		t.Fatalf("get_revision_asset content = %v, want uploaded asset", revisionAsset["contentBase64"])
+		t.Fatalf("wiki_get_revision_asset content = %v, want uploaded asset", revisionAsset["contentBase64"])
 	}
 	httpRevisionAssetBody, httpRevisionAssetContentType := getHTTPRevisionAsset(t, router, targetID, assetRevisionID, "style.css")
 	if httpRevisionAssetBody != string(assetContent) {
 		t.Fatalf("HTTP revision asset body = %q, want uploaded asset", httpRevisionAssetBody)
 	}
 	if revisionAsset["mimeType"] != "text/css; charset=utf-8" {
-		t.Fatalf("get_revision_asset missing-manifest MIME = %v, want CSS extension fallback", revisionAsset["mimeType"])
+		t.Fatalf("wiki_get_revision_asset missing-manifest MIME = %v, want CSS extension fallback", revisionAsset["mimeType"])
 	}
 	if !strings.HasPrefix(httpRevisionAssetContentType, revisionAsset["mimeType"].(string)) {
 		t.Fatalf("HTTP revision asset content type = %q, want MCP mime type %q", httpRevisionAssetContentType, revisionAsset["mimeType"])
@@ -1886,7 +3553,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		t.Fatalf("make revision asset blob unreadable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(assetBlobPath, 0o644) })
-	unreadableAssetErr := callToolError(t, session, "get_revision_asset", map[string]any{
+	unreadableAssetErr := callToolError(t, session, "wiki_get_revision_asset", map[string]any{
 		"pageId":     targetID,
 		"revisionId": assetRevisionID,
 		"assetName":  "style.css",
@@ -1899,50 +3566,50 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	if err := os.Chmod(assetBlobPath, 0o644); err != nil {
 		t.Fatalf("restore revision asset blob permissions: %v", err)
 	}
-	recordHTTPMCPParity(t, "get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
+	recordHTTPMCPParity(t, "wiki_get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
 
-	invalidRefactorKindErr := callToolError(t, session, "preview_page_refactor", map[string]any{
+	invalidRefactorKindErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  "copy",
 		"title": "Target",
 		"slug":  "target-copy",
 	})
-	assertErrorContainsAny(t, "MCP invalid preview_page_refactor kind", invalidRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP invalid preview_page_refactor kind", invalidRefactorKindErr, "enum", "validating")
+	assertErrorContainsAny(t, "MCP invalid wiki_preview_page_refactor kind", invalidRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
+	assertErrorDoesNotContainAny(t, "MCP invalid wiki_preview_page_refactor kind", invalidRefactorKindErr, "enum", "validating")
 	invalidRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  "copy",
 		"title": "Target",
 		"slug":  "target-copy",
 	}, http.StatusBadRequest)
 	if !strings.Contains(invalidRefactorKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP invalid preview_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidRefactorKindHTTP)
+		t.Fatalf("HTTP invalid wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidRefactorKindHTTP)
 	}
-	paddedRefactorKindErr := callToolError(t, session, "preview_page_refactor", map[string]any{
+	paddedRefactorKindErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  " rename ",
 		"title": "Target",
 		"slug":  "target-padded",
 	})
-	assertErrorContainsAny(t, "MCP padded preview_page_refactor kind", paddedRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP padded preview_page_refactor kind", paddedRefactorKindErr, "enum", "validating")
+	assertErrorContainsAny(t, "MCP padded wiki_preview_page_refactor kind", paddedRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
+	assertErrorDoesNotContainAny(t, "MCP padded wiki_preview_page_refactor kind", paddedRefactorKindErr, "enum", "validating")
 	paddedRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  " rename ",
 		"title": "Target",
 		"slug":  "target-padded",
 	}, http.StatusBadRequest)
 	if !strings.Contains(paddedRefactorKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP padded preview_page_refactor kind error = %q, want page_invalid_refactor_kind", paddedRefactorKindHTTP)
+		t.Fatalf("HTTP padded wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", paddedRefactorKindHTTP)
 	}
-	currentForInvalidApply := nestedMap(t, callToolStructured(t, session, "get_page", map[string]any{"id": targetID}), "page")
-	invalidApplyKindErr := callToolError(t, session, "apply_page_refactor", map[string]any{
+	currentForInvalidApply := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID}), "page")
+	invalidApplyKindErr := callToolError(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":      targetID,
 		"version": stringField(t, currentForInvalidApply, "version"),
 		"kind":    "copy",
 		"title":   "Target",
 		"slug":    "target-copy",
 	})
-	assertErrorContainsAny(t, "MCP invalid apply_page_refactor kind", invalidApplyKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP invalid apply_page_refactor kind", invalidApplyKindErr, "enum", "validating")
+	assertErrorContainsAny(t, "MCP invalid wiki_apply_page_refactor kind", invalidApplyKindErr, wikipages.ErrCodePageInvalidRefactorKind, "invalid refactor kind")
+	assertErrorDoesNotContainAny(t, "MCP invalid wiki_apply_page_refactor kind", invalidApplyKindErr, "enum", "validating")
 	invalidApplyKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/apply", map[string]any{
 		"version": stringField(t, currentForInvalidApply, "version"),
 		"kind":    "copy",
@@ -1950,48 +3617,48 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"slug":    "target-copy",
 	}, http.StatusBadRequest)
 	if !strings.Contains(invalidApplyKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP invalid apply_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidApplyKindHTTP)
+		t.Fatalf("HTTP invalid wiki_apply_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidApplyKindHTTP)
 	}
-	whitespaceRefactorParentErr := callToolError(t, session, "preview_page_refactor", map[string]any{
+	whitespaceRefactorParentErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":       targetID,
 		"kind":     "move",
 		"parentId": " ",
 	})
-	assertErrorContainsAny(t, "MCP preview_page_refactor whitespace parentId", whitespaceRefactorParentErr, "page_invalid_parent_id", "parent")
+	assertErrorContainsAny(t, "MCP wiki_preview_page_refactor whitespace parentId", whitespaceRefactorParentErr, "page_invalid_parent_id", "parent")
 	whitespaceRefactorParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":     "move",
 		"parentId": " ",
 	}, http.StatusBadRequest)
 	if !strings.Contains(whitespaceRefactorParentHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP preview_page_refactor whitespace parentId error = %q, want page_invalid_parent_id", whitespaceRefactorParentHTTP)
+		t.Fatalf("HTTP wiki_preview_page_refactor whitespace parentId error = %q, want page_invalid_parent_id", whitespaceRefactorParentHTTP)
 	}
-	refactorPaddedParent := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	refactorPaddedParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Refactor Padded Parent",
 		"slug":  "refactor-padded-parent",
 		"kind":  "section",
 	}), "page")
-	refactorPaddedTarget := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	refactorPaddedTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Refactor Padded Target",
 		"slug":  "refactor-padded-target",
 		"kind":  "page",
 	}), "page")
-	paddedApplyParentErr := callToolError(t, session, "apply_page_refactor", map[string]any{
+	paddedApplyParentErr := callToolError(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":       stringField(t, refactorPaddedTarget, "id"),
 		"version":  stringField(t, refactorPaddedTarget, "version"),
 		"kind":     "move",
 		"parentId": " " + stringField(t, refactorPaddedParent, "id") + " ",
 	})
-	assertErrorContainsAny(t, "MCP apply_page_refactor padded parentId", paddedApplyParentErr, "page_invalid_parent_id", "parent")
+	assertErrorContainsAny(t, "MCP wiki_apply_page_refactor padded parentId", paddedApplyParentErr, "page_invalid_parent_id", "parent")
 	paddedApplyParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+stringField(t, refactorPaddedTarget, "id")+"/refactor/apply", map[string]any{
 		"version":  stringField(t, refactorPaddedTarget, "version"),
 		"kind":     "move",
 		"parentId": " " + stringField(t, refactorPaddedParent, "id") + " ",
 	}, http.StatusBadRequest)
 	if !strings.Contains(paddedApplyParentHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP apply_page_refactor padded parentId error = %q, want page_invalid_parent_id", paddedApplyParentHTTP)
+		t.Fatalf("HTTP wiki_apply_page_refactor padded parentId error = %q, want page_invalid_parent_id", paddedApplyParentHTTP)
 	}
 
-	preview := callToolStructured(t, session, "preview_page_refactor", map[string]any{
+	preview := callToolStructured(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  "rename",
 		"title": "Target",
@@ -2002,14 +3669,14 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"title": "Target",
 		"slug":  "target-renamed",
 	}, http.StatusOK)
-	assertJSONEqual(t, "preview_page_refactor", preview, httpPreview)
-	recordHTTPMCPParity(t, "preview_page_refactor", "POST /api/pages/:id/refactor/preview")
+	assertJSONEqual(t, "wiki_preview_page_refactor", preview, httpPreview)
+	recordHTTPMCPParity(t, "wiki_preview_page_refactor", "POST /api/pages/:id/refactor/preview")
 	counts := nestedMap(t, preview, "counts")
 	if counts["affectedPages"] != float64(1) {
 		t.Fatalf("preview affectedPages = %v, want 1", counts["affectedPages"])
 	}
 
-	staleRefactor := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	staleRefactor := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Stale Refactor",
 		"slug":  "stale-refactor",
 		"kind":  "page",
@@ -2021,7 +3688,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"slug":    "stale-refactor",
 		"content": "newer version",
 	})
-	staleRefactorErr := callToolError(t, session, "apply_page_refactor", map[string]any{
+	staleRefactorErr := callToolError(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":           staleRefactorID,
 		"version":      stringField(t, staleRefactor, "version"),
 		"kind":         "rename",
@@ -2036,19 +3703,19 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"slug":         "stale-refactor-http",
 		"rewriteLinks": true,
 	}, http.StatusConflict)
-	assertPageVersionConflictParity(t, "stale apply_page_refactor", staleRefactorErr, staleRefactorHTTP)
+	assertPageVersionConflictParity(t, "stale wiki_apply_page_refactor", staleRefactorErr, staleRefactorHTTP)
 
-	httpApplyTarget := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	httpApplyTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "HTTP Apply Target",
 		"slug":  "http-apply-target",
 		"kind":  "page",
 	}), "page")
-	httpApplyRef := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	httpApplyRef := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "HTTP Apply Ref",
 		"slug":  "http-apply-ref",
 		"kind":  "page",
 	}), "page")
-	callToolStructured(t, session, "update_page", map[string]any{
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      stringField(t, httpApplyRef, "id"),
 		"version": stringField(t, httpApplyRef, "version"),
 		"title":   "HTTP Apply Ref",
@@ -2062,14 +3729,14 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"slug":         "http-apply-target-renamed",
 		"rewriteLinks": true,
 	}, http.StatusOK)
-	assertPageState(t, "HTTP apply_page_refactor success", httpAppliedViaRoute, stringField(t, httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", "")
+	assertPageState(t, "HTTP wiki_apply_page_refactor success", httpAppliedViaRoute, stringField(t, httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", "")
 	httpApplyRefAfter := getHTTPPageByPath(t, router, "http-apply-ref")
 	if httpApplyRefAfter["content"] != "[HTTP Apply Target](/http-apply-target-renamed)" {
 		t.Fatalf("HTTP apply ref content = %v, want rewritten link", httpApplyRefAfter["content"])
 	}
 
-	currentTarget := nestedMap(t, callToolStructured(t, session, "get_page", map[string]any{"id": targetID}), "page")
-	applied := nestedMap(t, callToolStructured(t, session, "apply_page_refactor", map[string]any{
+	currentTarget := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID}), "page")
+	applied := nestedMap(t, callToolStructured(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":           targetID,
 		"version":      stringField(t, currentTarget, "version"),
 		"kind":         "rename",
@@ -2078,34 +3745,34 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"rewriteLinks": true,
 	}), "page")
 	if applied["slug"] != "target-renamed" {
-		t.Fatalf("apply_page_refactor slug = %v, want target-renamed", applied["slug"])
+		t.Fatalf("wiki_apply_page_refactor slug = %v, want target-renamed", applied["slug"])
 	}
 	httpApplied := getHTTPPageByID(t, router, targetID)
-	assertJSONEqual(t, "apply_page_refactor", applied, httpApplied)
-	assertPageState(t, "MCP apply_page_refactor success", applied, targetID, "Target", "target-renamed", "target-renamed", "page", "")
+	assertJSONEqual(t, "wiki_apply_page_refactor", applied, httpApplied)
+	assertPageState(t, "MCP wiki_apply_page_refactor success", applied, targetID, "Target", "target-renamed", "target-renamed", "page", "")
 	refHTTP := getHTTPPageByPath(t, router, "ref")
 	if refHTTP["content"] != "[Target](/target-renamed)" {
 		t.Fatalf("ref content after refactor = %v, want rewritten link", refHTTP["content"])
 	}
-	recordHTTPMCPParity(t, "apply_page_refactor", "POST /api/pages/:id/refactor/apply")
+	recordHTTPMCPParity(t, "wiki_apply_page_refactor", "POST /api/pages/:id/refactor/apply")
 
-	restored := nestedMap(t, callToolStructured(t, session, "restore_revision", map[string]any{
+	restored := nestedMap(t, callToolStructured(t, session, "wiki_restore_revision", map[string]any{
 		"pageId":     targetID,
 		"revisionId": latestRevisionID,
 	}), "page")
 	if restored["content"] != "Third content from HTTP" {
-		t.Fatalf("restore_revision content = %v, want HTTP-updated content", restored["content"])
+		t.Fatalf("wiki_restore_revision content = %v, want HTTP-updated content", restored["content"])
 	}
 	httpRestored := getHTTPPageByID(t, router, targetID)
-	assertJSONEqual(t, "restore_revision", restored, httpRestored)
+	assertJSONEqual(t, "wiki_restore_revision", restored, httpRestored)
 
-	mcpRestoreMeta := nestedMap(t, callToolStructured(t, session, "create_page", map[string]any{
+	mcpRestoreMeta := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "MCP Restore Metadata",
 		"slug":  "mcp-restore-metadata",
 		"kind":  "page",
 	}), "page")
 	mcpRestoreMetaID := stringField(t, mcpRestoreMeta, "id")
-	mcpRestoreMetaRevision := nestedMap(t, callToolStructured(t, session, "update_page", map[string]any{
+	mcpRestoreMetaRevision := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
 		"version": stringField(t, mcpRestoreMeta, "version"),
 		"title":   "MCP Restore Metadata",
@@ -2116,20 +3783,20 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 			"status": "archived",
 		},
 	}), "page")
-	mcpRestoreMetaLatest := nestedMap(t, callToolStructured(t, session, "get_latest_revision", map[string]any{"pageId": mcpRestoreMetaID}), "revision")
-	callToolStructured(t, session, "update_page", map[string]any{
+	mcpRestoreMetaLatest := nestedMap(t, callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": mcpRestoreMetaID}), "revision")
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
 		"version": stringField(t, mcpRestoreMetaRevision, "version"),
 		"title":   "MCP Restore Metadata",
 		"slug":    "mcp-restore-metadata",
 		"content": "current revision\n",
 	})
-	mcpRestoredMeta := nestedMap(t, callToolStructured(t, session, "restore_revision", map[string]any{
+	mcpRestoredMeta := nestedMap(t, callToolStructured(t, session, "wiki_restore_revision", map[string]any{
 		"pageId":     mcpRestoreMetaID,
 		"revisionId": stringField(t, mcpRestoreMetaLatest, "id"),
 	}), "page")
 	assertRestoredMetadata(t, "MCP restore metadata", mcpRestoredMeta)
-	callToolStructured(t, session, "update_page", map[string]any{
+	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
 		"version": stringField(t, mcpRestoredMeta, "version"),
 		"title":   "MCP Restore Metadata",
@@ -2166,7 +3833,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	httpRestoredMeta := postHTTPJSON(t, router, "/api/pages/"+httpRestoreMetaID+"/revisions/"+stringField(t, httpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
 	assertRestoredMetadata(t, "HTTP restore metadata", httpRestoredMeta)
 	assertRestoredMetadata(t, "HTTP restore metadata persisted", getHTTPPageByID(t, router, httpRestoreMetaID))
-	recordHTTPMCPParity(t, "restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
+	recordHTTPMCPParity(t, "wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
 }
 
 func TestLocalMCPProtocol_HTTPParityCoverageRecordedForPlanTools(t *testing.T) {
@@ -2196,16 +3863,54 @@ func newLocalMCPTestWiki(t *testing.T, enableRevision bool) *wiki.Wiki {
 func newLocalMCPTestWikiWithStorage(t *testing.T, enableRevision bool) (*wiki.Wiki, string) {
 	t.Helper()
 
+	return newLocalMCPTestWikiWithOptionsAndStorage(t, wiki.WikiOptions{
+		AuthDisabled:   true,
+		EnableRevision: enableRevision,
+	})
+}
+
+func newLocalMCPTestWikiWithOptions(t *testing.T, opts wiki.WikiOptions) *wiki.Wiki {
+	t.Helper()
+
+	w, _ := newLocalMCPTestWikiWithOptionsAndStorage(t, opts)
+	return w
+}
+
+func newLocalMCPTestWikiWithOptionsAndStorage(t *testing.T, opts wiki.WikiOptions) (*wiki.Wiki, string) {
+	t.Helper()
+
 	storageDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
+	if opts.Workspace.ID == "" {
+		opts.Workspace.ID = "default"
+	}
+	if opts.Workspace.DataDir == "" {
+		opts.Workspace.DataDir = storageDir
+	}
+	if opts.Workspace.RootDir == "" {
+		opts.Workspace.RootDir = rootDir
+	}
+	if opts.AdminPassword == "" {
+		opts.AdminPassword = "admin"
+	}
+	if opts.JWTSecret == "" {
+		opts.JWTSecret = "secretkey"
+	}
+	if opts.AccessTokenTimeout == 0 {
+		opts.AccessTokenTimeout = 15 * time.Minute
+	}
+	if opts.RefreshTokenTimeout == 0 {
+		opts.RefreshTokenTimeout = 7 * 24 * time.Hour
+	}
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{ID: "default", DataDir: storageDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
-		EnableRevision:      enableRevision,
+		Workspace:           opts.Workspace,
+		AdminPassword:       opts.AdminPassword,
+		JWTSecret:           opts.JWTSecret,
+		AccessTokenTimeout:  opts.AccessTokenTimeout,
+		RefreshTokenTimeout: opts.RefreshTokenTimeout,
+		AuthDisabled:        opts.AuthDisabled,
+		EnableRevision:      opts.EnableRevision,
+		EnableWorkspaceSync: opts.EnableWorkspaceSync,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
@@ -2280,7 +3985,7 @@ func listAllTools(t *testing.T, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
 	return tools
 }
 
-func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expectedRequired, expectedAlternatives map[string][]string) {
+func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) {
 	t.Helper()
 
 	for _, tool := range tools {
@@ -2294,12 +3999,14 @@ func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expec
 	for name, props := range expected {
 		tool := findTool(t, tools, name)
 		schema := decodeToolSchema(t, "input", tool.Name, tool.InputSchema)
+		assertNoRootSchemaCombinators(t, "input", name, schema)
 		properties := schemaProperties(t, "input", tool.Name, schema)
 		gotProps := make([]string, 0, len(properties))
 		for prop := range properties {
 			gotProps = append(gotProps, prop)
 			assertSchemaPropertyHasType(t, "input", name, prop, properties[prop])
 		}
+		assertPreciseInputPropertySchemas(t, name, properties)
 		sort.Strings(gotProps)
 		assertSchemaPropertyOrderSorted(t, "input", name, schema)
 
@@ -2310,9 +4017,6 @@ func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expec
 		}
 
 		assertStringSet(t, "input schema required for "+name, schemaStringSlice(schema["required"]), expectedRequired[name])
-		if alternatives, ok := expectedAlternatives[name]; ok {
-			assertRequiredAlternatives(t, name, schema, alternatives)
-		}
 	}
 }
 
@@ -2333,6 +4037,7 @@ func assertOutputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected map[s
 			t.Fatalf("tool %s has no output schema", tool.Name)
 		}
 		schema := decodeToolSchema(t, "output", tool.Name, tool.OutputSchema)
+		assertNoRootSchemaCombinators(t, "output", name, schema)
 		properties := schemaProperties(t, "output", tool.Name, schema)
 		gotProps := make([]string, 0, len(properties))
 		for prop := range properties {
@@ -2347,8 +4052,19 @@ func assertOutputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected map[s
 		if strings.Join(gotProps, "\n") != strings.Join(wantProps, "\n") {
 			t.Fatalf("output schema for %s properties mismatch\n got: %v\nwant: %v", name, gotProps, wantProps)
 		}
-		assertStringSet(t, "output schema required for "+name, schemaStringSlice(schema["required"]), props)
+		requiredProps := outputRequiredProperties(props, toolOutputOptionalProperties[name])
+		assertStringSet(t, "output schema required for "+name, schemaStringSlice(schema["required"]), requiredProps)
 	}
+}
+
+func outputRequiredProperties(props, optional []string) []string {
+	required := make([]string, 0, len(props))
+	for _, prop := range props {
+		if !contains(optional, prop) {
+			required = append(required, prop)
+		}
+	}
+	return required
 }
 
 func findTool(t *testing.T, tools []*sdkmcp.Tool, name string) *sdkmcp.Tool {
@@ -2422,27 +4138,80 @@ func assertSchemaPropertyHasType(t *testing.T, kind, toolName, prop string, prop
 	t.Fatalf("%s schema for %s.%s has no type/ref/union: %#v", kind, toolName, prop, schema)
 }
 
-func assertRequiredAlternatives(t *testing.T, toolName string, schema map[string]any, alternatives []string) {
+func assertNoRootSchemaCombinators(t *testing.T, kind, name string, schema map[string]any) {
 	t.Helper()
 
-	anyOf, ok := schema["anyOf"].([]any)
-	if !ok {
-		t.Fatalf("input schema for %s has no anyOf required alternatives", toolName)
-	}
-	for _, alternative := range alternatives {
-		found := false
-		for _, raw := range anyOf {
-			option, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			if contains(schemaStringSlice(option["required"]), alternative) {
-				found = true
-				break
-			}
+	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
+		if _, ok := schema[key]; ok {
+			t.Fatalf("%s schema for %s has root-level %s: %#v", kind, name, key, schema)
 		}
-		if !found {
-			t.Fatalf("input schema for %s anyOf = %#v, want required alternative %q", toolName, anyOf, alternative)
+	}
+}
+
+func assertPreciseInputPropertySchemas(t *testing.T, toolName string, properties map[string]any) {
+	t.Helper()
+
+	switch toolName {
+	case "wiki_update_page_metadata":
+		for _, prop := range []string{"setTags", "addTags", "removeTags", "removeProperties"} {
+			assertStringArrayPropertySchema(t, toolName, prop, properties[prop])
+		}
+		assertStringMapPropertySchema(t, toolName, "setProperties", properties["setProperties"])
+	case "wiki_replace_page_section":
+		assertStringArrayPropertySchema(t, toolName, "headingPath", properties["headingPath"])
+	}
+}
+
+func assertStringArrayPropertySchema(t *testing.T, toolName, prop string, raw any) {
+	t.Helper()
+
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("input schema for %s.%s is not an object: %#v", toolName, prop, raw)
+	}
+	if schema["type"] != "array" {
+		t.Fatalf("input schema for %s.%s type = %#v, want array", toolName, prop, schema["type"])
+	}
+	items, ok := schema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("input schema for %s.%s missing string items schema: %#v", toolName, prop, schema)
+	}
+	if items["type"] != "string" {
+		t.Fatalf("input schema for %s.%s items type = %#v, want string", toolName, prop, items["type"])
+	}
+}
+
+func assertStringMapPropertySchema(t *testing.T, toolName, prop string, raw any) {
+	t.Helper()
+
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("input schema for %s.%s is not an object: %#v", toolName, prop, raw)
+	}
+	if schema["type"] != "object" {
+		t.Fatalf("input schema for %s.%s type = %#v, want object", toolName, prop, schema["type"])
+	}
+	additional, ok := schema["additionalProperties"].(map[string]any)
+	if !ok {
+		t.Fatalf("input schema for %s.%s missing string additionalProperties schema: %#v", toolName, prop, schema)
+	}
+	if additional["type"] != "string" {
+		t.Fatalf("input schema for %s.%s additionalProperties type = %#v, want string", toolName, prop, additional["type"])
+	}
+}
+
+func assertContextHistoryOpaque(t *testing.T, contextOut map[string]any) {
+	t.Helper()
+
+	for _, raw := range arrayField(t, contextOut, "contextHistory") {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("contextHistory entry has type %T: %#v", raw, raw)
+		}
+		for _, internal := range []string{"commitHash", "validationHash"} {
+			if _, exists := entry[internal]; exists {
+				t.Fatalf("contextHistory entry leaks %s: %#v", internal, entry)
+			}
 		}
 	}
 }
@@ -2542,6 +4311,19 @@ func callToolError(t *testing.T, session *sdkmcp.ClientSession, name string, arg
 	}
 	t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
 	return ""
+}
+
+func callToolProtocolError(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) string {
+	t.Helper()
+
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name:      name,
+		Arguments: args,
+	})
+	if err == nil {
+		t.Fatalf("CallTool %s result = %#v, want protocol error", name, result)
+	}
+	return err.Error()
 }
 
 func getHTTPPageByPath(t *testing.T, router http.Handler, path string) map[string]any {
@@ -2994,9 +4776,9 @@ func assertHTTPPageError(t *testing.T, label, body, code, message string) {
 func assertRestorePayloadsMatch(t *testing.T, mcpRestored, httpRestored map[string]any) {
 	t.Helper()
 
-	assertRestoreVolatileFieldsPresent(t, "MCP restore_revision", mcpRestored)
-	assertRestoreVolatileFieldsPresent(t, "HTTP restore_revision", httpRestored)
-	assertJSONEqual(t, "restore_revision response payload", normalizeRestorePayload(t, mcpRestored), normalizeRestorePayload(t, httpRestored))
+	assertRestoreVolatileFieldsPresent(t, "MCP wiki_restore_revision", mcpRestored)
+	assertRestoreVolatileFieldsPresent(t, "HTTP wiki_restore_revision", httpRestored)
+	assertJSONEqual(t, "wiki_restore_revision response payload", normalizeRestorePayload(t, mcpRestored), normalizeRestorePayload(t, httpRestored))
 }
 
 func assertRestoreVolatileFieldsPresent(t *testing.T, label string, page map[string]any) {
@@ -3124,6 +4906,16 @@ func assertErrorContainsAny(t *testing.T, label, errText string, wants ...string
 	t.Fatalf("%s error = %q, want one of %q", label, errText, wants)
 }
 
+func assertErrorContainsAll(t *testing.T, label, errText string, wants []string) {
+	t.Helper()
+
+	for _, want := range wants {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("%s error = %q, missing %q", label, errText, want)
+		}
+	}
+}
+
 func assertErrorDoesNotContainAny(t *testing.T, label, errText string, rejects ...string) {
 	t.Helper()
 
@@ -3238,6 +5030,22 @@ func stringField(t *testing.T, value map[string]any, key string) string {
 	return s
 }
 
+func arrayField(t *testing.T, value map[string]any, key string) []any {
+	t.Helper()
+
+	return arrayFieldFromMap(t, value, key)
+}
+
+func arrayFieldFromMap(t *testing.T, value map[string]any, key string) []any {
+	t.Helper()
+
+	raw, ok := value[key].([]any)
+	if !ok {
+		t.Fatalf("%q has type %T: %#v", key, value[key], value[key])
+	}
+	return raw
+}
+
 func stringSliceField(t *testing.T, value map[string]any, key string) []string {
 	t.Helper()
 
@@ -3268,6 +5076,166 @@ func arrayContainsObjectField(value any, field string, want any) bool {
 		}
 	}
 	return false
+}
+
+func objectWithField(t *testing.T, value any, field string, want any) map[string]any {
+	t.Helper()
+
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("value = %T %#v, want array", value, value)
+	}
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if ok && obj[field] == want {
+			return obj
+		}
+	}
+	t.Fatalf("array = %#v, want object with %s=%#v", value, field, want)
+	return nil
+}
+
+func changedPathsFromContext(t *testing.T, output map[string]any) map[string]bool {
+	t.Helper()
+
+	paths := map[string]bool{}
+	for _, raw := range arrayField(t, output, "changesSincePreviousContext") {
+		change, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("change has type %T: %#v", raw, raw)
+		}
+		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
+			path, ok := value.(string)
+			if !ok {
+				t.Fatalf("changed path has type %T: %#v", value, value)
+			}
+			paths[path] = true
+		}
+	}
+	return paths
+}
+
+func assertValidationIssueCodes(t *testing.T, output map[string]any, wantCodes []string) {
+	t.Helper()
+
+	issues, ok := output["issues"].([]any)
+	if !ok {
+		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	}
+	got := map[string]struct{}{}
+	for _, issue := range issues {
+		item, ok := issue.(map[string]any)
+		if !ok {
+			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		}
+		code, ok := item["code"].(string)
+		if !ok {
+			t.Fatalf("validation issue code = %T %#v, want string", item["code"], item["code"])
+		}
+		got[code] = struct{}{}
+	}
+	for _, want := range wantCodes {
+		if _, exists := got[want]; !exists {
+			t.Fatalf("validation issue codes = %#v, want %q in output %#v", got, want, output)
+		}
+	}
+}
+
+func validationIssueByCode(t *testing.T, output map[string]any, wantCode string) map[string]any {
+	t.Helper()
+
+	issues, ok := output["issues"].([]any)
+	if !ok {
+		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	}
+	for _, issue := range issues {
+		item, ok := issue.(map[string]any)
+		if !ok {
+			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		}
+		if item["code"] == wantCode {
+			return item
+		}
+	}
+	t.Fatalf("validation issues = %#v, want issue code %q", issues, wantCode)
+	return nil
+}
+
+func assertNoValidationIssuePath(t *testing.T, output map[string]any, unwantedPath string) {
+	t.Helper()
+
+	issues, ok := output["issues"].([]any)
+	if !ok {
+		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	}
+	for _, issue := range issues {
+		item, ok := issue.(map[string]any)
+		if !ok {
+			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		}
+		if item["path"] == unwantedPath {
+			t.Fatalf("validation issues = %#v, did not expect issue for hidden path %q", issues, unwantedPath)
+		}
+	}
+}
+
+func assertValidationIssueCodesAbsent(t *testing.T, output map[string]any, absentCodes []string) {
+	t.Helper()
+
+	issues, ok := output["issues"].([]any)
+	if !ok {
+		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	}
+	for _, issue := range issues {
+		item, ok := issue.(map[string]any)
+		if !ok {
+			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		}
+		code, ok := item["code"].(string)
+		if !ok {
+			t.Fatalf("validation issue code = %T %#v, want string", item["code"], item["code"])
+		}
+		if contains(absentCodes, code) {
+			t.Fatalf("validation issue codes include forbidden %q in output %#v", code, output)
+		}
+	}
+}
+
+func validationIssueCodeCount(t *testing.T, output map[string]any, wantCode string, wantPath string) int {
+	t.Helper()
+
+	issues, ok := output["issues"].([]any)
+	if !ok {
+		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	}
+	count := 0
+	for _, issue := range issues {
+		item, ok := issue.(map[string]any)
+		if !ok {
+			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		}
+		if item["code"] == wantCode && item["path"] == wantPath {
+			count++
+		}
+	}
+	return count
+}
+
+func assertRecentChangesIncludePath(t *testing.T, output map[string]any, wantPath string) {
+	t.Helper()
+
+	for _, rawChange := range arrayField(t, output, "recentChanges") {
+		change, ok := rawChange.(map[string]any)
+		if !ok {
+			t.Fatalf("recent change = %T %#v, want object", rawChange, rawChange)
+		}
+		for _, rawPath := range arrayFieldFromMap(t, change, "changedPaths") {
+			if rawPath == wantPath {
+				return
+			}
+		}
+	}
+	t.Fatalf("recentChanges = %#v, missing changed path %q", output["recentChanges"], wantPath)
 }
 
 func arrayContainsString(value any, want string) bool {

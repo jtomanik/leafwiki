@@ -47,6 +47,10 @@ Web and MCP page mutations write Markdown before the required workspace-sync sid
 
 Watcher events are advisory. Explicit sync through `POST /api/workspace-sync/refresh` performs a full sync even if the watcher is unavailable.
 
+MCP agents can use the same path through `wiki_refresh`. Direct Markdown edits under `--root-dir` are allowed for bulk or mechanical changes because the filesystem is the source of truth. After direct edits, call `wiki_refresh` when immediate UI/MCP visibility is needed, then run `wiki_validate_wiki` or scoped page validation before reporting completion.
+
+`wiki_get_context` uses workspace sync status to make the first MCP call context-rich. In `auto` mode it refreshes when workspace sync reports pending watcher events, a previous sync error, or an enabled watcher that is not running. In `force` mode, editor and admin MCP callers always ask workspace sync to reconcile the Markdown tree first. Viewer callers cannot refresh; the context response returns current status plus a warning that refresh was skipped.
+
 ## Restore Semantics
 
 Document restore writes one historical Markdown file back to the current document path, commits a new restore batch, and reruns sync. If reconstruction writes missing LeafWiki metadata back into Markdown, that writeback is captured in the restore batch.
@@ -60,4 +64,4 @@ Workspace snapshot restore rewrites all managed Markdown files to the selected c
 - `GET /api/workspace-sync/snapshots?cursor=&limit=` where `cursor` is the last snapshot commit ID returned by the previous page
 - `POST /api/workspace-sync/snapshots/:commit/restore`
 
-Existing page history APIs use Git-backed workspace commits when workspace sync is enabled.
+Existing page history APIs use Git-backed workspace commits when workspace sync is enabled. Workspace snapshot list/restore remain HTTP APIs in this slice; MCP exposes the current sync state, validation, recent change summaries, and page-level Git-backed history through the existing revision tools.

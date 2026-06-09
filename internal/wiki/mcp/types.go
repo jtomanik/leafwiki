@@ -6,6 +6,7 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
+	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 )
 
 type memoryMultipartFile struct {
@@ -33,6 +34,164 @@ type configOutput struct {
 
 type currentUserOutput struct {
 	User *coreauth.PublicUser `json:"user"`
+}
+
+type getContextInput struct {
+	SinceToken         string `json:"sinceToken,omitempty"`
+	SyncMode           string `json:"syncMode,omitempty"`
+	TreeDepth          *int   `json:"treeDepth,omitempty"`
+	RecentChangesLimit *int   `json:"recentChangesLimit,omitempty"`
+}
+
+type contextCheckpointOutput struct {
+	Token     string `json:"token"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type validationSummaryOutput struct {
+	Errors   int `json:"errors"`
+	Warnings int `json:"warnings"`
+}
+
+type validationIssueOutput struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Path     string `json:"path,omitempty"`
+	PageID   string `json:"pageId,omitempty"`
+	Message  string `json:"message"`
+}
+
+type validationOutput struct {
+	OK      bool                    `json:"ok"`
+	Summary validationSummaryOutput `json:"summary"`
+	Issues  []validationIssueOutput `json:"issues"`
+}
+
+type recentChangeOutput struct {
+	CommitID     string   `json:"commitId,omitempty"`
+	Timestamp    string   `json:"timestamp,omitempty"`
+	Actor        string   `json:"actor,omitempty"`
+	Source       string   `json:"source,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	ChangedCount int      `json:"changedCount"`
+	ChangedPaths []string `json:"changedPaths"`
+	PageIDs      []string `json:"pageIds,omitempty"`
+}
+
+type presenceStatusOutput struct {
+	Web        string `json:"web"`
+	AgentHooks string `json:"agentHooks"`
+}
+
+type contextOutput struct {
+	ContextToken                string                    `json:"contextToken"`
+	PreviousContextToken        string                    `json:"previousContextToken"`
+	ChangesSincePreviousContext []recentChangeOutput      `json:"changesSincePreviousContext"`
+	ContextHistory              []contextCheckpointOutput `json:"contextHistory"`
+	User                        *coreauth.PublicUser      `json:"user"`
+	Config                      configOutput              `json:"config"`
+	Server                      map[string]any            `json:"server"`
+	SyncStatus                  any                       `json:"syncStatus"`
+	Validation                  validationOutput          `json:"validation"`
+	RecentChanges               []recentChangeOutput      `json:"recentChanges"`
+	ActiveSessions              []wikipresence.Session    `json:"activeSessions"`
+	PresenceStatus              presenceStatusOutput      `json:"presenceStatus"`
+	Tree                        *dto.Node                 `json:"tree"`
+	RecommendedTools            []string                  `json:"recommendedTools"`
+	Warnings                    []string                  `json:"warnings,omitempty"`
+}
+
+type refreshInput struct {
+	Validate *bool  `json:"validate,omitempty"`
+	Source   string `json:"source,omitempty"`
+}
+
+type refreshOutput struct {
+	SyncStatus         any               `json:"syncStatus"`
+	RecentChangedPaths []string          `json:"recentChangedPaths"`
+	Validation         *validationOutput `json:"validation,omitempty"`
+	LastCommitHash     string            `json:"lastCommitHash"`
+}
+
+type getSubtreeInput struct {
+	PageID                string `json:"pageId,omitempty"`
+	Path                  string `json:"path,omitempty"`
+	Depth                 *int   `json:"depth,omitempty"`
+	IncludeMetadata       *bool  `json:"includeMetadata,omitempty"`
+	IncludeLinkCounts     bool   `json:"includeLinkCounts,omitempty"`
+	IncludeContentPreview bool   `json:"includeContentPreview,omitempty"`
+}
+
+type subtreeOutput struct {
+	Root        *subtreeNode   `json:"root"`
+	Breadcrumbs []*subtreeNode `json:"breadcrumbs"`
+	Depth       int            `json:"depth"`
+	Truncated   bool           `json:"truncated"`
+}
+
+type subtreeNode struct {
+	ID             string            `json:"id"`
+	Title          string            `json:"title"`
+	Slug           string            `json:"slug"`
+	Path           string            `json:"path"`
+	Version        string            `json:"version"`
+	Position       int               `json:"position"`
+	Kind           tree.NodeKind     `json:"kind"`
+	Children       []*subtreeNode    `json:"children"`
+	Metadata       *dto.NodeMetadata `json:"metadata,omitempty"`
+	LinkCounts     any               `json:"linkCounts,omitempty"`
+	ContentPreview string            `json:"contentPreview,omitempty"`
+}
+
+type validatePageInput struct {
+	PageID string `json:"pageId,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+type validateContentInput struct {
+	Path           string `json:"path"`
+	Content        string `json:"content"`
+	ExistingPageID string `json:"existingPageId,omitempty"`
+}
+
+type validateWikiInput struct {
+	IncludeWarnings *bool `json:"includeWarnings,omitempty"`
+}
+
+type updatePageMetadataInput struct {
+	PageID            string            `json:"pageId,omitempty"`
+	Path              string            `json:"path,omitempty"`
+	Version           string            `json:"version"`
+	SetTags           []string          `json:"setTags,omitempty"`
+	AddTags           []string          `json:"addTags,omitempty"`
+	RemoveTags        []string          `json:"removeTags,omitempty"`
+	SetProperties     map[string]string `json:"setProperties,omitempty"`
+	RemoveProperties  []string          `json:"removeProperties,omitempty"`
+	IncludePage       bool              `json:"includePage,omitempty"`
+	IncludeValidation *bool             `json:"includeValidation,omitempty"`
+	IncludeLinkStatus bool              `json:"includeLinkStatus,omitempty"`
+}
+
+type replacePageSectionInput struct {
+	PageID            string   `json:"pageId,omitempty"`
+	Path              string   `json:"path,omitempty"`
+	Version           string   `json:"version"`
+	HeadingPath       []string `json:"headingPath"`
+	Occurrence        int      `json:"occurrence,omitempty"`
+	Content           string   `json:"content"`
+	IncludePage       bool     `json:"includePage,omitempty"`
+	IncludeValidation *bool    `json:"includeValidation,omitempty"`
+	IncludeLinkStatus bool     `json:"includeLinkStatus,omitempty"`
+}
+
+type partialEditOutput struct {
+	PageID     string            `json:"pageId"`
+	Path       string            `json:"path"`
+	Title      string            `json:"title"`
+	Version    string            `json:"version"`
+	Validation *validationOutput `json:"validation,omitempty"`
+	Page       *dto.Page         `json:"page,omitempty"`
+	LinkStatus any               `json:"linkStatus,omitempty"`
 }
 
 type getTreeInput struct {

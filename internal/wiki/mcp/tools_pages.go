@@ -26,7 +26,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pageIDInput, pageOutput](server, toolGetPage, func(ctx context.Context, in pageIDInput) (pageOutput, error) {
-		out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))})
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return pageOutput{}, err
+		}
+		out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: pageID})
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -34,7 +38,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, pageOutput](server, toolGetPageByPath, func(ctx context.Context, in pathInput) (pageOutput, error) {
-		routePath, err := wikipages.ValidatePageRoutePath(in.Path)
+		routePath, err := wikipages.ValidatePageRoutePath(normalizeToolRoutePath(in.Path))
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -50,7 +54,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, lookupPathOutput](server, toolLookupPath, func(ctx context.Context, in pathInput) (lookupPathOutput, error) {
-		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: strings.TrimSpace(in.Path)})
+		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: normalizeToolRoutePath(in.Path)})
 		if err != nil {
 			return lookupPathOutput{}, err
 		}
@@ -58,7 +62,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pageIDInput, resolvePermalinkOutput](server, toolResolvePermalink, func(ctx context.Context, in pageIDInput) (resolvePermalinkOutput, error) {
-		out, err := r.resolveLink.Execute(ctx, wikipages.ResolvePermalinkInput{ID: strings.TrimSpace(firstNonEmpty(in.PageID, in.ID))})
+		pageID, err := exactlyOneIDOrPageID(in.ID, in.PageID)
+		if err != nil {
+			return resolvePermalinkOutput{}, err
+		}
+		out, err := r.resolveLink.Execute(ctx, wikipages.ResolvePermalinkInput{ID: pageID})
 		if err != nil {
 			return resolvePermalinkOutput{}, err
 		}

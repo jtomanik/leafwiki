@@ -105,13 +105,13 @@ test('malformed hook fails open and later MCP work succeeds', async ({ request }
 
   const mcp = await connectMCPStdioClient(appURL('/mcp'));
   try {
-    const created = await mcp.callTool('create_page', {
+    const created = await mcp.callTool('wiki_create_page', {
       title: 'Malformed Hook Followup',
       slug: `malformed-hook-followup-${Date.now()}`,
       kind: 'page',
     });
     const page = created.page as { id: string };
-    const readBack = await mcp.callTool('get_page', { id: page.id });
+    const readBack = await mcp.callTool('wiki_get_page', { id: page.id });
     expect((readBack.page as { title: string }).title).toBe('Malformed Hook Followup');
   } finally {
     await mcp.close();
@@ -165,13 +165,13 @@ test('hook-started daemon records private sanitized presence and accepts MCP att
 
     const mcp = await connectMCPStdioClient(appURL('/mcp'));
     try {
-      const created = await mcp.callTool('create_page', {
+      const created = await mcp.callTool('wiki_create_page', {
         title: 'Hook Started MCP Page',
         slug: `hook-started-mcp-${Date.now()}`,
         kind: 'page',
       });
       const page = created.page as { id: string };
-      const readBack = await mcp.callTool('get_page', { id: page.id });
+      const readBack = await mcp.callTool('wiki_get_page', { id: page.id });
       expect((readBack.page as { title: string }).title).toBe('Hook Started MCP Page');
     } finally {
       await mcp.close();
@@ -195,7 +195,7 @@ test('MCP-started daemon records later hook presence without disrupting tools', 
   let descriptor: DaemonDescriptor | undefined;
   const mcp = await connectMCPStdioClient(appURL('/mcp'));
   try {
-    const created = await mcp.callTool('create_page', {
+    const created = await mcp.callTool('wiki_create_page', {
       title: 'MCP First Hook Page',
       slug: `mcp-first-hook-${Date.now()}`,
       kind: 'page',
@@ -207,7 +207,7 @@ test('MCP-started daemon records later hook presence without disrupting tools', 
       JSON.stringify({
         hook_event_name: 'PreToolUse',
         session_id: 'mcp-first-codex-session',
-        tool_name: 'mcp__leafwiki__get_page',
+        tool_name: 'mcp__leafwiki__wiki_get_page',
         input: { id: page.id, secret: 'private-tool-input' },
       }),
     );
@@ -231,13 +231,13 @@ test('MCP-started daemon records later hook presence without disrupting tools', 
     expect(sessions).toHaveLength(1);
     expect(sessions[0].provider).toBe('codex');
     expect(sessions[0].lastEvent).toBe('PreToolUse');
-    expect(sessions[0].toolName).toBe('mcp__leafwiki__get_page');
+    expect(sessions[0].toolName).toBe('mcp__leafwiki__wiki_get_page');
     expect(sessions[0].isMcpTool).toBe(true);
     expect(sessions[0].sessionIdHash).toMatch(/^sha256:/);
     expect(JSON.stringify(sessions)).not.toContain('mcp-first-codex-session');
     expect(JSON.stringify(sessions)).not.toContain('private-tool-input');
 
-    const readBack = await mcp.callTool('get_page', { id: page.id });
+    const readBack = await mcp.callTool('wiki_get_page', { id: page.id });
     expect((readBack.page as { title: string }).title).toBe('MCP First Hook Page');
   } finally {
     await mcp.close();

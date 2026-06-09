@@ -554,11 +554,11 @@ func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if !mcpToolNamesContain(tools.Tools, "create_page") || !mcpToolNamesContain(tools.Tools, "get_current_user") {
+	if !mcpToolNamesContain(tools.Tools, "wiki_create_page") || !mcpToolNamesContain(tools.Tools, "wiki_get_current_user") {
 		t.Fatalf("native stdio tools = %#v, want shared LeafWiki tools", tools.Tools)
 	}
 
-	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_current_user"})
+	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "wiki_get_current_user"})
 	if err != nil {
 		t.Fatalf("get_current_user failed: %v", err)
 	}
@@ -622,12 +622,12 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if !mcpToolNamesContain(tools.Tools, "list_revisions") {
+	if !mcpToolNamesContain(tools.Tools, "wiki_list_revisions") {
 		t.Fatalf("workspace sync MCP tools missing list_revisions: %#v", tools.Tools)
 	}
 
 	created, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: "create_page",
+		Name: "wiki_create_page",
 		Arguments: map[string]any{
 			"title": "MCP Synced",
 			"slug":  "mcp-synced",
@@ -658,7 +658,7 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 	}
 
 	revisions, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: "list_revisions",
+		Name: "wiki_list_revisions",
 		Arguments: map[string]any{
 			"pageId": pageID,
 		},

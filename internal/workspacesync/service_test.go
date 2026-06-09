@@ -274,6 +274,128 @@ func TestServiceSyncNowRecordsChangedMarkdownPaths(t *testing.T) {
 	}
 }
 
+func TestServiceListSnapshotPagePropagatesChangedMarkdownPathErrors(t *testing.T) {
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store: &fakeRevisionStore{
+			commits: []gitrevisions.Commit{
+				{Hash: "abc123", ChangedMarkdownCount: 1},
+			},
+			changedPathsErr: errors.New("path trailer read failed"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	_, err = service.ListSnapshotPage(context.Background(), "", 10)
+	if err == nil || !strings.Contains(err.Error(), "path trailer read failed") {
+		t.Fatalf("ListSnapshotPage error = %v, want changed path error", err)
+	}
+}
+
+func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *testing.T) {
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store: &fakeRevisionStore{
+			commits: []gitrevisions.Commit{
+				{Hash: "returned", ChangedMarkdownCount: 1},
+				{Hash: "sentinel", ChangedMarkdownCount: 1},
+			},
+			changedPaths: map[string][]string{
+				"returned": {"returned.md"},
+			},
+			changedPathsErrByHash: map[string]error{
+				"sentinel": errors.New("sentinel diff should not be read"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	page, err := service.ListSnapshotPage(context.Background(), "", 1)
+	if err != nil {
+		t.Fatalf("ListSnapshotPage returned sentinel error: %v", err)
+	}
+	if len(page.Snapshots) != 1 || page.Snapshots[0].ID != "returned" {
+		t.Fatalf("snapshots = %#v, want only returned snapshot", page.Snapshots)
+	}
+	if page.NextCursor != "returned" {
+		t.Fatalf("NextCursor = %q, want returned", page.NextCursor)
+	}
+}
+
+func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChangedPaths(t *testing.T) {
+	store := &fakeRevisionStore{
+		capture: &gitrevisions.Commit{Hash: "sync-commit"},
+		commits: []gitrevisions.Commit{
+			{Hash: "slow-snapshot", ChangedMarkdownCount: 1},
+		},
+		changedPaths: map[string][]string{
+			"slow-snapshot": {"slow.md"},
+		},
+		changedPathsStarted: make(chan struct{}),
+		unblockChangedPaths: make(chan struct{}),
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	listDone := make(chan error, 1)
+	go func() {
+		_, err := service.ListSnapshotPage(context.Background(), "", 1)
+		listDone <- err
+	}()
+	<-store.changedPathsStarted
+
+	syncDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncNow(context.Background(), SyncRequest{
+			Reason: ReasonExplicit,
+			Source: SourceFilesystem,
+			Actor:  PublicEditorActor(),
+		})
+		syncDone <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	statusDone := make(chan SyncStatus, 1)
+	go func() {
+		statusDone <- service.Status()
+	}()
+
+	select {
+	case status := <-statusDone:
+		if !status.Enabled {
+			close(store.unblockChangedPaths)
+			<-listDone
+			<-syncDone
+			t.Fatalf("status.Enabled = false, want true")
+		}
+	case <-time.After(200 * time.Millisecond):
+		close(store.unblockChangedPaths)
+		<-listDone
+		<-syncDone
+		t.Fatalf("Status blocked behind SyncNow waiting for ListSnapshotPage changed-path read")
+	}
+
+	close(store.unblockChangedPaths)
+	if err := <-listDone; err != nil {
+		t.Fatalf("ListSnapshotPage: %v", err)
+	}
+	if err := <-syncDone; err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+}
+
 func TestServiceSyncNowRunsAfterSyncWhenValidationWarningsExist(t *testing.T) {
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
@@ -1071,6 +1193,63 @@ func TestServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning(t *testing.T)
 	}
 }
 
+func TestServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore(t *testing.T) {
+	page := &tree.Page{PageNode: &tree.PageNode{
+		ID:    "page-a",
+		Title: "Page A",
+		Slug:  "page-a",
+		Kind:  tree.NodeKindPage,
+	}}
+	store := &fakeRevisionStore{
+		commits: []gitrevisions.Commit{{Hash: "page-a-change", AuthorID: "alice"}},
+		filesAt: map[string]map[string]string{
+			"page-a-change": {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
+			},
+		},
+		changedPaths: map[string][]string{
+			"page-a-change": {"page-a.md"},
+		},
+		changedContentsStarted: make(chan struct{}),
+		unblockChangedContents: make(chan struct{}),
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.ListPageRevisions(context.Background(), page, "", 1)
+		done <- err
+	}()
+	<-store.changedContentsStarted
+
+	statusDone := make(chan SyncStatus, 1)
+	go func() {
+		statusDone <- service.Status()
+	}()
+
+	select {
+	case status := <-statusDone:
+		if !status.Enabled {
+			t.Fatalf("status.Enabled = false, want true")
+		}
+	case <-time.After(200 * time.Millisecond):
+		close(store.unblockChangedContents)
+		<-done
+		t.Fatalf("Status blocked behind ListPageRevisions store scan")
+	}
+	close(store.unblockChangedContents)
+	if err := <-done; err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+}
+
 func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
@@ -1101,6 +1280,63 @@ func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 
 	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, "page-b-change"); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot returned unrelated commit, want error")
+	}
+}
+
+func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *testing.T) {
+	page := &tree.Page{PageNode: &tree.PageNode{
+		ID:    "page-a",
+		Title: "Page A",
+		Slug:  "page-a",
+		Kind:  tree.NodeKindPage,
+	}}
+	store := &fakeRevisionStore{
+		commits: []gitrevisions.Commit{{Hash: "page-a-change", AuthorID: "alice"}},
+		filesAt: map[string]map[string]string{
+			"page-a-change": {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
+			},
+		},
+		changedPaths: map[string][]string{
+			"page-a-change": {"page-a.md"},
+		},
+		changedContentsStarted: make(chan struct{}),
+		unblockChangedContents: make(chan struct{}),
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.GetPageRevisionSnapshot(context.Background(), page, "page-a-change")
+		done <- err
+	}()
+	<-store.changedContentsStarted
+
+	statusDone := make(chan SyncStatus, 1)
+	go func() {
+		statusDone <- service.Status()
+	}()
+
+	select {
+	case status := <-statusDone:
+		if !status.Enabled {
+			t.Fatalf("status.Enabled = false, want true")
+		}
+	case <-time.After(200 * time.Millisecond):
+		close(store.unblockChangedContents)
+		<-done
+		t.Fatalf("Status blocked behind GetPageRevisionSnapshot store read")
+	}
+	close(store.unblockChangedContents)
+	if err := <-done; err != nil {
+		t.Fatalf("GetPageRevisionSnapshot: %v", err)
 	}
 }
 
@@ -1812,6 +2048,31 @@ func TestServiceStartWatcherIgnoresTemporaryFiles(t *testing.T) {
 	}
 }
 
+func TestServiceStopWatcherClosesUnderlyingWatcher(t *testing.T) {
+	fakeWatcher := newFakeWatcher()
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		RootDir: "/workspace",
+		Tree:    &fakeTreeReconstructor{},
+		Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "stop-commit"}},
+		WatcherFactory: func(string) (fileWatcher, error) {
+			return fakeWatcher, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if err := service.StartWatcher(context.Background()); err != nil {
+		t.Fatalf("StartWatcher: %v", err)
+	}
+
+	service.StopWatcher()
+
+	if got := fakeWatcher.closeCount(); got != 1 {
+		t.Fatalf("watcher Close calls = %d, want 1", got)
+	}
+}
+
 func writeMarkdown(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1879,11 +2140,17 @@ type fakeRevisionStore struct {
 	commits                           []gitrevisions.Commit
 	filesAt                           map[string]map[string]string
 	changedPaths                      map[string][]string
+	changedPathsErr                   error
+	changedPathsErrByHash             map[string]error
 	scannedCommits                    int
 	filesAtCalls                      int
 	restoreDocumentToPathCalls        int
 	restoreDocumentContentToPathCalls int
 	restoredContent                   string
+	changedPathsStarted               chan struct{}
+	unblockChangedPaths               chan struct{}
+	changedContentsStarted            chan struct{}
+	unblockChangedContents            chan struct{}
 }
 
 func (f *fakeRevisionStore) Capture(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
@@ -1927,10 +2194,32 @@ func (f *fakeRevisionStore) ForEachCommit(_ context.Context, visit func(gitrevis
 }
 
 func (f *fakeRevisionStore) ChangedMarkdownPaths(_ context.Context, hash string) ([]string, error) {
+	if f.changedPathsStarted != nil {
+		close(f.changedPathsStarted)
+		f.changedPathsStarted = nil
+	}
+	if f.unblockChangedPaths != nil {
+		<-f.unblockChangedPaths
+	}
+	if f.changedPathsErr != nil {
+		return nil, f.changedPathsErr
+	}
+	if f.changedPathsErrByHash != nil {
+		if err := f.changedPathsErrByHash[hash]; err != nil {
+			return nil, err
+		}
+	}
 	return f.changedPaths[hash], nil
 }
 
 func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash string) (map[string]string, error) {
+	if f.changedContentsStarted != nil {
+		close(f.changedContentsStarted)
+		f.changedContentsStarted = nil
+	}
+	if f.unblockChangedContents != nil {
+		<-f.unblockChangedContents
+	}
 	contents := make(map[string]string)
 	files := f.filesAt[hash]
 	for _, path := range f.changedPaths[hash] {
@@ -1984,6 +2273,7 @@ type fakeWatcher struct {
 	events   chan watcherEvent
 	dropped  chan watcherEvent
 	watchErr error
+	closes   int32
 }
 
 func newFakeWatcher() *fakeWatcher {
@@ -2007,6 +2297,14 @@ func (f *fakeWatcher) Events() <-chan watcherEvent {
 
 func (f *fakeWatcher) Dropped() <-chan watcherEvent {
 	return f.dropped
+}
+
+func (f *fakeWatcher) Close() {
+	atomic.AddInt32(&f.closes, 1)
+}
+
+func (f *fakeWatcher) closeCount() int {
+	return int(atomic.LoadInt32(&f.closes))
 }
 
 func waitUntil(t *testing.T, condition func() bool) {

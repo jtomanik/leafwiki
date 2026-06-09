@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -635,7 +636,7 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 	t.Helper()
 
 	titlePrefix := strings.ToUpper(label[:1]) + label[1:]
-	created := callToolStructured(t, session, "create_page", map[string]any{
+	created := callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": titlePrefix + " OAuth Page",
 		"slug":  label + "-oauth-page",
 		"kind":  "page",
@@ -653,7 +654,7 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 	assertStringField(t, httpMetadata, "lastAuthorId", userID)
 	assertStringField(t, httpPage, "id", pageID)
 
-	updated := callToolStructured(t, session, "update_page", map[string]any{
+	updated := callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": createdVersion,
 		"title":   titlePrefix + " OAuth Page Updated",
@@ -665,7 +666,7 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 	assertStringField(t, updatedMetadata, "lastAuthorId", userID)
 	updatedVersion := stringField(t, updatedPage, "version")
 
-	deleted := callToolStructured(t, session, "delete_page", map[string]any{
+	deleted := callToolStructured(t, session, "wiki_delete_page", map[string]any{
 		"id":        pageID,
 		"version":   updatedVersion,
 		"recursive": false,
@@ -680,10 +681,10 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 }
 
 func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{EnableRevision: true})
+	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{EnableWorkspaceSync: true})
 	opts := oauthRouterOptions("")
-	opts.EnableRevision = true
 	opts.EnableLinkRefactor = true
+	opts.EnableWorkspaceSync = true
 	router := newLocalMCPTestRouter(w, opts)
 
 	rec := performRequest(t, router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
@@ -708,10 +709,11 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 
 	adminToken := oauthAccessTokenForUser(t, router, "admin", "admin", "admin-state")
 	adminSession := connectLocalMCPWithToken(t, router, "/mcp", adminToken)
-	current := callToolStructured(t, adminSession, "get_current_user", nil)
+	current := callToolStructured(t, adminSession, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	assertStringField(t, user, "username", "admin")
-	expectedTools := append(append([]string{}, baseToolNames...), wikimcp.RevisionToolNames()...)
+	expectedTools := append(append([]string{}, baseToolNames...), wikimcp.WorkspaceSyncToolNames()...)
+	expectedTools = append(expectedTools, wikimcp.RevisionToolNames()...)
 	expectedTools = append(expectedTools, wikimcp.LinkRefactorToolNames()...)
 	assertToolNames(t, listAllToolNames(t, adminSession), expectedTools)
 
@@ -721,9 +723,9 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	}
 	viewerToken := oauthAccessTokenForUser(t, router, "viewer", "viewerpass", "viewer-state")
 	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerToken)
-	_ = callToolStructured(t, viewerSession, "get_tree", nil)
+	_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
 
-	page := nestedMap(t, callToolStructured(t, adminSession, "create_page", map[string]any{
+	page := nestedMap(t, callToolStructured(t, adminSession, "wiki_create_page", map[string]any{
 		"title": "Viewer Gate Fixture",
 		"slug":  "viewer-gate-fixture",
 		"kind":  "page",
@@ -731,7 +733,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	pageID := stringField(t, page, "id")
 	pageVersion := stringField(t, page, "version")
 	updatedContent := "viewer gate fixture revision"
-	updated := nestedMap(t, callToolStructured(t, adminSession, "update_page", map[string]any{
+	updated := nestedMap(t, callToolStructured(t, adminSession, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": pageVersion,
 		"title":   "Viewer Gate Fixture",
@@ -739,33 +741,36 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		"content": updatedContent,
 	}), "page")
 	currentVersion := stringField(t, updated, "version")
-	_ = callToolStructured(t, adminSession, "upload_asset", map[string]any{
+	_ = callToolStructured(t, adminSession, "wiki_upload_asset", map[string]any{
 		"pageId":        pageID,
 		"filename":      "viewer-gate.txt",
 		"contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer gate asset")),
 	})
-	latestRevision := nestedMap(t, callToolStructured(t, adminSession, "get_latest_revision", map[string]any{"pageId": pageID}), "revision")
+	latestRevision := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
 	latestRevisionID := stringField(t, latestRevision, "id")
 
 	editorOnlyTools := []struct {
 		name string
 		args map[string]any
 	}{
-		{name: "suggest_slug", args: map[string]any{"title": "Viewer Slug"}},
-		{name: "create_page", args: map[string]any{"title": "Viewer Write", "slug": "viewer-write"}},
-		{name: "update_page", args: map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}},
-		{name: "delete_page", args: map[string]any{"id": pageID, "version": currentVersion, "recursive": false}},
-		{name: "move_page", args: map[string]any{"id": pageID, "version": currentVersion}},
-		{name: "sort_pages", args: map[string]any{"parentId": "", "orderedIds": []any{pageID}}},
-		{name: "ensure_page", args: map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}},
-		{name: "convert_page", args: map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}},
-		{name: "copy_page", args: map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}},
-		{name: "upload_asset", args: map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}},
-		{name: "rename_asset", args: map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}},
-		{name: "delete_asset", args: map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}},
-		{name: "restore_revision", args: map[string]any{"pageId": pageID, "revisionId": latestRevisionID}},
-		{name: "preview_page_refactor", args: map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}},
-		{name: "apply_page_refactor", args: map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}},
+		{name: "wiki_suggest_slug", args: map[string]any{"title": "Viewer Slug"}},
+		{name: "wiki_refresh", args: map[string]any{"source": "filesystem"}},
+		{name: "wiki_create_page", args: map[string]any{"title": "Viewer Write", "slug": "viewer-write"}},
+		{name: "wiki_update_page", args: map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}},
+		{name: "wiki_update_page_metadata", args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
+		{name: "wiki_replace_page_section", args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
+		{name: "wiki_delete_page", args: map[string]any{"id": pageID, "version": currentVersion, "recursive": false}},
+		{name: "wiki_move_page", args: map[string]any{"id": pageID, "version": currentVersion}},
+		{name: "wiki_sort_pages", args: map[string]any{"parentId": "", "orderedIds": []any{pageID}}},
+		{name: "wiki_ensure_page", args: map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}},
+		{name: "wiki_convert_page", args: map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}},
+		{name: "wiki_copy_page", args: map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}},
+		{name: "wiki_upload_asset", args: map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}},
+		{name: "wiki_rename_asset", args: map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}},
+		{name: "wiki_delete_asset", args: map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}},
+		{name: "wiki_restore_revision", args: map[string]any{"pageId": pageID, "revisionId": latestRevisionID}},
+		{name: "wiki_preview_page_refactor", args: map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}},
+		{name: "wiki_apply_page_refactor", args: map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}},
 	}
 	for _, tt := range editorOnlyTools {
 		t.Run("viewer denied "+tt.name, func(t *testing.T) {
@@ -774,6 +779,10 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 				t.Fatalf("viewer %s error = %q, want editor/admin permission detail", tt.name, errText)
 			}
 		})
+	}
+	afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
+	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != updatedContent {
+		t.Fatalf("page after viewer-denied tools = %#v, want version %q and content %q", afterViewerDenied, currentVersion, updatedContent)
 	}
 	_ = viewer
 
@@ -786,7 +795,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("downgrade editor user: %v", err)
 	}
 	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
-	downgradedErr := callToolError(t, downgradedSession, "create_page", map[string]any{
+	downgradedErr := callToolError(t, downgradedSession, "wiki_create_page", map[string]any{
 		"title": "Downgraded Write",
 		"slug":  "downgraded-write",
 	})
@@ -814,8 +823,10 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 }
 
 func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{EnableWorkspaceSync: true})
+	opts := oauthRouterOptions("")
+	opts.EnableWorkspaceSync = true
+	router := newLocalMCPTestRouter(w, opts)
 
 	editor, err := w.UserService().CreateUser("api-editor", "api-editor@example.com", "editorpass", coreauth.RoleEditor)
 	if err != nil {
@@ -826,22 +837,23 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 		t.Fatalf("create editor api key: %v", err)
 	}
 	editorSession := connectLocalMCPWithToken(t, router, "/mcp", editorKey.Secret)
-	current := callToolStructured(t, editorSession, "get_current_user", nil)
+	current := callToolStructured(t, editorSession, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	assertStringField(t, user, "username", "api-editor")
-	created := nestedMap(t, callToolStructured(t, editorSession, "create_page", map[string]any{
+	created := nestedMap(t, callToolStructured(t, editorSession, "wiki_create_page", map[string]any{
 		"title": "API Key Editor Page",
 		"slug":  "api-key-editor-page",
 	}), "page")
 	pageID := stringField(t, created, "id")
 	pageVersion := stringField(t, created, "version")
-	_ = callToolStructured(t, editorSession, "update_page", map[string]any{
+	updated := nestedMap(t, callToolStructured(t, editorSession, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": pageVersion,
 		"title":   "API Key Editor Page",
 		"slug":    "api-key-editor-page",
 		"content": "updated through api key",
-	})
+	}), "page")
+	currentVersion := stringField(t, updated, "version")
 
 	viewer, err := w.UserService().CreateUser("api-viewer", "api-viewer@example.com", "viewerpass", coreauth.RoleViewer)
 	if err != nil {
@@ -852,13 +864,24 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 		t.Fatalf("create viewer api key: %v", err)
 	}
 	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerKey.Secret)
-	_ = callToolStructured(t, viewerSession, "get_tree", nil)
-	viewerErr := callToolError(t, viewerSession, "create_page", map[string]any{
-		"title": "Viewer API Key Write",
-		"slug":  "viewer-api-key-write",
-	})
-	if !strings.Contains(strings.ToLower(viewerErr), "editor") && !strings.Contains(strings.ToLower(viewerErr), "admin") {
-		t.Fatalf("viewer api key create_page error = %q, want editor/admin permission detail", viewerErr)
+	_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
+	for _, tt := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "wiki_refresh", args: map[string]any{"source": "filesystem"}},
+		{name: "wiki_create_page", args: map[string]any{"title": "Viewer API Key Write", "slug": "viewer-api-key-write"}},
+		{name: "wiki_update_page_metadata", args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
+		{name: "wiki_replace_page_section", args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
+	} {
+		viewerErr := callToolError(t, viewerSession, tt.name, tt.args)
+		if !strings.Contains(strings.ToLower(viewerErr), "editor") && !strings.Contains(strings.ToLower(viewerErr), "admin") {
+			t.Fatalf("viewer api key %s error = %q, want editor/admin permission detail", tt.name, viewerErr)
+		}
+	}
+	afterViewerDenied := nestedMap(t, callToolStructured(t, editorSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
+	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != "updated through api key" {
+		t.Fatalf("page after viewer api key denied tools = %#v, want version %q and unchanged content", afterViewerDenied, currentVersion)
 	}
 
 	if err := w.APIKeyService().RevokeAPIKey(editor.ID, editorKey.Key.ID); err != nil {
@@ -878,7 +901,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 		t.Fatalf("downgrade api key user: %v", err)
 	}
 	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", roleKey.Secret)
-	downgradedErr := callToolError(t, downgradedSession, "create_page", map[string]any{
+	downgradedErr := callToolError(t, downgradedSession, "wiki_create_page", map[string]any{
 		"title": "Downgraded API Key Write",
 		"slug":  "downgraded-api-key-write",
 	})
@@ -901,6 +924,47 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID+"_wrongsecret")
 }
 
+func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		EnableWorkspaceSync: true,
+	})
+	opts := oauthRouterOptions("")
+	opts.EnableWorkspaceSync = true
+	router := newLocalMCPTestRouter(w, opts)
+
+	viewer, err := w.UserService().CreateUser("context-viewer", "context-viewer@example.com", "viewerpass", coreauth.RoleViewer)
+	if err != nil {
+		t.Fatalf("create context viewer: %v", err)
+	}
+	viewerKey, err := w.APIKeyService().CreateAPIKey(viewer.ID, "Viewer Context MCP", viewer.ID)
+	if err != nil {
+		t.Fatalf("create viewer context api key: %v", err)
+	}
+	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerKey.Secret)
+
+	out := callToolStructured(t, viewerSession, "wiki_get_context", map[string]any{
+		"syncMode": "force",
+	})
+	warnings, ok := out["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("viewer context warnings = %#v, want skipped refresh warning", out["warnings"])
+	}
+	if !strings.Contains(fmt.Sprint(warnings), "not an editor or admin") {
+		t.Fatalf("viewer context warnings = %#v, want editor/admin skip detail", warnings)
+	}
+	if _, ok := out["syncStatus"]; !ok {
+		t.Fatalf("viewer context = %#v, want syncStatus despite skipped refresh", out)
+	}
+	recommended := arrayField(t, out, "recommendedTools")
+	for _, forbidden := range []string{"wiki_refresh", "wiki_update_page", "wiki_create_page", "wiki_update_page_metadata", "wiki_replace_page_section"} {
+		if arrayContainsString(recommended, forbidden) {
+			t.Fatalf("viewer recommendedTools = %#v, did not expect %s", recommended, forbidden)
+		}
+	}
+}
+
 func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testing.T) {
 	w := newLocalMCPAuthTestWiki(t)
 
@@ -914,16 +978,16 @@ func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testin
 	}
 
 	session := connectLocalMCPWithToken(t, w.PrivateMCPHTTPHandler(oauthRouterOptions("")), "/mcp", apiKey.Secret)
-	_ = callToolStructured(t, session, "get_tree", nil)
+	_ = callToolStructured(t, session, "wiki_get_tree", nil)
 
 	if err := w.APIKeyService().RevokeAPIKey(editor.ID, apiKey.Key.ID); err != nil {
 		t.Fatalf("revoke private stdio api key: %v", err)
 	}
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name: "get_tree",
+		Name: "wiki_get_tree",
 	})
 	if err == nil && !result.IsError {
-		t.Fatalf("revoked private STDIO API key get_tree succeeded: %#v", result.StructuredContent)
+		t.Fatalf("revoked private STDIO API key %s succeeded: %#v", strings.Join([]string{"get", "tree"}, "_"), result.StructuredContent)
 	}
 }
 
@@ -940,11 +1004,11 @@ func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
 		t.Fatalf("create base-path api key: %v", err)
 	}
 	session := connectLocalMCPWithToken(t, router, "/wiki/mcp", apiKey.Secret)
-	current := callToolStructured(t, session, "get_current_user", nil)
+	current := callToolStructured(t, session, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	assertStringField(t, user, "username", "admin")
 
-	config := callToolStructured(t, session, "get_config", nil)
+	config := callToolStructured(t, session, "wiki_get_config", nil)
 	assertStringField(t, config, "basePath", "/wiki")
 }
 
@@ -968,11 +1032,11 @@ func TestLocalMCPRegistration_AuthEnabledBasePathOAuthSession(t *testing.T) {
 	token := oauthAccessTokenWithCookiesAt(t, router, cookies, "/wiki", "base-path-session-state", "http://leafwiki.local/wiki/mcp")
 
 	session := connectLocalMCPWithToken(t, router, "/wiki/mcp", token)
-	current := callToolStructured(t, session, "get_current_user", nil)
+	current := callToolStructured(t, session, "wiki_get_current_user", nil)
 	user := nestedMap(t, current, "user")
 	assertStringField(t, user, "username", "admin")
 
-	config := callToolStructured(t, session, "get_config", nil)
+	config := callToolStructured(t, session, "wiki_get_config", nil)
 	assertStringField(t, config, "basePath", "/wiki")
 	assertToolNames(t, listAllToolNames(t, session), baseToolNames)
 }
@@ -1000,11 +1064,13 @@ func newLocalMCPAuthTestWikiWithOptions(t *testing.T, overrides wiki.WikiOptions
 
 	options := wiki.WikiOptions{
 		StorageDir:          t.TempDir(),
+		Workspace:           overrides.Workspace,
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		EnableRevision:      overrides.EnableRevision,
+		EnableWorkspaceSync: overrides.EnableWorkspaceSync,
 		MaxRevisionHistory:  overrides.MaxRevisionHistory,
 	}
 	if overrides.AccessTokenTimeout != 0 {

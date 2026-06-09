@@ -58,18 +58,52 @@ func Normalize(provider string, raw []byte, seenAt time.Time) (Event, bool) {
 	}
 
 	toolName := strings.TrimSpace(payload.ToolName)
+	sanitizedToolName := sanitizeMetadataValue(toolName, 160)
 	return Event{
 		Provider:      provider,
 		SessionIDHash: hashSessionID(provider, sessionID),
 		EventName:     eventName,
-		Model:         strings.TrimSpace(payload.Model),
-		Source:        strings.TrimSpace(payload.Source),
-		ToolName:      toolName,
-		IsMCPTool:     isMCPToolEvent(eventName, toolName),
+		Model:         sanitizeMetadataValue(payload.Model, 80),
+		Source:        sanitizeSource(payload.Source),
+		ToolName:      sanitizedToolName,
+		IsMCPTool:     isMCPToolEvent(eventName, sanitizedToolName),
 		SubagentDelta: subagentDelta(eventName),
 		EndsSession:   endsSession(provider, eventName),
 		SeenAt:        seenAt,
 	}, true
+}
+
+func sanitizeSource(raw string) string {
+	source := strings.ToLower(sanitizeMetadataValue(raw, 40))
+	switch source {
+	case "", "cli", "startup", "hook", "mcp", "tool", "user", "ide", "agent":
+		return source
+	default:
+		return "unknown"
+	}
+}
+
+func sanitizeMetadataValue(raw string, maxLen int) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.Contains(value, "/") ||
+		strings.Contains(value, `\`) ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "api_key") ||
+		strings.Contains(lower, "apikey") ||
+		strings.Contains(lower, "bearer ") ||
+		strings.Contains(lower, "password") {
+		return ""
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > maxLen {
+		value = value[:maxLen]
+	}
+	return value
 }
 
 func AllowResponse(provider string) []byte {
