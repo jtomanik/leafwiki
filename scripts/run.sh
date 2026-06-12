@@ -18,6 +18,9 @@ enable_workspace_sync="${LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC:-1}"
 api_key="${LEAFWIKI_RUN_MCP_API_KEY:-${LEAFWIKI_MCP_API_KEY:-}}"
 server_log="${LEAFWIKI_RUN_MCP_SERVER_LOG:-}"
 dry_run=0
+config_path=""
+config_conflict=""
+config_mode_requested=0
 
 server_extra_args=()
 
@@ -48,6 +51,7 @@ Options:
   --enable-workspace-sync   Pass --enable-workspace-sync to LeafWiki (default)
   --disable-workspace-sync  Do not pass --enable-workspace-sync
   --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
+  --config <path>           Pass a LeafWiki YAML config file without wrapper defaults
   --server-log <path>       Accepted and ignored for compatibility; use --server-arg for logging overrides
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
   --dry-run                 Print the planned command without starting anything
@@ -65,6 +69,11 @@ log() {
   printf '%s\n' "$1" >&2
 }
 
+fail_error() {
+  printf 'Error: %s\n' "$1" >&2
+  exit 1
+}
+
 fail() {
   if [[ "${mode:-}" == "agent-hook" ]]; then
     case "${hook_provider:-}" in
@@ -77,8 +86,66 @@ fail() {
     esac
     exit 0
   fi
-  printf 'Error: %s\n' "$1" >&2
-  exit 1
+  fail_error "$1"
+}
+
+fail_config_argument_error() {
+  if [[ "${config_mode_requested:-0}" == "1" || -n "${config_path:-}" ]]; then
+    fail_error "$1"
+  fi
+  fail "$1"
+}
+
+record_config_conflict() {
+  if [[ -z "$config_conflict" ]]; then
+    config_conflict="$1"
+  fi
+}
+
+fail_missing_config_conflict_value() {
+  local flag="$1"
+  local message="$2"
+  if [[ "${config_mode_requested:-0}" == "1" || -n "$config_path" ]]; then
+    fail_error "--config cannot be combined with $flag"
+  fi
+  fail "$message"
+}
+
+detect_config_mode_requested() {
+  local skip_next=0
+  local arg
+  for arg in "$@"; do
+    if [[ "$skip_next" == "1" ]]; then
+      skip_next=0
+      continue
+    fi
+    case "$arg" in
+      --config|--config=*)
+        config_mode_requested=1
+        ;;
+    esac
+    if [[ "$arg" != *=* ]] && wrapper_flag_takes_value "$arg"; then
+      skip_next=1
+    fi
+  done
+}
+
+wrapper_flag_takes_value() {
+  case "$1" in
+    --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg|--leafwiki-bin|--scheme|--host|--port|--base-path|--data-dir|--root-dir|--jwt-secret|--admin-password|--daemon-idle-timeout|--api-key|--config|--server-log|--server-arg)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_config_path_value() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  [[ -n "$value" && "$value" != -* ]]
 }
 
 quote_command() {
@@ -159,11 +226,16 @@ hook_provider=""
 case "$mode" in
   mcp)
     shift
+    detect_config_mode_requested "$@"
     ;;
   agent-hook)
     shift
+    detect_config_mode_requested "$@"
     [[ $# -ge 1 ]] || fail "agent-hook requires a provider"
     hook_provider="$1"
+    if [[ "$config_mode_requested" == "1" && "$hook_provider" == --* ]]; then
+      fail_error "agent-hook requires a provider"
+    fi
     shift
     ;;
   -h|--help|"")
@@ -177,15 +249,17 @@ esac
 
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == --*" "* ]]; then
-    fail "argument '$1' contains a space; MCP JSON args must split flags and values into separate args, for example \"--root-dir\", \"./wiki\", or use --root-dir=./wiki"
+    fail_config_argument_error "argument '$1' contains a space; MCP JSON args must split flags and values into separate args, for example \"--root-dir\", \"./wiki\", or use --root-dir=./wiki"
   fi
 
   case "$1" in
     --mode=*|--endpoint=*|--health-url=*|--mcp-stdio-bin=*|--request-timeout=*|--shutdown-timeout=*|--max-frame-size=*|--stdio-arg=*)
+      record_config_conflict "${1%%=*}"
       shift
       ;;
     --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg)
-      [[ $# -ge 2 ]] || fail "$1 requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "$1" "$1 requires a value"
+      record_config_conflict "$1"
       shift 2
       ;;
     --leafwiki-bin=*)
@@ -199,138 +273,179 @@ while [[ $# -gt 0 ]]; do
       ;;
     --scheme=*)
       scheme="${1#*=}"
+      record_config_conflict "--scheme"
       shift
       ;;
     --scheme)
-      [[ $# -ge 2 ]] || fail "--scheme requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--scheme" "--scheme requires a value"
       scheme="$2"
+      record_config_conflict "--scheme"
       shift 2
       ;;
     --host=*)
       host="${1#*=}"
+      record_config_conflict "--host"
       shift
       ;;
     --host)
-      [[ $# -ge 2 ]] || fail "--host requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--host" "--host requires a value"
       host="$2"
+      record_config_conflict "--host"
       shift 2
       ;;
     --port=*)
       port="${1#*=}"
+      record_config_conflict "--port"
       shift
       ;;
     --port)
-      [[ $# -ge 2 ]] || fail "--port requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--port" "--port requires a value"
       port="$2"
+      record_config_conflict "--port"
       shift 2
       ;;
     --base-path=*)
       base_path="${1#*=}"
+      record_config_conflict "--base-path"
       shift
       ;;
     --base-path)
-      [[ $# -ge 2 ]] || fail "--base-path requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--base-path" "--base-path requires a path"
       base_path="$2"
+      record_config_conflict "--base-path"
       shift 2
       ;;
     --data-dir=*)
       data_dir="${1#*=}"
+      record_config_conflict "--data-dir"
       shift
       ;;
     --data-dir)
-      [[ $# -ge 2 ]] || fail "--data-dir requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--data-dir" "--data-dir requires a path"
       data_dir="$2"
+      record_config_conflict "--data-dir"
       shift 2
       ;;
     --root-dir=*)
       root_dir="${1#*=}"
+      record_config_conflict "--root-dir"
       shift
       ;;
     --root-dir)
-      [[ $# -ge 2 ]] || fail "--root-dir requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--root-dir" "--root-dir requires a path"
       root_dir="$2"
+      record_config_conflict "--root-dir"
       shift 2
       ;;
     --jwt-secret=*)
       jwt_secret="${1#*=}"
+      record_config_conflict "--jwt-secret"
       shift
       ;;
     --jwt-secret)
-      [[ $# -ge 2 ]] || fail "--jwt-secret requires a secret"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--jwt-secret" "--jwt-secret requires a secret"
       jwt_secret="$2"
+      record_config_conflict "--jwt-secret"
       shift 2
       ;;
     --admin-password=*)
       admin_password="${1#*=}"
+      record_config_conflict "--admin-password"
       shift
       ;;
     --admin-password)
-      [[ $# -ge 2 ]] || fail "--admin-password requires a password"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--admin-password" "--admin-password requires a password"
       admin_password="$2"
+      record_config_conflict "--admin-password"
       shift 2
       ;;
     --disable-auth)
       disable_auth=1
+      record_config_conflict "--disable-auth"
       shift
       ;;
     --allow-insecure)
       allow_insecure=1
+      record_config_conflict "--allow-insecure"
       shift
       ;;
     --no-allow-insecure)
       allow_insecure=0
+      record_config_conflict "--no-allow-insecure"
       shift
       ;;
     --request-log)
       disable_request_log=0
+      record_config_conflict "--request-log"
       shift
       ;;
     --disable-request-log)
       disable_request_log=1
+      record_config_conflict "--disable-request-log"
       shift
       ;;
     --daemon-idle-timeout=*)
       daemon_idle_timeout="${1#*=}"
+      record_config_conflict "--daemon-idle-timeout"
       shift
       ;;
     --daemon-idle-timeout)
-      [[ $# -ge 2 ]] || fail "--daemon-idle-timeout requires a duration"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--daemon-idle-timeout" "--daemon-idle-timeout requires a duration"
       daemon_idle_timeout="$2"
+      record_config_conflict "--daemon-idle-timeout"
       shift 2
       ;;
     --enable-workspace-sync)
       enable_workspace_sync=1
+      record_config_conflict "--enable-workspace-sync"
       shift
       ;;
     --disable-workspace-sync)
       enable_workspace_sync=0
+      record_config_conflict "--disable-workspace-sync"
       shift
       ;;
     --api-key=*)
       api_key="${1#*=}"
+      record_config_conflict "--api-key"
       shift
       ;;
     --api-key)
-      [[ $# -ge 2 ]] || fail "--api-key requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--api-key" "--api-key requires a value"
       api_key="$2"
+      record_config_conflict "--api-key"
+      shift 2
+      ;;
+    --config=*)
+      config_path="${1#*=}"
+      is_config_path_value "$config_path" || fail_config_argument_error "--config requires a path"
+      shift
+      ;;
+    --config)
+      [[ $# -ge 2 ]] && is_config_path_value "$2" || fail_config_argument_error "--config requires a path"
+      config_path="$2"
       shift 2
       ;;
     --server-log=*)
       server_log="${1#*=}"
+      record_config_conflict "--server-log"
       shift
       ;;
     --server-log)
-      [[ $# -ge 2 ]] || fail "--server-log requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--server-log" "--server-log requires a path"
       server_log="$2"
+      record_config_conflict "--server-log"
       shift 2
       ;;
     --server-arg=*)
       server_extra_args+=("${1#*=}")
+      record_config_conflict "--server-arg"
       shift
       ;;
     --server-arg)
-      [[ $# -ge 2 ]] || fail "--server-arg requires an argument"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--server-arg" "--server-arg requires an argument"
       server_extra_args+=("$2")
+      record_config_conflict "--server-arg"
       shift 2
       ;;
     --dry-run)
@@ -338,94 +453,118 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
+      if [[ "$config_mode_requested" == "1" || -n "$config_path" ]]; then
+        fail_error "--config cannot be combined with --help"
+      fi
       usage
       exit 0
       ;;
     *)
-      fail "unknown option: $1"
+      fail_config_argument_error "unknown option: $1"
       ;;
   esac
 done
+
+if [[ "$config_mode_requested" == "1" && -n "$config_conflict" ]]; then
+  fail_error "--config cannot be combined with $config_conflict"
+fi
 
 base_path="$(normalize_base_path "$base_path")"
 url_host_value="$(url_host "$host")"
 http_url="$scheme://$url_host_value:$port$base_path"
 
 auth_bootstrap_configured=0
-if [[ -n "$jwt_secret" || -n "$admin_password" ]]; then
-  auth_bootstrap_configured=1
-fi
-
-if [[ -z "$disable_auth" ]]; then
-  if [[ -n "$api_key" ]]; then
-    disable_auth=0
-  elif [[ "$mode" == "agent-hook" && "$auth_bootstrap_configured" -eq 1 ]]; then
-    disable_auth=0
-  else
-    disable_auth=1
+if [[ -z "$config_path" ]]; then
+  if [[ -n "$jwt_secret" || -n "$admin_password" ]]; then
+    auth_bootstrap_configured=1
   fi
-fi
-if truthy "$disable_auth" && [[ -n "$api_key" ]]; then
-  fail "--disable-auth cannot be combined with --api-key or LEAFWIKI_MCP_API_KEY"
+
+  if [[ -z "$disable_auth" ]]; then
+    if [[ -n "$api_key" ]]; then
+      disable_auth=0
+    elif [[ "$mode" == "agent-hook" && "$auth_bootstrap_configured" -eq 1 ]]; then
+      disable_auth=0
+    else
+      disable_auth=1
+    fi
+  fi
+  if truthy "$disable_auth" && [[ -n "$api_key" ]]; then
+    fail "--disable-auth cannot be combined with --api-key or LEAFWIKI_MCP_API_KEY"
+  fi
 fi
 
 leafwiki_cmd=(
   "$leafwiki_bin"
 )
-if [[ "$mode" == "mcp" ]]; then
+if [[ -n "$config_path" ]]; then
+  leafwiki_cmd+=(--config "$config_path")
+  if [[ "$mode" == "agent-hook" ]]; then
+    leafwiki_cmd+=(agent-hook "$hook_provider")
+  fi
+elif [[ "$mode" == "mcp" ]]; then
   leafwiki_cmd+=(--mcp=stdio)
 else
   leafwiki_cmd+=(agent-hook "$hook_provider")
 fi
-leafwiki_cmd+=(
-  --host "$host"
-  --port "$port"
-  --data-dir "$data_dir"
-  --root-dir "$root_dir"
-  --daemon-idle-timeout "$daemon_idle_timeout"
-  --log-target file
-)
-if truthy "$disable_auth"; then
-  leafwiki_cmd+=(--disable-auth=true)
-fi
-if truthy "$allow_insecure"; then
-  leafwiki_cmd+=(--allow-insecure)
-fi
-if [[ -n "$base_path" ]]; then
-  leafwiki_cmd+=(--base-path "$base_path")
-fi
-if truthy "$disable_request_log"; then
-  leafwiki_cmd+=(--disable-request-log)
-fi
-if truthy "$enable_workspace_sync"; then
-  leafwiki_cmd+=(--enable-workspace-sync)
-fi
-if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
-  leafwiki_cmd+=("${server_extra_args[@]}")
+if [[ -z "$config_path" ]]; then
+  leafwiki_cmd+=(
+    --host "$host"
+    --port "$port"
+    --data-dir "$data_dir"
+    --root-dir "$root_dir"
+    --daemon-idle-timeout "$daemon_idle_timeout"
+    --log-target file
+  )
+  if truthy "$disable_auth"; then
+    leafwiki_cmd+=(--disable-auth=true)
+  fi
+  if truthy "$allow_insecure"; then
+    leafwiki_cmd+=(--allow-insecure)
+  fi
+  if [[ -n "$base_path" ]]; then
+    leafwiki_cmd+=(--base-path "$base_path")
+  fi
+  if truthy "$disable_request_log"; then
+    leafwiki_cmd+=(--disable-request-log)
+  fi
+  if truthy "$enable_workspace_sync"; then
+    leafwiki_cmd+=(--enable-workspace-sync)
+  fi
+  if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
+    leafwiki_cmd+=("${server_extra_args[@]}")
+  fi
 fi
 
 child_env=()
 print_env=()
-if [[ -n "$api_key" ]]; then
+if [[ -z "$config_path" && -n "$api_key" ]]; then
   child_env+=(LEAFWIKI_MCP_API_KEY="$api_key")
   print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED)
 fi
-if [[ -n "$jwt_secret" ]]; then
+if [[ -z "$config_path" && -n "$jwt_secret" ]]; then
   child_env+=(LEAFWIKI_JWT_SECRET="$jwt_secret")
   print_env+=(LEAFWIKI_JWT_SECRET=REDACTED)
 fi
-if [[ -n "$admin_password" ]]; then
+if [[ -z "$config_path" && -n "$admin_password" ]]; then
   child_env+=(LEAFWIKI_ADMIN_PASSWORD="$admin_password")
   print_env+=(LEAFWIKI_ADMIN_PASSWORD=REDACTED)
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
   if [[ "$mode" == "mcp" ]]; then
-    log "Would run LeafWiki native MCP STDIO"
+    if [[ -n "$config_path" ]]; then
+      log "Would run LeafWiki with YAML config for MCP"
+    else
+      log "Would run LeafWiki native MCP STDIO"
+    fi
   else
     log "Would run LeafWiki agent hook"
   fi
-  log "HTTP UI: $http_url"
+  if [[ -n "$config_path" ]]; then
+    log "HTTP UI: configured by $config_path"
+  else
+    log "HTTP UI: $http_url"
+  fi
   if [[ -n "$server_log" ]]; then
     log "Server log option ignored in native-only wrapper: $server_log"
   fi

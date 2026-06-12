@@ -53,6 +53,7 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		"--enable-workspace-sync",
 		"--mcp",
 		"--api-key",
+		"--config",
 		"leafwiki agent-hook <codex|claude|cursor|unknown>",
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
@@ -279,6 +280,539 @@ func TestMainProcess_RejectsInvalidLogTargetOnStderrWithNoStdout(t *testing.T) {
 	if !strings.Contains(stderr, "invalid log target") {
 		t.Fatalf("stderr = %q, want invalid log target", stderr)
 	}
+}
+
+func TestMainProcess_ConfigYAMLValueOverridesEnvironment(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	configPath := filepath.Join(baseDir, "leafwiki.yml")
+	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+data-dir: %s
+root-dir: %s
+host: 127.0.0.1
+port: %s
+log-target: stderr
+`, dataDir, rootDir, port))
+	proc := startLeafwikiHelper(t, []string{"--config", configPath}, map[string]string{
+		"LEAFWIKI_PORT": "1",
+	})
+
+	waitForLeafwikiReady(t, proc, port)
+	proc.stop(t)
+}
+
+func TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars(t *testing.T) {
+	t.Setenv("LEAFWIKI_PORT", "9999")
+	t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
+	t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
+	t.Setenv("LEAFWIKI_PUBLIC_ACCESS", "true")
+	t.Setenv("LEAFWIKI_MAX_REVISION_HISTORY", "100")
+
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, `port: 8088
+base-path: ""
+public-access: false
+max-revision-history: 0
+`)
+	flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
+
+	if got := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080"); got != "8088" {
+		t.Fatalf("port = %q, want YAML value 8088", got)
+	}
+	if got := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1"); got != "0.0.0.0" {
+		t.Fatalf("host = %q, want omitted YAML to use env", got)
+	}
+	if got := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data"); got != "./data" {
+		t.Fatalf("data-dir = %q, want default for omitted YAML/env key", got)
+	}
+	if got := resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""); got != "" {
+		t.Fatalf("base-path = %q, want explicit YAML empty string to override env", got)
+	}
+	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
+		t.Fatalf("public-access = true, want explicit YAML false to override env")
+	}
+	if got := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100); got != 0 {
+		t.Fatalf("max-revision-history = %d, want explicit YAML zero to override env", got)
+	}
+}
+
+func TestConfigFileFlagNamesCoverPublicRegisteredFlags(t *testing.T) {
+	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+	registerFlags(fs)
+
+	excluded := map[string]bool{
+		"config":                  true,
+		"enable-mcp":              true,
+		"internal-project-daemon": true,
+		"mcp-stdio":               true,
+	}
+	allowed := configFileFlagNames()
+	for name := range excluded {
+		if _, ok := allowed[name]; ok {
+			t.Fatalf("configFileFlagNames includes excluded flag %q", name)
+		}
+	}
+
+	var missing []string
+	fs.VisitAll(func(f *flag.Flag) {
+		if excluded[f.Name] {
+			return
+		}
+		if _, ok := allowed[f.Name]; !ok {
+			missing = append(missing, f.Name)
+		}
+	})
+
+	var extra []string
+	for name := range allowed {
+		if fs.Lookup(name) == nil {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	if len(missing) > 0 || len(extra) > 0 {
+		t.Fatalf("configFileFlagNames mismatch: missing=%v extra=%v", missing, extra)
+	}
+}
+
+func TestApplyYAMLConfigFile_AcceptsQuotedScalarCoercions(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, `public-access: "false"
+allow-insecure: "true"
+max-revision-history: "0"
+access-token-timeout: "30m"
+`)
+
+	flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
+
+	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
+		t.Fatalf("public-access = true, want quoted YAML false")
+	}
+	if got := resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE"); !got {
+		t.Fatalf("allow-insecure = false, want quoted YAML true")
+	}
+	if got := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100); got != 0 {
+		t.Fatalf("max-revision-history = %d, want quoted YAML zero", got)
+	}
+	if got := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT"); got != 30*time.Minute {
+		t.Fatalf("access-token-timeout = %s, want quoted YAML 30m", got)
+	}
+}
+
+func TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		yaml      string
+		wantError string
+	}{
+		{name: "unknown key", yaml: "unknown-option: true\n", wantError: `unknown --config key "unknown-option"`},
+		{name: "duplicate key", yaml: "port: 8080\nport: 8081\n", wantError: `duplicate --config key "port"`},
+		{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", wantError: `requires a non-null scalar value`},
+		{name: "null value", yaml: "base-path: null\n", wantError: `requires a non-null scalar value`},
+		{name: "hidden compatibility key", yaml: "enable-mcp: true\n", wantError: `unknown --config key "enable-mcp"`},
+		{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", wantError: `unknown --config key "internal-project-daemon"`},
+		{name: "config key", yaml: "config: other.yml\n", wantError: `unknown --config key "config"`},
+		{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", wantError: `unknown --config key "mcp-stdio"`},
+		{name: "bad bool scalar", yaml: "public-access: maybe\n", wantError: `invalid --config value for "public-access"`},
+		{name: "bad int scalar", yaml: "max-revision-history: many\n", wantError: `invalid --config value for "max-revision-history"`},
+		{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", wantError: `invalid --config value for "access-token-timeout"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+			writeTestConfig(t, configPath, tt.yaml)
+
+			_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
+
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestApplyYAMLConfigFile_RejectsConfigMixedWithNormalCLIFlag(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "port: 8080\n")
+
+	_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath, "--port", "8081"})
+
+	if err == nil || !strings.Contains(err.Error(), "--config cannot be combined with --port") {
+		t.Fatalf("applyYAMLConfigFile error = %v, want config/CLI mutual exclusion", err)
+	}
+}
+
+func TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "data-dir: ./data\n")
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "reset password trailing flag",
+			args: []string{"--config", configPath, "reset-admin-password", "--data-dir", "other"},
+			want: "--config cannot be combined with --data-dir",
+		},
+		{
+			name: "agent hook trailing flag",
+			args: []string{"--config", configPath, "agent-hook", "codex", "--data-dir", "other"},
+			want: "--config cannot be combined with --data-dir",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, err := parseConfigFlagsForArgsAllowError(t, tt.args)
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestMainProcess_ConfigPathValueNamedAgentHookDoesNotFailOpen(t *testing.T) {
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", "agent-hook",
+		"--not-a-real-flag",
+	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("config path plus invalid flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "not-a-real-flag") {
+		t.Fatalf("stderr = %q, want invalid flag error", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagWithoutFailOpen(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "data-dir: ./data\n")
+	payload := `{"hook_event_name":"SessionStart","session_id":"config-conflict-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", configPath,
+		"agent-hook", "codex",
+		"--data-dir", "other",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
+		t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
+	}
+	if strings.Contains(stderr, "config-conflict-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagBeforeReadingConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "missing.yml")
+	payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-conflict-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", configPath,
+		"agent-hook", "codex",
+		"--data-dir", "other",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
+		t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
+	}
+	if strings.Contains(stderr, "missing-config-conflict-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookMissingConfigFileFailsOpen(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "missing.yml")
+	payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", configPath,
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook missing config file should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stdout, "missing-config-secret") || strings.Contains(stderr, "missing-config-secret") {
+		t.Fatalf("hook output leaked payload secret\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsFlagLookingConfigPathWithoutFailOpen(t *testing.T) {
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-looking-config-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", "--data-dir",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("flag-looking config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "--config requires a path") {
+		t.Fatalf("stderr = %q, want config path-shape error", stderr)
+	}
+	if strings.Contains(stderr, "flag-looking-config-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsDashPrefixedConfigPathWithoutFailOpen(t *testing.T) {
+	baseDir := t.TempDir()
+	configPath := filepath.Join(baseDir, "---config")
+	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+data-dir: %s
+root-dir: %s
+log-target: stderr
+`, baseDir, baseDir))
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(baseDir); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+	payload := `{"hook_event_name":"SessionStart","session_id":"dash-prefixed-config-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", "---config",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("dash-prefixed config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "--config requires a path") {
+		t.Fatalf("stderr = %q, want config path-shape error", stderr)
+	}
+	if strings.Contains(stderr, "dash-prefixed-config-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "inline empty", args: []string{"--config=", "agent-hook", "codex"}},
+		{name: "separate empty", args: []string{"--config", "", "agent-hook", "codex"}},
+		{name: "trailing bare after agent hook", args: []string{"agent-hook", "codex", "--config"}},
+		{name: "inline empty before help after agent hook", args: []string{"agent-hook", "codex", "--config=", "--help"}},
+		{name: "single dash", args: []string{"--config", "-", "agent-hook", "codex"}},
+		{name: "double dash", args: []string{"--config", "--", "agent-hook", "codex"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := `{"hook_event_name":"SessionStart","session_id":"empty-config-secret"}`
+
+			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, tt.args, nil, payload, 5*time.Second)
+
+			if err == nil {
+				t.Fatalf("empty config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			if stdout == "{}\n" {
+				t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+			}
+			if !strings.Contains(stderr, "--config requires a path") {
+				t.Fatalf("stderr = %q, want empty config path error", stderr)
+			}
+			if strings.Contains(stderr, "empty-config-secret") {
+				t.Fatalf("stderr leaked hook payload data: %s", stderr)
+			}
+		})
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsHelpMixWithoutFailOpen(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "data-dir: ./data\n")
+	payload := `{"hook_event_name":"SessionStart","session_id":"config-help-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"agent-hook", "codex",
+		"--config", configPath,
+		"--help",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("config mixed with help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "Invalid config arguments") {
+		t.Fatalf("stderr = %q, want config argument error", stderr)
+	}
+	if strings.Contains(stderr, "config-help-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ConfigRejectsPositionalHelp(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "data-dir: ./data\n")
+
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--config", configPath,
+		"help",
+	}, nil)
+
+	if err == nil {
+		t.Fatalf("config mixed with positional help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if strings.Contains(stdout, "Usage:") {
+		t.Fatalf("stdout = %q, want no successful usage output", stdout)
+	}
+	if !strings.Contains(stderr, "Invalid config file") || !strings.Contains(stderr, "--config cannot be combined with help") {
+		t.Fatalf("stderr = %q, want config/help mix error", stderr)
+	}
+}
+
+func TestMainProcess_ConfigAgentHookRejectsUnknownFlagWithoutFailOpen(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+	writeTestConfig(t, configPath, "data-dir: ./data\n")
+	payload := `{"hook_event_name":"SessionStart","session_id":"unknown-config-flag-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", configPath,
+		"--not-a-real-flag",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err == nil {
+		t.Fatalf("config mixed with unknown flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if stdout == "{}\n" {
+		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+	}
+	if !strings.Contains(stderr, "not-a-real-flag") {
+		t.Fatalf("stderr = %q, want unknown flag error", stderr)
+	}
+	if strings.Contains(stderr, "unknown-config-flag-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_AgentHookFailOpenUsesConfig(t *testing.T) {
+	baseDir := t.TempDir()
+	sameDir := filepath.Join(baseDir, "same")
+	configPath := filepath.Join(baseDir, "leafwiki.yml")
+	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+data-dir: %s
+root-dir: %s
+log-target: stderr
+`, sameDir, sameDir))
+	payload := `{"hook_event_name":"SessionStart","session_id":"config-hook-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--config", configPath,
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("agent-hook invalid config should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "config-hook-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcess_ResetAdminPasswordUsesConfigDataDir(t *testing.T) {
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	initAdminUser(t, dataDir)
+	configPath := filepath.Join(baseDir, "leafwiki.yml")
+	writeTestConfig(t, configPath, fmt.Sprintf("data-dir: %s\n", dataDir))
+
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--config", configPath,
+		"reset-admin-password",
+	}, nil)
+
+	if err != nil {
+		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+	}
+	if !strings.Contains(stdout, "Admin password reset successfully") {
+		t.Fatalf("stdout = %q, want reset output", stdout)
+	}
+}
+
+func TestMainProcess_ConfigPathDoesNotAffectDaemonIdentity(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinWriter.Close()
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	configBody := fmt.Sprintf(`mcp: stdio
+disable-auth: true
+data-dir: %s
+root-dir: %s
+host: 127.0.0.1
+port: %s
+log-target: stderr
+`, dataDir, rootDir, port)
+	firstConfig := filepath.Join(baseDir, "first.yml")
+	secondConfig := filepath.Join(baseDir, "second.yml")
+	writeTestConfig(t, firstConfig, configBody)
+	writeTestConfig(t, secondConfig, configBody)
+	first := startLeafwikiHelperWithStdin(t, []string{"--config", firstConfig}, nil, stdinReader)
+	waitForLeafwikiReady(t, first, port)
+
+	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{"--config", secondConfig}, nil, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("second config path should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+	}
+	if strings.Contains(stderr, "project daemon config mismatch") {
+		t.Fatalf("stderr = %q, want no config mismatch from config path", stderr)
+	}
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	first.waitForExit(t)
 }
 
 func TestMainProcess_RejectsExplicitLogFileForStreamTarget(t *testing.T) {
@@ -1441,6 +1975,46 @@ func TestMainProcessAgentHookFlagFirstParseErrorsFailOpen(t *testing.T) {
 		t.Fatalf("stdout = %q, want Codex allow response", stdout)
 	}
 	if strings.Contains(stderr, "flag-parse-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessAgentHookFlagValueNamedConfigDoesNotDisableFailOpen(t *testing.T) {
+	payload := `{"hook_event_name":"SessionStart","session_id":"flag-value-config-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"--data-dir", "--config",
+		"--not-a-real-flag",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "flag-value-config-secret") {
+		t.Fatalf("stderr leaked hook payload data: %s", stderr)
+	}
+}
+
+func TestMainProcessAgentHookMalformedConfigFlagDoesNotDisableFailOpen(t *testing.T) {
+	payload := `{"hook_event_name":"SessionStart","session_id":"malformed-config-flag-secret"}`
+
+	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+		"---config",
+		"--not-a-real-flag",
+		"agent-hook", "codex",
+	}, nil, payload, 5*time.Second)
+
+	if err != nil {
+		t.Fatalf("malformed non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if stdout != "{}\n" {
+		t.Fatalf("stdout = %q, want Codex allow response", stdout)
+	}
+	if strings.Contains(stderr, "malformed-config-flag-secret") {
 		t.Fatalf("stderr leaked hook payload data: %s", stderr)
 	}
 }
@@ -3951,6 +4525,47 @@ func resolveMCPTransportsForArgs(t *testing.T, args []string) (mcpTransports, er
 	visited := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
 	return resolveMCPTransports(flags, visited)
+}
+
+func parseConfigFlagsForArgs(t *testing.T, args []string) (*cliFlags, map[string]bool, []string) {
+	t.Helper()
+
+	flags, visited, rest, err := parseConfigFlagsForArgsAllowError(t, args)
+	if err != nil {
+		t.Fatalf("applyYAMLConfigFile: %v", err)
+	}
+	return flags, visited, rest
+}
+
+func parseConfigFlagsForArgsAllowError(t *testing.T, args []string) (*cliFlags, map[string]bool, []string, error) {
+	t.Helper()
+
+	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+	var errOut bytes.Buffer
+	fs.SetOutput(&errOut)
+	flags := registerFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse flags: %v (%s)", err, errOut.String())
+	}
+	visited := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	if visited["config"] {
+		if err := validateConfigModeArgs(fs.Args()); err != nil {
+			return flags, visited, fs.Args(), err
+		}
+		if err := applyYAMLConfigFile(fs, flags, visited); err != nil {
+			return flags, visited, fs.Args(), err
+		}
+	}
+	return flags, visited, fs.Args(), nil
+}
+
+func writeTestConfig(t *testing.T, path string, body string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config %s: %v", path, err)
+	}
 }
 
 func resolveWorkspaceForArgs(t *testing.T, args []string) wiki.Workspace {

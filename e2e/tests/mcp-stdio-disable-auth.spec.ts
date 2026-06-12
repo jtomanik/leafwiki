@@ -18,6 +18,8 @@ test.skip(
 const assertRootFiles = process.env.E2E_ASSERT_SEPARATE_ROOT_FILES === '1';
 const dataDir = process.env.E2E_DATA_DIR ?? '';
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
+const stdioConfigFile = process.env.E2E_MCP_STDIO_CONFIG_FILE ?? '';
+const stdioCommand = process.env.E2E_MCP_STDIO_COMMAND ?? '';
 
 function appURL(routePath: string): string {
   return new URL(
@@ -39,6 +41,13 @@ function expectMarkdownInConfiguredRoot(slug: string, expectedContent: string) {
 }
 
 test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }) => {
+  if (process.env.E2E_USE_CONFIG_FILE === '1') {
+    expect(stdioConfigFile).not.toBe('');
+    expect(existsSync(stdioConfigFile), `${stdioConfigFile} should exist`).toBe(true);
+    expect(readFileSync(stdioConfigFile, 'utf8')).toContain('mcp:');
+    expect(readFileSync(stdioCommand, 'utf8')).toContain('--config');
+  }
+
   const mcp = await connectMCPStdioClient(appURL('/mcp'));
   const slug = `mcp-stdio-e2e-${Date.now()}`;
   const title = 'MCP STDIO E2E Page';

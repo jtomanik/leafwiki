@@ -39,6 +39,7 @@ assert_contains "$help_output" "--enable-workspace-sync" "help"
 assert_contains "$help_output" "--disable-workspace-sync" "help"
 assert_contains "$help_output" "--daemon-idle-timeout" "help"
 assert_contains "$help_output" "--server-arg" "help"
+assert_contains "$help_output" "--config" "help"
 assert_contains "$help_output" "--dry-run" "help"
 removed_binary="leafwiki""-mcp-stdio"
 legacy_bin_flag="--mcp""-stdio-bin"
@@ -62,6 +63,207 @@ assert_contains "$native_default_output" "--log-target file" "native dry-run"
 assert_contains "$native_default_output" "--enable-workspace-sync" "native dry-run"
 assert_not_contains "$native_default_output" "--log-target stderr" "native dry-run"
 assert_not_contains "$native_default_output" "$removed_binary" "native dry-run"
+
+config_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --config ./leafwiki.yml 2>&1)"
+assert_contains "$config_output" "Would run LeafWiki with YAML config for MCP" "config dry-run"
+assert_contains "$config_output" "/tmp/fake-leafwiki" "config dry-run"
+assert_contains "$config_output" "--config ./leafwiki.yml" "config dry-run"
+assert_not_contains "$config_output" "--mcp=stdio" "config dry-run"
+assert_not_contains "$config_output" "--data-dir" "config dry-run"
+assert_not_contains "$config_output" "--root-dir" "config dry-run"
+assert_not_contains "$config_output" "--disable-auth=true" "config dry-run"
+assert_not_contains "$config_output" "--enable-workspace-sync" "config dry-run"
+
+config_api_key_output="$(
+  LEAFWIKI_RUN_MCP_API_KEY=lwk_config_secret \
+  "$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --config ./leafwiki.yml 2>&1
+)"
+assert_contains "$config_api_key_output" "--config ./leafwiki.yml" "config api-key dry-run"
+assert_not_contains "$config_api_key_output" "LEAFWIKI_MCP_API_KEY" "config api-key dry-run"
+assert_not_contains "$config_api_key_output" "lwk_config_secret" "config api-key dry-run"
+
+hook_config_output="$("$script" agent-hook codex --dry-run --leafwiki-bin /tmp/fake-leafwiki --config ./leafwiki.yml 2>&1)"
+assert_contains "$hook_config_output" "Would run LeafWiki agent hook" "hook config dry-run"
+assert_contains "$hook_config_output" "--config ./leafwiki.yml agent-hook codex" "hook config dry-run"
+assert_not_contains "$hook_config_output" "--data-dir" "hook config dry-run"
+assert_not_contains "$hook_config_output" "--root-dir" "hook config dry-run"
+
+set +e
+bad_config_mix_output="$("$script" mcp --dry-run --config ./leafwiki.yml --root-dir ./wiki 2>&1)"
+bad_config_mix_status=$?
+set -e
+[[ "$bad_config_mix_status" -ne 0 ]] || fail "config mixed with root-dir unexpectedly succeeded"
+assert_contains "$bad_config_mix_output" "--config cannot be combined with --root-dir" "config root-dir mix error"
+
+set +e
+bad_hook_config_mix_output="$("$script" agent-hook codex --dry-run --config ./leafwiki.yml --root-dir ./wiki 2>&1)"
+bad_hook_config_mix_status=$?
+set -e
+[[ "$bad_hook_config_mix_status" -ne 0 ]] || fail "hook config mixed with root-dir unexpectedly succeeded"
+assert_contains "$bad_hook_config_mix_output" "--config cannot be combined with --root-dir" "hook config root-dir mix error"
+
+set +e
+bad_hook_config_mix_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-conflict-secret"}' | "$script" agent-hook codex --config ./leafwiki.yml --root-dir ./wiki 2>&1)"
+bad_hook_config_mix_runtime_status=$?
+set -e
+[[ "$bad_hook_config_mix_runtime_status" -ne 0 ]] || fail "runtime hook config mixed with root-dir unexpectedly succeeded"
+assert_contains "$bad_hook_config_mix_runtime_output" "--config cannot be combined with --root-dir" "runtime hook config root-dir mix error"
+assert_not_contains "$bad_hook_config_mix_runtime_output" "wrapper-config-conflict-secret" "runtime hook config root-dir mix error"
+
+set +e
+bad_hook_config_missing_value_output="$("$script" agent-hook codex --dry-run --config ./leafwiki.yml --root-dir 2>&1)"
+bad_hook_config_missing_value_status=$?
+set -e
+[[ "$bad_hook_config_missing_value_status" -ne 0 ]] || fail "hook config mixed with root-dir missing value unexpectedly succeeded"
+assert_contains "$bad_hook_config_missing_value_output" "--config cannot be combined with --root-dir" "hook config root-dir missing value error"
+
+set +e
+bad_hook_config_missing_value_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-missing-value-secret"}' | "$script" agent-hook codex --config ./leafwiki.yml --root-dir 2>&1)"
+bad_hook_config_missing_value_runtime_status=$?
+set -e
+[[ "$bad_hook_config_missing_value_runtime_status" -ne 0 ]] || fail "runtime hook config mixed with root-dir missing value unexpectedly succeeded"
+assert_contains "$bad_hook_config_missing_value_runtime_output" "--config cannot be combined with --root-dir" "runtime hook config root-dir missing value error"
+assert_not_contains "$bad_hook_config_missing_value_runtime_output" "wrapper-config-missing-value-secret" "runtime hook config root-dir missing value error"
+
+set +e
+bad_hook_config_unknown_option_output="$("$script" agent-hook codex --dry-run --config ./leafwiki.yml --not-a-real-flag 2>&1)"
+bad_hook_config_unknown_option_status=$?
+set -e
+[[ "$bad_hook_config_unknown_option_status" -ne 0 ]] || fail "hook config mixed with unknown option unexpectedly succeeded"
+assert_contains "$bad_hook_config_unknown_option_output" "unknown option: --not-a-real-flag" "hook config unknown option error"
+
+set +e
+bad_hook_config_unknown_option_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-unknown-option-secret"}' | "$script" agent-hook codex --config ./leafwiki.yml --not-a-real-flag 2>&1)"
+bad_hook_config_unknown_option_runtime_status=$?
+set -e
+[[ "$bad_hook_config_unknown_option_runtime_status" -ne 0 ]] || fail "runtime hook config mixed with unknown option unexpectedly succeeded"
+assert_contains "$bad_hook_config_unknown_option_runtime_output" "unknown option: --not-a-real-flag" "runtime hook config unknown option error"
+assert_not_contains "$bad_hook_config_unknown_option_runtime_output" "wrapper-config-unknown-option-secret" "runtime hook config unknown option error"
+
+set +e
+bad_hook_config_unknown_option_reversed_output="$("$script" agent-hook codex --dry-run --not-a-real-flag --config ./leafwiki.yml 2>&1)"
+bad_hook_config_unknown_option_reversed_status=$?
+set -e
+[[ "$bad_hook_config_unknown_option_reversed_status" -ne 0 ]] || fail "hook unknown option before config unexpectedly succeeded"
+assert_contains "$bad_hook_config_unknown_option_reversed_output" "unknown option: --not-a-real-flag" "hook config reversed unknown option error"
+
+set +e
+bad_hook_config_unknown_option_reversed_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-reversed-unknown-secret"}' | "$script" agent-hook codex --not-a-real-flag --config ./leafwiki.yml 2>&1)"
+bad_hook_config_unknown_option_reversed_runtime_status=$?
+set -e
+[[ "$bad_hook_config_unknown_option_reversed_runtime_status" -ne 0 ]] || fail "runtime hook unknown option before config unexpectedly succeeded"
+assert_contains "$bad_hook_config_unknown_option_reversed_runtime_output" "unknown option: --not-a-real-flag" "runtime hook config reversed unknown option error"
+assert_not_contains "$bad_hook_config_unknown_option_reversed_runtime_output" "wrapper-config-reversed-unknown-secret" "runtime hook config reversed unknown option error"
+
+set +e
+hook_flag_value_named_config_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-flag-value-config-secret"}' | "$script" agent-hook codex --data-dir --config --not-a-real-flag 2>&1)"
+hook_flag_value_named_config_runtime_status=$?
+set -e
+[[ "$hook_flag_value_named_config_runtime_status" -eq 0 ]] || fail "runtime hook flag value named config did not fail open"
+[[ "$hook_flag_value_named_config_runtime_output" == "{}" ]] || fail "runtime hook flag value named config output mismatch: $hook_flag_value_named_config_runtime_output"
+assert_not_contains "$hook_flag_value_named_config_runtime_output" "wrapper-flag-value-config-secret" "runtime hook flag value named config"
+
+set +e
+bad_hook_config_missing_path_output="$("$script" agent-hook codex --dry-run --config 2>&1)"
+bad_hook_config_missing_path_status=$?
+set -e
+[[ "$bad_hook_config_missing_path_status" -ne 0 ]] || fail "hook config missing path unexpectedly succeeded"
+assert_contains "$bad_hook_config_missing_path_output" "--config requires a path" "hook config missing path error"
+
+set +e
+bad_hook_config_missing_path_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-missing-path-secret"}' | "$script" agent-hook codex --config 2>&1)"
+bad_hook_config_missing_path_runtime_status=$?
+set -e
+[[ "$bad_hook_config_missing_path_runtime_status" -ne 0 ]] || fail "runtime hook config missing path unexpectedly succeeded"
+assert_contains "$bad_hook_config_missing_path_runtime_output" "--config requires a path" "runtime hook config missing path error"
+assert_not_contains "$bad_hook_config_missing_path_runtime_output" "wrapper-config-missing-path-secret" "runtime hook config missing path error"
+
+set +e
+bad_hook_config_empty_equals_output="$("$script" agent-hook codex --dry-run --config= 2>&1)"
+bad_hook_config_empty_equals_status=$?
+set -e
+[[ "$bad_hook_config_empty_equals_status" -ne 0 ]] || fail "hook empty config path unexpectedly succeeded"
+assert_contains "$bad_hook_config_empty_equals_output" "--config requires a path" "hook empty config path error"
+
+set +e
+bad_hook_config_empty_equals_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-empty-equals-secret"}' | "$script" agent-hook codex --config= 2>&1)"
+bad_hook_config_empty_equals_runtime_status=$?
+set -e
+[[ "$bad_hook_config_empty_equals_runtime_status" -ne 0 ]] || fail "runtime hook empty config path unexpectedly succeeded"
+assert_contains "$bad_hook_config_empty_equals_runtime_output" "--config requires a path" "runtime hook empty config path error"
+assert_not_contains "$bad_hook_config_empty_equals_runtime_output" "wrapper-config-empty-equals-secret" "runtime hook empty config path error"
+
+set +e
+bad_hook_config_empty_value_output="$("$script" agent-hook codex --dry-run --config "" 2>&1)"
+bad_hook_config_empty_value_status=$?
+set -e
+[[ "$bad_hook_config_empty_value_status" -ne 0 ]] || fail "hook empty config value unexpectedly succeeded"
+assert_contains "$bad_hook_config_empty_value_output" "--config requires a path" "hook empty config value error"
+
+set +e
+bad_mcp_config_empty_value_output="$("$script" mcp --dry-run --config "" 2>&1)"
+bad_mcp_config_empty_value_status=$?
+set -e
+[[ "$bad_mcp_config_empty_value_status" -ne 0 ]] || fail "mcp empty config value unexpectedly succeeded"
+assert_contains "$bad_mcp_config_empty_value_output" "--config requires a path" "mcp empty config value error"
+
+set +e
+bad_mcp_config_whitespace_value_output="$("$script" mcp --dry-run --config "   " 2>&1)"
+bad_mcp_config_whitespace_value_status=$?
+set -e
+[[ "$bad_mcp_config_whitespace_value_status" -ne 0 ]] || fail "mcp whitespace config value unexpectedly succeeded"
+assert_contains "$bad_mcp_config_whitespace_value_output" "--config requires a path" "mcp whitespace config value error"
+
+set +e
+bad_mcp_config_spaced_dash_value_output="$("$script" mcp --dry-run --config "  ---config" 2>&1)"
+bad_mcp_config_spaced_dash_value_status=$?
+set -e
+[[ "$bad_mcp_config_spaced_dash_value_status" -ne 0 ]] || fail "mcp leading-space dash config value unexpectedly succeeded"
+assert_contains "$bad_mcp_config_spaced_dash_value_output" "--config requires a path" "mcp leading-space dash config value error"
+
+set +e
+bad_mcp_config_flag_value_output="$("$script" mcp --leafwiki-bin /bin/echo --config --dry-run 2>&1)"
+bad_mcp_config_flag_value_status=$?
+set -e
+[[ "$bad_mcp_config_flag_value_status" -ne 0 ]] || fail "mcp config consumed flag as path unexpectedly succeeded"
+assert_contains "$bad_mcp_config_flag_value_output" "--config requires a path" "mcp config flag value error"
+
+set +e
+bad_hook_config_flag_value_output="$("$script" agent-hook codex --leafwiki-bin /bin/echo --config --dry-run 2>&1)"
+bad_hook_config_flag_value_status=$?
+set -e
+[[ "$bad_hook_config_flag_value_status" -ne 0 ]] || fail "hook config consumed flag as path unexpectedly succeeded"
+assert_contains "$bad_hook_config_flag_value_output" "--config requires a path" "hook config flag value error"
+
+set +e
+bad_mcp_config_help_output="$("$script" mcp --config ./leafwiki.yml --help 2>&1)"
+bad_mcp_config_help_status=$?
+set -e
+[[ "$bad_mcp_config_help_status" -ne 0 ]] || fail "mcp config mixed with help unexpectedly succeeded"
+assert_contains "$bad_mcp_config_help_output" "--config cannot be combined with --help" "mcp config help error"
+
+set +e
+bad_hook_config_help_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-help-secret"}' | "$script" agent-hook codex --config ./leafwiki.yml --help 2>&1)"
+bad_hook_config_help_status=$?
+set -e
+[[ "$bad_hook_config_help_status" -ne 0 ]] || fail "hook config mixed with help unexpectedly succeeded"
+assert_contains "$bad_hook_config_help_output" "--config cannot be combined with --help" "hook config help error"
+assert_not_contains "$bad_hook_config_help_output" "wrapper-config-help-secret" "hook config help error"
+
+set +e
+bad_hook_provider_config_output="$("$script" agent-hook --config --dry-run 2>&1)"
+bad_hook_provider_config_status=$?
+set -e
+[[ "$bad_hook_provider_config_status" -ne 0 ]] || fail "hook config without provider unexpectedly succeeded"
+assert_contains "$bad_hook_provider_config_output" "agent-hook requires a provider" "hook config without provider error"
+
+set +e
+bad_hook_provider_config_runtime_output="$(printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-provider-secret"}' | "$script" agent-hook --config --dry-run 2>&1)"
+bad_hook_provider_config_runtime_status=$?
+set -e
+[[ "$bad_hook_provider_config_runtime_status" -ne 0 ]] || fail "runtime hook config without provider unexpectedly succeeded"
+assert_contains "$bad_hook_provider_config_runtime_output" "agent-hook requires a provider" "runtime hook config without provider error"
+assert_not_contains "$bad_hook_provider_config_runtime_output" "wrapper-config-provider-secret" "runtime hook config without provider error"
 
 native_disabled_workspace_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --disable-workspace-sync 2>&1)"
 assert_not_contains "$native_disabled_workspace_output" "--enable-workspace-sync" "native disable workspace dry-run"
@@ -179,6 +381,21 @@ set -e
 [[ "$missing_hook_status" -eq 0 ]] || fail "missing hook binary blocked Codex hook: status $missing_hook_status"
 [[ "$(cat "$missing_hook_stdout_file")" == "{}" ]] || fail "missing hook binary stdout was not Codex allow response: $(cat "$missing_hook_stdout_file")"
 assert_not_contains "$(cat "$missing_hook_stderr_file")" "wrapper-secret-session" "missing Codex hook stderr"
+
+missing_config_hook_stdout_file="$tmp_dir/missing-config-hook.stdout"
+missing_config_hook_stderr_file="$tmp_dir/missing-config-hook.stderr"
+set +e
+printf '%s' '{"hook_event_name":"SessionStart","session_id":"wrapper-config-missing-binary-secret"}' | "$script" \
+  agent-hook codex \
+  --config ./leafwiki.yml \
+  --leafwiki-bin "$tmp_dir/missing-leafwiki" \
+  > "$missing_config_hook_stdout_file" \
+  2> "$missing_config_hook_stderr_file"
+missing_config_hook_status=$?
+set -e
+[[ "$missing_config_hook_status" -eq 0 ]] || fail "missing config hook binary blocked Codex hook: status $missing_config_hook_status"
+[[ "$(cat "$missing_config_hook_stdout_file")" == "{}" ]] || fail "missing config hook binary stdout was not Codex allow response: $(cat "$missing_config_hook_stdout_file")"
+assert_not_contains "$(cat "$missing_config_hook_stderr_file")" "wrapper-config-missing-binary-secret" "missing config Codex hook stderr"
 
 missing_cursor_stdout_file="$tmp_dir/missing-cursor-hook.stdout"
 set +e

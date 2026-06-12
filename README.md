@@ -243,6 +243,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--port`                         | Port the server listens on                                              | `8080`        | –       |
 | `--data-dir`                     | Directory where data is stored                                          | `./data`      | –       |
 | `--root-dir`                     | Directory where managed markdown pages and `.order.json` are stored     | `<data-dir>/root` | –    |
+| `--config`                       | Flat YAML config file; cannot be combined with normal CLI flags         | `""`          | v0.11.0 |
 | `--public-access`                | Allow public read-only access                                           | `false`       | –       |
 | `--base-path`                    | URL prefix for reverse proxy setups (e.g. `/wiki`)                      | `""`          | v0.8.2  |
 | `--allow-insecure`               | ⚠️ Enables HTTP for auth cookies (required for plain HTTP)              | `false`       | v0.7.0  |
@@ -269,6 +270,30 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--disable-request-log`          | Suppress per-request HTTP access logs                                   | `false`       | v0.11.0 |
 
 > Docker image default: `LEAFWIKI_HOST` is set to `0.0.0.0` automatically by the container entrypoint if neither `--host` nor `LEAFWIKI_HOST` is provided.
+
+### YAML Config File
+
+Use `--config <path>` when you want a single startup file instead of CLI flags:
+
+```yaml
+host: 127.0.0.1
+port: 8080
+data-dir: ./.wiki
+root-dir: ./wiki
+jwt-secret: change-me
+admin-password: change-me
+allow-insecure: true
+mcp: http
+enable-workspace-sync: true
+```
+
+```bash
+leafwiki --config ./leafwiki.yml
+```
+
+YAML keys mirror public CLI flag names without the leading `--`. `--config` cannot be combined with normal CLI flags, so `leafwiki --config ./leafwiki.yml --port 8081` fails. Values in YAML are treated like supplied CLI flag values: present YAML keys override environment variables, while omitted keys still fall back to environment variables and defaults. Explicit `""`, `false`, and `0` values are honored.
+
+The config file is a flat mapping of scalar values. Unknown keys, duplicate keys, `null`, lists, maps, hidden compatibility flags such as `enable-mcp`/`mcp-stdio`, and internal-only flags such as `internal-project-daemon` are rejected. Secrets are allowed in YAML, so protect the file accordingly. The config file path itself is not part of project daemon identity; only the resolved runtime values are matched. This config-file contract is tracked by `codex://threads/019eb504-6cf3-7803-b033-bee91c3b028b`.
 
 ### Environment Variables
 
@@ -374,7 +399,10 @@ The easiest project-local STDIO setup is the wrapper script:
 
 ```bash
 ./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --config ./leafwiki.yml
 ```
+
+When using `run.sh mcp --config`, set `mcp: stdio` or `mcp: http,stdio` in the YAML file so the spawned process speaks MCP over stdin/stdout.
 
 Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.
 

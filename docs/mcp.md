@@ -8,9 +8,10 @@ Use the transport selector:
 leafwiki --mcp=http --host 127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
 leafwiki --mcp=stdio --disable-auth=true --host 127.0.0.1 --root-dir ./wiki --data-dir ./.wiki
 leafwiki --mcp=http,stdio --host 127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
+leafwiki --config ./leafwiki.yml
 ```
 
-Supported values are `none`, `http`, `stdio`, `http,stdio`, and `stdio,http`. The `LEAFWIKI_MCP` environment variable accepts the same values. CLI flags take precedence over environment variables.
+Supported `--mcp` values are `none`, `http`, `stdio`, `http,stdio`, and `stdio,http`. The `LEAFWIKI_MCP` environment variable accepts the same values. CLI flags take precedence over environment variables. In config-file mode, `mcp: stdio` or `mcp: http,stdio` uses the same values, YAML keys override environment variables when present, and omitted YAML keys still use environment variables/defaults.
 
 The HTTP endpoint is:
 
@@ -21,6 +22,8 @@ http://127.0.0.1:8080/mcp
 When `--base-path /wiki` is configured, the endpoint is `http://127.0.0.1:8080/wiki/mcp`.
 
 Transport unification is tracked by `codex://threads/019e8a0f-9674-7780-b6ee-1cfd7be07f67`. The transparent project daemon design is tracked by `codex://threads/019e8df8-d944-71f3-956e-59eb999abdff`. The context-first agent collaboration surface is tracked by `codex://threads/019e9c9b-92bc-74c1-820e-a758f051d779`.
+
+YAML config-file startup is tracked by `codex://threads/019eb504-6cf3-7803-b033-bee91c3b028b`. `--config <path>` is mutually exclusive with normal CLI flags. The file is a flat mapping whose keys mirror public CLI flags without `--`; unknown, duplicate, non-scalar, hidden compatibility, and internal-only keys fail startup. The config path itself is not part of project daemon identity.
 
 ## Transparent Project Daemon
 
@@ -51,7 +54,10 @@ For project-local MCP clients, use `scripts/run.sh mcp`. It starts an agent-owne
 
 ```bash
 ./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
+./scripts/run.sh mcp --config ./leafwiki.yml
 ```
+
+In config-file mode the wrapper does not add `--mcp=stdio`; put `mcp: stdio` or `mcp: http,stdio` in `leafwiki.yml` for clients that spawn `run.sh mcp`.
 
 MCP client JSON:
 
@@ -77,6 +83,20 @@ Authenticated native STDIO:
 ```bash
 LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> \
 ./scripts/run.sh mcp --root-dir ./wiki --data-dir ./.wiki
+```
+
+Config-file native STDIO:
+
+```yaml
+mcp: stdio
+data-dir: ./.wiki
+root-dir: ./wiki
+disable-auth: true
+enable-workspace-sync: true
+```
+
+```bash
+./scripts/run.sh mcp --config ./leafwiki.yml
 ```
 
 `LEAFWIKI_JWT_SECRET` and `LEAFWIKI_ADMIN_PASSWORD` are only needed when this

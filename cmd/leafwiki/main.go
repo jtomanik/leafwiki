@@ -35,6 +35,7 @@ import (
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
+	"gopkg.in/yaml.v3"
 )
 
 func writeUsage(w io.Writer) {
@@ -82,6 +83,7 @@ func writeUsage(w io.Writer) {
 	--trusted-proxy-ips             Comma-separated trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)
 	--http-remote-user-logout-url   URL the frontend redirects to after logout in proxy-auth mode (default: "")
 	--disable-request-log           Suppress per-request HTTP access log lines (default: false)
+	--config                        Path to flat YAML config file; mutually exclusive with other CLI flags
 
 	Environment variables:
 	LEAFWIKI_HOST
@@ -147,6 +149,22 @@ func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io
 
 var failOpenAgentHookProvider string
 
+type configFlagMixError struct {
+	flag string
+}
+
+func (err configFlagMixError) Error() string {
+	return "--config cannot be combined with " + err.flag
+}
+
+type configUsageError struct {
+	message string
+}
+
+func (err configUsageError) Error() string {
+	return err.message
+}
+
 func fail(msg string, args ...any) {
 	if failOpenAgentHookProvider != "" {
 		provider := failOpenAgentHookProvider
@@ -156,6 +174,21 @@ func fail(msg string, args ...any) {
 		}
 		os.Exit(0)
 	}
+	slog.Default().Error(msg, args...)
+	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
+	os.Exit(1)
+}
+
+func failInvalidConfigFile(err error) {
+	var mixErr configFlagMixError
+	var usageErr configUsageError
+	if errors.As(err, &mixErr) || errors.As(err, &usageErr) {
+		failWithoutAgentHook("Invalid config file", "error", err)
+	}
+	fail("Invalid config file", "error", err)
+}
+
+func failWithoutAgentHook(msg string, args ...any) {
 	slog.Default().Error(msg, args...)
 	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
 	os.Exit(1)
@@ -180,6 +213,7 @@ var projectDaemonStartupConfigPostStartCleanupDelay = 30 * time.Second
 const agentHookMaxPayloadBytes = 1024 * 1024
 
 type cliFlags struct {
+	config                  *string
 	host                    *string
 	port                    *string
 	dataDir                 *string
@@ -250,6 +284,7 @@ type leafwikiRuntimeConfig struct {
 
 func registerFlags(fs *flag.FlagSet) *cliFlags {
 	return &cliFlags{
+		config:                  fs.String("config", "", "path to a flat YAML config file; mutually exclusive with other CLI flags"),
 		host:                    fs.String("host", "", "host/IP address to bind the server to (e.g. 127.0.0.1 or 0.0.0.0)"),
 		port:                    fs.String("port", "", "port to run the server on"),
 		dataDir:                 fs.String("data-dir", "", "path to data directory"),
@@ -293,8 +328,13 @@ func main() {
 	if provider, ok := agentHookProviderFromRawArgs(rawArgs); ok {
 		failOpenAgentHookProvider = provider
 	}
+	originalRawArgs := rawArgs
 	rawArgs = normalizeAgentHookRawArgs(rawArgs)
-	if shouldPrintUsage(rawArgs) {
+	configModeRequested := rawArgsContainFlag(rawArgs, "config")
+	if err := validateRawConfigFlagUsage(originalRawArgs); err != nil {
+		failInvalidConfigFile(err)
+	}
+	if !configModeRequested && shouldPrintUsage(rawArgs) {
 		printUsage()
 		return
 	}
@@ -307,10 +347,25 @@ func main() {
 
 	flags := registerFlags(flag.CommandLine)
 	if err := flag.CommandLine.Parse(rawArgs); err != nil {
+		if configModeRequested {
+			failWithoutAgentHook("Invalid config arguments", "error", err)
+		}
 		if failOpenAgentHookProvider != "" {
 			fail("Invalid agent hook arguments", "error", err)
 		}
 		os.Exit(2)
+	}
+
+	// Track which flags were explicitly set on CLI
+	visited := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	if visited["config"] {
+		if err := validateConfigModeArgs(flag.CommandLine.Args()); err != nil {
+			failInvalidConfigFile(err)
+		}
+		if err := applyYAMLConfigFile(flag.CommandLine, flags, visited); err != nil {
+			failInvalidConfigFile(err)
+		}
 	}
 	if strings.TrimSpace(*flags.internalProjectDaemon) != "" {
 		if err := runInternalProjectDaemon(context.Background(), *flags.internalProjectDaemon); err != nil {
@@ -318,10 +373,6 @@ func main() {
 		}
 		return
 	}
-
-	// Track which flags were explicitly set on CLI
-	visited := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
 
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	args := flag.Args()
@@ -529,7 +580,15 @@ func rawFlagName(arg string) (string, bool, bool) {
 	if !strings.HasPrefix(arg, "-") || arg == "-" {
 		return "", false, false
 	}
-	trimmed := strings.TrimLeft(arg, "-")
+	var trimmed string
+	if strings.HasPrefix(arg, "--") {
+		trimmed = strings.TrimPrefix(arg, "--")
+		if strings.HasPrefix(trimmed, "-") {
+			return "", false, false
+		}
+	} else {
+		trimmed = strings.TrimPrefix(arg, "-")
+	}
 	if trimmed == "" {
 		return "", false, false
 	}
@@ -541,12 +600,66 @@ func rawFlagName(arg string) (string, bool, bool) {
 	return name, hasInlineValue, true
 }
 
+func rawArgsContainFlag(args []string, flagName string) bool {
+	skipNext := false
+	for _, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		name, hasInlineValue, ok := rawFlagName(arg)
+		if ok {
+			if _, takesValue := valueTakingFlagNames()[name]; takesValue && !hasInlineValue {
+				skipNext = true
+			}
+		}
+		if ok && name == flagName {
+			return true
+		}
+	}
+	return false
+}
+
+func validateRawConfigFlagUsage(args []string) error {
+	skipNext := false
+	for i, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		name, hasInlineValue, ok := rawFlagName(arg)
+		if !ok {
+			continue
+		}
+		if name == "config" {
+			if hasInlineValue {
+				_, value, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+				if isInvalidBareConfigPathValue(value) {
+					return configUsageError{message: "--config requires a path"}
+				}
+			} else if i+1 >= len(args) || isInvalidBareConfigPathValue(args[i+1]) {
+				return configUsageError{message: "--config requires a path"}
+			}
+		}
+		if _, takesValue := valueTakingFlagNames()[name]; takesValue && !hasInlineValue {
+			skipNext = true
+		}
+	}
+	return nil
+}
+
+func isInvalidBareConfigPathValue(path string) bool {
+	path = strings.TrimSpace(path)
+	return path == "" || strings.HasPrefix(path, "-")
+}
+
 func valueTakingFlagNames() map[string]struct{} {
 	return map[string]struct{}{
 		"access-token-timeout":         {},
 		"admin-password":               {},
 		"api-key":                      {},
 		"base-path":                    {},
+		"config":                       {},
 		"custom-stylesheet":            {},
 		"daemon-idle-timeout":          {},
 		"data-dir":                     {},
@@ -1978,6 +2091,117 @@ func resolveWorkspace(flags *cliFlags, visited map[string]bool) (wiki.Workspace,
 		return wiki.Workspace{}, err
 	}
 	return workspace, nil
+}
+
+func applyYAMLConfigFile(fs *flag.FlagSet, flags *cliFlags, visited map[string]bool) error {
+	path := strings.TrimSpace(*flags.config)
+	if isInvalidBareConfigPathValue(path) {
+		return configUsageError{message: "--config requires a path"}
+	}
+	if name, _, ok := rawFlagName(path); ok {
+		return configFlagMixError{flag: configModeFlagDisplay(path, name)}
+	}
+	for name := range visited {
+		if name == "config" {
+			continue
+		}
+		return configFlagMixError{flag: "--" + name}
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read --config %q: %w", path, err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return fmt.Errorf("parse --config %q: %w", path, err)
+	}
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("--config root must be a YAML mapping")
+	}
+
+	root := doc.Content[0]
+	seen := map[string]struct{}{}
+	allowed := configFileFlagNames()
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+		if keyNode.Kind != yaml.ScalarNode {
+			return fmt.Errorf("--config keys must be scalar strings")
+		}
+		key := keyNode.Value
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate --config key %q", key)
+		}
+		seen[key] = struct{}{}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown --config key %q", key)
+		}
+		if valueNode.Kind != yaml.ScalarNode || valueNode.Tag == "!!null" {
+			return fmt.Errorf("--config key %q requires a non-null scalar value", key)
+		}
+		if err := fs.Set(key, valueNode.Value); err != nil {
+			return fmt.Errorf("invalid --config value for %q: %w", key, err)
+		}
+		visited[key] = true
+	}
+	return nil
+}
+
+func validateConfigModeArgs(args []string) error {
+	for _, arg := range args {
+		if arg == "help" {
+			return configFlagMixError{flag: "help"}
+		}
+		name, _, ok := rawFlagName(arg)
+		if !ok {
+			continue
+		}
+		return configFlagMixError{flag: configModeFlagDisplay(arg, name)}
+	}
+	return nil
+}
+
+func configModeFlagDisplay(arg string, name string) string {
+	if strings.HasPrefix(arg, "--") {
+		return "--" + name
+	}
+	return strings.SplitN(arg, "=", 2)[0]
+}
+
+func configFileFlagNames() map[string]struct{} {
+	return map[string]struct{}{
+		"access-token-timeout":         {},
+		"admin-password":               {},
+		"api-key":                      {},
+		"base-path":                    {},
+		"custom-stylesheet":            {},
+		"daemon-idle-timeout":          {},
+		"data-dir":                     {},
+		"disable-auth":                 {},
+		"disable-request-log":          {},
+		"enable-http-remote-user":      {},
+		"enable-link-refactor":         {},
+		"enable-revision":              {},
+		"enable-workspace-sync":        {},
+		"hide-link-metadata-section":   {},
+		"host":                         {},
+		"http-remote-user-header-name": {},
+		"http-remote-user-logout-url":  {},
+		"inject-code-in-header":        {},
+		"jwt-secret":                   {},
+		"log-file":                     {},
+		"log-target":                   {},
+		"max-asset-upload-size":        {},
+		"max-revision-history":         {},
+		"mcp":                          {},
+		"port":                         {},
+		"public-access":                {},
+		"allow-insecure":               {},
+		"refresh-token-timeout":        {},
+		"root-dir":                     {},
+		"trusted-proxy-ips":            {},
+	}
 }
 
 func resolveStartupWorkspace(flags *cliFlags, visited map[string]bool, args []string) (wiki.Workspace, bool, error) {

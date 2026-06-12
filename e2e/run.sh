@@ -16,6 +16,7 @@ server_pid=""
 server_log=""
 local_data_dir=""
 local_root_dir=""
+local_config_file=""
 local_leafwiki_bin_dir=""
 docker_data_volume=""
 docker_root_volume=""
@@ -23,6 +24,7 @@ mcp_stdio_dir=""
 mcp_stdio_command=""
 mcp_agent_hook_command=""
 mcp_stdio_root_dir=""
+mcp_stdio_config_file=""
 mcp_stdio_seed_dir=""
 mcp_stdio_seed_file=""
 
@@ -44,6 +46,59 @@ collect_revision_or_workspace_sync_args() {
 
 is_stdio_e2e() {
   [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ]
+}
+
+use_config_file_e2e() {
+  [ "${E2E_USE_CONFIG_FILE:-0}" = "1" ]
+}
+
+yaml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+write_leafwiki_e2e_config() {
+  local output_path="$1"
+  local data_dir="$2"
+  local root_dir="$3"
+  local mcp_mode="$4"
+  local auth_mode="$5"
+  local idle_timeout="$6"
+  local disable_request_log="$7"
+
+  {
+    printf 'host: %s\n' "$(yaml_quote "127.0.0.1")"
+    printf 'port: %s\n' "$(yaml_quote "$app_port")"
+    printf 'data-dir: %s\n' "$(yaml_quote "$data_dir")"
+    if [ -n "$root_dir" ]; then
+      printf 'root-dir: %s\n' "$(yaml_quote "$root_dir")"
+    fi
+    printf 'daemon-idle-timeout: %s\n' "$(yaml_quote "$idle_timeout")"
+    printf 'allow-insecure: true\n'
+    printf 'enable-link-refactor: true\n'
+    if [ "$disable_request_log" = "1" ]; then
+      printf 'disable-request-log: true\n'
+    fi
+    if [ -n "$app_base_path" ]; then
+      printf 'base-path: %s\n' "$(yaml_quote "$app_base_path")"
+    fi
+    if [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
+      printf 'enable-workspace-sync: true\n'
+    else
+      printf 'enable-revision: true\n'
+    fi
+    if [ -n "$mcp_mode" ]; then
+      printf 'mcp: %s\n' "$(yaml_quote "$mcp_mode")"
+    fi
+    if [ "$auth_mode" = "disabled" ]; then
+      printf 'disable-auth: true\n'
+    else
+      printf 'jwt-secret: %s\n' "$(yaml_quote "e2e-tests-secret")"
+      printf 'admin-password: %s\n' "$(yaml_quote "admin")"
+    fi
+  } >"$output_path"
 }
 
 app_port_is_listening() {
@@ -150,11 +205,23 @@ prepare_mcp_stdio_command() {
   if [ -n "$app_base_path" ]; then
     native_args+=(--base-path "$app_base_path")
   fi
+  if use_config_file_e2e; then
+    mcp_stdio_config_file="$mcp_stdio_dir/leafwiki.yml"
+    local auth_mode="disabled"
+    if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+      auth_mode="auth"
+    fi
+    write_leafwiki_e2e_config "$mcp_stdio_config_file" "$local_data_dir" "$mcp_stdio_root_dir" "stdio" "$auth_mode" "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" "1"
+  fi
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
     printf 'exec %q' "$leafwiki_bin"
-    printf ' %q' "${native_args[@]}"
+    if use_config_file_e2e; then
+      printf ' %q' --config "$mcp_stdio_config_file"
+    else
+      printf ' %q' "${native_args[@]}"
+    fi
     printf '\n'
   } >"$mcp_stdio_command"
   chmod +x "$mcp_stdio_command"
@@ -165,22 +232,27 @@ prepare_mcp_stdio_command() {
     printf 'provider="${1:-}"\n'
     printf 'shift || true\n'
     printf 'exec %q agent-hook "$provider"' "$repo_root/scripts/run.sh"
-    printf ' %q' --leafwiki-bin "$leafwiki_bin" --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log --server-arg --enable-link-refactor=true
-    for arg in "${sync_args[@]}"; do
-      if [ "$arg" = "--enable-workspace-sync" ]; then
-        printf ' %q' --enable-workspace-sync
-      else
-        printf ' %q' --disable-workspace-sync --server-arg "$arg"
-      fi
-    done
-    if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
-      printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
+    printf ' %q' --leafwiki-bin "$leafwiki_bin"
+    if use_config_file_e2e; then
+      printf ' %q' --config "$mcp_stdio_config_file"
     else
-      printf ' %q' --disable-auth
-    fi
-    printf ' %q' --root-dir "$mcp_stdio_root_dir"
-    if [ -n "$app_base_path" ]; then
-      printf ' %q' --base-path "$app_base_path"
+      printf ' %q' --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log --server-arg --enable-link-refactor=true
+      for arg in "${sync_args[@]}"; do
+        if [ "$arg" = "--enable-workspace-sync" ]; then
+          printf ' %q' --enable-workspace-sync
+        else
+          printf ' %q' --disable-workspace-sync --server-arg "$arg"
+        fi
+      done
+      if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+        printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
+      else
+        printf ' %q' --disable-auth
+      fi
+      printf ' %q' --root-dir "$mcp_stdio_root_dir"
+      if [ -n "$app_base_path" ]; then
+        printf ' %q' --base-path "$app_base_path"
+      fi
     fi
     printf ' "$@"\n'
   } >"$mcp_agent_hook_command"
@@ -336,13 +408,29 @@ start_local() {
   echo "🔨 Building local LeafWiki binary for E2E..."
   build_leafwiki_binary "$local_leafwiki_bin"
 
+  local command_args=(
+    "${server_args[@]}"
+    --allow-insecure=true
+    "${auth_args[@]}"
+    --enable-link-refactor=true
+    "${sync_args[@]}"
+  )
+  if use_config_file_e2e; then
+    local_config_file="$(mktemp /tmp/leafwiki-e2e-config.XXXXXX.yml)"
+    local mcp_mode=""
+    local auth_mode="auth"
+    if [ "${E2E_ENABLE_MCP_LOCAL:-0}" = "1" ]; then
+      mcp_mode="http"
+      auth_mode="disabled"
+    elif [ "${E2E_ENABLE_MCP_OAUTH_LOCAL:-0}" = "1" ] || [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+      mcp_mode="http"
+    fi
+    write_leafwiki_e2e_config "$local_config_file" "$local_data_dir" "$local_root_dir" "$mcp_mode" "$auth_mode" "${E2E_DAEMON_IDLE_TIMEOUT:-0}" "0"
+    command_args=(--config "$local_config_file")
+  fi
+
   (
-    exec "$local_leafwiki_bin" \
-      "${server_args[@]}" \
-      --allow-insecure=true \
-      "${auth_args[@]}" \
-      --enable-link-refactor=true \
-      "${sync_args[@]}"
+    exec "$local_leafwiki_bin" "${command_args[@]}"
   ) >"$server_log" 2>&1 &
 
   server_pid=$!
@@ -361,6 +449,9 @@ stop_local() {
   fi
   if [ -n "$local_root_dir" ] && [ -d "$local_root_dir" ]; then
     rm -rf "$local_root_dir"
+  fi
+  if [ -n "$local_config_file" ] && [ -f "$local_config_file" ]; then
+    rm -f "$local_config_file"
   fi
   if [ -n "$local_leafwiki_bin_dir" ] && [ -d "$local_leafwiki_bin_dir" ]; then
     rm -rf "$local_leafwiki_bin_dir"
@@ -495,6 +586,8 @@ run_playwright_tests() {
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_CONFIG_FILE="$local_config_file" \
+      E2E_MCP_STDIO_CONFIG_FILE="$mcp_stdio_config_file" \
       E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
@@ -510,6 +603,8 @@ run_playwright_tests() {
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
+      E2E_CONFIG_FILE="$local_config_file" \
+      E2E_MCP_STDIO_CONFIG_FILE="$mcp_stdio_config_file" \
       E2E_AGENT_HOOK_COMMAND="$mcp_agent_hook_command" \
       E2E_MCP_STDIO_SEED_FILE="$mcp_stdio_seed_file" \
       PLAYWRIGHT_FORCE_TTY=1 \
