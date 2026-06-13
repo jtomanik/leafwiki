@@ -13,6 +13,9 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Importer migrates old route-style page link to .md
+
 type fakeExecWiki struct {
 	hash string
 
@@ -34,6 +37,10 @@ type fakeExecWiki struct {
 func (f *fakeExecWiki) TreeHash() string { return f.hash }
 
 func (f *fakeExecWiki) LookupPagePath(path string) (*tree.PathLookup, error) {
+	panic("not used by Executor")
+}
+
+func (f *fakeExecWiki) LookupPagePathForKind(path string, kind tree.NodeKind) (*tree.PathLookup, error) {
 	panic("not used by Executor")
 }
 
@@ -327,6 +334,7 @@ title: Ordner
 	}
 }
 
+// - Importer migrates old route-style page link to .md
 func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.T) {
 	tmp := t.TempDir()
 	writeTmp(t, tmp, "Guides/index.md", "# Guides")
@@ -373,11 +381,11 @@ func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.
 	}
 
 	for _, expected := range []string{
-		"[Relative](/reference/endpoints)",
+		"[Relative](/reference/endpoints.md)",
 		"[Absolute](/guides)",
-		"[RouteStyle](/reference/endpoints)",
+		"[RouteStyle](/reference/endpoints.md)",
 		"[Container](/guides)",
-		"[API Alias](/reference/endpoints)",
+		"[API Alias](/reference/endpoints.md)",
 	} {
 		if !strings.Contains(setupContent, expected) {
 			t.Fatalf("expected rewritten content to contain %q, got:\n%s", expected, setupContent)
@@ -506,7 +514,7 @@ func TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBasenameOnly(t *testing.
 	}
 
 	homeContent := updatedContentByTitle["Home"]
-	if !strings.Contains(homeContent, "[Brainstorm](/daily/brainstorm)") {
+	if !strings.Contains(homeContent, "[Brainstorm](/daily/brainstorm.md)") {
 		t.Fatalf("expected unique basename wiki link rewrite, got:\n%s", homeContent)
 	}
 	if !strings.Contains(homeContent, "[[Meeting Notes]]") {
@@ -519,7 +527,7 @@ func TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix(t *testing.T) {
 	writeTmp(t, tmp, "knowledge-main/tools/kubernetes/resources/StatefulSet.md", strings.Join([]string{
 		"# StatefulSet",
 		"",
-		"[[Tools/Kubernetes/Resources/Deployment|Deployment]]",
+		"[[tools/kubernetes/resources/Deployment|Deployment]]",
 	}, "\n"))
 	writeTmp(t, tmp, "knowledge-main/tools/kubernetes/resources/Deployment.md", "# Deployment")
 
@@ -549,7 +557,7 @@ func TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix(t *testing.T) {
 	}
 
 	statefulSetContent := updatedContentByTitle["StatefulSet"]
-	if !strings.Contains(statefulSetContent, "[Deployment](/knowledge-main/tools/kubernetes/resources/deployment)") {
+	if !strings.Contains(statefulSetContent, "[Deployment](/knowledge-main/tools/kubernetes/resources/deployment.md)") {
 		t.Fatalf("expected unique nested path suffix wiki link rewrite, got:\n%s", statefulSetContent)
 	}
 }
@@ -639,8 +647,8 @@ func TestExecutor_Create_DoesNotRewriteLinksInsideCode(t *testing.T) {
 		"`[Inline](../Reference/Endpoints.md)`",
 		"[Fence](../Reference/Endpoints.md)",
 		"[[Reference/Endpoints|Fence Alias]]",
-		"[Real](/reference/endpoints)",
-		"[Real Alias](/reference/endpoints)",
+		"[Real](/reference/endpoints.md)",
+		"[Real Alias](/reference/endpoints.md)",
 	} {
 		if !strings.Contains(setupContent, expected) {
 			t.Fatalf("expected content to contain %q, got:\n%s", expected, setupContent)
@@ -686,7 +694,7 @@ func TestExecutor_Create_RewritesWindowsStyleMarkdownAndAssetPaths(t *testing.T)
 
 	setupContent := updatedContentByTitle["Setup"]
 	for _, expected := range []string{
-		"[Doc](/reference/endpoints)",
+		"[Doc](/reference/endpoints.md)",
 		"![Diagram](/assets/p1/diagram.png)",
 	} {
 		if !strings.Contains(setupContent, expected) {

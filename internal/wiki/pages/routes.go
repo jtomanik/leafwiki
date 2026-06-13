@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,14 +135,14 @@ func (r *Routes) handleGetTree(c *gin.Context) {
 	root := r.treeService.GetTree()
 	depthStr := strings.TrimSpace(c.Query("depth"))
 	if depthStr == "" {
-		c.JSON(http.StatusOK, dto.ToAPINode(root, "", r.userResolver))
+		c.JSON(http.StatusOK, dto.ToAPINodeWithContentPaths(root, "", r.userResolver, r.treeService.ContentPathForNode))
 		return
 	}
 	depth, err := strconv.Atoi(depthStr)
 	if err != nil {
 		depth = -1
 	}
-	c.JSON(http.StatusOK, dto.ToAPINodeWithDepth(root, "", r.userResolver, depth))
+	c.JSON(http.StatusOK, dto.ToAPINodeWithContentPathsAndDepth(root, "", r.userResolver, r.treeService.ContentPathForNode, depth))
 }
 
 func (r *Routes) handleGetPage(c *gin.Context) {
@@ -155,12 +156,7 @@ func (r *Routes) handleGetPage(c *gin.Context) {
 }
 
 func (r *Routes) handleGetByPath(c *gin.Context) {
-	routePath, err := ValidatePageRoutePath(c.Query("path"))
-	if err != nil {
-		respondWithPageError(c, err)
-		return
-	}
-	out, err := r.findByPath.Execute(c.Request.Context(), FindByPathInput{RoutePath: routePath})
+	out, err := r.findByPathInput(c.Request.Context(), c.Query("path"), c.Query("kind"))
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -172,9 +168,38 @@ func (r *Routes) handleGetByPath(c *gin.Context) {
 	r.respondPageWithDepth(c, http.StatusOK, out.Page, depth)
 }
 
+func (r *Routes) findByPathInput(ctx context.Context, rawPath string, rawKind string) (*FindByPathOutput, error) {
+	if out, handled, err := FindReadmeMarkdownPathFallback(rawPath, rawKind, ReadmeMarkdownPathFallbackLookup{
+		RootDir: r.treeService.RootDir(),
+		FindByPath: func(input FindByPathInput) (*FindByPathOutput, error) {
+			return r.findByPath.Execute(ctx, input)
+		},
+		RootPage: func() (*tree.Page, error) {
+			return r.treeService.GetPage("root")
+		},
+	}); err != nil || handled {
+		return out, err
+	}
+	routePath, kind, err := NormalizePagePathInput(rawPath, rawKind)
+	if err != nil {
+		return nil, err
+	}
+	return r.findByPath.Execute(ctx, FindByPathInput{RoutePath: routePath, Kind: kind})
+}
+
 func (r *Routes) handleLookupPath(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
-	out, err := r.lookupPath.Execute(c.Request.Context(), LookupPagePathInput{Path: path})
+	kind := tree.NodeKind("")
+	rawKind := strings.TrimSpace(c.Query("kind"))
+	if rawKind != "" {
+		validKind, kindErr := ValidatePageKindString(rawKind)
+		if kindErr != nil {
+			respondWithPageError(c, kindErr)
+			return
+		}
+		kind = validKind
+	}
+	out, err := r.lookupPath.Execute(c.Request.Context(), LookupPagePathInput{Path: path, Kind: kind})
 	if err != nil {
 		respondWithPageError(c, err)
 		return

@@ -633,6 +633,10 @@
     @apply text-muted-foreground text-xs;
   }
 
+  .workspace-snapshots-dialog__changed-paths {
+    @apply text-muted-foreground max-w-full font-mono text-xs break-words;
+  }
+
   /* Form Input Styles */
   .form-input {
     @apply space-y-1;

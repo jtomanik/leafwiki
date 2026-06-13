@@ -40,7 +40,7 @@ docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
 - Full-text search across titles and content, with tag-based filtering
 - Tags on pages — searchable and filterable across the wiki
 - Backlinks and link status per page (incoming, outgoing, broken links)
-- Built-in Markdown editor with live preview, keyboard shortcuts, and autocomplete for internal page links
+- Built-in Markdown editor with live preview, keyboard shortcuts, and autocomplete for canonical internal page links
 - Optimistic locking for concurrent edits
 - Markdown: tables, task lists, footnotes, callouts (`:::info` / `:::warning`), Mermaid diagrams, sanitized inline HTML
 
@@ -58,6 +58,7 @@ docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
 **Markdown import:**
 - ZIP-based importer for editors and admins
 - Supports Obsidian-style wiki link rewriting on import
+- Emits GitHub-portable Markdown links: pages use `.md`, sections use extensionless folder links
 - Best results with a reasonably clean folder structure; not a fully automatic converter for all source formats
 
 **Mobile:**
@@ -440,6 +441,7 @@ LeafWiki separates app state from managed markdown content:
 - `RootDir` is writable and managed by LeafWiki. It is not a passive arbitrary-folder viewer.
 - `RootDir` must not contain `DataDir` and must not point inside app-state paths such as `assets`, `.leafwiki`, `.importer`, or `branding`.
 - Changing `RootDir` does not migrate existing markdown. Move or copy content from the old `<data-dir>/root` before switching an existing install.
+- Managed Markdown uses [canonical internal links](docs/canonical-markdown-links.md): page hrefs end in `.md`, section hrefs omit `.md`.
 
 ### Root directory E2E smoke
 

@@ -12,12 +12,17 @@ import (
 	"github.com/perber/wiki/internal/test_utils"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - README.md as normal page keeps its filesystem casing in generated links
+
 type fakeWiki struct {
 	treeHash string
 
 	// planner part
-	lookups   map[string]*tree.PathLookup
-	lookupErr error
+	lookups          map[string]*tree.PathLookup
+	lookupsForKind   map[string]*tree.PathLookup
+	lookupErr        error
+	lookupForKindErr error
 
 	// executor part
 	ensureCalls        int
@@ -40,6 +45,17 @@ func (f *fakeWiki) LookupPagePath(p string) (*tree.PathLookup, error) {
 		return v, nil
 	}
 	return &tree.PathLookup{Path: p, Exists: false, Segments: []tree.PathSegment{}}, nil
+}
+
+func (f *fakeWiki) LookupPagePathForKind(p string, kind tree.NodeKind) (*tree.PathLookup, error) {
+	if f.lookupForKindErr != nil {
+		return nil, f.lookupForKindErr
+	}
+	key := string(kind) + ":" + p
+	if v, ok := f.lookupsForKind[key]; ok {
+		return v, nil
+	}
+	return f.LookupPagePath(p)
 }
 
 func (f *fakeWiki) EnsurePath(userID string, targetPath string, title string, kind *tree.NodeKind) (*tree.Page, error) {
@@ -92,6 +108,24 @@ func (f *fakeWiki) UploadAsset(userID, pageID string, file multipart.File, filen
 
 func newPlannerWithFake(w *fakeWiki) *Planner {
 	return NewPlanner(w, tree.NewSlugService())
+}
+
+func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, exists bool) tree.PathSegment {
+	return tree.PathSegment{
+		Slug:   slug,
+		Kind:   &kind,
+		ID:     &id,
+		Title:  &title,
+		Exists: exists,
+	}
+}
+
+func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
+	return tree.PathSegment{
+		Slug:   slug,
+		Kind:   &kind,
+		Exists: false,
+	}
 }
 
 func TestPlanner_CreatePlan_CreateNewPage_NonIndex(t *testing.T) {
@@ -169,6 +203,158 @@ func TestPlanner_CreatePlan_CreateNewSection_IndexMd(t *testing.T) {
 	}
 	if it.Title != "Guides" {
 		t.Fatalf("Title = %q", it.Title)
+	}
+}
+
+func TestPlanner_CreatePlan_ReadmeMdFallbackSectionWhenNoIndex(t *testing.T) {
+	tmp := t.TempDir()
+	test_utils.WriteFile(t, tmp, "Guides/README.md", "# Guides")
+
+	wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
+	p := newPlannerWithFake(wiki)
+
+	res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Guides/README.md"}}, PlanOptions{
+		SourceBasePath: tmp,
+		TargetBasePath: "docs",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan err: %v", err)
+	}
+	it := res.Items[0]
+
+	if it.Kind != tree.NodeKindSection {
+		t.Fatalf("Kind = %v, want section", it.Kind)
+	}
+	if it.TargetPath != "docs/guides" {
+		t.Fatalf("TargetPath = %q, want docs/guides", it.TargetPath)
+	}
+	if it.DesiredSlug != "guides" {
+		t.Fatalf("DesiredSlug = %q, want guides", it.DesiredSlug)
+	}
+}
+
+func TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPage(t *testing.T) {
+	tests := []struct {
+		sourcePath string
+		wantPath   string
+	}{
+		{sourcePath: "Guides/readme.md", wantPath: "docs/guides/readme"},
+		{sourcePath: "Guides/Readme.md", wantPath: "docs/guides/readme"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sourcePath, func(t *testing.T) {
+			tmp := t.TempDir()
+			test_utils.WriteFile(t, tmp, tt.sourcePath, "# Readme Page")
+
+			wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
+			p := newPlannerWithFake(wiki)
+
+			res, err := p.CreatePlan([]ImportMDFile{{SourcePath: tt.sourcePath}}, PlanOptions{
+				SourceBasePath: tmp,
+				TargetBasePath: "docs",
+			})
+			if err != nil {
+				t.Fatalf("CreatePlan err: %v", err)
+			}
+			it := res.Items[0]
+			if it.Kind != tree.NodeKindPage {
+				t.Fatalf("Kind = %v, want page", it.Kind)
+			}
+			if it.TargetPath != tt.wantPath {
+				t.Fatalf("TargetPath = %q, want %s", it.TargetPath, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestPlanner_CreatePlan_CreatesPageTwinWhenExistingSameRouteSectionExists(t *testing.T) {
+	tmp := t.TempDir()
+	test_utils.WriteFile(t, tmp, "sync.md", "# Sync Page")
+
+	wiki := &fakeWiki{
+		treeHash: "h",
+		lookups: map[string]*tree.PathLookup{
+			"docs/sync": {
+				Path:   "docs/sync",
+				Exists: true,
+				Segments: []tree.PathSegment{
+					fakePathSegment("docs", tree.NodeKindSection, "docs-section", "Docs", true),
+					fakePathSegment("sync", tree.NodeKindSection, "sync-section", "Sync Section", true),
+				},
+			},
+		},
+		lookupsForKind: map[string]*tree.PathLookup{
+			string(tree.NodeKindPage) + ":docs/sync": {
+				Path: "docs/sync",
+				Segments: []tree.PathSegment{
+					fakePathSegment("docs", tree.NodeKindSection, "docs-section", "Docs", true),
+					fakeMissingPathSegment("sync", tree.NodeKindPage),
+				},
+				Exists: false,
+			},
+		},
+	}
+	p := newPlannerWithFake(wiki)
+
+	res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "sync.md"}}, PlanOptions{
+		SourceBasePath: tmp,
+		TargetBasePath: "docs",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan err: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("Items len = %d, want 1", len(res.Items))
+	}
+	it := res.Items[0]
+	if it.Action != PlanActionCreate {
+		t.Fatalf("Action = %q, want create", it.Action)
+	}
+	if it.Kind != tree.NodeKindPage {
+		t.Fatalf("Kind = %v, want page", it.Kind)
+	}
+	if it.TargetPath != "docs/sync" {
+		t.Fatalf("TargetPath = %q, want docs/sync", it.TargetPath)
+	}
+}
+
+// - README.md as normal page keeps its filesystem casing in generated links
+func TestPlanner_CreatePlan_IndexMdCaseInsensitiveBeatsReadmeFallback(t *testing.T) {
+	tmp := t.TempDir()
+	test_utils.WriteFile(t, tmp, "Guides/index.MD", "# Guides")
+	test_utils.WriteFile(t, tmp, "Guides/README.md", "# Readme Page")
+
+	wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
+	p := newPlannerWithFake(wiki)
+
+	res, err := p.CreatePlan([]ImportMDFile{
+		{SourcePath: "Guides/index.MD"},
+		{SourcePath: "Guides/README.md"},
+	}, PlanOptions{
+		SourceBasePath: tmp,
+		TargetBasePath: "docs",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan err: %v", err)
+	}
+	if len(res.Items) != 2 {
+		t.Fatalf("Items len = %d, want 2", len(res.Items))
+	}
+
+	var readme PlanItem
+	for _, item := range res.Items {
+		if item.SourcePath == "Guides/README.md" {
+			readme = item
+		}
+	}
+	if readme.SourcePath == "" {
+		t.Fatalf("README item not found: %#v", res.Items)
+	}
+	if readme.Kind != tree.NodeKindPage {
+		t.Fatalf("README Kind = %v, want page", readme.Kind)
+	}
+	if readme.TargetPath != "docs/guides/README" {
+		t.Fatalf("README TargetPath = %q, want docs/guides/README", readme.TargetPath)
 	}
 }
 

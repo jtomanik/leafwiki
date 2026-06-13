@@ -13,8 +13,19 @@ import (
 
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
 )
+
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Relative link cannot escape the workspace root
+// - Old extensionless page link migrates to .md
+// - Old extensionless section link remains extensionless
+// - Unresolved old extensionless page link becomes validation error
+// - Ambiguous extensionless link is left as validation error
+// - Migration is idempotent
+// - Migration writeback is captured in revision history
+// - Migration write failure reports sync validation state without losing raw content
 
 func TestServiceSyncNowCommitsAndReconstructsDirectMarkdownCreate(t *testing.T) {
 	dataDir := t.TempDir()
@@ -186,6 +197,861 @@ func TestServiceSyncNowAmendsMetadataWritebacksIntoSameBatchCommit(t *testing.T)
 	}
 	if !strings.Contains(snapshot.Content, "leafwiki_id:") {
 		t.Fatalf("snapshot content was not amended with metadata: %q", snapshot.Content)
+	}
+}
+
+// - Old extensionless page link migrates to .md
+func TestServiceSyncNowRewritesResolvableLegacyPageLinkBeforeValidation(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[B](/docs/b)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b
+leafwiki_title: Page B
+---
+# Page B
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if len(status.ValidationErrors) != 0 {
+		t.Fatalf("ValidationErrors = %#v, want none after canonical migration", status.ValidationErrors)
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "docs", "a.md"))
+	if err != nil {
+		t.Fatalf("ReadFile a.md: %v", err)
+	}
+	if !strings.Contains(string(raw), "[B](/docs/b.md)") {
+		t.Fatalf("a.md = %q, want canonical .md page link", string(raw))
+	}
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	if !strings.Contains(page.RawContent, "[B](/docs/b.md)") {
+		t.Fatalf("page raw content = %q, want canonical .md page link after first sync", page.RawContent)
+	}
+}
+
+// - Relative old page link migrates to relative .md
+// - Existing canonical .md page link is not rewritten
+func TestServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "source", "a.md"), `---
+leafwiki_id: page-a-relative
+leafwiki_title: Page A Relative
+---
+# Page A Relative
+
+[Legacy](../b)
+[Canonical](../b.md)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b-relative
+leafwiki_title: Page B Relative
+---
+# Page B Relative
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if len(status.ValidationErrors) != 0 {
+		t.Fatalf("ValidationErrors = %#v, want none after canonical migration", status.ValidationErrors)
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "docs", "source", "a.md"))
+	if err != nil {
+		t.Fatalf("ReadFile source/a.md: %v", err)
+	}
+	content := string(raw)
+	if strings.Count(content, "../b.md") != 2 || strings.Contains(content, "](../b)") {
+		t.Fatalf("source/a.md = %q, want legacy relative link migrated and canonical link unchanged", content)
+	}
+}
+
+// - Duplicate syntaxes do not create duplicate target identities after migration
+func TestServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	linkStore, err := links.NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore: %v", err)
+	}
+	defer func() {
+		if err := linkStore.Close(); err != nil {
+			t.Fatalf("Close link store: %v", err)
+		}
+	}()
+	linkService := links.NewLinkService(dataDir, treeService, linkStore)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a-duplicate-syntax
+leafwiki_title: Page A Duplicate Syntax
+---
+# Page A Duplicate Syntax
+
+[Legacy](/docs/b)
+[Canonical](/docs/b.md)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b-duplicate-syntax
+leafwiki_title: Page B Duplicate Syntax
+---
+# Page B Duplicate Syntax
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+		AfterSync: func() error {
+			return linkService.IndexAllPages()
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if len(status.ValidationErrors) != 0 {
+		t.Fatalf("ValidationErrors = %#v, want none after canonical migration", status.ValidationErrors)
+	}
+	pageA, err := treeService.GetPage("page-a-duplicate-syntax")
+	if err != nil {
+		t.Fatalf("GetPage page-a-duplicate-syntax: %v", err)
+	}
+	linkStatus, err := linkService.GetLinkStatusForPage(pageA.ID, pageA.CalculatePath())
+	if err != nil {
+		t.Fatalf("GetLinkStatusForPage: %v", err)
+	}
+	if linkStatus.Counts.Outgoings != 1 || linkStatus.Counts.BrokenOutgoings != 0 {
+		t.Fatalf("link status counts = %#v, want one healthy outgoing target", linkStatus.Counts)
+	}
+	if got := linkStatus.Outgoings[0].ToPageID; got != "page-b-duplicate-syntax" {
+		t.Fatalf("ToPageID = %q, want page-b-duplicate-syntax", got)
+	}
+}
+
+// - Migration writeback is captured in revision history
+func TestServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[B](/docs/b)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b
+leafwiki_title: Page B
+---
+# Page B
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	revisions, err := service.ListPageRevisions(context.Background(), page, "", 10)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+	if len(revisions.Revisions) != 2 {
+		t.Fatalf("revision count = %d, want raw incoming content plus canonical writeback", len(revisions.Revisions))
+	}
+
+	var sawRaw, sawCanonical bool
+	for _, rev := range revisions.Revisions {
+		snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, rev.ID)
+		if err != nil {
+			t.Fatalf("GetPageRevisionSnapshot %s: %v", rev.ID, err)
+		}
+		if strings.Contains(snapshot.Content, "[B](/docs/b)\n") {
+			sawRaw = true
+		}
+		if strings.Contains(snapshot.Content, "[B](/docs/b.md)") {
+			sawCanonical = true
+		}
+	}
+	if !sawRaw || !sawCanonical {
+		t.Fatalf("revision history raw=%v canonical=%v, want both raw incoming and canonical writeback", sawRaw, sawCanonical)
+	}
+}
+
+func TestServiceCanonicalMigrationRollsBackWhenLaterWriteFails(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	service := &Service{rootDir: rootDir}
+
+	firstPath := filepath.Join(rootDir, "a", "source.md")
+	secondDir := filepath.Join(rootDir, "readonly")
+	secondPath := filepath.Join(secondDir, "source.md")
+	firstOriginal := `---
+leafwiki_id: first-source
+leafwiki_title: First Source
+---
+# First Source
+
+[Target](/targets/first)
+`
+	secondOriginal := `---
+leafwiki_id: second-source
+leafwiki_title: Second Source
+---
+# Second Source
+
+[Target](/targets/second)
+`
+	writeMarkdown(t, firstPath, firstOriginal)
+	writeMarkdown(t, secondPath, secondOriginal)
+	writeMarkdown(t, filepath.Join(rootDir, "targets", "first.md"), `---
+leafwiki_id: first-target
+leafwiki_title: First Target
+---
+# First Target
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "targets", "second.md"), `---
+leafwiki_id: second-target
+leafwiki_title: Second Target
+---
+# Second Target
+`)
+	if err := os.Chmod(secondPath, 0o444); err != nil {
+		t.Fatalf("chmod readonly source file: %v", err)
+	}
+	if err := os.Chmod(secondDir, 0o555); err != nil {
+		t.Fatalf("chmod readonly source dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(secondDir, 0o755)
+		_ = os.Chmod(secondPath, 0o644)
+	})
+	if err := os.WriteFile(filepath.Join(secondDir, ".probe"), []byte("probe"), 0o644); err == nil {
+		_ = os.Remove(filepath.Join(secondDir, ".probe"))
+		t.Skip("filesystem permits writes to read-only test directory")
+	}
+
+	changed, err := service.migrateCanonicalMarkdownLinksLocked()
+
+	if err == nil {
+		t.Fatalf("migrateCanonicalMarkdownLinksLocked error = nil, want write failure")
+	}
+	if changed {
+		t.Fatalf("changed = true, want no committed migration on write failure")
+	}
+	if got := readFileString(t, firstPath); got != firstOriginal {
+		t.Fatalf("first source = %q, want original content after rollback", got)
+	}
+	if got := readFileString(t, secondPath); got != secondOriginal {
+		t.Fatalf("second source = %q, want original content after failed write", got)
+	}
+}
+
+func TestWriteCanonicalMarkdownRewritesAtomicallyRollsBackCommittedRename(t *testing.T) {
+	rootDir := t.TempDir()
+	firstPath := filepath.Join(rootDir, "first.md")
+	blockingDir := filepath.Join(rootDir, "blocking")
+	firstOriginal := "# First\n\n[Target](/target)\n"
+	firstCanonical := "# First\n\n[Target](/target.md)\n"
+	writeMarkdown(t, firstPath, firstOriginal)
+	if err := os.MkdirAll(blockingDir, 0o755); err != nil {
+		t.Fatalf("mkdir blocking dir: %v", err)
+	}
+
+	err := writeCanonicalMarkdownRewritesAtomically([]canonicalMarkdownRewrite{
+		{
+			Path:     firstPath,
+			Original: []byte(firstOriginal),
+			Content:  []byte(firstCanonical),
+			Mode:     0o644,
+		},
+		{
+			Path:    blockingDir,
+			Content: []byte("not a markdown file"),
+			Mode:    0o644,
+		},
+	})
+
+	if err == nil {
+		t.Fatalf("writeCanonicalMarkdownRewritesAtomically error = nil, want rename failure")
+	}
+	if got := readFileString(t, firstPath); got != firstOriginal {
+		t.Fatalf("first source = %q, want original content after committed rename rollback", got)
+	}
+}
+
+func TestServiceSyncNowRollsBackCanonicalMigrationWhenWritebackCaptureFails(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	sourcePath := filepath.Join(rootDir, "docs", "a.md")
+	sourceOriginal := `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[B](/docs/b)
+`
+	writeMarkdown(t, sourcePath, sourceOriginal)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b
+leafwiki_title: Page B
+---
+# Page B
+`)
+	captureErr := errors.New("writeback capture failed")
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+		Store: &fakeRevisionStore{
+			capture:        &gitrevisions.Commit{Hash: "initial-commit"},
+			captureErr:     captureErr,
+			captureErrCall: 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+
+	if !errors.Is(err, captureErr) {
+		t.Fatalf("SyncNow error = %v, want %v", err, captureErr)
+	}
+	if !strings.Contains(status.LastError, "writeback capture failed") {
+		t.Fatalf("LastError = %q, want writeback capture failure", status.LastError)
+	}
+	if got := readFileString(t, sourcePath); !strings.Contains(got, "[B](/docs/b)") || strings.Contains(got, "[B](/docs/b.md)") {
+		t.Fatalf("source file = %q, want canonical migration rolled back after writeback capture failure", got)
+	}
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	if !strings.Contains(page.RawContent, "[B](/docs/b)") || strings.Contains(page.RawContent, "[B](/docs/b.md)") {
+		t.Fatalf("page raw content = %q, want reconstructed non-canonical content after rollback", page.RawContent)
+	}
+}
+
+// - Migration write failure reports sync validation state without losing raw content
+func TestServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	sourcePath := filepath.Join(rootDir, "docs", "a.md")
+	sourceOriginal := `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[B](/docs/b)
+`
+	writeMarkdown(t, sourcePath, sourceOriginal)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "b.md"), `---
+leafwiki_id: page-b
+leafwiki_title: Page B
+---
+# Page B
+`)
+
+	writeErr := errors.New("canonical migration write failed")
+	previousWriter := canonicalMarkdownRewriteWriter
+	canonicalMarkdownRewriteWriter = func([]canonicalMarkdownRewrite) error {
+		return writeErr
+	}
+	t.Cleanup(func() {
+		canonicalMarkdownRewriteWriter = previousWriter
+	})
+
+	derivedRebuilds := 0
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+		Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "initial-commit"}},
+		AfterSync: func() error {
+			derivedRebuilds++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("SyncNow error = %v, want %v", err, writeErr)
+	}
+	if !strings.Contains(status.LastError, writeErr.Error()) {
+		t.Fatalf("LastError = %q, want canonical write failure", status.LastError)
+	}
+	if got := readFileString(t, sourcePath); !strings.Contains(got, "[B](/docs/b)") || strings.Contains(got, "[B](/docs/b.md)") {
+		t.Fatalf("source file = %q, want no canonical migration rewrite after write failure", got)
+	}
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	if !strings.Contains(page.RawContent, "[B](/docs/b)") || strings.Contains(page.RawContent, "[B](/docs/b.md)") {
+		t.Fatalf("tree raw content = %q, want no canonical migration rewrite after write failure", page.RawContent)
+	}
+	if derivedRebuilds != 0 {
+		t.Fatalf("derived rebuilds = %d, want none after migration write failure", derivedRebuilds)
+	}
+}
+
+// - Migration is idempotent
+func TestServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[B](/b)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "b.md"), `---
+leafwiki_id: page-b
+leafwiki_title: Page B
+---
+# Page B
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := service.SyncNow(context.Background(), SyncRequest{
+			Reason: ReasonExplicit,
+			Source: SourceFilesystem,
+			Actor:  PublicEditorActor(),
+		}); err != nil {
+			t.Fatalf("SyncNow %d: %v", i+1, err)
+		}
+	}
+
+	snapshots, err := service.ListSnapshots(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want raw commit plus canonical migration writeback and no repeat revisions: %#v", len(snapshots), snapshots)
+	}
+}
+
+// - Unresolved old extensionless page link becomes validation error
+func TestServiceSyncNowLeavesUnresolvedLegacyPageLinkAndReportsValidationError(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Missing](/docs/missing)
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "docs", "a.md"))
+	if err != nil {
+		t.Fatalf("ReadFile a.md: %v", err)
+	}
+	if !strings.Contains(string(raw), "[Missing](/docs/missing)") {
+		t.Fatalf("a.md = %q, want unresolved legacy link left unchanged", string(raw))
+	}
+	if len(status.ValidationErrors) != 1 {
+		t.Fatalf("ValidationErrors = %#v, want one unresolved link error", status.ValidationErrors)
+	}
+	if status.ValidationErrors[0].Path != "docs/a" || !strings.Contains(status.ValidationErrors[0].Message, "/docs/missing") {
+		t.Fatalf("ValidationErrors = %#v, want source path and missing link detail", status.ValidationErrors)
+	}
+}
+
+// - Relative link cannot escape the workspace root
+func TestServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaceParent := t.TempDir()
+	rootDir := filepath.Join(workspaceParent, "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceParent, "outside.md"), []byte("---\nleafwiki_id: outside\nleafwiki_title: Outside\n---\n# Outside\n"), 0o644); err != nil {
+		t.Fatalf("write outside markdown: %v", err)
+	}
+	sourceOriginal := `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Bad Encoding](/docs/%zz)
+[Escape](../../outside.md)
+`
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), sourceOriginal)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	got := readFileString(t, filepath.Join(rootDir, "docs", "a.md"))
+	for _, originalLink := range []string{"[Bad Encoding](/docs/%zz)", "[Escape](../../outside.md)"} {
+		if !strings.Contains(got, originalLink) {
+			t.Fatalf("source file = %q, want invalid link %q left unchanged", got, originalLink)
+		}
+	}
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	for _, originalLink := range []string{"[Bad Encoding](/docs/%zz)", "[Escape](../../outside.md)"} {
+		if !strings.Contains(page.RawContent, originalLink) {
+			t.Fatalf("tree raw content = %q, want invalid link %q left unchanged", page.RawContent, originalLink)
+		}
+	}
+	if len(status.ValidationErrors) != 2 {
+		t.Fatalf("ValidationErrors = %#v, want two invalid link errors", status.ValidationErrors)
+	}
+	for _, validationError := range status.ValidationErrors {
+		if validationError.Path != "docs/a" || validationError.Code != "invalid_link" {
+			t.Fatalf("ValidationErrors = %#v, want invalid_link details for docs/a", status.ValidationErrors)
+		}
+	}
+}
+
+// - Ambiguous extensionless link is left as validation error
+func TestServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	sourceOriginal := `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Sync](/docs/sync)
+`
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), sourceOriginal)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if got := readFileString(t, filepath.Join(rootDir, "docs", "a.md")); !strings.Contains(got, "[Sync](/docs/sync)") {
+		t.Fatalf("source file = %q, want ambiguous legacy link left unchanged", got)
+	}
+	page, err := treeService.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage page-a: %v", err)
+	}
+	if !strings.Contains(page.RawContent, "[Sync](/docs/sync)") {
+		t.Fatalf("tree raw content = %q, want ambiguous legacy link left unchanged", page.RawContent)
+	}
+	if len(status.ValidationErrors) == 0 {
+		t.Fatalf("ValidationErrors empty, want ambiguous legacy migration issue")
+	}
+	if !strings.Contains(status.ValidationErrors[0].Message, "ambiguous_legacy_link") ||
+		!strings.Contains(status.ValidationErrors[0].Message, "/docs/sync") {
+		t.Fatalf("ValidationErrors = %#v, want ambiguous legacy link detail", status.ValidationErrors)
+	}
+}
+
+func TestServiceSyncNowPreservesMigrationAmbiguityWhenNormalValidationAlsoFails(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Sync](/docs/sync)
+[Missing](/docs/missing)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	assertValidationErrorContains := func(needle string) {
+		t.Helper()
+		for _, validationError := range status.ValidationErrors {
+			if strings.Contains(validationError.Message, needle) {
+				return
+			}
+		}
+		t.Fatalf("ValidationErrors = %#v, want message containing %q", status.ValidationErrors, needle)
+	}
+	assertValidationErrorContains("ambiguous_legacy_link")
+	assertValidationErrorContains("/docs/missing")
+}
+
+// - Old extensionless section link remains extensionless
+func TestServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Sync](/docs/sync/)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: section-sync
+leafwiki_title: Sync
+---
+# Sync
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := service.SyncNow(context.Background(), SyncRequest{
+			Reason: ReasonExplicit,
+			Source: SourceFilesystem,
+			Actor:  PublicEditorActor(),
+		}); err != nil {
+			t.Fatalf("SyncNow %d: %v", i+1, err)
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(rootDir, "docs", "a.md"))
+	if err != nil {
+		t.Fatalf("ReadFile a.md: %v", err)
+	}
+	if !strings.Contains(string(raw), "[Sync](/docs/sync)") || strings.Contains(string(raw), "/docs/sync/") {
+		t.Fatalf("a.md = %q, want section trailing slash canonicalized away", string(raw))
+	}
+	snapshots, err := service.ListSnapshots(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want raw sync plus canonical writeback with no repeat canonicalization revision: %#v", len(snapshots), snapshots)
 	}
 }
 
@@ -894,6 +1760,56 @@ func TestServiceListPageRevisionsNormalizesSectionIndexPath(t *testing.T) {
 	}
 }
 
+func TestServiceListPageRevisionsNormalizesReadmeFallbackSectionPath(t *testing.T) {
+	page := &tree.Page{PageNode: &tree.PageNode{
+		ID:    "section-guides",
+		Title: "Guides",
+		Slug:  "guides",
+		Kind:  tree.NodeKindSection,
+	}}
+	store := &fakeRevisionStore{
+		commits: []gitrevisions.Commit{{Hash: "readme-section-commit", AuthorID: "alice"}},
+		filesAt: map[string]map[string]string{
+			"readme-section-commit": {
+				"guides/README.md": "---\nleafwiki_id: section-guides\nleafwiki_title: Historical Guides\n---\n# Historical Guides\n",
+			},
+		},
+		changedPaths: map[string][]string{
+			"readme-section-commit": {"guides/README.md"},
+		},
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	result, err := service.ListPageRevisions(context.Background(), page, "", 1)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+	revisions := result.Revisions
+
+	if len(revisions) != 1 {
+		t.Fatalf("revision count = %d, want 1", len(revisions))
+	}
+	if revisions[0].Title != "Historical Guides" {
+		t.Fatalf("revision title = %q, want Historical Guides", revisions[0].Title)
+	}
+	if revisions[0].Slug != "guides" {
+		t.Fatalf("revision slug = %q, want guides", revisions[0].Slug)
+	}
+	if revisions[0].Kind != string(tree.NodeKindSection) {
+		t.Fatalf("revision kind = %q, want section", revisions[0].Kind)
+	}
+	if revisions[0].Path != "guides" {
+		t.Fatalf("revision path = %q, want guides", revisions[0].Path)
+	}
+}
+
 func TestServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversion(t *testing.T) {
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "docs-1",
@@ -1499,6 +2415,57 @@ func TestServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath(t *testi
 	}
 }
 
+func TestServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "README.md"), "---\nleafwiki_id: section-1\nleafwiki_title: Docs\n---\n# Docs\n\nold readme section content")
+	oldCommit, err := store.Capture(context.Background(), gitrevisions.CommitRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("capture old commit: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "README.md"), "---\nleafwiki_id: section-1\nleafwiki_title: Docs\n---\n# Docs\n\nnew readme section content")
+	if _, err := store.Capture(context.Background(), gitrevisions.CommitRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("capture new commit: %v", err)
+	}
+	section := &tree.Page{PageNode: &tree.PageNode{ID: "section-1", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		RootDir: rootDir,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := service.RestoreDocument(context.Background(), section, oldCommit.Hash, PublicEditorActor()); err != nil {
+		t.Fatalf("RestoreDocument from README section commit: %v", err)
+	}
+
+	readmeBytes, err := os.ReadFile(filepath.Join(rootDir, "docs", "README.md"))
+	if err != nil {
+		t.Fatalf("read restored README section: %v", err)
+	}
+	if !strings.Contains(string(readmeBytes), "old readme section content") {
+		t.Fatalf("README.md content = %q, want old readme section content", string(readmeBytes))
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "docs", "index.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("index.md exists after README section restore, want no new index; err=%v", err)
+	}
+}
+
 func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.T) {
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
@@ -2083,6 +3050,15 @@ func writeMarkdown(t *testing.T, path string, content string) {
 	}
 }
 
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
 func mustGetPage(t *testing.T, treeService *tree.TreeService, id string) *tree.Page {
 	t.Helper()
 	page, err := treeService.GetPage(id)
@@ -2136,6 +3112,8 @@ func (f *fakeTreeReconstructor) reconstructCount() int {
 type fakeRevisionStore struct {
 	capture                           *gitrevisions.Commit
 	captureErr                        error
+	captureErrCall                    int
+	amendErr                          error
 	captureCalls                      int
 	commits                           []gitrevisions.Commit
 	filesAt                           map[string]map[string]string
@@ -2155,7 +3133,7 @@ type fakeRevisionStore struct {
 
 func (f *fakeRevisionStore) Capture(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	f.captureCalls++
-	if f.captureErr != nil {
+	if f.captureErr != nil && (f.captureErrCall == 0 || f.captureCalls == f.captureErrCall) {
 		return nil, f.captureErr
 	}
 	if f.capture == nil {
@@ -2169,6 +3147,9 @@ func (f *fakeRevisionStore) Capture(context.Context, gitrevisions.CommitRequest)
 }
 
 func (f *fakeRevisionStore) Amend(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+	if f.amendErr != nil {
+		return nil, f.amendErr
+	}
 	return f.capture, nil
 }
 

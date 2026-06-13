@@ -45,6 +45,10 @@ func (a *WikiImportAdapter) LookupPagePath(path string) (*tree.PathLookup, error
 	return a.tree.LookupPagePath(path)
 }
 
+func (a *WikiImportAdapter) LookupPagePathForKind(path string, kind tree.NodeKind) (*tree.PathLookup, error) {
+	return a.tree.LookupPagePathForKind(path, kind)
+}
+
 func (a *WikiImportAdapter) FindByPath(route string) (*tree.Page, error) {
 	return a.tree.FindPageByRoutePath(route)
 }

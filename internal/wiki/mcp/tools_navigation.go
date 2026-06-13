@@ -9,7 +9,6 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
-	wikipages "github.com/perber/wiki/internal/wiki/pages"
 )
 
 func (r *Routes) registerNavigationTools(server *sdkmcp.Server) {
@@ -46,11 +45,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 		}
 		node = page.PageNode
 	case routePath != "":
-		validPath, err := wikipages.ValidatePageRoutePath(routePath)
-		if err != nil {
-			return subtreeOutput{}, err
-		}
-		page, err := r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: validPath})
+		page, err := r.findToolPageByInputPath(ctx, in.Path, "")
 		if err != nil {
 			return subtreeOutput{}, err
 		}

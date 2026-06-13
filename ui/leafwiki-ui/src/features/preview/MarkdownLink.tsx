@@ -5,9 +5,14 @@ import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildViewUrl, stripBasePath, withBasePath } from '@/lib/routePath'
 import {
+  markdownHrefToWikiBrowserPath,
+  markdownHrefToWikiRoutePath,
+  markdownRouteLookupKind,
   normalizeWikiRoutePath,
+  resolveReadmeFallbackRoutePath,
   resolveWikiLinkPath,
   toWikiLookupPath,
+  type WikiNodeKind,
 } from '@/lib/wikiPath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useDialogsStore } from '@/stores/dialogs'
@@ -20,6 +25,7 @@ interface MarkdownLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   href?: string
   children?: ReactNode
   path?: string
+  sourceKind?: WikiNodeKind
   node?: unknown
   resolveAssetUrl?: (src: string) => string
 }
@@ -29,6 +35,7 @@ export function MarkdownLink({
   children,
   node,
   resolveAssetUrl,
+  sourceKind = 'page',
   ...props
 }: MarkdownLinkProps) {
   void node
@@ -42,15 +49,16 @@ export function MarkdownLink({
     return <>{children}</>
   }
 
-  const isInternal =
-    href &&
-    !href.startsWith('http') &&
-    !href.startsWith('mailto:') &&
-    !href.startsWith('#')
+  const isInternal = href && !isExternalHref(href)
 
-  const handleOpenCreatePageDialog = (path: string, editMode: boolean) => {
+  const handleOpenCreatePageDialog = (
+    path: string,
+    kind: WikiNodeKind,
+    editMode: boolean,
+  ) => {
     openDialog(DIALOG_CREATE_PAGE_BY_PATH, {
       initialPath: path,
+      initialKind: kind,
       readOnlyPath: true,
       forwardToEditMode: !editMode,
     })
@@ -81,9 +89,10 @@ export function MarkdownLink({
       First we need to check if it is a relative link or an absolute link.
     */
     let normalizedHref = href
+    let browserHref = href
     if (href.startsWith('/')) {
-      // Already absolute (e.g. "/stoff/change")
-      normalizedHref = normalizeWikiRoutePath(href)
+      normalizedHref = markdownHrefToWikiRoutePath('/', href)
+      browserHref = markdownHrefToWikiBrowserPath('/', href)
     } else {
       // Relative link (e.g. "../stoff/change", "child-page", "./foo")
       let locationPath = window.location.pathname
@@ -96,11 +105,19 @@ export function MarkdownLink({
 
       // Then proceed as before
       const currentPath = normalizeWikiRoutePath(
-        props.path ?? buildViewUrl(locationPath),
+        props.path ??
+          markdownHrefToWikiRoutePath('/', buildViewUrl(locationPath)),
       )
 
-      normalizedHref = resolveWikiLinkPath(currentPath, href)
+      normalizedHref = resolveWikiLinkPath(currentPath, href, sourceKind)
+      browserHref = markdownHrefToWikiBrowserPath(currentPath, href, sourceKind)
     }
+    normalizedHref = resolveReadmeFallbackHref(
+      normalizedHref,
+      href,
+      getPageByPath,
+    )
+    browserHref = resolveReadmeFallbackHref(browserHref, href, getPageByPath)
 
     /**
      *  When a page link is internal and not an asset link and the page doesn't exist yet,
@@ -111,16 +128,21 @@ export function MarkdownLink({
 
     // normalizedTargetPath is the path without leading /, without query and hash
     const normalizedTargetPath = toWikiLookupPath(normalizedHref)
+    const targetKind = markdownRouteLookupKind(browserHref) ?? 'section'
 
     // Check if the page exists
-    const page = getPageByPath(normalizedTargetPath)
+    const page = getPageByPath(normalizedTargetPath, targetKind)
     const pageExists = !!page
     if (!pageExists && user) {
       return (
         <Button
           variant="link"
           onClick={() => {
-            handleOpenCreatePageDialog(normalizedTargetPath, editMode)
+            handleOpenCreatePageDialog(
+              normalizedTargetPath,
+              targetKind,
+              editMode,
+            )
           }}
           className="text-error hover:text-error/80 m-0 p-0 text-base no-underline hover:no-underline"
         >
@@ -131,7 +153,7 @@ export function MarkdownLink({
 
     return (
       <Link
-        to={normalizedHref}
+        to={browserHref}
         state={createNavigationVisitState()}
         {...props}
         className={clsx(
@@ -155,4 +177,53 @@ export function MarkdownLink({
       {children}
     </a>
   )
+}
+
+function isExternalHref(href: string) {
+  const trimmed = href.trimStart()
+  if (trimmed.startsWith('#') || trimmed.startsWith('//')) {
+    return true
+  }
+  const schemeIndex = trimmed.search(/[:/?#]/)
+  return schemeIndex >= 0 && trimmed[schemeIndex] === ':'
+}
+
+function resolveReadmeFallbackHref(
+  normalizedHref: string,
+  originalHref: string,
+  getPageByPath: (path: string, kind?: WikiNodeKind) => unknown,
+) {
+  const originalBase = originalHref
+    .split('?')[0]
+    .split('#')[0]
+    .replace(/\/+$/, '')
+  if (originalBase.split('/').pop() !== 'README.md') {
+    return normalizedHref
+  }
+  const { pathname, suffix } = splitHrefSuffix(normalizedHref)
+  const resolvedPathname = resolveReadmeFallbackRoutePath(
+    pathname,
+    getPageByPath as (
+      path: string,
+      kind?: WikiNodeKind,
+    ) => { readmeFallback?: boolean; kind?: string } | null | undefined,
+  )
+  return `${resolvedPathname}${suffix}`
+}
+
+function splitHrefSuffix(href: string): { pathname: string; suffix: string } {
+  const queryIndex = href.indexOf('?')
+  const hashIndex = href.indexOf('#')
+  let splitIndex = -1
+  if (queryIndex >= 0 && hashIndex >= 0) {
+    splitIndex = Math.min(queryIndex, hashIndex)
+  } else if (queryIndex >= 0) {
+    splitIndex = queryIndex
+  } else if (hashIndex >= 0) {
+    splitIndex = hashIndex
+  }
+  if (splitIndex < 0) {
+    return { pathname: href, suffix: '' }
+  }
+  return { pathname: href.slice(0, splitIndex), suffix: href.slice(splitIndex) }
 }

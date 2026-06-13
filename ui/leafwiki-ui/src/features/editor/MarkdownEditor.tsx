@@ -85,6 +85,7 @@ const MarkdownEditor = (
     }
   }, [])
   const path = usePageEditorStore((s) => s.page?.path)
+  const pageKind = usePageEditorStore((s) => s.page?.kind)
   const editorViewRef = useRef<EditorView | null>(null)
   const rafRef = useRef<number | null>(null)
   const currentCursorLineRef = useRef<number | null>(null)
@@ -468,12 +469,13 @@ const MarkdownEditor = (
           <MarkdownPreview
             content={debouncedPreview}
             path={path}
+            pageKind={pageKind}
             key={assetVersion}
           />
         </div>
       </div>
     )
-  }, [assetVersion, debouncedPreview, setPreviewRef, path])
+  }, [assetVersion, debouncedPreview, setPreviewRef, path, pageKind])
 
   // TODO: Known Issues:
   // * When we resize the window, the preview does not update immediately.

@@ -1,5 +1,6 @@
 import { useConfigStore } from '@/stores/config'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { Link2Off, Paperclip } from 'lucide-react'
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
@@ -50,7 +51,10 @@ export function BacklinkInfo() {
             <ul>
               {backlinks.map((bl) => (
                 <li key={bl.from_page_id} className="backlinks__item">
-                  <Link to={bl.from_path} state={createNavigationVisitState()}>
+                  <Link
+                    to={browserRoutePathForWikiNode(bl.from_path, bl.from_kind)}
+                    state={createNavigationVisitState()}
+                  >
                     <Paperclip size={16} className="backlinks__icon" />{' '}
                     {bl.from_title}
                   </Link>
@@ -121,7 +125,10 @@ export function BacklinkInfo() {
                         className="backlinks__item backlinks__item--broken"
                       >
                         <Link
-                          to={bl.from_path}
+                          to={browserRoutePathForWikiNode(
+                            bl.from_path,
+                            bl.from_kind,
+                          )}
                           state={createNavigationVisitState()}
                         >
                           <Link2Off size={16} className="backlinks__icon" />{' '}

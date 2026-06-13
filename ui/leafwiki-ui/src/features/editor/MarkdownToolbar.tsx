@@ -124,6 +124,7 @@ export default function MarkdownToolbar({
             variant="ghost"
             size="icon"
             className="markdown-toolbar__button"
+            data-testid="format-link-button"
             onClick={() => {
               const view = editorRef.current?.editorViewRef.current
               const selectedText = view

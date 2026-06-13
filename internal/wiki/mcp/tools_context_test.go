@@ -15,6 +15,9 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - GitHub README section import becomes section link
+
 func TestMarkdownPathToRoutePathHandlesCaseInsensitiveMarkdownNames(t *testing.T) {
 	tests := map[string]string{
 		"Docs/API.MD":      "Docs/API",
@@ -31,6 +34,10 @@ func TestMarkdownPathToRoutePathHandlesCaseInsensitiveMarkdownNames(t *testing.T
 	}
 }
 
+func testNodeKindPtr(kind tree.NodeKind) *tree.NodeKind {
+	return &kind
+}
+
 func TestPageIDsForMarkdownPathsResolvesRootIndex(t *testing.T) {
 	routes := newContextToolTestRoutes(t)
 
@@ -38,6 +45,56 @@ func TestPageIDsForMarkdownPathsResolvesRootIndex(t *testing.T) {
 
 	if len(got) != 1 || got[0] != "root" {
 		t.Fatalf("pageIDsForMarkdownPaths(index.md) = %v, want [root]", got)
+	}
+}
+
+func TestPageIDsForMarkdownPathsUsesMarkdownFileKindForSameBasenameTwins(t *testing.T) {
+	routes := newContextToolTestRoutes(t)
+
+	sectionID, err := routes.treeService.CreateNode("system", nil, "Sync Section", "sync", testNodeKindPtr(tree.NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+	pageID, err := routes.treeService.CreateNode("system", nil, "Sync Page", "sync", testNodeKindPtr(tree.NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+
+	pageIDs := routes.pageIDsForMarkdownPaths([]string{"sync.md"})
+	if len(pageIDs) != 1 || pageIDs[0] != *pageID {
+		t.Fatalf("pageIDsForMarkdownPaths(sync.md) = %v, want [%s]", pageIDs, *pageID)
+	}
+
+	sectionIDs := routes.pageIDsForMarkdownPaths([]string{"sync/index.md"})
+	if len(sectionIDs) != 1 || sectionIDs[0] != *sectionID {
+		t.Fatalf("pageIDsForMarkdownPaths(sync/index.md) = %v, want [%s]", sectionIDs, *sectionID)
+	}
+}
+
+func TestPageIDsForMarkdownPathsResolvesReadmeFallbackSection(t *testing.T) {
+	routes := newContextToolTestRoutes(t)
+
+	sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+
+	pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/README.md"})
+	if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
+		t.Fatalf("pageIDsForMarkdownPaths(guide/README.md) = %v, want [%s]", pageIDs, *sectionID)
+	}
+}
+
+func TestPageIDsForMarkdownPathsDoesNotFallbackLowercaseReadme(t *testing.T) {
+	routes := newContextToolTestRoutes(t)
+
+	if _, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection)); err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+
+	pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/readme.md"})
+	if len(pageIDs) != 0 {
+		t.Fatalf("pageIDsForMarkdownPaths(guide/readme.md) = %v, want no fallback section", pageIDs)
 	}
 }
 

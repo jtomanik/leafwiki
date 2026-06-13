@@ -58,6 +58,18 @@ export default class ImporterPage {
     }
   }
 
+  async resetImportStateIfPresent() {
+    const closeButton = this.page.getByRole('button', { name: 'Close and Clear' });
+    if (await closeButton.count()) {
+      await closeButton.click();
+      await this.page.goto(toAppPath('/settings/importer'));
+      await expect(this.page.getByRole('heading', { name: 'Choose Import Package' })).toBeVisible();
+      return;
+    }
+
+    await this.clearImportPlanIfPresent();
+  }
+
   async startNewImport() {
     await this.page.getByRole('button', { name: 'Start New Import' }).click();
     await expect(this.page.getByRole('heading', { name: 'Choose Import Package' })).toBeVisible();

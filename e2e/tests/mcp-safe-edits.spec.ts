@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 import { toAppPath } from '../pages/appPath';
 import { connectMCPClient } from './mcpClient';
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - MCP refactor preview and apply preserve canonical page and section syntax
+
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
     process.env.E2E_ENABLE_MCP_LOCAL !== '1' ||
@@ -37,6 +40,7 @@ function appURL(routePath: string): string {
   ).toString();
 }
 
+// - MCP refactor preview and apply preserve canonical page and section syntax
 test('safe edit tools patch sections and metadata with version checks', async () => {
   const mcp = await connectMCPClient(appURL('/mcp'));
   const slug = `safe-edits-e2e-${Date.now()}`;
@@ -60,6 +64,161 @@ test('safe edit tools patch sections and metadata with version checks', async ()
     })) as ValidationOutput;
     expect(invalid.ok).toBe(false);
     expect(invalid.issues?.length).toBeGreaterThan(0);
+
+    const canonicalTargetSlug = `safe-edits-canonical-target-${Date.now()}`;
+    const canonicalTarget = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      slug: canonicalTargetSlug,
+      title: 'Safe Edits Canonical Target',
+    })) as PageOutput;
+    const canonicalTargetPage = canonicalTarget.page;
+    expect(canonicalTargetPage).toBeTruthy();
+
+    const canonicalContent = (await mcp.callTool('wiki_validate_content', {
+      content: `[Target](/${canonicalTargetSlug}.md)\n[Root](/)\n`,
+      path: 'safe-edits-canonical-draft',
+    })) as ValidationOutput;
+    expect(canonicalContent.ok).toBe(true);
+
+    const canonicalSourceSlug = `safe-edits-canonical-source-${Date.now()}`;
+    const canonicalSource = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      slug: canonicalSourceSlug,
+      title: 'Safe Edits Canonical Source',
+    })) as PageOutput;
+    const canonicalSourcePage = canonicalSource.page;
+    expect(canonicalSourcePage).toBeTruthy();
+
+    await mcp.callTool('wiki_update_page', {
+      content: `[Target](/${canonicalTargetSlug}.md?mode=mcp#part "Open")`,
+      id: canonicalSourcePage?.id,
+      slug: canonicalSourceSlug,
+      title: 'Safe Edits Canonical Source',
+      version: canonicalSourcePage?.version,
+    });
+    const canonicalPreview = (await mcp.callTool('wiki_preview_page_refactor', {
+      id: canonicalTargetPage?.id,
+      kind: 'rename',
+      slug: `${canonicalTargetSlug}-renamed`,
+      title: 'Safe Edits Canonical Target',
+    })) as { counts?: { affectedPages?: number } };
+    expect(canonicalPreview.counts?.affectedPages).toBe(1);
+
+    await mcp.callTool('wiki_apply_page_refactor', {
+      id: canonicalTargetPage?.id,
+      kind: 'rename',
+      rewriteLinks: true,
+      slug: `${canonicalTargetSlug}-renamed`,
+      title: 'Safe Edits Canonical Target',
+      version: canonicalTargetPage?.version,
+    });
+    const canonicalSourceAfter = (await mcp.callTool('wiki_get_page', {
+      id: canonicalSourcePage?.id,
+    })) as PageOutput;
+    expect(canonicalSourceAfter.page?.content).toContain(
+      `[Target](/${canonicalTargetSlug}-renamed.md?mode=mcp#part "Open")`,
+    );
+
+    const relativeParentSlug = `safe-edits-relative-${Date.now()}`;
+    const relativeParent = (await mcp.callTool('wiki_create_page', {
+      kind: 'section',
+      slug: relativeParentSlug,
+      title: 'Safe Edits Relative Parent',
+    })) as PageOutput;
+    const relativeParentPage = relativeParent.page;
+    expect(relativeParentPage).toBeTruthy();
+
+    const relativeTarget = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      parentId: relativeParentPage?.id,
+      slug: 'target',
+      title: 'Relative Target',
+    })) as PageOutput;
+    const relativeTargetPage = relativeTarget.page;
+    expect(relativeTargetPage).toBeTruthy();
+
+    const relativeSource = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      parentId: relativeParentPage?.id,
+      slug: 'source',
+      title: 'Relative Source',
+    })) as PageOutput;
+    const relativeSourcePage = relativeSource.page;
+    expect(relativeSourcePage).toBeTruthy();
+
+    await mcp.callTool('wiki_update_page', {
+      content: '[Relative](./target.md)',
+      id: relativeSourcePage?.id,
+      slug: 'source',
+      title: 'Relative Source',
+      version: relativeSourcePage?.version,
+    });
+    const relativePreview = (await mcp.callTool('wiki_preview_page_refactor', {
+      id: relativeTargetPage?.id,
+      kind: 'rename',
+      slug: 'target-renamed',
+      title: 'Relative Target',
+    })) as { counts?: { affectedPages?: number } };
+    expect(relativePreview.counts?.affectedPages).toBe(1);
+
+    await mcp.callTool('wiki_apply_page_refactor', {
+      id: relativeTargetPage?.id,
+      kind: 'rename',
+      rewriteLinks: true,
+      slug: 'target-renamed',
+      title: 'Relative Target',
+      version: relativeTargetPage?.version,
+    });
+    const relativeSourceAfter = (await mcp.callTool('wiki_get_page', {
+      id: relativeSourcePage?.id,
+    })) as PageOutput;
+    expect(relativeSourceAfter.page?.content).toContain('[Relative](target-renamed.md)');
+
+    const sectionTargetSlug = `safe-edits-section-target-${Date.now()}`;
+    const sectionTarget = (await mcp.callTool('wiki_create_page', {
+      kind: 'section',
+      slug: sectionTargetSlug,
+      title: 'Safe Edits Section Target',
+    })) as PageOutput;
+    const sectionTargetPage = sectionTarget.page;
+    expect(sectionTargetPage).toBeTruthy();
+
+    const sectionSourceSlug = `safe-edits-section-source-${Date.now()}`;
+    const sectionSource = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      slug: sectionSourceSlug,
+      title: 'Safe Edits Section Source',
+    })) as PageOutput;
+    const sectionSourcePage = sectionSource.page;
+    expect(sectionSourcePage).toBeTruthy();
+
+    await mcp.callTool('wiki_update_page', {
+      content: `[Section](/${sectionTargetSlug})`,
+      id: sectionSourcePage?.id,
+      slug: sectionSourceSlug,
+      title: 'Safe Edits Section Source',
+      version: sectionSourcePage?.version,
+    });
+    const sectionPreview = (await mcp.callTool('wiki_preview_page_refactor', {
+      id: sectionTargetPage?.id,
+      kind: 'rename',
+      slug: `${sectionTargetSlug}-renamed`,
+      title: 'Safe Edits Section Target',
+    })) as { counts?: { affectedPages?: number } };
+    expect(sectionPreview.counts?.affectedPages).toBe(1);
+
+    await mcp.callTool('wiki_apply_page_refactor', {
+      id: sectionTargetPage?.id,
+      kind: 'rename',
+      rewriteLinks: true,
+      slug: `${sectionTargetSlug}-renamed`,
+      title: 'Safe Edits Section Target',
+      version: sectionTargetPage?.version,
+    });
+    const sectionSourceAfter = (await mcp.callTool('wiki_get_page', {
+      id: sectionSourcePage?.id,
+    })) as PageOutput;
+    expect(sectionSourceAfter.page?.content).toContain(`[Section](/${sectionTargetSlug}-renamed)`);
 
     const created = (await mcp.callTool('wiki_create_page', {
       kind: 'page',

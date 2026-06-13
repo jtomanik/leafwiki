@@ -9,7 +9,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { searchPages, SearchResultItem, SearchTagFacet } from '@/lib/api/search'
 import { deferStateUpdate } from '@/lib/deferState'
-import { normalizeWikiRoutePath } from '@/lib/wikiPath'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { fetchTags, TagCount } from '@/lib/api/tags'
 import { useDebounce } from '@/lib/useDebounce'
 import { X } from 'lucide-react'
@@ -267,7 +267,10 @@ export default function Search({ active = false }: SearchProps) {
     if (!activeResult) return
 
     navigate({
-      pathname: normalizeWikiRoutePath(activeResult.path),
+      pathname: browserRoutePathForWikiNode(
+        activeResult.path,
+        activeResult.kind,
+      ),
       search: location.search,
     })
   }

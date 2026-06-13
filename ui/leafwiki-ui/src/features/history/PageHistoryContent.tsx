@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildHistoryUrl, withBasePath } from '@/lib/routePath'
 import { useIsMobile } from '@/lib/useIsMobile'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import {
@@ -542,6 +543,7 @@ function PreviewPanel({
         <MarkdownPreview
           content={snapshot.content}
           path={snapshot.revision.path}
+          pageKind={snapshot.revision.kind === 'section' ? 'section' : 'page'}
           resolveAssetUrl={resolveAssetUrl}
           enableHeadlineLinks={false}
         />
@@ -851,7 +853,9 @@ export function PageHistoryContent({
       )) as Page
 
       await useTreeStore.getState().reloadTree()
-      await useViewerStore.getState().loadPageData(restoredPage.path)
+      await useViewerStore
+        .getState()
+        .loadPageData(restoredPage.path, undefined, restoredPage.kind)
 
       const viewerPageID = useViewerStore.getState().page?.id
       if (viewerPageID) {
@@ -861,10 +865,15 @@ export function PageHistoryContent({
       }
 
       await reloadPageHistory(pageId)
-      navigate(buildHistoryUrl(restoredPage.path), {
-        replace: true,
-        state: createNavigationVisitState(),
-      })
+      navigate(
+        buildHistoryUrl(
+          browserRoutePathForWikiNode(restoredPage.path, restoredPage.kind),
+        ),
+        {
+          replace: true,
+          state: createNavigationVisitState(),
+        },
+      )
       toast.success(
         enableWorkspaceSync ? 'Document version restored' : 'Revision restored',
       )

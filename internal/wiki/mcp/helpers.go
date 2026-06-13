@@ -120,6 +120,10 @@ func normalizeToolRoutePath(path string) string {
 	return strings.Trim(strings.TrimSpace(path), "/")
 }
 
+func normalizeToolPagePathInput(rawPath string, rawKind string) (string, tree.NodeKind, error) {
+	return wikipages.NormalizePagePathInput(rawPath, rawKind)
+}
+
 func base64DecodedSize(encoded string) int64 {
 	trimmed := strings.TrimSpace(encoded)
 	size := base64.StdEncoding.DecodedLen(len(trimmed))

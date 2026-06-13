@@ -4,6 +4,7 @@ import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import clsx from 'clsx'
@@ -37,7 +38,7 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
   const linkText = (
     <div className={clsx('flex', 'tree-node__tooltip-parent')}>
       <Link
-        to={`/${node.path}`}
+        to={browserRoutePathForWikiNode(node.path, node.kind)}
         state={createNavigationVisitState()}
         className="tree-node__link"
         data-testid={`tree-node-link-${node.id}`}

@@ -98,6 +98,7 @@ type contextOutput struct {
 	PresenceStatus              presenceStatusOutput      `json:"presenceStatus"`
 	Tree                        *dto.Node                 `json:"tree"`
 	RecommendedTools            []string                  `json:"recommendedTools"`
+	CanonicalLinkExamples       []string                  `json:"canonicalLinkExamples"`
 	Warnings                    []string                  `json:"warnings,omitempty"`
 }
 
@@ -146,12 +147,14 @@ type subtreeNode struct {
 type validatePageInput struct {
 	PageID string `json:"pageId,omitempty"`
 	Path   string `json:"path,omitempty"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 type validateContentInput struct {
 	Path           string `json:"path"`
 	Content        string `json:"content"`
 	ExistingPageID string `json:"existingPageId,omitempty"`
+	Kind           string `json:"kind,omitempty"`
 }
 
 type validateWikiInput struct {
@@ -209,6 +212,12 @@ type pageIDInput struct {
 
 type pathInput struct {
 	Path string `json:"path"`
+	Kind string `json:"kind,omitempty"`
+}
+
+type pagePathInput struct {
+	Path string `json:"path"`
+	Kind string `json:"kind,omitempty"`
 }
 
 type lookupPathOutput struct {

@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { deferStateUpdate } from '@/lib/deferState'
 import { searchFlatPageSearchItems } from '@/lib/pageSearch'
 import { DIALOG_LINK_INSERT } from '@/lib/registries'
+import { markdownHrefForWikiPath } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { useTreeStore } from '@/stores/tree'
@@ -79,8 +80,12 @@ export function LinkInsertDialog({
     })
   }, [url])
 
-  const selectSuggestion = (path: string, title: string) => {
-    setUrl(`/${path}`)
+  const selectSuggestion = (
+    path: string,
+    title: string,
+    kind?: 'page' | 'section',
+  ) => {
+    setUrl(markdownHrefForWikiPath(path, kind))
     if (!text) setText(title)
     setUrlFocused(false)
   }
@@ -156,7 +161,7 @@ export function LinkInsertDialog({
                     if (e.key === 'Enter') {
                       e.preventDefault()
                       const s = suggestions[highlightedIndex]
-                      if (s) selectSuggestion(s.path, s.title)
+                      if (s) selectSuggestion(s.path, s.title, s.kind)
                       return
                     }
                   }
@@ -173,7 +178,7 @@ export function LinkInsertDialog({
                         className={`w-full px-3 py-2 text-left text-sm ${i === highlightedIndex ? 'bg-accent' : 'hover:bg-accent'}`}
                         onMouseDown={(e) => {
                           e.preventDefault()
-                          selectSuggestion(s.path, s.title)
+                          selectSuggestion(s.path, s.title, s.kind)
                         }}
                         onMouseEnter={() => setHighlightedIndex(i)}
                       >

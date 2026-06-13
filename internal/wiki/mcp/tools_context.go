@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	"github.com/perber/wiki/internal/workspacesync"
 )
@@ -133,7 +135,11 @@ func (r *Routes) getContext(ctx context.Context, req *sdkmcp.CallToolRequest, ac
 		PresenceStatus:   presenceStatus,
 		Tree:             tree,
 		RecommendedTools: recommendedToolsForContext(actor.User, validation, status.Enabled),
-		Warnings:         warnings,
+		CanonicalLinkExamples: []string{
+			"Page links use .md: [Guide](/docs/guide.md)",
+			"Section links omit .md: [Docs](/docs)",
+		},
+		Warnings: warnings,
 	}, nil
 }
 
@@ -339,20 +345,9 @@ func (r *Routes) pageIDsForMarkdownPaths(paths []string) []string {
 	pageIDs := []string{}
 	seen := map[string]struct{}{}
 	for _, markdownPath := range paths {
-		routePath := tree.MarkdownPathToRoutePath(markdownPath)
-		pageID := ""
-		if routePath == "" {
-			page, err := r.treeService.FindPageByID("root")
-			if err != nil || page == nil {
-				continue
-			}
-			pageID = page.ID
-		} else {
-			page, err := r.treeService.FindPageByRoutePath(routePath)
-			if err != nil || page == nil {
-				continue
-			}
-			pageID = page.ID
+		pageID := r.pageIDForMarkdownPath(markdownPath)
+		if pageID == "" {
+			continue
 		}
 		if _, exists := seen[pageID]; exists {
 			continue
@@ -361,6 +356,45 @@ func (r *Routes) pageIDsForMarkdownPaths(paths []string) []string {
 		pageIDs = append(pageIDs, pageID)
 	}
 	return pageIDs
+}
+
+func (r *Routes) pageIDForMarkdownPath(markdownPath string) string {
+	trimmed := strings.Trim(strings.TrimSpace(filepath.ToSlash(markdownPath)), "/")
+	if path.Base(trimmed) == "README.md" {
+		if page, err := r.treeService.FindPageByRoutePathAndKind(tree.MarkdownPathToRoutePath(trimmed), tree.NodeKindPage); err == nil && page != nil {
+			return page.ID
+		}
+		sectionRoute := strings.Trim(path.Dir(trimmed), ".")
+		return r.pageIDForRecentChangeRoute(sectionRoute, tree.NodeKindSection)
+	}
+	routePath := tree.MarkdownPathToRoutePath(trimmed)
+	kind := wikipages.MarkdownPathInputKind(trimmed)
+	return r.pageIDForRecentChangeRoute(routePath, kind)
+}
+
+func (r *Routes) pageIDForRecentChangeRoute(routePath string, kind tree.NodeKind) string {
+	if routePath == "" && kind == tree.NodeKindSection {
+		page, err := r.treeService.FindPageByID("root")
+		if err != nil || page == nil {
+			return ""
+		}
+		return page.ID
+	}
+	if kind != "" {
+		page, err := r.treeService.FindPageByRoutePathAndKind(routePath, kind)
+		if err != nil || page == nil {
+			return ""
+		}
+		return page.ID
+	}
+	if page, err := r.treeService.FindPageByRoutePath(routePath); err == nil {
+		return page.ID
+	}
+	page, err := r.treeService.FindPageByRoutePathAndKind(routePath, tree.NodeKindSection)
+	if err != nil || page == nil {
+		return ""
+	}
+	return page.ID
 }
 
 func (r *Routes) validationFromSyncStatus(status workspacesync.SyncStatus) validationOutput {
@@ -390,9 +424,13 @@ func validationFromSyncStatusWithRedactor(status workspacesync.SyncStatus, redac
 			path = redact(path)
 			message = redact(message)
 		}
+		code := strings.TrimSpace(err.Code)
+		if code == "" {
+			code = "workspace_sync_validation"
+		}
 		issues = append(issues, validationIssueOutput{
 			Severity: severity,
-			Code:     "workspace_sync_validation",
+			Code:     code,
 			Path:     path,
 			Message:  message,
 		})

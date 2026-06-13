@@ -4,10 +4,11 @@ import { ensurePage, lookupPath, PathLookupResult } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
+import { browserRoutePathForWikiNode, type WikiNodeKind } from '@/lib/wikiPath'
 import { useDebounce } from '@/lib/useDebounce'
 import { useTreeStore } from '@/stores/tree'
 import { Check, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -15,12 +16,14 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type CreatePageByPathDialogProps = {
   initialPath?: string
+  initialKind?: WikiNodeKind
   readOnlyPath?: boolean
   forwardToEditMode?: boolean
 }
 
 export function CreatePageByPathDialog({
   initialPath,
+  initialKind = 'page',
   readOnlyPath,
   forwardToEditMode,
 }: CreatePageByPathDialogProps) {
@@ -39,16 +42,19 @@ export function CreatePageByPathDialog({
 
   const debouncedPath = useDebounce(path, 300)
 
-  const runLookup = async (path: string) => {
-    try {
-      const result = await lookupPath(path)
-      if (result) {
-        setLookup(result)
+  const runLookup = useCallback(
+    async (path: string) => {
+      try {
+        const result = await lookupPath(path, initialKind)
+        if (result) {
+          setLookup(result)
+        }
+      } catch (error) {
+        console.error('Error looking up path:', error)
       }
-    } catch (error) {
-      console.error('Error looking up path:', error)
-    }
-  }
+    },
+    [initialKind],
+  )
 
   const isCreateButtonDisabled = !title || !path || loading
 
@@ -58,11 +64,11 @@ export function CreatePageByPathDialog({
 
     try {
       // Here you would call your API to create the page
-      await ensurePage(path, title)
+      await ensurePage(path, title, initialKind)
       await reloadTree()
       // On success, close the dialog
       if (forwardToEditMode) {
-        navigate(buildEditUrl(path))
+        navigate(buildEditUrl(browserRoutePathForWikiNode(path, initialKind)))
       }
 
       toast.success('Page created successfully')
@@ -82,14 +88,14 @@ export function CreatePageByPathDialog({
       // run lookup if the path exists!
       runLookup(path)
     }
-  }, [path, readOnlyPath])
+  }, [path, readOnlyPath, runLookup])
 
   // Run lookup when debounced path changes
   useEffect(() => {
     if (!readOnlyPath) {
       runLookup(debouncedPath)
     }
-  }, [debouncedPath, readOnlyPath])
+  }, [debouncedPath, readOnlyPath, runLookup])
 
   const handleTitleChange = (val: string) => {
     setTitle(val)

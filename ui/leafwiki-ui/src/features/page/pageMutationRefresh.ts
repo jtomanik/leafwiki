@@ -1,7 +1,11 @@
 import { PageRefactorPreview } from '@/lib/api/pages'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildEditUrl, buildHistoryUrl, buildViewUrl } from '@/lib/routePath'
-import { normalizeWikiRoutePath } from '@/lib/wikiPath'
+import {
+  browserRoutePathForWikiNode,
+  normalizeWikiRoutePath,
+  type WikiNodeKind,
+} from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { NavigateFunction } from 'react-router-dom'
 import { useLinkStatusStore } from '../links/linkstatus_store'
@@ -24,23 +28,28 @@ function toPageLookupPath(path: string) {
   return normalizeRoutePath(path).replace(/^\/+/, '')
 }
 
-function buildRefactorRoutePath(currentPath: string, nextWikiPath: string) {
+function buildRefactorRoutePath(
+  currentPath: string,
+  nextWikiPath: string,
+  nextKind?: WikiNodeKind,
+) {
   const normalizedCurrentPath = normalizeRoutePath(currentPath)
+  const nextBrowserPath = browserRoutePathForWikiNode(nextWikiPath, nextKind)
 
   if (
     normalizedCurrentPath === '/history' ||
     normalizedCurrentPath === '/history/'
   ) {
-    return buildHistoryUrl(nextWikiPath)
+    return buildHistoryUrl(nextBrowserPath)
   }
   if (normalizedCurrentPath.startsWith('/history/')) {
-    return buildHistoryUrl(nextWikiPath)
+    return buildHistoryUrl(nextBrowserPath)
   }
   if (normalizedCurrentPath.startsWith('/e/')) {
-    return buildEditUrl(nextWikiPath)
+    return buildEditUrl(nextBrowserPath)
   }
 
-  return buildViewUrl(nextWikiPath)
+  return buildViewUrl(nextBrowserPath)
 }
 
 export async function refreshAfterPageRefactor({
@@ -67,7 +76,11 @@ export async function refreshAfterPageRefactor({
 
   if (isViewingMovedPage) {
     nextPath = preview.newPath
-    const nextRoutePath = buildRefactorRoutePath(currentPath, preview.newPath)
+    const nextRoutePath = buildRefactorRoutePath(
+      currentPath,
+      preview.newPath,
+      currentViewerPage?.kind,
+    )
     if (normalizeRoutePath(currentPath) !== nextRoutePath) {
       navigate(nextRoutePath, {
         replace: true,
@@ -82,7 +95,13 @@ export async function refreshAfterPageRefactor({
     return
   }
 
-  await useViewerStore.getState().loadPageData(toPageLookupPath(nextPath))
+  await useViewerStore
+    .getState()
+    .loadPageData(
+      toPageLookupPath(nextPath),
+      undefined,
+      currentViewerPage?.kind,
+    )
 
   const viewerPageID = useViewerStore.getState().page?.id
   if (!viewerPageID) {

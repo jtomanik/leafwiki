@@ -105,7 +105,7 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 	}
 
 	excludeIDs := subtreeIDSet(page.PageNode)
-	affectedPages, matchedLinks, err := uc.getAffectedPages(oldPath, excludeIDs)
+	affectedPages, matchedLinks, err := uc.getAffectedPages(oldPath, page.Kind, excludeIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -176,11 +176,11 @@ func (uc *PreviewPageRefactorUseCase) resolveParentPath(parentID string) (string
 	return parent.CalculatePath(), nil
 }
 
-func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, excludeIDs map[string]struct{}) ([]RefactorAffectedPage, int, error) {
+func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind tree.NodeKind, excludeIDs map[string]struct{}) ([]RefactorAffectedPage, int, error) {
 	if uc.links == nil {
 		return nil, 0, nil
 	}
-	matches, err := uc.links.GetRefactorMatchesForPrefix(oldPath)
+	matches, err := uc.links.GetRefactorMatchesForPrefixAndKind(oldPath, rootKind)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -217,8 +217,8 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, excludeID
 		if err != nil {
 			return nil, 0, err
 		}
-		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath}}
-		result := engine.Rewrite(sourcePage.Content, sourcePage.CalculatePath(), rules)
+		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath, Kind: string(rootKind)}}
+		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculatePath(), links.MarkdownSourceKind(sourcePage.Kind), rules)
 		for _, w := range result.Warnings {
 			if !containsString(item.Warnings, w.Message) {
 				item.Warnings = append(item.Warnings, w.Message)
@@ -383,15 +383,16 @@ func (uc *ApplyPageRefactorUseCase) rewriteIncomingLinks(in RefactorApplyInput, 
 	if !in.RewriteLinks {
 		return nil
 	}
-	rules := []links.RewriteRule{{OldPath: plan.oldPath, NewPath: plan.newPath}}
-	return uc.rewriteAffectedPages(in.UserID, in.Source, plan.affectedPageIDs, rules)
+	rules := []links.RewriteRule{{OldPath: plan.oldPath, NewPath: plan.newPath, Kind: string(plan.page.Kind)}}
+	return uc.rewriteAffectedPages(in.UserID, in.Source, plan.affectedPageIDs, rules, plan.legacyPageLinkSourceIDs)
 }
 
 type applyRefactorPlan struct {
-	page            *tree.Page
-	oldPath         string
-	newPath         string
-	affectedPageIDs []string
+	page                    *tree.Page
+	oldPath                 string
+	newPath                 string
+	affectedPageIDs         []string
+	legacyPageLinkSourceIDs map[string]struct{}
 }
 
 func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*applyRefactorPlan, error) {
@@ -416,18 +417,27 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 		return plan, nil
 	}
 
-	pageIDs, err := uc.links.GetRefactorSourcePageIDsForPrefix(oldPath)
+	matches, err := uc.links.GetRefactorMatchesForPrefixAndKind(oldPath, page.Kind)
 	if err != nil {
 		return nil, err
 	}
 
 	excludeIDs := subtreeIDSet(page.PageNode)
-	plan.affectedPageIDs = make([]string, 0, len(pageIDs))
-	for _, pageID := range pageIDs {
-		if _, excluded := excludeIDs[pageID]; excluded {
+	seenPageIDs := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		if _, excluded := excludeIDs[match.FromPageID]; excluded {
 			continue
 		}
-		plan.affectedPageIDs = append(plan.affectedPageIDs, pageID)
+		if _, seen := seenPageIDs[match.FromPageID]; !seen {
+			seenPageIDs[match.FromPageID] = struct{}{}
+			plan.affectedPageIDs = append(plan.affectedPageIDs, match.FromPageID)
+		}
+		if page.Kind == tree.NodeKindPage && match.ToPath == oldPath && match.ToKind == "unknown" && !match.Broken {
+			if plan.legacyPageLinkSourceIDs == nil {
+				plan.legacyPageLinkSourceIDs = make(map[string]struct{})
+			}
+			plan.legacyPageLinkSourceIDs[match.FromPageID] = struct{}{}
+		}
 	}
 
 	return plan, nil
@@ -454,6 +464,7 @@ type pathChangeSnapshot struct {
 	PageID   string
 	OldPath  string
 	Content  string
+	Kind     tree.NodeKind
 	RootPage bool
 }
 
@@ -473,13 +484,13 @@ func (uc *ApplyPageRefactorUseCase) captureSnapshots(page *tree.Page, in Refacto
 			content = *in.Content
 		}
 		snapshots = append(snapshots, pathChangeSnapshot{
-			PageID: p.ID, OldPath: p.CalculatePath(), Content: content, RootPage: ids[i] == in.PageID,
+			PageID: p.ID, OldPath: p.CalculatePath(), Content: content, Kind: p.Kind, RootPage: ids[i] == in.PageID,
 		})
 	}
 	return snapshots, nil
 }
 
-func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source string, affectedPageIDs []string, rules []links.RewriteRule) error {
+func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source string, affectedPageIDs []string, rules []links.RewriteRule, legacyPageLinkSourceIDs map[string]struct{}) error {
 	engine := links.NewMarkdownRefactorEngine()
 
 	type pending struct {
@@ -496,7 +507,21 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 		if !ok {
 			continue
 		}
-		result := engine.Rewrite(page.Content, page.CalculatePath(), rules)
+		pageRules := rules
+		if _, hasLegacyPageLink := legacyPageLinkSourceIDs[pageID]; hasLegacyPageLink {
+			pageRules = append([]links.RewriteRule{}, rules...)
+			for _, rule := range rules {
+				if rule.Kind == string(tree.NodeKindPage) {
+					pageRules = append(pageRules, links.RewriteRule{
+						OldPath:    rule.OldPath,
+						NewPath:    rule.NewPath,
+						Kind:       string(tree.NodeKindSection),
+						OutputKind: string(tree.NodeKindPage),
+					})
+				}
+			}
+		}
+		result := engine.RewriteWithSourceKind(page.Content, page.CalculatePath(), links.MarkdownSourceKind(page.Kind), pageRules)
 		if result.Count() == 0 || result.Content == page.Content {
 			continue
 		}
@@ -528,7 +553,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 
 func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, source string, snapshots []pathChangeSnapshot, oldPath, newPath string) error {
 	engine := links.NewMarkdownRefactorEngine()
-	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath}}
+	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath, Kind: string(planNodeKind(snapshots))}}
 
 	type pending struct {
 		page    *tree.Page
@@ -548,7 +573,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sou
 		if !ok {
 			continue
 		}
-		result := engine.RewriteRelativeLinksForPathChange(snap.Content, snap.OldPath, current.CalculatePath(), rules)
+		result := engine.RewriteRelativeLinksForPathChangeWithSourceKind(snap.Content, snap.OldPath, current.CalculatePath(), links.MarkdownSourceKind(snap.Kind), rules)
 		if (result.Count() == 0 && snap.Content == current.Content) || result.Content == current.Content {
 			continue
 		}
@@ -600,6 +625,15 @@ func subtreeIDSet(node *tree.PageNode) map[string]struct{} {
 		ids[id] = struct{}{}
 	}
 	return ids
+}
+
+func planNodeKind(snapshots []pathChangeSnapshot) tree.NodeKind {
+	for _, snap := range snapshots {
+		if snap.RootPage {
+			return snap.Kind
+		}
+	}
+	return tree.NodeKindPage
 }
 
 func containsString(values []string, target string) bool {

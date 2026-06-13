@@ -14,6 +14,9 @@ import (
 	"github.com/perber/wiki/internal/core/treemigration"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - New section creates index.md
+
 // --- helpers ---
 
 func newLoadedService(t *testing.T) (*TreeService, string) {
@@ -71,6 +74,16 @@ func mustNotExist(t *testing.T, path string) {
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected os.ErrNotExist for %q, got: %v", path, err)
+	}
+}
+
+func writeTestFile(t *testing.T, filePath string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(filePath), err)
+	}
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", filePath, err)
 	}
 }
 
@@ -853,6 +866,85 @@ func TestTreeService_CreateNode_RejectsCaseInsensitiveSlugConflict(t *testing.T)
 	}
 }
 
+func TestTreeService_CreateNode_AllowsSameBasenamePageAndSectionTwins(t *testing.T) {
+	svc, dataDir := newLoadedService(t)
+
+	pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+	sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section twin failed: %v", err)
+	}
+
+	mustStat(t, filepath.Join(dataDir, "root", "sync.md"))
+	mustStat(t, filepath.Join(dataDir, "root", "sync", "index.md"))
+
+	page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
+	}
+	if page.ID != *pageID {
+		t.Fatalf("page ID = %q, want %q", page.ID, *pageID)
+	}
+
+	section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
+	}
+	if section.ID != *sectionID {
+		t.Fatalf("section ID = %q, want %q", section.ID, *sectionID)
+	}
+
+	if _, err := svc.CreateNode("system", nil, "Duplicate Page", "SYNC", ptrKind(NodeKindPage)); !errors.Is(err, ErrPageAlreadyExists) {
+		t.Fatalf("expected ErrPageAlreadyExists for same-kind duplicate, got %v", err)
+	}
+}
+
+func TestTreeService_ContentPathForNodeUsesCoreReadRules(t *testing.T) {
+	svc, dataDir := newLoadedService(t)
+
+	sectionID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+	pageID, err := svc.CreateNode("system", nil, "Guide", "guide", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+	if err := os.Rename(filepath.Join(dataDir, "root", "docs", "index.md"), filepath.Join(dataDir, "root", "docs", "INDEX.MD")); err != nil {
+		t.Fatalf("rename section index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "root", "docs", "README.md"), []byte("# README\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	section, err := svc.GetPage(*sectionID)
+	if err != nil {
+		t.Fatalf("GetPage section failed: %v", err)
+	}
+	sectionPath, err := svc.ContentPathForNode(section.PageNode)
+	if err != nil {
+		t.Fatalf("ContentPathForNode section failed: %v", err)
+	}
+	if sectionPath != "docs/INDEX.MD" {
+		t.Fatalf("section content path = %q, want docs/INDEX.MD", sectionPath)
+	}
+
+	page, err := svc.GetPage(*pageID)
+	if err != nil {
+		t.Fatalf("GetPage page failed: %v", err)
+	}
+	pagePath, err := svc.ContentPathForNode(page.PageNode)
+	if err != nil {
+		t.Fatalf("ContentPathForNode page failed: %v", err)
+	}
+	if pagePath != "guide.md" {
+		t.Fatalf("page content path = %q, want guide.md", pagePath)
+	}
+}
+
 func TestTreeService_CreateNode_RejectsTraversalSlug(t *testing.T) {
 	svc, dataDir := newLoadedService(t)
 
@@ -885,6 +977,7 @@ func TestTreeService_CreateNode_PersistsRootOrderFile(t *testing.T) {
 	}
 }
 
+// - New section creates index.md
 func TestTreeService_CreateNode_Section_CreatesIndexWithFrontmatter(t *testing.T) {
 	svc, tmpDir := newLoadedService(t)
 
@@ -1016,6 +1109,33 @@ func TestTreeService_UpdateNode_SlugRename_RenamesOnDisk(t *testing.T) {
 	newPath := filepath.Join(tmpDir, "root", newSlug+".md")
 	mustStat(t, newPath)
 	mustNotExist(t, oldPath)
+}
+
+func TestTreeService_UpdateNode_AllowsRenameToSameBasenamePageSectionTwin(t *testing.T) {
+	svc, tmpDir := newLoadedService(t)
+
+	if _, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection)); err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+	pageID, err := svc.CreateNode("system", nil, "Draft Page", "draft", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+
+	if err := svc.UpdateNode("system", *pageID, "Sync Page", "sync", nil, VersionUnchecked, false); err != nil {
+		t.Fatalf("UpdateNode page rename to section basename failed: %v", err)
+	}
+
+	mustStat(t, filepath.Join(tmpDir, "root", "sync.md"))
+	mustStat(t, filepath.Join(tmpDir, "root", "sync", "index.md"))
+
+	page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
+	}
+	if page.ID != *pageID {
+		t.Fatalf("page ID = %q, want %q", page.ID, *pageID)
+	}
 }
 
 func TestTreeService_UpdateNode_RejectsCaseInsensitiveSlugConflict(t *testing.T) {
@@ -1370,6 +1490,37 @@ func TestTreeService_MoveNode_UpdatesSourceAndDestinationOrderFiles(t *testing.T
 	wantDest := []string{*nestedID, *moveID}
 	if strings.Join(destOrder, ",") != strings.Join(wantDest, ",") {
 		t.Fatalf("unexpected destination order after move: got %v want %v", destOrder, wantDest)
+	}
+}
+
+func TestTreeService_MoveNode_AllowsMoveToSameBasenamePageSectionTwin(t *testing.T) {
+	svc, tmpDir := newLoadedService(t)
+
+	destID, err := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode dest failed: %v", err)
+	}
+	if _, err := svc.CreateNode("system", destID, "Sync Section", "sync", ptrKind(NodeKindSection)); err != nil {
+		t.Fatalf("CreateNode destination section failed: %v", err)
+	}
+	moveID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+
+	if err := svc.MoveNode("system", *moveID, *destID, VersionUnchecked); err != nil {
+		t.Fatalf("MoveNode page next to section basename failed: %v", err)
+	}
+
+	mustStat(t, filepath.Join(tmpDir, "root", "dest", "sync.md"))
+	mustStat(t, filepath.Join(tmpDir, "root", "dest", "sync", "index.md"))
+
+	page, err := svc.FindPageByRoutePathAndKind("dest/sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind moved page failed: %v", err)
+	}
+	if page.ID != *moveID {
+		t.Fatalf("moved page ID = %q, want %q", page.ID, *moveID)
 	}
 }
 
@@ -1823,6 +1974,86 @@ func TestTreeService_FindPageByRoutePath_IsCaseSensitive(t *testing.T) {
 	}
 }
 
+func TestTreeService_FindPageByRoutePathAndKind_DistinguishesSameBasenamePageAndSection(t *testing.T) {
+	svc, _, rootDir := newLoadedServiceWithDirs(t)
+	writeTestFile(t, filepath.Join(rootDir, "docs", "index.md"), `---
+leafwiki_id: docs-section
+leafwiki_title: Docs
+---
+# Docs
+`)
+	writeTestFile(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+`)
+	writeTestFile(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+	writeTestFile(t, filepath.Join(rootDir, "docs", "sync", "child.md"), `---
+leafwiki_id: sync-child
+leafwiki_title: Sync Child
+---
+# Sync Child
+`)
+	if err := svc.ReconstructTreeFromFS(); err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	page, err := svc.FindPageByRoutePathAndKind("docs/sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind page: %v", err)
+	}
+	if page.ID != "sync-page" {
+		t.Fatalf("page ID = %q, want sync-page", page.ID)
+	}
+	section, err := svc.FindPageByRoutePathAndKind("docs/sync", NodeKindSection)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind section: %v", err)
+	}
+	if section.ID != "sync-section" {
+		t.Fatalf("section ID = %q, want sync-section", section.ID)
+	}
+	child, err := svc.FindPageByRoutePath("docs/sync/child")
+	if err != nil {
+		t.Fatalf("FindPageByRoutePath child: %v", err)
+	}
+	if child.ID != "sync-child" {
+		t.Fatalf("child ID = %q, want sync-child via section path", child.ID)
+	}
+}
+
+func TestTreeService_FindPageByRoutePath_PrefersSectionForSameBasenameTwin(t *testing.T) {
+	svc, _ := newLoadedService(t)
+
+	pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+	sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section twin failed: %v", err)
+	}
+
+	page, err := svc.FindPageByRoutePath("sync")
+	if err != nil {
+		t.Fatalf("FindPageByRoutePath sync: %v", err)
+	}
+	if page.ID == *pageID {
+		t.Fatalf("FindPageByRoutePath sync resolved page twin %q, want section %q", *pageID, *sectionID)
+	}
+	if page.ID != *sectionID {
+		t.Fatalf("FindPageByRoutePath sync resolved %q, want section %q", page.ID, *sectionID)
+	}
+	if page.Kind != NodeKindSection {
+		t.Fatalf("FindPageByRoutePath sync kind = %q, want section", page.Kind)
+	}
+}
+
 func TestTreeService_LookupPagePath_Segments(t *testing.T) {
 	svc, _ := newLoadedService(t)
 
@@ -1867,6 +2098,32 @@ func TestTreeService_LookupPagePath_IsCaseInsensitive(t *testing.T) {
 	}
 	if !lookup.Exists {
 		t.Fatalf("expected case-insensitive path lookup to resolve existing path")
+	}
+}
+
+func TestTreeService_LookupPagePath_PrefersSectionForSameBasenameTwin(t *testing.T) {
+	svc, _ := newLoadedService(t)
+
+	sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+	if _, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage)); err != nil {
+		t.Fatalf("CreateNode page twin failed: %v", err)
+	}
+
+	lookup, err := svc.LookupPagePath("sync")
+	if err != nil {
+		t.Fatalf("LookupPagePath failed: %v", err)
+	}
+	if !lookup.Exists || len(lookup.Segments) != 1 || lookup.Segments[0].ID == nil {
+		t.Fatalf("lookup = %#v, want existing section segment", lookup)
+	}
+	if *lookup.Segments[0].ID != *sectionID {
+		t.Fatalf("LookupPagePath sync resolved ID %q, want section %q", *lookup.Segments[0].ID, *sectionID)
+	}
+	if lookup.Segments[0].Kind == nil || *lookup.Segments[0].Kind != NodeKindSection {
+		t.Fatalf("LookupPagePath sync kind = %v, want section", lookup.Segments[0].Kind)
 	}
 }
 
@@ -2057,6 +2314,116 @@ func TestTreeService_EnsurePagePath_ReturnsExistingPageWithoutCreatingNodes(t *t
 	}
 	if len(existing.Created) != 0 {
 		t.Fatalf("expected no nodes to be created for an existing path, got %d", len(existing.Created))
+	}
+}
+
+func TestTreeService_EnsurePagePath_CreatesPageTwinWhenSectionRouteExists(t *testing.T) {
+	svc, _ := newLoadedService(t)
+
+	sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+
+	res, err := svc.EnsurePagePath("system", "sync", "Sync Page", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("EnsurePagePath page twin failed: %v", err)
+	}
+	if res.Page == nil {
+		t.Fatal("EnsurePagePath returned nil page")
+	}
+	if res.Page.ID == *sectionID {
+		t.Fatalf("EnsurePagePath returned existing section %q instead of creating page twin", *sectionID)
+	}
+	if res.Page.Kind != NodeKindPage {
+		t.Fatalf("ensured node kind = %q, want page", res.Page.Kind)
+	}
+	if len(res.Created) != 1 || res.Created[0].Kind != NodeKindPage {
+		t.Fatalf("created nodes = %#v, want one page twin", res.Created)
+	}
+
+	section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
+	}
+	if section.ID != *sectionID {
+		t.Fatalf("section route ID = %q, want %q", section.ID, *sectionID)
+	}
+	page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
+	}
+	if page.ID != res.Page.ID {
+		t.Fatalf("page route ID = %q, want %q", page.ID, res.Page.ID)
+	}
+
+	second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("EnsurePagePath existing page twin failed: %v", err)
+	}
+	if !second.Exists {
+		t.Fatalf("expected second ensure to report existing page twin")
+	}
+	if second.Page == nil || second.Page.ID != res.Page.ID {
+		t.Fatalf("second ensure page = %#v, want existing page %q", second.Page, res.Page.ID)
+	}
+	if len(second.Created) != 0 {
+		t.Fatalf("second ensure created %d nodes, want none", len(second.Created))
+	}
+}
+
+func TestTreeService_EnsurePagePath_CreatesSectionTwinWhenPageRouteExists(t *testing.T) {
+	svc, _ := newLoadedService(t)
+
+	pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+
+	res, err := svc.EnsurePagePath("system", "sync", "Sync Section", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("EnsurePagePath section twin failed: %v", err)
+	}
+	if res.Page == nil {
+		t.Fatal("EnsurePagePath returned nil page")
+	}
+	if res.Page.ID == *pageID {
+		t.Fatalf("EnsurePagePath returned existing page %q instead of creating section twin", *pageID)
+	}
+	if res.Page.Kind != NodeKindSection {
+		t.Fatalf("ensured node kind = %q, want section", res.Page.Kind)
+	}
+	if len(res.Created) != 1 || res.Created[0].Kind != NodeKindSection {
+		t.Fatalf("created nodes = %#v, want one section twin", res.Created)
+	}
+
+	page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
+	}
+	if page.ID != *pageID {
+		t.Fatalf("page route ID = %q, want %q", page.ID, *pageID)
+	}
+	section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+	if err != nil {
+		t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
+	}
+	if section.ID != res.Page.ID {
+		t.Fatalf("section route ID = %q, want %q", section.ID, res.Page.ID)
+	}
+
+	second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindSection))
+	if err != nil {
+		t.Fatalf("EnsurePagePath existing section twin failed: %v", err)
+	}
+	if !second.Exists {
+		t.Fatalf("expected second ensure to report existing section twin")
+	}
+	if second.Page == nil || second.Page.ID != res.Page.ID {
+		t.Fatalf("second ensure section = %#v, want existing section %q", second.Page, res.Page.ID)
+	}
+	if len(second.Created) != 0 {
+		t.Fatalf("second ensure created %d nodes, want none", len(second.Created))
 	}
 }
 

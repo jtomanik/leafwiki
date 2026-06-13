@@ -1,7 +1,12 @@
 import { SearchResultItem } from '@/lib/api/search'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildViewUrl } from '@/lib/routePath'
-import { normalizeWikiRoutePath } from '@/lib/wikiPath'
+import {
+  browserRoutePathForWikiNode,
+  getWikiTargetRoutePath,
+  markdownRouteLookupKind,
+  normalizeWikiRoutePath,
+} from '@/lib/wikiPath'
 import { forwardRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { usePageEditorStore } from '../editor/pageEditorStore'
@@ -23,11 +28,14 @@ const SearchResultCard = forwardRef<HTMLAnchorElement, SearchResultCardProps>(
       (state) => state.page?.id ?? state.initialPage?.id,
     )
     const currentViewPath = normalizeWikiRoutePath(
-      buildViewUrl(location.pathname),
+      getWikiTargetRoutePath(buildViewUrl(location.pathname)),
     )
+    const currentRouteKind =
+      markdownRouteLookupKind(location.pathname) ?? 'section'
     const resultPath = normalizeWikiRoutePath(item.path)
-    const resultUrl = `${resultPath}${location.search}`
-    const isRouteActive = currentViewPath === resultPath
+    const resultUrl = `${browserRoutePathForWikiNode(resultPath, item.kind)}${location.search}`
+    const isRouteActive =
+      currentViewPath === resultPath && currentRouteKind === item.kind
     const isEditorActive = currentEditorPageId === item.page_id
     const isActive = isRouteActive || isEditorActive || isSelected
     const kindLabel = item.kind === 'section' ? 'Section' : 'Page'

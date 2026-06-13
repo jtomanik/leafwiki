@@ -3,6 +3,7 @@ import EditPage from '../pages/EditPage';
 import EditPageMetadataDialog from '../pages/EditPageMetadataDialog';
 import LoginPage from '../pages/LoginPage';
 import ViewPage from '../pages/ViewPage';
+import { toAppPath } from '../pages/appPath';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
@@ -97,9 +98,99 @@ async function createPageWithRevisions(
   );
 
   const viewPage = new ViewPage(page);
-  await viewPage.goto(`/${createdPage.path}`);
+  await viewPage.goto(`/${createdPage.path}.md`);
 
   return viewPage;
+}
+
+async function createSectionWithRevisions(
+  page: import('@playwright/test').Page,
+  title: string,
+  revisionContents: string[],
+) {
+  const slug = title
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]/g, '');
+
+  return await page.evaluate(
+    async ({ pageTitle, contents, slug }) => {
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\\s*)leafwiki_csrf=([^;]+)/);
+
+        if (!hostMatch) return null;
+
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
+      }
+
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for history section test setup');
+      }
+
+      const createResponse = await fetch('/api/pages', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          parentId: null,
+          title: pageTitle,
+          slug,
+          kind: 'section',
+        }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create section ${pageTitle}: ${createResponse.status}`);
+      }
+
+      let currentPage = (await createResponse.json()) as {
+        id: string;
+        title: string;
+        slug: string;
+        path: string;
+        version: string;
+      };
+
+      for (const content of contents) {
+        const updateResponse = await fetch(`/api/pages/${currentPage.id}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({
+            version: currentPage.version,
+            title: currentPage.title,
+            slug: currentPage.slug,
+            content,
+          }),
+        });
+
+        if (!updateResponse.ok) {
+          throw new Error(`Failed to update section ${currentPage.path}: ${updateResponse.status}`);
+        }
+
+        currentPage = (await updateResponse.json()) as typeof currentPage;
+      }
+
+      return {
+        path: currentPage.path,
+        title: currentPage.title,
+      };
+    },
+    { pageTitle: title, contents: revisionContents, slug },
+  );
 }
 
 async function openPreviousRevision(page: import('@playwright/test').Page) {
@@ -149,6 +240,21 @@ test.describe('History', () => {
     await expect(
       page.locator('button[data-testid^="history-sidebar-revision-"]').first(),
     ).toBeVisible();
+  });
+
+  test('readme-markdown-history-route-does-not-fallback-for-index-backed-section', async ({
+    page,
+  }) => {
+    const title = `History README Index Backed ${Date.now()}`;
+    const section = await createSectionWithRevisions(page, title, [
+      'Index-backed first revision',
+      '\nIndex-backed second revision',
+    ]);
+
+    await page.goto(toAppPath(`/history/${section.path}/README.md`));
+
+    await expect(page.getByTestId('page404')).toBeVisible();
+    await expect(page.getByTestId('page-history-page-content')).toHaveCount(0);
   });
 
   test('current-revision-is-visible-and-badged', async ({ page }) => {

@@ -68,7 +68,7 @@ var (
 	toolGetTree            = ToolDescriptor{Name: ToolGetTree, Description: "Return the wiki page tree"}
 	toolGetPage            = ToolDescriptor{Name: ToolGetPage, Description: "Return a page by ID with link status context"}
 	toolGetPageByPath      = ToolDescriptor{Name: ToolGetPageByPath, Description: "Return a page by route path with link status context"}
-	toolLookupPath         = ToolDescriptor{Name: ToolLookupPath, Description: "Resolve a route path into existing and missing path segments"}
+	toolLookupPath         = ToolDescriptor{Name: ToolLookupPath, Description: "Resolve a route path into existing and missing path segments; pass kind page or section to disambiguate same-route twins"}
 	toolResolvePermalink   = ToolDescriptor{Name: ToolResolvePermalink, Description: "Resolve a stable page ID to its current route path"}
 	toolSuggestSlug        = ToolDescriptor{Name: ToolSuggestSlug, Description: "Suggest a unique child slug for a title"}
 	toolCreatePage         = ToolDescriptor{Name: ToolCreatePage, Description: "Create a wiki page or section"}

@@ -7,7 +7,9 @@ const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 const configFile = process.env.E2E_CONFIG_FILE ?? '';
 const hasLocalHTTPConfigFile =
-  process.env.E2E_RUN_MODE === 'local' && process.env.E2E_USE_CONFIG_FILE === '1' && configFile !== '';
+  process.env.E2E_RUN_MODE === 'local' &&
+  process.env.E2E_USE_CONFIG_FILE === '1' &&
+  configFile !== '';
 
 test('GET /api/health returns 200 with valid check fields', async ({ request }) => {
   const resp = await request.get('/api/health');

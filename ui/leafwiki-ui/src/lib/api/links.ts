@@ -3,6 +3,7 @@ import { fetchWithAuth } from './auth'
 export type Backlink = {
   from_page_id: string
   from_path: string
+  from_kind: 'page' | 'section'
   to_page_id: string
   from_title: string
   broken: boolean
@@ -12,6 +13,7 @@ export type OutgoingLink = {
   from_page_id: string
   to_page_id: string
   to_path: string
+  to_kind: 'page' | 'section' | 'unknown'
   to_page_title: string
   broken: boolean
 }

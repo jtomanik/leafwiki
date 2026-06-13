@@ -28,6 +28,9 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Explicit README.md page link stays a page when index.md exists
+
 type panicRegistrar struct{}
 
 func (panicRegistrar) RegisterRoutes(ctx httpinternal.RouterContext) {
@@ -258,22 +261,25 @@ func assertAPIKeyNullMetadata(t *testing.T, key map[string]any) {
 }
 
 type apiPage struct {
-	ID         string                 `json:"id"`
-	Title      string                 `json:"title"`
-	Slug       string                 `json:"slug"`
-	Content    string                 `json:"content"`
-	Path       string                 `json:"path"`
-	Version    string                 `json:"version"`
-	Kind       tree.NodeKind          `json:"kind"`
-	Children   []*apiPage             `json:"children"`
-	Tags       []string               `json:"tags"`
-	Properties map[string]interface{} `json:"properties"`
+	ID             string                 `json:"id"`
+	Title          string                 `json:"title"`
+	Slug           string                 `json:"slug"`
+	Content        string                 `json:"content"`
+	Path           string                 `json:"path"`
+	Version        string                 `json:"version"`
+	Kind           tree.NodeKind          `json:"kind"`
+	ContentPath    string                 `json:"contentPath"`
+	ReadmeFallback bool                   `json:"readmeFallback"`
+	Children       []*apiPage             `json:"children"`
+	Tags           []string               `json:"tags"`
+	Properties     map[string]interface{} `json:"properties"`
 }
 
 type apiPermalinkTarget struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Path string `json:"path"`
+	ID   string        `json:"id"`
+	Slug string        `json:"slug"`
+	Path string        `json:"path"`
+	Kind tree.NodeKind `json:"kind"`
 }
 
 func createPageViaAPI(t *testing.T, router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPage {
@@ -1755,7 +1761,7 @@ func TestRefactorPreviewEndpoint_UsesFrontendJSONShape(t *testing.T) {
 	target := createPageViaAPI(t, router, "Target", "target", nil, pageNodeKind())
 	ref := createPageViaAPI(t, router, "Ref", "ref", nil, pageNodeKind())
 
-	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target)"}`)
+	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
 	updateRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
@@ -1839,7 +1845,7 @@ func TestRefactorApply_DoesNotPersistRevisionsWhenRevisionDisabled(t *testing.T)
 	target := createPageViaAPI(t, router, "Target", "target", nil, pageNodeKind())
 	ref := createPageViaAPI(t, router, "Ref", "ref", nil, pageNodeKind())
 
-	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target)"}`)
+	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
 	updateRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
@@ -1861,7 +1867,7 @@ func TestRefactorApply_DoesNotPersistRevisionsWhenRevisionDisabled(t *testing.T)
 		t.Fatalf("Invalid ref page JSON: %v", err)
 	}
 
-	if got, _ := refPage["content"].(string); got != "[Target](/target-renamed)" {
+	if got, _ := refPage["content"].(string); got != "[Target](/target-renamed.md)" {
 		t.Fatalf("Expected rewritten ref content, got %q", got)
 	}
 
@@ -2226,7 +2232,7 @@ func TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets(t *testi
 	if completedResp.ExecutionStatus != "completed" || completedResp.ExecutionResult == nil {
 		t.Fatalf("expected completed execution result, got %#v", completedResp)
 	}
-	if completedResp.ExecutionResult.ImportedCount != 5 || completedResp.ExecutionResult.SkippedCount != 0 {
+	if completedResp.ExecutionResult.ImportedCount != 4 || completedResp.ExecutionResult.SkippedCount != 1 {
 		t.Fatalf(
 			"unexpected execution result: imported=%d skipped=%d",
 			completedResp.ExecutionResult.ImportedCount,
@@ -2236,11 +2242,11 @@ func TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets(t *testi
 
 	setupPage := getPageByPathViaAPI(t, router, "guides/setup")
 	for _, expected := range []string{
-		"[Relative MD](/reference/endpoints)",
-		"[Absolute MD](/reference/endpoints)",
+		"[Relative MD](/reference/endpoints.md)",
+		"[Absolute MD](/reference/endpoints.md)",
 		"[Container](/guides)",
-		"[Endpoints](/reference/endpoints)",
-		"[API Alias](/reference/endpoints)",
+		"[Endpoints](/reference/endpoints.md)",
+		"[API Alias](/reference/endpoints.md)",
 		"![Relative Image](/assets/" + setupPage.ID + "/logo.png)",
 		"[Manual](/assets/" + setupPage.ID + "/manual.pdf)",
 	} {
@@ -3057,6 +3063,9 @@ func TestGetPagesByTagsEndpoint_ReturnsExcerpt(t *testing.T) {
 	if len(pagesResp) != 1 {
 		t.Fatalf("expected 1 tagged page, got %#v", pagesResp)
 	}
+	if pagesResp[0]["kind"] != string(tree.NodeKindPage) {
+		t.Fatalf("expected tagged page kind page, got %#v", pagesResp[0]["kind"])
+	}
 
 	excerpt, _ := pagesResp[0]["excerpt"].(string)
 	if excerpt == "" {
@@ -3462,6 +3471,259 @@ func TestGetPageByPathEndpoint_SectionReturnsDirectChildrenOnly(t *testing.T) {
 	}
 }
 
+func TestGetPageByPathEndpoint_KindDistinguishesSameBasenamePageAndSection(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755); err != nil {
+		t.Fatalf("mkdir fixture: %v", err)
+	}
+	write := func(relPath, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+	}
+	write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
+	write("docs/sync.md", "---\nleafwiki_id: sync-page\nleafwiki_title: Sync Page\n---\n# Sync Page\n")
+	write("docs/sync/index.md", "---\nleafwiki_id: sync-section\nleafwiki_title: Sync Section\n---\n# Sync Section\n")
+
+	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	pageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=page", nil)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("Expected page status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
+	}
+	var pageResp map[string]interface{}
+	if err := json.Unmarshal(pageRec.Body.Bytes(), &pageResp); err != nil {
+		t.Fatalf("parse page response: %v", err)
+	}
+	if pageResp["id"] != "sync-page" || pageResp["kind"] != "page" {
+		t.Fatalf("page response = %#v, want sync-page page", pageResp)
+	}
+
+	pageMarkdownPathRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync.md", nil)
+	if pageMarkdownPathRec.Code != http.StatusOK {
+		t.Fatalf("Expected page markdown-path status 200, got %d - %s", pageMarkdownPathRec.Code, pageMarkdownPathRec.Body.String())
+	}
+	var pageMarkdownPathResp map[string]interface{}
+	if err := json.Unmarshal(pageMarkdownPathRec.Body.Bytes(), &pageMarkdownPathResp); err != nil {
+		t.Fatalf("parse page markdown-path response: %v", err)
+	}
+	if pageMarkdownPathResp["id"] != "sync-page" || pageMarkdownPathResp["kind"] != "page" {
+		t.Fatalf("page markdown-path response = %#v, want sync-page page", pageMarkdownPathResp)
+	}
+
+	sectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=section", nil)
+	if sectionRec.Code != http.StatusOK {
+		t.Fatalf("Expected section status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
+	}
+	var sectionResp map[string]interface{}
+	if err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionResp); err != nil {
+		t.Fatalf("parse section response: %v", err)
+	}
+	if sectionResp["id"] != "sync-section" || sectionResp["kind"] != "section" {
+		t.Fatalf("section response = %#v, want sync-section section", sectionResp)
+	}
+
+	sectionCanonicalRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync", nil)
+	if sectionCanonicalRec.Code != http.StatusOK {
+		t.Fatalf("Expected canonical section status 200, got %d - %s", sectionCanonicalRec.Code, sectionCanonicalRec.Body.String())
+	}
+	var sectionCanonicalResp map[string]interface{}
+	if err := json.Unmarshal(sectionCanonicalRec.Body.Bytes(), &sectionCanonicalResp); err != nil {
+		t.Fatalf("parse canonical section response: %v", err)
+	}
+	if sectionCanonicalResp["id"] != "sync-section" || sectionCanonicalResp["kind"] != "section" {
+		t.Fatalf("canonical section response = %#v, want sync-section section", sectionCanonicalResp)
+	}
+}
+
+// - Explicit README.md page link stays a page when index.md exists
+func TestGetPageByPathEndpoint_ReadmeMarkdownPathUsesFallbackOnlyWhenActive(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755); err != nil {
+		t.Fatalf("mkdir guides fixture: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755); err != nil {
+		t.Fatalf("mkdir indexed fixture: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755); err != nil {
+		t.Fatalf("mkdir no-readme fixture: %v", err)
+	}
+	write := func(relPath, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+	}
+	write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
+	write("README.md", "---\nleafwiki_id: root-section\nleafwiki_title: Root\n---\n# Root\n")
+	write("docs/guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides\n")
+	write("docs/indexed/index.md", "---\nleafwiki_id: indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n")
+	write("docs/indexed/README.md", "---\nleafwiki_id: indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n")
+	write("docs/no-readme/index.md", "---\nleafwiki_id: no-readme-section\nleafwiki_title: No README\n---\n# No README\n")
+
+	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	fallbackRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md", nil)
+	if fallbackRec.Code != http.StatusOK {
+		t.Fatalf("Expected README fallback status 200, got %d - %s", fallbackRec.Code, fallbackRec.Body.String())
+	}
+	var fallbackResp map[string]interface{}
+	if err := json.Unmarshal(fallbackRec.Body.Bytes(), &fallbackResp); err != nil {
+		t.Fatalf("parse README fallback response: %v", err)
+	}
+	if fallbackResp["id"] != "guides-section" || fallbackResp["kind"] != "section" {
+		t.Fatalf("README fallback response = %#v, want guides section", fallbackResp)
+	}
+
+	explicitSectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md&kind=section", nil)
+	if explicitSectionRec.Code != http.StatusOK {
+		t.Fatalf("Expected explicit README section fallback status 200, got %d - %s", explicitSectionRec.Code, explicitSectionRec.Body.String())
+	}
+	var explicitSectionResp map[string]interface{}
+	if err := json.Unmarshal(explicitSectionRec.Body.Bytes(), &explicitSectionResp); err != nil {
+		t.Fatalf("parse explicit README section fallback response: %v", err)
+	}
+	if explicitSectionResp["id"] != "guides-section" || explicitSectionResp["kind"] != "section" {
+		t.Fatalf("explicit README section fallback response = %#v, want guides section", explicitSectionResp)
+	}
+
+	readmePageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md", nil)
+	if readmePageRec.Code != http.StatusOK {
+		t.Fatalf("Expected README page status 200, got %d - %s", readmePageRec.Code, readmePageRec.Body.String())
+	}
+	var readmePageResp map[string]interface{}
+	if err := json.Unmarshal(readmePageRec.Body.Bytes(), &readmePageResp); err != nil {
+		t.Fatalf("parse README page response: %v", err)
+	}
+	if readmePageResp["id"] != "indexed-readme-page" || readmePageResp["kind"] != "page" {
+		t.Fatalf("README page response = %#v, want indexed README page", readmePageResp)
+	}
+
+	inactiveExplicitSectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md&kind=section", nil)
+	if inactiveExplicitSectionRec.Code != http.StatusNotFound {
+		t.Fatalf("Expected inactive explicit README section status 404, got %d - %s", inactiveExplicitSectionRec.Code, inactiveExplicitSectionRec.Body.String())
+	}
+
+	missingReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/no-readme/README.md", nil)
+	if missingReadmeRec.Code != http.StatusNotFound {
+		t.Fatalf("Expected missing README status 404, got %d - %s", missingReadmeRec.Code, missingReadmeRec.Body.String())
+	}
+
+	lowercaseReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/readme.md", nil)
+	if lowercaseReadmeRec.Code != http.StatusNotFound {
+		t.Fatalf("Expected lowercase readme.md status 404, got %d - %s", lowercaseReadmeRec.Code, lowercaseReadmeRec.Body.String())
+	}
+
+	traversalReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=../README.md&kind=section", nil)
+	if traversalReadmeRec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected traversal README status 400, got %d - %s", traversalReadmeRec.Code, traversalReadmeRec.Body.String())
+	}
+}
+
+func TestGetTreeEndpoint_ContentPathUsesCaseInsensitiveIndexPrecedence(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	for _, dir := range []string{"docs", "guides"} {
+		if err := os.MkdirAll(filepath.Join(rootDir, dir), 0o755); err != nil {
+			t.Fatalf("create %s dir: %v", dir, err)
+		}
+	}
+	write := func(relPath, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+	}
+	write("docs/INDEX.MD", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs Index\n")
+	write("docs/README.md", "---\nleafwiki_id: docs-readme\nleafwiki_title: Docs README\n---\n# Docs README\n")
+	write("guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides README\n")
+
+	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	root := getTreeViaAPI(t, router)
+	var docs, guides *apiPage
+	for _, child := range root.Children {
+		if child.Path == "docs" {
+			docs = child
+		}
+		if child.Path == "guides" {
+			guides = child
+		}
+	}
+	if docs == nil {
+		t.Fatalf("docs section missing from tree: %#v", root.Children)
+	}
+	if guides == nil {
+		t.Fatalf("guides section missing from tree: %#v", root.Children)
+	}
+	if docs.ContentPath != "docs/INDEX.MD" {
+		t.Fatalf("docs contentPath = %q, want docs/INDEX.MD", docs.ContentPath)
+	}
+	if docs.ReadmeFallback {
+		t.Fatalf("docs readmeFallback = true, want false for index-backed section")
+	}
+	if !guides.ReadmeFallback {
+		t.Fatalf("guides readmeFallback = false, want true for README-backed section")
+	}
+}
+
+func TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists(t *testing.T) {
+	w := createWikiTestInstance(t)
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	sectionKind := tree.NodeKindSection
+	page := createPageViaAPI(t, router, "Sync Page", "sync", nil, pageNodeKind())
+	body := `{"path":"sync","title":"Sync Section","kind":"section"}`
+	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages/ensure", strings.NewReader(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK on ensure, got %d - %s", rec.Code, rec.Body.String())
+	}
+	var ensured apiPage
+	if err := json.Unmarshal(rec.Body.Bytes(), &ensured); err != nil {
+		t.Fatalf("Unmarshal(ensure response) failed: %v", err)
+	}
+	if ensured.ID == page.ID {
+		t.Fatalf("ensure returned existing page %q instead of section twin", page.ID)
+	}
+	if ensured.Kind != sectionKind {
+		t.Fatalf("ensure kind = %q, want section", ensured.Kind)
+	}
+
+	pageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=sync&kind=page", nil)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("Expected page twin lookup status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
+	}
+	var pageTwin apiPage
+	if err := json.Unmarshal(pageRec.Body.Bytes(), &pageTwin); err != nil {
+		t.Fatalf("Unmarshal(page twin response) failed: %v", err)
+	}
+	if pageTwin.ID != page.ID || pageTwin.Kind != tree.NodeKindPage {
+		t.Fatalf("page twin response = %#v, want original page %q", pageTwin, page.ID)
+	}
+
+	sectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=sync&kind=section", nil)
+	if sectionRec.Code != http.StatusOK {
+		t.Fatalf("Expected section twin lookup status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
+	}
+	var sectionTwin apiPage
+	if err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionTwin); err != nil {
+		t.Fatalf("Unmarshal(section twin response) failed: %v", err)
+	}
+	if sectionTwin.ID != ensured.ID || sectionTwin.Kind != tree.NodeKindSection {
+		t.Fatalf("section twin response = %#v, want ensured section %q", sectionTwin, ensured.ID)
+	}
+}
+
 func TestGetPagePermalinkEndpoint_ReturnsCurrentPath(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
@@ -3495,6 +3757,9 @@ func TestGetPagePermalinkEndpoint_ReturnsCurrentPath(t *testing.T) {
 	if target.Path != "archive/user-guide" {
 		t.Fatalf("expected path archive/user-guide, got %q", target.Path)
 	}
+	if target.Kind != tree.NodeKindPage {
+		t.Fatalf("expected kind page, got %q", target.Kind)
+	}
 }
 
 func TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads(t *testing.T) {
@@ -3526,6 +3791,9 @@ func TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads(t *test
 	}
 	if target.Path != "public-page" {
 		t.Fatalf("expected path public-page, got %q", target.Path)
+	}
+	if target.Kind != tree.NodeKindPage {
+		t.Fatalf("expected kind page, got %q", target.Kind)
 	}
 }
 

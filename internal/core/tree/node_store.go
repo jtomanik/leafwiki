@@ -31,11 +31,16 @@ func (f *NodeStore) sectionIndexPathInDir(sectionDir string) (string, bool, erro
 	}
 
 	var existingPath string
+	var readmePath string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
+		if name == "README.md" {
+			readmePath = filepath.Join(sectionDir, name)
+			continue
+		}
 		ext := filepath.Ext(name)
 		base := strings.TrimSuffix(name, ext)
 		if !strings.EqualFold(base, "index") || !strings.EqualFold(ext, ".md") {
@@ -52,7 +57,18 @@ func (f *NodeStore) sectionIndexPathInDir(sectionDir string) (string, bool, erro
 	if existingPath != "" {
 		return existingPath, true, nil
 	}
+	if readmePath != "" {
+		return readmePath, true, nil
+	}
 	return defaultPath, false, nil
+}
+
+func (f *NodeStore) isSectionContentFileInDir(sectionDir string, filePath string) bool {
+	indexPath, hasIndex, err := f.sectionIndexPathInDir(sectionDir)
+	if err != nil || !hasIndex {
+		return false
+	}
+	return filepath.Clean(indexPath) == filepath.Clean(filePath)
 }
 
 func ensureUniqueReconstructedID(seenIDs map[string]string, id string, path string) error {
@@ -67,18 +83,17 @@ func ensureUniqueReconstructedID(seenIDs map[string]string, id string, path stri
 	return nil
 }
 
-func ensureUniqueReconstructedSlug(seenSlugs map[string]string, slug string, path string) error {
-	key := strings.ToLower(strings.TrimSpace(slug))
-	if key == "" {
+func ensureUniqueReconstructedSlug(seenSlugs map[string]string, slug string, kind NodeKind, path string) error {
+	trimmedSlug := strings.TrimSpace(slug)
+	if trimmedSlug == "" {
 		return fmt.Errorf("reconstruct tree from fs: empty slug at %s", path)
 	}
+	key := string(kind) + ":" + strings.ToLower(trimmedSlug)
 	if existingPath, exists := seenSlugs[key]; exists {
 		parentDir := filepath.Base(filepath.Dir(path))
 		return fmt.Errorf(
-			"duplicate slug %q: a directory and a .md file share the same name in %s/. "+
-				"Rename or remove one of them (e.g. rename %s.md -> %s-page.md) to resolve the conflict. "+
-				"Conflicting paths: %s and %s",
-			slug, parentDir, slug, slug, existingPath, path,
+			"duplicate %s slug %q in %s/. Conflicting paths: %s and %s",
+			kind, slug, parentDir, existingPath, path,
 		)
 	}
 	seenSlugs[key] = path
@@ -325,12 +340,42 @@ func (f *NodeStore) ReconstructTreeFromFS() (*PageNode, error) {
 		return nil, fmt.Errorf("root path %s is not a directory", f.rootDir)
 	}
 
+	if err := f.applyRootSectionContent(root, reconstructNow); err != nil {
+		return nil, fmt.Errorf("reconstruct root content from fs: %w", err)
+	}
 	if err := f.reconstructTreeRecursive(f.rootDir, root, reconstructNow, seenIDs); err != nil {
 		return nil, fmt.Errorf("reconstruct tree from fs: %w", err)
 	}
 
 	return root, nil
 }
+
+func (f *NodeStore) applyRootSectionContent(root *PageNode, reconstructNow time.Time) error {
+	indexPath, hasIndex, err := f.sectionIndexPathInDir(f.rootDir)
+	if err != nil {
+		return err
+	}
+	if !hasIndex {
+		return nil
+	}
+	mdFile, err := markdown.LoadMarkdownFile(indexPath)
+	if err != nil {
+		f.log.Error("could not load root section index", "path", indexPath, "error", err)
+		return nil
+	}
+	fm := mdFile.GetFrontmatter()
+	root.Metadata = f.metadataFromFrontmatter(fm, reconstructNow, indexPath)
+	if title, err := mdFile.GetTitle(); err == nil {
+		root.Title = title
+	} else {
+		f.log.Error("could not extract title from root section index", "path", indexPath, "error", err)
+	}
+	if fm.LeafWikiID != root.ID || fm.LeafWikiUpdatedAt == "" || fm.LeafWikiCreatedAt == "" {
+		f.writeReconstructedFrontmatter(mdFile, root)
+	}
+	return nil
+}
+
 func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNode, reconstructNow time.Time, seenIDs map[string]string) error {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
@@ -410,7 +455,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 				Kind:     NodeKindSection,
 				Metadata: metadata,
 			}
-			if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, filepath.Join(currentPath, name)); err != nil {
+			if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, filepath.Join(currentPath, name)); err != nil {
 				return err
 			}
 			if err := ensureUniqueReconstructedID(seenIDs, child.ID, indexPath); err != nil {
@@ -441,7 +486,8 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		}
 
 		baseFilename := strings.TrimSuffix(name, ext)
-		// skip index.md (handled by section case)
+		// Skip index-style files handled by the section case. Active README.md
+		// fallback files are skipped by isSectionContentFileInDir below.
 		if strings.EqualFold(baseFilename, "index") {
 			continue
 		}
@@ -451,6 +497,9 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		}
 
 		filePath := filepath.Join(currentPath, name)
+		if f.isSectionContentFileInDir(currentPath, filePath) {
+			continue
+		}
 
 		mdFile, err := markdown.LoadMarkdownFile(filePath)
 		if err != nil {
@@ -479,7 +528,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			Kind:     NodeKindPage,
 			Metadata: metadata,
 		}
-		if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, filePath); err != nil {
+		if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, filePath); err != nil {
 			return err
 		}
 		if err := ensureUniqueReconstructedID(seenIDs, child.ID, filePath); err != nil {
@@ -642,10 +691,8 @@ func (f *NodeStore) CreatePage(parentEntry *PageNode, newEntry *PageNode) error 
 		return err
 	}
 	destFile := destBase + ".md"
-	destDir := destBase
 
-	// Reject if either a file OR a directory with same slug exists
-	if fileExists(destFile) || fileExists(destDir) {
+	if fileExists(destFile) {
 		return &PageAlreadyExistsError{Path: destBase}
 	}
 
@@ -697,11 +744,9 @@ func (f *NodeStore) CreateSection(parentEntry *PageNode, newEntry *PageNode) err
 	if err := f.requirePathInRoot("CreateSection", destBase); err != nil {
 		return err
 	}
-	destFile := destBase + ".md"
 	destDir := destBase
 
-	// Reject if either a file OR a directory with same slug exists
-	if fileExists(destFile) || fileExists(destDir) {
+	if fileExists(destDir) {
 		return &PageAlreadyExistsError{Path: destBase}
 	}
 
@@ -721,7 +766,8 @@ func (f *NodeStore) CreateSection(parentEntry *PageNode, newEntry *PageNode) err
 // incoming content as plain body text. Any frontmatter-like blocks the caller
 // passes are stored verbatim in the body and are never extracted into the
 // system-managed frontmatter. Use this for all UI-originated writes.
-// It creates the file if it does not exist also for sections (index.md).
+// It creates the file if it does not exist, using index.md for sections with
+// no active content file.
 func (f *NodeStore) UpsertContent(entry *PageNode, content string) error {
 	if entry == nil {
 		return &InvalidOpError{Op: "UpsertContent", Reason: "an entry is required"}
@@ -824,9 +870,17 @@ func (f *NodeStore) MoveNode(entry *PageNode, parentEntry *PageNode) error {
 	destFile := destBase + ".md"
 	destDir := destBase
 
-	// Collision checks: refuse if destination already exists as file OR dir
-	if fileExists(destFile) || fileExists(destDir) {
-		return &PageAlreadyExistsError{Path: destBase}
+	switch entry.Kind {
+	case NodeKindPage:
+		if fileExists(destFile) {
+			return &PageAlreadyExistsError{Path: destBase}
+		}
+	case NodeKindSection:
+		if fileExists(destDir) {
+			return &PageAlreadyExistsError{Path: destBase}
+		}
+	default:
+		return &InvalidOpError{Op: "MoveNode", Reason: fmt.Sprintf("unknown node kind: %q", entry.Kind)}
 	}
 
 	// STRICT: follow tree.Kind exactly (no disk fallbacks)
@@ -981,9 +1035,17 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 		return err
 	}
 
-	// destination collision checks
-	if fileExists(newBase+".md") || fileExists(newBase) {
-		return &PageAlreadyExistsError{Path: newBase}
+	switch entry.Kind {
+	case NodeKindPage:
+		if fileExists(newBase + ".md") {
+			return &PageAlreadyExistsError{Path: newBase}
+		}
+	case NodeKindSection:
+		if fileExists(newBase) {
+			return &PageAlreadyExistsError{Path: newBase}
+		}
+	default:
+		return &InvalidOpError{Op: "RenameNode", Reason: fmt.Sprintf("unknown node kind: %q", entry.Kind)}
 	}
 	// perform rename based on kind
 	switch entry.Kind {
@@ -1044,7 +1106,7 @@ func (f *NodeStore) ReadPageRaw(entry *PageNode) (string, error) {
 		return "", err
 	}
 
-	// Sections may legitimately have no content (missing index.md)
+	// Sections may legitimately have no active content file.
 	if entry.Kind == NodeKindSection {
 		if !fileExists(filePath) {
 			return "", nil
@@ -1110,8 +1172,9 @@ func (f *NodeStore) SyncFrontmatterIfExists(entry *PageNode) error {
 		return &InvalidOpError{Op: "SyncFrontmatterIfExists", Reason: "an entry is required"}
 	}
 
-	// keine side effects: write-path NICHT verwenden (würde mkdir + bei Section implizit index.md Pfad liefern)
-	// aber read-path reicht, weil wir nur syncen, wenn Datei existiert
+	// No side effects: avoid the write path, which may create directories and
+	// choose a default section content path. The read path is enough because we
+	// only sync when the file exists.
 	filePath, err := f.contentPathForNodeRead(entry)
 	if err != nil {
 		return err
@@ -1123,7 +1186,7 @@ func (f *NodeStore) SyncFrontmatterIfExists(entry *PageNode) error {
 		if entry.Kind == NodeKindPage || entry.Kind == "" {
 			return &DriftError{NodeID: entry.ID, Kind: entry.Kind, Path: filePath, Reason: "expected page file missing"}
 		}
-		// Section: kein index.md -> NICHT erzeugen
+		// Section: no active content file -> do not create one here.
 		return nil
 	}
 
@@ -1231,8 +1294,9 @@ func resolvePathForContainment(path string) (string, error) {
 
 // contentPathForNodeRead returns the expected content file path for a node
 // based purely on the tree Kind (NO side effects, NO mkdir):
-// - page   => <base>.md
-// - section => existing <base>/index.md case variant, or <base>/index.md
+//   - page    => <base>.md
+//   - section => active <base>/index.md case variant, active <base>/README.md fallback,
+//     or <base>/index.md when no content file exists
 func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeRead", Reason: "an entry is required"}
@@ -1265,8 +1329,9 @@ func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 
 // contentPathForNodeWrite returns the expected content file path for a node
 // based purely on the tree Kind (MAY create dirs for sections):
-// - page   => <base>.md
-// - section => existing <base>/index.md case variant, or <base>/index.md (ensures directory exists)
+//   - page    => <base>.md
+//   - section => active <base>/index.md case variant, active <base>/README.md fallback,
+//     or <base>/index.md when no content file exists (ensures directory exists)
 func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeWrite", Reason: "an entry is required"}
@@ -1341,7 +1406,7 @@ func (f *NodeStore) resolveNode(entry *PageNode) (*ResolvedNode, error) {
 		return &ResolvedNode{
 			Kind:       NodeKindSection,
 			DirPath:    basePath,
-			FilePath:   "", // no index.md present
+			FilePath:   "", // no active section content file present
 			HasContent: false,
 		}, nil
 	}
@@ -1381,7 +1446,8 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 			}
 			return nil
 		}
-		// already folder (or missing) -> ensure dir exists and materialize index.md
+		// Already folder (or missing) -> ensure dir exists and sync/materialize
+		// the active section content file, defaulting to index.md when none exists.
 		if err := os.MkdirAll(folderPath, 0o755); err != nil {
 			return fmt.Errorf("could not ensure folder exists: %w", err)
 		}
@@ -1410,7 +1476,9 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 			return err
 		}
 
-		// allow only:
+		// Allow only the narrow section-to-page conversion shape. README.md
+		// fallback content is not converted here; folders with README.md are
+		// treated as non-empty and require an explicit migration first.
 		// - empty folder
 		// - folder with only index.md
 		// - internal child-order metadata file (alone or alongside index.md)

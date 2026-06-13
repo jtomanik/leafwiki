@@ -9,6 +9,7 @@ import {
   updatePage,
 } from '@/lib/api/pages'
 import { isPageNotFoundError, mapApiError } from '@/lib/api/errors'
+import type { WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import { create } from 'zustand'
@@ -42,7 +43,11 @@ export interface PageEditorState {
   setPage: (page: Page | null) => void // set the current page
   savePage: () => Promise<Page | null | undefined> // save the current page
   forceOverwrite: () => Promise<Page | null | undefined> // re-fetch server version, then save
-  loadPageData: (path: string) => Promise<void> // load page data by path
+  loadPageData: (
+    path: string,
+    fallbackPath?: string,
+    kind?: WikiNodeKind,
+  ) => Promise<void> // load page data by path
 }
 
 function tagsChanged(current: string[], original: string[]): boolean {
@@ -265,7 +270,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     const { page } = get()
     if (!page?.path) return
 
-    const fresh = await getPageByPath(page.path)
+    const fresh = await getPageByPath(page.path, page.kind)
     set((state) => {
       if (!state.page) return {}
       state.page.version = fresh.version
@@ -273,7 +278,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     })
     return get().savePage()
   },
-  loadPageData: async (path: string) => {
+  loadPageData: async (
+    path: string,
+    fallbackPath?: string,
+    kind?: WikiNodeKind,
+  ) => {
     set({
       error: null,
       notFound: false,
@@ -283,7 +292,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     })
     useProgressbarStore.getState().setLoading(true)
     try {
-      const page = await getPageByPath(path)
+      const page = await getPageByPath(path, kind)
       const fields: EditorFrontmatterField[] = Object.entries(
         page.properties ?? {},
       ).map(([key, value]) => ({
@@ -304,6 +313,44 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       })
     } catch (err) {
       if (isPageNotFoundError(err)) {
+        if (fallbackPath) {
+          try {
+            const fallbackPage = await getPageByPath(fallbackPath, 'section')
+            if (fallbackPage.kind === 'section') {
+              const fields: EditorFrontmatterField[] = Object.entries(
+                fallbackPage.properties ?? {},
+              ).map(([key, value]) => ({
+                key,
+                value: String(value ?? ''),
+                type: 'text' as const,
+              }))
+              set({
+                page: fallbackPage,
+                initialPage: { ...fallbackPage },
+                notFound: false,
+                title: fallbackPage.title,
+                slug: fallbackPage.slug,
+                content: fallbackPage.content,
+                tags: fallbackPage.tags ?? [],
+                frontmatterFields: fields,
+                frontmatterUnsupported: '',
+              })
+              return
+            }
+          } catch (fallbackErr) {
+            if (!isPageNotFoundError(fallbackErr)) {
+              const mapped = mapApiError(
+                fallbackErr,
+                'An unknown error occurred',
+              )
+              set({
+                error: mapped.message,
+                notFound: false,
+              })
+              return
+            }
+          }
+        }
         set({
           error: null,
           notFound: true,

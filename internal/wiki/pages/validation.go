@@ -1,6 +1,9 @@
 package pages
 
 import (
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -33,6 +36,184 @@ func ValidatePageKind(kind *string) (tree.NodeKind, error) {
 
 func ValidatePageKindString(kind string) (tree.NodeKind, error) {
 	return ValidatePageKind(&kind)
+}
+
+func NormalizePagePathInput(rawPath string, rawKind string) (string, tree.NodeKind, error) {
+	routePath := strings.Trim(strings.TrimSpace(rawPath), "/")
+	kind := tree.NodeKind("")
+	if strings.TrimSpace(rawKind) != "" {
+		validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
+		if err != nil {
+			return "", "", err
+		}
+		kind = validKind
+	}
+	if derivedKind := MarkdownPathInputKind(routePath); derivedKind != "" {
+		routePath = tree.MarkdownPathToRoutePath(routePath)
+		if kind != "" && kind != derivedKind {
+			return "", "", sharederrors.NewLocalizedError(ErrCodePageInvalidKind, "Invalid kind", "kind does not match markdown path", nil)
+		}
+		kind = derivedKind
+	}
+	validPath, err := ValidatePageRoutePath(routePath)
+	if err != nil {
+		return "", "", err
+	}
+	return validPath, kind, nil
+}
+
+func MarkdownPathInputKind(routePath string) tree.NodeKind {
+	if !strings.EqualFold(path.Ext(routePath), ".md") {
+		return ""
+	}
+	if strings.EqualFold(path.Base(routePath), "index.md") {
+		return tree.NodeKindSection
+	}
+	return tree.NodeKindPage
+}
+
+func MarkdownContentPathForRoute(routePath string, kind tree.NodeKind) string {
+	routePath = strings.Trim(routePath, "/")
+	if kind == tree.NodeKindSection {
+		if routePath == "" {
+			return "index.md"
+		}
+		return routePath + "/index.md"
+	}
+	if routePath == "" {
+		return "index.md"
+	}
+	return routePath + ".md"
+}
+
+func ReadmeMarkdownPathFallbackRoutes(rawPath string) (string, string, bool) {
+	trimmed := strings.Trim(strings.TrimSpace(rawPath), "/")
+	if path.Base(trimmed) != "README.md" {
+		return "", "", false
+	}
+	pageRoute := tree.MarkdownPathToRoutePath(trimmed)
+	sectionRoute := ""
+	if trimmed != "README.md" {
+		sectionRoute = strings.TrimSuffix(trimmed, "/README.md")
+		sectionRoute = strings.Trim(sectionRoute, "/")
+	}
+	return pageRoute, sectionRoute, true
+}
+
+type ReadmeMarkdownPathFallbackInput struct {
+	PageRoute    string
+	SectionRoute string
+	TryPage      bool
+	TrySection   bool
+}
+
+type ReadmeMarkdownPathFallbackLookup struct {
+	RootDir    string
+	FindByPath func(FindByPathInput) (*FindByPathOutput, error)
+	RootPage   func() (*tree.Page, error)
+}
+
+func NormalizeReadmeMarkdownPathFallbackInput(rawPath string, rawKind string) (ReadmeMarkdownPathFallbackInput, bool, error) {
+	pageRoute, sectionRoute, ok := ReadmeMarkdownPathFallbackRoutes(rawPath)
+	if !ok {
+		return ReadmeMarkdownPathFallbackInput{}, false, nil
+	}
+	input := ReadmeMarkdownPathFallbackInput{
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}
+	switch strings.TrimSpace(rawKind) {
+	case "":
+		input.TryPage = true
+		input.TrySection = true
+	case string(tree.NodeKindPage):
+		input.TryPage = true
+	case string(tree.NodeKindSection):
+		input.TrySection = true
+	default:
+		if _, err := ValidatePageKindString(strings.TrimSpace(rawKind)); err != nil {
+			return ReadmeMarkdownPathFallbackInput{}, true, err
+		}
+	}
+	return input, true, nil
+}
+
+func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, bool, error) {
+	fallback, ok, err := NormalizeReadmeMarkdownPathFallbackInput(rawPath, rawKind)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	var pageErr error
+	if fallback.TryPage {
+		if _, err := ValidatePageRoutePath(fallback.PageRoute); err != nil {
+			return nil, true, err
+		}
+		var pageOut *FindByPathOutput
+		pageOut, pageErr = lookup.FindByPath(FindByPathInput{RoutePath: fallback.PageRoute, Kind: tree.NodeKindPage})
+		if pageErr == nil {
+			return pageOut, true, nil
+		}
+	}
+	if fallback.TrySection && fallback.SectionRoute != "" {
+		if _, err := ValidatePageRoutePath(fallback.SectionRoute); err != nil {
+			return nil, true, err
+		}
+	}
+	if !fallback.TrySection || !ReadmeFallbackSectionIsActive(lookup.RootDir, fallback.SectionRoute) {
+		if pageErr != nil {
+			return nil, true, pageErr
+		}
+		if !fallback.TryPage {
+			return nil, true, tree.ErrPageNotFound
+		}
+		if _, err := ValidatePageRoutePath(fallback.PageRoute); err != nil {
+			return nil, true, err
+		}
+		out, err := lookup.FindByPath(FindByPathInput{RoutePath: fallback.PageRoute, Kind: tree.NodeKindPage})
+		return out, true, err
+	}
+	if fallback.SectionRoute == "" {
+		page, err := lookup.RootPage()
+		if err != nil {
+			return nil, true, err
+		}
+		return &FindByPathOutput{Page: page}, true, nil
+	}
+	out, err := lookup.FindByPath(FindByPathInput{RoutePath: fallback.SectionRoute, Kind: tree.NodeKindSection})
+	return out, true, err
+}
+
+func ReadmeFallbackSectionIsActive(rootDir string, sectionRoute string) bool {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "" {
+		return false
+	}
+	sectionRoute = strings.Trim(strings.TrimSpace(sectionRoute), "/")
+	sectionDir := rootDir
+	if sectionRoute != "" {
+		sectionDir = filepath.Join(rootDir, filepath.FromSlash(sectionRoute))
+	}
+	entries, err := os.ReadDir(sectionDir)
+	if err != nil {
+		return false
+	}
+	hasReadme := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "README.md" {
+			hasReadme = true
+			continue
+		}
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		if strings.EqualFold(base, "index") && strings.EqualFold(ext, ".md") {
+			return false
+		}
+	}
+	return hasReadme
 }
 
 func ValidateRefactorKind(kind string) (string, error) {

@@ -178,7 +178,7 @@ func (r *Routes) partialEditOutput(ctx context.Context, page *tree.Page, include
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		validation := validationOutputFromResult(r.validateMarkdownContent(ctx, updatedPage.Path, raw, updatedPage.ID))
+		validation := validationOutputFromResult(r.validateMarkdownContent(ctx, updatedPage.Path, raw, updatedPage.ID, page.Kind))
 		result.Validation = &validation
 	}
 	if includePage {

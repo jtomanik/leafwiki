@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { lookupPath } from '@/lib/api/pages'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
+import { toWikiLookupPath, type WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useSessionStore } from '@/stores/session'
@@ -9,11 +10,13 @@ import { useEffect, useState } from 'react'
 
 type Page404Props = {
   targetPath?: string
+  targetKind?: WikiNodeKind
   allowCreate?: boolean
 }
 
 export default function Page404({
   targetPath,
+  targetKind = 'page',
   allowCreate = false,
 }: Page404Props) {
   const user = useSessionStore((s) => s.user)
@@ -22,30 +25,35 @@ export default function Page404({
   const openDialog = useDialogsStore((s) => s.openDialog)
   const [lookupState, setLookupState] = useState<{
     path: string | null
+    kind: WikiNodeKind | null
     canCreate: boolean
   }>({
     path: null,
+    kind: null,
     canCreate: false,
   })
 
   useEffect(() => {
     if (!allowCreate || !targetPath) return
+    const lookupPathValue = toWikiLookupPath(targetPath)
 
     let active = true
 
     const loadLookup = async () => {
       try {
-        const lookup = await lookupPath(targetPath)
+        const lookup = await lookupPath(lookupPathValue, targetKind)
         if (active) {
           setLookupState({
-            path: targetPath,
+            path: lookupPathValue,
+            kind: targetKind,
             canCreate: lookup.canCreate && !lookup.exists,
           })
         }
       } catch {
         if (active) {
           setLookupState({
-            path: targetPath,
+            path: lookupPathValue,
+            kind: targetKind,
             canCreate: false,
           })
         }
@@ -57,12 +65,15 @@ export default function Page404({
     return () => {
       active = false
     }
-  }, [allowCreate, targetPath])
+  }, [allowCreate, targetKind, targetPath])
+
+  const createPath = targetPath ? toWikiLookupPath(targetPath) : ''
 
   const showCreate =
-    Boolean(targetPath) &&
+    Boolean(createPath) &&
     allowCreate &&
-    lookupState.path === targetPath &&
+    lookupState.path === createPath &&
+    lookupState.kind === targetKind &&
     lookupState.canCreate &&
     (user || authDisabled) &&
     !readOnlyMode
@@ -84,7 +95,8 @@ export default function Page404({
               data-testid="page404-create-page-button"
               onClick={() =>
                 openDialog(DIALOG_CREATE_PAGE_BY_PATH, {
-                  initialPath: targetPath,
+                  initialPath: createPath,
+                  initialKind: targetKind,
                   readOnlyPath: true,
                   forwardToEditMode: true,
                 })

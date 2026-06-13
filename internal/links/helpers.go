@@ -1,9 +1,10 @@
 package links
 
 import (
-	"net/url"
+	"path"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -13,10 +14,12 @@ import (
 type TargetLink struct {
 	TargetPageID   string
 	TargetPagePath string
+	TargetKind     string
 	Broken         bool
 }
 
 var markdownParser = goldmark.New()
+var newMarkdownLinkIndexFromRoot = markdownlinks.NewIndexFromRoot
 
 func isAssetLinkDestination(dest string) bool {
 	dest = strings.TrimSpace(dest)
@@ -97,37 +100,27 @@ func normalizeWikiPath(p string) string {
 	return p
 }
 
-// resolveURLPath resolves href against currentPath using "page is folder" semantics.
-func resolveURLPath(currentPath, href string) (string, error) {
-	currentPath = normalizeWikiPath(currentPath)
-
-	// treat currentPath as folder by forcing trailing slash
-	folderBase := currentPath
-	if !strings.HasSuffix(folderBase, "/") {
-		folderBase += "/"
-	}
-
-	base, err := url.Parse("https://example.com" + folderBase)
-	if err != nil {
-		return "", err
-	}
-
-	ref, err := url.Parse(href)
-	if err != nil {
-		return "", err
-	}
-
-	resolved := base.ResolveReference(ref)
-
-	// normalize result path (strip trailing slash etc.)
-	return normalizeWikiPath(resolved.Path), nil
+func resolveTargetLinks(treeService *tree.TreeService, currentPath string, links []string) []TargetLink {
+	return resolveTargetLinksForSourceKind(treeService, currentPath, tree.NodeKindPage, links)
 }
 
-func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []string) []TargetLink {
-	if !tree.IsLoaded() {
+func resolveTargetLinksForSourceKind(treeService *tree.TreeService, currentPath string, sourceKind tree.NodeKind, links []string) []TargetLink {
+	if !treeService.IsLoaded() {
 		return nil
 	}
 
+	return resolveTargetLinksWithIndex(treeService, markdownLinkIndexForTree(treeService), currentPath, sourceKind, links)
+}
+
+func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownlinks.Index, currentPath string, sourceKind tree.NodeKind, links []string) []TargetLink {
+	if treeService == nil || !treeService.IsLoaded() {
+		return nil
+	}
+	if index == nil {
+		index = markdownlinks.NewIndex(nil)
+	}
+
+	sourceFile := markdownSourceFileForRoute(currentPath, sourceKind)
 	var targetLinks []TargetLink
 
 	for _, link := range links {
@@ -135,9 +128,12 @@ func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []stri
 			continue
 		}
 
-		// resolve link against current path
-		resolvedPath, err := resolveURLPath(currentPath, link)
-		if err != nil || resolvedPath == "" {
+		resolved := index.Resolve(sourceFile, link)
+		if resolved.Kind != markdownlinks.TargetKindPage && resolved.Kind != markdownlinks.TargetKindSection && resolved.Kind != markdownlinks.TargetKindUnresolved {
+			continue
+		}
+		resolvedPath := normalizeWikiPath(resolved.RoutePath)
+		if resolvedPath == "" || resolvedPath == "/" {
 			continue
 		}
 
@@ -146,14 +142,35 @@ func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []stri
 		if normalizedForLookup == "" {
 			continue
 		}
+		if resolved.Kind == markdownlinks.TargetKindUnresolved {
+			targetKind := unresolvedStoredTargetKind(resolved, link)
+			targetLinks = append(targetLinks, TargetLink{
+				TargetPageID:   "",
+				TargetPagePath: resolvedPath,
+				TargetKind:     targetKind,
+				Broken:         true,
+			})
+			continue
+		}
 
+		targetKind := markdownTargetNodeKind(resolved.Kind)
+		if targetKind == tree.NodeKindPage && isExtensionlessWikiDestination(link) {
+			targetLinks = append(targetLinks, TargetLink{
+				TargetPageID:   "",
+				TargetPagePath: resolvedPath,
+				TargetKind:     nonCanonicalPageStoredTarget,
+				Broken:         true,
+			})
+			continue
+		}
 		// find page by route path
-		page, err := tree.FindPageByRoutePath(normalizedForLookup)
+		page, err := treeService.FindPageByRoutePathAndKind(normalizedForLookup, targetKind)
 		if err == nil && page != nil {
 			// found page
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   page.ID,
 				TargetPagePath: resolvedPath,
+				TargetKind:     string(page.Kind),
 				Broken:         false,
 			})
 		} else {
@@ -161,12 +178,122 @@ func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []stri
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   "",
 				TargetPagePath: resolvedPath,
+				TargetKind:     string(targetKind),
 				Broken:         true,
 			})
 		}
 	}
 
 	return targetLinks
+}
+
+func markdownTargetNodeKind(kind markdownlinks.TargetKind) tree.NodeKind {
+	if kind == markdownlinks.TargetKindSection {
+		return tree.NodeKindSection
+	}
+	return tree.NodeKindPage
+}
+
+func isExtensionlessWikiDestination(destination string) bool {
+	dest := strings.TrimSpace(destination)
+	dest = strings.TrimPrefix(dest, "<")
+	dest = strings.TrimSuffix(dest, ">")
+	if idx := strings.Index(dest, "#"); idx != -1 {
+		dest = dest[:idx]
+	}
+	if idx := strings.Index(dest, "?"); idx != -1 {
+		dest = dest[:idx]
+	}
+	if dest == "" || strings.HasSuffix(dest, "/") {
+		return false
+	}
+	return path.Ext(dest) == ""
+}
+
+func unresolvedStoredTargetKind(resolved markdownlinks.Resolution, href string) string {
+	if resolved.Code == "broken_page" {
+		return string(tree.NodeKindPage)
+	}
+	base, _ := splitLinkDestinationSuffix(strings.TrimSpace(href))
+	if strings.HasSuffix(strings.TrimRight(base, " \t\r\n"), "/") {
+		return string(tree.NodeKindSection)
+	}
+	if strings.EqualFold(path.Ext(strings.TrimRight(base, "/")), ".md") {
+		return string(tree.NodeKindPage)
+	}
+	return unknownStoredTargetKind
+}
+
+func splitLinkDestinationSuffix(destination string) (string, string) {
+	if idx := strings.Index(destination, "#"); idx != -1 {
+		return destination[:idx], destination[idx:]
+	}
+	if idx := strings.Index(destination, "?"); idx != -1 {
+		return destination[:idx], destination[idx:]
+	}
+	return destination, ""
+}
+
+func markdownLinkIndexForTree(treeService *tree.TreeService) *markdownlinks.Index {
+	if treeService == nil {
+		return markdownlinks.NewIndex(nil)
+	}
+	if rootDir := strings.TrimSpace(treeService.RootDir()); rootDir != "" {
+		if index, err := newMarkdownLinkIndexFromRoot(rootDir); err == nil {
+			return index
+		}
+	}
+	return markdownLinkIndexFromLoadedTree(treeService.GetTree())
+}
+
+func markdownLinkIndexFromLoadedTree(root *tree.PageNode) *markdownlinks.Index {
+	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, Path: "", ContentPath: "index.md"}}
+	var walk func(node *tree.PageNode)
+	walk = func(node *tree.PageNode) {
+		if node == nil {
+			return
+		}
+		routePath := strings.Trim(node.CalculatePath(), "/")
+		switch node.Kind {
+		case tree.NodeKindSection:
+			entries = append(entries, markdownlinks.Entry{
+				Kind:        markdownlinks.EntryKindSection,
+				Path:        routePath,
+				ContentPath: markdownContentPathForRoute(routePath, tree.NodeKindSection),
+			})
+		case tree.NodeKindPage:
+			if routePath != "" {
+				entries = append(entries, markdownlinks.Entry{
+					Kind: markdownlinks.EntryKindPage,
+					Path: routePath + ".md",
+				})
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return markdownlinks.NewIndex(entries)
+}
+
+func markdownSourceFileForRoute(routePath string, kind tree.NodeKind) string {
+	normalized := strings.Trim(normalizeWikiPath(routePath), "/")
+	return markdownContentPathForRoute(normalized, kind)
+}
+
+func markdownContentPathForRoute(routePath string, kind tree.NodeKind) string {
+	routePath = strings.Trim(routePath, "/")
+	if kind == tree.NodeKindSection {
+		if routePath == "" {
+			return "index.md"
+		}
+		return routePath + "/index.md"
+	}
+	if routePath == "" {
+		return "index.md"
+	}
+	return routePath + ".md"
 }
 
 func toBacklinkResult(tree *tree.TreeService, backlinks []Backlink) *BacklinkResult {
@@ -195,6 +322,7 @@ func toBacklinkResultItem(tree *tree.TreeService, backlink Backlink) BacklinkRes
 		FromPageID: backlink.FromPageID,
 		FromTitle:  backlink.FromTitle,
 		FromPath:   page.CalculatePath(),
+		FromKind:   string(page.Kind),
 		ToPageID:   backlink.ToPageID,
 		Broken:     backlink.Broken,
 	}
@@ -213,9 +341,14 @@ func toOutgoingLinkResult(tree *tree.TreeService, outgoings []Outgoing) *Outgoin
 }
 
 func toOutgoingResultItem(tree *tree.TreeService, outgoing Outgoing) OutgoingResultItem {
+	toKind := outgoing.ToKind
+	if toKind == nonCanonicalPageStoredTarget {
+		toKind = defaultStoredTargetKind
+	}
 	item := OutgoingResultItem{
 		ToPageID:   outgoing.ToPageID,
 		ToPath:     outgoing.ToPath,
+		ToKind:     toKind,
 		Broken:     outgoing.Broken,
 		FromPageID: outgoing.FromPageID,
 	}

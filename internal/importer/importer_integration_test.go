@@ -16,6 +16,9 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Importer distinguishes folder README section from README child page
+
 func integMustWrite(t *testing.T, base, rel, content string) string {
 	t.Helper()
 	abs := filepath.Join(base, filepath.FromSlash(rel))
@@ -276,8 +279,8 @@ func TestImporterService_ExecuteCurrentPlan_RewritesLinksAndUploadsAssetsToDisk(
 
 	for _, expected := range []string{
 		"[Guide Home](/guides)",
-		"[API](/reference/endpoints#intro)",
-		"[API Alias](/reference/endpoints)",
+		"[API](/reference/endpoints.md#intro)",
+		"[API Alias](/reference/endpoints.md)",
 		"/assets/" + setupPage.ID + "/logo.png",
 		"/assets/" + setupPage.ID + "/manual.pdf",
 	} {
@@ -321,11 +324,11 @@ func TestImporterService_ExecuteCurrentPlan_ImportsFixturePackage(t *testing.T) 
 	}
 
 	for _, expected := range []string{
-		"[Relative MD](/reference/endpoints)",
-		"[Absolute MD](/reference/endpoints)",
+		"[Relative MD](/reference/endpoints.md)",
+		"[Absolute MD](/reference/endpoints.md)",
 		"[Container](/guides)",
-		"[Endpoints](/reference/endpoints)",
-		"[API Alias](/reference/endpoints)",
+		"[Endpoints](/reference/endpoints.md)",
+		"[API Alias](/reference/endpoints.md)",
 		"![Relative Image](/assets/" + setupPage.ID + "/logo.png)",
 		"[Manual](/assets/" + setupPage.ID + "/manual.pdf)",
 		"![logo.png](/assets/" + setupPage.ID + "/logo.png)",
@@ -357,8 +360,8 @@ func TestImporterService_ExecuteCurrentPlan_ImportsFixturePackage(t *testing.T) 
 	if _, err := probe.FindByPath("guides"); err != nil {
 		t.Fatalf("FindByPath guides err: %v", err)
 	}
-	if _, err := probe.FindByPath("readme"); err != nil {
-		t.Fatalf("FindByPath readme err: %v", err)
+	if _, err := probe.FindByPath("readme"); err == nil {
+		t.Fatalf("FindByPath readme succeeded, want root README.md to import as section content instead of child page")
 	}
 }
 
@@ -402,8 +405,8 @@ func TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiNestedFixture(t *test
 	}
 
 	for _, expected := range []string{
-		"[Getting Started](/docs/getting-started)",
-		"[Basic Guide](/docs/guides/basic-guide)",
+		"[Getting Started](/docs/getting-started.md)",
+		"[Basic Guide](/docs/guides/basic-guide.md)",
 	} {
 		if !strings.Contains(introPage.Content, expected) {
 			t.Fatalf("expected intro content to contain %q, got:\n%s", expected, introPage.Content)
@@ -411,8 +414,8 @@ func TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiNestedFixture(t *test
 	}
 
 	for _, expected := range []string{
-		"[Intro](/intro)",
-		"[Basic Guide](/docs/guides/basic-guide)",
+		"[Intro](/intro.md)",
+		"[Basic Guide](/docs/guides/basic-guide.md)",
 	} {
 		if !strings.Contains(gettingStartedPage.Content, expected) {
 			t.Fatalf("expected getting-started content to contain %q, got:\n%s", expected, gettingStartedPage.Content)
@@ -420,7 +423,7 @@ func TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiNestedFixture(t *test
 	}
 
 	for _, expected := range []string{
-		"[Introduction](/intro)",
+		"[Introduction](/intro.md)",
 		"[Documentation](/docs)",
 	} {
 		if !strings.Contains(basicGuidePage.Content, expected) {
@@ -469,7 +472,7 @@ func TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiNestedFixture(t *test
 	if !ok || len(aliases) != 1 || aliases[0] != "start" {
 		t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
 	}
-	if !strings.Contains(body, "[Getting Started](/docs/getting-started)") {
+	if !strings.Contains(body, "[Getting Started](/docs/getting-started.md)") {
 		t.Fatalf("expected rewritten body in persisted intro file, got:\n%s", body)
 	}
 }
@@ -515,10 +518,10 @@ func TestImporterService_ExecuteCurrentPlan_ImportsObsidianWikiLinksFixture(t *t
 	}
 
 	for _, expected := range []string{
-		"[Project Plan](/project-plan)",
-		"[Brainstorm](/daily/brainstorm)",
+		"[Project Plan](/project-plan.md)",
+		"[Brainstorm](/daily/brainstorm.md)",
 		"[[Meeting Notes]]",
-		"[Meeting Alias](/daily/meeting-notes)",
+		"[Meeting Alias](/daily/meeting-notes.md)",
 		"![diagram.png](/assets/" + homePage.ID + "/diagram.png)",
 		"`[[Project Plan]]`",
 		"[[Daily/Meeting Notes]]",
@@ -530,18 +533,18 @@ func TestImporterService_ExecuteCurrentPlan_ImportsObsidianWikiLinksFixture(t *t
 	}
 
 	for _, expected := range []string{
-		"[Meeting Notes](/daily/meeting-notes)",
-		"[Home](/home)",
+		"[Meeting Notes](/daily/meeting-notes.md)",
+		"[Home](/home.md)",
 	} {
 		if !strings.Contains(projectPlanPage.Content, expected) {
 			t.Fatalf("expected project-plan content to contain %q, got:\n%s", expected, projectPlanPage.Content)
 		}
 	}
 
-	if !strings.Contains(meetingNotesPage.Content, "[Home](/home)") {
+	if !strings.Contains(meetingNotesPage.Content, "[Home](/home.md)") {
 		t.Fatalf("expected meeting-notes content to contain rewritten home link, got:\n%s", meetingNotesPage.Content)
 	}
-	if !strings.Contains(brainstormPage.Content, "[Home](/home)") {
+	if !strings.Contains(brainstormPage.Content, "[Home](/home.md)") {
 		t.Fatalf("expected brainstorm content to contain rewritten home link, got:\n%s", brainstormPage.Content)
 	}
 

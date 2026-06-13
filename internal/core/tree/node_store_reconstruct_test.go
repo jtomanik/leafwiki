@@ -12,6 +12,13 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - index.md has precedence over README.md
+// - README.md is fallback section default
+// - root README.md is fallback only without root index.md
+// - root index.md has precedence over root README.md
+// - Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules
+
 func findChildBySlug(t *testing.T, parent *PageNode, slug string) *PageNode {
 	t.Helper()
 	for _, ch := range parent.Children {
@@ -141,6 +148,7 @@ leafwiki_title: Readme
 	}
 }
 
+// - Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules
 func TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -221,6 +229,223 @@ leafwiki_title: Introduction
 	}
 	if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
 		t.Fatalf("expected metadata writeback to update INDEX.MD timestamps, got %#v", fm)
+	}
+}
+
+// - README.md is fallback section default
+func TestNodeStore_ReconstructTreeFromFS_ReadmeFallbackSectionWhenNoIndexExists(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	sectionDir := filepath.Join(tmp, "root", "docs")
+	mustMkdir(t, sectionDir)
+	readmePath := filepath.Join(sectionDir, "README.md")
+	mustWriteFile(t, readmePath, `---
+leafwiki_id: sec-docs
+leafwiki_title: Documentation
+---
+# Section readme
+`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	docs := findChildBySlug(t, tree, "docs")
+	if docs.Kind != NodeKindSection {
+		t.Fatalf("expected docs to be section, got %q", docs.Kind)
+	}
+	if docs.ID != "sec-docs" {
+		t.Fatalf("expected docs.ID from README.md frontmatter, got %q", docs.ID)
+	}
+	if docs.Title != "Documentation" {
+		t.Fatalf("expected docs.Title from README.md frontmatter, got %q", docs.Title)
+	}
+	for _, ch := range docs.Children {
+		if strings.EqualFold(ch.Slug, "readme") {
+			t.Fatalf("README.md fallback must not be reconstructed as a child page")
+		}
+	}
+
+	raw, err := store.ReadPageRaw(docs)
+	if err != nil {
+		t.Fatalf("ReadPageRaw section: %v", err)
+	}
+	if !strings.Contains(raw, "# Section readme") {
+		t.Fatalf("section raw content = %q, want README.md body", raw)
+	}
+	if _, err := os.Stat(filepath.Join(sectionDir, "index.md")); !os.IsNotExist(err) {
+		t.Fatalf("README.md fallback must not materialize index.md, stat err = %v", err)
+	}
+}
+
+// - index.md has precedence over README.md
+func TestNodeStore_ReconstructTreeFromFS_IndexBeatsReadmeAndReadmeIsSeparatePage(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	sectionDir := filepath.Join(tmp, "root", "docs")
+	mustMkdir(t, sectionDir)
+	mustWriteFile(t, filepath.Join(sectionDir, "index.md"), `---
+leafwiki_id: sec-docs
+leafwiki_title: Documentation
+---
+# Index section
+`, 0o644)
+	mustWriteFile(t, filepath.Join(sectionDir, "README.md"), `---
+leafwiki_id: page-readme
+leafwiki_title: Readme Page
+---
+# Readme page
+`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	docs := findChildBySlug(t, tree, "docs")
+	if docs.Kind != NodeKindSection || docs.ID != "sec-docs" {
+		t.Fatalf("docs = %#v, want section from index.md", docs)
+	}
+	raw, err := store.ReadPageRaw(docs)
+	if err != nil {
+		t.Fatalf("ReadPageRaw docs: %v", err)
+	}
+	if !strings.Contains(raw, "# Index section") {
+		t.Fatalf("docs raw = %q, want index.md content", raw)
+	}
+	readme := findChildBySlug(t, docs, "README")
+	if readme.Kind != NodeKindPage || readme.ID != "page-readme" {
+		t.Fatalf("README child = %#v, want separate page from README.md", readme)
+	}
+}
+
+func TestNodeStore_ReconstructTreeFromFS_AllowsPageAndSectionWithSameBasename(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	docsDir := filepath.Join(tmp, "root", "docs")
+	mustMkdir(t, filepath.Join(docsDir, "sync"))
+	mustWriteFile(t, filepath.Join(docsDir, "index.md"), `---
+leafwiki_id: sec-docs
+leafwiki_title: Documentation
+---
+# Documentation
+`, 0o644)
+	mustWriteFile(t, filepath.Join(docsDir, "sync.md"), `---
+leafwiki_id: page-sync
+leafwiki_title: Sync Page
+---
+# Sync Page
+`, 0o644)
+	mustWriteFile(t, filepath.Join(docsDir, "sync", "index.md"), `---
+leafwiki_id: sec-sync
+leafwiki_title: Sync Section
+---
+# Sync Section
+`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	docs := findChildBySlug(t, tree, "docs")
+	var syncPage, syncSection *PageNode
+	for _, ch := range docs.Children {
+		if ch.Slug == "sync" && ch.Kind == NodeKindPage {
+			syncPage = ch
+		}
+		if ch.Slug == "sync" && ch.Kind == NodeKindSection {
+			syncSection = ch
+		}
+	}
+	if syncPage == nil {
+		t.Fatalf("docs children = %#v, want sync.md page child", docs.Children)
+	}
+	if syncSection == nil {
+		t.Fatalf("docs children = %#v, want sync/ section child", docs.Children)
+	}
+	if syncPage.ID != "page-sync" {
+		t.Fatalf("sync page ID = %q, want page-sync", syncPage.ID)
+	}
+	if syncSection.ID != "sec-sync" {
+		t.Fatalf("sync section ID = %q, want sec-sync", syncSection.ID)
+	}
+}
+
+// - root README.md is fallback only without root index.md
+func TestNodeStore_ReconstructTreeFromFS_RootReadmeFallbackSectionWhenNoIndexExists(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustMkdir(t, filepath.Join(tmp, "root"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "README.md"), `---
+leafwiki_id: root
+leafwiki_title: Root Readme
+---
+# Root readme
+`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	if tree.ID != "root" || tree.Title != "Root Readme" {
+		t.Fatalf("root = %#v, want stable root ID with README title", tree)
+	}
+	if len(tree.Children) != 0 {
+		t.Fatalf("root children = %v, want README.md used as root content only", slugs(tree.Children))
+	}
+	raw, err := store.ReadPageRaw(tree)
+	if err != nil {
+		t.Fatalf("ReadPageRaw root: %v", err)
+	}
+	if !strings.Contains(raw, "# Root readme") {
+		t.Fatalf("root raw = %q, want README.md body", raw)
+	}
+}
+
+// - root index.md has precedence over root README.md
+func TestNodeStore_ReconstructTreeFromFS_RootIndexBeatsRootReadme(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustMkdir(t, filepath.Join(tmp, "root"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "index.md"), `---
+leafwiki_id: root
+leafwiki_title: Root Index
+---
+# Root index
+`, 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "README.md"), `---
+leafwiki_id: root-readme
+leafwiki_title: Root Readme Page
+---
+# Root readme page
+`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	if tree.ID != "root" || tree.Title != "Root Index" {
+		t.Fatalf("root = %#v, want stable root ID with index title", tree)
+	}
+	raw, err := store.ReadPageRaw(tree)
+	if err != nil {
+		t.Fatalf("ReadPageRaw root: %v", err)
+	}
+	if !strings.Contains(raw, "# Root index") {
+		t.Fatalf("root raw = %q, want index.md body", raw)
+	}
+	readme := findChildBySlug(t, tree, "README")
+	if readme.Kind != NodeKindPage || readme.ID != "root-readme" {
+		t.Fatalf("README child = %#v, want root README.md as separate page", readme)
 	}
 }
 
@@ -436,28 +661,45 @@ func TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnCaseInsensitiveDuplicateS
 	}
 }
 
-func TestNodeStore_ReconstructTreeFromFS_ReturnsActionableErrorOnDirectoryFileSlugConflict(t *testing.T) {
+func TestNodeStore_ReconstructTreeFromFS_AllowsDirectoryFileSlugPair(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
 
 	mustMkdir(t, filepath.Join(tmp, "root", "notes"))
-	mustWriteFile(t, filepath.Join(tmp, "root", "notes", "index.md"), "# Notes section", 0o644)
-	mustWriteFile(t, filepath.Join(tmp, "root", "notes.md"), "# Notes page", 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "notes", "index.md"), `---
+leafwiki_id: notes-section
+leafwiki_title: Notes Section
+---
+# Notes section
+`, 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "notes.md"), `---
+leafwiki_id: notes-page
+leafwiki_title: Notes Page
+---
+# Notes page
+`, 0o644)
 
-	_, err := store.ReconstructTreeFromFS()
-	if err == nil {
-		t.Fatalf("expected duplicate slug error")
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
 	}
-
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, `duplicate slug "notes": a directory and a .md file share the same name in root/.`) {
-		t.Fatalf("expected actionable duplicate slug summary, got: %v", err)
+	var page, section *PageNode
+	for _, child := range tree.Children {
+		if child.Slug != "notes" {
+			continue
+		}
+		if child.Kind == NodeKindPage {
+			page = child
+		}
+		if child.Kind == NodeKindSection {
+			section = child
+		}
 	}
-	if !strings.Contains(errMsg, "Rename or remove one of them") {
-		t.Fatalf("expected actionable remediation hint, got: %v", err)
+	if page == nil || page.ID != "notes-page" {
+		t.Fatalf("notes page = %#v, want notes-page", page)
 	}
-	if !strings.Contains(errMsg, "rename notes.md -> notes-page.md") {
-		t.Fatalf("expected rename example in error, got: %v", err)
+	if section == nil || section.ID != "notes-section" {
+		t.Fatalf("notes section = %#v, want notes-section", section)
 	}
 }
 

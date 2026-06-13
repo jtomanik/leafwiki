@@ -116,7 +116,8 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	rel := filepath.ToSlash(strings.TrimSpace(mdFile.SourcePath))
 	rel = strings.TrimPrefix(rel, "/")
 
-	filenameLower := strings.ToLower(path.Base(rel))
+	sourceFilename := path.Base(rel)
+	filenameLower := strings.ToLower(sourceFilename)
 	sourceDir := path.Dir(rel)
 	if sourceDir == "." {
 		sourceDir = ""
@@ -136,7 +137,8 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	kind := tree.NodeKindPage
 	var wikiPath string
 
-	if filenameLower == "index.md" {
+	readmeFallback := sourceFilename == "README.md" && !p.sourceDirHasIndex(options.SourceBasePath, sourceDir)
+	if filenameLower == "index.md" || readmeFallback {
 		kind = tree.NodeKindSection
 		wikiPath = strings.Trim(path.Join(targetBase, normalizedSourceDir), "/")
 	} else {
@@ -146,11 +148,14 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 			return nil, err
 		}
 		baseSlug := strings.TrimSuffix(normalizedFilename, path.Ext(normalizedFilename))
+		if sourceFilename == "README.md" {
+			baseSlug = "README"
+		}
 		wikiPath = strings.Trim(path.Join(targetBase, normalizedSourceDir, baseSlug), "/")
 	}
 
 	// lookup existing
-	result, err := p.wiki.LookupPagePath(wikiPath)
+	result, err := p.wiki.LookupPagePathForKind(wikiPath, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -216,4 +221,9 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 		Action:      PlanActionSkip,
 		Notes:       notes,
 	}, nil
+}
+
+func (p *Planner) sourceDirHasIndex(sourceBasePath string, sourceDir string) bool {
+	_, ok := sourceDirIndexFile(sourceBasePath, sourceDir)
+	return ok
 }

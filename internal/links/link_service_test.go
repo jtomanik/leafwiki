@@ -1,14 +1,55 @@
 package links
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tree"
 )
+
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Relative section links are resolved from the source file directory
+// - Canonical .md page link indexes as outgoing link
+// - Canonical section link indexes as outgoing link
+// - Assets are not coerced
+// - Broken canonical .md page link is reported as broken
+// - Duplicate syntaxes do not create duplicate target identities after migration
+// - Image links remain governed by existing image and asset validation
 
 func pageNodeKind() *tree.NodeKind {
 	kind := tree.NodeKindPage
 	return &kind
+}
+
+func sectionNodeKind() *tree.NodeKind {
+	kind := tree.NodeKindSection
+	return &kind
+}
+
+func writeLinkServiceMarkdown(t *testing.T, filePath string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll %s: %v", filepath.Dir(filePath), err)
+	}
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", filePath, err)
+	}
+}
+
+func countMarkdownRootIndexBuilds(t *testing.T, index *markdownlinks.Index) *int {
+	t.Helper()
+	original := newMarkdownLinkIndexFromRoot
+	calls := 0
+	newMarkdownLinkIndexFromRoot = func(rootDir string) (*markdownlinks.Index, error) {
+		calls++
+		return index, nil
+	}
+	t.Cleanup(func() {
+		newMarkdownLinkIndexFromRoot = original
+	})
+	return &calls
 }
 
 func TestExtractLinksFromMarkdown_FiltersExternalAndNormalizes(t *testing.T) {
@@ -64,6 +105,7 @@ func TestExtractLinksFromMarkdown_IgnoresExternalLinksCaseInsensitive(t *testing
 	}
 }
 
+// - Assets are not coerced
 func TestExtractLinksFromMarkdown_IgnoresAssetDestinations(t *testing.T) {
 	md := `
 Asset absolute: [File](/assets/abc/manual.pdf)
@@ -76,6 +118,26 @@ Internal: [Page](/docs/page1)
 	want := []string{"/docs/page1"}
 	if len(links) != len(want) {
 		t.Fatalf("expected %d links, got %d: %#v", len(want), len(links), links)
+	}
+	for i, w := range want {
+		if links[i] != w {
+			t.Fatalf("link[%d] = %q, want %q", i, links[i], w)
+		}
+	}
+}
+
+// - Image links remain governed by existing image and asset validation
+func TestExtractLinksFromMarkdown_IgnoresImageLinksToPageDestinations(t *testing.T) {
+	md := `
+Image page path: ![Alt](/docs/b.md)
+Normal page link: [Page](/docs/b.md)
+`
+
+	links := extractLinksFromMarkdown(md)
+
+	want := []string{"/docs/b.md"}
+	if len(links) != len(want) {
+		t.Fatalf("expected %d wiki links, got %d: %#v", len(want), len(links), links)
 	}
 	for i, w := range want {
 		if links[i] != w {
@@ -154,7 +216,7 @@ func TestResolveTargetLinks_FindsExistingTargets(t *testing.T) {
 	currentPath := page1.CalculatePath() // should be "docs/page1"
 
 	// we want to link from page1 to page2 using a relative link
-	links := []string{"../page2"}
+	links := []string{"./page2.md"}
 
 	targets := resolveTargetLinks(ts, currentPath, links)
 
@@ -171,6 +233,281 @@ func TestResolveTargetLinks_FindsExistingTargets(t *testing.T) {
 	}
 }
 
+// - Canonical .md page link indexes as outgoing link
+func TestResolveTargetLinks_ResolvesCanonicalRelativePageMdFromSourceFileDirectory(t *testing.T) {
+	ts, page1ID, page2ID := setupTreeForLinksTest(t)
+
+	page1, err := ts.GetPage(page1ID)
+	if err != nil {
+		t.Fatalf("GetPage(page1) failed: %v", err)
+	}
+
+	targets := resolveTargetLinks(ts, page1.CalculatePath(), []string{"./page2.md"})
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	got := targets[0]
+	if got.Broken {
+		t.Fatalf("target = %#v, want resolved canonical .md page link", got)
+	}
+	if got.TargetPageID != page2ID {
+		t.Fatalf("TargetPageID = %q, want %q", got.TargetPageID, page2ID)
+	}
+	if got.TargetPagePath != "/docs/page2" {
+		t.Fatalf("TargetPagePath = %q, want /docs/page2", got.TargetPagePath)
+	}
+}
+
+// - Relative section links are resolved from the source file directory
+func TestResolveTargetLinks_ResolvesRelativeSectionLinkFromSourceFileDirectory(t *testing.T) {
+	storageDir := t.TempDir()
+	ts := tree.NewTreeService(storageDir)
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+
+	docsID, err := ts.CreateNode("system", nil, "Docs", "docs", sectionNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode docs failed: %v", err)
+	}
+	aID, err := ts.CreateNode("system", docsID, "A", "a", sectionNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode a failed: %v", err)
+	}
+	currentID, err := ts.CreateNode("system", aID, "Current", "current", pageNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode current failed: %v", err)
+	}
+	bID, err := ts.CreateNode("system", docsID, "B", "b", sectionNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode b failed: %v", err)
+	}
+	current, err := ts.GetPage(*currentID)
+	if err != nil {
+		t.Fatalf("GetPage current failed: %v", err)
+	}
+
+	targets := resolveTargetLinks(ts, current.CalculatePath(), []string{"../b"})
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	if targets[0].Broken {
+		t.Fatalf("target = %#v, want resolved section link", targets[0])
+	}
+	if targets[0].TargetPageID != *bID {
+		t.Fatalf("TargetPageID = %q, want %q", targets[0].TargetPageID, *bID)
+	}
+	if targets[0].TargetPagePath != "/docs/b" {
+		t.Fatalf("TargetPagePath = %q, want /docs/b", targets[0].TargetPagePath)
+	}
+}
+
+func TestResolveTargetLinks_ResolvesReadmeFallbackSectionDefaultFile(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source.md"), `---
+leafwiki_id: page-source
+leafwiki_title: Source
+---
+# Source
+
+[Guides](/guides/README.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "guides", "README.md"), `---
+leafwiki_id: section-guides
+leafwiki_title: Guides
+---
+# Guides
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	source, err := ts.GetPage("page-source")
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+	guides, err := ts.GetPage("section-guides")
+	if err != nil {
+		t.Fatalf("GetPage guides failed: %v", err)
+	}
+
+	targets := resolveTargetLinks(ts, source.CalculatePath(), extractLinksFromMarkdown(source.Content))
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	if targets[0].Broken {
+		t.Fatalf("target = %#v, want README fallback section link resolved", targets[0])
+	}
+	if targets[0].TargetPageID != guides.ID {
+		t.Fatalf("TargetPageID = %q, want %q", targets[0].TargetPageID, guides.ID)
+	}
+	if targets[0].TargetPagePath != "/guides" {
+		t.Fatalf("TargetPagePath = %q, want /guides", targets[0].TargetPagePath)
+	}
+}
+
+// - Canonical section link indexes as outgoing link
+func TestResolveTargetLinks_ResolvesCanonicalSectionLinkForSameBasenameTwin(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Sync](/docs/sync)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	source, err := ts.GetPage("page-a")
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+
+	targets := resolveTargetLinks(ts, source.CalculatePath(), extractLinksFromMarkdown(source.Content))
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	if targets[0].Broken {
+		t.Fatalf("target = %#v, want canonical section link resolved", targets[0])
+	}
+	if targets[0].TargetPageID != "sync-section" {
+		t.Fatalf("TargetPageID = %q, want sync-section", targets[0].TargetPageID)
+	}
+	if targets[0].TargetPagePath != "/docs/sync" {
+		t.Fatalf("TargetPagePath = %q, want /docs/sync", targets[0].TargetPagePath)
+	}
+}
+
+func TestResolveTargetLinks_UsesSectionSourceFileForSameBasenameSection(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+
+[Wrong](./child.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+
+[Child](./child.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "child.md"), `---
+leafwiki_id: sync-child
+leafwiki_title: Sync Child
+---
+# Sync Child
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	source, err := ts.GetPage("sync-section")
+	if err != nil {
+		t.Fatalf("GetPage section source failed: %v", err)
+	}
+
+	targets := resolveTargetLinksForSourceKind(ts, source.CalculatePath(), source.Kind, extractLinksFromMarkdown(source.Content))
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	if targets[0].Broken {
+		t.Fatalf("target = %#v, want section-relative link resolved", targets[0])
+	}
+	if targets[0].TargetPageID != "sync-child" {
+		t.Fatalf("TargetPageID = %q, want sync-child", targets[0].TargetPageID)
+	}
+	if targets[0].TargetPagePath != "/docs/sync/child" {
+		t.Fatalf("TargetPagePath = %q, want /docs/sync/child", targets[0].TargetPagePath)
+	}
+}
+
+func TestResolveTargetLinks_UsesPageSourceFileForSameBasenamePage(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+
+[Sibling](./sibling.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sibling.md"), `---
+leafwiki_id: sync-sibling
+leafwiki_title: Sync Sibling
+---
+# Sync Sibling
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "sibling.md"), `---
+leafwiki_id: nested-sibling
+leafwiki_title: Nested Sibling
+---
+# Nested Sibling
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	source, err := ts.GetPage("sync-page")
+	if err != nil {
+		t.Fatalf("GetPage page source failed: %v", err)
+	}
+
+	targets := resolveTargetLinksForSourceKind(ts, source.CalculatePath(), source.Kind, extractLinksFromMarkdown(source.Content))
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
+	}
+	if targets[0].Broken {
+		t.Fatalf("target = %#v, want page-relative link resolved", targets[0])
+	}
+	if targets[0].TargetPageID != "sync-sibling" {
+		t.Fatalf("TargetPageID = %q, want sync-sibling", targets[0].TargetPageID)
+	}
+	if targets[0].TargetPagePath != "/docs/sibling" {
+		t.Fatalf("TargetPagePath = %q, want /docs/sibling", targets[0].TargetPagePath)
+	}
+}
+
+// - Broken canonical .md page link is reported as broken
 func TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting(t *testing.T) {
 	ts, page1ID, _ := setupTreeForLinksTest(t)
 
@@ -197,8 +534,8 @@ func TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting(t *testing.T) {
 	if targets[0].TargetPageID != "" {
 		t.Errorf("targets[0].TargetPageID = %q, want empty", targets[0].TargetPageID)
 	}
-	if targets[0].TargetPagePath != "/docs/page1/does-not-exist" {
-		t.Errorf("targets[0].TargetPagePath = %q, want %q", targets[0].TargetPagePath, "/docs/page1/does-not-exist")
+	if targets[0].TargetPagePath != "/docs/does-not-exist" {
+		t.Errorf("targets[0].TargetPagePath = %q, want %q", targets[0].TargetPagePath, "/docs/does-not-exist")
 	}
 
 	if targets[1].Broken != true {
@@ -268,7 +605,7 @@ func createSimpleLinkedPages(t *testing.T, ts *tree.TreeService) (pageAID, pageB
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
-	contentA := "Link to B: [Go to B](/b)"
+	contentA := "Link to B: [Go to B](/b.md)"
 	if err := ts.UpdateNode("system", aPage.ID, aPage.Title, aPage.Slug, &contentA, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdatePage a failed: %v", err)
 	}
@@ -311,6 +648,148 @@ func TestLinkService_IndexAllPages_BuildsLinks(t *testing.T) {
 	}
 	if bl.FromTitle == "" {
 		t.Errorf("FromTitle should not be empty")
+	}
+}
+
+// - Duplicate syntaxes do not create duplicate target identities after migration
+func TestLinkService_IndexAllPages_PreservesSamePathPageAndSectionTargets(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "source.md"), `---
+leafwiki_id: source
+leafwiki_title: Source
+---
+# Source
+
+[Sync page](/docs/sync.md)
+[Sync section](/docs/sync)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "section-source", "index.md"), `---
+leafwiki_id: section-source
+leafwiki_title: Section Source
+---
+# Section Source
+
+[Sync page](/docs/sync.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+leafwiki_id: sync-page
+leafwiki_title: Sync Page
+---
+# Sync Page
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+leafwiki_id: sync-section
+leafwiki_title: Sync Section
+---
+# Sync Section
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	source, err := ts.GetPage("source")
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+
+	if err := svc.IndexAllPages(); err != nil {
+		t.Fatalf("IndexAllPages failed: %v", err)
+	}
+
+	outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
+	}
+	if outgoing.Count != 2 {
+		t.Fatalf("expected 2 outgoing links, got %d: %#v", outgoing.Count, outgoing.Outgoings)
+	}
+	targetIDs := map[string]bool{}
+	for _, item := range outgoing.Outgoings {
+		if item.ToPath != "/docs/sync" {
+			t.Fatalf("ToPath = %q, want /docs/sync in %#v", item.ToPath, outgoing.Outgoings)
+		}
+		targetIDs[item.ToPageID] = true
+	}
+	if !targetIDs["sync-page"] || !targetIDs["sync-section"] {
+		t.Fatalf("outgoing target IDs = %#v, want page sync-page and section sync-section", targetIDs)
+	}
+
+	pageBacklinks, err := svc.GetBacklinksForPage("sync-page")
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage(page) failed: %v", err)
+	}
+	if pageBacklinks.Count != 2 {
+		t.Fatalf("expected 2 page backlinks, got %d: %#v", pageBacklinks.Count, pageBacklinks.Backlinks)
+	}
+	pageBacklinkKinds := map[string]bool{}
+	for _, backlink := range pageBacklinks.Backlinks {
+		pageBacklinkKinds[backlink.FromKind] = true
+	}
+	if !pageBacklinkKinds[string(tree.NodeKindPage)] || !pageBacklinkKinds[string(tree.NodeKindSection)] {
+		t.Fatalf("page backlink FromKind values = %#v, want page and section", pageBacklinkKinds)
+	}
+	sectionBacklinks, err := svc.GetBacklinksForPage("sync-section")
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage(section) failed: %v", err)
+	}
+	if sectionBacklinks.Count != 1 {
+		t.Fatalf("expected 1 section backlink, got %d: %#v", sectionBacklinks.Count, sectionBacklinks.Backlinks)
+	}
+	if sectionBacklinks.Backlinks[0].FromKind != string(tree.NodeKindPage) {
+		t.Fatalf("section backlink FromKind = %q, want page", sectionBacklinks.Backlinks[0].FromKind)
+	}
+}
+
+func TestLinkService_IndexAllPages_ReusesMarkdownIndexForRootBackedBatch(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-a.md"), `---
+leafwiki_id: source-a
+leafwiki_title: Source A
+---
+[Target](/target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-b.md"), `---
+leafwiki_id: source-b
+leafwiki_title: Source B
+---
+[Target](/target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "target.md"), `---
+leafwiki_id: target
+leafwiki_title: Target
+---
+# Target
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	calls := countMarkdownRootIndexBuilds(t, markdownlinks.NewIndex([]markdownlinks.Entry{
+		{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "target.md"},
+	}))
+
+	if err := svc.IndexAllPages(); err != nil {
+		t.Fatalf("IndexAllPages failed: %v", err)
+	}
+
+	if *calls != 1 {
+		t.Fatalf("root-backed markdown index built %d times, want 1", *calls)
 	}
 }
 
@@ -512,12 +991,15 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 	if outgoing.Outgoings[0].ToPath != "/b" {
 		t.Fatalf("ToPath = %q, want %q", outgoing.Outgoings[0].ToPath, "/b")
 	}
+	if !outgoing.Outgoings[0].Broken {
+		t.Fatalf("extensionless page link should be indexed as broken/non-canonical, got %#v", outgoing.Outgoings[0])
+	}
 
 	status, err := svc.GetLinkStatusForPage(pageAID, "/a")
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage failed: %v", err)
 	}
-	if status.Counts.Outgoings != 1 || status.Counts.BrokenOutgoings != 0 {
+	if status.Counts.Outgoings != 0 || status.Counts.BrokenOutgoings != 1 {
 		t.Fatalf("unexpected link status counts: %#v", status.Counts)
 	}
 
@@ -525,8 +1007,8 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
-	if backlinks.Count != 1 {
-		t.Fatalf("expected only page backlink to remain, got %d: %#v", backlinks.Count, backlinks.Backlinks)
+	if backlinks.Count != 0 {
+		t.Fatalf("expected non-canonical page alias to stay out of healthy backlinks, got %d: %#v", backlinks.Count, backlinks.Backlinks)
 	}
 }
 
@@ -586,7 +1068,7 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
-	var linkToB = "Link to B: [Go](/b)"
+	var linkToB = "Link to B: [Go](/b.md)"
 	if err := ts.UpdateNode("system", aPage.ID, aPage.Title, aPage.Slug, &linkToB, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode a failed: %v", err)
 	}
@@ -673,7 +1155,7 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
-	var linkToB = "Link to B: [Go](/b)"
+	var linkToB = "Link to B: [Go](/b.md)"
 	if err := ts.UpdateNode("system", pageA.ID, pageA.Title, pageA.Slug, &linkToB, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
@@ -921,7 +1403,7 @@ func TestLinksStore_GetBrokenIncomingForPath_EmptyWhenNoBrokenLinks(t *testing.T
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
-	var linkToB = "Link: [To B](/b)"
+	var linkToB = "Link: [To B](/b.md)"
 	if err := ts.UpdateNode("system", pageA.ID, pageA.Title, pageA.Slug, &linkToB, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
@@ -1020,7 +1502,7 @@ func TestLinksStore_GetBrokenIncomingForPath_OnlyReturnsBrokenNotResolved(t *tes
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
-	var linkToB = "Link: [To B](/b)"
+	var linkToB = "Link: [To B](/b.md)"
 	if err := ts.UpdateNode("system", pageA.ID, pageA.Title, pageA.Slug, &linkToB, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
@@ -1082,6 +1564,92 @@ func TestLinksStore_GetBrokenIncomingForPath_OnlyReturnsBrokenNotResolved(t *tes
 	}
 }
 
+func TestLinkService_HealLinksForExactPath_RehomesExtensionlessLinkToSectionTwin(t *testing.T) {
+	svc, ts, _ := setupLinkService(t)
+
+	sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode source failed: %v", err)
+	}
+	sourceID := *sourceIDPtr
+	source, err := ts.GetPage(sourceID)
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+	sourceContent := "Link: [Target](/x)"
+	if err := ts.UpdateNode("system", source.ID, source.Title, source.Slug, &sourceContent, tree.VersionUnchecked, false); err != nil {
+		t.Fatalf("UpdateNode source failed: %v", err)
+	}
+	source, err = ts.GetPage(sourceID)
+	if err != nil {
+		t.Fatalf("GetPage updated source failed: %v", err)
+	}
+	if err := svc.UpdateLinksForPage(source, source.Content); err != nil {
+		t.Fatalf("UpdateLinksForPage source failed: %v", err)
+	}
+
+	initialStatus, err := svc.GetLinkStatusForPage(source.ID, source.CalculatePath())
+	if err != nil {
+		t.Fatalf("GetLinkStatusForPage initial failed: %v", err)
+	}
+	if initialStatus.Counts.BrokenOutgoings != 1 {
+		t.Fatalf("initial broken outgoing count = %d, want 1", initialStatus.Counts.BrokenOutgoings)
+	}
+
+	pageIDPtr, err := ts.CreateNode("system", nil, "X Page", "x", pageNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode page target failed: %v", err)
+	}
+	pageTarget, err := ts.GetPage(*pageIDPtr)
+	if err != nil {
+		t.Fatalf("GetPage page target failed: %v", err)
+	}
+	if err := svc.HealLinksForExactPath(pageTarget); err != nil {
+		t.Fatalf("HealLinksForExactPath page target failed: %v", err)
+	}
+	pageBacklinks, err := svc.GetBacklinksForPage(pageTarget.ID)
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage page target failed: %v", err)
+	}
+	if pageBacklinks.Count != 0 {
+		t.Fatalf("page target backlinks after extensionless heal = %#v, want none", pageBacklinks.Backlinks)
+	}
+	statusAfterPageHeal, err := svc.GetLinkStatusForPage(source.ID, source.CalculatePath())
+	if err != nil {
+		t.Fatalf("GetLinkStatusForPage after page heal failed: %v", err)
+	}
+	if statusAfterPageHeal.Counts.BrokenOutgoings != 1 {
+		t.Fatalf("broken outgoing count after page heal = %d, want 1", statusAfterPageHeal.Counts.BrokenOutgoings)
+	}
+
+	sectionIDPtr, err := ts.CreateNode("system", nil, "X Section", "x", sectionNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode section target failed: %v", err)
+	}
+	sectionTarget, err := ts.GetPage(*sectionIDPtr)
+	if err != nil {
+		t.Fatalf("GetPage section target failed: %v", err)
+	}
+	if err := svc.HealLinksForExactPath(sectionTarget); err != nil {
+		t.Fatalf("HealLinksForExactPath section target failed: %v", err)
+	}
+
+	sectionBacklinks, err := svc.GetBacklinksForPage(sectionTarget.ID)
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage section target failed: %v", err)
+	}
+	if sectionBacklinks.Count != 1 || sectionBacklinks.Backlinks[0].FromPageID != source.ID {
+		t.Fatalf("section target backlinks = %#v, want source backlink", sectionBacklinks.Backlinks)
+	}
+	pageBacklinksAfter, err := svc.GetBacklinksForPage(pageTarget.ID)
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage page target after section failed: %v", err)
+	}
+	if pageBacklinksAfter.Count != 0 {
+		t.Fatalf("page target backlinks after section heal = %#v, want none", pageBacklinksAfter.Backlinks)
+	}
+}
+
 func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *testing.T) {
 	svc, ts, _ := setupLinkService(t)
 
@@ -1101,7 +1669,7 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
-	contentA := "Link: [B](/b)"
+	contentA := "Link: [B](/b.md)"
 	if err := ts.UpdateNode("system", pageA.ID, pageA.Title, pageA.Slug, &contentA, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
@@ -1110,7 +1678,7 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 	if err != nil {
 		t.Fatalf("GetPage C failed: %v", err)
 	}
-	contentC := "Link: [D](/d)"
+	contentC := "Link: [D](/d.md)"
 	if err := ts.UpdateNode("system", pageC.ID, pageC.Title, pageC.Slug, &contentC, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode C failed: %v", err)
 	}
@@ -1170,6 +1738,246 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 	}
 }
 
+func TestLinkService_UpdateLinksAndHealForPages_DoesNotHealUnknownExtensionlessLinksIntoPages(t *testing.T) {
+	svc, ts, _ := setupLinkService(t)
+
+	sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode source failed: %v", err)
+	}
+	source, err := ts.GetPage(*sourceIDPtr)
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+	content := "[Legacy](/target)"
+	if err := ts.UpdateNode("system", source.ID, source.Title, source.Slug, &content, tree.VersionUnchecked, false); err != nil {
+		t.Fatalf("UpdateNode source failed: %v", err)
+	}
+
+	if err := svc.IndexAllPages(); err != nil {
+		t.Fatalf("IndexAllPages failed: %v", err)
+	}
+
+	pageIDPtr, err := ts.CreateNode("system", nil, "Target", "target", pageNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode target page failed: %v", err)
+	}
+	pageTarget, err := ts.GetPage(*pageIDPtr)
+	if err != nil {
+		t.Fatalf("GetPage target page failed: %v", err)
+	}
+	if err := svc.UpdateLinksAndHealForPages([]*tree.Page{pageTarget}); err != nil {
+		t.Fatalf("UpdateLinksAndHealForPages page target failed: %v", err)
+	}
+
+	pageBacklinks, err := svc.GetBacklinksForPage(pageTarget.ID)
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage page target failed: %v", err)
+	}
+	if pageBacklinks.Count != 0 {
+		t.Fatalf("page target backlinks = %#v, want none for non-canonical extensionless link", pageBacklinks.Backlinks)
+	}
+	outAfterPage, err := svc.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage after page target failed: %v", err)
+	}
+	if outAfterPage.Count != 1 || !outAfterPage.Outgoings[0].Broken || outAfterPage.Outgoings[0].ToPageID != "" {
+		t.Fatalf("outgoing after page target = %#v, want unresolved extensionless link to stay broken", outAfterPage.Outgoings)
+	}
+
+	sectionIDPtr, err := ts.CreateNode("system", nil, "Target Section", "target", sectionNodeKind())
+	if err != nil {
+		t.Fatalf("CreateNode target section failed: %v", err)
+	}
+	sectionTarget, err := ts.GetPage(*sectionIDPtr)
+	if err != nil {
+		t.Fatalf("GetPage target section failed: %v", err)
+	}
+	if err := svc.UpdateLinksAndHealForPages([]*tree.Page{sectionTarget}); err != nil {
+		t.Fatalf("UpdateLinksAndHealForPages section target failed: %v", err)
+	}
+
+	sectionBacklinks, err := svc.GetBacklinksForPage(sectionTarget.ID)
+	if err != nil {
+		t.Fatalf("GetBacklinksForPage section target failed: %v", err)
+	}
+	if sectionBacklinks.Count != 1 || sectionBacklinks.Backlinks[0].FromPageID != source.ID {
+		t.Fatalf("section target backlinks = %#v, want source backlink", sectionBacklinks.Backlinks)
+	}
+}
+
+func TestLinkService_UpdateLinksAndHealForPages_ReusesMarkdownIndexForRootBackedBatch(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-a.md"), `---
+leafwiki_id: source-a
+leafwiki_title: Source A
+---
+[Target](/target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-b.md"), `---
+leafwiki_id: source-b
+leafwiki_title: Source B
+---
+[Target](/target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "target.md"), `---
+leafwiki_id: target
+leafwiki_title: Target
+---
+# Target
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	sourceA, err := ts.GetPage("source-a")
+	if err != nil {
+		t.Fatalf("GetPage source-a failed: %v", err)
+	}
+	sourceB, err := ts.GetPage("source-b")
+	if err != nil {
+		t.Fatalf("GetPage source-b failed: %v", err)
+	}
+	calls := countMarkdownRootIndexBuilds(t, markdownlinks.NewIndex([]markdownlinks.Entry{
+		{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "target.md"},
+	}))
+
+	if err := svc.UpdateLinksAndHealForPages([]*tree.Page{sourceA, sourceB}); err != nil {
+		t.Fatalf("UpdateLinksAndHealForPages failed: %v", err)
+	}
+
+	if *calls != 1 {
+		t.Fatalf("root-backed markdown index built %d times, want 1", *calls)
+	}
+}
+
+func TestLinkService_UpdateLinksAndHealForPages_AllNilBatchDoesNotBuildMarkdownIndex(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "target.md"), "# Target\n")
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	calls := countMarkdownRootIndexBuilds(t, markdownlinks.NewIndex(nil))
+
+	if err := svc.UpdateLinksAndHealForPages([]*tree.Page{nil}); err != nil {
+		t.Fatalf("UpdateLinksAndHealForPages failed: %v", err)
+	}
+
+	if *calls != 0 {
+		t.Fatalf("root-backed markdown index built %d times, want 0", *calls)
+	}
+}
+
+func TestLinkService_UpdateRewrittenLinksAndHealForPages_ReusesMarkdownIndexForRootBackedBatch(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-a.md"), `---
+leafwiki_id: source-a
+leafwiki_title: Source A
+---
+[Old](/old-target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source-b.md"), `---
+leafwiki_id: source-b
+leafwiki_title: Source B
+---
+[Old](/old-target.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "old-target.md"), `---
+leafwiki_id: old-target
+leafwiki_title: Old Target
+---
+# Old Target
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "new-target.md"), `---
+leafwiki_id: new-target
+leafwiki_title: New Target
+---
+# New Target
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	if err := svc.IndexAllPages(); err != nil {
+		t.Fatalf("IndexAllPages failed: %v", err)
+	}
+	sourceA, err := ts.GetPage("source-a")
+	if err != nil {
+		t.Fatalf("GetPage source-a failed: %v", err)
+	}
+	sourceB, err := ts.GetPage("source-b")
+	if err != nil {
+		t.Fatalf("GetPage source-b failed: %v", err)
+	}
+	calls := countMarkdownRootIndexBuilds(t, markdownlinks.NewIndex([]markdownlinks.Entry{
+		{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "old-target.md"},
+		{Kind: markdownlinks.EntryKindPage, Path: "new-target.md"},
+	}))
+
+	if err := svc.UpdateRewrittenLinksAndHealForPages([]*tree.Page{sourceA, sourceB}, []RewriteRule{{
+		OldPath: "/old-target",
+		NewPath: "/new-target",
+		Kind:    "page",
+	}}); err != nil {
+		t.Fatalf("UpdateRewrittenLinksAndHealForPages failed: %v", err)
+	}
+
+	if *calls != 1 {
+		t.Fatalf("root-backed markdown index built %d times, want 1", *calls)
+	}
+}
+
+func TestLinkService_UpdateRewrittenLinksAndHealForPages_AllNilBatchDoesNotBuildMarkdownIndex(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "target.md"), "# Target\n")
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkService(dataDir, ts, store)
+	calls := countMarkdownRootIndexBuilds(t, markdownlinks.NewIndex(nil))
+
+	if err := svc.UpdateRewrittenLinksAndHealForPages([]*tree.Page{nil}, nil); err != nil {
+		t.Fatalf("UpdateRewrittenLinksAndHealForPages failed: %v", err)
+	}
+
+	if *calls != 0 {
+		t.Fatalf("root-backed markdown index built %d times, want 0", *calls)
+	}
+}
+
 func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(t *testing.T) {
 	svc, ts, _ := setupLinkService(t)
 
@@ -1189,7 +1997,7 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 	if err != nil {
 		t.Fatalf("GetPage source failed: %v", err)
 	}
-	oldContent := "Link: [Old](/old-target)"
+	oldContent := "Link: [Old](/old-target.md)"
 	if err := ts.UpdateNode("system", source.ID, source.Title, source.Slug, &oldContent, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode source failed: %v", err)
 	}
@@ -1204,7 +2012,7 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 	}
 	newTargetID := *newTargetIDPtr
 
-	updatedContent := "Link: [New](/new-target)"
+	updatedContent := "Link: [New](/new-target.md)"
 	if err := ts.UpdateNode("system", source.ID, source.Title, source.Slug, &updatedContent, tree.VersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode source (rewrite) failed: %v", err)
 	}

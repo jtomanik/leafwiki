@@ -15,6 +15,17 @@ import TreeView from '../pages/TreeView';
 import ViewPage from '../pages/ViewPage';
 import { e2eBasePath, toAppPath } from '../pages/appPath';
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - Autocomplete inserts a canonical page link
+// - Autocomplete inserts a canonical section link
+// - User can click a canonical page link in preview
+// - User can click a canonical section link in preview
+// - Preview shows a broken-link state for unresolved canonical page links
+// - Direct browser route opens canonical .md page deep link
+// - Direct browser route does not alias old extensionless page path
+// - Direct browser route canonicalizes section trailing slash
+// - Exact-case mismatch is visible to the user
+
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 
@@ -66,9 +77,9 @@ async function createPageAndOpenViewer(page: import('@playwright/test').Page, ti
 
 async function createPageWithContent(
   page: import('@playwright/test').Page,
-  input: { title: string; slug: string; content: string },
+  input: { title: string; slug: string; content: string; kind?: 'page' | 'section' },
 ) {
-  await page.evaluate(async ({ title, slug, content }) => {
+  await page.evaluate(async ({ title, slug, content, kind }) => {
     function getCsrfTokenFromCookie(): string | null {
       const hostMatch =
         document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
@@ -99,7 +110,7 @@ async function createPageWithContent(
         parentId: null,
         title,
         slug,
-        kind: 'page',
+        kind: kind ?? 'page',
       }),
     });
 
@@ -243,6 +254,20 @@ async function expectMainScrollTopGreaterThanZero(page: import('@playwright/test
     .toBeGreaterThan(0);
 }
 
+async function reloadAndEnsureAuthenticated(page: import('@playwright/test').Page) {
+  await page.reload();
+  const loginField = page.locator('input[data-testid="login-identifier"]');
+  try {
+    if (await loginField.isVisible({ timeout: 1000 })) {
+      const loginPage = new LoginPage(page);
+      await loginPage.login(user, password);
+      await new ViewPage(page).expectUserLoggedIn();
+    }
+  } catch {
+    // The app stayed authenticated and no login field was rendered.
+  }
+}
+
 async function createTopLevelNode(
   page: import('@playwright/test').Page,
   input: {
@@ -294,9 +319,15 @@ async function createTopLevelNode(
 
 async function updatePageByPath(
   page: import('@playwright/test').Page,
-  input: { path: string; title?: string; slug?: string; content: string },
+  input: {
+    path: string;
+    title?: string;
+    slug?: string;
+    content: string;
+    kind?: 'page' | 'section';
+  },
 ) {
-  await page.evaluate(async ({ path, title, slug, content }) => {
+  await page.evaluate(async ({ path, title, slug, content, kind }) => {
     const normalizedPath = path.replace(/^\/+/, '');
 
     function getCsrfTokenFromCookie(): string | null {
@@ -318,15 +349,14 @@ async function updatePageByPath(
       throw new Error('Missing CSRF token cookie for test page update');
     }
 
-    const pageResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
-      {
-        credentials: 'include',
-        headers: {
-          'X-CSRF-Token': csrfToken,
-        },
+    const params = new URLSearchParams({ path: normalizedPath });
+    if (kind) params.set('kind', kind);
+    const pageResponse = await fetch(`/api/pages/by-path?${params.toString()}`, {
+      credentials: 'include',
+      headers: {
+        'X-CSRF-Token': csrfToken,
       },
-    );
+    });
 
     if (!pageResponse.ok) {
       throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
@@ -571,6 +601,25 @@ async function getChildPageTitlesByPath(page: import('@playwright/test').Page, p
     };
 
     return currentPage.children?.map((child) => child.title) ?? [];
+  }, path);
+}
+
+async function getPageContentByPath(page: import('@playwright/test').Page, path: string) {
+  return await page.evaluate(async (targetPath) => {
+    const normalizedPath = targetPath.replace(/^\/+/, '');
+    const response = await fetch(`/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
+    }
+
+    const currentPage = (await response.json()) as {
+      content?: string;
+    };
+
+    return currentPage.content ?? '';
   }, path);
 }
 
@@ -910,6 +959,7 @@ async function expectEditorFormattingShortcutsWork(
 
 async function expectMarkdownLinkAutocompleteWorks(page: import('@playwright/test').Page) {
   const title = `Markdown Link Shortcut Page ${Date.now()}`;
+  const slug = title.toLowerCase().replace(/\s+/g, '-');
   const viewPage = await createPageAndOpenViewer(page, title);
 
   await viewPage.clickEditPageButton();
@@ -930,8 +980,11 @@ async function expectMarkdownLinkAutocompleteWorks(page: import('@playwright/tes
   await editPage.savePage();
   await editPage.closeEditor();
 
-  const welcomeLink = page.locator(`article a[href="${toAppPath('/welcome-to-leafwiki')}"]`);
+  const welcomeLink = page.locator(`article a[href="${toAppPath('/welcome-to-leafwiki.md')}"]`);
   await welcomeLink.getByText('Welcome').waitFor({ state: 'visible' });
+  await expect
+    .poll(() => getPageContentByPath(page, slug))
+    .toContain('[Welcome](/welcome-to-leafwiki.md)');
 }
 
 async function expectSearchAndReplaceWorks(page: import('@playwright/test').Page) {
@@ -947,7 +1000,7 @@ async function expectSearchAndReplaceWorks(page: import('@playwright/test').Page
   });
 
   const viewPage = new ViewPage(page);
-  await viewPage.goto(`/${slug}`);
+  await viewPage.goto(`/${slug}.md`);
   await viewPage.clickEditPageButton();
 
   const editPage = new EditPage(page);
@@ -975,14 +1028,14 @@ async function expectEscapeClosesSearchPanelButNotEditor(page: import('@playwrig
   });
 
   const viewPage = new ViewPage(page);
-  await viewPage.goto(`/${slug}`);
+  await viewPage.goto(`/${slug}.md`);
   await viewPage.clickEditPageButton();
 
   const editPage = new EditPage(page);
   await editPage.openReplacePanel();
   await editPage.closeSearchPanelWithEscape();
   await editPage.expectEditorStillOpen();
-  await viewPage.goto(`/${slug}`);
+  await viewPage.goto(`/${slug}.md`);
 }
 
 async function expectOpenedPageMarkedInNavigationDuringEditMode(
@@ -990,7 +1043,7 @@ async function expectOpenedPageMarkedInNavigationDuringEditMode(
 ) {
   const title = 'Welcome to LeafWiki';
   const viewPage = new ViewPage(page);
-  await viewPage.goto('/welcome-to-leafwiki');
+  await viewPage.goto('/welcome-to-leafwiki.md');
 
   const treeView = new TreeView(page);
   await treeView.expectPageHighlighted(title);
@@ -1048,7 +1101,7 @@ test.describe('Authenticated', () => {
     await addPageDialog.submitWithEnter();
 
     await treeView.expectNumberOfTreeNodes(curNodeCount + 1);
-    await expect(page).toHaveURL(new RegExp(`${toAppPath(`/e/${expectedSlug}`)}$`));
+    await expect(page).toHaveURL(new RegExp(`${toAppPath(`/e/${expectedSlug}.md`)}$`));
   });
 
   test('create-subpage', async ({ page }) => {
@@ -1078,7 +1131,7 @@ test.describe('Authenticated', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -1195,14 +1248,14 @@ test.describe('Authenticated', () => {
       targetParentPath: targetParentTitle,
     });
 
-    await page.goto(toAppPath(`/${targetParentTitle}/${renamedChildTitle}`));
+    await page.goto(toAppPath(`/${targetParentTitle}/${renamedChildTitle}.md`));
     await page.locator('article').waitFor({ state: 'visible' });
     await expect(page.locator('.breadcrumbs-nav__current')).toHaveText(renamedChildTitle);
 
     await page.goto(permalinkUrl);
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(toAppPath(`/${targetParentTitle}/${renamedChildTitle}`));
+      .toBe(toAppPath(`/${targetParentTitle}/${renamedChildTitle}.md`));
     await page.locator('article').waitFor({ state: 'visible' });
     await expect(page.locator('.breadcrumbs-nav__current')).toHaveText(renamedChildTitle);
   });
@@ -1335,7 +1388,7 @@ for the page edited at ${new Date().toISOString()}
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -1409,8 +1462,713 @@ for the page edited at ${new Date().toISOString()}
     });
   });
 
+  // - Autocomplete inserts a canonical page link
   test('markdown link autocomplete works', async ({ page }) => {
     await expectMarkdownLinkAutocompleteWorks(page);
+  });
+
+  // - Autocomplete inserts a canonical section link
+  test('autocomplete-emits-section-links-without-md', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `autocomplete-section-source-${suffix}`;
+    const sectionSlug = `autocomplete-section-target-${suffix}`;
+    const sectionTitle = `autocomplete-section-target-${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await createPageWithContent(page, {
+      title: `Autocomplete Section Source ${suffix}`,
+      slug: sourceSlug,
+      content: '',
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await viewPage.clickEditPageButton();
+
+    const editPage = new EditPage(page);
+    await editPage.writeContent(`[Section](/${sectionSlug.slice(0, 12)}`);
+
+    const completionList = page.locator('.cm-tooltip-autocomplete');
+    await completionList.waitFor({ state: 'visible' });
+    await completionList.locator('li').filter({ hasText: sectionTitle }).first().click();
+    await page.keyboard.type(')');
+
+    await editPage.savePage();
+    await editPage.closeEditor();
+
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Section](/${sectionSlug})`);
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .not.toContain(`[Section](/${sectionSlug}.md)`);
+  });
+
+  test('link-insert-dialog-emits-page-md-links-but-section-links-without-md', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `dialog-link-source-${suffix}`;
+    const pageSlug = `dialog-page-target-${suffix}`;
+    const sectionSlug = `dialog-section-target-${suffix}`;
+    const pageTitle = `dialog-page-target-${suffix}`;
+    const sectionTitle = `dialog-section-target-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: pageTitle,
+      slug: pageSlug,
+      content: `# ${pageTitle}`,
+    });
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await createPageWithContent(page, {
+      title: `Dialog Link Source ${suffix}`,
+      slug: sourceSlug,
+      content: '',
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await viewPage.clickEditPageButton();
+
+    await page.getByTestId('format-link-button').click();
+    await page.getByLabel('Display Text').fill('Page Target');
+    await page.getByLabel('URL').fill(pageTitle);
+    await page.getByLabel('URL').press('Enter');
+    await expect(page.getByLabel('URL')).toHaveValue(`/${pageSlug}.md`);
+    await page.getByRole('button', { name: 'Insert' }).click();
+
+    await page.locator('.cm-editor').click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+
+    await page.getByTestId('format-link-button').click();
+    await page.getByLabel('Display Text').fill('Section Target');
+    await page.getByLabel('URL').fill(sectionTitle);
+    await page.getByLabel('URL').press('Enter');
+    await expect(page.getByLabel('URL')).toHaveValue(`/${sectionSlug}`);
+    await page.getByRole('button', { name: 'Insert' }).click();
+
+    const editPage = new EditPage(page);
+    await editPage.savePage();
+    await editPage.closeEditor();
+
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Page Target](/${pageSlug}.md)`);
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Section Target](/${sectionSlug})`);
+  });
+
+  // - User can click a canonical page link in preview
+  test('preview-clicks-canonical-absolute-page-link-with-query-fragment', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `canonical-absolute-source-${suffix}`;
+    const targetSlug = `canonical-absolute-target-${suffix}`;
+    const sourceTitle = `Canonical Absolute Source ${suffix}`;
+    const targetTitle = `Canonical Absolute Target ${suffix}`;
+
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}\n\n## Target Heading\n\nTarget content`,
+    });
+    await createPageWithContent(page, {
+      title: sourceTitle,
+      slug: sourceSlug,
+      content: `[Open Target](/${targetSlug}.md?mode=e2e#target-heading)`,
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const link = page.getByRole('link', { name: 'Open Target' });
+    await expect(link).toHaveAttribute(
+      'href',
+      new RegExp(`/${targetSlug}\\.md\\?mode=e2e#target-heading$`),
+    );
+    await link.click();
+
+    await page.waitForURL(new RegExp(`/${targetSlug}\\.md\\?mode=e2e#target-heading$`));
+    await expect(page.locator('article>h1')).toHaveText(targetTitle);
+  });
+
+  test('preview-clicks-canonical-relative-page-link-from-nested-page', async ({ page }) => {
+    const suffix = Date.now();
+    const parentSlug = `canonical-relative-parent-${suffix}`;
+    const sourceTitle = `canonical-relative-source-${suffix}`;
+    const targetTitle = `canonical-relative-target-${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: parentSlug,
+      slug: parentSlug,
+      kind: 'section',
+    });
+    await createChildPagesByPath(page, {
+      parentPath: parentSlug,
+      titles: [sourceTitle, targetTitle],
+    });
+    await updatePageByPath(page, {
+      path: `${parentSlug}/${sourceTitle}`,
+      content: `[Open Sibling](./${targetTitle}.md)`,
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${parentSlug}/${sourceTitle}.md`);
+    await page.getByRole('link', { name: 'Open Sibling' }).click();
+
+    await page.waitForURL(new RegExp(`/${parentSlug}/${targetTitle}\\.md$`));
+    await expect(page.locator('article>h1')).toHaveText(targetTitle);
+  });
+
+  test('preview-clicks-section-relative-page-link-from-section-content', async ({ page }) => {
+    const suffix = Date.now();
+    const sectionSlug = `section-relative-parent-${suffix}`;
+    const childTitle = `section-relative-child-${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionSlug,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await createChildPagesByPath(page, {
+      parentPath: sectionSlug,
+      titles: [childTitle],
+    });
+    await updatePageByPath(page, {
+      path: sectionSlug,
+      content: `[Open Child](./${childTitle}.md)`,
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sectionSlug}`);
+    await page.getByRole('link', { name: 'Open Child' }).click();
+
+    await page.waitForURL(new RegExp(`/${sectionSlug}/${childTitle}\\.md$`));
+    await expect(page.locator('article>h1')).toHaveText(childTitle);
+  });
+
+  test('preview-clicks-distinguish-same-basename-page-and-section-links', async ({ page }) => {
+    const suffix = Date.now();
+    const twinSlug = `same-basename-preview-${suffix}`;
+    const sourceSlug = `same-basename-source-${suffix}`;
+    const pageTitle = `Same Basename Page ${suffix}`;
+    const sectionTitle = `Same Basename Section ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: pageTitle,
+      slug: twinSlug,
+      kind: 'page',
+    });
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: twinSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: twinSlug,
+      kind: 'page',
+      content: `# ${pageTitle}\n\nPage twin content`,
+    });
+    await updatePageByPath(page, {
+      path: twinSlug,
+      kind: 'section',
+      content: `# ${sectionTitle}\n\nSection twin content`,
+    });
+    await createPageWithContent(page, {
+      title: `Same Basename Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Open Page](/${twinSlug}.md)\n[Open Section](/${twinSlug})`,
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const pageLink = page.getByRole('link', { name: 'Open Page' });
+    await expect(pageLink).toHaveAttribute('href', new RegExp(`/${twinSlug}\\.md$`));
+    await pageLink.click();
+    await page.waitForURL(new RegExp(`/${twinSlug}\\.md$`));
+    await expect(page.locator('article>h1')).toHaveText(pageTitle);
+
+    await viewPage.goto(`/${sourceSlug}.md`);
+    const sectionLink = page.getByRole('link', { name: 'Open Section' });
+    await expect(sectionLink).toHaveAttribute('href', new RegExp(`/${twinSlug}$`));
+    await sectionLink.click();
+    await page.waitForURL(new RegExp(`/${twinSlug}$`));
+    await expect(page.locator('article>h1')).toHaveText(sectionTitle);
+  });
+
+  test('direct-routes-distinguish-real-same-basename-page-and-section', async ({ page }) => {
+    const suffix = Date.now();
+    const twinSlug = `same-basename-direct-${suffix}`;
+    const pageTitle = `Same Basename Direct Page ${suffix}`;
+    const sectionTitle = `Same Basename Direct Section ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: pageTitle,
+      slug: twinSlug,
+      kind: 'page',
+    });
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: twinSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: twinSlug,
+      kind: 'page',
+      content: `# ${pageTitle}\n\nDirect page twin content`,
+    });
+    await updatePageByPath(page, {
+      path: twinSlug,
+      kind: 'section',
+      content: `# ${sectionTitle}\n\nDirect section twin content`,
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    await page.goto(toAppPath(`/${twinSlug}.md`));
+    await expect(page.locator('article>h1')).toHaveText(pageTitle);
+
+    await page.goto(toAppPath(`/${twinSlug}`));
+    await expect(page.locator('article>h1')).toHaveText(sectionTitle);
+  });
+
+  test('preview-readme-md-link-does-not-fallback-for-index-backed-section', async ({ page }) => {
+    const suffix = Date.now();
+    const sectionSlug = `preview-inactive-readme-section-${suffix}`;
+    const sectionTitle = `Preview Inactive README Section ${suffix}`;
+    const sourceTitle = `preview-inactive-readme-source-${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: sectionSlug,
+      kind: 'section',
+      content: `# ${sectionTitle}\n\nIndex-backed section content`,
+    });
+    await createChildPagesByPath(page, {
+      parentPath: sectionSlug,
+      titles: [sourceTitle],
+    });
+    await updatePageByPath(page, {
+      path: `${sectionSlug}/${sourceTitle}`,
+      content: '[Open README](README.md)',
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sectionSlug}/${sourceTitle}.md`);
+
+    await expect(page.getByRole('link', { name: 'Open README' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open README' })).toBeVisible();
+  });
+
+  test('cold-direct-route-does-not-fallback-readme-md-for-index-backed-section', async ({
+    page,
+  }) => {
+    const suffix = Date.now();
+    const sectionSlug = `cold-readme-index-section-${suffix}`;
+    const sectionTitle = `Cold README Index Section ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: sectionSlug,
+      content: `# ${sectionTitle}\n\nCold README-backed section content`,
+    });
+
+    let releaseTreeRequest: (() => void) | null = null;
+    await page.route('**/api/tree', async (route) => {
+      await new Promise<void>((resolve) => {
+        releaseTreeRequest = resolve;
+      });
+      await route.continue();
+    });
+
+    await page.goto(toAppPath(`/${sectionSlug}/README.md`));
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.expectVisible();
+    await expect(page.locator('article>h1')).toHaveCount(0);
+    releaseTreeRequest?.();
+  });
+
+  test('direct-route-lowercase-readme-does-not-fallback-to-section', async ({ page }) => {
+    const suffix = Date.now();
+    const sectionSlug = `lowercase-readme-section-${suffix}`;
+    const sectionTitle = `Lowercase README Section ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+
+    await page.goto(toAppPath(`/${sectionSlug}/readme`));
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.expectVisible();
+    await expect(page.locator('article>h1')).toHaveCount(0);
+  });
+
+  test('direct-readme-md-routes-do-not-fallback-for-index-backed-section', async ({ page }) => {
+    const suffix = Date.now();
+    const sectionSlug = `inactive-readme-section-${suffix}`;
+    const sectionTitle = `Inactive README Section ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: sectionSlug,
+      kind: 'section',
+      content: `# ${sectionTitle}\n\nIndex-backed section content`,
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const notfoundPage = new NotFoundPage(page);
+    for (const routePath of [
+      `/${sectionSlug}/README.md`,
+      `/e/${sectionSlug}/README.md`,
+      `/history/${sectionSlug}/README.md`,
+    ]) {
+      await page.goto(toAppPath(routePath));
+      await notfoundPage.expectVisible();
+      await expect(page.locator('article>h1')).toHaveCount(0);
+    }
+  });
+
+  test('direct-md-route-requests-page-kind-for-same-basename-lookup', async ({ page }) => {
+    let observedPath: string | null = null;
+    let observedKind: string | null = null;
+
+    await page.route('**/api/pages/by-path**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('path') !== 'docs/sync') {
+        await route.continue();
+        return;
+      }
+
+      observedPath = url.searchParams.get('path');
+      observedKind = url.searchParams.get('kind');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'sync-page',
+          slug: 'sync',
+          path: 'docs/sync',
+          title: 'Sync Page Direct Route',
+          content: '# Sync Page Direct Route\n\nLoaded as a page.',
+          version: 'v1',
+          kind: 'page',
+        }),
+      });
+    });
+
+    await page.goto(toAppPath('/docs/sync.md'));
+
+    await expect(page.locator('article>h1')).toHaveText('Sync Page Direct Route');
+    expect(observedPath).toBe('docs/sync');
+    expect(observedKind).toBe('page');
+  });
+
+  // - Direct browser route does not alias old extensionless page path
+  test('direct-extensionless-page-route-does-not-open-old-page-alias', async ({ page }) => {
+    const suffix = Date.now();
+    const slug = `direct-extensionless-page-alias-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: `Direct Extensionless Page Alias ${suffix}`,
+      slug,
+      content: `# Direct Extensionless Page Alias ${suffix}\n\nCanonical page route only.`,
+    });
+
+    await page.goto(toAppPath(`/${slug}`));
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.expectVisible();
+    await expect(page.locator('article>h1')).toHaveCount(0);
+
+    await page.goto(toAppPath(`/${slug}.md`));
+    await expect(page.locator('article>h1')).toHaveText(
+      `Direct Extensionless Page Alias ${suffix}`,
+    );
+  });
+
+  // - Preview shows a broken-link state for unresolved canonical page links
+  test('preview-shows-broken-state-for-unresolved-canonical-page-md-link', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `broken-canonical-md-source-${suffix}`;
+    const missingSlug = `missing-canonical-target-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: `Broken Canonical Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Missing Canonical](/${missingSlug}.md)`,
+    });
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    await expect(page.getByRole('link', { name: 'Missing Canonical' })).toHaveCount(0);
+    const missingButton = page.getByRole('button', { name: 'Missing Canonical' });
+    await expect(missingButton).toBeVisible();
+    await missingButton.click();
+    await expect(page.getByTestId('create-page-by-path-path-input')).toHaveValue(missingSlug);
+
+    const createDialog = new CreatePageByPathDialog(page);
+    await createDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: missingSlug,
+      kind: 'page',
+    });
+
+    await page.waitForURL(new RegExp(`/e/${missingSlug}\\.md$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=page`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, missingSlug);
+    expect(createdKind).toBe('page');
+  });
+
+  test('preview-keeps-uppercase-and-protocol-relative-external-links-external', async ({
+    page,
+  }) => {
+    const suffix = Date.now();
+    const sourceSlug = `external-preview-links-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: `External Preview Links ${suffix}`,
+      slug: sourceSlug,
+      content: [
+        '[External HTTPS](HTTPS://example.com/manual.md)',
+        '[External Protocol Relative](//example.com/manual.md)',
+      ].join('\n'),
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    await expect(page.getByRole('button', { name: 'External HTTPS' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'External Protocol Relative' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'External HTTPS' })).toHaveAttribute(
+      'href',
+      'https://example.com/manual.md',
+    );
+    await expect(page.getByRole('link', { name: 'External Protocol Relative' })).toHaveAttribute(
+      'href',
+      '//example.com/manual.md',
+    );
+  });
+
+  test('preview-create-missing-page-link-creates-page', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `create-missing-page-source-${suffix}`;
+    const missingSlug = `create-missing-page-target-${suffix}`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+
+    await createPageWithContent(page, {
+      title: `Create Missing Page Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Missing Page](/${missingSlug}.md)`,
+    });
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const missingButton = page.getByRole('button', { name: 'Missing Page' });
+    await expect(missingButton).toBeVisible();
+    await missingButton.click();
+
+    const createDialog = new CreatePageByPathDialog(page);
+    await createDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: missingSlug,
+      kind: 'page',
+    });
+    await page.waitForURL(new RegExp(`/e/${missingSlug}\\.md$`));
+  });
+
+  test('preview-create-missing-section-link-creates-section', async ({ page }) => {
+    const suffix = Date.now();
+    const sourceSlug = `missing-section-source-${suffix}`;
+    const missingSlug = `missing-section-target-${suffix}`;
+    const missingTitle = `missing-section-target-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: `Missing Section Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Missing Section](/${missingSlug})`,
+    });
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const missingButton = page.getByRole('button', { name: 'Missing Section' });
+    await expect(missingButton).toBeVisible();
+    await missingButton.click();
+    await expect(page.getByTestId('create-page-by-path-path-input')).toHaveValue(missingSlug);
+    await expect(page.getByTestId('create-page-by-path-title-input')).toHaveValue(missingTitle);
+
+    const createDialog = new CreatePageByPathDialog(page);
+    await createDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: missingSlug,
+      kind: 'section',
+    });
+
+    await page.waitForURL(new RegExp(`/e/${missingSlug}$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=section`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, missingSlug);
+    expect(createdKind).toBe('section');
+  });
+
+  // - User can click a canonical section link in preview
+  // - Direct browser route canonicalizes section trailing slash
+  test('preview-clicks-section-link-with-trailing-slash-and-canonicalizes-url', async ({
+    page,
+  }) => {
+    const suffix = Date.now();
+    const sourceSlug = `canonical-section-source-${suffix}`;
+    const sectionSlug = `canonical-section-target-${suffix}`;
+    const sectionTitle = `Canonical Section Target ${suffix}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await updatePageByPath(page, {
+      path: sectionSlug,
+      content: `# ${sectionTitle}\n\nSection overview`,
+    });
+    await createPageWithContent(page, {
+      title: `Canonical Section Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Open Section](/${sectionSlug}/)`,
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await page.getByRole('link', { name: 'Open Section' }).click();
+
+    await page.waitForURL(new RegExp(`/${sectionSlug}$`));
+    await expect(page.locator('article>h1')).toHaveText(sectionTitle);
+  });
+
+  // - Direct browser route opens canonical .md page deep link
+  test('direct-browser-deep-link-page-md-opens-viewer-page', async ({ page }) => {
+    const suffix = Date.now();
+    const slug = `canonical-deep-link-${suffix}`;
+    const title = `Canonical Deep Link ${suffix}`;
+
+    await createPageWithContent(page, {
+      title,
+      slug,
+      content: `# ${title}\n\nDirect canonical route`,
+    });
+
+    await page.goto(toAppPath(`/${slug}.md`));
+
+    await expect(page.locator('article>h1')).toHaveText(title);
+  });
+
+  test('direct-browser-deep-link-page-md-opens-editor-page', async ({ page }) => {
+    const suffix = Date.now();
+    const slug = `canonical-editor-deep-link-${suffix}`;
+    const title = `Canonical Editor Deep Link ${suffix}`;
+
+    await createPageWithContent(page, {
+      title,
+      slug,
+      content: `# ${title}\n\nDirect canonical editor route`,
+    });
+
+    await page.goto(toAppPath(`/e/${slug}.md`));
+
+    await expect(page.locator('.cm-editor')).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText('Direct canonical editor route');
+  });
+
+  // - Exact-case mismatch is visible to the user
+  test('direct-browser-deep-link-case-mismatch-shows-not-found', async ({ page }) => {
+    const suffix = Date.now();
+    const slug = `canonical-case-target-${suffix}`;
+    const title = `Canonical Case Target ${suffix}`;
+
+    await createPageWithContent(page, {
+      title,
+      slug,
+      content: `# ${title}\n\nCase-sensitive target`,
+    });
+
+    await page.goto(toAppPath(`/${slug.toUpperCase()}.md`));
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.expectVisible();
+    await expect(page.locator('article>h1')).toHaveCount(0);
   });
 
   test('search and replace works in markdown editor', async ({ page }) => {
@@ -1436,7 +2194,7 @@ Target content`;
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const anchorTarget = page.locator('article h1').getByText('Intro');
     await anchorTarget.waitFor({ state: 'visible' });
@@ -1462,7 +2220,7 @@ Target content`;
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const cyrillicHeading = page.locator('article h1').getByText('Привет мир');
     await cyrillicHeading.waitFor({ state: 'visible' });
@@ -1526,7 +2284,7 @@ Trailing content`;
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}#target-section`);
+    await viewPage.goto(`/${slug}.md#target-section`);
 
     const stickyToc = page.locator('.page-viewer__subheader');
     const targetHeading = page.locator('article h2').getByText('Target Section');
@@ -1561,7 +2319,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const contentText = await viewPage.getContent();
     test.expect(contentText).toContain('This paragraph creates a footnote reference.');
@@ -1617,7 +2375,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const footnoteReference = page.locator('article sup a[data-footnote-ref]');
     await footnoteReference.waitFor({ state: 'visible' });
@@ -1673,7 +2431,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${sourceSlug}`);
+    await viewPage.goto(`/${sourceSlug}.md`);
 
     const scrollContainer = page.locator('#scroll-container');
     await scrollContainer.evaluate((element) => {
@@ -1729,7 +2487,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     const viewPage = new ViewPage(page);
     const treeView = new TreeView(page);
 
-    await viewPage.goto(`/${sourceSlug}`);
+    await viewPage.goto(`/${sourceSlug}.md`);
 
     const scrollContainer = page.locator('#scroll-container');
     await scrollContainer.evaluate((element) => {
@@ -1797,7 +2555,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${sourceSlug}`);
+    await viewPage.goto(`/${sourceSlug}.md`);
 
     const scrollContainer = page.locator('#scroll-container');
     await scrollContainer.evaluate((element) => {
@@ -1863,13 +2621,13 @@ This paragraph creates a footnote reference.[^leafwiki]
     await createPageWithContent(page, {
       title: referrerTitle,
       slug: referrerSlug,
-      content: `# ${referrerTitle}\n\n[${targetTitle}](/${targetSlug})\n\n${longContent}`,
+      content: `# ${referrerTitle}\n\n[${targetTitle}](/${targetSlug}.md)\n\n${longContent}`,
     });
 
     const treeView = new TreeView(page);
     const viewPage = new ViewPage(page);
 
-    await viewPage.goto(`/${referrerSlug}`);
+    await viewPage.goto(`/${referrerSlug}.md`);
     await scrollMainContentTo(page, 900);
     await expectMainScrollTopGreaterThanZero(page);
 
@@ -1880,7 +2638,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     await expect(deleteDialog).toContainText(referrerTitle);
     await deleteDialog.getByRole('link', { name: referrerTitle }).click();
 
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${referrerSlug}`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${referrerSlug}.md`);
     await expectMainScrollTop(page, 0);
   });
 
@@ -1899,7 +2657,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await scrollMainContentTo(page, 880);
     await expectMainScrollTopGreaterThanZero(page);
 
@@ -1907,7 +2665,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     const editPage = new EditPage(page);
     await editPage.closeEditor();
 
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${slug}`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${slug}.md`);
     await expectMainScrollTop(page, 0);
   });
 
@@ -1926,7 +2684,7 @@ First reference[^leafwiki] and second reference[^leafwiki]
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const footnoteReferences = page.locator('article sup a[data-footnote-ref]');
     await test.expect(footnoteReferences).toHaveCount(2);
@@ -1967,7 +2725,7 @@ First reference[^leafwiki] and second reference[^leafwiki]
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const contentText = await viewPage.getContent();
     test.expect(contentText).toContain('h1 Heading 8-)');
@@ -2143,7 +2901,7 @@ A -->
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     await page.getByText('Unable to render Mermaid diagram.').waitFor({
       state: 'visible',
@@ -2316,7 +3074,7 @@ graph TD;
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     await page
       .locator('article ol ol li')
@@ -2356,7 +3114,7 @@ Paragraph outside the list.
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     await page.getByText('Paragraph outside the list.').waitFor({ state: 'visible' });
 
@@ -2392,7 +3150,7 @@ Paragraph outside the list.
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     await page
       .locator('article > ol > li')
@@ -2412,7 +3170,15 @@ Paragraph outside the list.
 
   test('create-page-on-not-found-page', async ({ page }) => {
     const slug = `page-from-not-found-${Date.now()}`;
-    const pagePath = `/${slug}`;
+    const pagePath = `/${slug}.md`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
 
     const notfoundPage = new NotFoundPage(page);
     await notfoundPage.goto(pagePath);
@@ -2421,8 +3187,16 @@ Paragraph outside the list.
     await notfoundPage.expectCreatePageButtonVisible();
 
     await notfoundPage.clickCreatePageButton();
+    await expect(page.getByText('will be created')).toBeVisible();
+    await expect(page.getByText('A page already exists at this path.')).toHaveCount(0);
     const createPageByPathDialog = new CreatePageByPathDialog(page);
     await createPageByPathDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: slug,
+      kind: 'page',
+    });
+    await page.waitForURL(new RegExp(`/e/${slug}\\.md$`));
 
     // Check if we are in edit mode
     const editPage = new EditPage(page);
@@ -2434,12 +3208,227 @@ Paragraph outside the list.
     test.expect(pageTitle).toBe(slug);
   });
 
+  test('create-section-on-extensionless-not-found-route', async ({ page }) => {
+    const slug = `section-from-not-found-${Date.now()}`;
+    const pagePath = `/${slug}`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.goto(pagePath);
+
+    await notfoundPage.expectVisible();
+    await notfoundPage.expectCreatePageButtonVisible();
+
+    await notfoundPage.clickCreatePageButton();
+    await expect(page.getByText('will be created')).toBeVisible();
+    await expect(page.getByText('A page already exists at this path.')).toHaveCount(0);
+    const createPageByPathDialog = new CreatePageByPathDialog(page);
+    await createPageByPathDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: slug,
+      kind: 'section',
+    });
+    await page.waitForURL(new RegExp(`/e/${slug}$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=section`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, slug);
+    expect(createdKind).toBe('section');
+  });
+
+  test('create-section-on-not-found-route-when-page-twin-exists', async ({ page }) => {
+    const slug = `section-twin-from-not-found-${Date.now()}`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    const lookupKinds: string[] = [];
+
+    await createPageWithContent(page, {
+      title: `Existing Page Twin ${slug}`,
+      slug,
+      content: `# Existing Page Twin ${slug}`,
+      kind: 'page',
+    });
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/pages/lookup') {
+        lookupKinds.push(url.searchParams.get('kind') ?? '');
+      }
+    });
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.goto(`/${slug}`);
+
+    await notfoundPage.expectVisible();
+    await notfoundPage.expectCreatePageButtonVisible();
+
+    await notfoundPage.clickCreatePageButton();
+    await expect(page.getByText('will be created')).toBeVisible();
+    await expect(page.getByText('A page already exists at this path.')).toHaveCount(0);
+    await expect
+      .poll(() => lookupKinds.filter((kind) => kind === 'section').length)
+      .toBeGreaterThanOrEqual(2);
+    const createPageByPathDialog = new CreatePageByPathDialog(page);
+    await createPageByPathDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: slug,
+      kind: 'section',
+    });
+    await page.waitForURL(new RegExp(`/e/${slug}$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=section`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, slug);
+    expect(createdKind).toBe('section');
+  });
+
+  test('create-page-on-not-found-md-route-when-section-twin-exists', async ({ page }) => {
+    const slug = `page-twin-from-not-found-${Date.now()}`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+    const lookupKinds: string[] = [];
+
+    await createPageWithContent(page, {
+      title: `Existing Section Twin ${slug}`,
+      slug,
+      content: `# Existing Section Twin ${slug}`,
+      kind: 'section',
+    });
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/pages/lookup') {
+        lookupKinds.push(url.searchParams.get('kind') ?? '');
+      }
+    });
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.goto(`/${slug}.md`);
+
+    await notfoundPage.expectVisible();
+    await notfoundPage.expectCreatePageButtonVisible();
+
+    await notfoundPage.clickCreatePageButton();
+    await expect(page.getByText('will be created')).toBeVisible();
+    await expect(page.getByText('A page already exists at this path.')).toHaveCount(0);
+    await expect
+      .poll(() => lookupKinds.filter((kind) => kind === 'page').length)
+      .toBeGreaterThanOrEqual(2);
+    const createPageByPathDialog = new CreatePageByPathDialog(page);
+    await createPageByPathDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: slug,
+      kind: 'page',
+    });
+    await page.waitForURL(new RegExp(`/e/${slug}\\.md$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=page`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, slug);
+    expect(createdKind).toBe('page');
+  });
+
+  test('create-readme-page-on-not-found-readme-md-route-when-index-section-exists', async ({
+    page,
+  }) => {
+    const slug = `readme-page-from-not-found-${Date.now()}`;
+    let observedEnsureBody: { path?: string; kind?: string } | null = null;
+
+    await createPageWithContent(page, {
+      title: `Existing Index Section ${slug}`,
+      slug,
+      content: `# Existing Index Section ${slug}`,
+      kind: 'section',
+    });
+    await page.route('**/api/pages/ensure', async (route) => {
+      observedEnsureBody = route.request().postDataJSON() as {
+        path?: string;
+        kind?: string;
+      };
+      await route.continue();
+    });
+
+    const notfoundPage = new NotFoundPage(page);
+    await notfoundPage.goto(`/${slug}/README.md`);
+
+    await notfoundPage.expectVisible();
+    await notfoundPage.expectCreatePageButtonVisible();
+
+    await notfoundPage.clickCreatePageButton();
+    await expect(page.getByTestId('create-page-by-path-path-input')).toHaveValue(`${slug}/README`);
+    const createPageByPathDialog = new CreatePageByPathDialog(page);
+    await createPageByPathDialog.clickCreate();
+
+    expect(observedEnsureBody).toMatchObject({
+      path: `${slug}/README`,
+      kind: 'page',
+    });
+    await page.waitForURL(new RegExp(`/e/${slug}/README\\.md$`));
+
+    const createdKind = await page.evaluate(async (targetPath) => {
+      const response = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(targetPath)}&kind=page`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const result = (await response.json()) as { kind: string };
+      return result.kind;
+    }, `${slug}/README`);
+    expect(createdKind).toBe('page');
+  });
+
   test('not-found-on-edit-page-hides-create-page-cta', async ({ page }) => {
     const slug = `missing-edit-${Date.now()}`;
     const notfoundPage = new NotFoundPage(page);
     const viewPage = new ViewPage(page);
 
-    await viewPage.goto('/welcome-to-leafwiki');
+    await viewPage.goto('/welcome-to-leafwiki.md');
     await navigateWithinApp(page, `/e/${slug}`);
 
     await notfoundPage.expectVisible();
@@ -2451,7 +3440,7 @@ Paragraph outside the list.
     const notfoundPage = new NotFoundPage(page);
     const viewPage = new ViewPage(page);
 
-    await viewPage.goto('/welcome-to-leafwiki');
+    await viewPage.goto('/welcome-to-leafwiki.md');
     await navigateWithinApp(page, `/history/${slug}`);
 
     await notfoundPage.expectVisible();
@@ -2504,7 +3493,7 @@ Paragraph outside the list.
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
-    await editPage.writeContent(`[${siblingTitle}](../${siblingTitle})`);
+    await editPage.writeContent(`[${siblingTitle}](../${siblingTitle}.md)`);
     await editPage.savePage();
     await editPage.closeEditor();
 
@@ -2512,8 +3501,8 @@ Paragraph outside the list.
       path: `${parentTitle}/${childTitle}`,
       targetParentPath: '',
     });
-    await page.goto(toAppPath(`/${childTitle}`));
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${childTitle}`);
+    await page.goto(toAppPath(`/${childTitle}.md`));
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${childTitle}.md`);
     await expect
       .poll(
         () =>
@@ -2578,10 +3567,10 @@ Paragraph outside the list.
       path: `${sourceParentTitle}/${childTitle}`,
       targetParentPath: targetParentTitle,
     });
-    await page.goto(toAppPath(`/${targetParentTitle}/${childTitle}`));
+    await page.goto(toAppPath(`/${targetParentTitle}/${childTitle}.md`));
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(`/${targetParentTitle}/${childTitle}`);
+      .toBe(`/${targetParentTitle}/${childTitle}.md`);
     await expect(page.locator('article > h1')).toHaveText(childTitle);
   });
 
@@ -2618,10 +3607,10 @@ Paragraph outside the list.
       path: `${sourceParentTitle}/${childTitle}`,
       targetParentPath: targetParentTitle,
     });
-    await page.goto(toAppPath(`/e/${targetParentTitle}/${childTitle}`));
+    await page.goto(toAppPath(`/e/${targetParentTitle}/${childTitle}.md`));
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(`/e/${targetParentTitle}/${childTitle}`);
+      .toBe(`/e/${targetParentTitle}/${childTitle}.md`);
     await expect(page.locator('.cm-editor')).toBeVisible();
   });
 
@@ -2653,7 +3642,7 @@ Paragraph outside the list.
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
-    await editPage.writeContent(`[${targetTitle}](/${parentTitle}/${targetTitle})`);
+    await editPage.writeContent(`[${targetTitle}](/${parentTitle}/${targetTitle}.md)`);
     await editPage.savePage();
     await editPage.closeEditor();
 
@@ -2732,14 +3721,14 @@ Paragraph outside the list.
       targetParentPath: '',
       rewriteLinks: true,
     });
-    await page.goto(toAppPath(`/${referrerTitle}`));
+    await page.goto(toAppPath(`/${referrerTitle}.md`));
     await expect(page.locator('article').getByRole('link', { name: targetTitle })).toHaveAttribute(
       'href',
-      toAppPath(`/${targetTitle}`),
+      toAppPath(`/${targetTitle}.md`),
     );
 
     await page.locator('article').getByRole('link', { name: targetTitle }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${targetTitle}`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${targetTitle}.md`);
     await expect(page.locator('article > h1')).toHaveText(targetTitle);
   });
 
@@ -2816,7 +3805,7 @@ Paragraph outside the list.
       slug,
       content: 'Mobile toolbar overflow test page',
     });
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await page.locator('article').getByText('Mobile toolbar overflow test page').waitFor({
       state: 'visible',
     });
@@ -2843,7 +3832,7 @@ Paragraph outside the list.
     // We verify the delete worked by checking we are no longer on the deleted page URL.
     // Avoid a full page.goto() here: that triggers auth bootstrap again and the
     // refresh-token API call can hang indefinitely in CI, causing a 3-minute timeout.
-    await page.waitForURL((url) => !url.pathname.endsWith(slug));
+    await page.waitForURL((url) => !url.pathname.endsWith(`${slug}.md`));
   });
 
   test('delete-page-shows-backlink-warning', async ({ page }) => {
@@ -2871,7 +3860,7 @@ Paragraph outside the list.
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
-    await editPage.writeContent(`[${targetTitle}](/${targetTitle})`);
+    await editPage.writeContent(`[${targetTitle}](/${targetTitle}.md)`);
     await editPage.savePage();
     await editPage.closeEditor();
 
@@ -3113,7 +4102,7 @@ Paragraph outside the list.
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/search-start-${stamp}`);
+    await viewPage.goto(`/search-start-${stamp}.md`);
     await viewPage.switchToSearchTab();
 
     const searchView = new SearchView(page);
@@ -3126,7 +4115,7 @@ Paragraph outside the list.
       .first();
     await result.click();
 
-    await expect(page).toHaveURL(new RegExp(`/search-result-${stamp}(\\?|$)`));
+    await expect(page).toHaveURL(new RegExp(`/search-result-${stamp}\\.md(\\?|$)`));
     await expect(page).toHaveURL(new RegExp(`[?&]q=${query.replace(/ /g, '\\+')}`));
     await expect(page).toHaveURL(new RegExp(`[?&]tags=${tag}(?:&|$)`));
     await expect(page).not.toHaveURL(new RegExp(`/search-start-${stamp}/search-result-${stamp}`));
@@ -3136,7 +4125,7 @@ Paragraph outside the list.
     const initialQuery = 'alpha-query';
     const updatedQuery = 'beta-query';
 
-    await page.goto(toAppPath(`/welcome-to-leafwiki?q=${initialQuery}`));
+    await page.goto(toAppPath(`/welcome-to-leafwiki.md?q=${initialQuery}`));
 
     const viewPage = new ViewPage(page);
     await viewPage.switchToSearchTab();
@@ -3205,12 +4194,12 @@ Paragraph outside the list.
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
-    await editPage.writeContent('[' + linkLabel + '](../' + targetTitle + ')');
+    await editPage.writeContent('[' + linkLabel + '](./' + targetTitle + '.md)');
     await editPage.savePage();
     await editPage.closeEditor();
 
     await page.getByRole('link', { name: linkLabel }).click();
-    await page.waitForURL(new RegExp('/' + parentTitle + '/' + targetTitle + '$'));
+    await page.waitForURL(new RegExp('/' + parentTitle + '/' + targetTitle + '\\.md$'));
 
     await test.expect(page.locator('article>h1')).toHaveText(targetTitle);
   });
@@ -3265,7 +4254,7 @@ Paragraph outside the list.
     await deletePageByPath(page, { path: otherTitle });
 
     test.expect(await viewPage.getTitle()).toBe(currentTitle);
-    await page.waitForURL(new RegExp('/' + currentTitle + '$'));
+    await page.waitForURL(new RegExp('/' + currentTitle + '\\.md$'));
   });
 
   test('cannot-delete-current-page-while-editing-it', async ({ page }) => {
@@ -3354,7 +4343,7 @@ Paragraph outside the list.
     await editPage.savePage();
     await editPage.closeEditor();
 
-    await page.waitForURL(new RegExp('/' + expectedPath + '$'));
+    await page.waitForURL(new RegExp('/' + expectedPath + '\\.md$'));
   });
 
   test('page-history-opens-for-nested-page', async ({ page }) => {
@@ -3378,7 +4367,7 @@ Paragraph outside the list.
 
     await viewPage.openCurrentPageHistory();
 
-    await page.waitForURL(new RegExp('/history/' + parentTitle + '/' + childTitle + '$'));
+    await page.waitForURL(new RegExp('/history/' + parentTitle + '/' + childTitle + '\\.md$'));
     await expect(page.getByTestId('page-history-page-content')).toBeVisible();
     await expect(page.getByTestId('page-history-page-content')).toContainText(childTitle);
     await expect(page.getByText('Error: Page not found')).toHaveCount(0);
@@ -3461,7 +4450,7 @@ Custom content
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const infoShoutout = page.locator('article aside.markdown-shoutout--info');
     const successShoutout = page.locator('article aside.markdown-shoutout--success');
@@ -3585,7 +4574,7 @@ Outro paragraph`;
     await createPageWithContent(page, { title, slug, content });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
 
     const article = page.locator('article');
     const blockMath = article.locator('.katex-display');

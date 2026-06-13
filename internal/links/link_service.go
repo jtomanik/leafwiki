@@ -1,6 +1,10 @@
 package links
 
 import (
+	"path"
+	"strings"
+
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -36,12 +40,13 @@ func (b *LinkService) IndexAllPages() error {
 	}
 
 	pages, errs := b.treeService.GetPages(ids)
+	markdownIndex := markdownLinkIndexForTree(b.treeService)
 	for i, page := range pages {
 		if errs[i] != nil {
 			return errs[i]
 		}
 		links := extractLinksFromMarkdown(page.Content)
-		targets := resolveTargetLinks(b.treeService, page.CalculatePath(), links)
+		targets := resolveTargetLinksWithIndex(b.treeService, markdownIndex, page.CalculatePath(), page.Kind, links)
 		if err := b.store.AddLinks(page.ID, page.Title, targets); err != nil {
 			return err
 		}
@@ -68,8 +73,16 @@ func (b *LinkService) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorL
 	return b.store.GetRefactorMatchesForPrefix(oldPrefix)
 }
 
+func (b *LinkService) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKind tree.NodeKind) ([]RefactorLinkMatch, error) {
+	return b.store.GetRefactorMatchesForPrefixAndKind(oldPrefix, string(rootKind))
+}
+
 func (b *LinkService) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]string, error) {
 	return b.store.GetRefactorSourcePageIDsForPrefix(oldPrefix)
+}
+
+func (b *LinkService) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix string, rootKind tree.NodeKind) ([]string, error) {
+	return b.store.GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix, string(rootKind))
 }
 
 func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, rules []RewriteRule) error {
@@ -79,16 +92,21 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 	}
 
 	updates := make([]PageLinkUpdate, 0, len(pages))
+	var markdownIndex *markdownlinks.Index
 	for _, page := range pages {
 		if page == nil {
 			continue
 		}
+		if markdownIndex == nil {
+			markdownIndex = markdownLinkIndexForTree(b.treeService)
+		}
 		pagePath := normalizeWikiPath(page.CalculatePath())
-		targets := rewriteResolvedTargets(pagePath, outgoingByPageID[page.ID], rules, b.treeService)
+		targets := rewriteResolvedTargets(pagePath, page.Kind, outgoingByPageID[page.ID], rules, b.treeService, markdownIndex)
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
 			ToPath:     pagePath,
+			ToKind:     string(page.Kind),
 			Targets:    targets,
 		})
 	}
@@ -102,6 +120,12 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 
 func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*LinkStatusResult, error) {
 	pagePath = normalizeWikiPath(pagePath)
+	pageKind := tree.NodeKindPage
+	if b.treeService != nil {
+		if page, err := b.treeService.GetPage(pageID); err == nil && page != nil {
+			pageKind = page.Kind
+		}
+	}
 
 	// 1) Valid inbound backlinks
 	validBacklinks, err := b.store.GetBacklinksForPage(pageID)
@@ -111,7 +135,7 @@ func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*Lin
 	validBacklinksResult := toBacklinkResult(b.treeService, validBacklinks)
 
 	// 2) Broken inbound
-	brokenIncoming, err := b.store.GetBrokenIncomingForPath(pagePath)
+	brokenIncoming, err := b.store.GetBrokenIncomingForPathAndKind(pagePath, string(pageKind))
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +176,7 @@ func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*Lin
 func (b *LinkService) UpdateLinksForPage(page *tree.Page, content string) error {
 	links := extractLinksFromMarkdown(content)
 
-	targets := resolveTargetLinks(b.treeService, page.CalculatePath(), links)
+	targets := resolveTargetLinksForSourceKind(b.treeService, page.CalculatePath(), page.Kind, links)
 
 	err := b.store.AddLinks(page.ID, page.Title, targets)
 	if err != nil {
@@ -164,17 +188,22 @@ func (b *LinkService) UpdateLinksForPage(page *tree.Page, content string) error 
 
 func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 	updates := make([]PageLinkUpdate, 0, len(pages))
+	var markdownIndex *markdownlinks.Index
 	for _, page := range pages {
 		if page == nil {
 			continue
 		}
+		if markdownIndex == nil {
+			markdownIndex = markdownLinkIndexForTree(b.treeService)
+		}
 		pagePath := normalizeWikiPath(page.CalculatePath())
 		links := extractLinksFromMarkdown(page.Content)
-		targets := resolveTargetLinks(b.treeService, pagePath, links)
+		targets := resolveTargetLinksWithIndex(b.treeService, markdownIndex, pagePath, page.Kind, links)
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
 			ToPath:     pagePath,
+			ToKind:     string(page.Kind),
 			Targets:    targets,
 		})
 	}
@@ -202,15 +231,27 @@ func (b *LinkService) MarkLinksBrokenForPath(toPath string) error {
 	return b.store.MarkLinksBrokenForPath(toPath)
 }
 
+// MarkLinksBrokenForPathAndKind marks links pointing to an exact path and kind as broken.
+func (b *LinkService) MarkLinksBrokenForPathAndKind(toPath string, toKind tree.NodeKind) error {
+	toPath = normalizeWikiPath(toPath)
+	return b.store.MarkLinksBrokenForPathAndKind(toPath, string(toKind))
+}
+
 // MarkLinksBrokenForPrefix marks all links under a prefix as broken (subtree move/delete).
 func (b *LinkService) MarkLinksBrokenForPrefix(prefix string) error {
 	prefix = normalizeWikiPath(prefix)
 	return b.store.MarkLinksBrokenForPrefix(prefix)
 }
 
+// MarkLinksBrokenForPrefixAndKind marks a subtree root by kind while preserving same-path twins.
+func (b *LinkService) MarkLinksBrokenForPrefixAndKind(prefix string, rootKind tree.NodeKind) error {
+	prefix = normalizeWikiPath(prefix)
+	return b.store.MarkLinksBrokenForPrefixAndKind(prefix, string(rootKind))
+}
+
 func (b *LinkService) HealLinksForExactPath(page *tree.Page) error {
 	toPath := normalizeWikiPath(page.CalculatePath())
-	return b.store.HealLinksForPath(toPath, page.ID)
+	return b.store.HealLinksForPathAndKind(toPath, string(page.Kind), page.ID)
 }
 
 func (b *LinkService) Close() error {
@@ -231,7 +272,7 @@ func pageIDsForPages(pages []*tree.Page) []string {
 	return ids
 }
 
-func rewriteResolvedTargets(currentPath string, outgoings []Outgoing, rules []RewriteRule, treeService *tree.TreeService) []TargetLink {
+func rewriteResolvedTargets(currentPath string, sourceKind tree.NodeKind, outgoings []Outgoing, rules []RewriteRule, treeService *tree.TreeService, markdownIndex *markdownlinks.Index) []TargetLink {
 	if len(outgoings) == 0 {
 		return nil
 	}
@@ -239,11 +280,22 @@ func rewriteResolvedTargets(currentPath string, outgoings []Outgoing, rules []Re
 	paths := make([]string, 0, len(outgoings))
 	for _, outgoing := range outgoings {
 		targetPath := normalizeWikiPath(outgoing.ToPath)
-		if rewritten, ok := applyRewriteRules(targetPath, rules); ok {
+		if rewritten, ok := applyRewriteRulesForKind(targetPath, outgoing.ToKind, rules); ok {
 			targetPath = rewritten
 		}
-		paths = append(paths, targetPath)
+		paths = append(paths, storedTargetMarkdownHref(targetPath, outgoing.ToKind))
 	}
 
-	return resolveTargetLinks(treeService, currentPath, paths)
+	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath, sourceKind, paths)
+}
+
+func storedTargetMarkdownHref(targetPath string, targetKind string) string {
+	targetPath = normalizeWikiPath(targetPath)
+	if storedTargetKind(targetKind) != "page" || targetPath == "/" {
+		return targetPath
+	}
+	if strings.EqualFold(path.Ext(targetPath), ".md") {
+		return targetPath
+	}
+	return targetPath + ".md"
 }

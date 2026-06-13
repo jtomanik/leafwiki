@@ -5,6 +5,9 @@ import TreeView from '../pages/TreeView';
 import { toAppPath } from '../pages/appPath';
 import { connectMCPClient } from './mcpClient';
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - MCP validation reports canonical and non-canonical links consistently
+
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
     process.env.E2E_ENABLE_MCP_LOCAL !== '1' ||
@@ -40,15 +43,24 @@ type WikiContext = {
   };
   syncStatus?: {
     enabled?: boolean;
+    validationErrors?: ValidationIssue[];
   };
   tree?: unknown;
   validation?: {
     ok?: boolean;
+    issues?: ValidationIssue[];
     summary?: {
       errors?: number;
       warnings?: number;
     };
   };
+};
+
+type ValidationIssue = {
+  code?: string;
+  message?: string;
+  path?: string;
+  severity?: string;
 };
 
 type SubtreeOutput = {
@@ -66,6 +78,7 @@ type PageOutput = {
   page?: {
     content?: string;
     id?: string;
+    linkStatus?: LinkStatus;
     tags?: string[];
     version?: string;
   };
@@ -78,6 +91,8 @@ type PartialEditOutput = PageOutput & {
 type RefreshOutput = {
   lastCommitHash?: string;
   recentChangedPaths?: string[];
+  syncStatus?: WikiContext['syncStatus'];
+  validation?: WikiContext['validation'];
 };
 
 type RevisionOutput = {
@@ -96,6 +111,17 @@ type ListRevisionsOutput = {
   }>;
 };
 
+type LinkStatus = {
+  counts?: {
+    broken_outgoings?: number;
+  };
+  broken_outgoings?: Array<{
+    broken?: boolean;
+    to_kind?: string;
+    to_path?: string;
+  }>;
+};
+
 function appURL(routePath: string): string {
   return new URL(
     toAppPath(routePath),
@@ -109,6 +135,20 @@ function writeRootMarkdown(relativePath: string, content: string) {
   const fullPath = path.join(rootDir, relativePath);
   mkdirSync(path.dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, content);
+}
+
+async function getLinkStatus(page: import('@playwright/test').Page, pageId: string) {
+  return await page.evaluate(async (id) => {
+    const response = await fetch(`/api/pages/${encodeURIComponent(id)}/links`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load link status ${id}: ${response.status}`);
+    }
+
+    return (await response.json()) as LinkStatus;
+  }, pageId);
 }
 
 test('wiki_get_context is the context-first MCP surface', async () => {
@@ -272,6 +312,212 @@ Browser-visible direct edit from E2E`,
   }
 });
 
+test('mcp-refresh-exposes-canonical-link-validation-in-browser-tree', async ({ page }) => {
+  const mcp = await connectMCPClient(appURL('/mcp'));
+  const slug = `mcp-validation-source-${Date.now()}`;
+  const missingSlug = `mcp-validation-missing-${Date.now()}`;
+
+  try {
+    writeRootMarkdown(
+      `${slug}.md`,
+      `---
+leafwiki_id: ${slug}
+leafwiki_title: MCP Validation Source
+---
+
+# MCP Validation Source
+
+[Missing](/${missingSlug})`,
+    );
+
+    const refresh = (await mcp.callTool('wiki_refresh', {
+      source: 'filesystem',
+      validate: true,
+    })) as RefreshOutput;
+    expect(refresh.validation?.ok).toBe(false);
+    expect(refresh.validation?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'broken_link',
+          message: expect.stringContaining(`/${missingSlug}`),
+        }),
+      ]),
+    );
+    expect(refresh.syncStatus?.validationErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'broken_link',
+          message: expect.stringContaining(`/${missingSlug}`),
+        }),
+      ]),
+    );
+    await page.goto(toAppPath('/'));
+    const linkStatus = await getLinkStatus(page, slug);
+    expect(linkStatus.counts?.broken_outgoings).toBe(1);
+    expect(linkStatus.broken_outgoings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          broken: true,
+          to_kind: 'unknown',
+          to_path: `/${missingSlug}`,
+        }),
+      ]),
+    );
+    await expect(page.getByTestId('workspace-sync-status')).toContainText(`/${missingSlug}`, {
+      timeout: 15000,
+    });
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('mcp-refresh-preserves-ambiguous-legacy-link-code', async () => {
+  const mcp = await connectMCPClient(appURL('/mcp'));
+  const suffix = Date.now();
+  const sourceSlug = `mcp-ambiguous-source-${suffix}`;
+  const targetSlug = `mcp-ambiguous-target-${suffix}`;
+
+  try {
+    writeRootMarkdown(
+      `${targetSlug}.md`,
+      `---
+leafwiki_id: ${targetSlug}-page
+leafwiki_title: MCP Ambiguous Target Page
+---
+
+# MCP Ambiguous Target Page`,
+    );
+    writeRootMarkdown(
+      `${targetSlug}/index.md`,
+      `---
+leafwiki_id: ${targetSlug}-section
+leafwiki_title: MCP Ambiguous Target Section
+---
+
+# MCP Ambiguous Target Section`,
+    );
+    writeRootMarkdown(
+      `${sourceSlug}.md`,
+      `---
+leafwiki_id: ${sourceSlug}
+leafwiki_title: MCP Ambiguous Source
+---
+
+# MCP Ambiguous Source
+
+[Target](/${targetSlug})`,
+    );
+
+    const refresh = (await mcp.callTool('wiki_refresh', {
+      source: 'filesystem',
+      validate: true,
+    })) as RefreshOutput;
+    expect(refresh.validation?.ok).toBe(false);
+    expect(refresh.validation?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ambiguous_legacy_link',
+          message: expect.stringContaining(`/${targetSlug}`),
+        }),
+      ]),
+    );
+    expect(refresh.syncStatus?.validationErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ambiguous_legacy_link',
+          message: expect.stringContaining(`/${targetSlug}`),
+        }),
+      ]),
+    );
+  } finally {
+    await mcp.close();
+  }
+});
+
+// - MCP validation reports canonical and non-canonical links consistently
+test('mcp-validate-content-reports-canonical-legacy-and-asset-links-consistently', async () => {
+  const mcp = await connectMCPClient(appURL('/mcp'));
+  const suffix = Date.now();
+  const sourceSlug = `mcp-validate-source-${suffix}`;
+  const targetSlug = `mcp-validate-target-${suffix}`;
+  const sectionSlug = `mcp-validate-section-${suffix}`;
+  const missingSlug = `mcp-validate-missing-${suffix}`;
+
+  try {
+    const source = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      slug: sourceSlug,
+      title: 'MCP Validate Source',
+    })) as PageOutput;
+    const sourcePage = source.page;
+    expect(sourcePage?.id).toEqual(expect.any(String));
+
+    const target = (await mcp.callTool('wiki_create_page', {
+      kind: 'page',
+      slug: targetSlug,
+      title: 'MCP Validate Target',
+    })) as PageOutput;
+    expect(target.page?.id).toEqual(expect.any(String));
+
+    const section = (await mcp.callTool('wiki_create_page', {
+      kind: 'section',
+      slug: sectionSlug,
+      title: 'MCP Validate Section',
+    })) as PageOutput;
+    expect(section.page?.id).toEqual(expect.any(String));
+
+    const validation = (await mcp.callTool('wiki_validate_content', {
+      content: `---
+leafwiki_id: ${sourcePage?.id}
+leafwiki_title: MCP Validate Source
+---
+
+[Target](/${targetSlug}.md)
+[Section](/${sectionSlug})`,
+      path: `/${sourceSlug}.md`,
+    })) as WikiContext['validation'];
+    expect(validation?.ok).toBe(true);
+    expect(validation?.issues ?? []).toEqual([]);
+
+    const invalidValidation = (await mcp.callTool('wiki_validate_content', {
+      existingPageId: sourcePage?.id,
+      content: `---
+leafwiki_id: ${sourcePage?.id}
+leafwiki_title: MCP Validate Source
+---
+
+[Canonical](/${targetSlug}.md)
+[Section](/${sectionSlug})
+[Legacy](/${missingSlug})
+![Missing asset](missing.png)`,
+      path: `/${sourceSlug}.md`,
+    })) as WikiContext['validation'];
+    expect(invalidValidation?.ok).toBe(false);
+    const invalidIssues = invalidValidation?.issues ?? [];
+    expect(invalidIssues).toHaveLength(2);
+    expect(invalidIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'broken_link',
+          message: expect.stringContaining(`/${missingSlug}`),
+        }),
+        expect.objectContaining({
+          code: 'missing_asset',
+          message: expect.stringContaining('missing.png'),
+        }),
+      ]),
+    );
+    for (const issue of invalidIssues) {
+      expect(issue.message ?? '').not.toContain(targetSlug);
+      expect(issue.message ?? '').not.toContain(sectionSlug);
+      expect(issue.path ?? '').not.toContain(targetSlug);
+      expect(issue.path ?? '').not.toContain(sectionSlug);
+    }
+  } finally {
+    await mcp.close();
+  }
+});
+
 test('safe MCP edit workflow records workspace revision metadata', async () => {
   const mcp = await connectMCPClient(appURL('/mcp'));
   const slug = `mcp-context-task-${Date.now()}`;
@@ -330,9 +576,24 @@ test('safe MCP edit workflow records workspace revision metadata', async () => {
       syncMode: 'none',
       treeDepth: 1,
     })) as WikiContext;
-    const mcpChange = context.recentChanges?.find(
-      (change) => change.source === 'mcp' && change.changedPaths?.includes(`${slug}.md`),
-    );
+    const pageChanges =
+      context.recentChanges?.filter(
+        (change) => change.source === 'mcp' && change.changedPaths?.includes(`${slug}.md`),
+      ) ?? [];
+    expect(pageChanges.length).toBeGreaterThan(0);
+
+    const latestRevision = (await mcp.callTool('wiki_get_latest_revision', {
+      pageId: created.page?.id,
+    })) as RevisionOutput;
+    expect(latestRevision.revision).toMatchObject({
+      authorId: expect.any(String),
+      createdAt: expect.any(String),
+      pageId: created.page?.id,
+    });
+    expect(latestRevision.revision?.id).toEqual(expect.any(String));
+
+    const mcpChange = pageChanges.find((change) => change.commitId === latestRevision.revision?.id);
+    expect(mcpChange).toBeTruthy();
     expect(mcpChange).toMatchObject({
       changedCount: expect.any(Number),
       changedPaths: expect.arrayContaining([`${slug}.md`]),
@@ -341,19 +602,9 @@ test('safe MCP edit workflow records workspace revision metadata', async () => {
       source: 'mcp',
     });
     expect(mcpChange?.changedCount).toBeGreaterThanOrEqual(1);
-    expect(mcpChange?.commitId).toEqual(expect.any(String));
+    expect(mcpChange?.commitId).toEqual(latestRevision.revision?.id);
     expect(mcpChange?.timestamp).toEqual(expect.any(String));
     expect(mcpChange?.actor).toEqual(expect.any(String));
-
-    const latestRevision = (await mcp.callTool('wiki_get_latest_revision', {
-      pageId: created.page?.id,
-    })) as RevisionOutput;
-    expect(latestRevision.revision).toMatchObject({
-      authorId: expect.any(String),
-      createdAt: expect.any(String),
-      id: mcpChange?.commitId,
-      pageId: created.page?.id,
-    });
 
     const revisions = (await mcp.callTool('wiki_list_revisions', {
       limit: 5,
@@ -362,7 +613,7 @@ test('safe MCP edit workflow records workspace revision metadata', async () => {
     expect(revisions.revisions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: mcpChange?.commitId,
+          id: latestRevision.revision?.id,
           pageId: created.page?.id,
         }),
       ]),

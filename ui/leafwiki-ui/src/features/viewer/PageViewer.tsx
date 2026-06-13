@@ -12,9 +12,10 @@ import {
 import { buildHistoryUrl } from '@/lib/routePath'
 import { useScrollRestoration } from '@/lib/useScrollRestoration'
 import {
+  browserRoutePathForWikiNode,
   getParentWikiRoutePath,
-  getWikiTargetRoutePath,
-  toWikiLookupPath,
+  wikiPageCreateInputForBrowserRoute,
+  wikiPageLookupInputForBrowserRoute,
 } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
@@ -49,20 +50,31 @@ export default function PageViewer() {
   const notFound = useViewerStore((s) => s.notFound)
   const page = useViewerStore((s) => s.page)
   const loadPageData = useViewerStore((s) => s.loadPageData)
+  const pagePath = page?.path
+  const pageKind = page?.kind
 
   const actions = {
-    pageKind: page?.kind,
+    pageKind,
     printPage: useCallback(() => {
       window.print()
     }, []),
     editPage: useCallback(() => {
-      navigate(`/e/${page?.path || ''}`)
-    }, [page?.path, navigate]),
+      navigate(
+        pagePath
+          ? `/e${browserRoutePathForWikiNode(pagePath, pageKind)}`
+          : '/e/',
+      )
+    }, [navigate, pageKind, pagePath]),
     showHistory: useCallback(() => {
-      navigate(buildHistoryUrl(page?.path || pathname), {
-        state: createNavigationVisitState(),
-      })
-    }, [navigate, page?.path, pathname]),
+      navigate(
+        buildHistoryUrl(
+          pagePath ? browserRoutePathForWikiNode(pagePath, pageKind) : pathname,
+        ),
+        {
+          state: createNavigationVisitState(),
+        },
+      )
+    }, [navigate, pageKind, pagePath, pathname]),
     showPermalink: useCallback(() => {
       if (!page) return
       openDialog(DIALOG_PAGE_PERMALINK, { page })
@@ -85,8 +97,8 @@ export default function PageViewer() {
   useSetPageTitle({ page })
 
   useEffect(() => {
-    const path = toWikiLookupPath(pathname)
-    loadPageData?.(path)
+    const lookup = wikiPageLookupInputForBrowserRoute(pathname)
+    loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind)
   }, [pathname, loadPageData])
 
   useEffect(() => {
@@ -96,8 +108,13 @@ export default function PageViewer() {
 
   const renderError = () => {
     if (!loading && notFound) {
+      const createTarget = wikiPageCreateInputForBrowserRoute(pathname)
       return (
-        <Page404 allowCreate targetPath={getWikiTargetRoutePath(pathname)} />
+        <Page404
+          allowCreate
+          targetPath={createTarget.path}
+          targetKind={createTarget.kind}
+        />
       )
     }
     if (!loading && error) {
@@ -162,7 +179,11 @@ export default function PageViewer() {
         {page && !error && (
           <div className="page-viewer__body">
             <article className="page-viewer__content">
-              <MarkdownPreview content={page.content} path={page.path} />
+              <MarkdownPreview
+                content={page.content}
+                path={page.path}
+                pageKind={page.kind}
+              />
               <EmptySectionChildrenList page={page} />
             </article>
             <BacklinkInfo />

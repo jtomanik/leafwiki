@@ -18,6 +18,7 @@ type TaggedPage struct {
 	ID           string          `json:"id"`
 	Title        string          `json:"title"`
 	Path         string          `json:"path"`
+	Kind         tree.NodeKind   `json:"kind"`
 	Excerpt      string          `json:"excerpt,omitempty"`
 	Tags         []string        `json:"tags"`
 	CreatedAt    string          `json:"createdAt,omitempty"`
@@ -37,6 +38,7 @@ func ToTaggedPage(node *tree.PageNode, pageTags []string, excerpt string, userRe
 		ID:           node.ID,
 		Title:        node.Title,
 		Path:         BuildPathFromNode(node),
+		Kind:         node.Kind,
 		Excerpt:      excerpt,
 		Tags:         pageTags,
 		LastAuthorID: node.Metadata.LastAuthorID,

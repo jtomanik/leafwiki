@@ -586,8 +586,9 @@ func (t *TreeService) createNodeLocked(userID string, parentID *string, title st
 		}
 	}
 
-	// Check if a child with the same slug already exists
-	if t.findChildBySlugInParentLocked(parent, slug) != nil {
+	// Same-basename page and section twins are valid because they map to
+	// distinct filesystem entries (<slug>.md and <slug>/index.md).
+	if t.findChildBySlugAndKindInParentLocked(parent, slug, k) != nil {
 		return nil, ErrPageAlreadyExists
 	}
 
@@ -851,6 +852,48 @@ func (t *TreeService) findChildBySlugExactInParentLocked(parent *PageNode, slug 
 	return nil
 }
 
+func (t *TreeService) findChildBySlugAndKindInParentLocked(parent *PageNode, slug string, kind NodeKind) *PageNode {
+	if parent == nil {
+		return nil
+	}
+
+	for _, child := range parent.Children {
+		if child != nil && strings.EqualFold(child.Slug, slug) && child.Kind == kind {
+			return child
+		}
+	}
+
+	return nil
+}
+
+func (t *TreeService) findRouteSegmentInParentLocked(parent *PageNode, slug string) *PageNode {
+	if section := t.findChildBySlugAndKindInParentLocked(parent, slug, NodeKindSection); section != nil {
+		return section
+	}
+	return t.findChildBySlugInParentLocked(parent, slug)
+}
+
+func (t *TreeService) findRouteSegmentExactInParentLocked(parent *PageNode, slug string) *PageNode {
+	if section := t.findChildBySlugAndKindExactInParentLocked(parent, slug, NodeKindSection); section != nil {
+		return section
+	}
+	return t.findChildBySlugExactInParentLocked(parent, slug)
+}
+
+func (t *TreeService) findChildBySlugAndKindExactInParentLocked(parent *PageNode, slug string, kind NodeKind) *PageNode {
+	if parent == nil {
+		return nil
+	}
+
+	for _, child := range parent.Children {
+		if child != nil && child.Slug == slug && child.Kind == kind {
+			return child
+		}
+	}
+
+	return nil
+}
+
 // DeleteNode deletes a node from the tree
 func (t *TreeService) DeleteNode(userID string, id string, recursive bool, expectedVersion string) error {
 	err := t.withLockedTree(func() error {
@@ -945,7 +988,7 @@ func (t *TreeService) UpdateNode(userID string, id string, title string, slug st
 
 		// Slug must be unique under same parent (when changed)
 		if slug != node.Slug && node.Parent != nil {
-			existing := t.findChildBySlugInParentLocked(node.Parent, slug)
+			existing := t.findChildBySlugAndKindInParentLocked(node.Parent, slug, node.Kind)
 			if existing != nil && existing.ID != node.ID {
 				return ErrPageAlreadyExists
 			}
@@ -1048,6 +1091,30 @@ func (t *TreeService) GetTree() *PageNode {
 	defer t.mu.RUnlock()
 
 	return t.tree
+}
+
+// RootDir returns the configured filesystem root that backs Markdown content.
+func (t *TreeService) RootDir() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.rootDir
+}
+
+// ContentPathForNode returns the Markdown path backing a tree node, relative to
+// the configured root dir.
+func (t *TreeService) ContentPathForNode(node *PageNode) (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	contentPath, err := t.store.contentPathForNodeRead(node)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(t.rootDir, contentPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 // IsLoaded reports whether the tree has been loaded into memory.
@@ -1304,11 +1371,21 @@ func (t *TreeService) ResolvePermalinkTarget(id string) (*PermalinkTarget, error
 		ID:   node.ID,
 		Slug: node.Slug,
 		Path: strings.TrimPrefix(node.CalculatePath(), "/"),
+		Kind: node.Kind,
 	}, nil
 }
 
 // FindPageByRoutePath finds a page in the tree by its path.
 func (t *TreeService) FindPageByRoutePath(routePath string) (*Page, error) {
+	return t.findPageByRoutePath(routePath, "")
+}
+
+// FindPageByRoutePathAndKind finds a page in the tree by path and final node kind.
+func (t *TreeService) FindPageByRoutePathAndKind(routePath string, kind NodeKind) (*Page, error) {
+	return t.findPageByRoutePath(routePath, kind)
+}
+
+func (t *TreeService) findPageByRoutePath(routePath string, finalKind NodeKind) (*Page, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -1324,12 +1401,21 @@ func (t *TreeService) FindPageByRoutePath(routePath string) (*Page, error) {
 
 	parent := t.tree
 	var node *PageNode
-	for _, part := range routePart {
+	for index, part := range routePart {
 		if part == "" {
 			return nil, ErrPageNotFound
 		}
 
-		node = t.findChildBySlugExactInParentLocked(parent, part)
+		if index == len(routePart)-1 && finalKind != "" {
+			node = t.findChildBySlugAndKindExactInParentLocked(parent, part, finalKind)
+		} else if index < len(routePart)-1 {
+			node = t.findChildBySlugAndKindExactInParentLocked(parent, part, NodeKindSection)
+			if node == nil {
+				node = t.findChildBySlugExactInParentLocked(parent, part)
+			}
+		} else {
+			node = t.findRouteSegmentExactInParentLocked(parent, part)
+		}
 		if node == nil {
 			return nil, ErrPageNotFound
 		}
@@ -1354,13 +1440,22 @@ func (t *TreeService) LookupPagePath(p string) (*PathLookup, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return t.lookupPagePathLocked(p)
+	return t.lookupPagePathLocked(p, "")
+}
+
+// LookupPagePathForKind looks up a path while requiring the final segment to
+// match the requested kind when it exists.
+func (t *TreeService) LookupPagePathForKind(p string, finalKind NodeKind) (*PathLookup, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return t.lookupPagePathLocked(p, finalKind)
 }
 
 // lookupPagePathLocked looks up a path in the tree and returns a PathLookup struct
 // that contains information about the path and its segments and whether they exist.
 // Lock must be held by the caller.
-func (t *TreeService) lookupPagePathLocked(p string) (*PathLookup, error) {
+func (t *TreeService) lookupPagePathLocked(p string, finalKind NodeKind) (*PathLookup, error) {
 	if t.tree == nil {
 		return nil, ErrTreeNotLoaded
 	}
@@ -1416,7 +1511,12 @@ func (t *TreeService) lookupPagePathLocked(p string) (*PathLookup, error) {
 		lookup.Segments[i] = segment
 
 		// Check if the segment exists under the current parent.
-		e := t.findChildBySlugInParentLocked(parent, part)
+		var e *PageNode
+		if i == len(pathParts)-1 && finalKind != "" {
+			e = t.findChildBySlugAndKindInParentLocked(parent, part, finalKind)
+		} else {
+			e = t.findRouteSegmentInParentLocked(parent, part)
+		}
 		if e != nil {
 			// Segment exists
 			lookup.Segments[i].Exists = true
@@ -1467,26 +1567,36 @@ func (t *TreeService) EnsurePagePath(userID string, p string, targetTitle string
 	}
 
 	created := []*PageNode{}
+	requestedKind := NodeKindPage
+	if kind != nil {
+		requestedKind = *kind
+	}
 
-	lookup, err := t.lookupPagePathLocked(p)
+	lookup, err := t.lookupPagePathLocked(p, requestedKind)
 	if err != nil {
 		return nil, fmt.Errorf("could not lookup page path: %w", err)
 	}
 
 	// Path exists -> return existing
-	if lookup.Exists {
+	if lookup.Exists && len(lookup.Segments) > 0 {
 		last := lookup.Segments[len(lookup.Segments)-1]
-		page := t.getNodeByIDLocked(*last.ID)
-		if page == nil {
-			return nil, fmt.Errorf("could not find existing page by ID: %w", ErrPageNotFound)
+		if last.Kind != nil && *last.Kind == requestedKind {
+			page := t.getNodeByIDLocked(*last.ID)
+			if page == nil {
+				return nil, fmt.Errorf("could not find existing page by ID: %w", ErrPageNotFound)
+			}
+			return &EnsurePathResult{Exists: true, Page: page}, nil
 		}
-		return &EnsurePathResult{Exists: true, Page: page}, nil
+		if page := t.findNodeByRoutePathAndKindLocked(lookup.Path, requestedKind); page != nil {
+			return &EnsurePathResult{Exists: true, Page: page}, nil
+		}
 	}
 
 	// Create missing segments
 	var currentID *string // nil means root
 	for i, segment := range lookup.Segments {
-		if segment.Exists {
+		isFinalSegment := i == len(lookup.Segments)-1
+		if segment.Exists && !(isFinalSegment && segment.Kind != nil && *segment.Kind != requestedKind) {
 			currentID = segment.ID
 			continue
 		}
@@ -1499,8 +1609,8 @@ func (t *TreeService) EnsurePagePath(userID string, p string, targetTitle string
 
 		// Kind: intermediate segments are sections, last segment uses provided kind (or page/section default)
 		kindToUse := NodeKindSection
-		if i == len(lookup.Segments)-1 && kind != nil {
-			kindToUse = *kind
+		if isFinalSegment {
+			kindToUse = requestedKind
 		}
 
 		createdNode, err := t.createNodeLocked(userID, currentID, segTitle, segment.Slug, &kindToUse, createNodeOptions{})
@@ -1532,6 +1642,32 @@ func (t *TreeService) EnsurePagePath(userID string, p string, targetTitle string
 		Page:    page,
 		Created: created,
 	}, nil
+}
+
+func (t *TreeService) findNodeByRoutePathAndKindLocked(routePath string, finalKind NodeKind) *PageNode {
+	path := strings.Trim(strings.TrimSpace(routePath), "/")
+	if path == "" {
+		return nil
+	}
+
+	parts := strings.Split(strings.ReplaceAll(path, "//", "/"), "/")
+	parent := t.tree
+	for index, part := range parts {
+		if part == "" {
+			return nil
+		}
+		var node *PageNode
+		if index == len(parts)-1 {
+			node = t.findChildBySlugAndKindExactInParentLocked(parent, part, finalKind)
+		} else {
+			node = t.findRouteSegmentInParentLocked(parent, part)
+		}
+		if node == nil {
+			return nil
+		}
+		parent = node
+	}
+	return parent
 }
 
 // MoveNode moves a node to another parent (root if parentID is empty/"root")
@@ -1568,7 +1704,7 @@ func (t *TreeService) MoveNode(userID string, id string, parentID string, expect
 	}
 
 	// Same slug collision under new parent
-	if existing := t.findChildBySlugInParentLocked(newParent, node.Slug); existing != nil && existing.ID != node.ID {
+	if existing := t.findChildBySlugAndKindInParentLocked(newParent, node.Slug, node.Kind); existing != nil && existing.ID != node.ID {
 		return fmt.Errorf("child with the same slug already exists: %w", ErrPageAlreadyExists)
 	}
 

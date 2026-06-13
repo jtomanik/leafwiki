@@ -1,7 +1,12 @@
 import { TaggedPage } from '@/lib/api/tags'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildViewUrl } from '@/lib/routePath'
-import { normalizeWikiRoutePath } from '@/lib/wikiPath'
+import {
+  browserRoutePathForWikiNode,
+  getWikiTargetRoutePath,
+  markdownRouteLookupKind,
+  normalizeWikiRoutePath,
+} from '@/lib/wikiPath'
 import { MouseEvent, forwardRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import type { PageEditorState } from '../editor/pageEditorStore'
@@ -28,10 +33,14 @@ const TagsResultCard = forwardRef<HTMLDivElement, TagsResultCardProps>(
       (state: PageEditorState) => state.page?.id ?? state.initialPage?.id,
     )
     const currentViewPath = normalizeWikiRoutePath(
-      buildViewUrl(location.pathname),
+      getWikiTargetRoutePath(buildViewUrl(location.pathname)),
     )
+    const currentRouteKind =
+      markdownRouteLookupKind(location.pathname) ?? 'section'
     const resultPath = normalizeWikiRoutePath(`/${item.path}`)
-    const isRouteActive = currentViewPath === resultPath
+    const resultUrl = browserRoutePathForWikiNode(item.path, item.kind)
+    const isRouteActive =
+      currentViewPath === resultPath && currentRouteKind === item.kind
     const isEditorActive = currentEditorPageId === item.id
     const isActive = isRouteActive || isEditorActive || isSelected
     const displayPath = resultPath.split('/').join(' / ')
@@ -58,7 +67,7 @@ const TagsResultCard = forwardRef<HTMLDivElement, TagsResultCardProps>(
         } ${isRouteActive ? 'search-result-card--route-active' : ''}`.trim()}
       >
         <Link
-          to={`/${item.path}`}
+          to={resultUrl}
           state={createNavigationVisitState()}
           aria-current={isRouteActive ? 'page' : undefined}
           className="tags-result-card__link"
@@ -70,7 +79,9 @@ const TagsResultCard = forwardRef<HTMLDivElement, TagsResultCardProps>(
             {item.title}
           </div>
           <div className="search-result-card__meta">
-            <span className="search-result-card__badge">Page</span>
+            <span className="search-result-card__badge">
+              {item.kind === 'section' ? 'Section' : 'Page'}
+            </span>
           </div>
           {item.excerpt && (
             <div className="search-result-card__excerpt">{item.excerpt}</div>

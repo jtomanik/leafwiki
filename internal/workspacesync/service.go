@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
@@ -41,6 +42,8 @@ const (
 )
 
 const watcherBatchDebounce = 250 * time.Millisecond
+
+var canonicalMarkdownRewriteWriter = writeCanonicalMarkdownRewritesAtomically
 
 type Actor = gitrevisions.Actor
 
@@ -98,6 +101,7 @@ type SyncRequest struct {
 }
 
 type ValidationError struct {
+	Code     string `json:"code,omitempty"`
 	Path     string `json:"path"`
 	Message  string `json:"message"`
 	Severity string `json:"severity,omitempty"`
@@ -430,8 +434,22 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 		s.status.ValidationErrors = s.validationErrorsFromError(err)
 		return s.status, nil
 	}
-	if err := s.captureWritebacksLocked(ctx, commitReq, commit); err != nil {
+	migratedCanonicalLinks, rollbackCanonicalLinks, err := s.migrateCanonicalMarkdownLinksLockedWithRollback()
+	if err != nil {
 		s.status.LastError = err.Error()
+		return s.status, err
+	}
+	if migratedCanonicalLinks {
+		if err := s.tree.ReconstructTreeFromFS(); err != nil {
+			s.status.LastError = err.Error()
+			s.status.ValidationErrors = s.validationErrorsFromError(err)
+			s.rollbackCanonicalMarkdownMigrationLocked(rollbackCanonicalLinks)
+			return s.status, nil
+		}
+	}
+	if err := s.captureWritebacksLocked(ctx, commitReq, commit, !migratedCanonicalLinks); err != nil {
+		s.status.LastError = err.Error()
+		s.rollbackCanonicalMarkdownMigrationLocked(rollbackCanonicalLinks)
 		return s.status, err
 	}
 	if err := s.validateAndRunAfterSyncLocked(); err != nil {
@@ -439,6 +457,220 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 		return s.status, err
 	}
 	return s.status, nil
+}
+
+func (s *Service) migrateCanonicalMarkdownLinksLocked() (bool, error) {
+	changed, _, err := s.migrateCanonicalMarkdownLinksLockedWithRollback()
+	return changed, err
+}
+
+func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func() error, error) {
+	if strings.TrimSpace(s.rootDir) == "" {
+		return false, nil, nil
+	}
+	if info, err := os.Stat(s.rootDir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil, nil
+		}
+		return false, nil, err
+	} else if !info.IsDir() {
+		return false, nil, nil
+	}
+	index, err := markdownlinks.NewIndexFromRoot(s.rootDir)
+	if err != nil {
+		return false, nil, err
+	}
+	rewrites := make([]canonicalMarkdownRewrite, 0)
+	migrationIssues := make([]ValidationError, 0)
+	err = filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if filePath == s.rootDir {
+			return nil
+		}
+		if entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relPath, err := filepath.Rel(s.rootDir, filePath)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath)
+		if !gitrevisions.IsManagedMarkdownRelPath(relPath) {
+			return nil
+		}
+		raw, err := os.ReadFile(filePath)
+		if err != nil {
+			return err
+		}
+		result := index.RewriteMarkdown(relPath, string(raw))
+		migrationIssues = append(migrationIssues, canonicalMigrationValidationErrors(relPath, result.Issues)...)
+		if !result.Changed {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rewrites = append(rewrites, canonicalMarkdownRewrite{
+			Path:     filePath,
+			Original: raw,
+			Content:  []byte(result.Content),
+			Mode:     info.Mode().Perm(),
+		})
+		return nil
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	if len(migrationIssues) > 0 {
+		s.status.ValidationErrors = append(s.status.ValidationErrors, migrationIssues...)
+		if strings.TrimSpace(s.status.LastError) == "" {
+			s.status.LastError = migrationIssues[0].Message
+		}
+	}
+	if len(rewrites) == 0 {
+		return false, nil, nil
+	}
+	if err := canonicalMarkdownRewriteWriter(rewrites); err != nil {
+		return false, nil, err
+	}
+	return true, func() error {
+		return rollbackCanonicalMarkdownRewrites(rewrites)
+	}, nil
+}
+
+func canonicalMigrationValidationErrors(relPath string, issues []markdownlinks.Issue) []ValidationError {
+	if len(issues) == 0 {
+		return nil
+	}
+	out := make([]ValidationError, 0, len(issues))
+	for _, issue := range issues {
+		if issue.Code != "ambiguous_legacy_link" {
+			continue
+		}
+		out = append(out, ValidationError{
+			Code:     issue.Code,
+			Path:     tree.MarkdownPathToRoutePath(relPath),
+			Message:  fmt.Sprintf("ambiguous_legacy_link: %s is ambiguous during canonical Markdown link migration", issue.Destination),
+			Severity: "error",
+		})
+	}
+	return out
+}
+
+func (s *Service) rollbackCanonicalMarkdownMigrationLocked(rollback func() error) {
+	if rollback == nil {
+		return
+	}
+	previousErr := s.status.LastError
+	if err := rollback(); err != nil {
+		s.status.LastError = appendSyncError(previousErr, fmt.Sprintf("canonical migration rollback failed: %v", err))
+		return
+	}
+	if s.tree == nil {
+		return
+	}
+	if err := s.tree.ReconstructTreeFromFS(); err != nil {
+		s.status.LastError = appendSyncError(previousErr, fmt.Sprintf("reconstruct after canonical migration rollback failed: %v", err))
+		s.status.ValidationErrors = s.validationErrorsFromError(err)
+		return
+	}
+	s.status.LastError = previousErr
+	s.status.ValidationErrors = nil
+}
+
+func appendSyncError(primary string, secondary string) string {
+	if strings.TrimSpace(primary) == "" {
+		return secondary
+	}
+	if strings.TrimSpace(secondary) == "" {
+		return primary
+	}
+	return primary + "; " + secondary
+}
+
+type canonicalMarkdownRewrite struct {
+	Path     string
+	Original []byte
+	Content  []byte
+	Mode     os.FileMode
+}
+
+type preparedCanonicalMarkdownRewrite struct {
+	canonicalMarkdownRewrite
+	TempPath string
+}
+
+func writeCanonicalMarkdownRewritesAtomically(rewrites []canonicalMarkdownRewrite) error {
+	prepared := make([]preparedCanonicalMarkdownRewrite, 0, len(rewrites))
+	for _, rewrite := range rewrites {
+		prep, err := prepareCanonicalMarkdownRewrite(rewrite)
+		if err != nil {
+			cleanupPreparedCanonicalMarkdownRewrites(prepared)
+			return err
+		}
+		prepared = append(prepared, prep)
+	}
+
+	committed := make([]canonicalMarkdownRewrite, 0, len(prepared))
+	for _, prep := range prepared {
+		if err := os.Rename(prep.TempPath, prep.Path); err != nil {
+			cleanupPreparedCanonicalMarkdownRewrites(prepared[len(committed):])
+			rollbackErr := rollbackCanonicalMarkdownRewrites(committed)
+			if rollbackErr != nil {
+				return fmt.Errorf("write canonical markdown migration: %w; rollback failed: %v", err, rollbackErr)
+			}
+			return err
+		}
+		committed = append(committed, prep.canonicalMarkdownRewrite)
+	}
+	return nil
+}
+
+func prepareCanonicalMarkdownRewrite(rewrite canonicalMarkdownRewrite) (preparedCanonicalMarkdownRewrite, error) {
+	temp, err := os.CreateTemp(filepath.Dir(rewrite.Path), "."+filepath.Base(rewrite.Path)+".*.tmp")
+	if err != nil {
+		return preparedCanonicalMarkdownRewrite{}, err
+	}
+	tempPath := temp.Name()
+	if _, err := temp.Write(rewrite.Content); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+		return preparedCanonicalMarkdownRewrite{}, err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return preparedCanonicalMarkdownRewrite{}, err
+	}
+	if err := os.Chmod(tempPath, rewrite.Mode); err != nil {
+		_ = os.Remove(tempPath)
+		return preparedCanonicalMarkdownRewrite{}, err
+	}
+	return preparedCanonicalMarkdownRewrite{
+		canonicalMarkdownRewrite: rewrite,
+		TempPath:                 tempPath,
+	}, nil
+}
+
+func cleanupPreparedCanonicalMarkdownRewrites(prepared []preparedCanonicalMarkdownRewrite) {
+	for _, prep := range prepared {
+		_ = os.Remove(prep.TempPath)
+	}
+}
+
+func rollbackCanonicalMarkdownRewrites(rewrites []canonicalMarkdownRewrite) error {
+	for i := len(rewrites) - 1; i >= 0; i-- {
+		rewrite := rewrites[i]
+		if err := os.WriteFile(rewrite.Path, rewrite.Original, rewrite.Mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) recordChangedMarkdownPaths(paths []string) {
@@ -622,7 +854,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID strin
 		Reason: gitrevisions.ReasonRestore,
 		Source: source,
 		Actor:  actor,
-	}, commit); err != nil {
+	}, commit, true); err != nil {
 		s.status.LastError = err.Error()
 		return s.status, err
 	}
@@ -721,7 +953,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		Reason: gitrevisions.ReasonRestore,
 		Source: source,
 		Actor:  actor,
-	}, commit); err != nil {
+	}, commit, true); err != nil {
 		s.status.LastError = err.Error()
 		return s.status, err
 	}
@@ -732,7 +964,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 	return s.status, nil
 }
 
-func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.CommitRequest, commit *gitrevisions.Commit) error {
+func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.CommitRequest, commit *gitrevisions.Commit, amendCreatedCommit bool) error {
 	if commit == nil {
 		return nil
 	}
@@ -744,7 +976,7 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 	)
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
-	if commit.Created {
+	if commit.Created && amendCreatedCommit {
 		writebackCommit, err = s.store.Amend(ctx, req)
 	} else {
 		writebackCommit, err = s.store.Capture(ctx, req)
@@ -761,10 +993,43 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 
 func (s *Service) validateAndRunAfterSyncLocked() error {
 	if validationErrors := s.validateWorkspaceMarkdownFiles(); len(validationErrors) > 0 {
-		s.status.LastError = validationErrors[0].Message
-		s.status.ValidationErrors = validationErrors
+		s.status.ValidationErrors = mergeValidationErrors(s.status.ValidationErrors, validationErrors)
+		if strings.TrimSpace(s.status.LastError) == "" {
+			s.status.LastError = s.status.ValidationErrors[0].Message
+		}
 	}
 	return s.runAfterSyncLocked()
+}
+
+func mergeValidationErrors(existing []ValidationError, next []ValidationError) []ValidationError {
+	if len(existing) == 0 {
+		return append([]ValidationError(nil), next...)
+	}
+	if len(next) == 0 {
+		return append([]ValidationError(nil), existing...)
+	}
+	merged := make([]ValidationError, 0, len(existing)+len(next))
+	seen := map[string]struct{}{}
+	appendUnique := func(validationError ValidationError) {
+		key := strings.Join([]string{
+			validationError.Code,
+			validationError.Path,
+			validationError.Message,
+			validationError.Severity,
+		}, "\x00")
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, validationError)
+	}
+	for _, validationError := range existing {
+		appendUnique(validationError)
+	}
+	for _, validationError := range next {
+		appendUnique(validationError)
+	}
+	return merged
 }
 
 func (s *Service) runAfterSyncLocked() error {
@@ -848,17 +1113,24 @@ func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
 	if err != nil {
 		return preferred
 	}
+	readmeFallback := ""
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		if !strings.EqualFold(entry.Name(), base) {
+			if page.Kind == tree.NodeKindSection && entry.Name() == "README.md" {
+				readmeFallback = filepath.ToSlash(filepath.Join(filepath.ToSlash(dir), entry.Name()))
+			}
 			continue
 		}
 		candidate := filepath.ToSlash(filepath.Join(filepath.ToSlash(dir), entry.Name()))
 		if gitrevisions.IsManagedMarkdownRelPath(candidate) {
 			return candidate
 		}
+	}
+	if readmeFallback != "" && gitrevisions.IsManagedMarkdownRelPath(readmeFallback) {
+		return readmeFallback
 	}
 	return preferred
 }
@@ -964,10 +1236,18 @@ func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath
 }
 
 func revisionRoutePathSlugAndKind(relPath string, page *tree.Page) (string, string, tree.NodeKind) {
+	relPath = filepath.ToSlash(relPath)
 	path := tree.MarkdownPathToRoutePath(relPath)
 	kind := tree.NodeKindPage
-	if strings.EqualFold(filepath.Base(filepath.ToSlash(relPath)), "index.md") {
+	base := filepath.Base(relPath)
+	dir := filepath.ToSlash(filepath.Dir(relPath))
+	if dir == "." {
+		dir = ""
+	}
+	dir = strings.Trim(dir, "/")
+	if strings.EqualFold(base, "index.md") || isRevisionReadmeFallbackSection(relPath, page, dir) {
 		kind = tree.NodeKindSection
+		path = dir
 	}
 	slug := ""
 	if path != "" {
@@ -977,6 +1257,16 @@ func revisionRoutePathSlugAndKind(relPath string, page *tree.Page) (string, stri
 		slug = page.Slug
 	}
 	return path, slug, kind
+}
+
+func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string) bool {
+	if filepath.Base(filepath.ToSlash(relPath)) != "README.md" {
+		return false
+	}
+	if page == nil || page.PageNode == nil || page.Kind != tree.NodeKindSection {
+		return false
+	}
+	return strings.Trim(page.CalculatePath(), "/") == dir
 }
 
 func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
@@ -990,6 +1280,7 @@ func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
 	validationErrors := make([]ValidationError, 0, len(result.Issues))
 	for _, issue := range result.Issues {
 		validationErrors = append(validationErrors, ValidationError{
+			Code:     issue.Code,
 			Path:     issue.Path,
 			Message:  issue.Message,
 			Severity: issue.Severity,
@@ -1005,11 +1296,11 @@ func (s *Service) validationErrorsFromError(err error) []ValidationError {
 	message := err.Error()
 	paths := markdownPathsInError(s.rootDir, message)
 	if len(paths) == 0 {
-		return []ValidationError{{Path: "workspace", Message: message, Severity: "error"}}
+		return []ValidationError{{Code: "workspace_sync_error", Path: "workspace", Message: message, Severity: "error"}}
 	}
 	errors := make([]ValidationError, 0, len(paths))
 	for _, path := range paths {
-		errors = append(errors, ValidationError{Path: path, Message: message, Severity: "error"})
+		errors = append(errors, ValidationError{Code: "workspace_sync_error", Path: path, Message: message, Severity: "error"})
 	}
 	return errors
 }

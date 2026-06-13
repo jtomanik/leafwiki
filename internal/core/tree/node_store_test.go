@@ -404,24 +404,54 @@ func TestNodeStore_CreatePage_SetsLeafWikiTitleInitially(t *testing.T) {
 	}
 }
 
-func TestNodeStore_CreatePage_RejectsCollision_FileOrDir(t *testing.T) {
+func TestNodeStore_CreatePage_RejectsExistingPageFileButAllowsSiblingSectionDirectory(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
 
 	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 
-	// collision as file
 	mustWriteFile(t, filepath.Join(tmp, "root", "dup.md"), "x", 0o644)
 	page := &PageNode{ID: "p1", Slug: "dup", Title: "Dup", Kind: NodeKindPage, Parent: root}
 	if err := store.CreatePage(root, page); err == nil {
 		t.Fatalf("expected PageAlreadyExistsError for existing file")
 	}
 
-	// collision as dir
-	mustMkdir(t, filepath.Join(tmp, "root", "dupdir"))
-	page2 := &PageNode{ID: "p2", Slug: "dupdir", Title: "DupDir", Kind: NodeKindPage, Parent: root}
-	if err := store.CreatePage(root, page2); err == nil {
-		t.Fatalf("expected PageAlreadyExistsError for existing dir")
+	mustMkdir(t, filepath.Join(tmp, "root", "sync"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "sync", "index.md"), "# Section", 0o644)
+	page2 := &PageNode{ID: "p2", Slug: "sync", Title: "Sync Page", Kind: NodeKindPage, Parent: root}
+	if err := store.CreatePage(root, page2); err != nil {
+		t.Fatalf("CreatePage should allow sibling section directory with same basename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "root", "sync.md")); err != nil {
+		t.Fatalf("expected page file next to section directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md")); err != nil {
+		t.Fatalf("expected sibling section index to remain: %v", err)
+	}
+}
+
+func TestNodeStore_CreateSection_RejectsExistingSectionDirectoryButAllowsSiblingPageFile(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+
+	mustMkdir(t, filepath.Join(tmp, "root", "dup"))
+	section := &PageNode{ID: "s1", Slug: "dup", Title: "Dup", Kind: NodeKindSection, Parent: root}
+	if err := store.CreateSection(root, section); err == nil {
+		t.Fatalf("expected PageAlreadyExistsError for existing section directory")
+	}
+
+	mustWriteFile(t, filepath.Join(tmp, "root", "sync.md"), "# Page", 0o644)
+	section2 := &PageNode{ID: "s2", Slug: "sync", Title: "Sync Section", Kind: NodeKindSection, Parent: root}
+	if err := store.CreateSection(root, section2); err != nil {
+		t.Fatalf("CreateSection should allow sibling page file with same basename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "root", "sync.md")); err != nil {
+		t.Fatalf("expected sibling page file to remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md")); err != nil {
+		t.Fatalf("expected section index next to page file: %v", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import { deferStateUpdate } from '@/lib/deferState'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { DIALOG_PAGE_QUICK_SWITCHER } from '@/lib/registries'
 import { cn } from '@/lib/utils'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import { File, FolderTree } from 'lucide-react'
@@ -75,10 +76,12 @@ export function PageQuickSwitcherDialog() {
     })
   }, [clampedActiveIndex, isOpen, results])
 
-  const openResult = (path: string) => {
+  const openResult = (path: string, kind: 'page' | 'section') => {
     queueMicrotask(() => {
-      openAncestorsForPath(path)
-      navigate(`/${path}`, { state: createNavigationVisitState() })
+      openAncestorsForPath(path, kind)
+      navigate(browserRoutePathForWikiNode(path, kind), {
+        state: createNavigationVisitState(),
+      })
       closeDialog()
     })
   }
@@ -142,7 +145,7 @@ export function PageQuickSwitcherDialog() {
                 if (!activeItem) return
 
                 e.preventDefault()
-                openResult(activeItem.path)
+                openResult(activeItem.path, activeItem.kind)
               }
             }}
           />
@@ -186,7 +189,7 @@ export function PageQuickSwitcherDialog() {
                           setActiveIndex(index)
                         })
                       }
-                      onClick={() => openResult(item.path)}
+                      onClick={() => openResult(item.path, item.kind)}
                     >
                       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                       <span className="min-w-0 flex-1">

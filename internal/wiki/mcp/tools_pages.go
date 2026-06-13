@@ -20,9 +20,9 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return treeOutput{}, nil
 		}
 		if in.Depth != nil {
-			return treeOutput{Tree: dto.ToAPINodeWithDepth(root, "", r.userResolver, *in.Depth)}, nil
+			return treeOutput{Tree: dto.ToAPINodeWithContentPathsAndDepth(root, "", r.userResolver, r.treeService.ContentPathForNode, *in.Depth)}, nil
 		}
-		return treeOutput{Tree: dto.ToAPINode(root, "", r.userResolver)}, nil
+		return treeOutput{Tree: dto.ToAPINodeWithContentPaths(root, "", r.userResolver, r.treeService.ContentPathForNode)}, nil
 	})
 
 	addTypedTool[pageIDInput, pageOutput](server, toolGetPage, func(ctx context.Context, in pageIDInput) (pageOutput, error) {
@@ -37,12 +37,8 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		return r.pageOutputWithLinkStatus(ctx, out.Page, 0)
 	})
 
-	addTypedTool[pathInput, pageOutput](server, toolGetPageByPath, func(ctx context.Context, in pathInput) (pageOutput, error) {
-		routePath, err := wikipages.ValidatePageRoutePath(normalizeToolRoutePath(in.Path))
-		if err != nil {
-			return pageOutput{}, err
-		}
-		out, err := r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath})
+	addTypedTool[pagePathInput, pageOutput](server, toolGetPageByPath, func(ctx context.Context, in pagePathInput) (pageOutput, error) {
+		out, err := r.findToolPageByInputPath(ctx, in.Path, in.Kind)
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -54,7 +50,15 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, lookupPathOutput](server, toolLookupPath, func(ctx context.Context, in pathInput) (lookupPathOutput, error) {
-		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: normalizeToolRoutePath(in.Path)})
+		kind := tree.NodeKind("")
+		if strings.TrimSpace(in.Kind) != "" {
+			validKind, err := wikipages.ValidatePageKindString(strings.TrimSpace(in.Kind))
+			if err != nil {
+				return lookupPathOutput{}, err
+			}
+			kind = validKind
+		}
+		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: normalizeToolRoutePath(in.Path), Kind: kind})
 		if err != nil {
 			return lookupPathOutput{}, err
 		}
@@ -229,6 +233,35 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
 	})
+}
+
+func (r *Routes) findToolPageByInputPath(ctx context.Context, rawPath string, rawKind string) (*wikipages.FindByPathOutput, error) {
+	if out, handled, err := wikipages.FindReadmeMarkdownPathFallback(rawPath, rawKind, wikipages.ReadmeMarkdownPathFallbackLookup{
+		RootDir: r.treeService.RootDir(),
+		FindByPath: func(input wikipages.FindByPathInput) (*wikipages.FindByPathOutput, error) {
+			return r.findByPath.Execute(ctx, input)
+		},
+		RootPage: func() (*tree.Page, error) {
+			return r.treeService.GetPage("root")
+		},
+	}); err != nil || handled {
+		return out, err
+	}
+	routePath, kind, err := normalizeToolPagePathInput(rawPath, rawKind)
+	if err != nil {
+		return nil, err
+	}
+	return r.findToolPageByPath(ctx, routePath, kind)
+}
+
+func (r *Routes) findToolPageByPath(ctx context.Context, routePath string, kind tree.NodeKind) (*wikipages.FindByPathOutput, error) {
+	if kind != "" {
+		return r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath, Kind: kind})
+	}
+	if out, err := r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath, Kind: tree.NodeKindSection}); err == nil {
+		return out, nil
+	}
+	return r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath})
 }
 
 func (r *Routes) pageOutputWithLinkStatus(ctx context.Context, page *tree.Page, depth int) (pageOutput, error) {

@@ -9,6 +9,7 @@ export type TaggedPage = {
   id: string
   title: string
   path: string
+  kind: 'page' | 'section'
   excerpt?: string
   tags: string[]
   updatedAt?: string

@@ -85,13 +85,25 @@ func toolInputSchema(name string) *jsonschema.Schema {
 			"includeLinkCounts":     booleanSchema(),
 			"includeContentPreview": booleanSchema(),
 		}, nil)
+	case ToolLookupPath:
+		kindSchema := stringSchema()
+		kindSchema.Description = "Optional final segment kind for same-route twins. Allowed values: page or section."
+		return objectSchema(map[string]*jsonschema.Schema{
+			"path": stringSchema(),
+			"kind": kindSchema,
+		}, []string{"path"})
 	case ToolValidatePage:
-		return pagePathSchemaWith(nil, nil)
+		return objectSchema(map[string]*jsonschema.Schema{
+			"pageId": stringSchema(),
+			"path":   stringSchema(),
+			"kind":   stringSchema(),
+		}, nil)
 	case ToolValidateContent:
 		return objectSchema(map[string]*jsonschema.Schema{
 			"path":           stringSchema(),
 			"content":        stringSchema(),
 			"existingPageId": stringSchema(),
+			"kind":           stringSchema(),
 		}, []string{"path", "content"})
 	case ToolValidateWiki:
 		return objectSchema(map[string]*jsonschema.Schema{
@@ -226,8 +238,9 @@ func toolOutputSchema(name string) *jsonschema.Schema {
 			"presenceStatus":              objectValueSchema(),
 			"tree":                        objectValueSchema(),
 			"recommendedTools":            arrayValueSchema(),
+			"canonicalLinkExamples":       arrayValueSchema(),
 			"warnings":                    arrayValueSchema(),
-		}, []string{"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools"})
+		}, []string{"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools", "canonicalLinkExamples"})
 	case ToolRefresh:
 		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
 			"syncStatus":         objectValueSchema(),

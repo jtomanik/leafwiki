@@ -40,6 +40,7 @@ func (uc *GetPageUseCase) Execute(_ context.Context, in GetPageInput) (*GetPageO
 // FindByPathInput is the input for FindByPathUseCase.
 type FindByPathInput struct {
 	RoutePath string
+	Kind      tree.NodeKind
 }
 
 // FindByPathOutput is the output of FindByPathUseCase.
@@ -59,7 +60,15 @@ func NewFindByPathUseCase(t *tree.TreeService) *FindByPathUseCase {
 
 // Execute finds the page matching the given route path.
 func (uc *FindByPathUseCase) Execute(_ context.Context, in FindByPathInput) (*FindByPathOutput, error) {
-	page, err := uc.tree.FindPageByRoutePath(in.RoutePath)
+	var (
+		page *tree.Page
+		err  error
+	)
+	if in.Kind == "" {
+		page, err = uc.tree.FindPageByRoutePath(in.RoutePath)
+	} else {
+		page, err = uc.tree.FindPageByRoutePathAndKind(in.RoutePath, in.Kind)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +80,7 @@ func (uc *FindByPathUseCase) Execute(_ context.Context, in FindByPathInput) (*Fi
 // LookupPagePathInput is the input for LookupPagePathUseCase.
 type LookupPagePathInput struct {
 	Path string
+	Kind tree.NodeKind
 }
 
 // LookupPagePathOutput is the output of LookupPagePathUseCase.
@@ -90,7 +100,15 @@ func NewLookupPagePathUseCase(t *tree.TreeService) *LookupPagePathUseCase {
 
 // Execute looks up the path and returns segment metadata.
 func (uc *LookupPagePathUseCase) Execute(_ context.Context, in LookupPagePathInput) (*LookupPagePathOutput, error) {
-	lookup, err := uc.tree.LookupPagePath(in.Path)
+	var (
+		lookup *tree.PathLookup
+		err    error
+	)
+	if in.Kind == "" {
+		lookup, err = uc.tree.LookupPagePath(in.Path)
+	} else {
+		lookup, err = uc.tree.LookupPagePathForKind(in.Path, in.Kind)
+	}
 	if err != nil {
 		return nil, err
 	}

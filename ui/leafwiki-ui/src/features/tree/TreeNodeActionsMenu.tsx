@@ -19,8 +19,11 @@ import {
   DIALOG_MOVE_PAGE,
   DIALOG_SORT_PAGES,
 } from '@/lib/registries'
-import { stripBasePath } from '@/lib/routePath'
-import { getDeleteRedirectRoutePath } from '@/lib/wikiPath'
+import { buildEditUrl, stripBasePath } from '@/lib/routePath'
+import {
+  browserRoutePathForWikiNode,
+  getDeleteRedirectRoutePath,
+} from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useViewerStore } from '@/features/viewer/viewer'
 import { useTreeStore } from '@/stores/tree'
@@ -78,7 +81,7 @@ export default function TreeNodeActionsMenu({
           if (viewerPage?.id === nodeId && viewerPage.path) {
             useViewerStore
               .getState()
-              .loadPageData(viewerPage.path)
+              .loadPageData(viewerPage.path, undefined, viewerPage.kind)
               .catch(console.error)
           }
           toast.error(
@@ -138,7 +141,9 @@ export default function TreeNodeActionsMenu({
         <DropdownMenuItem
           className="cursor-pointer"
           onClick={() => {
-            navigate(`/e/${node.path}`)
+            navigate(
+              buildEditUrl(browserRoutePathForWikiNode(node.path, node.kind)),
+            )
           }}
         >
           <Pencil size={18} className="tree-node__action-icon" /> Edit{' '}
@@ -205,6 +210,7 @@ export default function TreeNodeActionsMenu({
               redirectTo: getDeleteRedirectRoutePath(
                 currentRouterPath,
                 node.path,
+                node.kind,
               ),
             })
           }}

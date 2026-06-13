@@ -3,7 +3,11 @@ import { mapApiError, asApiLocalizedError } from '@/lib/api/errors'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildBrowserEditUrl } from '@/lib/routePath'
 import { DIALOG_LINK_INSERT } from '@/lib/registries'
-import { getWikiTargetRoutePath } from '@/lib/wikiPath'
+import {
+  browserRoutePathForWikiNode,
+  getWikiTargetRoutePath,
+  wikiPageLookupInputForBrowserRoute,
+} from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useEffect, useRef } from 'react'
@@ -56,8 +60,9 @@ export default function PageEditor() {
   // Load page data when path changes
   useEffect(() => {
     if (!path) return
-    loadPageData(path)
-  }, [path, loadPageData])
+    const lookup = wikiPageLookupInputForBrowserRoute(pathname)
+    loadPageData(lookup.path, lookup.fallbackPath, lookup.kind)
+  }, [path, pathname, loadPageData])
 
   // Open node
   useEffect(() => {
@@ -73,7 +78,9 @@ export default function PageEditor() {
           window.history.replaceState(
             null,
             '',
-            buildBrowserEditUrl(`/${page?.path}`),
+            buildBrowserEditUrl(
+              browserRoutePathForWikiNode(page.path, page.kind),
+            ),
           )
           toast.success('Page saved successfully')
         }
@@ -98,7 +105,9 @@ export default function PageEditor() {
                       window.history.replaceState(
                         null,
                         '',
-                        buildBrowserEditUrl(`/${page.path}`),
+                        buildBrowserEditUrl(
+                          browserRoutePathForWikiNode(page.path, page.kind),
+                        ),
                       )
                       toast.success('Page saved successfully')
                     }
@@ -141,9 +150,12 @@ export default function PageEditor() {
     }
 
     if (currentPage?.path) {
-      navigate(`/${currentPage.path}`, {
-        state: createNavigationVisitState(),
-      })
+      navigate(
+        browserRoutePathForWikiNode(currentPage.path, currentPage.kind),
+        {
+          state: createNavigationVisitState(),
+        },
+      )
     } else {
       navigate('/', { state: createNavigationVisitState() })
     }

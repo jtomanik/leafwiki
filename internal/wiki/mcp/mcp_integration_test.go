@@ -34,6 +34,9 @@ import (
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 )
 
+// Canonical Markdown links plan scenarios covered by tests in this file:
+// - MCP agent context returns canonical examples
+
 var baseToolNames = wikimcp.BaseToolNames()
 
 var mcpOnlyToolNames = map[string]struct{}{
@@ -50,8 +53,8 @@ var mcpOnlyToolNames = map[string]struct{}{
 var baseToolInputProperties = map[string][]string{
 	"wiki_get_context":           {"sinceToken", "syncMode", "treeDepth", "recentChangesLimit"},
 	"wiki_get_subtree":           {"pageId", "path", "depth", "includeMetadata", "includeLinkCounts", "includeContentPreview"},
-	"wiki_validate_page":         {"pageId", "path"},
-	"wiki_validate_content":      {"path", "content", "existingPageId"},
+	"wiki_validate_page":         {"kind", "pageId", "path"},
+	"wiki_validate_content":      {"path", "content", "existingPageId", "kind"},
 	"wiki_validate_wiki":         {"includeWarnings"},
 	"wiki_update_page_metadata":  {"pageId", "path", "version", "setTags", "addTags", "removeTags", "setProperties", "removeProperties", "includePage", "includeValidation", "includeLinkStatus"},
 	"wiki_replace_page_section":  {"pageId", "path", "version", "headingPath", "occurrence", "content", "includePage", "includeValidation", "includeLinkStatus"},
@@ -59,8 +62,8 @@ var baseToolInputProperties = map[string][]string{
 	"wiki_get_current_user":      {},
 	"wiki_get_tree":              {"depth"},
 	"wiki_get_page":              {"id", "pageId"},
-	"wiki_get_page_by_path":      {"path"},
-	"wiki_lookup_path":           {"path"},
+	"wiki_get_page_by_path":      {"kind", "path"},
+	"wiki_lookup_path":           {"path", "kind"},
 	"wiki_resolve_permalink":     {"id", "pageId"},
 	"wiki_suggest_slug":          {"parentId", "currentId", "title"},
 	"wiki_create_page":           {"parentId", "title", "slug", "kind"},
@@ -293,7 +296,7 @@ var featureToolInputRequiredProperties = map[string][]string{
 }
 
 var baseToolOutputProperties = map[string][]string{
-	"wiki_get_context":           {"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools", "warnings"},
+	"wiki_get_context":           {"contextToken", "previousContextToken", "changesSincePreviousContext", "contextHistory", "user", "config", "server", "syncStatus", "validation", "recentChanges", "activeSessions", "presenceStatus", "tree", "recommendedTools", "canonicalLinkExamples", "warnings"},
 	"wiki_get_subtree":           {"root", "breadcrumbs", "depth", "truncated"},
 	"wiki_validate_page":         {"ok", "summary", "issues"},
 	"wiki_validate_content":      {"ok", "summary", "issues"},
@@ -608,6 +611,7 @@ func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
 	}
 }
 
+// - MCP agent context returns canonical examples
 func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled:        true,
@@ -646,6 +650,7 @@ func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 		"presenceStatus",
 		"tree",
 		"recommendedTools",
+		"canonicalLinkExamples",
 	} {
 		if _, ok := out[key]; !ok {
 			t.Fatalf("wiki_get_context missing %s in %#v", key, out)
@@ -683,6 +688,24 @@ func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 	tree := nestedMap(t, out, "tree")
 	if tree["id"] == "" || tree["children"] == nil {
 		t.Fatalf("tree = %#v, want compact root node", tree)
+	}
+	examples, ok := out["canonicalLinkExamples"].([]any)
+	if !ok || len(examples) == 0 {
+		t.Fatalf("canonicalLinkExamples = %#v, want non-empty array", out["canonicalLinkExamples"])
+	}
+	exampleText := ""
+	for _, example := range examples {
+		text, ok := example.(string)
+		if !ok {
+			t.Fatalf("canonicalLinkExamples contains non-string %T: %#v", example, examples)
+		}
+		exampleText += "\n" + text
+	}
+	if !strings.Contains(exampleText, "](/docs/guide.md)") {
+		t.Fatalf("canonicalLinkExamples = %q, want .md page link example", exampleText)
+	}
+	if !strings.Contains(exampleText, "](/docs)") {
+		t.Fatalf("canonicalLinkExamples = %q, want extensionless section link example", exampleText)
 	}
 }
 
@@ -1207,7 +1230,7 @@ func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t
 	if errors, ok := summary["errors"].(float64); !ok || errors == 0 {
 		t.Fatalf("wiki_refresh validation summary = %#v, want validation errors for duplicate IDs", summary)
 	}
-	assertValidationIssueCodes(t, validation, []string{"workspace_sync_validation"})
+	assertValidationIssueCodes(t, validation, []string{"workspace_sync_error"})
 
 	currentUser := callToolStructured(t, session, "wiki_get_current_user", nil)
 	user := nestedMap(t, currentUser, "user")
@@ -1302,7 +1325,7 @@ func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
 		"version": stringField(t, childPage, "version"),
 		"title":   "Reference",
 		"slug":    "reference",
-		"content": "Reference content with [Target](/target).",
+		"content": "Reference content with [Target](/target.md).",
 	})
 
 	out := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
@@ -1416,7 +1439,7 @@ func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
 		"slug":    "link-source",
 		"content": "[Missing](/missing-target)",
 	})
-	if err := os.WriteFile(filepath.Join(rootDir, "link-source.md"), []byte("---\nleafwiki_id: "+stringField(t, page, "id")+"\nleafwiki_title: Link Source\n---\n# Link Source\n\n[Fixed](/fixed-target)\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "link-source.md"), []byte("---\nleafwiki_id: "+stringField(t, page, "id")+"\nleafwiki_title: Link Source\n---\n# Link Source\n\n[Fixed](/fixed-target.md)\n"), 0o644); err != nil {
 		t.Fatalf("write fixed source: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(rootDir, "fixed-target.md"), []byte("---\nleafwiki_id: fixed-target\nleafwiki_title: Fixed Target\n---\n# Fixed Target\n"), 0o644); err != nil {
@@ -1515,6 +1538,96 @@ func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) 
 	missingDraft := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
 	assertErrorContainsAny(t, "wiki_validate_content does not write", missingDraft, "not found", "page_not_found")
 
+	canonicalPageLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "draft-canonical",
+		"content": "[Valid](/valid-page.md)\n",
+	})
+	if canonicalPageLink["ok"] != true {
+		t.Fatalf("wiki_validate_content canonical page link = %#v, want ok", canonicalPageLink)
+	}
+	canonicalPagePath := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "/valid-page.md",
+		"content": fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Valid Page\n---\n[Valid](/valid-page.md)\n", stringField(t, created, "id")),
+	})
+	if canonicalPagePath["ok"] != true {
+		t.Fatalf("wiki_validate_content canonical page path = %#v, want ok", canonicalPagePath)
+	}
+	rootSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "draft-root-link",
+		"content": "[Root](/)\n",
+	})
+	if rootSectionLink["ok"] != true {
+		t.Fatalf("wiki_validate_content root section link = %#v, want ok", rootSectionLink)
+	}
+	sectionTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Validation Section",
+		"slug":  "validation-section",
+		"kind":  "section",
+	}), "page")
+	sectionChildTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"parentId": stringField(t, sectionTarget, "id"),
+		"title":    "Validation Section Child",
+		"slug":     "child",
+		"kind":     "page",
+	}), "page")
+	relativeSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"existingPageId": stringField(t, sectionTarget, "id"),
+		"path":           "validation-section",
+		"content":        "[Child](./child.md)\n",
+	})
+	if relativeSectionLink["ok"] != true {
+		t.Fatalf("wiki_validate_content section-relative child link = %#v, want ok", relativeSectionLink)
+	}
+	draftSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "validation-section",
+		"kind":    "section",
+		"content": "[Child](./child.md)\n",
+	})
+	if draftSectionLink["ok"] != true {
+		t.Fatalf("wiki_validate_content draft section-relative child link = %#v, want ok", draftSectionLink)
+	}
+	omittedKindExistingSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "validation-section",
+		"content": "[Child](./child.md)\n",
+	})
+	if omittedKindExistingSectionLink["ok"] != true {
+		t.Fatalf("wiki_validate_content omitted-kind existing section link = %#v, want ok", omittedKindExistingSectionLink)
+	}
+	pageTwin := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Validation Twin Page",
+		"slug":  "validation-twin",
+		"kind":  "page",
+	}), "page")
+	sectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "Validation Twin Section",
+		"slug":  "validation-twin",
+		"kind":  "section",
+	}), "page")
+	sectionTwinChild := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"parentId": stringField(t, sectionTwin, "id"),
+		"title":    "Validation Twin Child",
+		"slug":     "child",
+		"kind":     "page",
+	}), "page")
+	omittedKindExistingSectionTwinLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "validation-twin",
+		"content": "[Child](./child.md)\n",
+	})
+	if omittedKindExistingSectionTwinLink["ok"] != true {
+		t.Fatalf("wiki_validate_content omitted-kind same-basename section link = %#v, want ok", omittedKindExistingSectionTwinLink)
+	}
+	_ = pageTwin
+	_ = sectionTwinChild
+	sectionMdLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "draft-section-md",
+		"content": "[Section as md](/validation-section.md)\n",
+	})
+	if sectionMdLink["ok"] != false {
+		t.Fatalf("wiki_validate_content section .md link = %#v, want broken link", sectionMdLink)
+	}
+	assertValidationIssueCodes(t, sectionMdLink, []string{"broken_link"})
+	_ = sectionChildTarget
+
 	invalid := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "broken",
 		"content": "---\nleafwiki_title: [unterminated\n---\n# Broken\n",
@@ -1569,6 +1682,237 @@ func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) 
 	assertValidationIssueCodes(t, pathConflict, []string{"path_conflict"})
 }
 
+func TestLocalMCPPathToolsResolveCanonicalSameBasenameTwins(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	rootDir := w.GetRootDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755); err != nil {
+		t.Fatalf("mkdir same-basename fixture: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "section-only"), 0o755); err != nil {
+		t.Fatalf("mkdir section-only fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "sync.md"), []byte(`---
+leafwiki_id: mcp-sync-page
+leafwiki_title: MCP Sync Page
+---
+# MCP Sync Page
+`), 0o644); err != nil {
+		t.Fatalf("write page twin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "sync", "index.md"), []byte(`---
+leafwiki_id: mcp-sync-section
+leafwiki_title: MCP Sync Section
+---
+# MCP Sync Section
+`), 0o644); err != nil {
+		t.Fatalf("write section twin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "section-only", "index.md"), []byte(`---
+leafwiki_id: mcp-section-only
+leafwiki_title: MCP Section Only
+---
+# MCP Section Only
+`), 0o644); err != nil {
+		t.Fatalf("write section-only fixture: %v", err)
+	}
+	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+
+	pageByMarkdownPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/sync.md",
+	}), "page")
+	if stringField(t, pageByMarkdownPath, "id") != "mcp-sync-page" || stringField(t, pageByMarkdownPath, "kind") != "page" {
+		t.Fatalf("wiki_get_page_by_path /docs/sync.md = %#v, want page twin", pageByMarkdownPath)
+	}
+
+	sectionByCanonicalPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/sync",
+	}), "page")
+	if stringField(t, sectionByCanonicalPath, "id") != "mcp-sync-section" || stringField(t, sectionByCanonicalPath, "kind") != "section" {
+		t.Fatalf("wiki_get_page_by_path /docs/sync = %#v, want section twin", sectionByCanonicalPath)
+	}
+
+	pageSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path": "/docs/sync.md",
+	}), "root")
+	if stringField(t, pageSubtree, "id") != "mcp-sync-page" || stringField(t, pageSubtree, "kind") != "page" {
+		t.Fatalf("wiki_get_subtree /docs/sync.md = %#v, want page twin", pageSubtree)
+	}
+
+	sectionSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path": "/docs/sync",
+	}), "root")
+	if stringField(t, sectionSubtree, "id") != "mcp-sync-section" || stringField(t, sectionSubtree, "kind") != "section" {
+		t.Fatalf("wiki_get_subtree /docs/sync = %#v, want section twin", sectionSubtree)
+	}
+
+	pageValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
+		"path": "/docs/sync.md",
+	})
+	if pageValidation["ok"] != true {
+		t.Fatalf("wiki_validate_page /docs/sync.md = %#v, want page twin ok", pageValidation)
+	}
+
+	sectionValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
+		"path": "/docs/sync",
+	})
+	if sectionValidation["ok"] != true {
+		t.Fatalf("wiki_validate_page /docs/sync = %#v, want section twin ok", sectionValidation)
+	}
+
+	draftPageBesideSection := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "/docs/section-only.md",
+		"content": "---\nleafwiki_id: mcp-section-only-draft-page\nleafwiki_title: MCP Section Only Draft Page\n---\n# Draft Page\n",
+	})
+	if draftPageBesideSection["ok"] != true {
+		t.Fatalf("wiki_validate_content draft page beside section = %#v, want ok", draftPageBesideSection)
+	}
+	assertValidationIssueCodesAbsent(t, draftPageBesideSection, []string{"path_conflict"})
+}
+
+func TestLocalMCPPathToolsResolveReadmeFallbackMarkdownPath(t *testing.T) {
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	rootDir := w.GetRootDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755); err != nil {
+		t.Fatalf("mkdir guides fixture: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755); err != nil {
+		t.Fatalf("mkdir indexed fixture: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755); err != nil {
+		t.Fatalf("mkdir no-readme fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "index.md"), []byte("---\nleafwiki_id: mcp-docs-section\nleafwiki_title: Docs\n---\n# Docs\n"), 0o644); err != nil {
+		t.Fatalf("write docs index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: mcp-root-section\nleafwiki_title: Root\n---\n# Root\n"), 0o644); err != nil {
+		t.Fatalf("write root README fallback: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "guides", "README.md"), []byte("---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n# Guides\n"), 0o644); err != nil {
+		t.Fatalf("write guides README fallback: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "index.md"), []byte("---\nleafwiki_id: mcp-indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n"), 0o644); err != nil {
+		t.Fatalf("write indexed index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "README.md"), []byte("---\nleafwiki_id: mcp-indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n"), 0o644); err != nil {
+		t.Fatalf("write indexed README page: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "no-readme", "index.md"), []byte("---\nleafwiki_id: mcp-no-readme-section\nleafwiki_title: No README\n---\n# No README\n"), 0o644); err != nil {
+		t.Fatalf("write no-readme index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "docs", "guides", "child.md"), []byte("---\nleafwiki_id: mcp-guides-child\nleafwiki_title: Guides Child\n---\n# Guides Child\n"), 0o644); err != nil {
+		t.Fatalf("write guides child: %v", err)
+	}
+	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+
+	fallbackPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/guides/README.md",
+	}), "page")
+	if stringField(t, fallbackPage, "id") != "mcp-guides-section" || stringField(t, fallbackPage, "kind") != "section" {
+		t.Fatalf("wiki_get_page_by_path README fallback = %#v, want guides section", fallbackPage)
+	}
+
+	explicitFallbackPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/guides/README.md",
+		"kind": "section",
+	}), "page")
+	if stringField(t, explicitFallbackPage, "id") != "mcp-guides-section" || stringField(t, explicitFallbackPage, "kind") != "section" {
+		t.Fatalf("wiki_get_page_by_path explicit README fallback section = %#v, want guides section", explicitFallbackPage)
+	}
+
+	fallbackSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
+		"path": "/docs/guides/README.md",
+	}), "root")
+	if stringField(t, fallbackSubtree, "id") != "mcp-guides-section" || stringField(t, fallbackSubtree, "kind") != "section" {
+		t.Fatalf("wiki_get_subtree README fallback = %#v, want guides section", fallbackSubtree)
+	}
+
+	readmeChildPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/indexed/README.md",
+	}), "page")
+	if stringField(t, readmeChildPage, "id") != "mcp-indexed-readme-page" || stringField(t, readmeChildPage, "kind") != "page" {
+		t.Fatalf("wiki_get_page_by_path README page = %#v, want indexed README page", readmeChildPage)
+	}
+
+	inactiveExplicitSectionErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/indexed/README.md",
+		"kind": "section",
+	})
+	assertErrorContainsAny(t, "wiki_get_page_by_path inactive explicit README section", inactiveExplicitSectionErr, "not found", "page_not_found")
+
+	missingReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/no-readme/README.md",
+	})
+	assertErrorContainsAny(t, "wiki_get_page_by_path missing README", missingReadmeErr, "not found", "page_not_found")
+
+	lowercaseReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "/docs/guides/readme.md",
+	})
+	assertErrorContainsAny(t, "wiki_get_page_by_path lowercase readme", lowercaseReadmeErr, "not found", "page_not_found")
+
+	traversalReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+		"path": "../README.md",
+		"kind": "section",
+	})
+	assertErrorContainsAny(t, "wiki_get_page_by_path traversal README", traversalReadmeErr, "invalid", "invalid_path")
+
+	fallbackValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
+		"path": "/docs/guides/README.md",
+	})
+	if fallbackValidation["ok"] != true {
+		t.Fatalf("wiki_validate_page README fallback = %#v, want ok", fallbackValidation)
+	}
+
+	lowercaseValidationErr := callToolError(t, session, "wiki_validate_page", map[string]any{
+		"path": "/docs/guides/readme.md",
+	})
+	assertErrorContainsAny(t, "wiki_validate_page lowercase readme", lowercaseValidationErr, "not found", "page_not_found")
+
+	fallbackDraftValidation := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "/docs/guides/README.md",
+		"content": "---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n[Child](./child.md)\n",
+	})
+	if fallbackDraftValidation["ok"] != true {
+		t.Fatalf("wiki_validate_content README fallback = %#v, want ok", fallbackDraftValidation)
+	}
+
+	explicitFallbackDraftValidation := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "/docs/guides/README.md",
+		"kind":    "section",
+		"content": "[Child](./child.md)\n",
+	})
+	if explicitFallbackDraftValidation["ok"] != true {
+		t.Fatalf("wiki_validate_content explicit README fallback section = %#v, want ok", explicitFallbackDraftValidation)
+	}
+}
+
 func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled:        true,
@@ -1619,6 +1963,32 @@ func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 		t.Fatalf("duplicate_leafwiki_id message = %#v, want first path detail in %#v", duplicateIssue["message"], duplicateIssue)
 	}
 
+	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), "guides"), 0o755); err != nil {
+		t.Fatalf("mkdir guides: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "guides", "README.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: guides",
+		"leafwiki_title: Guides",
+		"---",
+		"# Guides",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write guides README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "readme-fallback-link.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: readme-fallback-link",
+		"leafwiki_title: README Fallback Link",
+		"---",
+		"# README Fallback Link",
+		"",
+		"[Guides](/guides/README.md)",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write README fallback link source: %v", err)
+	}
+	readmeFallbackOut := callToolStructured(t, session, "wiki_validate_wiki", nil)
+	assertValidationIssueCodesAbsent(t, readmeFallbackOut, []string{"broken_link"})
+
 	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".hidden.md"), []byte("# Hidden\n"), 0o644); err != nil {
 		t.Fatalf("write hidden markdown: %v", err)
 	}
@@ -1657,8 +2027,25 @@ func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict.md"), []byte("# Route Conflict Page\n"), 0o644); err != nil {
 		t.Fatalf("write route conflict page: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict-link.md"), []byte(strings.Join([]string{
+		"---",
+		"leafwiki_id: route-conflict-link",
+		"leafwiki_title: Route Conflict Link",
+		"---",
+		"# Route Conflict Link",
+		"",
+		"[Ambiguous](/route-conflict)",
+	}, "\n")), 0o644); err != nil {
+		t.Fatalf("write route conflict link: %v", err)
+	}
 	conflicts := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodes(t, conflicts, []string{"invalid_slug", "missing_asset", "path_conflict"})
+	assertValidationIssueCodes(t, conflicts, []string{"invalid_slug", "missing_asset"})
+	assertValidationIssueCodesAbsent(t, conflicts, []string{"path_conflict", "ambiguous_legacy_link"})
+	ambiguousContent := callToolStructured(t, session, "wiki_validate_content", map[string]any{
+		"path":    "draft-route-conflict",
+		"content": "[Ambiguous](/route-conflict)\n",
+	})
+	assertValidationIssueCodesAbsent(t, ambiguousContent, []string{"ambiguous_legacy_link"})
 
 	broken := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Broken Link",
@@ -2765,6 +3152,42 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if got := nullKindEnsured["kind"]; got != "page" {
 		t.Fatalf("MCP ensure_page null kind = %v, want page", got)
 	}
+
+	mcpPageBase := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"parentId": parentID,
+		"title":    "MCP Section Twin Base",
+		"slug":     "mcp-section-twin",
+		"kind":     "page",
+	}, http.StatusCreated)
+	mcpEnsuredSectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
+		"path":  "parent-section/mcp-section-twin",
+		"title": "MCP Ensured Section Twin",
+		"kind":  "section",
+	}), "page")
+	if stringField(t, mcpEnsuredSectionTwin, "id") == stringField(t, mcpPageBase, "id") {
+		t.Fatalf("MCP ensure_page returned existing page %q instead of section twin", stringField(t, mcpPageBase, "id"))
+	}
+	if got := mcpEnsuredSectionTwin["kind"]; got != "section" {
+		t.Fatalf("MCP ensure_page section twin kind = %v, want section", got)
+	}
+
+	httpPageBase := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"parentId": parentID,
+		"title":    "HTTP Section Twin Base",
+		"slug":     "http-section-twin",
+		"kind":     "page",
+	}, http.StatusCreated)
+	httpEnsuredSectionTwin := postHTTPJSON(t, router, "/api/pages/ensure", map[string]any{
+		"path":  "parent-section/http-section-twin",
+		"title": "HTTP Ensured Section Twin",
+		"kind":  "section",
+	}, http.StatusOK)
+	if stringField(t, httpEnsuredSectionTwin, "id") == stringField(t, httpPageBase, "id") {
+		t.Fatalf("HTTP ensure returned existing page %q instead of section twin", stringField(t, httpPageBase, "id"))
+	}
+	if got := httpEnsuredSectionTwin["kind"]; got != "section" {
+		t.Fatalf("HTTP ensure section twin kind = %v, want section", got)
+	}
 	recordHTTPMCPParity(t, "wiki_ensure_page", "POST /api/pages/ensure")
 
 	lookup := callToolStructured(t, session, "wiki_lookup_path", map[string]any{"path": "parent-section/ensured"})
@@ -2774,6 +3197,45 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if lookup["lookup"] == nil {
 		t.Fatalf("lookup_path returned no lookup: %#v", lookup)
 	}
+
+	pageTwin := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"parentId": parentID,
+		"title":    "Lookup Page Twin",
+		"slug":     "lookup-twin",
+		"kind":     "page",
+	}, http.StatusCreated)
+	sectionTwin := postHTTPJSON(t, router, "/api/pages", map[string]any{
+		"parentId": parentID,
+		"title":    "Lookup Section Twin",
+		"slug":     "lookup-twin",
+		"kind":     "section",
+	}, http.StatusCreated)
+	mcpLookupPageTwin := nestedMap(t, callToolStructured(t, session, "wiki_lookup_path", map[string]any{
+		"path": "parent-section/lookup-twin",
+		"kind": "page",
+	}), "lookup")
+	httpLookupPageTwin := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=page")
+	assertJSONEqual(t, "wiki_lookup_path page twin", mcpLookupPageTwin, httpLookupPageTwin)
+	assertLookupFinalID(t, "wiki_lookup_path page twin", mcpLookupPageTwin, stringField(t, pageTwin, "id"), "page")
+
+	mcpLookupSectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_lookup_path", map[string]any{
+		"path": "parent-section/lookup-twin",
+		"kind": "section",
+	}), "lookup")
+	httpLookupSectionTwin := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=section")
+	assertJSONEqual(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, httpLookupSectionTwin)
+	assertLookupFinalID(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, stringField(t, sectionTwin, "id"), "section")
+
+	invalidLookupKindErr := callToolError(t, session, "wiki_lookup_path", map[string]any{
+		"path": "parent-section/lookup-twin",
+		"kind": "folder",
+	})
+	assertErrorContainsAny(t, "MCP lookup_path invalid kind", invalidLookupKindErr, "page_invalid_kind", "invalid kind")
+	invalidLookupKindHTTP := getHTTPStatus(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=folder", http.StatusBadRequest)
+	if !strings.Contains(invalidLookupKindHTTP, "page_invalid_kind") {
+		t.Fatalf("HTTP lookup_path invalid kind error = %q, want page_invalid_kind", invalidLookupKindHTTP)
+	}
+
 	permalink := callToolStructured(t, session, "wiki_resolve_permalink", map[string]any{"id": ensuredID})
 	httpPermalink := getHTTPMap(t, router, "/api/pages/permalink/"+ensuredID)
 	assertJSONEqual(t, "wiki_resolve_permalink", permalink["target"], httpPermalink)
@@ -3060,7 +3522,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 		"kind":  "page",
 	}), "page")
 	sourceID := stringField(t, source, "id")
-	content := "Tagged source with [Target](/target) and [Missing](/missing-target)"
+	content := "Tagged source with [Target](/target.md) and [Missing](/missing-target)"
 	callToolStructured(t, session, "wiki_update_page", map[string]any{
 		"id":      sourceID,
 		"version": stringField(t, source, "version"),
@@ -3424,7 +3886,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"version": stringField(t, ref, "version"),
 		"title":   "Ref",
 		"slug":    "ref",
-		"content": "[Target](/target)",
+		"content": "[Target](/target.md)",
 	})
 
 	first := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
@@ -3720,7 +4182,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		"version": stringField(t, httpApplyRef, "version"),
 		"title":   "HTTP Apply Ref",
 		"slug":    "http-apply-ref",
-		"content": "[HTTP Apply Target](/http-apply-target)",
+		"content": "[HTTP Apply Target](/http-apply-target.md)",
 	})
 	httpAppliedViaRoute := postHTTPJSON(t, router, "/api/pages/"+stringField(t, httpApplyTarget, "id")+"/refactor/apply", map[string]any{
 		"version":      stringField(t, httpApplyTarget, "version"),
@@ -3731,7 +4193,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	}, http.StatusOK)
 	assertPageState(t, "HTTP wiki_apply_page_refactor success", httpAppliedViaRoute, stringField(t, httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", "")
 	httpApplyRefAfter := getHTTPPageByPath(t, router, "http-apply-ref")
-	if httpApplyRefAfter["content"] != "[HTTP Apply Target](/http-apply-target-renamed)" {
+	if httpApplyRefAfter["content"] != "[HTTP Apply Target](/http-apply-target-renamed.md)" {
 		t.Fatalf("HTTP apply ref content = %v, want rewritten link", httpApplyRefAfter["content"])
 	}
 
@@ -3751,7 +4213,7 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	assertJSONEqual(t, "wiki_apply_page_refactor", applied, httpApplied)
 	assertPageState(t, "MCP wiki_apply_page_refactor success", applied, targetID, "Target", "target-renamed", "target-renamed", "page", "")
 	refHTTP := getHTTPPageByPath(t, router, "ref")
-	if refHTTP["content"] != "[Target](/target-renamed)" {
+	if refHTTP["content"] != "[Target](/target-renamed.md)" {
 		t.Fatalf("ref content after refactor = %v, want rewritten link", refHTTP["content"])
 	}
 	recordHTTPMCPParity(t, "wiki_apply_page_refactor", "POST /api/pages/:id/refactor/apply")
@@ -5028,6 +5490,25 @@ func stringField(t *testing.T, value map[string]any, key string) string {
 		t.Fatalf("%q has type %T and value %#v, want non-empty string", key, value[key], value[key])
 	}
 	return s
+}
+
+func assertLookupFinalID(t *testing.T, label string, lookup map[string]any, wantID string, wantKind string) {
+	t.Helper()
+
+	segmentsRaw, ok := lookup["segments"].([]any)
+	if !ok || len(segmentsRaw) == 0 {
+		t.Fatalf("%s segments = %#v, want non-empty list", label, lookup["segments"])
+	}
+	final, ok := segmentsRaw[len(segmentsRaw)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("%s final segment = %#v, want object", label, segmentsRaw[len(segmentsRaw)-1])
+	}
+	if got := final["id"]; got != wantID {
+		t.Fatalf("%s final id = %v, want %q", label, got, wantID)
+	}
+	if got := final["kind"]; got != wantKind {
+		t.Fatalf("%s final kind = %v, want %q", label, got, wantKind)
+	}
 }
 
 func arrayField(t *testing.T, value map[string]any, key string) []any {

@@ -26,7 +26,7 @@ export function EditorTitleBar() {
 
     const parentId = () => {
       const parentPath = toWikiLookupPath(getParentWikiRoutePath(page.path))
-      const p = getPageByPath(parentPath)
+      const p = getPageByPath(parentPath, 'section')
       if (!p) return ''
       return p.id
     }

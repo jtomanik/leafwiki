@@ -158,6 +158,8 @@ Agents should call `wiki_get_context` before other tools. It returns the current
 
 The normal edit path is semantic MCP writes such as `wiki_update_page`, `wiki_update_page_metadata`, or `wiki_replace_page_section`. When workspace sync is enabled, direct Markdown file edits under `--root-dir` can be useful for large mechanical changes; then call `wiki_refresh` when humans or following tools need immediate web visibility, and run validation before reporting done.
 
+Most MCP page-path arguments are route paths such as `/docs/api`. Path-based page lookup, validation, and subtree tools also accept canonical Markdown file paths: `/docs/api.md` selects the page, `/docs/api/index.md` selects the section, and an active `/docs/api/README.md` fallback selects the section it backs. Route-structure tools such as `wiki_lookup_path` remain route-oriented and use an explicit `kind` argument when page and section twins share a route. Markdown content should use LeafWiki's canonical link format: page links end in `.md`, section links omit `.md`. Workspace sync and import canonicalize resolvable legacy page links before validation.
+
 Presence is advisory and privacy-filtered. Web heartbeats are in memory, expire after 90 seconds, and expose sanitized user id/name/role plus page id/path/title when resolvable. User email is visible only to admin MCP callers. Agent hook presence is also in memory and exposes only provider, provider-scoped session hash, model/source metadata, event name, and timestamps; raw hook payloads, prompts, transcript paths, session ids, API keys, JWTs, and daemon control tokens are never exposed through `wiki_get_context`.
 
 Example validation and narrow edit flow:

@@ -5,6 +5,7 @@ import { asApiLocalizedError } from '@/lib/api/errors'
 import { deletePage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useViewerStore } from '../viewer/viewer'
 import { DIALOG_DELETE_PAGE_CONFIRMATION } from '@/lib/registries'
 import { useConfigStore } from '@/stores/config'
@@ -96,7 +97,7 @@ export function DeletePageDialog({
         if (viewerPage?.id === pageId && viewerPage.path) {
           useViewerStore
             .getState()
-            .loadPageData(viewerPage.path)
+            .loadPageData(viewerPage.path, undefined, viewerPage.kind)
             .catch(console.error)
         }
         setPageModifiedWarning(true)
@@ -191,7 +192,10 @@ export function DeletePageDialog({
                   <li key={backlink.from_page_id}>
                     <Link
                       className="underline"
-                      to={backlink.from_path}
+                      to={browserRoutePathForWikiNode(
+                        backlink.from_path,
+                        backlink.from_kind,
+                      )}
                       state={createNavigationVisitState()}
                     >
                       {backlink.from_title}

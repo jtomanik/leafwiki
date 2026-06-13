@@ -7,9 +7,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 type importTarget struct {
@@ -22,30 +28,33 @@ type contentTransformer struct {
 	assetMaxBytes   int64
 	slugger         *tree.SlugService
 	pagesBySource   map[string]importTarget
-	pagesByBasename map[string][]string
-	pagesBySuffix   map[string][]string
+	pagesByBasename map[string][]importTarget
+	pagesBySuffix   map[string][]importTarget
 	assetUploads    map[string]string
 }
+
+var importerMarkdownParser = goldmark.New()
 
 // newContentTransformer precomputes source->target lookups from the import plan.
 // We resolve links against planned imports so we only rewrite destinations we can actually create.
 func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxBytes int64) *contentTransformer {
 	pagesBySource := make(map[string]importTarget, len(plan.Items))
-	pagesByBasename := make(map[string][]string, len(plan.Items))
-	pagesBySuffix := make(map[string][]string, len(plan.Items))
+	pagesByBasename := make(map[string][]importTarget, len(plan.Items))
+	pagesBySuffix := make(map[string][]importTarget, len(plan.Items))
 	for _, item := range plan.Items {
 		normalizedSource := normalizePlanSourcePath(item.SourcePath)
-		pagesBySource[normalizedSource] = importTarget{
+		target := importTarget{
 			targetPath: item.TargetPath,
 			kind:       item.Kind,
 		}
+		pagesBySource[normalizedSource] = target
 
 		if basenameKey := normalizePageBasenameForLookup(path.Base(normalizedSource)); basenameKey != "" {
-			pagesByBasename[basenameKey] = append(pagesByBasename[basenameKey], item.TargetPath)
+			pagesByBasename[basenameKey] = append(pagesByBasename[basenameKey], target)
 		}
 
-		for _, suffixKey := range buildTargetPathSuffixKeys(item.TargetPath) {
-			pagesBySuffix[suffixKey] = append(pagesBySuffix[suffixKey], item.TargetPath)
+		for _, suffixKey := range buildSourcePathSuffixKeys(normalizedSource, item.Kind) {
+			pagesBySuffix[suffixKey] = append(pagesBySuffix[suffixKey], target)
 		}
 	}
 
@@ -61,7 +70,7 @@ func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxByte
 }
 
 // TransformContent rewrites Markdown links, wiki links, and asset references for one imported page.
-// Rewrites only happen outside inline code and fenced blocks so code examples remain untouched.
+// Rewrites only happen outside inline code, fenced blocks, and indented code so examples remain untouched.
 func (t *contentTransformer) TransformContent(
 	userID string,
 	sourcePath string,
@@ -89,54 +98,163 @@ func (t *contentTransformer) rewriteMarkdownLinks(
 	wiki ImporterWiki,
 ) (string, error) {
 	var out strings.Builder
-	for i := 0; i < len(content); i++ {
-		if content[i] != '[' && (content[i] != '!' || i+1 >= len(content) || content[i+1] != '[') {
-			out.WriteByte(content[i])
-			continue
-		}
-
-		start := i
-		isImage := false
-		if content[i] == '!' {
-			isImage = true
-			i++
-		}
-
-		labelEnd := strings.IndexByte(content[i:], ']')
-		if labelEnd < 0 {
-			out.WriteString(content[start:])
-			return out.String(), nil
-		}
-		labelEnd += i
-		if labelEnd+1 >= len(content) || content[labelEnd+1] != '(' {
-			out.WriteString(content[start : labelEnd+1])
-			i = labelEnd
-			continue
-		}
-
-		destStart := labelEnd + 2
-		destEnd := findMarkdownLinkDestinationEnd(content, destStart)
-		if destEnd < 0 {
-			out.WriteString(content[start:])
-			return out.String(), nil
-		}
-
-		destination := content[destStart:destEnd]
-		rewritten, err := t.rewriteDestination(userID, sourcePath, page, destination, wiki)
+	last := 0
+	for _, occurrence := range markdownlinks.ScanInlineDestinations(content, markdownlinks.InlineScanOptions{
+		IncludeImages:    true,
+		IgnoreCodeRanges: true,
+	}) {
+		out.WriteString(content[last:occurrence.Start])
+		rewritten, err := t.rewriteDestination(userID, sourcePath, page, occurrence.Destination, wiki, rewriteDestinationOptions{
+			assetOnly: occurrence.Image,
+		})
 		if err != nil {
 			return "", err
 		}
-
-		if isImage {
-			out.WriteByte('!')
-		}
-		out.WriteString(content[i : labelEnd+2])
 		out.WriteString(rewritten)
-		out.WriteByte(')')
-		i = destEnd
+		last = occurrence.End
 	}
+	out.WriteString(content[last:])
 
+	return t.rewriteMarkdownReferenceDefinitions(userID, sourcePath, page, out.String(), wiki)
+}
+
+func (t *contentTransformer) rewriteMarkdownReferenceDefinitions(
+	userID string,
+	sourcePath string,
+	page *tree.Page,
+	content string,
+	wiki ImporterWiki,
+) (string, error) {
+	usage := importerReferenceLabelUsage(content)
+	var out strings.Builder
+	lineStart := 0
+	for lineStart < len(content) {
+		lineEnd := strings.IndexByte(content[lineStart:], '\n')
+		hasNewline := lineEnd >= 0
+		if hasNewline {
+			lineEnd += lineStart
+		} else {
+			lineEnd = len(content)
+		}
+
+		label, destStart, destEnd, ok := parseMarkdownReferenceDestination(content, lineStart, lineEnd)
+		if !ok {
+			out.WriteString(content[lineStart:lineEnd])
+		} else {
+			rewritten, err := t.rewriteDestination(userID, sourcePath, page, content[destStart:destEnd], wiki, rewriteDestinationOptions{
+				assetOnly: usage.imageOnly(label),
+			})
+			if err != nil {
+				return "", err
+			}
+			out.WriteString(content[lineStart:destStart])
+			out.WriteString(rewritten)
+			out.WriteString(content[destEnd:lineEnd])
+		}
+
+		if hasNewline {
+			out.WriteByte('\n')
+			lineStart = lineEnd + 1
+		} else {
+			break
+		}
+	}
 	return out.String(), nil
+}
+
+type importerReferenceUsage struct {
+	linkLabels  map[string]struct{}
+	imageLabels map[string]struct{}
+}
+
+func importerReferenceLabelUsage(content string) importerReferenceUsage {
+	usage := importerReferenceUsage{
+		linkLabels:  map[string]struct{}{},
+		imageLabels: map[string]struct{}{},
+	}
+	reader := text.NewReader([]byte(content))
+	doc := importerMarkdownParser.Parser().Parse(reader)
+	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n := node.(type) {
+		case *ast.Link:
+			if n.Reference != nil {
+				usage.linkLabels[normalizeImporterReferenceLabel(n.Reference.Value)] = struct{}{}
+			}
+		case *ast.Image:
+			if n.Reference != nil {
+				usage.imageLabels[normalizeImporterReferenceLabel(n.Reference.Value)] = struct{}{}
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return usage
+}
+
+func normalizeImporterReferenceLabel(label []byte) string {
+	return util.ToLinkReference(label)
+}
+
+func (usage importerReferenceUsage) imageOnly(label string) bool {
+	if label == "" {
+		return false
+	}
+	if _, ok := usage.imageLabels[label]; !ok {
+		return false
+	}
+	_, usedByLink := usage.linkLabels[label]
+	return !usedByLink
+}
+
+func parseMarkdownReferenceDestination(content string, lineStart int, lineEnd int) (string, int, int, bool) {
+	i := lineStart
+	spaces := 0
+	for i < lineEnd && content[i] == ' ' && spaces < 4 {
+		i++
+		spaces++
+	}
+	if spaces > 3 || i >= lineEnd || content[i] != '[' || isEscapedMarkdownBracket(content, i) {
+		return "", 0, 0, false
+	}
+	labelEnd := findMarkdownClosingBracket(content, i)
+	if labelEnd < 0 {
+		return "", 0, 0, false
+	}
+	if labelEnd+1 >= lineEnd || content[labelEnd+1] != ':' {
+		return "", 0, 0, false
+	}
+	label := normalizeImporterReferenceLabel([]byte(content[i+1 : labelEnd]))
+	i = labelEnd + 2
+	for i < lineEnd && (content[i] == ' ' || content[i] == '\t') {
+		i++
+	}
+	if i >= lineEnd {
+		return "", 0, 0, false
+	}
+	destStart := i
+	destEnd := lineEnd
+	if content[i] == '<' {
+		i++
+		destStart = i
+		for i < lineEnd {
+			if content[i] == '>' {
+				destEnd = i
+				break
+			}
+			i++
+		}
+	} else {
+		for i < lineEnd {
+			if content[i] == ' ' || content[i] == '\t' {
+				destEnd = i
+				break
+			}
+			i++
+		}
+	}
+	return label, destStart, destEnd, destEnd > destStart
 }
 
 // rewriteWikiLinks handles Obsidian-style wiki links and converts them to plain Markdown links.
@@ -221,12 +339,17 @@ func (t *contentTransformer) rewriteWikiLinks(
 
 // rewriteDestination keeps the original Markdown destination wrapper and title suffix intact
 // while only replacing the actual href when we can resolve it safely.
+type rewriteDestinationOptions struct {
+	assetOnly bool
+}
+
 func (t *contentTransformer) rewriteDestination(
 	userID string,
 	sourcePath string,
 	page *tree.Page,
 	destination string,
 	wiki ImporterWiki,
+	options rewriteDestinationOptions,
 ) (string, error) {
 	trimmed := strings.TrimSpace(destination)
 	if trimmed == "" {
@@ -234,8 +357,15 @@ func (t *contentTransformer) rewriteDestination(
 	}
 
 	prefix, href, suffix := splitMarkdownDestination(trimmed)
+	href = unescapeMarkdownDestinationEscapes(href)
 	href = normalizeImportedHref(href)
-	resolved, _, err := t.resolveDestination(userID, sourcePath, page, href, wiki)
+	var resolved string
+	var err error
+	if options.assetOnly {
+		resolved, err = t.resolveAssetDestination(userID, sourcePath, page, href, wiki)
+	} else {
+		resolved, _, err = t.resolveDestination(userID, sourcePath, page, href, wiki)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -243,6 +373,29 @@ func (t *contentTransformer) rewriteDestination(
 		return destination, nil
 	}
 	return prefix + resolved + suffix, nil
+}
+
+func (t *contentTransformer) resolveAssetDestination(
+	userID string,
+	sourcePath string,
+	page *tree.Page,
+	href string,
+	wiki ImporterWiki,
+) (string, error) {
+	rawTarget, suffix := splitURLSuffix(href)
+	if rawTarget == "" || isExternalHref(rawTarget) || strings.HasPrefix(rawTarget, "#") {
+		return "", nil
+	}
+	rawTarget = decodeImportTarget(rawTarget)
+
+	assetPath, err := t.resolveAndUploadAsset(userID, sourcePath, page, rawTarget, wiki)
+	if err != nil {
+		return "", err
+	}
+	if assetPath == "" {
+		return "", nil
+	}
+	return assetPath + suffix, nil
 }
 
 // resolveDestination first tries to map the href to another imported page.
@@ -260,8 +413,8 @@ func (t *contentTransformer) resolveDestination(
 	}
 	rawTarget = decodeImportTarget(rawTarget)
 
-	if targetPath, ok := t.resolvePagePath(sourcePath, rawTarget); ok {
-		return "/" + targetPath + suffix, false, nil
+	if target, ok := t.resolvePageTarget(sourcePath, rawTarget); ok {
+		return "/" + formatResolvedTargetPath(target) + suffix, false, nil
 	}
 
 	assetPath, err := t.resolveAndUploadAsset(userID, sourcePath, page, rawTarget, wiki)
@@ -275,23 +428,36 @@ func (t *contentTransformer) resolveDestination(
 	return "", false, nil
 }
 
-// resolvePagePath resolves links only against files that are part of the current import plan.
+func formatResolvedTargetPath(target importTarget) string {
+	switch target.kind {
+	case tree.NodeKindSection:
+		return strings.Trim(target.targetPath, "/")
+	default:
+		trimmed := strings.Trim(target.targetPath, "/")
+		if strings.EqualFold(path.Ext(trimmed), ".md") {
+			return trimmed
+		}
+		return trimmed + ".md"
+	}
+}
+
+// resolvePageTarget resolves links only against files that are part of the current import plan.
 // This avoids guessing against unrelated existing wiki pages and keeps imports predictable.
-func (t *contentTransformer) resolvePagePath(sourcePath string, href string) (string, bool) {
-	candidates := buildSourceCandidates(sourcePath, href)
+func (t *contentTransformer) resolvePageTarget(sourcePath string, href string) (importTarget, bool) {
+	candidates := buildSourceCandidates(t.sourceBasePath, sourcePath, href)
 	if !strings.HasPrefix(href, "/") && !strings.HasPrefix(href, ".") {
-		candidates = append(candidates, buildSourceCandidates(sourcePath, "/"+href)...)
+		candidates = append(candidates, buildSourceCandidates(t.sourceBasePath, sourcePath, "/"+href)...)
 	}
 	for _, candidate := range candidates {
 		if target, ok := t.pagesBySource[normalizePlanSourcePath(candidate)]; ok {
-			return target.targetPath, true
+			return target, true
 		}
 	}
 
 	// Obsidian also resolves links by note name when that name is unique in the vault.
 	// We only apply that fallback for basename-only links within the current import package.
 	if basenameKey, ok := basenameOnlyLookupKey(href); ok {
-		if matches := uniqueStrings(t.pagesByBasename[basenameKey]); len(matches) == 1 {
+		if matches := uniqueImportTargets(t.pagesByBasename[basenameKey]); len(matches) == 1 {
 			return matches[0], true
 		}
 	}
@@ -300,24 +466,67 @@ func (t *contentTransformer) resolvePagePath(sourcePath string, href string) (st
 		return match, true
 	}
 
-	return "", false
+	return importTarget{}, false
 }
 
-func (t *contentTransformer) resolveUniqueTargetPathSuffix(href string) (string, bool) {
+func (t *contentTransformer) resolveUniqueTargetPathSuffix(href string) (importTarget, bool) {
 	if isNonMarkdownAssetTarget(href) {
-		return "", false
+		return importTarget{}, false
 	}
 
-	suffix, ok := t.normalizeWikiHrefToRoutePath(href)
+	suffix, ok := normalizeSourcePathSuffixLookupKey(href)
 	if !ok || suffix == "" || !strings.Contains(suffix, "/") {
-		return "", false
+		return importTarget{}, false
 	}
 
-	matches := uniqueStrings(t.pagesBySuffix[suffix])
+	matches := uniqueImportTargets(t.pagesBySuffix[suffix])
+	if kind, ok := impliedImportTargetKind(href); ok {
+		matches = filterImportTargetsByKind(matches, kind)
+		if len(matches) != 1 {
+			return importTarget{}, false
+		}
+		return matches[0], true
+	}
 	if len(matches) != 1 {
-		return "", false
+		return importTarget{}, false
 	}
 	return matches[0], true
+}
+
+func filterImportTargetsByKind(values []importTarget, kind tree.NodeKind) []importTarget {
+	out := make([]importTarget, 0, len(values))
+	for _, value := range values {
+		if value.kind == kind {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func impliedImportTargetKind(href string) (tree.NodeKind, bool) {
+	decoded := strings.TrimSpace(decodeImportTarget(href))
+	if decoded == "" {
+		return "", false
+	}
+	if strings.HasSuffix(decoded, "/") {
+		return tree.NodeKindSection, true
+	}
+
+	trimmed := strings.Trim(strings.TrimPrefix(decoded, "/"), "/")
+	if trimmed == "" {
+		return "", false
+	}
+
+	base := path.Base(trimmed)
+	if !strings.EqualFold(path.Ext(base), ".md") {
+		return "", false
+	}
+	switch {
+	case strings.EqualFold(base, "index.md"), base == "README.md":
+		return tree.NodeKindSection, true
+	default:
+		return tree.NodeKindPage, true
+	}
 }
 
 // resolveAndUploadAsset imports local non-Markdown files into the target page's asset folder
@@ -357,7 +566,7 @@ func (t *contentTransformer) resolveAndUploadAsset(
 }
 
 func normalizePlanSourcePath(p string) string {
-	return strings.ToLower(path.Clean(strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(p)), "/")))
+	return path.Clean(strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(p)), "/"))
 }
 
 func basenameOnlyLookupKey(href string) (string, bool) {
@@ -380,7 +589,7 @@ func normalizePageBasenameForLookup(value string) string {
 	if base == "" || strings.EqualFold(base, "index") {
 		return ""
 	}
-	return strings.ToLower(base)
+	return base
 }
 
 func decodeImportTarget(value string) string {
@@ -391,7 +600,7 @@ func decodeImportTarget(value string) string {
 	return decoded
 }
 
-func buildSourceCandidates(sourcePath string, href string) []string {
+func buildSourceCandidates(sourceBasePath string, sourcePath string, href string) []string {
 	raw := filepath.ToSlash(strings.TrimSpace(href))
 	if raw == "" {
 		return nil
@@ -416,18 +625,59 @@ func buildSourceCandidates(sourcePath string, href string) []string {
 	trimmed := strings.TrimSuffix(base, "/")
 
 	if strings.HasSuffix(raw, "/") {
-		candidates = append(candidates, path.Join(trimmed, "index.md"))
+		candidates = append(candidates, activeSourceSectionContentCandidates(sourceBasePath, trimmed)...)
 	}
 
 	ext := strings.ToLower(path.Ext(trimmed))
 	switch ext {
-	case ".md":
-		candidates = append(candidates, path.Join(strings.TrimSuffix(trimmed, ".md"), "index.md"))
 	case "":
-		candidates = append(candidates, trimmed+".md", path.Join(trimmed, "index.md"))
+		candidates = append(candidates, trimmed+".md")
+		candidates = append(candidates, activeSourceSectionContentCandidates(sourceBasePath, trimmed)...)
 	}
 
 	return uniqueStrings(candidates)
+}
+
+func activeSourceSectionContentCandidates(sourceBasePath string, sourceDir string) []string {
+	if indexName, ok := sourceDirIndexFile(sourceBasePath, sourceDir); ok {
+		return []string{path.Join(sourceDir, indexName)}
+	}
+	if readmeName, ok := sourceDirReadmeFallbackFile(sourceBasePath, sourceDir); ok {
+		return []string{path.Join(sourceDir, readmeName)}
+	}
+	return []string{path.Join(sourceDir, "index.md"), path.Join(sourceDir, "README.md")}
+}
+
+func sourceDirIndexFile(sourceBasePath string, sourceDir string) (string, bool) {
+	entries, err := os.ReadDir(filepath.Join(sourceBasePath, filepath.FromSlash(sourceDir)))
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.EqualFold(entry.Name(), "index.md") {
+			return entry.Name(), true
+		}
+	}
+	return "", false
+}
+
+func sourceDirReadmeFallbackFile(sourceBasePath string, sourceDir string) (string, bool) {
+	entries, err := os.ReadDir(filepath.Join(sourceBasePath, filepath.FromSlash(sourceDir)))
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if entry.Name() == "README.md" {
+			return entry.Name(), true
+		}
+	}
+	return "", false
 }
 
 func (t *contentTransformer) fallbackWikiPageHref(sourcePath string, href string) (string, bool) {
@@ -441,13 +691,28 @@ func (t *contentTransformer) fallbackWikiPageHref(sourcePath string, href string
 	}
 
 	if basenameKey, ok := basenameOnlyLookupKey(rawTarget); ok {
-		if matches := uniqueStrings(t.pagesByBasename[basenameKey]); len(matches) > 1 {
+		exactMatches, hasExactMatches := t.pagesByBasename[basenameKey]
+		if matches := uniqueImportTargets(exactMatches); len(matches) == 1 {
+			return "/" + formatResolvedTargetPath(matches[0]) + suffix, true
+		}
+		if hasExactMatches && len(exactMatches) > 0 {
 			return "", false
 		}
+		if t.hasCaseVariantBasenameMatch(basenameKey) {
+			return "", false
+		}
+		routePath, ok := t.normalizeWikiHrefToRoutePath(rawTarget)
+		if !ok {
+			return "", false
+		}
+		return "/" + routePath + suffix, true
 	}
 
 	if strings.HasPrefix(rawTarget, ".") || strings.HasPrefix(rawTarget, "/") {
-		candidates := buildSourceCandidates(sourcePath, rawTarget)
+		if t.hasCaseVariantSourceSuffixMatch(rawTarget) {
+			return "", false
+		}
+		candidates := buildSourceCandidates(t.sourceBasePath, sourcePath, rawTarget)
 		if len(candidates) == 0 {
 			return "", false
 		}
@@ -458,11 +723,39 @@ func (t *contentTransformer) fallbackWikiPageHref(sourcePath string, href string
 		return "/" + routePath + suffix, true
 	}
 
+	if t.hasCaseVariantSourceSuffixMatch(rawTarget) {
+		return "", false
+	}
 	routePath, ok := t.normalizeWikiHrefToRoutePath(rawTarget)
 	if !ok {
 		return "", false
 	}
 	return "/" + routePath + suffix, true
+}
+
+func (t *contentTransformer) hasCaseVariantSourceSuffixMatch(href string) bool {
+	key, ok := normalizeSourcePathSuffixLookupKey(href)
+	if !ok {
+		return false
+	}
+	if _, ok := t.pagesBySuffix[key]; ok {
+		return false
+	}
+	for existing := range t.pagesBySuffix {
+		if existing != key && strings.EqualFold(existing, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *contentTransformer) hasCaseVariantBasenameMatch(key string) bool {
+	for existing := range t.pagesByBasename {
+		if existing != key && strings.EqualFold(existing, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func isNonMarkdownAssetTarget(href string) bool {
@@ -519,9 +812,24 @@ func (t *contentTransformer) normalizeSourceCandidateToRoutePath(candidate strin
 	return normalized, true
 }
 
-func buildTargetPathSuffixKeys(targetPath string) []string {
-	trimmed := strings.Trim(strings.TrimSpace(targetPath), "/")
+func buildSourcePathSuffixKeys(sourcePath string, kind tree.NodeKind) []string {
+	trimmed := strings.Trim(strings.TrimSpace(sourcePath), "/")
 	if trimmed == "" {
+		return nil
+	}
+
+	if strings.EqualFold(path.Ext(trimmed), ".md") {
+		base := path.Base(trimmed)
+		switch {
+		case strings.EqualFold(base, "index.md"):
+			trimmed = strings.Trim(path.Dir(trimmed), "/")
+		case kind == tree.NodeKindSection && base == "README.md":
+			trimmed = strings.Trim(path.Dir(trimmed), "/")
+		default:
+			trimmed = strings.TrimSuffix(trimmed, path.Ext(trimmed))
+		}
+	}
+	if trimmed == "" || trimmed == "." {
 		return nil
 	}
 
@@ -532,6 +840,28 @@ func buildTargetPathSuffixKeys(targetPath string) []string {
 	}
 
 	return uniqueStrings(suffixes)
+}
+
+func normalizeSourcePathSuffixLookupKey(href string) (string, bool) {
+	base, _ := splitURLSuffix(strings.TrimSpace(decodeImportTarget(href)))
+	base = strings.Trim(strings.TrimPrefix(filepath.ToSlash(base), "/"), "/")
+	if base == "" || base == "." || strings.HasPrefix(base, "../") {
+		return "", false
+	}
+
+	if strings.EqualFold(path.Ext(base), ".md") {
+		name := path.Base(base)
+		switch {
+		case strings.EqualFold(name, "index.md"), name == "README.md":
+			base = strings.Trim(path.Dir(base), "/")
+		default:
+			base = strings.TrimSuffix(base, path.Ext(base))
+		}
+	}
+	if base == "" || base == "." {
+		return "", false
+	}
+	return base, true
 }
 
 // resolveAssetPath keeps asset resolution inside the extracted import workspace.
@@ -686,20 +1016,49 @@ func isImageAssetTarget(target string) bool {
 	}
 }
 
-func findMarkdownLinkDestinationEnd(content string, start int) int {
+func findMarkdownClosingBracket(content string, start int) int {
+	if start >= len(content) || content[start] != '[' {
+		return -1
+	}
 	depth := 0
 	for i := start; i < len(content); i++ {
 		switch content[i] {
-		case '(':
+		case '\\':
+			i++
+		case '[':
 			depth++
-		case ')':
+		case ']':
+			depth--
 			if depth == 0 {
 				return i
 			}
-			depth--
 		}
 	}
 	return -1
+}
+
+func isEscapedMarkdownBracket(content string, offset int) bool {
+	backslashes := 0
+	for i := offset - 1; i >= 0 && content[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
+}
+
+func unescapeMarkdownDestinationEscapes(destination string) string {
+	var out strings.Builder
+	out.Grow(len(destination))
+	for i := 0; i < len(destination); i++ {
+		if destination[i] == '\\' && i+1 < len(destination) && isMarkdownEscapablePunctuation(destination[i+1]) {
+			i++
+		}
+		out.WriteByte(destination[i])
+	}
+	return out.String()
+}
+
+func isMarkdownEscapablePunctuation(ch byte) bool {
+	return strings.ContainsRune(`!"#$%&'()*+,-./:;<=>?@[\]^_{|}~`+"`", rune(ch))
 }
 
 func isExternalHref(href string) bool {
@@ -727,44 +1086,39 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 
+func uniqueImportTargets(values []importTarget) []importTarget {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]importTarget, 0, len(values))
+	for _, value := range values {
+		if value.targetPath == "" {
+			continue
+		}
+		key := value.targetPath + "\x00" + string(value.kind)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 // rewriteOutsideCodeSpans applies rewrites only to plain text segments.
-// The importer must not rewrite examples inside inline code or fenced code blocks.
+// The importer must not rewrite examples inside inline code, fenced blocks, or indented code blocks.
 func rewriteOutsideCodeSpans(content string, rewrite func(string) (string, error)) (string, error) {
 	var out strings.Builder
 	plainStart := 0
-	i := 0
-
-	for i < len(content) {
-		if fenceLen, fenceChar, ok := detectFenceStart(content, i); ok {
-			rewritten, err := rewrite(content[plainStart:i])
-			if err != nil {
-				return "", err
-			}
-			out.WriteString(rewritten)
-
-			fenceEnd := findFenceEnd(content, i, fenceChar, fenceLen)
-			out.WriteString(content[i:fenceEnd])
-			i = fenceEnd
-			plainStart = i
+	for _, codeRange := range excludedMarkdownCodeRanges(content) {
+		if codeRange.Start < plainStart {
 			continue
 		}
-
-		if content[i] == '`' {
-			runLen := countRepeatedByte(content, i, '`')
-			rewritten, err := rewrite(content[plainStart:i])
-			if err != nil {
-				return "", err
-			}
-			out.WriteString(rewritten)
-
-			codeEnd := findInlineCodeEnd(content, i, runLen)
-			out.WriteString(content[i:codeEnd])
-			i = codeEnd
-			plainStart = i
-			continue
+		rewritten, err := rewrite(content[plainStart:codeRange.Start])
+		if err != nil {
+			return "", err
 		}
-
-		i++
+		out.WriteString(rewritten)
+		out.WriteString(content[codeRange.Start:codeRange.End])
+		plainStart = codeRange.End
 	}
 
 	rewritten, err := rewrite(content[plainStart:])
@@ -775,95 +1129,80 @@ func rewriteOutsideCodeSpans(content string, rewrite func(string) (string, error
 	return out.String(), nil
 }
 
-func detectFenceStart(content string, index int) (int, byte, bool) {
-	if !isLineStart(content, index) {
-		return 0, 0, false
-	}
-
-	lineEnd := index
-	for lineEnd < len(content) && content[lineEnd] != '\n' {
-		lineEnd++
-	}
-
-	line := content[index:lineEnd]
-	trimmed := strings.TrimLeft(line, " ")
-	indent := len(line) - len(trimmed)
-	if indent > 3 || len(trimmed) < 3 {
-		return 0, 0, false
-	}
-
-	switch trimmed[0] {
-	case '`', '~':
-		runLen := countLeadingByte(trimmed, trimmed[0])
-		if runLen >= 3 {
-			return runLen, trimmed[0], true
-		}
-	}
-
-	return 0, 0, false
+type markdownTextRange struct {
+	Start int
+	End   int
 }
 
-func findFenceEnd(content string, start int, fenceChar byte, fenceLen int) int {
-	i := start
-	for {
-		lineEnd := i
-		for lineEnd < len(content) && content[lineEnd] != '\n' {
-			lineEnd++
+func excludedMarkdownCodeRanges(content string) []markdownTextRange {
+	var ranges []markdownTextRange
+	reader := text.NewReader([]byte(content))
+	doc := importerMarkdownParser.Parser().Parse(reader)
+	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
 		}
+		switch n := node.(type) {
+		case *ast.CodeSpan:
+			ranges = append(ranges, collectMarkdownTextNodeRanges(n)...)
+		case *ast.FencedCodeBlock:
+			ranges = append(ranges, collectMarkdownBlockRanges(n)...)
+		case *ast.CodeBlock:
+			ranges = append(ranges, collectMarkdownBlockRanges(n)...)
+		}
+		return ast.WalkContinue, nil
+	})
+	return mergeMarkdownTextRanges(ranges)
+}
 
-		if i > start {
-			line := content[i:lineEnd]
-			trimmed := strings.TrimLeft(line, " ")
-			indent := len(line) - len(trimmed)
-			if indent <= 3 && len(trimmed) >= fenceLen {
-				if countLeadingByte(trimmed, fenceChar) >= fenceLen {
-					if lineEnd < len(content) {
-						return lineEnd + 1
-					}
-					return lineEnd
-				}
+func collectMarkdownTextNodeRanges(parent ast.Node) []markdownTextRange {
+	var ranges []markdownTextRange
+	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
+		textNode, ok := child.(*ast.Text)
+		if !ok {
+			continue
+		}
+		ranges = append(ranges, markdownTextRange{Start: textNode.Segment.Start, End: textNode.Segment.Stop})
+	}
+	return ranges
+}
+
+func collectMarkdownBlockRanges(node interface{ Lines() *text.Segments }) []markdownTextRange {
+	lines := node.Lines()
+	if lines == nil {
+		return nil
+	}
+	ranges := make([]markdownTextRange, 0, lines.Len())
+	for i := 0; i < lines.Len(); i++ {
+		segment := lines.At(i)
+		ranges = append(ranges, markdownTextRange{Start: segment.Start, End: segment.Stop})
+	}
+	return ranges
+}
+
+func mergeMarkdownTextRanges(ranges []markdownTextRange) []markdownTextRange {
+	if len(ranges) < 2 {
+		return ranges
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].Start == ranges[j].Start {
+			return ranges[i].End < ranges[j].End
+		}
+		return ranges[i].Start < ranges[j].Start
+	})
+	merged := make([]markdownTextRange, 0, len(ranges))
+	current := ranges[0]
+	for i := 1; i < len(ranges); i++ {
+		next := ranges[i]
+		if next.Start <= current.End {
+			if next.End > current.End {
+				current.End = next.End
 			}
+			continue
 		}
-
-		if lineEnd >= len(content) {
-			return len(content)
-		}
-		i = lineEnd + 1
+		merged = append(merged, current)
+		current = next
 	}
-}
-
-func findInlineCodeEnd(content string, start int, delimiterLen int) int {
-	searchFrom := start + delimiterLen
-	for searchFrom < len(content) {
-		next := strings.IndexByte(content[searchFrom:], '`')
-		if next < 0 {
-			return len(content)
-		}
-		next += searchFrom
-		if countRepeatedByte(content, next, '`') == delimiterLen {
-			return next + delimiterLen
-		}
-		searchFrom = next + 1
-	}
-	return len(content)
-}
-
-func isLineStart(content string, index int) bool {
-	return index == 0 || content[index-1] == '\n'
-}
-
-func countRepeatedByte(content string, start int, target byte) int {
-	count := 0
-	for start+count < len(content) && content[start+count] == target {
-		count++
-	}
-	return count
-}
-
-func countLeadingByte(content string, target byte) int {
-	count := 0
-	for count < len(content) && content[count] == target {
-		count++
-	}
-	return count
+	merged = append(merged, current)
+	return merged
 }

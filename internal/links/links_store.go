@@ -26,8 +26,16 @@ type PageLinkUpdate struct {
 	FromPageID string
 	FromTitle  string
 	ToPath     string
+	ToKind     string
 	Targets    []TargetLink
 }
+
+const (
+	defaultStoredTargetKind      = "page"
+	sectionStoredTargetKind      = "section"
+	unknownStoredTargetKind      = "unknown"
+	nonCanonicalPageStoredTarget = "non_canonical_page"
+)
 
 func linksDatabasePath(storageDir string, filename string) string {
 	normalizedStorageDir := filepath.FromSlash(strings.ReplaceAll(storageDir, `\`, `/`))
@@ -84,23 +92,147 @@ func (s *LinksStore) ensureSchema() error {
 	if err != nil {
 		return err
 	}
-	// Create the users table if it doesn't exist
+	if err := s.ensureLinksTable(); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`
-        CREATE TABLE IF NOT EXISTS links (
+		CREATE INDEX IF NOT EXISTS idx_links_to_page_id ON links(to_page_id);
+		CREATE INDEX IF NOT EXISTS idx_links_to_path ON links(to_path);
+		CREATE INDEX IF NOT EXISTS idx_links_to_path_kind ON links(to_path, to_kind);
+		CREATE INDEX IF NOT EXISTS idx_links_to_path_kind_from_page_id ON links(to_path, to_kind, from_page_id);
+		CREATE INDEX IF NOT EXISTS idx_links_broken ON links(broken);
+	`)
+	return err
+}
+
+func (s *LinksStore) ensureLinksTable() error {
+	exists, err := s.linksTableExists()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		_, err = s.db.Exec(linksTableSchemaSQL("links"))
+		return err
+	}
+
+	columns, err := s.linksTableColumns()
+	if err != nil {
+		return err
+	}
+	if linksTableKindAware(columns) {
+		return nil
+	}
+	return s.migrateLinksTableToKindAware(columns)
+}
+
+type linksTableColumn struct {
+	Name string
+	PK   int
+}
+
+func (s *LinksStore) linksTableExists() (bool, error) {
+	var name string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'links'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *LinksStore) linksTableColumns() ([]linksTableColumn, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(links)`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Default().Error("could not close rows", "error", err)
+		}
+	}()
+
+	var columns []linksTableColumn
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return nil, err
+		}
+		columns = append(columns, linksTableColumn{Name: name, PK: pk})
+	}
+	return columns, rows.Err()
+}
+
+func linksTableKindAware(columns []linksTableColumn) bool {
+	pk := map[string]int{}
+	for _, column := range columns {
+		pk[column.Name] = column.PK
+	}
+	return pk["from_page_id"] > 0 && pk["to_path"] > 0 && pk["to_kind"] > 0
+}
+
+func linksTableHasColumn(columns []linksTableColumn, name string) bool {
+	for _, column := range columns {
+		if column.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *LinksStore) migrateLinksTableToKindAware(columns []linksTableColumn) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	kindExpr := "'" + defaultStoredTargetKind + "'"
+	if linksTableHasColumn(columns, "to_kind") {
+		kindExpr = "COALESCE(NULLIF(to_kind, ''), '" + defaultStoredTargetKind + "')"
+	}
+	_, err = tx.Exec(linksTableSchemaSQL("links_migration") + fmt.Sprintf(`
+		INSERT OR REPLACE INTO links_migration(from_page_id, to_page_id, to_path, to_kind, from_title, broken)
+		SELECT from_page_id, to_page_id, to_path, %s, from_title, broken FROM links;
+		DROP TABLE links;
+		ALTER TABLE links_migration RENAME TO links;
+	`, kindExpr))
+	if err != nil {
+		rbErr := tx.Rollback()
+		if rbErr != nil {
+			return errors.Join(err, rbErr)
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
+func linksTableSchemaSQL(tableName string) string {
+	return fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS %s (
             from_page_id TEXT NOT NULL,
             to_page_id   TEXT,
 			to_path	  	 TEXT NOT NULL,
+			to_kind      TEXT NOT NULL DEFAULT '%s',
             from_title   TEXT,
 			broken 	     INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (from_page_id, to_path)
+            PRIMARY KEY (from_page_id, to_path, to_kind)
         );
+	`, tableName, defaultStoredTargetKind)
+}
 
-		CREATE INDEX IF NOT EXISTS idx_links_to_page_id ON links(to_page_id);
-		CREATE INDEX IF NOT EXISTS idx_links_to_path    ON links(to_path);
-		CREATE INDEX IF NOT EXISTS idx_links_to_path_from_page_id ON links(to_path, from_page_id);
-		CREATE INDEX IF NOT EXISTS idx_links_broken     ON links(broken);
-	`)
-	return err
+func storedTargetKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case sectionStoredTargetKind:
+		return sectionStoredTargetKind
+	case unknownStoredTargetKind:
+		return unknownStoredTargetKind
+	case nonCanonicalPageStoredTarget:
+		return nonCanonicalPageStoredTarget
+	default:
+		return defaultStoredTargetKind
+	}
 }
 
 // DeleteOutgoingLinks removes all links originating from the given page.
@@ -147,6 +279,23 @@ func (s *LinksStore) MarkLinksBrokenForPath(toPath string) error {
 	return err
 }
 
+// MarkLinksBrokenForPathAndKind marks links that point to an exact path and target kind as broken.
+func (s *LinksStore) MarkLinksBrokenForPathAndKind(toPath string, toKind string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE links
+		SET to_page_id = NULL,
+		    broken    = 1
+		WHERE to_path = ?
+		  AND to_kind = ?
+		  AND broken  = 0
+	`, toPath, storedTargetKind(toKind))
+
+	return err
+}
+
 // MarkLinksBrokenForPrefix marks links whose to_path is under the given prefix as broken.
 // Boundary-safe: matches either the prefix itself, or prefix + "/...".
 func (s *LinksStore) MarkLinksBrokenForPrefix(oldPrefix string) error {
@@ -163,6 +312,39 @@ func (s *LinksStore) MarkLinksBrokenForPrefix(oldPrefix string) error {
 		    OR to_path LIKE ? || '/%'
 		  )
 	`, oldPrefix, oldPrefix)
+
+	return err
+}
+
+// MarkLinksBrokenForPrefixAndKind marks links under a moved/deleted subtree.
+// Exact links to the subtree root must match the root kind; descendants remain path-bound.
+func (s *LinksStore) MarkLinksBrokenForPrefixAndKind(oldPrefix string, rootKind string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	storedKind := storedTargetKind(rootKind)
+	if storedKind != sectionStoredTargetKind {
+		_, err := s.db.Exec(`
+			UPDATE links
+			SET to_page_id = NULL,
+			    broken    = 1
+			WHERE broken = 0
+			  AND to_path = ?
+			  AND to_kind = ?
+		`, oldPrefix, storedKind)
+		return err
+	}
+
+	_, err := s.db.Exec(`
+		UPDATE links
+		SET to_page_id = NULL,
+		    broken    = 1
+		WHERE broken = 0
+		  AND (
+		    (to_path = ? AND to_kind = ?)
+		    OR to_path LIKE ? || '/%'
+		  )
+	`, oldPrefix, storedKind, oldPrefix)
 
 	return err
 }
@@ -187,7 +369,7 @@ func (s *LinksStore) AddLinks(fromPageID string, fromTitle string, toLinks []Tar
 		return errors.Join(base, err)
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO links(from_page_id, to_page_id, to_path, from_title, broken) VALUES (?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO links(from_page_id, to_page_id, to_path, to_kind, from_title, broken) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		rbErr := tx.Rollback()
 		base := fmt.Errorf("failed to prepare insert statement for links from page %s", fromPageID)
@@ -209,7 +391,7 @@ func (s *LinksStore) AddLinks(fromPageID string, fromTitle string, toLinks []Tar
 			brokenInt = 1
 		}
 
-		_, err := stmt.Exec(fromPageID, link.TargetPageID, link.TargetPagePath, fromTitle, brokenInt)
+		_, err := stmt.Exec(fromPageID, link.TargetPageID, link.TargetPagePath, storedTargetKind(link.TargetKind), fromTitle, brokenInt)
 		if err != nil {
 			rbErr := tx.Rollback()
 			base := fmt.Errorf("failed to insert link from %s to %s", fromPageID, link.TargetPageID)
@@ -255,7 +437,7 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 		}
 	}()
 
-	insertStmt, err := tx.Prepare(`INSERT OR REPLACE INTO links(from_page_id, to_page_id, to_path, from_title, broken) VALUES (?, ?, ?, ?, ?)`)
+	insertStmt, err := tx.Prepare(`INSERT OR REPLACE INTO links(from_page_id, to_page_id, to_path, to_kind, from_title, broken) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert statement for batched link update: %w", err)
 	}
@@ -265,16 +447,31 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 		}
 	}()
 
-	healStmt, err := tx.Prepare(`
+	healPageStmt, err := tx.Prepare(`
 		UPDATE links
 		SET to_page_id = ?, broken = 0
-		WHERE to_path = ? AND broken = 1
+		WHERE to_path = ? AND to_kind = ? AND broken = 1
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare heal statement for batched link update: %w", err)
 	}
 	defer func() {
-		if err := healStmt.Close(); err != nil {
+		if err := healPageStmt.Close(); err != nil {
+			slog.Default().Error("could not close statement", "error", err)
+		}
+	}()
+
+	healSectionStmt, err := tx.Prepare(`
+		UPDATE OR REPLACE links
+		SET to_page_id = ?, to_kind = ?, broken = 0
+		WHERE to_path = ?
+		  AND ((to_kind = ? AND broken = 1) OR to_kind = ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare section heal statement for batched link update: %w", err)
+	}
+	defer func() {
+		if err := healSectionStmt.Close(); err != nil {
 			slog.Default().Error("could not close statement", "error", err)
 		}
 	}()
@@ -289,14 +486,21 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 			if link.Broken {
 				brokenInt = 1
 			}
-			if _, err := insertStmt.Exec(update.FromPageID, link.TargetPageID, link.TargetPagePath, update.FromTitle, brokenInt); err != nil {
+			if _, err := insertStmt.Exec(update.FromPageID, link.TargetPageID, link.TargetPagePath, storedTargetKind(link.TargetKind), update.FromTitle, brokenInt); err != nil {
 				return fmt.Errorf("failed to insert link from %s to %s: %w", update.FromPageID, link.TargetPageID, err)
 			}
 		}
 	}
 
 	for _, update := range updates {
-		if _, err := healStmt.Exec(update.FromPageID, update.ToPath); err != nil {
+		toKind := storedTargetKind(update.ToKind)
+		if toKind == sectionStoredTargetKind {
+			if _, err := healSectionStmt.Exec(update.FromPageID, toKind, update.ToPath, toKind, unknownStoredTargetKind); err != nil {
+				return fmt.Errorf("failed to heal links for path %s: %w", update.ToPath, err)
+			}
+			continue
+		}
+		if _, err := healPageStmt.Exec(update.FromPageID, update.ToPath, toKind); err != nil {
 			return fmt.Errorf("failed to heal links for path %s: %w", update.ToPath, err)
 		}
 	}
@@ -307,7 +511,7 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 func (s *LinksStore) GetBacklinksForPage(pageID string) ([]Backlink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT from_page_id, to_page_id, from_title FROM links WHERE to_page_id = ? and broken = 0`, pageID)
+	rows, err := s.db.Query(`SELECT from_page_id, to_page_id, from_title, to_kind FROM links WHERE to_page_id = ? and broken = 0`, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +525,7 @@ func (s *LinksStore) GetBacklinksForPage(pageID string) ([]Backlink, error) {
 	for rows.Next() {
 		var b Backlink
 		var toPageID sql.NullString
-		if err := rows.Scan(&b.FromPageID, &toPageID, &b.FromTitle); err != nil {
+		if err := rows.Scan(&b.FromPageID, &toPageID, &b.FromTitle, &b.ToKind); err != nil {
 			return nil, err
 		}
 		if toPageID.Valid {
@@ -343,7 +547,7 @@ func (s *LinksStore) GetOutgoingLinksForPage(pageID string) ([]Outgoing, error) 
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(`
-        SELECT from_page_id, to_page_id, to_path, from_title, broken
+        SELECT from_page_id, to_page_id, to_path, to_kind, from_title, broken
         FROM links
         WHERE from_page_id = ?
     `, pageID)
@@ -362,7 +566,7 @@ func (s *LinksStore) GetOutgoingLinksForPage(pageID string) ([]Outgoing, error) 
 		var toPageID sql.NullString
 		var brokenInt int
 
-		if err := rows.Scan(&o.FromPageID, &toPageID, &o.ToPath, &o.FromTitle, &brokenInt); err != nil {
+		if err := rows.Scan(&o.FromPageID, &toPageID, &o.ToPath, &o.ToKind, &o.FromTitle, &brokenInt); err != nil {
 			return nil, err
 		}
 
@@ -413,7 +617,7 @@ func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[string
 	}
 
 	rows, err := s.db.Query(`
-        SELECT from_page_id, to_page_id, to_path, from_title, broken
+        SELECT from_page_id, to_page_id, to_path, to_kind, from_title, broken
         FROM links
         WHERE from_page_id IN (`+placeholders+`)
         ORDER BY from_page_id
@@ -432,7 +636,7 @@ func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[string
 		var toPageID sql.NullString
 		var brokenInt int
 
-		if err := rows.Scan(&outgoing.FromPageID, &toPageID, &outgoing.ToPath, &outgoing.FromTitle, &brokenInt); err != nil {
+		if err := rows.Scan(&outgoing.FromPageID, &toPageID, &outgoing.ToPath, &outgoing.ToKind, &outgoing.FromTitle, &brokenInt); err != nil {
 			return err
 		}
 
@@ -451,7 +655,7 @@ func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLi
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(`
-		SELECT from_page_id, from_title, to_path, broken
+		SELECT from_page_id, from_title, to_path, to_kind, broken
 		FROM links
 		WHERE to_path = ? OR to_path LIKE ?
 	`, oldPrefix, oldPrefix+"/%")
@@ -468,7 +672,53 @@ func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLi
 	for rows.Next() {
 		var match RefactorLinkMatch
 		var brokenInt int
-		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &match.ToPath, &brokenInt); err != nil {
+		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &match.ToPath, &match.ToKind, &brokenInt); err != nil {
+			return nil, err
+		}
+		match.Broken = brokenInt == 1
+		matches = append(matches, match)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return matches, nil
+}
+
+func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKind string) ([]RefactorLinkMatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	storedKind := storedTargetKind(rootKind)
+	query := `
+		SELECT from_page_id, from_title, to_path, to_kind, broken
+		FROM links
+		WHERE to_path = ? AND (to_kind = ? OR (to_kind = ? AND broken = 0))
+	`
+	args := []any{oldPrefix, storedKind, unknownStoredTargetKind}
+	if storedKind == sectionStoredTargetKind {
+		query = `
+			SELECT from_page_id, from_title, to_path, to_kind, broken
+			FROM links
+			WHERE (to_path = ? AND to_kind = ?) OR to_path LIKE ?
+		`
+		args = append(args, oldPrefix+"/%")
+	}
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Default().Error("could not close rows", "error", err)
+		}
+	}()
+
+	var matches []RefactorLinkMatch
+	for rows.Next() {
+		var match RefactorLinkMatch
+		var brokenInt int
+		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &match.ToPath, &match.ToKind, &brokenInt); err != nil {
 			return nil, err
 		}
 		match.Broken = brokenInt == 1
@@ -514,12 +764,56 @@ func (s *LinksStore) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]stri
 	return pageIDs, nil
 }
 
+func (s *LinksStore) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix string, rootKind string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	storedKind := storedTargetKind(rootKind)
+	query := `
+		SELECT DISTINCT from_page_id
+		FROM links
+		WHERE to_path = ? AND (to_kind = ? OR (to_kind = ? AND broken = 0))
+	`
+	args := []any{oldPrefix, storedKind, unknownStoredTargetKind}
+	if storedKind == sectionStoredTargetKind {
+		query = `
+			SELECT DISTINCT from_page_id
+			FROM links
+			WHERE (to_path = ? AND to_kind = ?) OR to_path LIKE ?
+		`
+		args = append(args, oldPrefix+"/%")
+	}
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Default().Error("could not close rows", "error", err)
+		}
+	}()
+
+	var pageIDs []string
+	for rows.Next() {
+		var pageID string
+		if err := rows.Scan(&pageID); err != nil {
+			return nil, err
+		}
+		pageIDs = append(pageIDs, pageID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return pageIDs, nil
+}
+
 func (s *LinksStore) GetBrokenIncomingForPath(toPath string) ([]Backlink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(`
-		SELECT from_page_id, to_page_id, from_title
+		SELECT from_page_id, to_page_id, from_title, to_kind
 		FROM links
 		WHERE to_path = ? AND broken = 1
 		ORDER BY from_title ASC
@@ -537,7 +831,48 @@ func (s *LinksStore) GetBrokenIncomingForPath(toPath string) ([]Backlink, error)
 	for rows.Next() {
 		var b Backlink
 		var toPageID sql.NullString
-		if err := rows.Scan(&b.FromPageID, &toPageID, &b.FromTitle); err != nil {
+		if err := rows.Scan(&b.FromPageID, &toPageID, &b.FromTitle, &b.ToKind); err != nil {
+			return nil, err
+		}
+		if toPageID.Valid {
+			b.ToPageID = toPageID.String
+		} else {
+			b.ToPageID = ""
+		}
+		b.Broken = true
+		backlinks = append(backlinks, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return backlinks, nil
+}
+
+func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath string, toKind string) ([]Backlink, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`
+		SELECT from_page_id, to_page_id, from_title, to_kind
+		FROM links
+		WHERE to_path = ? AND to_kind IN (?, ?) AND broken = 1
+		ORDER BY from_title ASC
+	`, toPath, storedTargetKind(toKind), unknownStoredTargetKind)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			slog.Default().Error("could not close rows", "error", err)
+		}
+	}()
+
+	var backlinks []Backlink
+	for rows.Next() {
+		var b Backlink
+		var toPageID sql.NullString
+		if err := rows.Scan(&b.FromPageID, &toPageID, &b.FromTitle, &b.ToKind); err != nil {
 			return nil, err
 		}
 		if toPageID.Valid {
@@ -564,6 +899,30 @@ func (s *LinksStore) HealLinksForPath(toPath string, pageID string) error {
 		SET to_page_id = ?, broken = 0
 		WHERE to_path = ? AND broken = 1
 	`, pageID, toPath)
+
+	return err
+}
+
+func (s *LinksStore) HealLinksForPathAndKind(toPath string, toKind string, pageID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	storedKind := storedTargetKind(toKind)
+	if storedKind == sectionStoredTargetKind {
+		_, err := s.db.Exec(`
+			UPDATE OR REPLACE links
+			SET to_page_id = ?, to_kind = ?, broken = 0
+			WHERE to_path = ?
+			  AND ((to_kind = ? AND broken = 1) OR to_kind = ?)
+		`, pageID, storedKind, toPath, storedKind, unknownStoredTargetKind)
+		return err
+	}
+
+	_, err := s.db.Exec(`
+		UPDATE links
+		SET to_page_id = ?, broken = 0
+		WHERE to_path = ? AND to_kind = ? AND broken = 1
+	`, pageID, toPath, storedKind)
 
 	return err
 }

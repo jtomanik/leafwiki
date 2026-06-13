@@ -4,6 +4,7 @@ import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import { FilePlus, FolderPlus } from 'lucide-react'
@@ -71,7 +72,10 @@ export default function EmptySectionChildrenList({
 
               return (
                 <li key={n.id}>
-                  <Link to={`/${n.path}`} state={createNavigationVisitState()}>
+                  <Link
+                    to={browserRoutePathForWikiNode(n.path, n.kind)}
+                    state={createNavigationVisitState()}
+                  >
                     {n.title}
                   </Link>{' '}
                   {n.kind === NODE_KIND_SECTION && ' (Section)'}

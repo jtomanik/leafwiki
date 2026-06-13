@@ -4,6 +4,7 @@ import { createPage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
+import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -85,7 +86,9 @@ export function AddPageDialog({
         await reloadTree()
         if (redirect) {
           const fullPath = parentPath !== '' ? `${parentPath}/${slug}` : slug
-          navigate(buildEditUrl(fullPath))
+          navigate(
+            buildEditUrl(browserRoutePathForWikiNode(fullPath, nodeKind)),
+          )
         }
         resetForm()
         return true

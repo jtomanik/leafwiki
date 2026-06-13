@@ -3,18 +3,25 @@ import { FlatPageSearchItem, buildFlatPageSearchItems } from '@/lib/pageSearch'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+type NodesByPathKind = Record<
+  string,
+  Partial<Record<PageNode['kind'], PageNode>>
+>
+
 function buildIndexes(root: PageNode) {
   const byPath: Record<string, PageNode> = {}
+  const byPathKind: NodesByPathKind = {}
   const byId: Record<string, PageNode> = {}
 
   const walk = (n: PageNode) => {
     byId[n.id] = n
     byPath[n.path] = n
+    byPathKind[n.path] = { ...byPathKind[n.path], [n.kind]: n }
     for (const ch of n.children || []) walk(ch)
   }
 
   walk(root)
-  return { byPath, byId }
+  return { byPath, byPathKind, byId }
 }
 
 function collectExpandableNodeIds(root: PageNode | null): string[] {
@@ -61,13 +68,14 @@ type TreeStore = {
   setActiveNodeId: (id: string | null) => void
   isNodeOpen: (id: string) => boolean
   getPageById: (id: string) => PageNode | null
-  getPageByPath: (path: string) => PageNode | null
+  getPageByPath: (path: string, kind?: PageNode['kind']) => PageNode | null
   getPathById: (id: string) => string | null
   getAncestors: (id: string) => string[]
-  openAncestorsForPath: (path: string) => void
+  openAncestorsForPath: (path: string, kind?: PageNode['kind']) => void
   openNodeIds: string[]
   openNodeIdSet: Record<string, true>
   byPath: Record<string, PageNode>
+  byPathKind: NodesByPathKind
   byId: Record<string, PageNode>
   flatPages: FlatPageSearchItem[]
 }
@@ -81,6 +89,7 @@ export const useTreeStore = create<TreeStore>()(
       openNodeIds: [],
       openNodeIdSet: {},
       byPath: {},
+      byPathKind: {},
       byId: {},
       flatPages: [],
       expandAll: () => {
@@ -131,7 +140,12 @@ export const useTreeStore = create<TreeStore>()(
 
       isNodeOpen: (id: string) => !!get().openNodeIdSet?.[id],
 
-      getPageByPath: (path: string) => get().byPath?.[path] ?? null,
+      getPageByPath: (path: string, kind?: PageNode['kind']) => {
+        if (kind) {
+          return get().byPathKind?.[path]?.[kind] ?? null
+        }
+        return get().byPath?.[path] ?? null
+      },
       getPageById: (id: string) => get().byId?.[id] ?? null,
       getPathById: (id: string) => get().byId?.[id]?.path ?? null,
 
@@ -146,8 +160,8 @@ export const useTreeStore = create<TreeStore>()(
         return out
       },
 
-      openAncestorsForPath: (path: string) => {
-        const node = get().getPageByPath(path)
+      openAncestorsForPath: (path: string, kind?: PageNode['kind']) => {
+        const node = get().getPageByPath(path, kind)
         if (!node) return
 
         const ancestors = get().getAncestors(node.id)
@@ -173,12 +187,24 @@ export const useTreeStore = create<TreeStore>()(
       patchNodeVersion: (id: string, version: string) => {
         const byId = get().byId
         const byPath = get().byPath
+        const byPathKind = get().byPathKind
         const node = byId?.[id]
         if (!node) return
         const updatedNode = { ...node, version }
+        const currentPathKind = node.path ? (byPathKind[node.path] ?? {}) : {}
+        const nextByPath =
+          node.path && byPath[node.path]?.id === id
+            ? { ...byPath, [node.path]: updatedNode }
+            : byPath
         set({
           byId: { ...byId, [id]: updatedNode },
-          byPath: node.path ? { ...byPath, [node.path]: updatedNode } : byPath,
+          byPath: nextByPath,
+          byPathKind: node.path
+            ? {
+                ...byPathKind,
+                [node.path]: { ...currentPathKind, [node.kind]: updatedNode },
+              }
+            : byPathKind,
         })
       },
 
@@ -188,12 +214,13 @@ export const useTreeStore = create<TreeStore>()(
         try {
           const tree = await fetchTree()
           assignParentIds(tree)
-          const { byPath, byId } = buildIndexes(tree)
+          const { byPath, byPathKind, byId } = buildIndexes(tree)
           const flatPages = buildFlatPageSearchItems(tree)
           const persistedOpen = get().openNodeIds
           set({
             tree,
             byPath,
+            byPathKind,
             byId,
             flatPages,
             openNodeIdSet: toSetRecord(persistedOpen),

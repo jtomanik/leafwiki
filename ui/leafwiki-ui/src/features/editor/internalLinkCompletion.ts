@@ -4,6 +4,7 @@ import type {
   CompletionResult,
 } from '@codemirror/autocomplete'
 import { FlatPageSearchItem, searchFlatPageSearchItems } from '@/lib/pageSearch'
+import { markdownHrefForWikiPath } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 
 const MAX_RESULTS = 20
@@ -54,7 +55,7 @@ function buildCompletionOptions(
     displayLabel: item.title,
     info: item.breadcrumb,
     type: 'text',
-    apply: `/${item.path}`,
+    apply: markdownHrefForWikiPath(item.path, item.kind),
     path: item.path,
   }))
 }

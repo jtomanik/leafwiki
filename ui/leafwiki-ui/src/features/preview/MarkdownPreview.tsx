@@ -1,5 +1,6 @@
 import { useDesignModeStore } from '@/features/designtoggle/designmode'
 import { withBasePath } from '@/lib/routePath'
+import type { WikiNodeKind } from '@/lib/wikiPath'
 import {
   AnchorHTMLAttributes,
   AudioHTMLAttributes,
@@ -69,6 +70,7 @@ const schema = {
 type Props = {
   content: string
   path?: string
+  pageKind?: WikiNodeKind
   resolveAssetUrl?: (src: string) => string
   enableHeadlineLinks?: boolean
   showToc?: boolean
@@ -82,9 +84,17 @@ type MarkdownPreviewErrorBoundaryState = {
 
 const CLOBBER_PREFIX = ''
 const FOOTNOTE_TARGET_PREFIX = '#user-content-fn'
+const SAFE_URL_SCHEMES = new Set(['http', 'https', 'mailto'])
 
 type MarkdownNodeProp = {
   node?: unknown
+}
+
+type RehypeNode = {
+  type?: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: RehypeNode[]
 }
 
 type SemanticAlertKind = 'info' | 'success' | 'warning' | 'error'
@@ -206,6 +216,43 @@ function normalizeFootnoteHref(href?: string) {
   return `#${CLOBBER_PREFIX}${href.slice(1)}`
 }
 
+function normalizeSafeUrlSchemes() {
+  return (tree: RehypeNode) => {
+    visitRehypeNode(tree, (node) => {
+      if (node.tagName !== 'a') {
+        return
+      }
+      const properties = node.properties
+      if (!properties) {
+        return
+      }
+      const href = properties.href
+      if (typeof href !== 'string') {
+        return
+      }
+      properties.href = normalizeSafeUrlScheme(href)
+    })
+  }
+}
+
+function visitRehypeNode(
+  node: RehypeNode,
+  visitor: (node: RehypeNode) => void,
+) {
+  visitor(node)
+  for (const child of node.children ?? []) {
+    visitRehypeNode(child, visitor)
+  }
+}
+
+function normalizeSafeUrlScheme(href: string) {
+  return href.replace(/^([A-Za-z][A-Za-z0-9+.-]*):/, (scheme, name: string) =>
+    SAFE_URL_SCHEMES.has(name.toLowerCase())
+      ? `${name.toLowerCase()}:`
+      : scheme,
+  )
+}
+
 function isPlainListParagraph(
   child: ReactNode,
 ): child is ReactElement<{ children?: ReactNode; 'data-line'?: string }> {
@@ -233,6 +280,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 export default function MarkdownPreview({
   content,
   path,
+  pageKind = 'page',
   resolveAssetUrl,
   enableHeadlineLinks = true,
   showToc = false,
@@ -273,13 +321,14 @@ export default function MarkdownPreview({
       return (
         <MarkdownLink
           path={path}
+          sourceKind={pageKind}
           resolveAssetUrl={resolveAssetUrl}
           {...props}
           href={normalizeFootnoteHref(props.href)}
         />
       )
     },
-    [path, resolveAssetUrl],
+    [path, pageKind, resolveAssetUrl],
   )
 
   const components = useMemo(
@@ -582,6 +631,7 @@ export default function MarkdownPreview({
             rehypeRaw,
             rehypeLineNumber,
             rehypeWhitelistStyles,
+            normalizeSafeUrlSchemes,
             [rehypeKatex, { output: 'html', strict: 'ignore' }],
             [rehypeSanitize, schema],
             rehypeHighlight,

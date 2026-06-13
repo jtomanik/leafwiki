@@ -4,12 +4,17 @@
 package dto
 
 import (
+	pathpkg "path"
 	"strings"
 	"time"
 
 	"github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
 )
+
+// ContentPathResolver returns the Markdown path backing a node, relative to the
+// configured wiki root.
+type ContentPathResolver func(*tree.PageNode) (string, error)
 
 // NodeMetadata contains authorship and timestamp information for a page node.
 type NodeMetadata struct {
@@ -31,8 +36,12 @@ type Node struct {
 	Version  string        `json:"version"`
 	Position int           `json:"position"`
 	Kind     tree.NodeKind `json:"kind"`
-	Children []*Node       `json:"children"`
-	Metadata NodeMetadata  `json:"metadata"`
+	// ContentPath is the Markdown file backing this node when the mapper has
+	// enough filesystem context to distinguish index.md from README.md fallback.
+	ContentPath    string       `json:"contentPath,omitempty"`
+	ReadmeFallback bool         `json:"readmeFallback,omitempty"`
+	Children       []*Node      `json:"children"`
+	Metadata       NodeMetadata `json:"metadata"`
 }
 
 // Page is the HTTP representation of a full page (node + content).
@@ -79,6 +88,16 @@ func BuildPathFromNode(node *tree.PageNode) string {
 
 // ToAPINode recursively converts a tree.PageNode to its HTTP representation.
 func ToAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserResolver) *Node {
+	return toAPINode(node, parentPath, userResolver, nil)
+}
+
+// ToAPINodeWithContentPaths recursively converts a tree.PageNode and includes
+// each node's backing Markdown file path.
+func ToAPINodeWithContentPaths(node *tree.PageNode, parentPath string, userResolver *auth.UserResolver, contentPathResolver ContentPathResolver) *Node {
+	return toAPINode(node, parentPath, userResolver, contentPathResolver)
+}
+
+func toAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserResolver, contentPathResolver ContentPathResolver) *Node {
 	path := node.Slug
 	if node.Slug == "root" {
 		path = ""
@@ -93,14 +112,17 @@ func ToAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserRe
 		lastAuthor, _ = userResolver.ResolveUserLabel(node.Metadata.LastAuthorID)
 	}
 
+	contentPath := contentPathForNode(node, contentPathResolver)
 	apiNode := &Node{
-		ID:       node.ID,
-		Title:    node.Title,
-		Slug:     node.Slug,
-		Path:     path,
-		Version:  node.Version(),
-		Position: node.Position,
-		Kind:     node.Kind,
+		ID:             node.ID,
+		Title:          node.Title,
+		Slug:           node.Slug,
+		Path:           path,
+		Version:        node.Version(),
+		Position:       node.Position,
+		Kind:           node.Kind,
+		ContentPath:    contentPath,
+		ReadmeFallback: node.Kind == tree.NodeKindSection && pathpkg.Base(contentPath) == "README.md",
 		Metadata: NodeMetadata{
 			CreatedAt:    node.Metadata.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:    node.Metadata.UpdatedAt.Format(time.RFC3339),
@@ -112,7 +134,7 @@ func ToAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserRe
 	}
 
 	for _, child := range node.Children {
-		apiNode.Children = append(apiNode.Children, ToAPINode(child, path, userResolver))
+		apiNode.Children = append(apiNode.Children, toAPINode(child, path, userResolver, contentPathResolver))
 	}
 
 	return apiNode
@@ -144,6 +166,28 @@ func ToAPINodeWithDepth(node *tree.PageNode, parentPath string, userResolver *au
 	}
 	pruneNodeDepth(apiNode, depth)
 	return apiNode
+}
+
+// ToAPINodeWithContentPathsAndDepth converts a node with depth limiting and
+// backing Markdown file paths.
+func ToAPINodeWithContentPathsAndDepth(node *tree.PageNode, parentPath string, userResolver *auth.UserResolver, contentPathResolver ContentPathResolver, depth int) *Node {
+	apiNode := ToAPINodeWithContentPaths(node, parentPath, userResolver, contentPathResolver)
+	if depth < 0 {
+		return apiNode
+	}
+	pruneNodeDepth(apiNode, depth)
+	return apiNode
+}
+
+func contentPathForNode(node *tree.PageNode, contentPathResolver ContentPathResolver) string {
+	if contentPathResolver == nil {
+		return ""
+	}
+	contentPath, err := contentPathResolver(node)
+	if err != nil {
+		return ""
+	}
+	return contentPath
 }
 
 // FormatAPITime formats a time.Time to RFC3339 or empty string for zero time.

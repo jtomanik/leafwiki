@@ -58,6 +58,12 @@ function snapshotMeta(snapshot: WorkspaceSnapshot) {
   return parts.join(' · ')
 }
 
+function snapshotChangedMarkdownPaths(snapshot: WorkspaceSnapshot) {
+  return Array.isArray(snapshot.changedMarkdownPaths)
+    ? snapshot.changedMarkdownPaths.filter((path) => path.trim().length > 0)
+    : []
+}
+
 export function WorkspaceSnapshotsDialog() {
   const open = useDialogsStore(
     (state) => state.dialogType === DIALOG_WORKSPACE_SNAPSHOTS,
@@ -211,6 +217,7 @@ export function WorkspaceSnapshotsDialog() {
                 const commitId = snapshotCommitId(snapshot)
                 const selected = commitId === selectedCommitId
                 const meta = snapshotMeta(snapshot)
+                const changedPaths = snapshotChangedMarkdownPaths(snapshot)
 
                 return (
                   <button
@@ -237,6 +244,14 @@ export function WorkspaceSnapshotsDialog() {
                     {meta ? (
                       <span className="workspace-snapshots-dialog__meta">
                         {meta}
+                      </span>
+                    ) : null}
+                    {changedPaths.length > 0 ? (
+                      <span
+                        className="workspace-snapshots-dialog__changed-paths"
+                        data-testid={`workspace-snapshots-dialog-changed-paths-${commitId}`}
+                      >
+                        {changedPaths.join(', ')}
                       </span>
                     ) : null}
                   </button>

@@ -35,7 +35,7 @@ func (e *LinkIndexSideEffect) Apply(event PageSaveEvent) {
 
 	case PageOperationUpdate:
 		if event.SlugChanged {
-			e.markBrokenForOldPath(event.OldPath)
+			e.markBrokenForOldPath(event.OldPath, event.After)
 			for _, p := range event.AffectedPages {
 				e.updateAndHeal(p)
 			}
@@ -53,7 +53,7 @@ func (e *LinkIndexSideEffect) Apply(event PageSaveEvent) {
 		}
 
 	case PageOperationMove:
-		e.markBrokenForOldPath(event.OldPath)
+		e.markBrokenForOldPath(event.OldPath, event.After)
 		for _, p := range event.AffectedPages {
 			e.updateAndHeal(p)
 		}
@@ -69,14 +69,14 @@ func (e *LinkIndexSideEffect) Apply(event PageSaveEvent) {
 		}
 		if len(event.AffectedPages) > 1 {
 			// Recursive delete: mark entire subtree prefix as broken.
-			e.markBrokenForOldPath(event.OldPath)
+			e.markBrokenForOldPath(event.OldPath, event.Before)
 		} else {
 			// Single-page delete.
 			if err := e.svc.MarkIncomingLinksBrokenForPage(event.Before.ID); err != nil {
 				e.log.Warn("failed to mark incoming links broken", "pageID", event.Before.ID, "error", err)
 			}
 			if event.OldPath != "" {
-				if err := e.svc.MarkLinksBrokenForPath(event.OldPath); err != nil {
+				if err := e.svc.MarkLinksBrokenForPathAndKind(event.OldPath, event.Before.Kind); err != nil {
 					e.log.Warn("failed to mark links broken for path", "path", event.OldPath, "error", err)
 				}
 			}
@@ -103,11 +103,17 @@ func (e *LinkIndexSideEffect) updateAndHeal(p *tree.Page) {
 	e.healExact(p)
 }
 
-func (e *LinkIndexSideEffect) markBrokenForOldPath(oldPath string) {
+func (e *LinkIndexSideEffect) markBrokenForOldPath(oldPath string, page *tree.Page) {
 	if oldPath == "" {
 		return
 	}
-	if err := e.svc.MarkLinksBrokenForPrefix(oldPath); err != nil {
+	if page == nil {
+		if err := e.svc.MarkLinksBrokenForPrefix(oldPath); err != nil {
+			e.log.Warn("failed to mark links broken for prefix", "path", oldPath, "error", err)
+		}
+		return
+	}
+	if err := e.svc.MarkLinksBrokenForPrefixAndKind(oldPath, page.Kind); err != nil {
 		e.log.Warn("failed to mark links broken for prefix", "path", oldPath, "error", err)
 	}
 }

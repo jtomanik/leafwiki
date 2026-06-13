@@ -10,7 +10,11 @@ import { useTreeStore } from '@/stores/tree'
 import { useCallback, useEffect } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useToolbarStore } from '../toolbar/toolbarStore'
-import { getWikiTargetRoutePath, toWikiLookupPath } from '@/lib/wikiPath'
+import {
+  browserRoutePathForWikiNode,
+  getWikiTargetRoutePath,
+  wikiPageLookupInputForBrowserRoute,
+} from '@/lib/wikiPath'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
 import { useSetPageTitle } from '../viewer/useSetPageTitle'
@@ -31,21 +35,26 @@ export default function PageHistoryPage() {
   const notFound = useViewerStore((s) => s.notFound)
   const page = useViewerStore((s) => s.page)
   const loadPageData = useViewerStore((s) => s.loadPageData)
+  const pagePath = page?.path
+  const pageKind = page?.kind
 
   usePageHistory(page?.id ?? null)
 
   const closeHistory = useCallback(() => {
-    navigate(buildViewUrl(page?.path || pathname), {
+    const targetPath = pagePath
+      ? browserRoutePathForWikiNode(pagePath, pageKind)
+      : buildViewUrl(pathname)
+    navigate(targetPath, {
       state: createNavigationVisitState(),
     })
-  }, [navigate, page?.path, pathname])
+  }, [navigate, pageKind, pagePath, pathname])
 
   useScrollRestoration(getNavigationVisitKey(location), loading)
   useSetPageTitle({ page })
 
   useEffect(() => {
-    const path = toWikiLookupPath(buildViewUrl(pathname))
-    void loadPageData?.(path)
+    const lookup = wikiPageLookupInputForBrowserRoute(pathname)
+    void loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind)
   }, [pathname, loadPageData])
 
   useEffect(() => {

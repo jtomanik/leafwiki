@@ -27,6 +27,8 @@ export type PageNode = {
   parentId?: string | null
   children: PageNode[] | null
   kind: 'page' | 'section'
+  contentPath?: string
+  readmeFallback?: boolean
   metadata?: PageMetadata // optional metadata, because older API responses may not have it
 }
 
@@ -47,6 +49,7 @@ export type PermalinkTarget = {
   id: string
   slug: string
   path: string
+  kind: 'page' | 'section'
 }
 
 export type PageRefactorKind = 'rename' | 'move'
@@ -90,10 +93,15 @@ export async function suggestSlug(
   return typedData.slug
 }
 
-export async function getPageByPath(path: string): Promise<Page> {
-  return (await fetchWithAuth(
-    `/api/pages/by-path?path=${encodeURIComponent(path)}`,
-  )) as Page
+export async function getPageByPath(
+  path: string,
+  kind?: 'page' | 'section',
+): Promise<Page> {
+  const query = new URLSearchParams({ path })
+  if (kind) {
+    query.set('kind', kind)
+  }
+  return (await fetchWithAuth(`/api/pages/by-path?${query}`)) as Page
 }
 
 export async function getPermalinkTarget(id: string): Promise<PermalinkTarget> {
@@ -261,10 +269,15 @@ export type PathLookupResult = {
   segments: { slug: string; id?: string; exists: boolean }[]
 }
 
-export async function lookupPath(path: string): Promise<PathLookupResult> {
-  return (await fetchWithAuth(
-    `/api/pages/lookup?path=${encodeURIComponent(path)}`,
-  )) as {
+export async function lookupPath(
+  path: string,
+  kind?: Page['kind'],
+): Promise<PathLookupResult> {
+  const query = new URLSearchParams({ path })
+  if (kind) {
+    query.set('kind', kind)
+  }
+  return (await fetchWithAuth(`/api/pages/lookup?${query}`)) as {
     path: string
     exists: boolean
     canCreate: boolean
@@ -272,10 +285,14 @@ export async function lookupPath(path: string): Promise<PathLookupResult> {
   }
 }
 
-export async function ensurePage(path: string, targetTitle: string) {
+export async function ensurePage(
+  path: string,
+  targetTitle: string,
+  kind: Page['kind'] = 'page',
+) {
   return await fetchWithAuth(`/api/pages/ensure`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, title: targetTitle }),
+    body: JSON.stringify({ path, title: targetTitle, kind }),
   })
 }

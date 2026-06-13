@@ -6,10 +6,13 @@ import {
   DIALOG_SORT_PAGES,
   DIALOG_WORKSPACE_SNAPSHOTS,
 } from '@/lib/registries'
-import { buildViewUrl } from '@/lib/routePath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
-import { toWikiLookupPath } from '@/lib/wikiPath'
+import {
+  getWikiTargetRoutePath,
+  markdownRouteLookupKind,
+  toWikiLookupPath,
+} from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
@@ -56,7 +59,8 @@ export default function TreeView() {
   )
   const observedWorkspaceCommitRef = useRef<string | null>(null)
 
-  const currentPath = toWikiLookupPath(buildViewUrl(pathname))
+  const currentPath = toWikiLookupPath(getWikiTargetRoutePath(pathname))
+  const currentKind = markdownRouteLookupKind(pathname) ?? 'section'
 
   const openDialog = useDialogsStore((state) => state.openDialog)
   const readOnlyMode = useIsReadOnly()
@@ -94,8 +98,8 @@ export default function TreeView() {
 
   useEffect(() => {
     if (!tree || !currentPath) return
-    openAncestorsForPath(currentPath)
-  }, [tree, currentPath, openAncestorsForPath])
+    openAncestorsForPath(currentPath, currentKind)
+  }, [tree, currentPath, currentKind, openAncestorsForPath])
 
   useEffect(() => {
     if (!tree) return
@@ -110,13 +114,14 @@ export default function TreeView() {
       return
     }
 
-    const node = useTreeStore.getState().getPageByPath(currentPath)
+    const node = useTreeStore.getState().getPageByPath(currentPath, currentKind)
     setActiveNodeId(node?.id ?? null)
   }, [
     tree,
     appMode,
     currentEditorPageId,
     currentPath,
+    currentKind,
     openNode,
     setActiveNodeId,
   ])

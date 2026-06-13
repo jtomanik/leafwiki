@@ -66,7 +66,12 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 		return nil, err
 	}
 
-	if lookup.Exists {
+	requestedKind := tree.NodeKindPage
+	if in.Kind != nil {
+		requestedKind = *in.Kind
+	}
+
+	if lookup.Exists && lookupFinalKindMatches(lookup, requestedKind) {
 		page, err := uc.tree.GetPage(*lookup.Segments[len(lookup.Segments)-1].ID)
 		if err != nil {
 			return nil, err
@@ -141,4 +146,12 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 	}
 
 	return &EnsurePathOutput{Page: page}, nil
+}
+
+func lookupFinalKindMatches(lookup *tree.PathLookup, kind tree.NodeKind) bool {
+	if lookup == nil || len(lookup.Segments) == 0 {
+		return false
+	}
+	finalKind := lookup.Segments[len(lookup.Segments)-1].Kind
+	return finalKind != nil && *finalKind == kind
 }
