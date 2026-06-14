@@ -129,7 +129,6 @@ func NewSQLiteIndex(storageDir string) (*SQLiteIndex, error) {
 	return s, nil
 }
 
-
 func (s *SQLiteIndex) withDB(fn func(db *sql.DB) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -189,10 +188,11 @@ func (s *SQLiteIndex) Close() error {
 }
 
 func (s *SQLiteIndex) IndexPage(path string, filePath string, pageID string, title string, kind tree.NodeKind, raw string) error {
-	_, content, _, err := markdown.ParseFrontmatter(raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
 		return err
 	}
+	content := doc.Body
 
 	content = excerpt.NormalizeMarkdownBody(content)
 

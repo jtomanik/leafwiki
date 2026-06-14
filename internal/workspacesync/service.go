@@ -977,6 +977,15 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	if commit.Created && amendCreatedCommit {
+		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, commit.Hash)
+		if err != nil {
+			return err
+		}
+		if requiresMigrationWriteback {
+			amendCreatedCommit = false
+		}
+	}
+	if commit.Created && amendCreatedCommit {
 		writebackCommit, err = s.store.Amend(ctx, req)
 	} else {
 		writebackCommit, err = s.store.Capture(ctx, req)
@@ -989,6 +998,29 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 		s.recordChangedMarkdownPaths(writebackCommit.ChangedMarkdownPaths)
 	}
 	return nil
+}
+
+func capturedMarkdownRequiresMetadataWriteback(ctx context.Context, store revisionStore, commitHash string) (bool, error) {
+	if store == nil || strings.TrimSpace(commitHash) == "" {
+		return false, nil
+	}
+	changedFiles, err := store.ChangedMarkdownContents(ctx, commitHash)
+	if err != nil {
+		return false, err
+	}
+	for relPath, content := range changedFiles {
+		if !gitrevisions.IsManagedMarkdownRelPath(relPath) {
+			continue
+		}
+		_, result, err := markdown.ParsePageDocument(content)
+		if err != nil {
+			return false, err
+		}
+		if result.RequiresWriteback {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) validateAndRunAfterSyncLocked() error {
@@ -1149,11 +1181,11 @@ func contentForPageAtCommitPath(page *tree.Page, preferredPath string, files map
 		if !gitrevisions.IsManagedMarkdownRelPath(path) {
 			continue
 		}
-		fm, _, _, err := markdown.ParseFrontmatter(content)
-		if err != nil {
+		leafWikiID, ok := leafWikiIDFromContent(content)
+		if !ok {
 			continue
 		}
-		if strings.TrimSpace(fm.LeafWikiID) == page.ID {
+		if leafWikiID == page.ID {
 			return content, path, true
 		}
 	}
@@ -1179,11 +1211,11 @@ func changedContentForPageAtCommit(page *tree.Page, preferredPath string, change
 			continue
 		}
 		content := changedFiles[path]
-		fm, _, _, err := markdown.ParseFrontmatter(content)
-		if err != nil {
+		leafWikiID, ok := leafWikiIDFromContent(content)
+		if !ok {
 			continue
 		}
-		if strings.TrimSpace(fm.LeafWikiID) == page.ID {
+		if leafWikiID == page.ID {
 			return content, path, true
 		}
 	}
@@ -1191,12 +1223,19 @@ func changedContentForPageAtCommit(page *tree.Page, preferredPath string, change
 }
 
 func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
-	fm, _, _, err := markdown.ParseFrontmatter(content)
-	if err != nil {
+	leafWikiID, ok := leafWikiIDFromContent(content)
+	if !ok {
 		return false
 	}
-	leafWikiID := strings.TrimSpace(fm.LeafWikiID)
 	return leafWikiID == "" || leafWikiID == page.ID
+}
+
+func leafWikiIDFromContent(content string) (string, bool) {
+	doc, _, err := markdown.ParsePageDocument(content)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(doc.Metadata.Page.ID), true
 }
 
 func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {

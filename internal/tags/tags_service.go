@@ -57,34 +57,36 @@ func (s *TagsService) GetExcerptsForPages(pageIDs []string) (map[string]string, 
 	return s.store.GetExcerptsForPages(pageIDs)
 }
 
-// ExtractTagsFromContent parses frontmatter and returns lowercase-normalized tags.
+// ExtractTagsFromContent parses page metadata and returns lowercase-normalized tags.
 func ExtractTagsFromContent(content string) []string {
-	fm, _, has, err := markdown.ParseFrontmatter(content)
-	if err != nil || !has {
+	doc, _, err := markdown.ParsePageDocument(content)
+	if err != nil || len(doc.Metadata.Tags) == 0 {
 		return nil
 	}
-
-	for key, value := range fm.ExtraFields {
-		if strings.EqualFold(strings.TrimSpace(key), "tags") {
-			return normalizeTags(value)
-		}
-	}
-	return nil
+	return normalizeTags(doc.Metadata.Tags)
 }
 
 func normalizeTags(value interface{}) []string {
-	list, ok := value.([]interface{})
-	if !ok {
+	var list []string
+	switch typed := value.(type) {
+	case []string:
+		list = typed
+	case []interface{}:
+		list = make([]string, 0, len(typed))
+		for _, item := range typed {
+			tag, ok := item.(string)
+			if !ok {
+				continue
+			}
+			list = append(list, tag)
+		}
+	default:
 		return nil
 	}
 
 	seen := make(map[string]struct{})
 	result := make([]string, 0, len(list))
-	for _, item := range list {
-		tag, ok := item.(string)
-		if !ok {
-			continue
-		}
+	for _, tag := range list {
 		normalized := strings.ToLower(strings.TrimSpace(tag))
 		if normalized == "" {
 			continue

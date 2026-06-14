@@ -131,34 +131,37 @@ func TestImporterService_ExecuteCurrentPlan_WritesPreservedFrontmatterToDisk(t *
 	}
 	raw := string(rawBytes)
 
-	fm, body, has, err := markdown.ParseFrontmatter(raw)
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("expected written file not to use legacy YAML frontmatter, got: %q", raw)
+	}
+	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter err: %v", err)
+		t.Fatalf("ParsePageDocument err: %v", err)
 	}
-	if !has {
-		t.Fatalf("expected frontmatter in written file, got: %q", raw)
+	if doc.Body != "\n# Imported Title\nBody" {
+		t.Fatalf("unexpected body: %q", doc.Body)
 	}
-	if body != "\n# Imported Title\nBody" {
-		t.Fatalf("unexpected body: %q", body)
-	}
-	if got := fm.ExtraFields["custom_key"]; got != "keep-me" {
+	if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
 		t.Fatalf("expected custom_key to be preserved, got %#v", got)
 	}
-	if got := fm.ExtraFields["title"]; got != "Imported Title" {
-		t.Fatalf("expected title to be preserved, got %#v", got)
+	if got := doc.Metadata.Extra["title"]; got != nil {
+		t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
 	}
-	aliases, ok := fm.ExtraFields["aliases"].([]interface{})
+	aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
 	if !ok || len(aliases) != 1 || aliases[0] != "alpha" {
-		t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
+		t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
 	}
 	if strings.Contains(raw, "leafwiki_id: source-id") {
 		t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
 	}
-	if fm.LeafWikiID == "" {
-		t.Fatalf("expected written file to contain generated leafwiki_id")
+	if doc.Metadata.Page.ID == "" {
+		t.Fatalf("expected written file to contain generated page.id")
 	}
-	if fm.LeafWikiTitle != "Imported Title" {
-		t.Fatalf("expected written file to contain effective leafwiki_title, got %q", fm.LeafWikiTitle)
+	if doc.Metadata.Page.Title != "Imported Title" {
+		t.Fatalf("expected written file to contain effective page.title, got %q", doc.Metadata.Page.Title)
 	}
 }
 

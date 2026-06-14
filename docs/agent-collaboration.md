@@ -30,7 +30,7 @@ Prefer semantic MCP writes for normal page work:
 - `wiki_replace_page_section`
 - `wiki_create_page`, `wiki_move_page`, `wiki_delete_page`, and related page tools
 
-Use direct Markdown file edits for broad mechanical changes, generated bulk rewrites, or repo-native workflows where filesystem tools are safer than many small MCP calls. After direct edits, call `wiki_refresh` if humans or subsequent MCP reads need immediate visibility.
+Use direct Markdown file edits for broad mechanical body changes, generated bulk rewrites, or repo-native workflows where filesystem tools are safer than many small MCP calls. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. After direct edits, call `wiki_refresh` if humans or subsequent MCP reads need immediate visibility.
 
 Before editing a page, check `activeSessions` from `wiki_get_context`. Presence is advisory, not locking, but it should influence whether an agent edits now, narrows the edit with partial-edit tools, or asks the user before touching a page a human is actively editing.
 
@@ -66,7 +66,7 @@ Direct Markdown edit:
 {"tool":"wiki_get_context","arguments":{"syncMode":"auto"}}
 ```
 
-Edit files under `--root-dir`, then:
+Edit files under `--root-dir`, preserving canonical `<!-- leafwiki ... -->` metadata blocks and changing only body content unless the task is an explicit metadata repair. Then:
 
 ```json
 {"tool":"wiki_refresh","arguments":{"validate":true,"source":"filesystem"}}

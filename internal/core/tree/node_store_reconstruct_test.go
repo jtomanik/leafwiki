@@ -634,6 +634,96 @@ leafwiki_title: B
 	}
 }
 
+func TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnDuplicateCanonicalAndLegacyLeafWikiIDs(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), `<!-- leafwiki
+version: 1
+page:
+  id: mixed-dup-id
+  title: A
+-->
+
+# A`, 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), `---
+leafwiki_id: mixed-dup-id
+leafwiki_title: B
+---
+# B`, 0o644)
+
+	_, err := store.ReconstructTreeFromFS()
+	if err == nil {
+		t.Fatalf("expected duplicate ID error")
+	}
+	if !strings.Contains(err.Error(), "duplicate leafwiki_id") {
+		t.Fatalf("expected duplicate ID error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mixed-dup-id") {
+		t.Fatalf("expected duplicate ID to be mentioned, got: %v", err)
+	}
+}
+
+func TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnMalformedCanonicalMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		raw  string
+	}{
+		{
+			name: "page file",
+			path: filepath.Join("root", "bad.md"),
+			raw: `<!-- leafwiki
+version: 1
+page:
+  id: bad
+fields:
+  aliases:
+    - one
+-->
+# Bad`,
+		},
+		{
+			name: "section index",
+			path: filepath.Join("root", "docs", "index.md"),
+			raw: `<!-- leafwiki
+version: 1
+page:
+  id: docs
+fields:
+  leafwiki_hidden: true
+-->
+# Docs`,
+		},
+		{
+			name: "root index",
+			path: filepath.Join("root", "index.md"),
+			raw: `<!-- leafwiki
+version: 2
+page:
+  id: root
+-->
+# Root`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			store := NewNodeStore(tmp)
+			mustWriteFile(t, filepath.Join(tmp, tt.path), tt.raw, 0o644)
+
+			_, err := store.ReconstructTreeFromFS()
+			if err == nil {
+				t.Fatalf("expected reconstruct error")
+			}
+			if !strings.Contains(err.Error(), "metadata parse error") {
+				t.Fatalf("expected metadata parse error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnCaseInsensitiveDuplicateSlugs(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -836,6 +926,77 @@ leafwiki_last_author_id: bob
 	}
 	if page.Metadata.CreatorID != "alice" || page.Metadata.LastAuthorID != "bob" {
 		t.Fatalf("expected author metadata from frontmatter, got %#v", page.Metadata)
+	}
+}
+
+func TestNodeStore_ReconstructTreeFromFS_CanonicalizesCompleteLegacyMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	rootIndex := filepath.Join(tmp, "root", "index.md")
+	sectionIndex := filepath.Join(tmp, "root", "docs", "index.md")
+	pagePath := filepath.Join(tmp, "root", "docs", "page.md")
+
+	mustWriteFile(t, rootIndex, `---
+leafwiki_id: root
+leafwiki_title: Root
+leafwiki_created_at: 2026-03-21T09:00:00Z
+leafwiki_updated_at: 2026-03-21T09:30:00Z
+leafwiki_creator_id: root-author
+leafwiki_last_author_id: root-editor
+---
+# Root`, 0o644)
+	mustWriteFile(t, sectionIndex, `---
+leafwiki_id: docs-section
+leafwiki_title: Docs
+leafwiki_created_at: 2026-03-21T10:00:00Z
+leafwiki_updated_at: 2026-03-21T10:30:00Z
+leafwiki_creator_id: docs-author
+leafwiki_last_author_id: docs-editor
+---
+# Docs`, 0o644)
+	mustWriteFile(t, pagePath, `---
+leafwiki_id: docs-page
+leafwiki_title: Page
+leafwiki_created_at: 2026-03-21T11:00:00Z
+leafwiki_updated_at: 2026-03-21T11:30:00Z
+leafwiki_creator_id: page-author
+leafwiki_last_author_id: page-editor
+---
+# Page`, 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	if tree.ID != "root" {
+		t.Fatalf("root ID = %q", tree.ID)
+	}
+	section := findChildBySlug(t, tree, "docs")
+	if section.ID != "docs-section" {
+		t.Fatalf("section ID = %q", section.ID)
+	}
+	page := findChildBySlug(t, section, "page")
+	if page.ID != "docs-page" {
+		t.Fatalf("page ID = %q", page.ID)
+	}
+
+	for _, path := range []string{rootIndex, sectionIndex, pagePath} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", path, err)
+		}
+		content := string(raw)
+		if !strings.HasPrefix(content, "<!-- leafwiki\n") {
+			t.Fatalf("%s was not canonicalized: %q", path, content)
+		}
+		if strings.HasPrefix(content, "---\n") {
+			t.Fatalf("%s still starts with YAML frontmatter: %q", path, content)
+		}
+		if _, _, err := markdown.ParsePageDocument(content); err != nil {
+			t.Fatalf("ParsePageDocument(%s): %v", path, err)
+		}
 	}
 }
 

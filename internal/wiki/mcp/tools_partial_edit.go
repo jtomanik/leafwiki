@@ -26,14 +26,11 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		fm, body, hasFrontmatter, err := markdown.ParseFrontmatter(raw)
+		doc, _, err := markdown.ParsePageDocument(raw)
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		if !hasFrontmatter {
-			body = raw
-		}
-		currentTags, currentProperties := pages.ExtractPageMetadata(fm.ExtraFields)
+		currentTags, currentProperties := pages.ExtractPageMetadataFromPageMetadata(doc.Metadata)
 		tags, properties, err := pages.ApplyMetadataPatch(currentTags, currentProperties, pages.MetadataPatch{
 			SetTags:          in.SetTags,
 			AddTags:          in.AddTags,
@@ -44,8 +41,12 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		fm.ExtraFields = patchMetadataExtraFields(fm.ExtraFields, currentProperties, tags, properties)
-		combined, err := markdown.BuildMarkdownWithFrontmatter(fm, body)
+		combined, err := pages.BuildMarkdownWithPublicMetadataPatch(raw, page.ID, page.Title, pages.PublicMetadataPatch{
+			Tags:              tags,
+			TagsPresent:       true,
+			Properties:        properties,
+			PropertiesPresent: true,
+		}, doc.Body)
 		if err != nil {
 			return partialEditOutput{}, err
 		}
@@ -139,30 +140,6 @@ func partialEditWriteError(err error, page *tree.Page) error {
 		page.Title,
 		page.Version(),
 	)
-}
-
-func patchMetadataExtraFields(current map[string]interface{}, currentProperties map[string]string, tags []string, properties map[string]string) map[string]interface{} {
-	next := make(map[string]interface{}, len(current)+len(properties)+1)
-	for key, value := range current {
-		lower := strings.ToLower(strings.TrimSpace(key))
-		if lower == "tags" {
-			continue
-		}
-		if _, isProperty := currentProperties[key]; isProperty {
-			continue
-		}
-		next[key] = value
-	}
-	if len(tags) > 0 {
-		next["tags"] = append([]string{}, tags...)
-	}
-	for key, value := range properties {
-		next[key] = value
-	}
-	if len(next) == 0 {
-		return nil
-	}
-	return next
 }
 
 func (r *Routes) partialEditOutput(ctx context.Context, page *tree.Page, includePage bool, includeValidationValue *bool, includeLinkStatus bool) (partialEditOutput, error) {

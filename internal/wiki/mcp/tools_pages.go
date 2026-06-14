@@ -113,13 +113,41 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addEditorTool[updatePageInput, pageOutput](r, server, toolUpdatePage, func(ctx context.Context, actor toolActor, in updatePageInput) (pageOutput, error) {
-		if err := wikipages.ValidatePageMetadataInput(in.Tags, in.Properties); err != nil {
+		var tagsForValidation []string
+		if in.TagsPresent {
+			tagsForValidation = in.Tags
+		}
+		var propertiesForValidation map[string]string
+		if in.PropertiesPresent {
+			propertiesForValidation = in.Properties
+		}
+		if err := wikipages.ValidatePageMetadataInput(tagsForValidation, propertiesForValidation); err != nil {
 			return pageOutput{}, err
 		}
 		contentToSave := in.Content
 		fromImport := false
-		if in.Content != nil {
-			combined, err := markdown.BuildMarkdownWithExtraFrontmatter(wikipages.BuildExtraFields(in.Tags, in.Properties), *in.Content)
+		if in.Content != nil || in.TagsPresent || in.PropertiesPresent {
+			pageID := strings.TrimSpace(in.ID)
+			currentRaw, err := r.treeService.ReadPageRaw(pageID)
+			if err != nil {
+				return pageOutput{}, err
+			}
+			body := ""
+			if in.Content != nil {
+				body = *in.Content
+			} else {
+				doc, _, err := markdown.ParsePageDocument(currentRaw)
+				if err != nil {
+					return pageOutput{}, err
+				}
+				body = doc.Body
+			}
+			combined, err := wikipages.BuildMarkdownWithPublicMetadataPatch(currentRaw, pageID, in.Title, wikipages.PublicMetadataPatch{
+				Tags:              tagsForValidation,
+				TagsPresent:       in.TagsPresent,
+				Properties:        propertiesForValidation,
+				PropertiesPresent: in.PropertiesPresent,
+			}, body)
 			if err != nil {
 				return pageOutput{}, err
 			}

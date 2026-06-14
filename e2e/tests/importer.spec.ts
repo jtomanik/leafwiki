@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'path';
 import test, { expect } from '@playwright/test';
@@ -25,13 +25,38 @@ const importMetadataZipPath = path.resolve(
 );
 const importMetadataZipFileName = 'import-metadata.zip';
 const importedMetadataPagePath = '/imported-metadata-page.md';
-const rootDir = process.env.E2E_ROOT_DIR ?? '';
+const rootDir =
+  process.env.E2E_ROOT_DIR ||
+  (process.env.E2E_DATA_DIR ? path.join(process.env.E2E_DATA_DIR, 'root') : '');
 
 function writeRootMarkdown(relativePath: string, content: string) {
   expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
   const fullPath = path.join(rootDir, relativePath);
   mkdirSync(path.dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, content);
+}
+
+function readRootMarkdownIfAvailable(relativePath: string) {
+  if (rootDir === '' || !existsSync(rootDir)) return null;
+  const fullPath = path.join(rootDir, relativePath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
+function expectCanonicalMarkdownStorage(raw: string) {
+  expect(raw.startsWith('<!-- leafwiki\n')).toBe(true);
+  expect(raw.startsWith('---\n')).toBe(false);
+}
+
+function canonicalPageMarkdown(id: string, title: string, body: string) {
+  return `<!-- leafwiki
+version: 1
+page:
+  id: ${id}
+  title: ${title}
+-->
+
+${body}`;
 }
 
 async function refreshWorkspaceSync(page: import('@playwright/test').Page) {
@@ -196,12 +221,11 @@ async function cleanupCanonicalFixtureMissingTarget(
 
   writeRootMarkdown(
     `${fixture.missingSlug}.md`,
-    `---
-leafwiki_id: ${fixture.missingSlug}
-leafwiki_title: Canonical Import Missing Cleanup
----
-
-# Canonical Import Missing Cleanup`,
+    canonicalPageMarkdown(
+      fixture.missingSlug,
+      'Canonical Import Missing Cleanup',
+      '# Canonical Import Missing Cleanup',
+    ),
   );
   await refreshWorkspaceSync(page);
   await expect.poll(() => getWorkspaceSyncValidationErrors(page), { timeout: 15000 }).toEqual([]);
@@ -495,6 +519,14 @@ test.describe('Importer', () => {
     const viewPage = new ViewPage(page);
     await viewPage.goto(importedMetadataPagePath);
 
+    const apiContent = await getPageContentByPath(page, importedMetadataPagePath);
+    expect(apiContent).toContain('# Imported Metadata Page');
+    expect(apiContent).toContain('This imported page carries metadata for E2E verification.');
+    expect(apiContent).not.toContain('---');
+    expect(apiContent).not.toContain('tags:');
+    expect(apiContent).not.toContain('status: published');
+    expect(apiContent).not.toContain('owner: importer-e2e');
+
     await expect(
       page.locator('.page-metadata__tag-chip').filter({ hasText: 'imported-e2e-tag' }),
     ).toBeVisible();
@@ -528,6 +560,16 @@ test.describe('Importer', () => {
       owner: 'importer-e2e',
       status: 'published',
     });
+
+    const raw = readRootMarkdownIfAvailable('imported-metadata-page.md');
+    if (raw === null) {
+      throw new Error('importer raw canonical-storage assertion requires readable root storage');
+    }
+    expectCanonicalMarkdownStorage(raw);
+    expect(raw).toContain('tags:');
+    expect(raw).toContain('- imported-e2e-tag');
+    expect(raw).toContain('status: published');
+    expect(raw).not.toContain('leafwiki_id:');
 
     await editPage.closeEditor();
   });

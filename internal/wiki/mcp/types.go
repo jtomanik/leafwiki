@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"encoding/json"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
@@ -246,13 +247,52 @@ type createPageInput struct {
 }
 
 type updatePageInput struct {
-	ID         string            `json:"id"`
-	Version    string            `json:"version"`
-	Title      string            `json:"title"`
-	Slug       string            `json:"slug"`
-	Content    *string           `json:"content,omitempty"`
-	Tags       []string          `json:"tags,omitempty"`
-	Properties map[string]string `json:"properties,omitempty"`
+	ID                string            `json:"id"`
+	Version           string            `json:"version"`
+	Title             string            `json:"title"`
+	Slug              string            `json:"slug"`
+	Content           *string           `json:"content,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	Properties        map[string]string `json:"properties,omitempty"`
+	TagsPresent       bool              `json:"-"`
+	PropertiesPresent bool              `json:"-"`
+}
+
+func (in *updatePageInput) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID         string           `json:"id"`
+		Version    string           `json:"version"`
+		Title      string           `json:"title"`
+		Slug       string           `json:"slug"`
+		Content    *string          `json:"content,omitempty"`
+		Tags       *json.RawMessage `json:"tags,omitempty"`
+		Properties *json.RawMessage `json:"properties,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	in.ID = raw.ID
+	in.Version = raw.Version
+	in.Title = raw.Title
+	in.Slug = raw.Slug
+	in.Content = raw.Content
+	in.Tags = nil
+	in.Properties = nil
+	in.TagsPresent = raw.Tags != nil
+	in.PropertiesPresent = raw.Properties != nil
+
+	if raw.Tags != nil && string(*raw.Tags) != "null" {
+		if err := json.Unmarshal(*raw.Tags, &in.Tags); err != nil {
+			return err
+		}
+	}
+	if raw.Properties != nil && string(*raw.Properties) != "null" {
+		if err := json.Unmarshal(*raw.Properties, &in.Properties); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type pageOutput struct {

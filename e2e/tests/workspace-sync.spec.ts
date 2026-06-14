@@ -48,6 +48,26 @@ function readRootMarkdown(relativePath: string) {
   return readFileSync(path.join(rootDir, relativePath), 'utf8');
 }
 
+function canonicalPageMarkdown(id: string, title: string, body: string) {
+  return `<!-- leafwiki
+version: 1
+page:
+  id: ${id}
+  title: ${title}
+-->
+
+${body}`;
+}
+
+function legacyPageMarkdown(id: string, title: string, body: string) {
+  return `---
+leafwiki_id: ${id}
+leafwiki_title: ${title}
+---
+
+${body}`;
+}
+
 async function refreshWorkspaceSync(page: import('@playwright/test').Page) {
   await page.evaluate(async () => {
     const hostMatch =
@@ -124,14 +144,13 @@ test.describe('Workspace Sync', () => {
     const slug = `workspace-sync-direct-${Date.now()}`;
     writeRootMarkdown(
       `${slug}.md`,
-      `---
-leafwiki_id: ${slug}
-leafwiki_title: Workspace Sync Direct
----
-
-# Workspace Sync Direct
+      legacyPageMarkdown(
+        slug,
+        'Workspace Sync Direct',
+        `# Workspace Sync Direct
 
 Direct filesystem content`,
+      ),
     );
 
     const treeView = new TreeView(page);
@@ -151,23 +170,21 @@ Direct filesystem content`,
 
     writeRootMarkdown(
       `${targetSlug}.md`,
-      `---
-leafwiki_id: ${targetSlug}
-leafwiki_title: Workspace Sync Canonical Target
----
-
-# Workspace Sync Canonical Target`,
+      canonicalPageMarkdown(
+        targetSlug,
+        'Workspace Sync Canonical Target',
+        '# Workspace Sync Canonical Target',
+      ),
     );
     writeRootMarkdown(
       `${sourceSlug}.md`,
-      `---
-leafwiki_id: ${sourceSlug}
-leafwiki_title: Workspace Sync Canonical Source
----
-
-# Workspace Sync Canonical Source
+      canonicalPageMarkdown(
+        sourceSlug,
+        'Workspace Sync Canonical Source',
+        `# Workspace Sync Canonical Source
 
 [Target](/${targetSlug})`,
+      ),
     );
 
     const treeView = new TreeView(page);
@@ -188,14 +205,13 @@ leafwiki_title: Workspace Sync Canonical Source
 
     writeRootMarkdown(
       `${sourceSlug}.md`,
-      `---
-leafwiki_id: ${sourceSlug}
-leafwiki_title: Workspace Sync Repair Source
----
-
-# Workspace Sync Repair Source
+      canonicalPageMarkdown(
+        sourceSlug,
+        'Workspace Sync Repair Source',
+        `# Workspace Sync Repair Source
 
 [Target](/${targetSlug})`,
+      ),
     );
 
     await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
@@ -203,12 +219,11 @@ leafwiki_title: Workspace Sync Repair Source
 
     writeRootMarkdown(
       `${targetSlug}.md`,
-      `---
-leafwiki_id: ${targetSlug}
-leafwiki_title: Workspace Sync Repair Target
----
-
-# Workspace Sync Repair Target`,
+      canonicalPageMarkdown(
+        targetSlug,
+        'Workspace Sync Repair Target',
+        '# Workspace Sync Repair Target',
+      ),
     );
 
     await expect
@@ -264,14 +279,13 @@ leafwiki_title: Workspace Sync Repair Target
 
     writeRootMarkdown(
       `${sourceSlug}.md`,
-      `---
-leafwiki_id: ${sourceSlug}
-leafwiki_title: Workspace Sync Unresolved Source
----
-
-# Workspace Sync Unresolved Source
+      canonicalPageMarkdown(
+        sourceSlug,
+        'Workspace Sync Unresolved Source',
+        `# Workspace Sync Unresolved Source
 
 [Missing](/${missingSlug})`,
+      ),
     );
 
     await runCleanupPreservingTestError(
@@ -285,12 +299,11 @@ leafwiki_title: Workspace Sync Unresolved Source
       async () => {
         writeRootMarkdown(
           `${missingSlug}.md`,
-          `---
-leafwiki_id: ${missingSlug}
-leafwiki_title: Workspace Sync Missing Cleanup
----
-
-# Workspace Sync Missing Cleanup`,
+          canonicalPageMarkdown(
+            missingSlug,
+            'Workspace Sync Missing Cleanup',
+            '# Workspace Sync Missing Cleanup',
+          ),
         );
         await refreshWorkspaceSync(page);
         await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
@@ -310,24 +323,22 @@ leafwiki_title: Workspace Sync Missing Cleanup
 
     writeRootMarkdown(
       `${targetSlug}.md`,
-      `---
-leafwiki_id: ${targetSlug}
-leafwiki_title: Workspace Sync Mixed Target
----
-
-# Workspace Sync Mixed Target`,
+      canonicalPageMarkdown(
+        targetSlug,
+        'Workspace Sync Mixed Target',
+        '# Workspace Sync Mixed Target',
+      ),
     );
     writeRootMarkdown(
       `${sourceSlug}.md`,
-      `---
-leafwiki_id: ${sourceSlug}
-leafwiki_title: Workspace Sync Mixed Source
----
-
-# Workspace Sync Mixed Source
+      canonicalPageMarkdown(
+        sourceSlug,
+        'Workspace Sync Mixed Source',
+        `# Workspace Sync Mixed Source
 
 [Target](/${targetSlug})
 [Missing](/${missingSlug})`,
+      ),
     );
 
     await runCleanupPreservingTestError(
@@ -365,12 +376,11 @@ leafwiki_title: Workspace Sync Mixed Source
       async () => {
         writeRootMarkdown(
           `${missingSlug}.md`,
-          `---
-leafwiki_id: ${missingSlug}
-leafwiki_title: Workspace Sync Mixed Missing Cleanup
----
-
-# Workspace Sync Mixed Missing Cleanup`,
+          canonicalPageMarkdown(
+            missingSlug,
+            'Workspace Sync Mixed Missing Cleanup',
+            '# Workspace Sync Mixed Missing Cleanup',
+          ),
         );
         await refreshWorkspaceSync(page);
         await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
@@ -387,21 +397,18 @@ leafwiki_title: Workspace Sync Mixed Missing Cleanup
 
     writeRootMarkdown(
       `${targetSlug}.md`,
-      `---
-leafwiki_id: ${targetSlug}
-leafwiki_title: Workspace Sync Query Target
----
-
-# Workspace Sync Query Target`,
+      canonicalPageMarkdown(
+        targetSlug,
+        'Workspace Sync Query Target',
+        '# Workspace Sync Query Target',
+      ),
     );
     writeRootMarkdown(
       `${sourceSlug}.md`,
-      `---
-leafwiki_id: ${sourceSlug}
-leafwiki_title: Workspace Sync Query Source
----
-
-# Workspace Sync Query Source
+      canonicalPageMarkdown(
+        sourceSlug,
+        'Workspace Sync Query Source',
+        `# Workspace Sync Query Source
 
 [Target](/${targetSlug}?mode=raw#part)
 [Manual](${assetHref})
@@ -409,6 +416,7 @@ leafwiki_title: Workspace Sync Query Source
 \`\`\`md
 [Code](/${targetSlug})
 \`\`\``,
+      ),
     );
 
     const rewritten = expect.poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 });
@@ -423,14 +431,13 @@ leafwiki_title: Workspace Sync Query Source
     const slug = `workspace-sync-restore-${Date.now()}`;
     writeRootMarkdown(
       `${slug}.md`,
-      `---
-leafwiki_id: ${slug}
-leafwiki_title: Workspace Snapshot Restore
----
-
-# Workspace Snapshot Restore
+      canonicalPageMarkdown(
+        slug,
+        'Workspace Snapshot Restore',
+        `# Workspace Snapshot Restore
 
 Original snapshot content`,
+      ),
     );
 
     const treeView = new TreeView(page);
@@ -446,14 +453,13 @@ Original snapshot content`,
 
     writeRootMarkdown(
       `${slug}.md`,
-      `---
-leafwiki_id: ${slug}
-leafwiki_title: Workspace Snapshot Restore
----
-
-# Workspace Snapshot Restore
+      canonicalPageMarkdown(
+        slug,
+        'Workspace Snapshot Restore',
+        `# Workspace Snapshot Restore
 
 Updated snapshot content`,
+      ),
     );
     await expect(page.locator('article')).toContainText('Updated snapshot content', {
       timeout: 15000,
@@ -519,28 +525,62 @@ Updated snapshot content`,
     await expect(loadMore).toHaveCount(0);
   });
 
+  test('workspace sync migrates legacy frontmatter once', async ({ page }) => {
+    const slug = `workspace-sync-metadata-migration-${Date.now()}`;
+    writeRootMarkdown(
+      `${slug}.md`,
+      legacyPageMarkdown(
+        slug,
+        'Workspace Sync Metadata Migration',
+        `# Workspace Sync Metadata Migration
+
+Legacy metadata should be canonicalized exactly once.`,
+      ),
+    );
+
+    const treeView = new TreeView(page);
+    await expect(await treeView.findPageByTitle('Workspace Sync Metadata Migration')).toBeVisible({
+      timeout: 15000,
+    });
+
+    const migrated = expect.poll(() => readRootMarkdown(`${slug}.md`), { timeout: 15000 });
+    await migrated.toContain('<!-- leafwiki\n');
+    await migrated.toContain(`id: ${slug}`);
+    await migrated.not.toContain('leafwiki_id:');
+
+    const migratedContent = readRootMarkdown(`${slug}.md`);
+    await refreshWorkspaceSync(page);
+    await expect
+      .poll(() => readRootMarkdown(`${slug}.md`), { timeout: 15000 })
+      .toBe(migratedContent);
+
+    await treeView.clickPageByTitle('Workspace Sync Metadata Migration');
+    await expect(page.locator('article')).toContainText(
+      'Legacy metadata should be canonicalized exactly once.',
+    );
+    await expect(page.locator('article')).not.toContainText('leafwiki_id:');
+
+    const viewPage = new ViewPage(page);
+    await viewPage.openCurrentPageHistory();
+    const revisionButtons = page.locator('button[data-testid^="history-sidebar-revision-"]');
+    await expect(revisionButtons).toHaveCount(2);
+    await page.getByTestId('page-history-page-raw-tab').click();
+    await revisionButtons.nth(0).click();
+    await expect(page.locator('.page-history__snapshot-content')).toContainText('<!-- leafwiki');
+    await expect(page.locator('.page-history__snapshot-content')).not.toContainText('leafwiki_id:');
+    await revisionButtons.nth(1).click();
+    await expect(page.locator('.page-history__snapshot-content')).toContainText('leafwiki_id:');
+    await expect(page.locator('.page-history__snapshot-content')).not.toContainText(
+      '<!-- leafwiki',
+    );
+  });
+
   test('invalid Markdown state is shown in the Explorer banner', async ({ page }) => {
     const duplicateId = `duplicate-workspace-sync-${Date.now()}`;
     const firstPath = `workspace-sync-invalid-a-${Date.now()}.md`;
     const secondPath = `workspace-sync-invalid-b-${Date.now()}.md`;
-    writeRootMarkdown(
-      firstPath,
-      `---
-leafwiki_id: ${duplicateId}
-leafwiki_title: Invalid A
----
-
-# Invalid A`,
-    );
-    writeRootMarkdown(
-      secondPath,
-      `---
-leafwiki_id: ${duplicateId}
-leafwiki_title: Invalid B
----
-
-# Invalid B`,
-    );
+    writeRootMarkdown(firstPath, canonicalPageMarkdown(duplicateId, 'Invalid A', '# Invalid A'));
+    writeRootMarkdown(secondPath, canonicalPageMarkdown(duplicateId, 'Invalid B', '# Invalid B'));
 
     await runCleanupPreservingTestError(
       async () => {
@@ -554,12 +594,7 @@ leafwiki_title: Invalid B
       async () => {
         writeRootMarkdown(
           secondPath,
-          `---
-leafwiki_id: ${duplicateId}-fixed
-leafwiki_title: Invalid B Fixed
----
-
-# Invalid B Fixed`,
+          canonicalPageMarkdown(duplicateId + '-fixed', 'Invalid B Fixed', '# Invalid B Fixed'),
         );
         await refreshWorkspaceSync(page);
         await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);

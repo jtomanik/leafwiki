@@ -4026,7 +4026,7 @@ func TestTreeService_VersionUnchecked_BypassesVersionCheck(t *testing.T) {
 
 // ─── RawContent ───────────────────────────────────────────────────────────────
 
-func TestTreeService_GetPage_RawContent_ContainsFrontmatterAndBody(t *testing.T) {
+func TestTreeService_GetPage_RawContent_ContainsCanonicalMetadataAndBody(t *testing.T) {
 	svc, _ := newLoadedService(t)
 
 	id, err := svc.CreateNode("system", nil, "Raw Test", "raw-test", ptrKind(NodeKindPage))
@@ -4050,17 +4050,17 @@ func TestTreeService_GetPage_RawContent_ContainsFrontmatterAndBody(t *testing.T)
 	if page.RawContent == "" {
 		t.Fatal("expected RawContent to be non-empty")
 	}
-	if !strings.Contains(page.RawContent, "---") {
-		t.Errorf("expected RawContent to contain frontmatter delimiter, got: %q", page.RawContent)
+	if !strings.Contains(page.RawContent, "<!-- leafwiki\n") {
+		t.Errorf("expected RawContent to contain canonical metadata, got: %q", page.RawContent)
 	}
 	if !strings.Contains(page.RawContent, "Hello raw world") {
 		t.Errorf("expected RawContent to contain body text, got: %q", page.RawContent)
 	}
-	if strings.HasPrefix(strings.TrimSpace(page.Content), "---") {
-		t.Errorf("Content must not start with frontmatter, got: %q", page.Content)
+	if strings.HasPrefix(strings.TrimSpace(page.Content), "<!-- leafwiki") {
+		t.Errorf("Content must not start with canonical metadata, got: %q", page.Content)
 	}
 	if page.Content == page.RawContent {
-		t.Error("Content (stripped) and RawContent (with frontmatter) must differ")
+		t.Error("Content (body only) and RawContent (with storage metadata) must differ")
 	}
 }
 
@@ -4086,8 +4086,8 @@ func TestTreeService_GetPages_RawContent_PopulatedForAll(t *testing.T) {
 		if p.RawContent == "" {
 			t.Errorf("GetPages[%d]: expected RawContent to be populated", i)
 		}
-		if !strings.Contains(p.RawContent, "---") {
-			t.Errorf("GetPages[%d]: expected RawContent to contain frontmatter, got: %q", i, p.RawContent)
+		if !strings.Contains(p.RawContent, "<!-- leafwiki\n") {
+			t.Errorf("GetPages[%d]: expected RawContent to contain canonical metadata, got: %q", i, p.RawContent)
 		}
 	}
 }

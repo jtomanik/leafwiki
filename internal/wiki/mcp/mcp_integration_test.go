@@ -23,6 +23,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/markdown"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -1648,7 +1649,7 @@ func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) 
 	if semantic["ok"] != false {
 		t.Fatalf("semantic validation = %#v, want not ok", semantic)
 	}
-	assertValidationIssueCodes(t, semantic, []string{"duplicate_leafwiki_id", "reserved_frontmatter", "broken_link", "missing_asset"})
+	assertValidationIssueCodes(t, semantic, []string{"duplicate_leafwiki_id", "reserved_metadata", "broken_link", "missing_asset"})
 
 	assetOwner := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Asset Owner",
@@ -2315,6 +2316,13 @@ func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) 
 	}
 
 	raw := readPageMarkdownByRoutePath(t, w.GetRootDir(), "metadata-preserve")
+	doc := assertCanonicalPageMarkdown(t, "wiki_update_page_metadata raw markdown", raw)
+	if strings.Contains(raw, "leafwiki_id:") {
+		t.Fatalf("raw metadata after patch retained legacy leafwiki_id:\n%s", raw)
+	}
+	if doc.Metadata.Fields["status"] != "published" {
+		t.Fatalf("canonical fields after patch = %#v, want status=published", doc.Metadata.Fields)
+	}
 	for _, want := range []string{
 		"pinned: true",
 		"audiences:",
@@ -2334,6 +2342,96 @@ func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) 
 		"recentChangesLimit": float64(5),
 	})
 	assertRecentChangesIncludePath(t, contextOut, "metadata-preserve.md")
+}
+
+func TestLocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty(t *testing.T) {
+	w := newLocalMCPTestWiki(t, false)
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		"title": "MCP Metadata Preserve",
+		"slug":  "mcp-metadata-preserve",
+		"kind":  "page",
+	}), "page")
+	first := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, created, "id"),
+		"version": stringField(t, created, "version"),
+		"title":   "MCP Metadata Preserve",
+		"slug":    "mcp-metadata-preserve",
+		"content": "# MCP Metadata Preserve\n\nFirst",
+		"tags":    []any{"draft"},
+		"properties": map[string]any{
+			"status": "draft",
+		},
+	}), "page")
+	rawAfterFirst := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-metadata-preserve")
+	firstDoc := assertCanonicalPageMarkdown(t, "wiki_update_page metadata preserve first update", rawAfterFirst)
+	if len(firstDoc.Metadata.Tags) != 1 || firstDoc.Metadata.Tags[0] != "draft" {
+		t.Fatalf("first raw tags = %#v, want [draft]", firstDoc.Metadata.Tags)
+	}
+	if firstDoc.Metadata.Fields["status"] != "draft" {
+		t.Fatalf("first raw fields = %#v, want status=draft", firstDoc.Metadata.Fields)
+	}
+
+	metadataOnly := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, first, "id"),
+		"version": stringField(t, first, "version"),
+		"title":   "MCP Metadata Preserve",
+		"slug":    "mcp-metadata-preserve",
+		"tags":    []any{"ready"},
+		"properties": map[string]any{
+			"status": "ready",
+		},
+	}), "page")
+	if metadataOnly["content"] != "# MCP Metadata Preserve\n\nFirst" {
+		t.Fatalf("expected metadata-only wiki_update_page to preserve body, got %#v", metadataOnly["content"])
+	}
+	assertStringSet(t, "metadata-only wiki_update_page tags", stringSliceField(t, metadataOnly, "tags"), []string{"ready"})
+	metadataOnlyProperties := nestedMap(t, metadataOnly, "properties")
+	if metadataOnlyProperties["status"] != "ready" {
+		t.Fatalf("expected metadata-only properties to update, got %#v", metadataOnlyProperties)
+	}
+
+	omitted := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":      stringField(t, metadataOnly, "id"),
+		"version": stringField(t, metadataOnly, "version"),
+		"title":   "MCP Metadata Preserve",
+		"slug":    "mcp-metadata-preserve",
+		"content": "# MCP Metadata Preserve\n\nSecond",
+	}), "page")
+	assertStringSet(t, "omitted wiki_update_page tags", stringSliceField(t, omitted, "tags"), []string{"ready"})
+	omittedProperties := nestedMap(t, omitted, "properties")
+	if omittedProperties["status"] != "ready" {
+		t.Fatalf("expected omitted properties to be preserved, got %#v", omittedProperties)
+	}
+
+	cleared := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+		"id":         stringField(t, omitted, "id"),
+		"version":    stringField(t, omitted, "version"),
+		"title":      "MCP Metadata Preserve",
+		"slug":       "mcp-metadata-preserve",
+		"content":    "# MCP Metadata Preserve\n\nThird",
+		"tags":       []any{},
+		"properties": map[string]any{},
+	}), "page")
+	assertStringSet(t, "explicit empty wiki_update_page tags", stringSliceField(t, cleared, "tags"), nil)
+	clearedProperties := nestedMap(t, cleared, "properties")
+	if len(clearedProperties) != 0 {
+		t.Fatalf("expected explicit empty properties to clear metadata, got %#v", clearedProperties)
+	}
+	rawAfterClear := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-metadata-preserve")
+	clearDoc := assertCanonicalPageMarkdown(t, "wiki_update_page metadata preserve clear update", rawAfterClear)
+	if len(clearDoc.Metadata.Tags) != 0 || len(clearDoc.Metadata.Fields) != 0 {
+		t.Fatalf("clear raw metadata = tags %#v fields %#v, want both empty", clearDoc.Metadata.Tags, clearDoc.Metadata.Fields)
+	}
 }
 
 func TestLocalMCPReplacePageSection_PreservesFrontmatter(t *testing.T) {
@@ -2787,6 +2885,13 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		t.Fatalf("HTTP properties.status after MCP update = %v, want draft", got)
 	}
 	rawMCPMetadata := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-draft")
+	mcpDoc := assertCanonicalPageMarkdown(t, "MCP update raw markdown", rawMCPMetadata)
+	if len(mcpDoc.Metadata.Tags) != 2 || mcpDoc.Metadata.Tags[0] != "mcp" || mcpDoc.Metadata.Tags[1] != "parity" {
+		t.Fatalf("MCP update raw tags = %#v, want [mcp parity]", mcpDoc.Metadata.Tags)
+	}
+	if mcpDoc.Metadata.Fields["status"] != "draft" {
+		t.Fatalf("MCP update raw fields = %#v, want status=draft", mcpDoc.Metadata.Fields)
+	}
 	if !strings.Contains(rawMCPMetadata, "tags:") || !strings.Contains(rawMCPMetadata, "- mcp") || !strings.Contains(rawMCPMetadata, "status: draft") {
 		t.Fatalf("MCP update raw markdown missing metadata frontmatter:\n%s", rawMCPMetadata)
 	}
@@ -2813,6 +2918,13 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 		t.Fatalf("HTTP update properties.status = %v, want review", got)
 	}
 	rawHTTPMetadata := readPageMarkdownByRoutePath(t, w.GetRootDir(), "http-metadata")
+	httpDoc := assertCanonicalPageMarkdown(t, "HTTP update raw markdown", rawHTTPMetadata)
+	if len(httpDoc.Metadata.Tags) != 2 || httpDoc.Metadata.Tags[0] != "http" || httpDoc.Metadata.Tags[1] != "metadata" {
+		t.Fatalf("HTTP update raw tags = %#v, want [http metadata]", httpDoc.Metadata.Tags)
+	}
+	if httpDoc.Metadata.Fields["status"] != "review" {
+		t.Fatalf("HTTP update raw fields = %#v, want status=review", httpDoc.Metadata.Fields)
+	}
 	if !strings.Contains(rawHTTPMetadata, "tags:") || !strings.Contains(rawHTTPMetadata, "- http") || !strings.Contains(rawHTTPMetadata, "status: review") {
 		t.Fatalf("HTTP update raw markdown missing metadata frontmatter:\n%s", rawHTTPMetadata)
 	}
@@ -5345,6 +5457,22 @@ func readPageMarkdownByRoutePath(t *testing.T, rootDir, routePath string) string
 		t.Fatalf("read markdown page %s: %v", path, err)
 	}
 	return string(raw)
+}
+
+func assertCanonicalPageMarkdown(t *testing.T, label, raw string) markdown.PageDocument {
+	t.Helper()
+
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("%s should start with canonical LeafWiki metadata, got:\n%s", label, raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("%s should not start with legacy YAML frontmatter, got:\n%s", label, raw)
+	}
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		t.Fatalf("%s should parse with ParsePageDocument: %v\n%s", label, err, raw)
+	}
+	return doc
 }
 
 func assertMCPToolErrorContains(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any, want string) {

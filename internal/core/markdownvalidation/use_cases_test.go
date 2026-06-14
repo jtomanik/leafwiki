@@ -3,6 +3,7 @@ package markdownvalidation
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/perber/wiki/internal/core/tree"
@@ -13,13 +14,17 @@ import (
 // - Case mismatch is invalid
 // - Old extensionless page link is reported as non-canonical when migration cannot resolve it
 
+func canonicalValidationMarkdown(id, title, body string) []byte {
+	return []byte("<!-- leafwiki\nversion: 1\npage:\n  id: " + id + "\n  title: " + title + "\n-->\n\n" + body)
+}
+
 func TestValidateWorkspaceMarkdownFilesResolvesSectionDirectoryRoutes(t *testing.T) {
 	rootDir := t.TempDir()
 	docsDir := filepath.Join(rootDir, "docs")
 	if err := os.MkdirAll(docsDir, 0o755); err != nil {
 		t.Fatalf("create docs dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(docsDir, "child.md"), []byte("---\nleafwiki_id: docs-child\nleafwiki_title: Docs Child\n---\n# Docs Child\n\n[Docs section](/docs)\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(docsDir, "child.md"), canonicalValidationMarkdown("docs-child", "Docs Child", "# Docs Child\n\n[Docs section](/docs)\n"), 0o644); err != nil {
 		t.Fatalf("write child markdown: %v", err)
 	}
 
@@ -32,7 +37,7 @@ func TestValidateWorkspaceMarkdownFilesResolvesSectionDirectoryRoutes(t *testing
 
 func TestValidateWorkspaceMarkdownFilesAllowsRootIndexRoute(t *testing.T) {
 	rootDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(rootDir, "index.md"), []byte("---\nleafwiki_id: root-page\nleafwiki_title: Root Page\n---\n# Root Page\n\nRoot index content\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "index.md"), canonicalValidationMarkdown("root-page", "Root Page", "# Root Page\n\nRoot index content\n"), 0o644); err != nil {
 		t.Fatalf("write root index markdown: %v", err)
 	}
 
@@ -45,7 +50,7 @@ func TestValidateWorkspaceMarkdownFilesAllowsRootIndexRoute(t *testing.T) {
 
 func TestValidateWorkspaceMarkdownFilesAllowsRootReadmeFallbackRoute(t *testing.T) {
 	rootDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: root\nleafwiki_title: Root Page\n---\n# Root Page\n\nRoot README content\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), canonicalValidationMarkdown("root", "Root Page", "# Root Page\n\nRoot README content\n"), 0o644); err != nil {
 		t.Fatalf("write root README markdown: %v", err)
 	}
 
@@ -53,6 +58,31 @@ func TestValidateWorkspaceMarkdownFilesAllowsRootReadmeFallbackRoute(t *testing.
 
 	if !result.OK {
 		t.Fatalf("validation = %#v, want root README.md fallback to validate as root route", result)
+	}
+}
+
+func TestValidateWorkspaceMarkdownFiles_DuplicateCanonicalPageIDMessageUsesPageID(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rootDir, "first.md"), canonicalValidationMarkdown("duplicate-id", "First", "# First\n"), 0o644); err != nil {
+		t.Fatalf("write first markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "second.md"), canonicalValidationMarkdown("duplicate-id", "Second", "# Second\n"), 0o644); err != nil {
+		t.Fatalf("write second markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
+
+	if result.OK {
+		t.Fatalf("validation = %#v, want duplicate page.id issue", result)
+	}
+	if len(result.Issues) != 1 || result.Issues[0].Code != "duplicate_leafwiki_id" {
+		t.Fatalf("issues = %#v, want one duplicate_leafwiki_id", result.Issues)
+	}
+	if !strings.Contains(result.Issues[0].Message, "page.id") {
+		t.Fatalf("message = %q, want canonical page.id wording", result.Issues[0].Message)
+	}
+	if strings.Contains(result.Issues[0].Message, "leafwiki_id") {
+		t.Fatalf("message = %q, should not name legacy leafwiki_id", result.Issues[0].Message)
 	}
 }
 
@@ -113,6 +143,28 @@ func TestValidateWorkspaceMarkdownFilesRequiresFilesystemTargets(t *testing.T) {
 	}
 	if result.Issues[0].Path != "source" {
 		t.Fatalf("issue path = %q, want source page path", result.Issues[0].Path)
+	}
+}
+
+func TestValidateMarkdownContent_DuplicateCanonicalPageIDMessageUsesPageID(t *testing.T) {
+	result := ValidateMarkdownContentWithOptions("docs/page", string(canonicalValidationMarkdown("duplicate-id", "Page", "# Page\n")), ContentValidationOptions{
+		ExistingPageID: "current-id",
+		PageIDExists: func(pageID string) bool {
+			return pageID == "duplicate-id"
+		},
+	})
+
+	if result.OK {
+		t.Fatalf("validation = %#v, want duplicate page.id issue", result)
+	}
+	if len(result.Issues) != 1 || result.Issues[0].Code != "duplicate_leafwiki_id" {
+		t.Fatalf("issues = %#v, want one duplicate_leafwiki_id", result.Issues)
+	}
+	if !strings.Contains(result.Issues[0].Message, "page.id") {
+		t.Fatalf("message = %q, want canonical page.id wording", result.Issues[0].Message)
+	}
+	if strings.Contains(result.Issues[0].Message, "leafwiki_id") {
+		t.Fatalf("message = %q, should not name legacy leafwiki_id", result.Issues[0].Message)
 	}
 }
 

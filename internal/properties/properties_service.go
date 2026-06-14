@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
-// reservedKeys are frontmatter keys that must never be stored in the properties index.
+// reservedKeys are metadata keys that must never be stored in the properties index.
 // Any key starting with "leafwiki_" is also reserved (checked separately).
 var reservedKeys = map[string]struct{}{
 	"tags":  {},
@@ -50,16 +50,16 @@ func (s *PropertiesService) GetPropertiesForPages(pageIDs []string) (map[string]
 	return s.store.GetPropertiesForPages(pageIDs)
 }
 
-// ExtractPropertiesFromContent parses frontmatter and returns scalar properties.
-// Skips: reserved keys (tags, title, leafwiki_*), lists, nil values.
+// ExtractPropertiesFromContent parses page metadata and returns string properties.
+// Skips: reserved keys (tags, title, leafwiki_*), non-string fields, and empty values.
 func ExtractPropertiesFromContent(content string) map[string]PropertyEntry {
-	fm, _, has, err := markdown.ParseFrontmatter(content)
-	if err != nil || !has || len(fm.ExtraFields) == 0 {
+	doc, _, err := markdown.ParsePageDocument(content)
+	if err != nil || len(doc.Metadata.Fields) == 0 {
 		return nil
 	}
 
 	result := make(map[string]PropertyEntry)
-	for rawKey, value := range fm.ExtraFields {
+	for rawKey, value := range doc.Metadata.Fields {
 		key := strings.TrimSpace(rawKey)
 		if isReservedKey(key) {
 			continue
@@ -82,7 +82,7 @@ func isReservedKey(key string) bool {
 	if _, ok := reservedKeys[lower]; ok {
 		return true
 	}
-	return strings.HasPrefix(lower, "leafwiki_")
+	return markdown.IsReservedMetadataKey(key)
 }
 
 func toPropertyEntry(value interface{}) (PropertyEntry, bool) {

@@ -1,11 +1,9 @@
 package markdown
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +25,7 @@ type Frontmatter struct {
 	LeafWikiCreatorID    string                 `yaml:"leafwiki_creator_id,omitempty" json:"creatorId,omitempty"`
 	LeafWikiLastAuthorID string                 `yaml:"leafwiki_last_author_id,omitempty" json:"lastAuthorId,omitempty"`
 	ExtraFields          map[string]interface{} `yaml:"-" json:"-"`
+	TitleFromAlias       bool                   `yaml:"-" json:"-"`
 }
 
 var unquotedTemplatePlaceholderLine = regexp.MustCompile(`^(\s*[^:\n]+:\s*)(\{\{[^}\n]+\}\})(\s*(?:#.*)?)$`)
@@ -56,6 +55,7 @@ func parseFrontmatterYAML(yamlPart string) (Frontmatter, error) {
 		fm.LeafWikiTitle = fm.stripSingleAndDoubleQuotes(valueToString(value))
 	} else if value, ok := raw["title"]; ok {
 		fm.LeafWikiTitle = fm.stripSingleAndDoubleQuotes(valueToString(value))
+		fm.TitleFromAlias = true
 	}
 	if value, ok := raw["leafwiki_created_at"]; ok {
 		fm.LeafWikiCreatedAt = fm.stripSingleAndDoubleQuotes(strings.TrimSpace(valueToString(value)))
@@ -212,6 +212,15 @@ func splitFrontmatter(md string) (yamlPart string, body string, has bool) {
 // Use this on raw content that is already in memory when you only need parsing,
 // not path-based title fallback or write-back via MarkdownFile.
 func ParseFrontmatter(md string) (fm Frontmatter, body string, has bool, err error) {
+	normalized := normalizeMarkdownNewlines(md)
+	if normalized == canonicalMetadataOpenMarker || strings.HasPrefix(normalized, canonicalMetadataOpenMarker+"\n") {
+		doc, _, err := ParsePageDocument(md)
+		if err != nil {
+			return Frontmatter{}, md, true, err
+		}
+		return pageMetadataToFrontmatter(doc.Metadata), doc.Body, true, nil
+	}
+
 	yamlPart, body, has := splitFrontmatter(md)
 	if !has {
 		return Frontmatter{}, md, false, nil
@@ -230,108 +239,4 @@ func toYAMLNode(value interface{}) (*yaml.Node, error) {
 		return nil, err
 	}
 	return &node, nil
-}
-
-func buildExtraFieldsMapping(extraFields map[string]interface{}) (*yaml.Node, error) {
-	mapping := &yaml.Node{Kind: yaml.MappingNode}
-
-	extraKeys := make([]string, 0, len(extraFields))
-	for key := range extraFields {
-		extraKeys = append(extraKeys, key)
-	}
-	sort.Strings(extraKeys)
-	for _, key := range extraKeys {
-		valueNode, err := toYAMLNode(extraFields[key])
-		if err != nil {
-			return nil, err
-		}
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
-			valueNode,
-		)
-	}
-
-	return mapping, nil
-}
-
-func buildMarkdownFromMapping(mapping *yaml.Node, body string) (string, error) {
-	if mapping == nil || len(mapping.Content) == 0 {
-		return body, nil
-	}
-
-	b, err := yaml.Marshal(mapping)
-	if err != nil {
-		return "", err
-	}
-
-	var out bytes.Buffer
-	out.WriteString("---\n")
-	out.Write(b)
-	out.WriteString("---\n")
-	out.WriteString(body)
-	return out.String(), nil
-}
-
-func BuildMarkdownWithExtraFrontmatter(extraFields map[string]interface{}, body string) (string, error) {
-	if len(extraFields) == 0 {
-		return body, nil
-	}
-
-	mapping, err := buildExtraFieldsMapping(extraFields)
-	if err != nil {
-		return "", err
-	}
-
-	return buildMarkdownFromMapping(mapping, body)
-}
-
-// BuildMarkdownWithFrontmatter rebuilds markdown from parsed frontmatter data
-// and a markdown body. It preserves additional frontmatter keys and emits them
-// in deterministic order to keep rewrites stable.
-func BuildMarkdownWithFrontmatter(fm Frontmatter, body string) (string, error) {
-	if strings.TrimSpace(fm.LeafWikiID) == "" {
-		return BuildMarkdownWithExtraFrontmatter(fm.ExtraFields, body)
-	}
-
-	mapping, err := buildExtraFieldsMapping(fm.ExtraFields)
-	if err != nil {
-		return "", err
-	}
-
-	mapping.Content = append(mapping.Content,
-		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_id"},
-		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiID)},
-	)
-	if strings.TrimSpace(fm.LeafWikiTitle) != "" {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_title"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiTitle)},
-		)
-	}
-	if strings.TrimSpace(fm.LeafWikiCreatedAt) != "" {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_created_at"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiCreatedAt)},
-		)
-	}
-	if strings.TrimSpace(fm.LeafWikiUpdatedAt) != "" {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_updated_at"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiUpdatedAt)},
-		)
-	}
-	if strings.TrimSpace(fm.LeafWikiCreatorID) != "" {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_creator_id"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiCreatorID)},
-		)
-	}
-	if strings.TrimSpace(fm.LeafWikiLastAuthorID) != "" {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "leafwiki_last_author_id"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.TrimSpace(fm.LeafWikiLastAuthorID)},
-		)
-	}
-
-	return buildMarkdownFromMapping(mapping, body)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
@@ -284,7 +285,7 @@ func validatePatchPropertyKeys(keys []string) error {
 			ve.Add(field, "Property key must not be empty")
 		case key != rawKey:
 			ve.Add(field, "Property key must not contain leading or trailing whitespace")
-		case strings.HasPrefix(strings.ToLower(key), "leafwiki_"):
+		case markdown.IsReservedMetadataKey(key):
 			ve.Add(field, "Property key uses a reserved prefix")
 		case strings.ToLower(key) == "tags" || strings.ToLower(key) == "title":
 			ve.Add(field, "Property key is reserved")

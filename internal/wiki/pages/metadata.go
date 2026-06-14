@@ -12,7 +12,7 @@ var reservedPropertyKeys = map[string]struct{}{
 	"title": {},
 }
 
-// EnrichPageMetadata fills API page metadata from the page frontmatter.
+// EnrichPageMetadata fills API page metadata from stored page metadata.
 func EnrichPageMetadata(page *dto.Page, readPageRaw func(string) (string, error)) {
 	if page == nil {
 		return
@@ -26,34 +26,84 @@ func EnrichPageMetadata(page *dto.Page, readPageRaw func(string) (string, error)
 		return
 	}
 
-	fm, _, has, err := markdown.ParseFrontmatter(raw)
-	if err != nil || !has || len(fm.ExtraFields) == 0 {
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
 		return
 	}
 
-	page.Tags, page.Properties = ExtractPageMetadata(fm.ExtraFields)
+	page.Tags, page.Properties = ExtractPageMetadataFromPageMetadata(doc.Metadata)
 }
 
-func ExtractPageMetadata(fields map[string]interface{}) ([]string, map[string]string) {
-	tags := []string{}
-	properties := map[string]string{}
+func ExtractPageMetadataFromPageMetadata(meta markdown.PageMetadata) ([]string, map[string]string) {
+	return normalizeTagInputs(meta.Tags), extractStringProperties(meta.Fields)
+}
 
+type PublicMetadataPatch struct {
+	Tags              []string
+	TagsPresent       bool
+	Properties        map[string]string
+	PropertiesPresent bool
+}
+
+func BuildMarkdownWithPublicMetadataPatch(currentRaw string, pageID string, title string, patch PublicMetadataPatch, body string) (string, error) {
+	doc, _, err := markdown.ParsePageDocument(currentRaw)
+	if err != nil {
+		return "", err
+	}
+
+	currentTags, currentProperties := ExtractPageMetadataFromPageMetadata(doc.Metadata)
+	tags := currentTags
+	if patch.TagsPresent {
+		tags = patch.Tags
+	}
+	properties := currentProperties
+	if patch.PropertiesPresent {
+		properties = patch.Properties
+	}
+
+	meta := ApplyPublicMetadata(doc.Metadata, currentProperties, tags, properties)
+	meta.Version = 1
+	meta.Page.ID = strings.TrimSpace(pageID)
+	meta.Page.Title = strings.TrimSpace(title)
+
+	return markdown.RenderPageDocument(markdown.PageDocument{
+		Body:     body,
+		Metadata: meta,
+	})
+}
+
+func ApplyPublicMetadata(current markdown.PageMetadata, currentProperties map[string]string, tags []string, properties map[string]string) markdown.PageMetadata {
+	next := current
+	next.Tags = normalizeTagInputs(tags)
+
+	fields := map[string]interface{}{}
+	for key, value := range current.Fields {
+		if _, isPublicProperty := currentProperties[key]; isPublicProperty {
+			continue
+		}
+		fields[key] = value
+	}
+	for key, value := range properties {
+		fields[key] = value
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	next.Fields = fields
+	return next
+}
+
+func extractStringProperties(fields map[string]interface{}) map[string]string {
+	properties := map[string]string{}
 	for rawKey, value := range fields {
 		key := strings.TrimSpace(rawKey)
 		lower := strings.ToLower(key)
-
-		if lower == "tags" {
-			tags = normalizeMetadataTags(value)
-			continue
-		}
-
 		if _, reserved := reservedPropertyKeys[lower]; reserved {
 			continue
 		}
-		if strings.HasPrefix(lower, "leafwiki_") {
+		if markdown.IsReservedMetadataKey(key) {
 			continue
 		}
-
 		s, ok := value.(string)
 		if !ok {
 			continue
@@ -64,23 +114,25 @@ func ExtractPageMetadata(fields map[string]interface{}) ([]string, map[string]st
 		}
 		properties[key] = s
 	}
-
-	return tags, properties
+	return properties
 }
 
 func normalizeMetadataTags(value interface{}) []string {
-	list, ok := value.([]interface{})
-	if !ok {
-		return []string{}
-	}
-
-	rawTags := make([]string, 0, len(list))
-	for _, item := range list {
-		tag, ok := item.(string)
-		if !ok {
-			continue
+	var rawTags []string
+	switch typed := value.(type) {
+	case []string:
+		rawTags = typed
+	case []interface{}:
+		rawTags = make([]string, 0, len(typed))
+		for _, item := range typed {
+			tag, ok := item.(string)
+			if !ok {
+				continue
+			}
+			rawTags = append(rawTags, tag)
 		}
-		rawTags = append(rawTags, tag)
+	default:
+		return []string{}
 	}
 
 	return normalizeTagInputs(rawTags)

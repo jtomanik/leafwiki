@@ -1751,6 +1751,76 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	}
 }
 
+func TestUpdatePageUseCase_MetadataOnlyUpdateRecordsContentRevision(t *testing.T) {
+	deps := newTestDeps(t)
+	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+		UserID: "creator",
+		Title:  "Metadata Revision",
+		Slug:   "metadata-revision",
+		Kind:   pageKind(),
+	})
+	if err != nil {
+		t.Fatalf("CreatePage failed: %v", err)
+	}
+	body := "# Metadata Revision\n\nBody"
+	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+		UserID:  "creator",
+		ID:      created.Page.ID,
+		Version: created.Page.Version(),
+		Title:   created.Page.Title,
+		Slug:    created.Page.Slug,
+		Content: &body,
+		Kind:    pageKind(),
+	}); err != nil {
+		t.Fatalf("initial UpdatePage failed: %v", err)
+	}
+	firstRevision, err := deps.revision.GetLatestRevision(created.Page.ID)
+	if err != nil {
+		t.Fatalf("GetLatestRevision first: %v", err)
+	}
+
+	current, err := deps.tree.GetPage(created.Page.ID)
+	if err != nil {
+		t.Fatalf("GetPage current: %v", err)
+	}
+	rawWithMetadata, err := pages.BuildMarkdownWithPublicMetadata(created.Page.ID, current.Title, []string{"ready"}, map[string]string{"status": "ready"}, body)
+	if err != nil {
+		t.Fatalf("BuildMarkdownWithPublicMetadata: %v", err)
+	}
+	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+		UserID:     "editor",
+		ID:         created.Page.ID,
+		Version:    current.Version(),
+		Title:      current.Title,
+		Slug:       current.Slug,
+		Content:    &rawWithMetadata,
+		Kind:       pageKind(),
+		FromImport: true,
+	}); err != nil {
+		t.Fatalf("metadata-only UpdatePage failed: %v", err)
+	}
+
+	secondRevision, err := deps.revision.GetLatestRevision(created.Page.ID)
+	if err != nil {
+		t.Fatalf("GetLatestRevision second: %v", err)
+	}
+	if secondRevision.ID == firstRevision.ID {
+		t.Fatalf("metadata-only update did not create a new revision")
+	}
+	if secondRevision.PageMetadata == nil {
+		t.Fatalf("metadata-only revision did not capture PageMetadata")
+	}
+	if len(secondRevision.PageMetadata.Tags) != 1 || secondRevision.PageMetadata.Tags[0] != "ready" {
+		t.Fatalf("metadata-only revision tags = %#v, want [ready]", secondRevision.PageMetadata.Tags)
+	}
+	if secondRevision.PageMetadata.Fields["status"] != "ready" {
+		t.Fatalf("metadata-only revision fields = %#v, want status=ready", secondRevision.PageMetadata.Fields)
+	}
+}
+
 func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *testing.T) {
 	deps := newTestDeps(t)
 	searchIndex, err := search.NewSQLiteIndex(t.TempDir())

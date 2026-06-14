@@ -226,7 +226,7 @@ export function PageFrontmatterPanel({
                                 type="button"
                                 className="page-frontmatter-panel__field-remove"
                                 onClick={() => removeField(index)}
-                                aria-label={`Remove frontmatter field ${field.key || index + 1}`}
+                                aria-label={`Remove metadata field ${field.key || index + 1}`}
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -321,8 +321,8 @@ export function PageFrontmatterPanel({
                       className="page-frontmatter-panel__notice"
                       data-testid="page-frontmatter-unsupported-notice"
                     >
-                      Existing advanced frontmatter is preserved in the
-                      background but not editable in this compact view yet.
+                      Existing advanced metadata is preserved in the background
+                      but not editable in this compact view yet.
                     </p>
                   ) : null}
                 </div>

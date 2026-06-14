@@ -39,9 +39,10 @@ type fenceState struct {
 	markerLength int
 }
 
-// FromContent parses markdown, skips frontmatter, and returns a short plain-text excerpt.
+// FromContent parses markdown, skips storage metadata, and returns a short plain-text excerpt.
 func FromContent(raw string) string {
-	_, body, _, err := markdown.ParseFrontmatter(raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	body := doc.Body
 	if err != nil {
 		body = raw
 	}

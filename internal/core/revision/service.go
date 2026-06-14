@@ -589,7 +589,7 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 		)
 	}
 
-	restoredContent, restoreFromImport, err := buildRestoredRawContent(rev.ExtraFrontmatter, string(content))
+	restoredContent, restoreFromImport, err := buildRestoredRawContent(pageID, rev.Title, rev.PageMetadata, rev.ExtraFrontmatter, string(content))
 	if err != nil {
 		return sharederrors.NewLocalizedError(
 			"revision_restore_failed",
@@ -599,7 +599,7 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 			pageID,
 		)
 	}
-	if err := s.pages.UpdateNode(authorID, pageID, rev.Title, beforeState.Slug, &restoredContent, tree.VersionUnchecked, restoreFromImport); err != nil {
+	if err := s.updateRestoredContent(authorID, pageID, rev.Title, beforeState.Slug, &restoredContent, restoreFromImport); err != nil {
 		return sharederrors.NewLocalizedError(
 			"revision_restore_failed",
 			"Failed to restore page",
@@ -610,13 +610,13 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 	}
 
 	if err := s.restoreAssets(pageID, assets); err != nil {
-		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(beforeState.ExtraFrontmatter, beforeState.Content)
+		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(pageID, beforeState.Title, beforeState.PageMetadata, beforeState.ExtraFrontmatter, beforeState.Content)
 		if buildErr != nil {
 			s.log.Warn("failed to rebuild rollback content", "pageID", pageID, "error", buildErr)
 			restoreRollbackContent = beforeState.Content
 			rollbackFromImport = false
 		}
-		if rollbackErr := s.pages.UpdateNode(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, tree.VersionUnchecked, rollbackFromImport); rollbackErr != nil {
+		if rollbackErr := s.updateRestoredContent(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, rollbackFromImport); rollbackErr != nil {
 			s.log.Warn("failed to rollback restored content", "pageID", pageID, "error", rollbackErr)
 		}
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
@@ -632,13 +632,13 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 	}
 
 	if err := s.recordRestoreRevision(pageID, authorID); err != nil {
-		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(beforeState.ExtraFrontmatter, beforeState.Content)
+		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(pageID, beforeState.Title, beforeState.PageMetadata, beforeState.ExtraFrontmatter, beforeState.Content)
 		if buildErr != nil {
 			s.log.Warn("failed to rebuild rollback content", "pageID", pageID, "error", buildErr)
 			restoreRollbackContent = beforeState.Content
 			rollbackFromImport = false
 		}
-		if rollbackErr := s.pages.UpdateNode(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, tree.VersionUnchecked, rollbackFromImport); rollbackErr != nil {
+		if rollbackErr := s.updateRestoredContent(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, rollbackFromImport); rollbackErr != nil {
 			s.log.Warn("failed to rollback restored content", "pageID", pageID, "error", rollbackErr)
 		}
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
@@ -654,6 +654,13 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) updateRestoredContent(authorID string, pageID string, title string, slug string, content *string, replaceMetadata bool) error {
+	if replaceMetadata {
+		return s.pages.UpdateNodeReplacingMetadata(authorID, pageID, title, slug, content, tree.VersionUnchecked)
+	}
+	return s.pages.UpdateNode(authorID, pageID, title, slug, content, tree.VersionUnchecked, false)
 }
 
 func (s *Service) capturePageState(pageID string, withAssets bool) (*RevisionState, error) {
@@ -720,7 +727,7 @@ func (s *Service) recordContentUpdateForPage(page *tree.Page, authorID, summary 
 		return nil, false, err
 	}
 
-	if prev != nil && prev.ContentHash == state.ContentHash && prev.ExtraFrontmatterHash == state.ExtraFrontmatterHash {
+	if prev != nil && prev.ContentHash == state.ContentHash && revisionStoredMetadataHash(prev) == state.PageMetadataHash {
 		return prev, false, nil
 	}
 
@@ -769,6 +776,8 @@ func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID, su
 		ContentHash:          state.ContentHash,
 		ExtraFrontmatter:     state.ExtraFrontmatter,
 		ExtraFrontmatterHash: state.ExtraFrontmatterHash,
+		PageMetadata:         state.PageMetadata,
+		PageMetadataHash:     state.PageMetadataHash,
 		AssetManifestHash:    assetManifestHash,
 		PageCreatedAt:        state.PageCreatedAt.UTC(),
 		PageUpdatedAt:        state.PageUpdatedAt.UTC(),
@@ -788,23 +797,67 @@ func (s *Service) enrichStateWithExtraFrontmatter(pageID string, state *Revision
 		return err
 	}
 
-	fm, _, has, err := markdown.ParseFrontmatter(raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
 		return err
 	}
-	if !has || len(fm.ExtraFields) == 0 {
+	metadata := revisionPageMetadata(doc.Metadata)
+	if metadata == nil {
+		state.PageMetadata = nil
+		state.PageMetadataHash = ""
 		state.ExtraFrontmatter = nil
 		state.ExtraFrontmatterHash = ""
 		return nil
 	}
-
-	hash, err := hashExtraFrontmatter(fm.ExtraFields)
+	metadataHash, err := hashPageMetadata(metadata)
 	if err != nil {
 		return err
 	}
-	state.ExtraFrontmatter = fm.ExtraFields
-	state.ExtraFrontmatterHash = hash
+	state.PageMetadata = metadata
+	state.PageMetadataHash = metadataHash
+	state.ExtraFrontmatter = nil
+	state.ExtraFrontmatterHash = ""
 	return nil
+}
+
+func revisionStoredMetadataHash(rev *Revision) string {
+	if rev == nil {
+		return ""
+	}
+	if strings.TrimSpace(rev.PageMetadataHash) != "" {
+		return rev.PageMetadataHash
+	}
+	return rev.ExtraFrontmatterHash
+}
+
+func revisionPageMetadata(meta markdown.PageMetadata) *markdown.PageMetadata {
+	if meta.Version == 0 {
+		return nil
+	}
+	snapshot := markdown.PageMetadata{
+		Version: 1,
+		Tags:    append([]string{}, meta.Tags...),
+		Fields:  cloneMetadataMap(meta.Fields),
+		Extra:   cloneMetadataMap(meta.Extra),
+	}
+	if len(snapshot.Fields) == 0 {
+		snapshot.Fields = nil
+	}
+	if len(snapshot.Extra) == 0 {
+		snapshot.Extra = nil
+	}
+	return &snapshot
+}
+
+func hashPageMetadata(meta *markdown.PageMetadata) (string, error) {
+	if meta == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("marshal page metadata: %w", err)
+	}
+	return sha256HexBytes(raw), nil
 }
 
 func hashExtraFrontmatter(extra map[string]interface{}) (string, error) {
@@ -814,22 +867,68 @@ func hashExtraFrontmatter(extra map[string]interface{}) (string, error) {
 
 	raw, err := json.Marshal(extra)
 	if err != nil {
-		return "", fmt.Errorf("marshal extra frontmatter: %w", err)
+		return "", fmt.Errorf("marshal compatibility metadata extras: %w", err)
 	}
 	return sha256HexBytes(raw), nil
 }
 
-func buildRestoredRawContent(extra map[string]interface{}, body string) (string, bool, error) {
+func buildRestoredRawContent(pageID string, title string, metadata *markdown.PageMetadata, extra map[string]interface{}, body string) (string, bool, error) {
+	if metadata != nil {
+		meta := clonePageMetadata(*metadata)
+		meta.Version = 1
+		meta.Page = markdown.PageMetadataPage{
+			ID:    strings.TrimSpace(pageID),
+			Title: strings.TrimSpace(title),
+		}
+		raw, err := markdown.RenderPageDocument(markdown.PageDocument{
+			Body:     body,
+			Metadata: meta,
+		})
+		if err != nil {
+			return "", false, err
+		}
+		return raw, true, nil
+	}
+
 	if len(extra) == 0 {
 		return body, false, nil
 	}
 
-	raw, err := markdown.BuildMarkdownWithExtraFrontmatter(extra, body)
+	raw, err := markdown.BuildMarkdownWithMetadata(markdown.Frontmatter{
+		LeafWikiID:    strings.TrimSpace(pageID),
+		LeafWikiTitle: strings.TrimSpace(title),
+		ExtraFields:   extra,
+	}, body)
 	if err != nil {
 		return "", false, err
 	}
 
 	return raw, true, nil
+}
+
+func clonePageMetadata(meta markdown.PageMetadata) markdown.PageMetadata {
+	cloned := meta
+	cloned.Tags = append([]string{}, meta.Tags...)
+	cloned.Fields = cloneMetadataMap(meta.Fields)
+	if len(cloned.Fields) == 0 {
+		cloned.Fields = nil
+	}
+	cloned.Extra = cloneMetadataMap(meta.Extra)
+	if len(cloned.Extra) == 0 {
+		cloned.Extra = nil
+	}
+	return cloned
+}
+
+func cloneMetadataMap(values map[string]interface{}) map[string]interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *Service) persistLiveAssets(pageID string, refs []AssetRef) error {

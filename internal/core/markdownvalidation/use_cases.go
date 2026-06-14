@@ -99,19 +99,19 @@ func ValidateMarkdownContentWithOptions(routePath string, content string, opts C
 			})
 		}
 	}
-	fm, body, _, err := markdown.ParseFrontmatter(content)
+	doc, _, err := markdown.ParsePageDocument(content)
 	if err != nil {
 		issues = append(issues, Issue{
 			Severity: "error",
-			Code:     "frontmatter_parse_error",
+			Code:     "metadata_parse_error",
 			Path:     path,
 			PageID:   opts.ExistingPageID,
 			Message:  err.Error(),
 		})
 	}
 	if err == nil {
-		issues = append(issues, validateFrontmatter(path, opts, fm)...)
-		issues = append(issues, validateMarkdownReferences(path, body, opts)...)
+		issues = append(issues, validateMetadata(path, opts, doc.Metadata)...)
+		issues = append(issues, validateMarkdownReferences(path, doc.Body, opts)...)
 	}
 	return resultFromIssues(issues)
 }
@@ -237,13 +237,13 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			return nil
 		}
 		raw := string(rawBytes)
-		fm, _, _, err := markdown.ParseFrontmatter(raw)
+		doc, _, err := markdown.ParsePageDocument(raw)
 		existingPageID := ""
 		if err == nil {
-			existingPageID = strings.TrimSpace(fm.LeafWikiID)
+			existingPageID = strings.TrimSpace(doc.Metadata.Page.ID)
 			if existingPageID != "" {
 				if firstPath, exists := seenIDs[existingPageID]; exists {
-					addIssue("error", "duplicate_leafwiki_id", relPath, existingPageID, "leafwiki_id already appears in "+firstPath)
+					addIssue("error", "duplicate_leafwiki_id", relPath, existingPageID, "metadata page.id already appears in "+firstPath)
 				} else {
 					seenIDs[existingPageID] = relPath
 				}
@@ -385,28 +385,27 @@ func Combine(results ...Result) Result {
 	return resultFromIssues(issues)
 }
 
-func validateFrontmatter(routePath string, opts ContentValidationOptions, fm markdown.Frontmatter) []Issue {
+func validateMetadata(routePath string, opts ContentValidationOptions, meta markdown.PageMetadata) []Issue {
 	issues := []Issue{}
-	if id := strings.TrimSpace(fm.LeafWikiID); id != "" && id != opts.ExistingPageID {
+	if id := strings.TrimSpace(meta.Page.ID); id != "" && id != opts.ExistingPageID {
 		if opts.PageIDExists != nil && opts.PageIDExists(id) {
 			issues = append(issues, Issue{
 				Severity: "error",
 				Code:     "duplicate_leafwiki_id",
 				Path:     routePath,
 				PageID:   opts.ExistingPageID,
-				Message:  "leafwiki_id already belongs to another page",
+				Message:  "metadata page.id already belongs to another page",
 			})
 		}
 	}
-	for key := range fm.ExtraFields {
-		lower := strings.ToLower(strings.TrimSpace(key))
-		if strings.HasPrefix(lower, "leafwiki_") {
+	for key := range meta.Extra {
+		if markdown.IsReservedMetadataKey(key) {
 			issues = append(issues, Issue{
 				Severity: "error",
-				Code:     "reserved_frontmatter",
+				Code:     "reserved_metadata",
 				Path:     routePath,
 				PageID:   opts.ExistingPageID,
-				Message:  "frontmatter key uses reserved leafwiki_ prefix",
+				Message:  "metadata key uses reserved leafwiki_ prefix",
 			})
 		}
 	}

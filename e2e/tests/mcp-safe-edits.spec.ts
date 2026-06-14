@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { toAppPath } from '../pages/appPath';
 import { connectMCPClient } from './mcpClient';
@@ -33,11 +35,25 @@ type ValidationOutput = {
   ok?: boolean;
 };
 
+const rootDir = process.env.E2E_ROOT_DIR ?? '';
+
 function appURL(routePath: string): string {
   return new URL(
     toAppPath(routePath),
     process.env.E2E_BASE_URL || 'http://localhost:8080',
   ).toString();
+}
+
+function readRootMarkdownIfAvailable(relativePath: string) {
+  if (rootDir === '' || !existsSync(rootDir)) return null;
+  const fullPath = join(rootDir, relativePath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
+function expectCanonicalMarkdownStorage(raw: string) {
+  expect(raw.startsWith('<!-- leafwiki\n')).toBe(true);
+  expect(raw.startsWith('---\n')).toBe(false);
 }
 
 // - MCP refactor preview and apply preserve canonical page and section syntax
@@ -274,6 +290,16 @@ test('safe edit tools patch sections and metadata with version checks', async ()
     expect(metadataPage?.tags).not.toContain('draft');
     expect(metadataPage?.properties).toMatchObject({ status: 'ready' });
     expect(metadataPage?.properties).not.toHaveProperty('owner');
+
+    const raw = readRootMarkdownIfAvailable(`${slug}.md`);
+    if (raw === null) {
+      throw new Error('local MCP/workspace-sync E2E runner should expose canonical raw file');
+    }
+    expectCanonicalMarkdownStorage(raw);
+    expect(raw).toContain('- keep');
+    expect(raw).toContain('- review');
+    expect(raw).toContain('status: ready');
+    expect(raw).not.toContain('owner: team');
 
     await expect(
       mcp.callTool('wiki_update_page_metadata', {

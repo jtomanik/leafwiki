@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test, { Page, expect } from '@playwright/test';
 import EditPage from '../pages/EditPage';
@@ -14,6 +14,21 @@ const editorPreviewScrollFixturePath = join(
   'assets',
   'editor-preview-scroll-fixture.md',
 );
+const rootDir =
+  process.env.E2E_ROOT_DIR ||
+  (process.env.E2E_DATA_DIR ? join(process.env.E2E_DATA_DIR, 'root') : '');
+
+function readRootMarkdownIfAvailable(relativePath: string) {
+  if (rootDir === '' || !existsSync(rootDir)) return null;
+  const fullPath = join(rootDir, relativePath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
+function expectCanonicalMarkdownStorage(raw: string) {
+  expect(raw.startsWith('<!-- leafwiki\n')).toBe(true);
+  expect(raw.startsWith('---\n')).toBe(false);
+}
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
@@ -37,7 +52,7 @@ async function createPageWithMetadata(
     properties?: Record<string, string>;
   },
 ) {
-  await page.evaluate(
+  return await page.evaluate(
     async ({ title, slug, content, tags, properties, csrfScript }) => {
       const csrfToken = new Function(csrfScript)() as string;
 
@@ -65,9 +80,14 @@ async function createPageWithMetadata(
         }),
       });
       if (!updateRes.ok) throw new Error(`update failed: ${updateRes.status}`);
+      return (await updateRes.json()) as { id: string; path: string; version: string };
     },
     { ...input, csrfScript: getCsrfScript() },
   );
+}
+
+function viewRouteForCreatedPage(createdPage: { id: string; path: string }) {
+  return `/p/${createdPage.id}/${createdPage.path.replace(/^\/+/, '')}`;
 }
 
 async function updatePageByPath(page: Page, input: { path: string; content: string }) {
@@ -265,7 +285,7 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-load-meta-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Load Meta ${stamp}`,
       slug,
       content: 'Page with metadata.',
@@ -274,7 +294,7 @@ test.describe('Editor', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -308,15 +328,16 @@ test.describe('Editor', () => {
   test('editor-saves-tags-and-properties', async ({ page }) => {
     const stamp = Date.now();
     const slug = `editor-save-meta-${stamp}`;
+    const title = `Editor Save Meta ${stamp}`;
 
-    await createPageWithMetadata(page, {
-      title: `Editor Save Meta ${stamp}`,
+    const createdPage = await createPageWithMetadata(page, {
+      title,
       slug,
       content: 'Page content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -343,13 +364,27 @@ test.describe('Editor', () => {
     await expect(
       page.locator('.page-metadata__prop-value').filter({ hasText: 'draft' }),
     ).toBeVisible();
+
+    const raw = readRootMarkdownIfAvailable(`${createdPage.path.replace(/^\/+/, '')}.md`);
+    if (raw === null) {
+      test.info().annotations.push({
+        type: 'note',
+        description:
+          'raw storage assertion skipped because the runner does not expose E2E_ROOT_DIR',
+      });
+      return;
+    }
+    expectCanonicalMarkdownStorage(raw);
+    expect(raw).toContain('tags:');
+    expect(raw).toContain('- release');
+    expect(raw).toContain('status: draft');
   });
 
   test('editor-removes-tags-when-all-tags-are-cleared', async ({ page }) => {
     const stamp = Date.now();
     const slug = `editor-remove-tags-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Remove Tags ${stamp}`,
       slug,
       content: 'Page with tags.',
@@ -357,7 +392,7 @@ test.describe('Editor', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -393,7 +428,7 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-update-meta-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Update Meta ${stamp}`,
       slug,
       content: 'Some content.',
@@ -402,7 +437,7 @@ test.describe('Editor', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -442,14 +477,14 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-properties-only-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Properties Only ${stamp}`,
       slug,
       content: 'Properties only content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const saveButton = page.locator('button[data-testid="save-page-button"]');
@@ -483,7 +518,7 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-remove-properties-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Remove Properties ${stamp}`,
       slug,
       content: 'Remove properties content.',
@@ -491,7 +526,7 @@ test.describe('Editor', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const saveButton = page.locator('button[data-testid="save-page-button"]');
@@ -537,7 +572,7 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-clean-state-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Clean State ${stamp}`,
       slug,
       content: 'Unmodified content.',
@@ -546,7 +581,7 @@ test.describe('Editor', () => {
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     // Without making changes, the save button must be disabled
@@ -559,14 +594,14 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-dirty-tag-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Dirty Tag ${stamp}`,
       slug,
       content: 'Content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const saveButton = page.locator('button[data-testid="save-page-button"]');
@@ -586,14 +621,14 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-conflict-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Conflict ${stamp}`,
       slug,
       content: 'Original content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -619,14 +654,14 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-validation-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Validation ${stamp}`,
       slug,
       content: 'Content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -649,14 +684,14 @@ test.describe('Editor', () => {
     const stamp = Date.now();
     const slug = `editor-empty-key-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Empty Key ${stamp}`,
       slug,
       content: 'Content.',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -731,14 +766,14 @@ test.describe('Editor', () => {
       },
     ];
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Preview Image Heading ${stamp}`,
       slug,
       content: editorPreviewScrollFixture,
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     await expect(page.locator('#markdown-preview-container')).toContainText(
@@ -793,7 +828,7 @@ test.describe('Editor line wrap', () => {
     const stamp = Date.now();
     const slug = `editor-line-wrap-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Line Wrap ${stamp}`,
       slug,
       content: '',
@@ -803,7 +838,7 @@ test.describe('Editor line wrap', () => {
     await page.evaluate(() => localStorage.removeItem('leafwiki-editor-settings'));
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const cmContent = page.locator('.cm-content');
@@ -842,14 +877,14 @@ test.describe('Editor formatting', () => {
     const stamp = Date.now();
     const slug = `editor-bold-keyboard-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Bold Keyboard ${stamp}`,
       slug,
       content: '',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -869,14 +904,14 @@ test.describe('Editor formatting', () => {
     const stamp = Date.now();
     const slug = `editor-italic-keyboard-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Italic Keyboard ${stamp}`,
       slug,
       content: '',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -895,14 +930,14 @@ test.describe('Editor formatting', () => {
     const stamp = Date.now();
     const slug = `editor-bold-button-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Bold Button ${stamp}`,
       slug,
       content: '',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);
@@ -922,14 +957,14 @@ test.describe('Editor formatting', () => {
     const stamp = Date.now();
     const slug = `editor-italic-button-${stamp}`;
 
-    await createPageWithMetadata(page, {
+    const createdPage = await createPageWithMetadata(page, {
       title: `Editor Italic Button ${stamp}`,
       slug,
       content: '',
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(viewRouteForCreatedPage(createdPage));
     await viewPage.clickEditPageButton();
 
     const editPage = new EditPage(page);

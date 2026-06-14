@@ -70,6 +70,7 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 	// Snapshot mutable fields before UpdateNode mutates the live tree node.
 	oldTitle := before.Title
 	oldContent := before.Content
+	oldRawContent := before.RawContent
 
 	var subtreeIDs []string
 	if slugChanged {
@@ -90,16 +91,18 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 
 	contentChanged := oldContent != after.Content
 	titleChanged := oldTitle != after.Title
+	metadataChanged := oldRawContent != after.RawContent && !contentChanged && !titleChanged && !slugChanged
 
 	event := pagesave.PageSaveEvent{
-		Operation:      pagesave.PageOperationUpdate,
-		UserID:         in.UserID,
-		Source:         in.Source,
-		After:          after,
-		OldPath:        oldPath,
-		ContentChanged: contentChanged,
-		SlugChanged:    slugChanged,
-		TitleChanged:   titleChanged,
+		Operation:       pagesave.PageOperationUpdate,
+		UserID:          in.UserID,
+		Source:          in.Source,
+		After:           after,
+		OldPath:         oldPath,
+		ContentChanged:  contentChanged,
+		MetadataChanged: metadataChanged,
+		SlugChanged:     slugChanged,
+		TitleChanged:    titleChanged,
 	}
 
 	if slugChanged {

@@ -18,7 +18,7 @@ Prefer semantic MCP writes for normal edits:
 - `wiki_replace_page_section`
 - page create/move/delete/sort/refactor tools
 
-Use direct Markdown file edits for bulk or mechanical changes under the configured root directory. After direct edits, call `wiki_refresh` when immediate web/MCP visibility is needed.
+Use direct Markdown file edits for bulk or mechanical body changes under the configured root directory. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. After direct edits, call `wiki_refresh` when immediate web/MCP visibility is needed.
 
 Every write tool that accepts a version must use a fresh `page.version` from `wiki_get_page`, `wiki_get_page_by_path`, or the immediately preceding write result. Re-read and merge on stale-version conflicts.
 
@@ -40,7 +40,7 @@ Partial-edit rules:
 Direct Markdown flow:
 
 1. Call `wiki_get_context`.
-2. Edit files under `--root-dir`.
+2. Edit files under `--root-dir`, preserving canonical `<!-- leafwiki ... -->` metadata blocks and changing only body content unless the task is an explicit metadata repair.
 3. Call `wiki_refresh` with `source: "filesystem"` when immediate visibility matters.
 4. Run validation.
 5. Summarize changed pages and any remaining validation issues.

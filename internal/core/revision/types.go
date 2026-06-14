@@ -1,6 +1,10 @@
 package revision
 
-import "time"
+import (
+	"time"
+
+	"github.com/perber/wiki/internal/core/markdown"
+)
 
 type RevisionType string
 
@@ -29,6 +33,8 @@ type RevisionState struct {
 	ContentHash          string
 	ExtraFrontmatter     map[string]interface{}
 	ExtraFrontmatterHash string
+	PageMetadata         *markdown.PageMetadata
+	PageMetadataHash     string
 	Assets               []AssetRef
 	AssetManifestHash    string
 	PageCreatedAt        time.Time
@@ -52,6 +58,8 @@ type Revision struct {
 	ContentHash          string                 `json:"content_hash"`
 	ExtraFrontmatter     map[string]interface{} `json:"extra_frontmatter,omitempty"`
 	ExtraFrontmatterHash string                 `json:"extra_frontmatter_hash,omitempty"`
+	PageMetadata         *markdown.PageMetadata `json:"page_metadata,omitempty"`
+	PageMetadataHash     string                 `json:"page_metadata_hash,omitempty"`
 	AssetManifestHash    string                 `json:"asset_manifest_hash"`
 	PageCreatedAt        time.Time              `json:"page_created_at"`
 	PageUpdatedAt        time.Time              `json:"page_updated_at"`

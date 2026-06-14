@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test, { expect } from '@playwright/test';
 import EditPage from '../pages/EditPage';
 import EditPageMetadataDialog from '../pages/EditPageMetadataDialog';
@@ -7,6 +9,154 @@ import { toAppPath } from '../pages/appPath';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
+const rootDir =
+  process.env.E2E_ROOT_DIR ||
+  (process.env.E2E_DATA_DIR ? join(process.env.E2E_DATA_DIR, 'root') : '');
+const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
+
+function readRootMarkdownIfAvailable(relativePath: string) {
+  if (rootDir === '' || !existsSync(rootDir)) return null;
+  const fullPath = join(rootDir, relativePath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
+function writeRootMarkdown(relativePath: string, content: string) {
+  if (rootDir === '' || !existsSync(rootDir)) {
+    throw new Error('E2E_ROOT_DIR should be exported by the local E2E runner');
+  }
+  const fullPath = join(rootDir, relativePath);
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, content);
+}
+
+function expectCanonicalMarkdownStorage(raw: string) {
+  expect(raw.startsWith('<!-- leafwiki\n')).toBe(true);
+  expect(raw.startsWith('---\n')).toBe(false);
+}
+
+function legacyPageMarkdown(id: string, title: string, body: string) {
+  return `---
+leafwiki_id: ${id}
+leafwiki_title: ${title}
+tags:
+  - legacy-history
+status: legacy
+---
+
+${body}`;
+}
+
+async function refreshWorkspaceSync(page: import('@playwright/test').Page) {
+  await page.evaluate(async () => {
+    const hostMatch =
+      document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+      document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+
+    if (!hostMatch) {
+      throw new Error('Missing CSRF token cookie for workspace sync refresh');
+    }
+
+    let csrfToken = hostMatch[1];
+    try {
+      csrfToken = decodeURIComponent(csrfToken);
+    } catch {
+      // Use the raw cookie value if it is not URI encoded.
+    }
+
+    const response = await fetch('/api/workspace-sync/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-CSRF-Token': csrfToken,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Workspace sync refresh failed: ${response.status}`);
+    }
+  });
+}
+
+async function getPageByPath(page: import('@playwright/test').Page, targetPath: string) {
+  return await page.evaluate(async (inputPath) => {
+    const normalizedPath = inputPath.replace(/^\/+/, '');
+    const response = await fetch(`/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
+    }
+
+    return (await response.json()) as {
+      content?: string;
+      id: string;
+      slug: string;
+      title: string;
+      version: string;
+    };
+  }, targetPath);
+}
+
+async function updatePageContentByPath(
+  page: import('@playwright/test').Page,
+  targetPath: string,
+  content: string,
+) {
+  await page.evaluate(
+    async ({ inputPath, nextContent }) => {
+      const normalizedPath = inputPath.replace(/^\/+/, '');
+      const pageResponse = await fetch(
+        `/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
+        { credentials: 'include' },
+      );
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
+      }
+
+      const currentPage = (await pageResponse.json()) as {
+        id: string;
+        slug: string;
+        title: string;
+        version: string;
+      };
+
+      const hostMatch =
+        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      if (!hostMatch) {
+        throw new Error('Missing CSRF token cookie for page update');
+      }
+      let csrfToken = hostMatch[1];
+      try {
+        csrfToken = decodeURIComponent(csrfToken);
+      } catch {
+        // Use the raw cookie value if it is not URI encoded.
+      }
+
+      const updateResponse = await fetch(`/api/pages/${currentPage.id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          version: currentPage.version,
+          title: currentPage.title,
+          slug: currentPage.slug,
+          content: nextContent,
+        }),
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error(`Failed to update page ${currentPage.id}: ${updateResponse.status}`);
+      }
+    },
+    { inputPath: targetPath, nextContent: content },
+  );
+}
 
 // Helper: create a page with multiple revisions so history tests have data.
 async function createPageWithRevisions(
@@ -531,5 +681,83 @@ test.describe('History', () => {
       page.locator('button[data-testid^="history-sidebar-revision-"]').first(),
     ).toBeVisible();
     await expect.poll(() => new URL(page.url()).pathname).toContain(`/history/${renamedTitle}`);
+
+    const raw = readRootMarkdownIfAvailable(`${renamedTitle}.md`);
+    if (raw === null) {
+      test.info().annotations.push({
+        type: 'note',
+        description:
+          'raw storage assertion skipped because the runner does not expose E2E_ROOT_DIR',
+      });
+      return;
+    }
+    expectCanonicalMarkdownStorage(raw);
+    expect(raw).toContain(updatedContent);
+  });
+
+  test('restore-legacy-workspace-sync-revision-writes-canonical-output', async ({ page }) => {
+    test.skip(
+      !workspaceSyncEnabled || rootDir === '' || !existsSync(rootDir),
+      'requires local workspace-sync runner with readable E2E_ROOT_DIR',
+    );
+
+    const slug = `history-legacy-restore-${Date.now()}`;
+    const originalBody = `# History Legacy Restore
+
+Original legacy body ${Date.now()}.`;
+    const updatedBody = `# History Legacy Restore
+
+Updated body ${Date.now()}.`;
+
+    writeRootMarkdown(
+      `${slug}.md`,
+      legacyPageMarkdown(slug, 'History Legacy Restore', originalBody),
+    );
+    await refreshWorkspaceSync(page);
+
+    await expect
+      .poll(() => readRootMarkdownIfAvailable(`${slug}.md`) ?? '', { timeout: 15000 })
+      .toContain('<!-- leafwiki\n');
+
+    await updatePageContentByPath(page, slug, updatedBody);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${slug}.md`);
+    await expect(page.locator('article')).toContainText('Updated body');
+    await viewPage.openCurrentPageHistory();
+
+    const revisionButtons = page.locator('button[data-testid^="history-sidebar-revision-"]');
+    await expect(revisionButtons.first()).toBeVisible();
+    await expect.poll(async () => await revisionButtons.count(), { timeout: 15000 }).toBe(3);
+
+    await page.getByTestId('page-history-page-raw-tab').click();
+    await revisionButtons.nth(2).click();
+    await expect(page.locator('.page-history__snapshot-content')).toContainText('leafwiki_id:');
+    await expect(page.locator('.page-history__snapshot-content')).not.toContainText(
+      '<!-- leafwiki',
+    );
+
+    const restoreButton = page.locator('[data-testid="page-history-page-restore"]');
+    await restoreButton.waitFor({ state: 'visible' });
+    await restoreButton.click();
+    await page.locator('[data-testid="restore-revision-dialog-button-confirm"]').click();
+
+    await expect
+      .poll(async () => (await getPageByPath(page, slug)).content ?? '', { timeout: 15000 })
+      .toContain('Original legacy body');
+
+    const restoredPage = await getPageByPath(page, slug);
+    expect(restoredPage.content ?? '').not.toContain('leafwiki_id:');
+    expect(restoredPage.content ?? '').not.toContain('---');
+
+    const raw = readRootMarkdownIfAvailable(`${slug}.md`);
+    if (raw === null) {
+      throw new Error('local workspace-sync E2E runner should expose canonical raw file');
+    }
+    expectCanonicalMarkdownStorage(raw);
+    expect(raw).toContain('Original legacy body');
+    expect(raw).toContain('- legacy-history');
+    expect(raw).toContain('status: legacy');
+    expect(raw).not.toContain('leafwiki_id:');
   });
 });

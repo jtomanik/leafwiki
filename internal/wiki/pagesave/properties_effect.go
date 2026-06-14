@@ -35,7 +35,7 @@ func (e *PropertiesSideEffect) Apply(event PageSaveEvent) {
 		}
 
 	case PageOperationMove:
-		// page_id is stable across moves; properties in frontmatter are unchanged — no-op.
+		// page_id is stable across moves; properties are unchanged.
 
 	case PageOperationDelete:
 		for _, p := range event.AffectedPages {

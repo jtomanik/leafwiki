@@ -367,11 +367,11 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 }
 
 func validationContentLeafWikiID(content string) string {
-	fm, _, _, err := markdown.ParseFrontmatter(content)
+	doc, _, err := markdown.ParsePageDocument(content)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(fm.LeafWikiID)
+	return strings.TrimSpace(doc.Metadata.Page.ID)
 }
 
 func (r *Routes) validationSourceMarkdownFile(sourceRoutePath string) string {

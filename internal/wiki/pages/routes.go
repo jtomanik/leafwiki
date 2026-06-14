@@ -293,18 +293,26 @@ func (r *Routes) handleCreate(c *gin.Context) {
 func (r *Routes) handleUpdate(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	var req struct {
-		Version    string            `json:"version" binding:"required"`
-		Title      string            `json:"title" binding:"required"`
-		Slug       string            `json:"slug" binding:"required"`
-		Content    *string           `json:"content"`
-		Tags       []string          `json:"tags"`
-		Properties map[string]string `json:"properties"`
+		Version    string             `json:"version" binding:"required"`
+		Title      string             `json:"title" binding:"required"`
+		Slug       string             `json:"slug" binding:"required"`
+		Content    *string            `json:"content"`
+		Tags       *[]string          `json:"tags"`
+		Properties *map[string]string `json:"properties"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondWithPageStatusError(c, http.StatusBadRequest, ErrCodePageInvalidRequest, "Invalid request", "invalid request")
 		return
 	}
-	if err := ValidatePageMetadataInput(req.Tags, req.Properties); err != nil {
+	var tagsForValidation []string
+	if req.Tags != nil {
+		tagsForValidation = *req.Tags
+	}
+	var propertiesForValidation map[string]string
+	if req.Properties != nil {
+		propertiesForValidation = *req.Properties
+	}
+	if err := ValidatePageMetadataInput(tagsForValidation, propertiesForValidation); err != nil {
 		respondWithPageError(c, err)
 		return
 	}
@@ -315,11 +323,31 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 
 	contentToSave := req.Content
 	fromImport := false
-	if req.Content != nil {
-		extraFields := BuildExtraFields(req.Tags, req.Properties)
-		combined, err := markdown.BuildMarkdownWithExtraFrontmatter(extraFields, *req.Content)
+	if req.Content != nil || req.Tags != nil || req.Properties != nil {
+		currentRaw, err := r.treeService.ReadPageRaw(id)
 		if err != nil {
-			respondWithPageStatusError(c, http.StatusInternalServerError, ErrCodePageInternalError, "Failed to build frontmatter", "failed to build frontmatter")
+			respondWithPageError(c, err)
+			return
+		}
+		body := ""
+		if req.Content != nil {
+			body = *req.Content
+		} else {
+			doc, _, err := markdown.ParsePageDocument(currentRaw)
+			if err != nil {
+				respondWithPageStatusError(c, http.StatusInternalServerError, ErrCodePageInternalError, "Failed to parse metadata", "failed to parse metadata")
+				return
+			}
+			body = doc.Body
+		}
+		combined, err := BuildMarkdownWithPublicMetadataPatch(currentRaw, id, req.Title, PublicMetadataPatch{
+			Tags:              tagsForValidation,
+			TagsPresent:       req.Tags != nil,
+			Properties:        propertiesForValidation,
+			PropertiesPresent: req.Properties != nil,
+		}, body)
+		if err != nil {
+			respondWithPageStatusError(c, http.StatusInternalServerError, ErrCodePageInternalError, "Failed to build metadata", "failed to build metadata")
 			return
 		}
 		contentToSave = &combined
@@ -338,18 +366,26 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 	r.respondPage(c, http.StatusOK, out.Page)
 }
 
-func BuildExtraFields(tags []string, properties map[string]string) map[string]interface{} {
-	extra := make(map[string]interface{}, len(properties)+1)
-	for k, v := range properties {
-		extra[k] = v
+func BuildMarkdownWithPublicMetadata(pageID string, title string, tags []string, properties map[string]string, body string) (string, error) {
+	fields := make(map[string]interface{}, len(properties))
+	for key, value := range properties {
+		fields[key] = value
 	}
-	normalizedTags := normalizeTagInputs(tags)
-	list := make([]interface{}, len(normalizedTags))
-	for i, t := range normalizedTags {
-		list[i] = t
+	if len(fields) == 0 {
+		fields = nil
 	}
-	extra["tags"] = list
-	return extra
+	return markdown.RenderPageDocument(markdown.PageDocument{
+		Body: body,
+		Metadata: markdown.PageMetadata{
+			Version: 1,
+			Page: markdown.PageMetadataPage{
+				ID:    strings.TrimSpace(pageID),
+				Title: strings.TrimSpace(title),
+			},
+			Tags:   normalizeTagInputs(tags),
+			Fields: fields,
+		},
+	})
 }
 
 func (r *Routes) handleDelete(c *gin.Context) {
@@ -612,7 +648,7 @@ func ValidatePageMetadataInput(tags []string, properties map[string]string) erro
 			ve.Add(field, "Property key must not be empty")
 		case key != rawKey:
 			ve.Add(field, "Property key must not contain leading or trailing whitespace")
-		case strings.HasPrefix(strings.ToLower(key), "leafwiki_"):
+		case markdown.IsReservedMetadataKey(key):
 			ve.Add(field, "Property key uses a reserved prefix")
 		case strings.ToLower(key) == "tags" || strings.ToLower(key) == "title":
 			ve.Add(field, "Property key is reserved")

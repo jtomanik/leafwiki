@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/perber/wiki/internal/core/markdown"
@@ -24,6 +25,16 @@ func newRevisionTestService(t *testing.T) (*Service, *tree.TreeService, string) 
 	return NewService(storageDir, treeService, logger), treeService, storageDir
 }
 
+func assertCanonicalRevisionRawStorage(t *testing.T, raw string) {
+	t.Helper()
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("raw storage should start with canonical metadata comment, got:\n%s", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("raw storage should not start with legacy YAML frontmatter:\n%s", raw)
+	}
+}
+
 func createRevisionTestPage(t *testing.T, treeService *tree.TreeService, title, slug, content string) string {
 	t.Helper()
 	kind := tree.NodeKindPage
@@ -35,6 +46,26 @@ func createRevisionTestPage(t *testing.T, treeService *tree.TreeService, title, 
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 	return *id
+}
+
+func renderRevisionTestMarkdown(t *testing.T, pageID, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
+	t.Helper()
+	raw, err := markdown.RenderPageDocument(markdown.PageDocument{
+		Body: body,
+		Metadata: markdown.PageMetadata{
+			Version: 1,
+			Page: markdown.PageMetadataPage{
+				ID:    pageID,
+				Title: title,
+			},
+			Fields: fields,
+			Extra:  extra,
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderPageDocument failed: %v", err)
+	}
+	return raw
 }
 
 func writeLiveAsset(t *testing.T, storageDir, pageID, name, content string) {
@@ -630,7 +661,7 @@ func TestRestoreRevisionRehydratesLivePageState(t *testing.T) {
 	}
 }
 
-func TestRecordContentUpdate_CapturesHistoricalCustomFrontmatter(t *testing.T) {
+func TestRecordContentUpdate_CapturesCanonicalPageMetadataWithoutLegacyExtraFrontmatter(t *testing.T) {
 	service, treeService, _ := newRevisionTestService(t)
 
 	pageKind := tree.NodeKindPage
@@ -640,13 +671,11 @@ func TestRecordContentUpdate_CapturesHistoricalCustomFrontmatter(t *testing.T) {
 	}
 	pageID := *pageIDPtr
 
-	firstRaw, err := markdown.BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"aliases":   []string{"one"},
-		"customKey": "first",
-	}, "Body")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter(first) failed: %v", err)
-	}
+	firstRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		map[string]interface{}{"customKey": "first"},
+		map[string]interface{}{"aliases": []interface{}{"one"}},
+		"Body",
+	)
 	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
@@ -658,17 +687,21 @@ func TestRecordContentUpdate_CapturesHistoricalCustomFrontmatter(t *testing.T) {
 	if !created {
 		t.Fatalf("expected first revision to be created")
 	}
-	if got := firstRev.ExtraFrontmatter["customKey"]; got != "first" {
-		t.Fatalf("expected first revision custom frontmatter, got %#v", firstRev.ExtraFrontmatter)
+	if firstRev.ExtraFrontmatter != nil || firstRev.ExtraFrontmatterHash != "" {
+		t.Fatalf("new revisions must not populate legacy extra frontmatter, got %#v hash %q", firstRev.ExtraFrontmatter, firstRev.ExtraFrontmatterHash)
+	}
+	if firstRev.PageMetadata == nil {
+		t.Fatalf("expected page metadata snapshot")
+	}
+	if got := firstRev.PageMetadata.Fields["customKey"]; got != "first" {
+		t.Fatalf("expected first revision field, got %#v", firstRev.PageMetadata.Fields)
 	}
 
-	secondRaw, err := markdown.BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"aliases":   []string{"two"},
-		"customKey": "second",
-	}, "Body")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter(second) failed: %v", err)
-	}
+	secondRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		map[string]interface{}{"customKey": "second"},
+		map[string]interface{}{"aliases": []interface{}{"two"}},
+		"Body",
+	)
 	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
@@ -683,12 +716,18 @@ func TestRecordContentUpdate_CapturesHistoricalCustomFrontmatter(t *testing.T) {
 	if secondRev.ID == firstRev.ID {
 		t.Fatalf("expected distinct revision for changed custom frontmatter")
 	}
-	if got := secondRev.ExtraFrontmatter["customKey"]; got != "second" {
-		t.Fatalf("expected second revision custom frontmatter, got %#v", secondRev.ExtraFrontmatter)
+	if secondRev.ExtraFrontmatter != nil || secondRev.ExtraFrontmatterHash != "" {
+		t.Fatalf("new revisions must not populate legacy extra frontmatter, got %#v hash %q", secondRev.ExtraFrontmatter, secondRev.ExtraFrontmatterHash)
 	}
-	aliases, ok := secondRev.ExtraFrontmatter["aliases"].([]interface{})
+	if secondRev.PageMetadata == nil {
+		t.Fatalf("expected second page metadata snapshot")
+	}
+	if got := secondRev.PageMetadata.Fields["customKey"]; got != "second" {
+		t.Fatalf("expected second revision field, got %#v", secondRev.PageMetadata.Fields)
+	}
+	aliases, ok := secondRev.PageMetadata.Extra["aliases"].([]interface{})
 	if !ok || len(aliases) != 1 || aliases[0] != "two" {
-		t.Fatalf("expected aliases to be preserved in revision, got %#v", secondRev.ExtraFrontmatter["aliases"])
+		t.Fatalf("expected aliases to be preserved in page metadata, got %#v", secondRev.PageMetadata.Extra["aliases"])
 	}
 }
 
@@ -702,13 +741,11 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 	}
 	pageID := *pageIDPtr
 
-	firstRaw, err := markdown.BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"aliases":   []string{"one"},
-		"customKey": "first",
-	}, "Body")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter(first) failed: %v", err)
-	}
+	firstRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		map[string]interface{}{"customKey": "first"},
+		map[string]interface{}{"aliases": []interface{}{"one"}},
+		"Body",
+	)
 	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
@@ -720,13 +757,11 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 		t.Fatalf("expected first revision to be created")
 	}
 
-	secondRaw, err := markdown.BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"aliases":   []string{"two"},
-		"customKey": "second",
-	}, "Body changed")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter(second) failed: %v", err)
-	}
+	secondRaw := renderRevisionTestMarkdown(t, pageID, "Changed",
+		map[string]interface{}{"customKey": "second"},
+		map[string]interface{}{"aliases": []interface{}{"two"}},
+		"Body changed",
+	)
 	if err := treeService.UpdateNode("editor", pageID, "Changed", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
@@ -774,6 +809,7 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
+	assertCanonicalRevisionRawStorage(t, raw)
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter(restored raw) failed: %v", err)
@@ -808,6 +844,140 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 	}
 }
 
+func TestRestoreRevision_PreservesCanonicalFieldsAndExtraBoundaries(t *testing.T) {
+	service, treeService, _ := newRevisionTestService(t)
+
+	pageKind := tree.NodeKindPage
+	pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
+	if err != nil {
+		t.Fatalf("CreateNode(page) failed: %v", err)
+	}
+	pageID := *pageIDPtr
+
+	firstRaw, err := markdown.RenderPageDocument(markdown.PageDocument{
+		Body: "First body",
+		Metadata: markdown.PageMetadata{
+			Version: 1,
+			Page:    markdown.PageMetadataPage{ID: pageID, Title: "Page"},
+			Fields:  map[string]interface{}{"status": "draft", "priority": 2},
+			Extra:   map[string]interface{}{"source": "imported"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderPageDocument(first) failed: %v", err)
+	}
+	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+		t.Fatalf("UpdateNode(first raw) failed: %v", err)
+	}
+	firstRev, created, err := service.RecordContentUpdate(pageID, "creator", "first")
+	if err != nil {
+		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
+	}
+	if !created {
+		t.Fatalf("expected first revision to be created")
+	}
+
+	secondRaw, err := markdown.RenderPageDocument(markdown.PageDocument{
+		Body: "Second body",
+		Metadata: markdown.PageMetadata{
+			Version: 1,
+			Page:    markdown.PageMetadataPage{ID: pageID, Title: "Page"},
+			Fields:  map[string]interface{}{"status": "ready"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderPageDocument(second) failed: %v", err)
+	}
+	if err := treeService.UpdateNode("editor", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+		t.Fatalf("UpdateNode(second raw) failed: %v", err)
+	}
+	if _, _, err := service.RecordContentUpdate(pageID, "editor", "second"); err != nil {
+		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
+	}
+
+	if err := service.RestoreRevision(pageID, firstRev.ID, "restorer"); err != nil {
+		t.Fatalf("RestoreRevision failed: %v", err)
+	}
+	raw, err := treeService.ReadPageRaw(pageID)
+	if err != nil {
+		t.Fatalf("ReadPageRaw failed: %v", err)
+	}
+	assertCanonicalRevisionRawStorage(t, raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		t.Fatalf("ParsePageDocument failed: %v", err)
+	}
+	if got := doc.Metadata.Fields["priority"]; got != 2 {
+		t.Fatalf("priority field = %#v", got)
+	}
+	if _, exists := doc.Metadata.Fields["source"]; exists {
+		t.Fatalf("source extra moved into fields: %#v", doc.Metadata.Fields)
+	}
+	if got := doc.Metadata.Extra["source"]; got != "imported" {
+		t.Fatalf("source extra = %#v", got)
+	}
+	if doc.Body != "First body" {
+		t.Fatalf("body = %q", doc.Body)
+	}
+}
+
+func TestRestoreRevision_RestoresExplicitEmptyMetadataSnapshot(t *testing.T) {
+	service, treeService, _ := newRevisionTestService(t)
+
+	pageKind := tree.NodeKindPage
+	pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
+	if err != nil {
+		t.Fatalf("CreateNode(page) failed: %v", err)
+	}
+	pageID := *pageIDPtr
+
+	firstRaw := renderRevisionTestMarkdown(t, pageID, "Page", nil, nil, "Empty metadata body")
+	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+		t.Fatalf("UpdateNode(first raw) failed: %v", err)
+	}
+	firstRev, created, err := service.RecordContentUpdate(pageID, "creator", "empty metadata")
+	if err != nil {
+		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
+	}
+	if !created {
+		t.Fatalf("expected first revision to be created")
+	}
+	if firstRev.PageMetadata == nil {
+		t.Fatalf("expected explicit empty page metadata snapshot")
+	}
+
+	secondRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		map[string]interface{}{"status": "ready"},
+		map[string]interface{}{"source": "imported"},
+		"Non-empty metadata body",
+	)
+	if err := treeService.UpdateNode("editor", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+		t.Fatalf("UpdateNode(second raw) failed: %v", err)
+	}
+	if _, _, err := service.RecordContentUpdate(pageID, "editor", "non-empty metadata"); err != nil {
+		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
+	}
+
+	if err := service.RestoreRevision(pageID, firstRev.ID, "restorer"); err != nil {
+		t.Fatalf("RestoreRevision failed: %v", err)
+	}
+	raw, err := treeService.ReadPageRaw(pageID)
+	if err != nil {
+		t.Fatalf("ReadPageRaw failed: %v", err)
+	}
+	assertCanonicalRevisionRawStorage(t, raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		t.Fatalf("ParsePageDocument failed: %v", err)
+	}
+	if len(doc.Metadata.Tags) != 0 || len(doc.Metadata.Fields) != 0 || len(doc.Metadata.Extra) != 0 {
+		t.Fatalf("expected restored metadata to be empty, got %#v", doc.Metadata)
+	}
+	if doc.Body != "Empty metadata body" {
+		t.Fatalf("body = %q", doc.Body)
+	}
+}
+
 func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *testing.T) {
 	service, treeService, _ := newRevisionTestService(t)
 
@@ -818,12 +988,11 @@ func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *test
 	}
 	pageID := *pageIDPtr
 
-	initialRaw, err := markdown.BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"customKey": "current",
-	}, "Current body")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter(initial) failed: %v", err)
-	}
+	initialRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		map[string]interface{}{"customKey": "current"},
+		nil,
+		"Current body",
+	)
 	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &initialRaw, tree.VersionUnchecked, true); err != nil {
 		t.Fatalf("UpdateNode(initial raw) failed: %v", err)
 	}
@@ -857,6 +1026,7 @@ func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *test
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
+	assertCanonicalRevisionRawStorage(t, raw)
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter failed: %v", err)
@@ -869,6 +1039,75 @@ func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *test
 	}
 	if body != "Legacy body" {
 		t.Fatalf("expected legacy content to be restored, got %q", body)
+	}
+}
+
+func TestRestoreRevision_LegacyRevisionWithExtraFrontmatterWritesCanonicalMetadata(t *testing.T) {
+	service, treeService, _ := newRevisionTestService(t)
+
+	pageKind := tree.NodeKindPage
+	pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
+	if err != nil {
+		t.Fatalf("CreateNode(page) failed: %v", err)
+	}
+	pageID := *pageIDPtr
+
+	initialContent := "Current body"
+	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &initialContent, tree.VersionUnchecked, false); err != nil {
+		t.Fatalf("UpdateNode(initial content) failed: %v", err)
+	}
+
+	page, err := treeService.GetPage(pageID)
+	if err != nil {
+		t.Fatalf("GetPage failed: %v", err)
+	}
+
+	state := service.revisionStateFromPage(page)
+	contentHash, err := service.store.SaveContentBlob([]byte("Legacy body with extra"))
+	if err != nil {
+		t.Fatalf("SaveContentBlob failed: %v", err)
+	}
+	legacyRevision, err := service.newRevision(RevisionTypeContentUpdate, state, "legacy-author", "legacy extra", "")
+	if err != nil {
+		t.Fatalf("newRevision failed: %v", err)
+	}
+	legacyRevision.ContentHash = contentHash
+	legacyRevision.PageMetadata = nil
+	legacyRevision.PageMetadataHash = ""
+	legacyRevision.ExtraFrontmatter = map[string]interface{}{
+		"status":  "legacy",
+		"aliases": []interface{}{"old"},
+	}
+	legacyRevision.ExtraFrontmatterHash, err = hashExtraFrontmatter(legacyRevision.ExtraFrontmatter)
+	if err != nil {
+		t.Fatalf("hashExtraFrontmatter failed: %v", err)
+	}
+	if err := service.store.SaveRevision(legacyRevision); err != nil {
+		t.Fatalf("SaveRevision failed: %v", err)
+	}
+
+	if err := service.RestoreRevision(pageID, legacyRevision.ID, "restorer"); err != nil {
+		t.Fatalf("RestoreRevision failed: %v", err)
+	}
+
+	raw, err := treeService.ReadPageRaw(pageID)
+	if err != nil {
+		t.Fatalf("ReadPageRaw failed: %v", err)
+	}
+	assertCanonicalRevisionRawStorage(t, raw)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		t.Fatalf("ParsePageDocument failed: %v", err)
+	}
+	if got := doc.Metadata.Fields["status"]; got != "legacy" {
+		t.Fatalf("expected legacy scalar extra to restore as metadata field, got %#v", got)
+	}
+	aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
+	if !ok || len(aliases) != 1 || aliases[0] != "old" {
+		t.Fatalf("expected non-scalar legacy extra to restore as metadata extra, got %#v", doc.Metadata.Extra["aliases"])
+	}
+	if doc.Body != "Legacy body with extra" {
+		t.Fatalf("expected legacy content to be restored, got %q", doc.Body)
 	}
 }
 
@@ -925,6 +1164,7 @@ func TestRestoreRevision_LegacyBodyThatLooksLikeFrontmatterStaysBody(t *testing.
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
+	assertCanonicalRevisionRawStorage(t, raw)
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter failed: %v", err)

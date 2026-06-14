@@ -454,31 +454,35 @@ func TestImporterService_ExecuteCurrentPlan_HappyPath_PreservesNonInternalFrontm
 	if w.lastUpdatedContent == nil {
 		t.Fatalf("expected UpdatePage content")
 	}
-	fm, body, has, err := markdown.ParseFrontmatter(*w.lastUpdatedContent)
+	raw := *w.lastUpdatedContent
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("expected importer output not to use legacy YAML frontmatter, got: %q", raw)
+	}
+	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter err: %v", err)
+		t.Fatalf("ParsePageDocument err: %v", err)
 	}
-	if !has {
-		t.Fatalf("expected preserved frontmatter, got: %q", *w.lastUpdatedContent)
+	if doc.Body != "\n# Heading\nBody" {
+		t.Fatalf("unexpected body: %q", doc.Body)
 	}
-	if body != "\n# Heading\nBody" {
-		t.Fatalf("unexpected body: %q", body)
-	}
-	if got := fm.ExtraFields["custom_key"]; got != "keep-me" {
+	if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
 		t.Fatalf("expected custom_key to be preserved, got %#v", got)
 	}
-	if got := fm.ExtraFields["title"]; got != "X" {
-		t.Fatalf("expected title extra field to be preserved, got %#v", got)
+	if got := doc.Metadata.Extra["title"]; got != nil {
+		t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
 	}
-	aliases, ok := fm.ExtraFields["aliases"].([]interface{})
+	aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
 	if !ok || len(aliases) != 1 || aliases[0] != "x" {
-		t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
+		t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
 	}
-	if strings.Contains(*w.lastUpdatedContent, "leafwiki_id: source-id") {
-		t.Fatalf("expected source leafwiki_id to be dropped, got: %q", *w.lastUpdatedContent)
+	if strings.Contains(raw, "leafwiki_id: source-id") {
+		t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
 	}
-	if strings.Contains(*w.lastUpdatedContent, "leafwiki_title: Source Title") {
-		t.Fatalf("expected source leafwiki_title to be dropped, got: %q", *w.lastUpdatedContent)
+	if strings.Contains(raw, "leafwiki_title: Source Title") {
+		t.Fatalf("expected source leafwiki_title to be dropped, got: %q", raw)
 	}
 }
 

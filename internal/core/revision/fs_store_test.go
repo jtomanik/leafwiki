@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
@@ -112,6 +114,67 @@ func TestFSStoreBlobPaths(t *testing.T) {
 	}
 	if len(manifest) != 1 || manifest[0].Name != "asset.txt" {
 		t.Fatalf("manifest = %#v", manifest)
+	}
+}
+
+func TestFSStoreSaveRevisionSerializesPageMetadataAsSnakeCaseJSON(t *testing.T) {
+	store := NewFSStore(t.TempDir())
+	createdAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	revision := &Revision{
+		ID:        "rev-snake",
+		PageID:    "page-snake",
+		CreatedAt: createdAt,
+		Type:      RevisionTypeContentUpdate,
+		Title:     "Page",
+		Slug:      "page",
+		PageMetadata: &markdown.PageMetadata{
+			Version: 1,
+			Page: markdown.PageMetadataPage{
+				ID:           "page-snake",
+				Title:        "Page",
+				CreatedAt:    "2026-06-13T10:00:00Z",
+				UpdatedAt:    "2026-06-13T11:00:00Z",
+				CreatorID:    "creator",
+				LastAuthorID: "editor",
+			},
+			Tags:   []string{"ready"},
+			Fields: map[string]interface{}{"status": "published"},
+		},
+	}
+
+	if err := store.SaveRevision(revision); err != nil {
+		t.Fatalf("SaveRevision failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(store.revisionFilePath("page-snake", "rev-snake", createdAt))
+	if err != nil {
+		t.Fatalf("ReadFile revision: %v", err)
+	}
+	revisionJSON := string(raw)
+	for _, want := range []string{
+		`"page_metadata"`,
+		`"version"`,
+		`"page"`,
+		`"created_at"`,
+		`"updated_at"`,
+		`"creator_id"`,
+		`"last_author_id"`,
+	} {
+		if !strings.Contains(revisionJSON, want) {
+			t.Fatalf("revision JSON missing %s:\n%s", want, revisionJSON)
+		}
+	}
+	for _, legacyGoName := range []string{
+		`"Version":`,
+		`"Page":`,
+		`"CreatedAt":`,
+		`"UpdatedAt":`,
+		`"CreatorID":`,
+		`"LastAuthorID":`,
+	} {
+		if strings.Contains(revisionJSON, legacyGoName) {
+			t.Fatalf("revision JSON contains Go field name %s:\n%s", legacyGoName, revisionJSON)
+		}
 	}
 }
 

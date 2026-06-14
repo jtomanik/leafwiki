@@ -31,7 +31,7 @@ func (e *RevisionSideEffect) Apply(event PageSaveEvent) {
 		}
 
 	case PageOperationUpdate:
-		if event.ContentChanged && event.After == nil {
+		if (event.ContentChanged || event.MetadataChanged) && event.After == nil {
 			for _, p := range event.AffectedPages {
 				if p != nil {
 					e.recordContent(p.ID, event.UserID, event.Summary)
@@ -52,7 +52,7 @@ func (e *RevisionSideEffect) Apply(event PageSaveEvent) {
 				e.recordStructure(event.After.ID, event.UserID)
 			}
 		}
-		if event.ContentChanged && event.After != nil {
+		if (event.ContentChanged || event.MetadataChanged) && event.After != nil {
 			e.recordContent(event.After.ID, event.UserID, event.Summary)
 		}
 

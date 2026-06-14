@@ -106,6 +106,16 @@ func TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter(t *testing.T)
 	writeTmp(t, tmp, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
 
 	w := &fakeExecWiki{hash: "h1"}
+	updatedContentByTitle := map[string]string{}
+	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+		w.lastUpdatedContent = content
+		w.updateTitles = append(w.updateTitles, title)
+		if content != nil {
+			updatedContentByTitle[title] = *content
+		}
+		w.hash = w.hash + "-changed"
+		return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
+	}
 	plan := &PlanResult{
 		TreeHash: "h1",
 		Items: []PlanItem{
@@ -134,31 +144,35 @@ func TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter(t *testing.T)
 	if w.lastUpdatedContent == nil {
 		t.Fatalf("expected content to be passed to UpdatePage")
 	}
-	fm, body, has, err := markdown.ParseFrontmatter(*w.lastUpdatedContent)
+	raw := *w.lastUpdatedContent
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("expected importer output not to use legacy YAML frontmatter, got: %q", raw)
+	}
+	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter err: %v", err)
+		t.Fatalf("ParsePageDocument err: %v", err)
 	}
-	if !has {
-		t.Fatalf("expected preserved frontmatter, got: %q", *w.lastUpdatedContent)
+	if doc.Body != "\n# Heading\nBody" {
+		t.Fatalf("unexpected body: %q", doc.Body)
 	}
-	if body != "\n# Heading\nBody" {
-		t.Fatalf("unexpected body: %q", body)
-	}
-	if got := fm.ExtraFields["custom_key"]; got != "keep-me" {
+	if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
 		t.Fatalf("expected custom_key to be preserved, got %#v", got)
 	}
-	if got := fm.ExtraFields["title"]; got != "X" {
-		t.Fatalf("expected title extra field to be preserved, got %#v", got)
+	if got := doc.Metadata.Extra["title"]; got != nil {
+		t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
 	}
-	aliases, ok := fm.ExtraFields["aliases"].([]interface{})
+	aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
 	if !ok || len(aliases) != 1 || aliases[0] != "x" {
-		t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
+		t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
 	}
-	if strings.Contains(*w.lastUpdatedContent, "leafwiki_id: source-id") {
-		t.Fatalf("expected source leafwiki_id to be dropped, got: %q", *w.lastUpdatedContent)
+	if strings.Contains(raw, "leafwiki_id: source-id") {
+		t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
 	}
-	if strings.Contains(*w.lastUpdatedContent, "leafwiki_title: Source Title") {
-		t.Fatalf("expected source leafwiki_title to be dropped, got: %q", *w.lastUpdatedContent)
+	if strings.Contains(raw, "leafwiki_title: Source Title") {
+		t.Fatalf("expected source leafwiki_title to be dropped, got: %q", raw)
 	}
 
 	if res.TreeHashBefore != "h1" {
@@ -174,6 +188,16 @@ func TestExecutor_Create_HappyPath_PreservesDistinctExtraFieldValues(t *testing.
 	writeTmp(t, tmp, "a.md", "---\nalpha: first\nbeta: second\nnested:\n  key: value\n---\n\nBody")
 
 	w := &fakeExecWiki{hash: "h1"}
+	updatedContentByTitle := map[string]string{}
+	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+		w.lastUpdatedContent = content
+		w.updateTitles = append(w.updateTitles, title)
+		if content != nil {
+			updatedContentByTitle[title] = *content
+		}
+		w.hash = w.hash + "-changed"
+		return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
+	}
 	plan := &PlanResult{
 		TreeHash: "h1",
 		Items: []PlanItem{
@@ -390,6 +414,68 @@ func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.
 		if !strings.Contains(setupContent, expected) {
 			t.Fatalf("expected rewritten content to contain %q, got:\n%s", expected, setupContent)
 		}
+	}
+}
+
+func TestExecutor_Create_RewritesBodyLinksWithoutTouchingMetadataValues(t *testing.T) {
+	tmp := t.TempDir()
+	writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+		"---",
+		`custom_link: "[Endpoint](/Reference/Endpoints)"`,
+		"nested:",
+		`  link: "[Endpoint](/Reference/Endpoints)"`,
+		"---",
+		"",
+		"# Setup",
+		"",
+		"[RouteStyle](/Reference/Endpoints)",
+	}, "\n"))
+	writeTmp(t, tmp, "Reference/Endpoints.md", "# Endpoints")
+
+	w := &fakeExecWiki{hash: "h1"}
+	updatedContentByTitle := map[string]string{}
+	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+		w.lastUpdatedContent = content
+		w.updateTitles = append(w.updateTitles, title)
+		if content != nil {
+			updatedContentByTitle[title] = *content
+		}
+		w.hash = w.hash + "-changed"
+		return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
+	}
+	plan := &PlanResult{
+		TreeHash: "h1",
+		Items: []PlanItem{
+			{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+			{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+		},
+	}
+	opts := &PlanOptions{SourceBasePath: tmp}
+
+	ex := NewExecutor(plan, opts, 0, w, slog.Default())
+	if _, err := ex.Execute("user1"); err != nil {
+		t.Fatalf("Execute err: %v", err)
+	}
+	setupContent, ok := updatedContentByTitle["Setup"]
+	if !ok {
+		t.Fatalf("expected setup content to be updated")
+	}
+	doc, _, err := markdown.ParsePageDocument(setupContent)
+	if err != nil {
+		t.Fatalf("ParsePageDocument err: %v", err)
+	}
+	if got := doc.Metadata.Fields["custom_link"]; got != "[Endpoint](/Reference/Endpoints)" {
+		t.Fatalf("metadata field link was rewritten: %#v", got)
+	}
+	nested, ok := doc.Metadata.Extra["nested"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested extra metadata, got %#v", doc.Metadata.Extra["nested"])
+	}
+	if got := nested["link"]; got != "[Endpoint](/Reference/Endpoints)" {
+		t.Fatalf("metadata extra link was rewritten: %#v", got)
+	}
+	if !strings.Contains(doc.Body, "[RouteStyle](/reference/endpoints.md)") {
+		t.Fatalf("expected body link to be rewritten, got:\n%s", doc.Body)
 	}
 }
 

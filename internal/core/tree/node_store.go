@@ -151,19 +151,18 @@ func validateNodeSlug(op string, slug string) error {
 	return nil
 }
 
-// writeReconstructedFrontmatter writes the full managed frontmatter (ID, title, timestamps, authors)
-// back to disk while preserving the file's modification time. Called during reconstruct for files
-// that are missing any managed metadata field.
-func (f *NodeStore) writeReconstructedFrontmatter(mdFile *markdown.MarkdownFile, entry *PageNode) {
+// writeReconstructedMetadata writes the full managed metadata back to disk
+// while preserving the file's modification time. Called during reconstruct for
+// files that are missing any managed metadata field.
+func (f *NodeStore) writeReconstructedMetadata(mdFile *markdown.MarkdownFile, entry *PageNode) error {
 	var originalModTime time.Time
 	if info, err := os.Stat(mdFile.GetPath()); err == nil {
 		originalModTime = info.ModTime()
 	}
 
-	f.syncManagedFrontmatter(mdFile, entry)
+	f.syncManagedMetadata(mdFile, entry)
 	if err := mdFile.WriteToFile(); err != nil {
-		f.log.Error("could not write metadata back to file during reconstruct", "path", mdFile.GetPath(), "error", err)
-		return
+		return fmt.Errorf("write reconstructed metadata for %s: %w", mdFile.GetPath(), err)
 	}
 
 	if !originalModTime.IsZero() {
@@ -171,6 +170,7 @@ func (f *NodeStore) writeReconstructedFrontmatter(mdFile *markdown.MarkdownFile,
 			f.log.Warn("could not restore file mtime after writing metadata", "path", mdFile.GetPath(), "error", err)
 		}
 	}
+	return nil
 }
 
 func formatMetadataTime(ts time.Time) string {
@@ -180,8 +180,8 @@ func formatMetadataTime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339Nano)
 }
 
-func (f *NodeStore) syncManagedFrontmatter(mdFile *markdown.MarkdownFile, entry *PageNode) {
-	mdFile.SetLeafWikiFrontmatter(strings.TrimSpace(entry.ID), strings.TrimSpace(entry.Title))
+func (f *NodeStore) syncManagedMetadata(mdFile *markdown.MarkdownFile, entry *PageNode) {
+	mdFile.SetLeafWikiMetadataIdentity(strings.TrimSpace(entry.ID), strings.TrimSpace(entry.Title))
 	mdFile.SetLeafWikiMetadata(
 		formatMetadataTime(entry.Metadata.CreatedAt),
 		formatMetadataTime(entry.Metadata.UpdatedAt),
@@ -211,7 +211,7 @@ func (f *NodeStore) ensureSectionIndex(entry *PageNode) (string, error) {
 		}
 	}
 
-	f.syncManagedFrontmatter(mdFile, entry)
+	f.syncManagedMetadata(mdFile, entry)
 	if err := mdFile.WriteToFile(); err != nil {
 		return "", fmt.Errorf("could not write markdown file: %w", err)
 	}
@@ -247,19 +247,19 @@ func (f *NodeStore) parseMetadataTime(value string, fallback time.Time, field st
 		parsed, err = time.Parse(time.RFC3339, trimmed)
 	}
 	if err != nil {
-		f.log.Warn("invalid frontmatter metadata timestamp, using fallback", "path", filePath, "field", field, "value", trimmed, "fallback", fallback.UTC().Format(time.RFC3339), "error", err)
+		f.log.Warn("invalid metadata timestamp, using fallback", "path", filePath, "field", field, "value", trimmed, "fallback", fallback.UTC().Format(time.RFC3339), "error", err)
 		return fallback.UTC()
 	}
 	return parsed.UTC()
 }
 
-func (f *NodeStore) metadataFromFrontmatter(fm markdown.Frontmatter, fallbackNow time.Time, filePath string) PageMetadata {
+func (f *NodeStore) metadataFromPageMetadata(meta markdown.PageMetadata, fallbackNow time.Time, filePath string) PageMetadata {
 	fallbackTime := f.metadataFallbackTime(filePath, fallbackNow)
 	return PageMetadata{
-		CreatedAt:    f.parseMetadataTime(fm.LeafWikiCreatedAt, fallbackTime, "leafwiki_created_at", filePath),
-		UpdatedAt:    f.parseMetadataTime(fm.LeafWikiUpdatedAt, fallbackTime, "leafwiki_updated_at", filePath),
-		CreatorID:    fallbackMetadataString(fm.LeafWikiCreatorID),
-		LastAuthorID: fallbackMetadataString(fm.LeafWikiLastAuthorID),
+		CreatedAt:    f.parseMetadataTime(meta.Page.CreatedAt, fallbackTime, "page.created_at", filePath),
+		UpdatedAt:    f.parseMetadataTime(meta.Page.UpdatedAt, fallbackTime, "page.updated_at", filePath),
+		CreatorID:    fallbackMetadataString(meta.Page.CreatorID),
+		LastAuthorID: fallbackMetadataString(meta.Page.LastAuthorID),
 	}
 }
 
@@ -323,7 +323,7 @@ func (f *NodeStore) ReconstructTreeFromFS() (*PageNode, error) {
 		Position: 0,
 		Children: []*PageNode{},
 		Kind:     NodeKindSection,
-		Metadata: f.metadataFromFrontmatter(markdown.Frontmatter{}, reconstructNow, f.rootDir),
+		Metadata: f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, f.rootDir),
 	}
 	seenIDs := map[string]string{"root": f.rootDir}
 
@@ -360,18 +360,19 @@ func (f *NodeStore) applyRootSectionContent(root *PageNode, reconstructNow time.
 	}
 	mdFile, err := markdown.LoadMarkdownFile(indexPath)
 	if err != nil {
-		f.log.Error("could not load root section index", "path", indexPath, "error", err)
-		return nil
+		return fmt.Errorf("load root section index %s: %w", indexPath, err)
 	}
-	fm := mdFile.GetFrontmatter()
-	root.Metadata = f.metadataFromFrontmatter(fm, reconstructNow, indexPath)
+	meta := mdFile.GetMetadata()
+	root.Metadata = f.metadataFromPageMetadata(meta, reconstructNow, indexPath)
 	if title, err := mdFile.GetTitle(); err == nil {
 		root.Title = title
 	} else {
 		f.log.Error("could not extract title from root section index", "path", indexPath, "error", err)
 	}
-	if fm.LeafWikiID != root.ID || fm.LeafWikiUpdatedAt == "" || fm.LeafWikiCreatedAt == "" {
-		f.writeReconstructedFrontmatter(mdFile, root)
+	if mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) != root.ID || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == "" {
+		if err := f.writeReconstructedMetadata(mdFile, root); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -404,7 +405,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		// defaults
 		title := name
 		id, err := shared.GenerateUniqueID()
-		metadata := f.metadataFromFrontmatter(markdown.Frontmatter{}, reconstructNow, filepath.Join(currentPath, name))
+		metadata := f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, filepath.Join(currentPath, name))
 		if err != nil {
 			return fmt.Errorf("generate unique ID: %w", err)
 		}
@@ -425,20 +426,19 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			if hasIndex {
 				mdFile, err := markdown.LoadMarkdownFile(indexPath)
 				if err != nil {
-					f.log.Error("could not load section index", "path", indexPath, "error", err)
-					// fall back to default title and generated ID, but still add the section and recurse
+					return fmt.Errorf("load section index %s: %w", indexPath, err)
 				} else {
-					fm := mdFile.GetFrontmatter()
-					metadata = f.metadataFromFrontmatter(fm, reconstructNow, indexPath)
+					meta := mdFile.GetMetadata()
+					metadata = f.metadataFromPageMetadata(meta, reconstructNow, indexPath)
 					title, err = mdFile.GetTitle()
 					if err != nil {
 						f.log.Error("could not extract title from section index", "path", indexPath, "error", err)
 						// keep default title; still add the section and recurse
 					}
-					if fm.LeafWikiID != "" {
-						id = fm.LeafWikiID
+					if strings.TrimSpace(meta.Page.ID) != "" {
+						id = strings.TrimSpace(meta.Page.ID)
 					}
-					if fm.LeafWikiID == "" || fm.LeafWikiUpdatedAt == "" || fm.LeafWikiCreatedAt == "" {
+					if mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == "" {
 						sectionMdFile = mdFile
 						needsWriteback = true
 					}
@@ -464,7 +464,9 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			parent.Children = append(parent.Children, child)
 
 			if needsWriteback {
-				f.writeReconstructedFrontmatter(sectionMdFile, child)
+				if err := f.writeReconstructedMetadata(sectionMdFile, child); err != nil {
+					return err
+				}
 			}
 
 			if !hasIndex {
@@ -503,20 +505,19 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 
 		mdFile, err := markdown.LoadMarkdownFile(filePath)
 		if err != nil {
-			f.log.Error("could not load markdown file", "path", filePath, "error", err)
-			continue
+			return fmt.Errorf("load markdown file %s: %w", filePath, err)
 		}
-		fm := mdFile.GetFrontmatter()
-		metadata = f.metadataFromFrontmatter(fm, reconstructNow, filePath)
+		meta := mdFile.GetMetadata()
+		metadata = f.metadataFromPageMetadata(meta, reconstructNow, filePath)
 		title, err = mdFile.GetTitle()
 		if err != nil {
 			f.log.Error("could not extract title from file", "path", filePath, "error", err)
 			continue
 		}
-		if fm.LeafWikiID != "" {
-			id = fm.LeafWikiID
+		if strings.TrimSpace(meta.Page.ID) != "" {
+			id = strings.TrimSpace(meta.Page.ID)
 		}
-		needsWriteback := fm.LeafWikiID == "" || fm.LeafWikiUpdatedAt == "" || fm.LeafWikiCreatedAt == ""
+		needsWriteback := mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == ""
 
 		child := &PageNode{
 			ID:       id,
@@ -535,7 +536,9 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			return err
 		}
 		if needsWriteback {
-			f.writeReconstructedFrontmatter(mdFile, child)
+			if err := f.writeReconstructedMetadata(mdFile, child); err != nil {
+				return err
+			}
 		}
 		parent.Children = append(parent.Children, child)
 	}
@@ -697,7 +700,7 @@ func (f *NodeStore) CreatePage(parentEntry *PageNode, newEntry *PageNode) error 
 	}
 
 	mdFile := markdown.NewMarkdownFile(destFile, "# "+newEntry.Title+"\n", markdown.Frontmatter{})
-	f.syncManagedFrontmatter(mdFile, newEntry)
+	f.syncManagedMetadata(mdFile, newEntry)
 	if err := mdFile.WriteToFile(); err != nil {
 		return fmt.Errorf("could not create file: %w", err)
 	}
@@ -763,9 +766,9 @@ func (f *NodeStore) CreateSection(parentEntry *PageNode, newEntry *PageNode) err
 }
 
 // UpsertContent updates the content of a page file on disk, treating the
-// incoming content as plain body text. Any frontmatter-like blocks the caller
+// incoming content as plain body text. Any metadata-like blocks the caller
 // passes are stored verbatim in the body and are never extracted into the
-// system-managed frontmatter. Use this for all UI-originated writes.
+// system-managed metadata. Use this for all UI-originated writes.
 // It creates the file if it does not exist, using index.md for sections with
 // no active content file.
 func (f *NodeStore) UpsertContent(entry *PageNode, content string) error {
@@ -787,7 +790,7 @@ func (f *NodeStore) UpsertContent(entry *PageNode, content string) error {
 	}
 
 	mdFile.SetContent(content)
-	f.syncManagedFrontmatter(mdFile, entry)
+	f.syncManagedMetadata(mdFile, entry)
 	if err := mdFile.WriteToFile(); err != nil {
 		return fmt.Errorf("could not write markdown file: %w", err)
 	}
@@ -795,9 +798,9 @@ func (f *NodeStore) UpsertContent(entry *PageNode, content string) error {
 	return nil
 }
 
-// UpsertContentPreservingFrontmatter is the importer variant of UpsertContent.
-// It parses any frontmatter block at the top of content and merges the extra
-// fields into the system-managed frontmatter block written to disk.
+// UpsertContentPreservingFrontmatter is the legacy-named importer variant of
+// UpsertContent. It parses incoming metadata at the top of content and merges
+// public fields into the system-managed canonical metadata written to disk.
 func (f *NodeStore) UpsertContentPreservingFrontmatter(entry *PageNode, content string) error {
 	if entry == nil {
 		return &InvalidOpError{Op: "UpsertContentPreservingFrontmatter", Reason: "an entry is required"}
@@ -816,10 +819,39 @@ func (f *NodeStore) UpsertContentPreservingFrontmatter(entry *PageNode, content 
 		}
 	}
 
-	if err := mdFile.SetRawContentPreservingManagedFrontmatter(content); err != nil {
+	if err := mdFile.SetRawContentPreservingManagedMetadata(content); err != nil {
 		return fmt.Errorf("could not parse markdown content: %w", err)
 	}
-	f.syncManagedFrontmatter(mdFile, entry)
+	f.syncManagedMetadata(mdFile, entry)
+	if err := mdFile.WriteToFile(); err != nil {
+		return fmt.Errorf("could not write markdown file: %w", err)
+	}
+
+	return nil
+}
+
+func (f *NodeStore) UpsertContentReplacingMetadata(entry *PageNode, content string) error {
+	if entry == nil {
+		return &InvalidOpError{Op: "UpsertContentReplacingMetadata", Reason: "an entry is required"}
+	}
+
+	filePath, err := f.contentPathForNodeWrite(entry)
+	if err != nil {
+		return err
+	}
+
+	mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
+	if fileExists(filePath) {
+		mdFile, err = markdown.LoadMarkdownFile(filePath)
+		if err != nil {
+			return fmt.Errorf("could not load markdown file: %w", err)
+		}
+	}
+
+	if err := mdFile.SetRawContentReplacingManagedMetadata(content); err != nil {
+		return fmt.Errorf("could not parse markdown content: %w", err)
+	}
+	f.syncManagedMetadata(mdFile, entry)
 	if err := mdFile.WriteToFile(); err != nil {
 		return fmt.Errorf("could not write markdown file: %w", err)
 	}
@@ -1099,7 +1131,7 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 	}
 }
 
-// ReadPageRaw returns the raw content of a page including frontmatter
+// ReadPageRaw returns the raw content of a page, including metadata.
 func (f *NodeStore) ReadPageRaw(entry *PageNode) (string, error) {
 	filePath, err := f.contentPathForNodeRead(entry)
 	if err != nil {
@@ -1126,7 +1158,7 @@ func (f *NodeStore) ReadPageRaw(entry *PageNode) (string, error) {
 }
 
 // ReadPageAndRaw returns both the stripped content and the raw markdown string
-// (including frontmatter) from a single disk read.
+// from a single disk read.
 func (f *NodeStore) ReadPageAndRaw(entry *PageNode) (content, raw string, err error) {
 	raw, err = f.ReadPageRaw(entry)
 	if err != nil || raw == "" {
@@ -1166,10 +1198,10 @@ func (f *NodeStore) ReadPageContent(entry *PageNode) (string, error) {
 	return mdFile.GetContent(), nil
 }
 
-// SyncFrontmatterIfExists updates the frontmatter of a page file on disk if it exists
-func (f *NodeStore) SyncFrontmatterIfExists(entry *PageNode) error {
+// SyncMetadataIfExists updates managed metadata for a page file on disk if it exists.
+func (f *NodeStore) SyncMetadataIfExists(entry *PageNode) error {
 	if entry == nil {
-		return &InvalidOpError{Op: "SyncFrontmatterIfExists", Reason: "an entry is required"}
+		return &InvalidOpError{Op: "SyncMetadataIfExists", Reason: "an entry is required"}
 	}
 
 	// No side effects: avoid the write path, which may create directories and
@@ -1195,9 +1227,21 @@ func (f *NodeStore) SyncFrontmatterIfExists(entry *PageNode) error {
 		return fmt.Errorf("load markdown file: %w", err)
 	}
 
-	f.syncManagedFrontmatter(mdFile, entry)
+	f.syncManagedMetadata(mdFile, entry)
 	if err := mdFile.WriteToFile(); err != nil {
 		return fmt.Errorf("write markdown file: %w", err)
+	}
+	return nil
+}
+
+// SyncFrontmatterIfExists is kept for compatibility with callers that still
+// use the legacy API name.
+func (f *NodeStore) SyncFrontmatterIfExists(entry *PageNode) error {
+	if err := f.SyncMetadataIfExists(entry); err != nil {
+		if invalid, ok := err.(*InvalidOpError); ok && invalid.Op == "SyncMetadataIfExists" {
+			return &InvalidOpError{Op: "SyncFrontmatterIfExists", Reason: invalid.Reason}
+		}
+		return err
 	}
 	return nil
 }
@@ -1502,7 +1546,7 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 			}
 		} else {
 			mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
-			f.syncManagedFrontmatter(mdFile, entry)
+			f.syncManagedMetadata(mdFile, entry)
 			if err := mdFile.WriteToFile(); err != nil {
 				return fmt.Errorf("could not write page file: %w", err)
 			}

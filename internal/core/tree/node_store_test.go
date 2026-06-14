@@ -41,6 +41,16 @@ func mustMkdir(t *testing.T, path string) {
 	}
 }
 
+func assertCanonicalNodeStoreRawStorage(t *testing.T, raw string) {
+	t.Helper()
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("expected canonical metadata comment at start of raw storage, got:\n%s", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("expected raw storage not to start with legacy YAML frontmatter, got:\n%s", raw)
+	}
+}
+
 func TestNodeStore_LoadTree_MissingFile_ReturnsDefaultRoot(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -303,6 +313,7 @@ func TestNodeStore_CreateSection_CreatesFolderAndIndexWithFrontmatter(t *testing
 
 	index := filepath.Join(dir, "index.md")
 	raw := string(mustRead(t, index))
+	assertCanonicalNodeStoreRawStorage(t, raw)
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter: %v", err)
@@ -358,6 +369,7 @@ func TestNodeStore_CreatePage_CreatesMarkdownWithFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read created page: %v", err)
 	}
+	assertCanonicalNodeStoreRawStorage(t, string(raw))
 
 	fm, body, has, err := markdown.ParseFrontmatter(string(raw))
 	if err != nil {
@@ -482,6 +494,7 @@ func TestNodeStore_UpsertContent_Page_CreatesOrUpdates_PreservesMode(t *testing.
 	}
 
 	raw, _ := os.ReadFile(path)
+	assertCanonicalNodeStoreRawStorage(t, string(raw))
 	fm, body, has, err := markdown.ParseFrontmatter(string(raw))
 	if err != nil {
 		t.Fatalf("ParseFrontmatter: %v", err)
@@ -561,7 +574,7 @@ func TestNodeStore_UpsertContent_RawFrontmatter_TreatedAsPlainBody(t *testing.T)
 		t.Fatalf("CreatePage: %v", err)
 	}
 
-	rawContent := "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: Imported Title\n---\n\n# Imported Title\nBody"
+	rawContent := "---\naliases:\n  - alpha\ncustom_key: keep-me\ntitle: Imported Title\n---\n\n# Imported Title\nBody"
 	if err := store.UpsertContent(page, rawContent); err != nil {
 		t.Fatalf("UpsertContent: %v", err)
 	}
@@ -642,10 +655,9 @@ func TestNodeStore_UpsertContent_TreatsLeadingFrontmatterAsPlainBody(t *testing.
 	}
 }
 
-// UpsertContentPreservingFrontmatter is used by the importer: it parses
-// frontmatter from the incoming content and merges extra fields into the
-// system-managed frontmatter block.
-func TestNodeStore_UpsertContentPreservingFrontmatter_MergesExtrasIntoWrittenFrontmatter(t *testing.T) {
+// UpsertContentPreservingFrontmatter is the legacy-named importer path: it parses
+// incoming metadata/frontmatter and writes the canonical metadata comment.
+func TestNodeStore_UpsertContentPreservingFrontmatter_MergesExtrasIntoWrittenMetadata(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
 
@@ -663,6 +675,12 @@ func TestNodeStore_UpsertContentPreservingFrontmatter_MergesExtrasIntoWrittenFro
 
 	path := filepath.Join(tmp, "root", "p.md")
 	raw := string(mustRead(t, path))
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("expected canonical metadata comment, got: %q", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") {
+		t.Fatalf("expected YAML frontmatter to be removed, got: %q", raw)
+	}
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter: %v", err)
@@ -677,7 +695,7 @@ func TestNodeStore_UpsertContentPreservingFrontmatter_MergesExtrasIntoWrittenFro
 		t.Fatalf("expected custom_key to be preserved, got %#v", got)
 	}
 	if got := fm.ExtraFields["title"]; got != "Imported Title" {
-		t.Fatalf("expected title extra field to be preserved, got %#v", got)
+		t.Fatalf("expected title field to be preserved when leafwiki_title is present, got %#v", got)
 	}
 	aliases, ok := fm.ExtraFields["aliases"].([]interface{})
 	if !ok || len(aliases) != 1 || aliases[0] != "alpha" {
@@ -1054,6 +1072,7 @@ func TestNodeStore_SyncFrontmatterIfExists_Page_UpdatesOrAddsFM(t *testing.T) {
 	}
 
 	raw := string(mustRead(t, path))
+	assertCanonicalNodeStoreRawStorage(t, raw)
 	fm, body, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter: %v", err)
@@ -1349,6 +1368,7 @@ func TestNodeStore_ConvertNode_SectionToPage_NoIndex_CreatesEmptyPageWithFM(t *t
 
 	pageFile := filepath.Join(tmp, "root", "docs.md")
 	raw := string(mustRead(t, pageFile))
+	assertCanonicalNodeStoreRawStorage(t, raw)
 	fm, _, has, err := markdown.ParseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter: %v", err)

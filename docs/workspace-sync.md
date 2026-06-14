@@ -49,7 +49,7 @@ Web and MCP page mutations write Markdown before the required workspace-sync sid
 
 Watcher events are advisory. Explicit sync through `POST /api/workspace-sync/refresh` performs a full sync even if the watcher is unavailable.
 
-MCP agents can use the same path through `wiki_refresh`. Direct Markdown edits under `--root-dir` are allowed for bulk or mechanical changes because the filesystem is the source of truth. After direct edits, call `wiki_refresh` when immediate UI/MCP visibility is needed, then run `wiki_validate_wiki` or scoped page validation before reporting completion.
+MCP agents can use the same path through `wiki_refresh`. Direct Markdown edits under `--root-dir` are allowed for bulk or mechanical body changes because the filesystem is the source of truth. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. After direct edits, call `wiki_refresh` when immediate UI/MCP visibility is needed, then run `wiki_validate_wiki` or scoped page validation before reporting completion.
 
 `wiki_get_context` uses workspace sync status to make the first MCP call context-rich. In `auto` mode it refreshes when workspace sync reports pending watcher events, a previous sync error, or an enabled watcher that is not running. In `force` mode, editor and admin MCP callers always ask workspace sync to reconcile the Markdown tree first. Viewer callers cannot refresh; the context response returns current status plus a warning that refresh was skipped.
 

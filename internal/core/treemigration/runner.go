@@ -236,8 +236,8 @@ func migrateToV2(deps Dependencies) error {
 	backfillKindFromFS(deps, deps.Root)
 
 	for _, child := range deps.Root.Children() {
-		if err := addFrontmatter(deps, child); err != nil {
-			deps.Log.Error("Error adding frontmatter to child node", "nodeID", child.ID(), "error", err)
+		if err := addManagedMetadata(deps, child); err != nil {
+			deps.Log.Error("Error adding metadata to child node", "nodeID", child.ID(), "error", err)
 			return err
 		}
 	}
@@ -283,14 +283,14 @@ func backfillKindFromFS(deps Dependencies, root Node) {
 	}
 }
 
-func addFrontmatter(deps Dependencies, node Node) error {
+func addManagedMetadata(deps Dependencies, node Node) error {
 	content, err := deps.Store.ReadPageRaw(node)
 	if err != nil {
 		if deps.IsMissingContentErr != nil && deps.IsMissingContentErr(err) {
-			deps.Log.Warn("Page file does not exist, skipping frontmatter addition", "nodeID", node.ID())
+			deps.Log.Warn("Page file does not exist, skipping metadata addition", "nodeID", node.ID())
 			for _, child := range node.Children() {
-				if err := addFrontmatter(deps, child); err != nil {
-					deps.Log.Error("Error adding frontmatter to child node", "nodeID", child.ID(), "error", err)
+				if err := addManagedMetadata(deps, child); err != nil {
+					deps.Log.Error("Error adding metadata to child node", "nodeID", child.ID(), "error", err)
 					return err
 				}
 			}
@@ -315,31 +315,31 @@ func addFrontmatter(deps Dependencies, node Node) error {
 		}
 	}
 
-	fm := mdFile.GetFrontmatter()
+	meta := mdFile.GetMetadata()
 	changed := false
 
-	if strings.TrimSpace(fm.LeafWikiID) == "" {
-		fm.LeafWikiID = node.ID()
+	if strings.TrimSpace(meta.Page.ID) == "" {
+		meta.Page.ID = node.ID()
 		changed = true
 	}
-	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
-		fm.LeafWikiTitle = node.Title()
+	if strings.TrimSpace(meta.Page.Title) == "" {
+		meta.Page.Title = node.Title()
 		changed = true
 	}
 
 	if changed {
-		mdFile.SetLeafWikiFrontmatter(fm.LeafWikiID, fm.LeafWikiTitle)
+		mdFile.SetLeafWikiMetadataIdentity(meta.Page.ID, meta.Page.Title)
 		if err := mdFile.WriteToFile(); err != nil {
 			deps.Log.Error("could not write updated page content", "nodeID", node.ID(), "filePath", filePath, "error", err)
 			return fmt.Errorf("could not write updated page content for node %s: %w", node.ID(), err)
 		}
 
-		deps.Log.Info("frontmatter backfilled", "nodeID", node.ID(), "path", filePath)
+		deps.Log.Info("metadata backfilled", "nodeID", node.ID(), "path", filePath)
 	}
 
 	for _, child := range node.Children() {
-		if err := addFrontmatter(deps, child); err != nil {
-			deps.Log.Error("Error adding frontmatter to child node", "nodeID", child.ID(), "error", err)
+		if err := addManagedMetadata(deps, child); err != nil {
+			deps.Log.Error("Error adding metadata to child node", "nodeID", child.ID(), "error", err)
 			return err
 		}
 	}
@@ -348,10 +348,10 @@ func addFrontmatter(deps Dependencies, node Node) error {
 }
 
 func migrateToV3(deps Dependencies) error {
-	return backfillMetadataFrontmatter(deps, deps.Root)
+	return backfillNodeMetadata(deps, deps.Root)
 }
 
-func backfillMetadataFrontmatter(deps Dependencies, node Node) error {
+func backfillNodeMetadata(deps Dependencies, node Node) error {
 	if node == nil {
 		return nil
 	}
@@ -380,7 +380,7 @@ func backfillMetadataFrontmatter(deps Dependencies, node Node) error {
 	}
 
 	for _, child := range node.Children() {
-		if err := backfillMetadataFrontmatter(deps, child); err != nil {
+		if err := backfillNodeMetadata(deps, child); err != nil {
 			return err
 		}
 	}

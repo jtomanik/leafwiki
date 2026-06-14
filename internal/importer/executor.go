@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 type ExecutionResult struct {
@@ -84,8 +86,19 @@ func (e *Executor) WithResumeState(startIndex int, initialResult *ExecutionResul
 	return e
 }
 
-func buildImportedContent(mdFile *markdown.MarkdownFile) (string, error) {
-	return markdown.BuildMarkdownWithExtraFrontmatter(mdFile.GetFrontmatter().ExtraFields, mdFile.GetContent())
+func buildImportedContent(mdFile *markdown.MarkdownFile, page *tree.Page, body string) (string, error) {
+	meta := mdFile.GetMetadata()
+	if meta.Version == 0 {
+		meta.Version = 1
+	}
+	meta.Page = markdown.PageMetadataPage{
+		ID:    strings.TrimSpace(page.ID),
+		Title: strings.TrimSpace(page.Title),
+	}
+	return markdown.RenderPageDocument(markdown.PageDocument{
+		Body:     body,
+		Metadata: meta,
+	})
 }
 
 // Execute runs the import based on the provided plan
@@ -177,17 +190,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				e.logger.Error("Failed to load source file", "source_path", sourceAbs, "error", err)
 				continue
 			}
-			importedContent, err := buildImportedContent(mdFile)
-			if err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
-				result.SkippedCount++
-				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to prepare imported content", "source_path", sourceAbs, "error", err)
-				continue
-			}
-			importedContent, err = transformer.TransformContent(userID, item.SourcePath, page, importedContent, e.wiki)
+			importedBody, err := transformer.TransformContent(userID, item.SourcePath, page, mdFile.GetContent(), e.wiki)
 			if err != nil {
 				errMsg := err.Error()
 				execItem.Action = ExecutionActionSkipped
@@ -195,6 +198,16 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to transform imported content", "source_path", sourceAbs, "error", err)
+				continue
+			}
+			importedContent, err := buildImportedContent(mdFile, page, importedBody)
+			if err != nil {
+				errMsg := err.Error()
+				execItem.Action = ExecutionActionSkipped
+				execItem.Error = &errMsg
+				result.SkippedCount++
+				result.Items = append(result.Items, execItem)
+				e.logger.Error("Failed to prepare imported content", "source_path", sourceAbs, "error", err)
 				continue
 			}
 			if _, err := e.wiki.UpdatePage(userID, page.ID, page.Title, page.Slug, &importedContent, &page.Kind); err != nil {

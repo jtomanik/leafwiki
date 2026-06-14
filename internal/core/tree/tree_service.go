@@ -362,9 +362,9 @@ func legacyTargetMatchesNode(path legacyContentPath) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("load configured legacy content path %s: %w", path.targetPath, err)
 	}
-	frontmatter := mdFile.GetFrontmatter()
-	return strings.TrimSpace(frontmatter.LeafWikiID) == strings.TrimSpace(path.nodeID) &&
-		strings.TrimSpace(frontmatter.LeafWikiTitle) == strings.TrimSpace(path.nodeTitle), nil
+	metadata := mdFile.GetMetadata()
+	return strings.TrimSpace(metadata.Page.ID) == strings.TrimSpace(path.nodeID) &&
+		strings.TrimSpace(metadata.Page.Title) == strings.TrimSpace(path.nodeTitle), nil
 }
 
 func (t *TreeService) expectedLegacyContentPaths(legacyTree *PageNode) ([]legacyContentPath, error) {
@@ -494,7 +494,8 @@ func (t *TreeService) reconstructTreeFromFSLocked() error {
 	t.tree = newTree
 	t.rebuildIndexesLocked()
 
-	// Reconstructed nodes already carry metadata from frontmatter or safe defaults.
+	// Reconstructed nodes already carry metadata from canonical files, legacy
+	// migration input, or safe defaults.
 
 	if err := saveSchema(t.dataDir, CurrentSchemaVersion); err != nil {
 		t.log.Error("Error saving schema after reconstruction", "error", err)
@@ -551,8 +552,8 @@ func (t *TreeService) RestoreNode(userID, id string, parentID *string, title, sl
 		created.entry.Metadata.CreatedAt = metadata.CreatedAt.UTC()
 		created.entry.Metadata.CreatorID = strings.TrimSpace(metadata.CreatorID)
 		created.entry.Metadata.LastAuthorID = strings.TrimSpace(metadata.LastAuthorID)
-		if err := t.store.SyncFrontmatterIfExists(created.entry); err != nil {
-			return fmt.Errorf("could not sync restored frontmatter: %w", err)
+		if err := t.store.SyncMetadataIfExists(created.entry); err != nil {
+			return fmt.Errorf("could not sync restored metadata: %w", err)
 		}
 
 		restored = &Page{PageNode: created.entry, Content: content}
@@ -966,8 +967,28 @@ func (t *TreeService) DeleteNode(userID string, id string, recursive bool, expec
 	return err
 }
 
+type contentUpdateMode int
+
+const (
+	contentUpdatePlain contentUpdateMode = iota
+	contentUpdatePreserveMetadata
+	contentUpdateReplaceMetadata
+)
+
 // UpdateNode updates a node (page/section) in the tree and syncs disk state via NodeStore.
 func (t *TreeService) UpdateNode(userID string, id string, title string, slug string, content *string, expectedVersion string, fromImport bool) error {
+	mode := contentUpdatePlain
+	if fromImport {
+		mode = contentUpdatePreserveMetadata
+	}
+	return t.updateNode(userID, id, title, slug, content, expectedVersion, mode)
+}
+
+func (t *TreeService) UpdateNodeReplacingMetadata(userID string, id string, title string, slug string, content *string, expectedVersion string) error {
+	return t.updateNode(userID, id, title, slug, content, expectedVersion, contentUpdateReplaceMetadata)
+}
+
+func (t *TreeService) updateNode(userID string, id string, title string, slug string, content *string, expectedVersion string, mode contentUpdateMode) error {
 	return t.withLockedTree(func() error {
 		if t.tree == nil {
 			return ErrTreeNotLoaded
@@ -998,9 +1019,12 @@ func (t *TreeService) UpdateNode(userID string, id string, title string, slug st
 		if content != nil {
 			t.log.Info("updating node content", "nodeID", node.ID)
 			var upsertErr error
-			if fromImport {
+			switch mode {
+			case contentUpdatePreserveMetadata:
 				upsertErr = t.store.UpsertContentPreservingFrontmatter(node, *content)
-			} else {
+			case contentUpdateReplaceMetadata:
+				upsertErr = t.store.UpsertContentReplacingMetadata(node, *content)
+			default:
 				upsertErr = t.store.UpsertContent(node, *content)
 			}
 			if upsertErr != nil {
@@ -1027,9 +1051,10 @@ func (t *TreeService) UpdateNode(userID string, id string, title string, slug st
 		node.Metadata.UpdatedAt = time.Now().UTC()
 		node.Metadata.LastAuthorID = userID
 
-		// Keep frontmatter in sync *if file exists* (important when title changed but content == nil)
-		if err := t.store.SyncFrontmatterIfExists(node); err != nil {
-			return fmt.Errorf("could not sync frontmatter: %w", err)
+		// Keep metadata in sync if the file exists (important when title
+		// changed but content == nil).
+		if err := t.store.SyncMetadataIfExists(node); err != nil {
+			return fmt.Errorf("could not sync metadata: %w", err)
 		}
 
 		// Save tree
@@ -1075,9 +1100,10 @@ func (t *TreeService) ConvertNode(userID string, id string, kind NodeKind, expec
 		node.Metadata.UpdatedAt = time.Now().UTC()
 		node.Metadata.LastAuthorID = userID
 
-		// Keep frontmatter in sync *if file exists* (important when kind changed but content == nil)
-		if err := t.store.SyncFrontmatterIfExists(node); err != nil {
-			return fmt.Errorf("could not sync frontmatter: %w", err)
+		// Keep metadata in sync if the file exists (important when kind
+		// changed but content == nil).
+		if err := t.store.SyncMetadataIfExists(node); err != nil {
+			return fmt.Errorf("could not sync metadata: %w", err)
 		}
 
 		// Save tree
@@ -1331,7 +1357,7 @@ func (t *TreeService) GetPage(id string) (*Page, error) {
 	}, nil
 }
 
-// ReadPageRaw returns the raw markdown of a page including frontmatter.
+// ReadPageRaw returns the raw markdown of a page, including metadata.
 func (t *TreeService) ReadPageRaw(id string) (string, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -1777,12 +1803,12 @@ func (t *TreeService) MoveNode(userID string, id string, parentID string, expect
 		}
 	}
 
-	if err := t.store.SyncFrontmatterIfExists(node); err != nil {
+	if err := t.store.SyncMetadataIfExists(node); err != nil {
 		rollbackErr := t.rollbackMovedNodeLocked(node, oldParent, newParent, previousOldChildren, previousOldPositions, previousNewChildren, previousNewPositions, previousPosition, previousMetadata, newParentWasConverted)
 		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("could not sync moved node frontmatter: %w", err), fmt.Errorf("rollback moved node: %w", rollbackErr))
+			return errors.Join(fmt.Errorf("could not sync moved node metadata: %w", err), fmt.Errorf("rollback moved node: %w", rollbackErr))
 		}
-		return fmt.Errorf("could not sync moved node frontmatter: %w", err)
+		return fmt.Errorf("could not sync moved node metadata: %w", err)
 	}
 
 	return nil

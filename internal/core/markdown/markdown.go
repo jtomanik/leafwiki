@@ -11,11 +11,11 @@ import (
 )
 
 // MarkdownFile is the path-aware abstraction for markdown files that may need
-// title extraction, frontmatter updates, and writes back to disk.
+// title extraction, metadata updates, and writes back to disk.
 type MarkdownFile struct {
-	path    string
-	content string
-	fm      Frontmatter
+	path              string
+	doc               PageDocument
+	requiresWriteback bool
 }
 
 // LoadMarkdownFile reads a markdown file from disk and returns a MarkdownFile.
@@ -38,35 +38,34 @@ func LoadMarkdownFile(filePath string) (*MarkdownFile, error) {
 // Use this when the caller already has the raw markdown string and wants the
 // MarkdownFile behavior without a second filesystem read.
 func NewMarkdownFileFromRaw(filePath string, raw string) (*MarkdownFile, error) {
-	fm, content, has, err := ParseFrontmatter(raw)
+	doc, result, err := ParsePageDocument(raw)
 	if err != nil {
 		return nil, err
 	}
-	if !has {
-		fm = Frontmatter{}
-	}
 
 	return &MarkdownFile{
-		path:    filePath,
-		content: content,
-		fm:      fm,
+		path:              filePath,
+		doc:               doc,
+		requiresWriteback: result.RequiresWriteback,
 	}, nil
 }
 
 // NewMarkdownFile constructs a MarkdownFile from explicit content and parsed
-// frontmatter, typically for new files or callers that already control both.
+// legacy frontmatter metadata, typically for new files or compatibility callers.
 func NewMarkdownFile(filePath string, content string, fm Frontmatter) *MarkdownFile {
 	return &MarkdownFile{
-		path:    filePath,
-		content: content,
-		fm:      fm,
+		path: filePath,
+		doc: PageDocument{
+			Body:     content,
+			Metadata: frontmatterToPageMetadata(fm),
+		},
 	}
 }
 
-// WriteToFile serializes frontmatter and body and writes them back atomically
+// WriteToFile serializes canonical metadata and body and writes them back atomically
 // to the MarkdownFile path.
 func (mf *MarkdownFile) WriteToFile() error {
-	fmContent, err := BuildMarkdownWithFrontmatter(mf.fm, mf.content)
+	rendered, err := RenderPageDocument(mf.doc)
 	if err != nil {
 		return err
 	}
@@ -76,14 +75,18 @@ func (mf *MarkdownFile) WriteToFile() error {
 		mode = st.Mode()
 	}
 
-	return shared.WriteFileAtomic(mf.path, []byte(fmContent), mode)
+	if err := shared.WriteFileAtomic(mf.path, []byte(rendered), mode); err != nil {
+		return err
+	}
+	mf.requiresWriteback = false
+	return nil
 }
 
-// GetTitle resolves the effective title from leafwiki_title first, then from
-// the first markdown heading, and finally from the file name.
+// GetTitle resolves the effective title from managed page metadata first, then
+// from the first markdown heading, and finally from the file name.
 func (mf *MarkdownFile) GetTitle() (string, error) {
-	if mf.fm.LeafWikiTitle != "" {
-		return strings.TrimSpace(mf.fm.LeafWikiTitle), nil
+	if mf.doc.Metadata.Page.Title != "" {
+		return strings.TrimSpace(mf.doc.Metadata.Page.Title), nil
 	}
 
 	title, err := mf.extractTitleFromFirstHeading()
@@ -97,7 +100,7 @@ func (mf *MarkdownFile) GetTitle() (string, error) {
 }
 
 func (mf *MarkdownFile) extractTitleFromFirstHeading() (string, error) {
-	lines := strings.Split(mf.content, "\n")
+	lines := strings.Split(mf.doc.Body, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "# ") {
@@ -108,26 +111,51 @@ func (mf *MarkdownFile) extractTitleFromFirstHeading() (string, error) {
 }
 
 func (mf *MarkdownFile) GetContent() string {
-	return mf.content
+	return mf.doc.Body
 }
 
 func (mf *MarkdownFile) SetContent(content string) {
-	mf.content = content
+	mf.doc.Body = content
 }
 
-func (mf *MarkdownFile) SetRawContentPreservingManagedFrontmatter(raw string) error {
-	incomingFM, body, has, err := ParseFrontmatter(raw)
+func (mf *MarkdownFile) SetRawContentPreservingManagedMetadata(raw string) error {
+	doc, result, err := ParsePageDocument(raw)
 	if err != nil {
 		return err
 	}
 
-	if !has {
-		mf.content = raw
+	if doc.Metadata.Version == 0 {
+		mf.doc.Body = raw
 		return nil
 	}
 
-	mf.content = body
-	mf.fm.ExtraFields = incomingFM.ExtraFields
+	mf.doc.Body = doc.Body
+	mf.mergeIncomingMetadata(doc.Metadata)
+	if result.RequiresWriteback {
+		mf.requiresWriteback = true
+	}
+	return nil
+}
+
+func (mf *MarkdownFile) SetRawContentReplacingManagedMetadata(raw string) error {
+	doc, result, err := ParsePageDocument(raw)
+	if err != nil {
+		return err
+	}
+
+	if doc.Metadata.Version == 0 {
+		mf.doc = PageDocument{
+			Body: raw,
+			Metadata: PageMetadata{
+				Version: 1,
+			},
+		}
+		mf.requiresWriteback = false
+		return nil
+	}
+
+	mf.doc = doc
+	mf.requiresWriteback = result.RequiresWriteback
 	return nil
 }
 
@@ -135,26 +163,107 @@ func (mf *MarkdownFile) GetPath() string {
 	return mf.path
 }
 
+func (mf *MarkdownFile) RequiresWriteback() bool {
+	return mf.requiresWriteback
+}
+
+// GetFrontmatter returns a legacy compatibility view of canonical metadata.
 func (mf *MarkdownFile) GetFrontmatter() Frontmatter {
-	return mf.fm
+	return pageMetadataToFrontmatter(mf.doc.Metadata)
 }
 
-func (mf *MarkdownFile) setFrontmatterID(id string) {
-	mf.fm.LeafWikiID = id
+func (mf *MarkdownFile) GetMetadata() PageMetadata {
+	return clonePageMetadata(mf.doc.Metadata)
 }
 
-func (mf *MarkdownFile) setFrontmatterTitle(title string) {
-	mf.fm.LeafWikiTitle = title
+func (mf *MarkdownFile) setMetadataID(id string) {
+	meta := mf.ensureMetadata()
+	meta.Page.ID = strings.TrimSpace(id)
 }
 
-func (mf *MarkdownFile) SetLeafWikiFrontmatter(id string, title string) {
-	mf.setFrontmatterID(id)
-	mf.setFrontmatterTitle(title)
+func (mf *MarkdownFile) setMetadataTitle(title string) {
+	meta := mf.ensureMetadata()
+	meta.Page.Title = strings.TrimSpace(title)
+}
+
+func (mf *MarkdownFile) SetLeafWikiMetadataIdentity(id string, title string) {
+	mf.setMetadataID(id)
+	mf.setMetadataTitle(title)
 }
 
 func (mf *MarkdownFile) SetLeafWikiMetadata(createdAt string, updatedAt string, creatorID string, lastAuthorID string) {
-	mf.fm.LeafWikiCreatedAt = strings.TrimSpace(createdAt)
-	mf.fm.LeafWikiUpdatedAt = strings.TrimSpace(updatedAt)
-	mf.fm.LeafWikiCreatorID = strings.TrimSpace(creatorID)
-	mf.fm.LeafWikiLastAuthorID = strings.TrimSpace(lastAuthorID)
+	meta := mf.ensureMetadata()
+	meta.Page.CreatedAt = strings.TrimSpace(createdAt)
+	meta.Page.UpdatedAt = strings.TrimSpace(updatedAt)
+	meta.Page.CreatorID = strings.TrimSpace(creatorID)
+	meta.Page.LastAuthorID = strings.TrimSpace(lastAuthorID)
+}
+
+func (mf *MarkdownFile) ensureMetadata() *PageMetadata {
+	if mf.doc.Metadata.Version == 0 {
+		mf.doc.Metadata.Version = 1
+	}
+	if mf.doc.Metadata.Fields == nil {
+		mf.doc.Metadata.Fields = map[string]interface{}{}
+	}
+	if mf.doc.Metadata.Extra == nil {
+		mf.doc.Metadata.Extra = map[string]interface{}{}
+	}
+	return &mf.doc.Metadata
+}
+
+func (mf *MarkdownFile) mergeIncomingMetadata(incoming PageMetadata) {
+	meta := mf.ensureMetadata()
+	meta.Tags = append([]string{}, incoming.Tags...)
+
+	fields := map[string]interface{}{}
+	for key, value := range meta.Fields {
+		if _, incomingHasField := incoming.Fields[key]; incomingHasField {
+			continue
+		}
+		if _, isString := value.(string); !isString {
+			fields[key] = value
+		}
+	}
+	for key, value := range incoming.Fields {
+		fields[key] = value
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	meta.Fields = fields
+
+	extra := cloneMetadataMap(meta.Extra)
+	for key, value := range incoming.Extra {
+		extra[key] = value
+	}
+	if len(extra) == 0 {
+		extra = nil
+	}
+	meta.Extra = extra
+}
+
+func cloneMetadataMap(values map[string]interface{}) map[string]interface{} {
+	if len(values) == 0 {
+		return map[string]interface{}{}
+	}
+	cloned := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func clonePageMetadata(meta PageMetadata) PageMetadata {
+	cloned := meta
+	cloned.Tags = append([]string{}, meta.Tags...)
+	cloned.Fields = cloneMetadataMap(meta.Fields)
+	if len(cloned.Fields) == 0 {
+		cloned.Fields = nil
+	}
+	cloned.Extra = cloneMetadataMap(meta.Extra)
+	if len(cloned.Extra) == 0 {
+		cloned.Extra = nil
+	}
+	return cloned
 }

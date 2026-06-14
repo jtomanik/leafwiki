@@ -4,7 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 )
 
 func TestSplitFrontmatter(t *testing.T) {
@@ -171,6 +170,7 @@ func TestParseFrontmatter(t *testing.T) {
 				ExtraFields: map[string]interface{}{
 					"title": "My Title",
 				},
+				TitleFromAlias: true,
 			},
 			wantBody: "# Title\nContent",
 			wantHas:  true,
@@ -298,192 +298,6 @@ func TestParseFrontmatter(t *testing.T) {
 	}
 }
 
-func TestBuildMarkdownWithFrontmatter(t *testing.T) {
-	tests := []struct {
-		name    string
-		fm      Frontmatter
-		body    string
-		want    string
-		wantErr bool
-	}{
-		{
-			name: "empty frontmatter struct",
-			fm:   Frontmatter{},
-			body: "# Title\nContent",
-			want: "# Title\nContent",
-		},
-		{
-			name: "frontmatter with empty ID",
-			fm: Frontmatter{
-				LeafWikiID: "",
-			},
-			body: "# Title\nContent",
-			want: "# Title\nContent",
-		},
-		{
-			name: "frontmatter with whitespace-only ID",
-			fm: Frontmatter{
-				LeafWikiID: "   ",
-			},
-			body: "# Title\nContent",
-			want: "# Title\nContent",
-		},
-		{
-			name: "frontmatter with ID only",
-			fm: Frontmatter{
-				LeafWikiID: "abc123",
-			},
-			body: "# Title\nContent",
-			want: "---\nleafwiki_id: abc123\n---\n# Title\nContent",
-		},
-		{
-			name: "frontmatter with title only",
-			fm: Frontmatter{
-				LeafWikiTitle: "My Title",
-			},
-			body: "# Title\nContent",
-			want: "# Title\nContent",
-		},
-		{
-			name: "frontmatter with both ID and title",
-			fm: Frontmatter{
-				LeafWikiID:    "abc123",
-				LeafWikiTitle: "My Title",
-			},
-			body: "# Title\nContent",
-			want: "---\nleafwiki_id: abc123\nleafwiki_title: My Title\n---\n# Title\nContent",
-		},
-		{
-			name: "frontmatter with metadata fields",
-			fm: Frontmatter{
-				LeafWikiID:           "abc123",
-				LeafWikiTitle:        "My Title",
-				LeafWikiCreatedAt:    "2026-03-21T10:15:30Z",
-				LeafWikiUpdatedAt:    "2026-03-21T11:16:31Z",
-				LeafWikiCreatorID:    "alice",
-				LeafWikiLastAuthorID: "bob",
-			},
-			body: "Content",
-			want: "---\nleafwiki_id: abc123\nleafwiki_title: My Title\nleafwiki_created_at: \"2026-03-21T10:15:30Z\"\nleafwiki_updated_at: \"2026-03-21T11:16:31Z\"\nleafwiki_creator_id: alice\nleafwiki_last_author_id: bob\n---\nContent",
-		},
-		{
-			name: "frontmatter preserves unknown fields",
-			fm: Frontmatter{
-				LeafWikiID:    "abc123",
-				LeafWikiTitle: "My Title",
-				ExtraFields: map[string]interface{}{
-					"custom_key": "keep-me",
-				},
-			},
-			body: "Content",
-			want: "---\ncustom_key: keep-me\nleafwiki_id: abc123\nleafwiki_title: My Title\n---\nContent",
-		},
-		{
-			name: "empty body",
-			fm: Frontmatter{
-				LeafWikiID: "abc123",
-			},
-			body: "",
-			want: "---\nleafwiki_id: abc123\n---\n",
-		},
-		{
-			name: "body with newlines",
-			fm: Frontmatter{
-				LeafWikiID: "abc123",
-			},
-			body: "# Title\n\nParagraph 1\n\nParagraph 2\n",
-			want: "---\nleafwiki_id: abc123\n---\n# Title\n\nParagraph 1\n\nParagraph 2\n",
-		},
-		{
-			name: "frontmatter with special characters in values",
-			fm: Frontmatter{
-				LeafWikiID:    "abc-123_xyz",
-				LeafWikiTitle: "Title: With Special & Characters",
-			},
-			body: "Content",
-			want: "---\nleafwiki_id: abc-123_xyz\nleafwiki_title: 'Title: With Special & Characters'\n---\nContent",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildMarkdownWithFrontmatter(tt.fm, tt.body)
-
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("BuildMarkdownWithFrontmatter() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			if got != tt.want {
-				t.Fatalf("BuildMarkdownWithFrontmatter() =\n%q\nwant:\n%q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseFrontmatterAndBuildRoundtrip(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantBody string
-	}{
-		{
-			name:     "no frontmatter",
-			input:    "# Title\nContent",
-			wantBody: "# Title\nContent",
-		},
-		{
-			name:     "with ID only",
-			input:    "---\nleafwiki_id: abc123\n---\n# Title\nContent",
-			wantBody: "# Title\nContent",
-		},
-		{
-			name:     "with ID and title",
-			input:    "---\nleafwiki_id: abc123\nleafwiki_title: My Title\n---\n# Title\nContent",
-			wantBody: "# Title\nContent",
-		},
-		{
-			name:     "with unknown fields",
-			input:    "---\nleafwiki_id: abc123\ncustom_key: keep-me\n---\n# Title\nContent",
-			wantBody: "# Title\nContent",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fm, body, has, err := ParseFrontmatter(tt.input)
-			if err != nil {
-				t.Fatalf("ParseFrontmatter() error = %v", err)
-			}
-
-			if body != tt.wantBody {
-				t.Fatalf("body after parse = %q, want %q", body, tt.wantBody)
-			}
-
-			rebuilt, err := BuildMarkdownWithFrontmatter(fm, body)
-			if err != nil {
-				t.Fatalf("BuildMarkdownWithFrontmatter() error = %v", err)
-			}
-
-			fm2, body2, has2, err := ParseFrontmatter(rebuilt)
-			if err != nil {
-				t.Fatalf("ParseFrontmatter() second parse error = %v", err)
-			}
-
-			if has != has2 {
-				t.Fatalf("has flag changed: first=%v, second=%v", has, has2)
-			}
-
-			if !reflect.DeepEqual(fm, fm2) {
-				t.Fatalf("frontmatter changed: first=%+v, second=%+v", fm, fm2)
-			}
-
-			if body != body2 {
-				t.Fatalf("body changed: first=%q, second=%q", body, body2)
-			}
-		})
-	}
-}
-
 func TestParseFrontmatter_ScalarLeafWikiValuesArePreserved(t *testing.T) {
 	fm, body, has, err := ParseFrontmatter(`---
 leafwiki_id: 123
@@ -507,81 +321,34 @@ Body`)
 	}
 }
 
-func TestBuildMarkdownWithFrontmatter_SortsExtraFieldsDeterministically(t *testing.T) {
-	fm := Frontmatter{
-		LeafWikiID:    "abc123",
-		LeafWikiTitle: "My Title",
-		ExtraFields: map[string]interface{}{
-			"z_key": "last",
-			"a_key": "first",
-		},
-	}
-
-	got, err := BuildMarkdownWithFrontmatter(fm, "Content")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithFrontmatter() error = %v", err)
-	}
-
-	want := `---
-a_key: first
-z_key: last
-leafwiki_id: abc123
-leafwiki_title: My Title
----
-Content`
-	if got != want {
-		t.Fatalf("BuildMarkdownWithFrontmatter() =\n%q\nwant:\n%q", got, want)
-	}
-}
-
-func TestBuildMarkdownWithExtraFrontmatter_SortsExtraFieldsDeterministically(t *testing.T) {
-	got, err := BuildMarkdownWithExtraFrontmatter(map[string]interface{}{
-		"z_key": "last",
-		"a_key": "first",
-	}, "Content")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter() error = %v", err)
-	}
-
-	want := `---
-a_key: first
-z_key: last
----
-Content`
-	if got != want {
-		t.Fatalf("BuildMarkdownWithExtraFrontmatter() =\n%q\nwant:\n%q", got, want)
-	}
-}
-
-func TestFrontmatter_MetadataRoundtripRFC3339(t *testing.T) {
-	createdAt := time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC).Format(time.RFC3339)
-	updatedAt := time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC).Format(time.RFC3339)
-
-	input := Frontmatter{
-		LeafWikiID:           "abc123",
-		LeafWikiTitle:        "My Title",
-		LeafWikiCreatedAt:    createdAt,
-		LeafWikiUpdatedAt:    updatedAt,
-		LeafWikiCreatorID:    "alice",
-		LeafWikiLastAuthorID: "bob",
-	}
-
-	raw, err := BuildMarkdownWithFrontmatter(input, "Body")
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithFrontmatter() error = %v", err)
-	}
-
-	fm, body, has, err := ParseFrontmatter(raw)
+func TestParseFrontmatter_CanonicalMetadataCompatibility(t *testing.T) {
+	fm, body, has, err := ParseFrontmatter(`<!-- leafwiki
+version: 1
+page:
+  id: abc123
+  title: Canonical Title
+tags:
+  - demo
+fields:
+  status: open
+-->
+Body`)
 	if err != nil {
 		t.Fatalf("ParseFrontmatter() error = %v", err)
 	}
 	if !has {
-		t.Fatalf("expected frontmatter")
+		t.Fatalf("expected canonical metadata")
+	}
+	if fm.LeafWikiID != "abc123" {
+		t.Fatalf("expected id abc123, got %q", fm.LeafWikiID)
+	}
+	if fm.LeafWikiTitle != "Canonical Title" {
+		t.Fatalf("expected title, got %q", fm.LeafWikiTitle)
+	}
+	if got := fm.ExtraFields["status"]; got != "open" {
+		t.Fatalf("expected status field, got %#v", got)
 	}
 	if body != "Body" {
-		t.Fatalf("unexpected body %q", body)
-	}
-	if !reflect.DeepEqual(fm, input) {
-		t.Fatalf("frontmatter changed: got %+v want %+v", fm, input)
+		t.Fatalf("body = %q", body)
 	}
 }

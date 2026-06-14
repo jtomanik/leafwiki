@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -138,18 +139,25 @@ section content`)
 	if err != nil {
 		t.Fatalf("ListPageRevisions: %v", err)
 	}
-	if len(result.Revisions) != 1 {
-		t.Fatalf("revision count = %d, want uppercase section index commit", len(result.Revisions))
+	if len(result.Revisions) != 2 {
+		t.Fatalf("revision count = %d, want raw legacy commit plus canonical metadata writeback", len(result.Revisions))
 	}
-	if result.Revisions[0].Path != "docs" {
-		t.Fatalf("revision path = %q, want docs", result.Revisions[0].Path)
+	if result.Revisions[1].Path != "docs" {
+		t.Fatalf("raw revision path = %q, want docs", result.Revisions[1].Path)
 	}
-	snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[0].ID)
+	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[0].ID)
 	if err != nil {
-		t.Fatalf("GetPageRevisionSnapshot: %v", err)
+		t.Fatalf("GetPageRevisionSnapshot latest: %v", err)
 	}
-	if !strings.Contains(snapshot.Content, "section content") {
-		t.Fatalf("snapshot content = %q, want uppercase section index content", snapshot.Content)
+	older, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[1].ID)
+	if err != nil {
+		t.Fatalf("GetPageRevisionSnapshot older: %v", err)
+	}
+	if !strings.HasPrefix(latest.Content, "<!-- leafwiki\n") {
+		t.Fatalf("latest snapshot content = %q, want canonical metadata writeback first", latest.Content)
+	}
+	if !strings.HasPrefix(older.Content, "---\n") || !strings.Contains(older.Content, "section content") {
+		t.Fatalf("older snapshot content = %q, want raw uppercase section index content", older.Content)
 	}
 }
 
@@ -195,8 +203,8 @@ func TestServiceSyncNowAmendsMetadataWritebacksIntoSameBatchCommit(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot: %v", err)
 	}
-	if !strings.Contains(snapshot.Content, "leafwiki_id:") {
-		t.Fatalf("snapshot content was not amended with metadata: %q", snapshot.Content)
+	if !strings.Contains(snapshot.Content, "<!-- leafwiki\n") || !strings.Contains(snapshot.Content, "  id:") {
+		t.Fatalf("snapshot content was not amended with canonical metadata: %q", snapshot.Content)
 	}
 }
 
@@ -461,6 +469,111 @@ leafwiki_title: Page B
 	}
 }
 
+func TestServiceSyncNowCanonicalizesCompleteLegacyMetadataAndKeepsRawRevision(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "page.md"), `---
+leafwiki_id: complete-legacy-page
+leafwiki_title: Complete Legacy Page
+leafwiki_created_at: 2026-03-21T10:15:30Z
+leafwiki_updated_at: 2026-03-21T11:16:31Z
+leafwiki_creator_id: alice
+leafwiki_last_author_id: bob
+---
+# Complete Legacy Page
+
+Fully populated legacy metadata.
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	rawBytes, err := os.ReadFile(filepath.Join(rootDir, "docs", "page.md"))
+	if err != nil {
+		t.Fatalf("ReadFile canonicalized page: %v", err)
+	}
+	raw := string(rawBytes)
+	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("canonicalized page should start with LeafWiki metadata comment, got: %q", raw)
+	}
+	if strings.HasPrefix(raw, "---\n") || strings.Contains(raw, "leafwiki_id: complete-legacy-page") {
+		t.Fatalf("canonicalized page retained legacy frontmatter: %q", raw)
+	}
+	parsed, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		t.Fatalf("ParsePageDocument canonicalized page: %v", err)
+	}
+	if parsed.Metadata.Page.ID != "complete-legacy-page" || parsed.Metadata.Page.Title != "Complete Legacy Page" {
+		t.Fatalf("metadata = %#v, want migrated ID and title", parsed.Metadata)
+	}
+	if got := parsed.Metadata.Page.CreatedAt; got != "2026-03-21T10:15:30Z" {
+		t.Fatalf("created_at = %q, want legacy timestamp", got)
+	}
+	if parsed.Metadata.Page.CreatorID != "alice" || parsed.Metadata.Page.LastAuthorID != "bob" {
+		t.Fatalf("author metadata = %#v, want legacy authors", parsed.Metadata)
+	}
+
+	page, err := treeService.GetPage("complete-legacy-page")
+	if err != nil {
+		t.Fatalf("GetPage complete-legacy-page: %v", err)
+	}
+	revisions, err := service.ListPageRevisions(context.Background(), page, "", 10)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+	if len(revisions.Revisions) != 2 {
+		t.Fatalf("revision count = %d, want raw incoming content plus canonical writeback", len(revisions.Revisions))
+	}
+	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, revisions.Revisions[0].ID)
+	if err != nil {
+		t.Fatalf("GetPageRevisionSnapshot latest: %v", err)
+	}
+	older, err := service.GetPageRevisionSnapshot(context.Background(), page, revisions.Revisions[1].ID)
+	if err != nil {
+		t.Fatalf("GetPageRevisionSnapshot older: %v", err)
+	}
+	if !strings.HasPrefix(latest.Content, "<!-- leafwiki\n") {
+		t.Fatalf("latest revision content = %q, want canonical metadata writeback first", latest.Content)
+	}
+	if !strings.HasPrefix(older.Content, "---\n") {
+		t.Fatalf("older revision content = %q, want raw legacy metadata", older.Content)
+	}
+
+	if _, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("second SyncNow: %v", err)
+	}
+	snapshots, err := service.ListSnapshots(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want raw commit plus canonical writeback and no repeat revisions: %#v", len(snapshots), snapshots)
+	}
+}
+
 func TestServiceCanonicalMigrationRollsBackWhenLaterWriteFails(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	service := &Service{rootDir: rootDir}
@@ -699,6 +812,74 @@ leafwiki_title: Page B
 	}
 	if derivedRebuilds != 0 {
 		t.Fatalf("derived rebuilds = %d, want none after migration write failure", derivedRebuilds)
+	}
+}
+
+func TestServiceSyncNowReportsMetadataWritebackFailureDuringReconstruction(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	sourcePath := filepath.Join(rootDir, "legacy-metadata.md")
+	writeMarkdown(t, sourcePath, `---
+leafwiki_id: legacy-metadata
+leafwiki_title: Legacy Metadata
+leafwiki_created_at: "2026-06-13T10:00:00Z"
+leafwiki_updated_at: "2026-06-13T11:00:00Z"
+---
+# Legacy Metadata
+
+body
+`)
+	if err := os.Chmod(rootDir, 0o500); err != nil {
+		t.Fatalf("chmod read-only root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(rootDir, 0o700)
+	})
+
+	store := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "initial-commit"}}
+	derivedRebuilds := 0
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+		Store:   store,
+		AfterSync: func() error {
+			derivedRebuilds++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+
+	if err != nil {
+		t.Fatalf("SyncNow error = %v, want status failure without returned error", err)
+	}
+	if !strings.Contains(status.LastError, "legacy-metadata.md") {
+		t.Fatalf("LastError = %q, want metadata writeback failure path", status.LastError)
+	}
+	if derivedRebuilds != 0 {
+		t.Fatalf("derived rebuilds = %d, want none after metadata writeback failure", derivedRebuilds)
+	}
+	if store.captureCalls != 1 {
+		t.Fatalf("capture calls = %d, want only initial raw capture and no writeback capture", store.captureCalls)
+	}
+	if _, err := treeService.GetPage("legacy-metadata"); err == nil {
+		t.Fatalf("legacy-metadata page was indexed despite failed metadata writeback")
+	}
+	if raw := readFileString(t, sourcePath); strings.HasPrefix(raw, "<!-- leafwiki\n") {
+		t.Fatalf("source file was canonicalized despite writeback failure: %q", raw)
 	}
 }
 
@@ -1062,12 +1243,14 @@ func TestServiceSyncNowPreservesOriginalChangedMarkdownCountWhenAmendingMetadata
 	if err := treeService.LoadTree(); err != nil {
 		t.Fatalf("LoadTree: %v", err)
 	}
-	writeMarkdown(t, filepath.Join(rootDir, "already-has-metadata.md"), `---
-leafwiki_id: page-ready
-leafwiki_title: Already Has Metadata
-leafwiki_created_at: 2026-06-07T10:00:00Z
-leafwiki_updated_at: 2026-06-07T10:00:00Z
----
+	writeMarkdown(t, filepath.Join(rootDir, "already-has-metadata.md"), `<!-- leafwiki
+version: 1
+page:
+  id: page-ready
+  title: Already Has Metadata
+  created_at: 2026-06-07T10:00:00Z
+  updated_at: 2026-06-07T10:00:00Z
+-->
 
 # Already Has Metadata
 `)
@@ -2622,8 +2805,8 @@ func TestServiceRestoreWorkspaceCapturesMetadataWriteback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
-	if !strings.Contains(files["needs-metadata.md"], "leafwiki_id:") {
-		t.Fatalf("restore commit did not include reconstructed metadata writeback: %q", files["needs-metadata.md"])
+	if !strings.Contains(files["needs-metadata.md"], "<!-- leafwiki\n") || !strings.Contains(files["needs-metadata.md"], "  id:") {
+		t.Fatalf("restore commit did not include reconstructed canonical metadata writeback: %q", files["needs-metadata.md"])
 	}
 }
 
@@ -2682,8 +2865,8 @@ current body`)
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
-	if !strings.Contains(files["needs-metadata.md"], "leafwiki_id:") {
-		t.Fatalf("document restore commit did not include reconstructed metadata writeback: %q", files["needs-metadata.md"])
+	if !strings.Contains(files["needs-metadata.md"], "<!-- leafwiki\n") || !strings.Contains(files["needs-metadata.md"], "  id:") {
+		t.Fatalf("document restore commit did not include reconstructed canonical metadata writeback: %q", files["needs-metadata.md"])
 	}
 }
 

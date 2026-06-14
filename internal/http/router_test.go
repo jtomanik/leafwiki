@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -1344,7 +1345,7 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
 		t.Fatalf("create root dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 1\n"), 0o644); err != nil {
 		t.Fatalf("write page: %v", err)
 	}
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
@@ -1364,7 +1365,7 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 	if initialCommit == "" {
 		t.Fatalf("initial workspace commit is empty")
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 2\n"), 0o644); err != nil {
 		t.Fatalf("write page update: %v", err)
 	}
 	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
@@ -1402,7 +1403,7 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 	}
 	firstPageID, _ := resp.Snapshots[0]["id"].(string)
 
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 3\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 3\n"), 0o644); err != nil {
 		t.Fatalf("write page newer update: %v", err)
 	}
 	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
@@ -2641,6 +2642,144 @@ func TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent(t *testing.T) {
 		if entry["tag"] == "react" {
 			t.Fatalf("expected react tag to be removed from index, got %#v", tagsResp)
 		}
+	}
+}
+
+func TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty(t *testing.T) {
+	w := createWikiTestInstance(t)
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	page := createPageViaAPI(t, router, "Metadata Preserve", "metadata-preserve", nil, pageNodeKind())
+
+	firstPayload := map[string]interface{}{
+		"version": page.Version,
+		"title":   page.Title,
+		"slug":    page.Slug,
+		"content": "# Metadata Preserve\n\nFirst",
+		"tags":    []string{"React"},
+		"properties": map[string]string{
+			"status": "draft",
+		},
+	}
+	firstBody, _ := json.Marshal(firstPayload)
+	firstRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(firstBody)))
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstUpdated apiPage
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstUpdated); err != nil {
+		t.Fatalf("Invalid first update response JSON: %v", err)
+	}
+	rawAfterFirstBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
+	if err != nil {
+		t.Fatalf("ReadFile first metadata update: %v", err)
+	}
+	rawAfterFirst := string(rawAfterFirstBytes)
+	if !strings.HasPrefix(rawAfterFirst, "<!-- leafwiki\n") {
+		t.Fatalf("HTTP update should write canonical LeafWiki metadata, got: %q", rawAfterFirst)
+	}
+	if strings.HasPrefix(rawAfterFirst, "---\n") {
+		t.Fatalf("HTTP update should not write legacy YAML frontmatter, got: %q", rawAfterFirst)
+	}
+	firstDoc, _, err := markdown.ParsePageDocument(rawAfterFirst)
+	if err != nil {
+		t.Fatalf("ParsePageDocument first metadata update: %v", err)
+	}
+	if len(firstDoc.Metadata.Tags) != 1 || firstDoc.Metadata.Tags[0] != "react" {
+		t.Fatalf("first raw tags = %#v, want [react]", firstDoc.Metadata.Tags)
+	}
+	if firstDoc.Metadata.Fields["status"] != "draft" {
+		t.Fatalf("first raw fields = %#v, want status=draft", firstDoc.Metadata.Fields)
+	}
+
+	metadataOnlyPayload := map[string]interface{}{
+		"version": firstUpdated.Version,
+		"title":   firstUpdated.Title,
+		"slug":    firstUpdated.Slug,
+		"tags":    []string{"Ready"},
+		"properties": map[string]string{
+			"status": "ready",
+		},
+	}
+	metadataOnlyBody, _ := json.Marshal(metadataOnlyPayload)
+	metadataOnlyRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(metadataOnlyBody)))
+	if metadataOnlyRec.Code != http.StatusOK {
+		t.Fatalf("Expected metadata-only update to return 200 OK, got %d - %s", metadataOnlyRec.Code, metadataOnlyRec.Body.String())
+	}
+	var metadataOnlyUpdated apiPage
+	if err := json.Unmarshal(metadataOnlyRec.Body.Bytes(), &metadataOnlyUpdated); err != nil {
+		t.Fatalf("Invalid metadata-only update response JSON: %v", err)
+	}
+	if metadataOnlyUpdated.Content != "# Metadata Preserve\n\nFirst" {
+		t.Fatalf("expected metadata-only update to preserve body, got %q", metadataOnlyUpdated.Content)
+	}
+	if len(metadataOnlyUpdated.Tags) != 1 || metadataOnlyUpdated.Tags[0] != "ready" {
+		t.Fatalf("expected metadata-only tags to update, got %#v", metadataOnlyUpdated.Tags)
+	}
+	if metadataOnlyUpdated.Properties["status"] != "ready" {
+		t.Fatalf("expected metadata-only properties to update, got %#v", metadataOnlyUpdated.Properties)
+	}
+
+	omittedPayload := map[string]interface{}{
+		"version": metadataOnlyUpdated.Version,
+		"title":   metadataOnlyUpdated.Title,
+		"slug":    metadataOnlyUpdated.Slug,
+		"content": "# Metadata Preserve\n\nSecond",
+	}
+	omittedBody, _ := json.Marshal(omittedPayload)
+	omittedRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(omittedBody)))
+	if omittedRec.Code != http.StatusOK {
+		t.Fatalf("Expected omitted metadata update to return 200 OK, got %d - %s", omittedRec.Code, omittedRec.Body.String())
+	}
+	var omittedUpdated apiPage
+	if err := json.Unmarshal(omittedRec.Body.Bytes(), &omittedUpdated); err != nil {
+		t.Fatalf("Invalid omitted update response JSON: %v", err)
+	}
+	if len(omittedUpdated.Tags) != 1 || omittedUpdated.Tags[0] != "ready" {
+		t.Fatalf("expected omitted tags to be preserved, got %#v", omittedUpdated.Tags)
+	}
+	if omittedUpdated.Properties["status"] != "ready" {
+		t.Fatalf("expected omitted properties to be preserved, got %#v", omittedUpdated.Properties)
+	}
+
+	clearPayload := map[string]interface{}{
+		"version":    omittedUpdated.Version,
+		"title":      omittedUpdated.Title,
+		"slug":       omittedUpdated.Slug,
+		"content":    "# Metadata Preserve\n\nThird",
+		"tags":       []string{},
+		"properties": map[string]string{},
+	}
+	clearBody, _ := json.Marshal(clearPayload)
+	clearRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(clearBody)))
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("Expected explicit clear update to return 200 OK, got %d - %s", clearRec.Code, clearRec.Body.String())
+	}
+	var cleared apiPage
+	if err := json.Unmarshal(clearRec.Body.Bytes(), &cleared); err != nil {
+		t.Fatalf("Invalid clear update response JSON: %v", err)
+	}
+	if len(cleared.Tags) != 0 {
+		t.Fatalf("expected explicit empty tags to clear metadata, got %#v", cleared.Tags)
+	}
+	if len(cleared.Properties) != 0 {
+		t.Fatalf("expected explicit empty properties to clear metadata, got %#v", cleared.Properties)
+	}
+	rawAfterClearBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
+	if err != nil {
+		t.Fatalf("ReadFile clear metadata update: %v", err)
+	}
+	rawAfterClear := string(rawAfterClearBytes)
+	if !strings.HasPrefix(rawAfterClear, "<!-- leafwiki\n") || strings.HasPrefix(rawAfterClear, "---\n") {
+		t.Fatalf("clear update should keep canonical storage, got: %q", rawAfterClear)
+	}
+	clearDoc, _, err := markdown.ParsePageDocument(rawAfterClear)
+	if err != nil {
+		t.Fatalf("ParsePageDocument clear metadata update: %v", err)
+	}
+	if len(clearDoc.Metadata.Tags) != 0 || len(clearDoc.Metadata.Fields) != 0 {
+		t.Fatalf("clear raw metadata = tags %#v fields %#v, want both empty", clearDoc.Metadata.Tags, clearDoc.Metadata.Fields)
 	}
 }
 

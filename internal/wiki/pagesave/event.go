@@ -29,9 +29,10 @@ type PageSaveEvent struct {
 	// After is the page state after the operation; nil for Delete.
 	After *tree.Page
 
-	ContentChanged bool
-	SlugChanged    bool
-	TitleChanged   bool
+	ContentChanged  bool
+	MetadataChanged bool
+	SlugChanged     bool
+	TitleChanged    bool
 
 	// OldPath is the path of Before before the mutation (CalculatePath on a live node
 	// returns the new path after UpdateNode/MoveNode mutates the tree in place).
