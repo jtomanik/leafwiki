@@ -9,6 +9,7 @@ export type Config = {
   publicAccess: boolean
   hideLinkMetadataSection: boolean
   authDisabled: boolean
+  markdownLinkRootPrefix: string
   maxAssetUploadSizeBytes: number
   enableRevision: boolean
   enableWorkspaceSync: boolean

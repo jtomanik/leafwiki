@@ -25,6 +25,7 @@ type configOutput struct {
 	HideLinkMetadataSection bool   `json:"hideLinkMetadataSection"`
 	AuthDisabled            bool   `json:"authDisabled"`
 	BasePath                string `json:"basePath"`
+	MarkdownLinkRootPrefix  string `json:"markdownLinkRootPrefix"`
 	MaxAssetUploadSizeBytes int64  `json:"maxAssetUploadSizeBytes"`
 	EnableRevision          bool   `json:"enableRevision"`
 	EnableWorkspaceSync     bool   `json:"enableWorkspaceSync"`

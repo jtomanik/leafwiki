@@ -277,6 +277,7 @@ func toolOutputSchema(name string) *jsonschema.Schema {
 		return outputSchema(map[string]*jsonschema.Schema{
 			"authDisabled":            booleanSchema(),
 			"basePath":                stringSchema(),
+			"markdownLinkRootPrefix":  stringSchema(),
 			"publicAccess":            booleanSchema(),
 			"hideLinkMetadataSection": booleanSchema(),
 			"maxAssetUploadSizeBytes": integerSchema(),

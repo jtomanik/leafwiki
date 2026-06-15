@@ -23,6 +23,7 @@ func configOutputForOptions(opts httpinternal.RouterOptions) configOutput {
 		HideLinkMetadataSection: opts.HideLinkMetadataSection,
 		AuthDisabled:            opts.AuthDisabled,
 		BasePath:                opts.BasePath,
+		MarkdownLinkRootPrefix:  opts.MarkdownLinkRootPrefix,
 		MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
 		EnableRevision:          opts.EnableRevision,
 		EnableWorkspaceSync:     opts.EnableWorkspaceSync,

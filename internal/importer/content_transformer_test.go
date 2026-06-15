@@ -249,6 +249,25 @@ func TestContentTransformer_EmitsMdForPagesAndExtensionlessForSections(t *testin
 	}
 }
 
+func TestContentTransformer_UsesMarkdownLinkRootPrefixForGeneratedPageLinks(t *testing.T) {
+	tmp := t.TempDir()
+	writeTmp(t, tmp, "Note.md", "# Note")
+	transformer := newContentTransformerWithOptions(&PlanResult{
+		Items: []PlanItem{
+			{SourcePath: "Note.md", TargetPath: "note", Kind: tree.NodeKindPage},
+		},
+	}, tmp, 1234, ContentTransformerOptions{MarkdownLinkRootPrefix: "/docs"})
+
+	page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+	got, err := transformer.TransformContent("editor", "current.md", page, "[Note](./Note.md)", &fakeExecWiki{})
+	if err != nil {
+		t.Fatalf("TransformContent: %v", err)
+	}
+	if got != "[Note](/docs/note.md)" {
+		t.Fatalf("content = %q, want prefixed generated link", got)
+	}
+}
+
 func TestContentTransformer_SourcePathMatchingIsCaseSensitive(t *testing.T) {
 	tmp := t.TempDir()
 	writeTmp(t, tmp, "current.md", "# Current")

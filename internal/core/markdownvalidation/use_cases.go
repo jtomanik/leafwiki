@@ -35,22 +35,24 @@ type Result struct {
 }
 
 type ContentValidationOptions struct {
-	ExistingPageID       string
-	AllowRootRoute       bool
-	ResolvePageID        func(routePath string) (string, bool)
-	ResolveLinkPageID    func(routePath string) (string, bool)
-	ResolveLinkTarget    func(routePath string) (string, tree.NodeKind, bool)
-	ResolveMarkdownLink  func(destination string) (string, tree.NodeKind, bool, string)
-	ResolveReferencePath func(destination string) string
-	PageIDExists         func(pageID string) bool
-	AssetExists          func(destination string) bool
+	ExistingPageID         string
+	AllowRootRoute         bool
+	ResolvePageID          func(routePath string) (string, bool)
+	ResolveLinkPageID      func(routePath string) (string, bool)
+	ResolveLinkTarget      func(routePath string) (string, tree.NodeKind, bool)
+	ResolveMarkdownLink    func(destination string) (string, tree.NodeKind, bool, string)
+	ResolveReferencePath   func(destination string) string
+	PageIDExists           func(pageID string) bool
+	AssetExists            func(destination string) bool
+	MarkdownLinkRootPrefix string
 }
 
 type WorkspaceMarkdownValidationOptions struct {
-	RootDir         string
-	IncludeWarnings bool
-	PageIDExists    func(pageID string) bool
-	AssetExists     func(pageID string, destination string) bool
+	RootDir                string
+	MarkdownLinkRootPrefix string
+	IncludeWarnings        bool
+	PageIDExists           func(pageID string) bool
+	AssetExists            func(pageID string, destination string) bool
 }
 
 type WorkspaceStatusIssue struct {
@@ -271,7 +273,9 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 	if err != nil {
 		addIssue("error", "workspace_scan_error", "workspace", "", err.Error())
 	}
-	linkIndex, indexErr := markdownlinks.NewIndexFromRoot(rootDir)
+	linkIndex, indexErr := markdownlinks.NewIndexFromRootWithOptions(rootDir, markdownlinks.Options{
+		MarkdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
+	})
 	if indexErr != nil {
 		addIssue("error", "workspace_scan_error", "workspace", "", indexErr.Error())
 	}
@@ -314,10 +318,11 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			}
 		}
 		result := ValidateMarkdownContentWithOptions(file.RoutePath, file.Content, ContentValidationOptions{
-			ExistingPageID:      file.ExistingPageID,
-			AllowRootRoute:      true,
-			ResolveLinkPageID:   linkResolver,
-			ResolveMarkdownLink: markdownLinkResolver,
+			ExistingPageID:         file.ExistingPageID,
+			AllowRootRoute:         true,
+			ResolveLinkPageID:      linkResolver,
+			ResolveMarkdownLink:    markdownLinkResolver,
+			MarkdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
 			ResolveReferencePath: func(destination string) string {
 				return resolveWorkspaceReferencePath(file.RelPath, file.RoutePath, destination)
 			},
@@ -376,8 +381,9 @@ func validateMarkdownReferences(routePath string, body string, opts ContentValid
 		if shouldIgnoreDestination(ref.Destination) {
 			continue
 		}
-		if ref.Image || isAssetDestination(ref.Destination) {
-			if opts.AssetExists != nil && !opts.AssetExists(ref.Destination) {
+		assetDestination := stripMarkdownLinkRootPrefix(ref.Destination, opts.MarkdownLinkRootPrefix)
+		if ref.Image || isAssetDestination(assetDestination) {
+			if opts.AssetExists != nil && !opts.AssetExists(assetDestination) {
 				issues = append(issues, Issue{
 					Severity: "error",
 					Code:     "missing_asset",
@@ -461,6 +467,23 @@ func validateMarkdownReferences(routePath string, body string, opts ContentValid
 		}
 	}
 	return issues
+}
+
+func stripMarkdownLinkRootPrefix(destination string, prefix string) string {
+	trimmedPrefix := strings.TrimRight(strings.TrimSpace(prefix), "/")
+	if trimmedPrefix == "" || !strings.HasPrefix(destination, "/") {
+		return destination
+	}
+	if !strings.HasPrefix(trimmedPrefix, "/") {
+		trimmedPrefix = "/" + trimmedPrefix
+	}
+	if destination == trimmedPrefix {
+		return "/"
+	}
+	if strings.HasPrefix(destination, trimmedPrefix+"/") {
+		return destination[len(trimmedPrefix):]
+	}
+	return destination
 }
 
 func isExtensionlessWikiDestination(destination string) bool {

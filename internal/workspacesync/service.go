@@ -85,13 +85,14 @@ type closableFileWatcher interface {
 type watcherFactory func(rootDir string) (fileWatcher, error)
 
 type ServiceOptions struct {
-	Enabled        bool
-	DataDir        string
-	RootDir        string
-	Tree           treeReconstructor
-	Store          revisionStore
-	WatcherFactory watcherFactory
-	AfterSync      func() error
+	Enabled                bool
+	DataDir                string
+	RootDir                string
+	MarkdownLinkRootPrefix string
+	Tree                   treeReconstructor
+	Store                  revisionStore
+	WatcherFactory         watcherFactory
+	AfterSync              func() error
 }
 
 type SyncRequest struct {
@@ -144,12 +145,13 @@ type PageRevisionList struct {
 }
 
 type Service struct {
-	enabled        bool
-	rootDir        string
-	tree           treeReconstructor
-	store          revisionStore
-	watcherFactory watcherFactory
-	afterSync      func() error
+	enabled                bool
+	rootDir                string
+	markdownLinkRootPrefix string
+	tree                   treeReconstructor
+	store                  revisionStore
+	watcherFactory         watcherFactory
+	afterSync              func() error
 
 	mu            sync.Mutex
 	storeMu       sync.Mutex
@@ -166,12 +168,13 @@ func PublicEditorActor() Actor {
 func NewService(options ServiceOptions) (*Service, error) {
 	status := SyncStatus{Enabled: options.Enabled}
 	service := &Service{
-		enabled:        options.Enabled,
-		rootDir:        strings.TrimSpace(options.RootDir),
-		tree:           options.Tree,
-		watcherFactory: options.WatcherFactory,
-		afterSync:      options.AfterSync,
-		status:         status,
+		enabled:                options.Enabled,
+		rootDir:                strings.TrimSpace(options.RootDir),
+		markdownLinkRootPrefix: options.MarkdownLinkRootPrefix,
+		tree:                   options.Tree,
+		watcherFactory:         options.WatcherFactory,
+		afterSync:              options.AfterSync,
+		status:                 status,
 	}
 	if !options.Enabled {
 		return service, nil
@@ -477,7 +480,9 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 	} else if !info.IsDir() {
 		return false, nil, nil
 	}
-	index, err := markdownlinks.NewIndexFromRoot(s.rootDir)
+	index, err := markdownlinks.NewIndexFromRootWithOptions(s.rootDir, markdownlinks.Options{
+		MarkdownLinkRootPrefix: s.markdownLinkRootPrefix,
+	})
 	if err != nil {
 		return false, nil, err
 	}
@@ -1455,8 +1460,9 @@ func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string
 
 func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
 	result := wikivalidation.ValidateWorkspaceMarkdownFiles(wikivalidation.WorkspaceMarkdownValidationOptions{
-		RootDir:         s.rootDir,
-		IncludeWarnings: false,
+		RootDir:                s.rootDir,
+		MarkdownLinkRootPrefix: s.markdownLinkRootPrefix,
+		IncludeWarnings:        false,
 	})
 	if len(result.Issues) == 0 {
 		return nil

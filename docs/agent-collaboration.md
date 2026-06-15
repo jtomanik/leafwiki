@@ -87,8 +87,10 @@ Edit files under `--root-dir`, preserving canonical `<!-- leafwiki ... -->` meta
 Narrow safe edit:
 
 ```json
-{"tool":"wiki_get_page_by_path","arguments":{"path":"/docs/api"}}
-{"tool":"wiki_validate_page","arguments":{"path":"/docs/api"}}
-{"tool":"wiki_replace_page_section","arguments":{"path":"/docs/api","version":"<page.version>","headingPath":["Authentication"],"content":"Updated body\\n"}}
-{"tool":"wiki_validate_page","arguments":{"path":"/docs/api"}}
+{"tool":"wiki_get_page_by_path","arguments":{"path":"api"}}
+{"tool":"wiki_validate_page","arguments":{"path":"api"}}
+{"tool":"wiki_replace_page_section","arguments":{"path":"api","version":"<page.version>","headingPath":["Authentication"],"content":"Updated body\\n"}}
+{"tool":"wiki_validate_page","arguments":{"path":"api"}}
 ```
+
+MCP `path` inputs are LeafWiki route paths. Do not include authored Markdown href prefixes such as `/docs`.

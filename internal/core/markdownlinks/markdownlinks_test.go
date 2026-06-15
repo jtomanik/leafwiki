@@ -39,6 +39,176 @@ func TestResolveCanonicalLink_UsesFilesystemRelativeSemanticsNotPageAsFolder(t *
 	}
 }
 
+// - Prefixed absolute page link resolves inside wiki root
+func TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindPage, Path: "sync/glossary.md"},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	result := index.Resolve("index.md", "/docs/sync/glossary.md")
+
+	if result.Kind != TargetKindPage {
+		t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
+	}
+	if result.RoutePath != "sync/glossary" {
+		t.Fatalf("RoutePath = %q, want sync/glossary", result.RoutePath)
+	}
+	if result.CanonicalHref != "/docs/sync/glossary.md" {
+		t.Fatalf("CanonicalHref = %q, want /docs/sync/glossary.md", result.CanonicalHref)
+	}
+}
+
+// - Unprefixed absolute page link still resolves but canonicalizes to the configured prefix
+func TestResolveForMigration_WithRootPrefixCanonicalizesUnprefixedAbsolutePage(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindPage, Path: "sync/glossary.md"},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	result := index.ResolveForMigration("index.md", "/sync/glossary?view=1#term")
+
+	if result.Kind != TargetKindPage {
+		t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
+	}
+	if result.RoutePath != "sync/glossary" {
+		t.Fatalf("RoutePath = %q, want sync/glossary", result.RoutePath)
+	}
+	if result.CanonicalHref != "/docs/sync/glossary.md?view=1#term" {
+		t.Fatalf("CanonicalHref = %q, want /docs/sync/glossary.md?view=1#term", result.CanonicalHref)
+	}
+}
+
+// - Configured prefix root resolves to the wiki root section
+func TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindSection, Path: ""},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	for _, href := range []string{"/docs", "/docs/"} {
+		result := index.Resolve("index.md", href)
+		if result.Kind != TargetKindSection {
+			t.Fatalf("Resolve(%q).Kind = %q, want %q: %#v", href, result.Kind, TargetKindSection, result)
+		}
+		if result.RoutePath != "" {
+			t.Fatalf("Resolve(%q).RoutePath = %q, want root route", href, result.RoutePath)
+		}
+		if result.CanonicalHref != "/docs" {
+			t.Fatalf("Resolve(%q).CanonicalHref = %q, want /docs", href, result.CanonicalHref)
+		}
+	}
+}
+
+func TestResolveCanonicalLink_WithRootPrefixPreservesRootSuffixWithoutExtraSlash(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindSection, Path: ""},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	tests := []struct {
+		href string
+		want string
+	}{
+		{"/docs#intro", "/docs#intro"},
+		{"/docs?view=1#intro", "/docs?view=1#intro"},
+	}
+
+	for _, tc := range tests {
+		result := index.Resolve("index.md", tc.href)
+		if result.Kind != TargetKindSection {
+			t.Fatalf("Resolve(%q).Kind = %q, want section: %#v", tc.href, result.Kind, result)
+		}
+		if result.RoutePath != "" {
+			t.Fatalf("Resolve(%q).RoutePath = %q, want root route", tc.href, result.RoutePath)
+		}
+		if result.CanonicalHref != tc.want {
+			t.Fatalf("Resolve(%q).CanonicalHref = %q, want %q", tc.href, result.CanonicalHref, tc.want)
+		}
+	}
+}
+
+func TestNormalizeMarkdownLinkRootPrefixRejectsInvalidValues(t *testing.T) {
+	tests := []string{
+		"/",
+		"..",
+		"/../docs",
+		"https://example.com/docs",
+		"/docs?x=1",
+		"/docs#intro",
+		`docs\sync`,
+		"http:/docs",
+		"mailto:docs",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			if got, err := NormalizeMarkdownLinkRootPrefix(input); err == nil {
+				t.Fatalf("NormalizeMarkdownLinkRootPrefix(%q) = %q, nil; want error", input, got)
+			}
+		})
+	}
+}
+
+func TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindSection, Path: "sync", ContentPath: "sync/index.md"},
+		{Kind: EntryKindPage, Path: "sync.md"},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	section := index.Resolve("index.md", "/docs/sync")
+	if section.Kind != TargetKindSection {
+		t.Fatalf("section Kind = %q, want %q: %#v", section.Kind, TargetKindSection, section)
+	}
+	if section.RoutePath != "sync" {
+		t.Fatalf("section RoutePath = %q, want sync", section.RoutePath)
+	}
+	if section.CanonicalHref != "/docs/sync" {
+		t.Fatalf("section CanonicalHref = %q, want /docs/sync", section.CanonicalHref)
+	}
+
+	page := index.Resolve("index.md", "/docs/sync.md")
+	if page.Kind != TargetKindPage {
+		t.Fatalf("page Kind = %q, want %q: %#v", page.Kind, TargetKindPage, page)
+	}
+	if page.RoutePath != "sync" {
+		t.Fatalf("page RoutePath = %q, want sync", page.RoutePath)
+	}
+	if page.CanonicalHref != "/docs/sync.md" {
+		t.Fatalf("page CanonicalHref = %q, want /docs/sync.md", page.CanonicalHref)
+	}
+}
+
+func TestResolveCanonicalLink_WithRootPrefixLeavesRelativeExternalAndHashLinksUnchanged(t *testing.T) {
+	index := NewIndexWithOptions([]Entry{
+		{Kind: EntryKindPage, Path: "glossary.md"},
+	}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	relative := index.Resolve("sync/page.md", "../glossary.md")
+	if relative.Kind != TargetKindPage || relative.CanonicalHref != "../glossary.md" {
+		t.Fatalf("relative link resolved as %#v, want page with unchanged relative href", relative)
+	}
+
+	for _, href := range []string{"https://example.com/docs/a.md", "//example.com/docs/a.md", "mailto:a@example.com", "#local"} {
+		result := index.Resolve("sync/page.md", href)
+		if result.Kind != TargetKindExternal {
+			t.Fatalf("Resolve(%q).Kind = %q, want external", href, result.Kind)
+		}
+		if result.CanonicalHref != href {
+			t.Fatalf("Resolve(%q).CanonicalHref = %q, want unchanged", href, result.CanonicalHref)
+		}
+	}
+}
+
+func TestResolveCanonicalLink_WithRootPrefixResolvesPrefixedAssets(t *testing.T) {
+	index := NewIndexWithOptions(nil, Options{MarkdownLinkRootPrefix: "/docs"})
+
+	result := index.Resolve("index.md", "/docs/assets/logo.png")
+
+	if result.Kind != TargetKindAsset {
+		t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindAsset, result)
+	}
+	if result.CanonicalHref != "/docs/assets/logo.png" {
+		t.Fatalf("CanonicalHref = %q, want /docs/assets/logo.png", result.CanonicalHref)
+	}
+}
+
 // - Section trailing slash is accepted but canonicalized away
 func TestResolveCanonicalLink_SectionTrailingSlashIsAcceptedButCanonicalizedAway(t *testing.T) {
 	index := NewIndex([]Entry{

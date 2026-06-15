@@ -955,19 +955,23 @@ rtk make test
 Focused E2E commands should use the existing local runner patterns:
 
 ```bash
-rtk env E2E_RUN_MODE=local ./e2e/run.sh tests/root-dir.spec.ts --grep "markdown link root prefix"
+rtk env E2E_RUN_MODE=local E2E_ENABLE_SEPARATE_ROOT_DIR=1 E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs ./e2e/run.sh tests/root-dir.spec.ts --grep "markdown link root prefix"
 ```
 
 ```bash
-rtk env E2E_RUN_MODE=local E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh tests/workspace-sync.spec.ts --grep "markdown link root prefix"
+rtk env E2E_RUN_MODE=local E2E_ENABLE_WORKSPACE_SYNC=1 E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs ./e2e/run.sh tests/workspace-sync.spec.ts --grep "markdown link root prefix"
 ```
 
 ```bash
-rtk env E2E_RUN_MODE=local ./e2e/run.sh tests/page.spec.ts --grep "markdown link root prefix"
+rtk env E2E_RUN_MODE=local E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs ./e2e/run.sh tests/page.spec.ts --grep "markdown link root prefix"
 ```
 
 ```bash
-rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 ./e2e/run.sh tests/mcp-agent-context.spec.ts --grep "markdown link root prefix"
+rtk env E2E_RUN_MODE=local E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs E2E_BASE_PATH=/wiki ./e2e/run.sh tests/page.spec.ts --grep "markdown link root prefix remains separate from base path"
+```
+
+```bash
+rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_WORKSPACE_SYNC=1 E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs ./e2e/run.sh tests/mcp-agent-context.spec.ts --grep "markdown link root prefix"
 ```
 
 If the frontend build output is current and the changed E2E does not require

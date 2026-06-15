@@ -1048,6 +1048,39 @@ func TestConfigEndpoint_IncludesEnableLinkRefactor(t *testing.T) {
 	}
 }
 
+func TestConfigEndpoint_IncludesMarkdownLinkRootPrefix(t *testing.T) {
+	w := createWikiTestInstance(t)
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+		PublicAccess:            true,
+		InjectCodeInHeader:      "",
+		AllowInsecure:           true,
+		AccessTokenTimeout:      15 * time.Minute,
+		RefreshTokenTimeout:     7 * 24 * time.Hour,
+		HideLinkMetadataSection: false,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		MarkdownLinkRootPrefix:  "/docs",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+
+	if got := resp["markdownLinkRootPrefix"]; got != "/docs" {
+		t.Fatalf("Expected markdownLinkRootPrefix=/docs, got %v in %v", got, resp)
+	}
+}
+
 func TestConfigEndpoint_IncludesEnableWorkspaceSyncWhenDisabled(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)

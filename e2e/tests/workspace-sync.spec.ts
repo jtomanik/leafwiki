@@ -15,6 +15,7 @@ const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
+const markdownLinkRootPrefix = process.env.E2E_MARKDOWN_LINK_ROOT_PREFIX || '';
 
 type WorkspaceSnapshot = {
   id: string;
@@ -272,6 +273,47 @@ Direct filesystem content`,
     await page.goto(toAppPath(`/${sectionSlug}/agent-hooks-plan.md`));
     await expect(page.locator('article')).toContainText('Normalized filename content');
     await expectWorkspaceStatusNotToMention(page, 'agent_hooks.PLAN.md');
+  });
+
+  test('markdown link root prefix rewrites unprefixed absolute links', async ({ page }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+    const suffix = Date.now();
+    const sourcePath = `prefix-sync-source-${suffix}.md`;
+    const targetPath = `sync/prefix-sync-target-${suffix}.md`;
+    const sourceID = `prefix-sync-source-${suffix}`;
+    const targetID = `prefix-sync-target-${suffix}`;
+
+    writeRootMarkdown(
+      targetPath,
+      canonicalPageMarkdown(
+        targetID,
+        `Prefix Sync Target ${suffix}`,
+        `# Prefix Sync Target ${suffix}`,
+      ),
+    );
+    writeRootMarkdown(
+      sourcePath,
+      canonicalPageMarkdown(
+        sourceID,
+        `Prefix Sync Source ${suffix}`,
+        `# Prefix Sync Source ${suffix}
+
+[Target](/sync/prefix-sync-target-${suffix}.md)`,
+      ),
+    );
+
+    const status = await refreshWorkspaceSync(page);
+    expect(validationErrorsMentioning(status.validationErrors ?? [], sourceID)).toEqual([]);
+
+    await expect
+      .poll(() => readRootMarkdown(sourcePath), { timeout: 15000 })
+      .toContain(`/docs/sync/prefix-sync-target-${suffix}.md`);
+
+    const snapshotsBefore = await listWorkspaceSnapshots(page);
+    await refreshWorkspaceSync(page);
+    const snapshotsAfter = await listWorkspaceSnapshots(page);
+    expect(snapshotsAfter.length).toBe(snapshotsBefore.length);
   });
 
   test('root README renders at home and Explorer Home returns to slash', async ({ page }) => {

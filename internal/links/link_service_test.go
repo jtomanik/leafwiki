@@ -747,6 +747,108 @@ leafwiki_title: Sync Section
 	}
 }
 
+func TestLinkService_IndexAllPages_ResolvesMarkdownLinkRootPrefix(t *testing.T) {
+	dataDir := t.TempDir()
+	repoRoot := t.TempDir()
+	rootDir := filepath.Join(repoRoot, "docs")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source.md"), `---
+leafwiki_id: source
+leafwiki_title: Source
+---
+# Source
+
+[Glossary](/docs/sync/glossary.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "sync", "glossary.md"), `---
+leafwiki_id: glossary
+leafwiki_title: Glossary
+---
+# Glossary
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkServiceWithOptions(dataDir, ts, store, LinkServiceOptions{
+		MarkdownLinkRootPrefix: "/docs",
+	})
+	source, err := ts.GetPage("source")
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+
+	if err := svc.IndexAllPages(); err != nil {
+		t.Fatalf("IndexAllPages failed: %v", err)
+	}
+
+	outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
+	}
+	if outgoing.Count != 1 {
+		t.Fatalf("outgoing.Count = %d, want 1: %#v", outgoing.Count, outgoing)
+	}
+	if outgoing.Outgoings[0].ToPath != "/sync/glossary" || outgoing.Outgoings[0].Broken {
+		t.Fatalf("outgoing link = %#v, want resolved /sync/glossary", outgoing.Outgoings[0])
+	}
+}
+
+func TestLinkService_UpdateLinksForPage_ResolvesMarkdownLinkRootPrefix(t *testing.T) {
+	dataDir := t.TempDir()
+	repoRoot := t.TempDir()
+	rootDir := filepath.Join(repoRoot, "docs")
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "source.md"), `---
+leafwiki_id: source
+leafwiki_title: Source
+---
+# Source
+
+[Glossary](/docs/sync/glossary.md)
+`)
+	writeLinkServiceMarkdown(t, filepath.Join(rootDir, "sync", "glossary.md"), `---
+leafwiki_id: glossary
+leafwiki_title: Glossary
+---
+# Glossary
+`)
+
+	ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := ts.LoadTree(); err != nil {
+		t.Fatalf("LoadTree failed: %v", err)
+	}
+	store, err := NewLinksStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	svc := NewLinkServiceWithOptions(dataDir, ts, store, LinkServiceOptions{
+		MarkdownLinkRootPrefix: "/docs",
+	})
+	source, err := ts.GetPage("source")
+	if err != nil {
+		t.Fatalf("GetPage source failed: %v", err)
+	}
+
+	if err := svc.UpdateLinksForPage(source, source.Content); err != nil {
+		t.Fatalf("UpdateLinksForPage failed: %v", err)
+	}
+
+	outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
+	}
+	if outgoing.Count != 1 {
+		t.Fatalf("outgoing.Count = %d, want 1: %#v", outgoing.Count, outgoing)
+	}
+	if outgoing.Outgoings[0].ToPath != "/sync/glossary" || outgoing.Outgoings[0].Broken {
+		t.Fatalf("outgoing link = %#v, want resolved /sync/glossary", outgoing.Outgoings[0])
+	}
+}
+
 func TestLinkService_IndexAllPages_ReusesMarkdownIndexForRootBackedBatch(t *testing.T) {
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")

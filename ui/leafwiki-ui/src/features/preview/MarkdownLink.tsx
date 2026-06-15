@@ -11,10 +11,12 @@ import {
   normalizeWikiRoutePath,
   resolveReadmeFallbackRoutePath,
   resolveWikiLinkPath,
+  stripMarkdownLinkRootPrefix,
   toWikiLookupPath,
   type WikiNodeKind,
 } from '@/lib/wikiPath'
 import { useAppMode } from '@/lib/useAppMode'
+import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useSessionStore } from '@/stores/session'
 import { useTreeStore } from '@/stores/tree'
@@ -42,6 +44,9 @@ export function MarkdownLink({
   const openDialog = useDialogsStore((s) => s.openDialog)
   const getPageByPath = useTreeStore((s) => s.getPageByPath)
   const user = useSessionStore((s) => s.user)
+  const markdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
 
   const editMode = useAppMode() === 'edit'
 
@@ -65,11 +70,14 @@ export function MarkdownLink({
   }
 
   if (isInternal) {
+    const hrefForLookup = href.startsWith('/')
+      ? stripMarkdownLinkRootPrefix(href, markdownLinkRootPrefix)
+      : href
     // check if it is a asset link
-    if (href.startsWith('assets/') || href.startsWith('/assets/')) {
-      const path = href.startsWith('/assets/')
-        ? href
-        : '/assets/' + href.slice('assets/'.length)
+    if (hrefForLookup.startsWith('assets/') || hrefForLookup.startsWith('/assets/')) {
+      const path = hrefForLookup.startsWith('/assets/')
+        ? hrefForLookup
+        : '/assets/' + hrefForLookup.slice('assets/'.length)
 
       const resolvedPath = resolveAssetUrl?.(path) ?? path
       const assetHref = withBasePath(resolvedPath)
@@ -91,8 +99,18 @@ export function MarkdownLink({
     let normalizedHref = href
     let browserHref = href
     if (href.startsWith('/')) {
-      normalizedHref = markdownHrefToWikiRoutePath('/', href)
-      browserHref = markdownHrefToWikiBrowserPath('/', href)
+      normalizedHref = markdownHrefToWikiRoutePath(
+        '/',
+        href,
+        sourceKind,
+        markdownLinkRootPrefix,
+      )
+      browserHref = markdownHrefToWikiBrowserPath(
+        '/',
+        href,
+        sourceKind,
+        markdownLinkRootPrefix,
+      )
     } else {
       // Relative link (e.g. "../stoff/change", "child-page", "./foo")
       let locationPath = window.location.pathname

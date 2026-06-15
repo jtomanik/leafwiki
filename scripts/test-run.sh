@@ -34,6 +34,7 @@ help_output="$("$script" --help)"
 assert_contains "$help_output" "mcp" "help"
 assert_contains "$help_output" "agent-hook" "help"
 assert_contains "$help_output" "--leafwiki-bin" "help"
+assert_contains "$help_output" "--markdown-link-root-prefix" "help"
 assert_contains "$help_output" "--api-key" "help"
 assert_contains "$help_output" "--enable-workspace-sync" "help"
 assert_contains "$help_output" "--disable-workspace-sync" "help"
@@ -63,6 +64,15 @@ assert_contains "$native_default_output" "--log-target file" "native dry-run"
 assert_contains "$native_default_output" "--enable-workspace-sync" "native dry-run"
 assert_not_contains "$native_default_output" "--log-target stderr" "native dry-run"
 assert_not_contains "$native_default_output" "$removed_binary" "native dry-run"
+
+native_prefix_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --markdown-link-root-prefix /docs 2>&1)"
+assert_contains "$native_prefix_output" "--markdown-link-root-prefix /docs" "native prefix dry-run"
+
+native_env_prefix_output="$(
+  LEAFWIKI_RUN_MCP_MARKDOWN_LINK_ROOT_PREFIX=/docs \
+  "$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki 2>&1
+)"
+assert_contains "$native_env_prefix_output" "--markdown-link-root-prefix /docs" "native env prefix dry-run"
 
 config_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --config ./leafwiki.yml 2>&1)"
 assert_contains "$config_output" "Would run LeafWiki with YAML config for MCP" "config dry-run"
@@ -94,6 +104,13 @@ bad_config_mix_status=$?
 set -e
 [[ "$bad_config_mix_status" -ne 0 ]] || fail "config mixed with root-dir unexpectedly succeeded"
 assert_contains "$bad_config_mix_output" "--config cannot be combined with --root-dir" "config root-dir mix error"
+
+set +e
+bad_config_prefix_mix_output="$("$script" mcp --dry-run --config ./leafwiki.yml --markdown-link-root-prefix /docs 2>&1)"
+bad_config_prefix_mix_status=$?
+set -e
+[[ "$bad_config_prefix_mix_status" -ne 0 ]] || fail "config mixed with markdown-link-root-prefix unexpectedly succeeded"
+assert_contains "$bad_config_prefix_mix_output" "--config cannot be combined with --markdown-link-root-prefix" "config markdown-link-root-prefix mix error"
 
 set +e
 bad_hook_config_mix_output="$("$script" agent-hook codex --dry-run --config ./leafwiki.yml --root-dir ./wiki 2>&1)"
@@ -459,6 +476,7 @@ LEAFWIKI_RUN_MCP_API_KEY=lwk_runtime_secret \
   --port 18081 \
   --root-dir "$tmp_dir/wiki" \
   --data-dir "$tmp_dir/data" \
+  --markdown-link-root-prefix /docs \
   --daemon-idle-timeout 1s \
   <<< '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   > "$native_stdout_file" \
@@ -470,6 +488,8 @@ assert_contains "$(cat "$native_stderr_file")" "native diagnostic stderr" "nativ
 assert_contains "$(cat "$native_args_file")" "--mcp=stdio" "native leafwiki args"
 assert_contains "$(cat "$native_args_file")" "--daemon-idle-timeout" "native leafwiki args"
 assert_contains "$(cat "$native_args_file")" "1s" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "--markdown-link-root-prefix" "native leafwiki args"
+assert_contains "$(cat "$native_args_file")" "/docs" "native leafwiki args"
 assert_contains "$(cat "$native_args_file")" "--log-target" "native leafwiki args"
 assert_contains "$(cat "$native_args_file")" "file" "native leafwiki args"
 assert_not_contains "$(cat "$native_args_file")" "stderr" "native leafwiki args"

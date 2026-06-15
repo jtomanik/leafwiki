@@ -43,22 +43,23 @@ import (
 )
 
 type Wiki struct {
-	tree                *tree.TreeService
-	slug                *tree.SlugService
-	auth                *auth.AuthService
-	apiKeys             *auth.APIKeyService
-	userResolver        *auth.UserResolver
-	user                *auth.UserService
-	asset               *assets.AssetService
-	branding            *branding.BrandingService
-	searchIndex         *search.SQLiteIndex
-	status              *search.IndexingStatus
-	storageDir          string
-	workspace           Workspace
-	workspaceSync       *workspacesync.Service
-	workspaceSyncCancel context.CancelFunc
-	webPresence         *wikipresence.WebPresenceRegistry
-	agentPresence       *projectdaemon.AgentPresenceRegistry
+	tree                   *tree.TreeService
+	slug                   *tree.SlugService
+	auth                   *auth.AuthService
+	apiKeys                *auth.APIKeyService
+	userResolver           *auth.UserResolver
+	user                   *auth.UserService
+	asset                  *assets.AssetService
+	branding               *branding.BrandingService
+	searchIndex            *search.SQLiteIndex
+	status                 *search.IndexingStatus
+	storageDir             string
+	workspace              Workspace
+	markdownLinkRootPrefix string
+	workspaceSync          *workspacesync.Service
+	workspaceSyncCancel    context.CancelFunc
+	webPresence            *wikipresence.WebPresenceRegistry
+	agentPresence          *projectdaemon.AgentPresenceRegistry
 
 	// Domain route registrars (populated by NewWiki).
 	pagesRoutes         *wikipages.Routes
@@ -98,6 +99,7 @@ type WikiOptions struct {
 	EnableWorkspaceSync     bool          // Whether workspace sync is enabled
 	MaxRevisionHistory      int           // Max revisions kept per page; 0 = unlimited
 	MaxAssetUploadSizeBytes int64         // Maximum allowed size in bytes for asset/import uploads; 0 = default
+	MarkdownLinkRootPrefix  string        // Repository-root prefix for absolute Markdown links
 }
 
 func NewWiki(options *WikiOptions) (*Wiki, error) {
@@ -112,9 +114,10 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		return nil, err
 	}
 	w := &Wiki{
-		storageDir: workspace.DataDir,
-		workspace:  workspace,
-		log:        slog.Default().With("component", "Wiki"),
+		storageDir:             workspace.DataDir,
+		workspace:              workspace,
+		markdownLinkRootPrefix: options.MarkdownLinkRootPrefix,
+		log:                    slog.Default().With("component", "Wiki"),
 	}
 	if err := w.initAuth(options); err != nil {
 		return nil, err
@@ -265,10 +268,11 @@ func (w *Wiki) initCoreServices(options *WikiOptions) error {
 	})
 	if options.EnableWorkspaceSync {
 		service, err := workspacesync.NewService(workspacesync.ServiceOptions{
-			Enabled: true,
-			DataDir: w.workspace.DataDir,
-			RootDir: w.workspace.RootDir,
-			Tree:    w.tree,
+			Enabled:                true,
+			DataDir:                w.workspace.DataDir,
+			RootDir:                w.workspace.RootDir,
+			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+			Tree:                   w.tree,
 		})
 		if err != nil {
 			return err
@@ -296,7 +300,9 @@ func (w *Wiki) initLinkService() error {
 	if err != nil {
 		return fmt.Errorf("failed to init links store: %w", err)
 	}
-	w.links = links.NewLinkService(w.storageDir, w.tree, linksStore)
+	w.links = links.NewLinkServiceWithOptions(w.storageDir, w.tree, linksStore, links.LinkServiceOptions{
+		MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+	})
 	if err := w.links.IndexAllPages(); err != nil {
 		w.log.Warn("failed to index links on startup", "error", err)
 	}
@@ -503,10 +509,14 @@ func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
 		SortPages:        wikipages.NewSortPagesUseCase(w.tree),
 		EnsurePath:       wikipages.NewEnsurePathUseCase(w.tree, w.slug, o, w.log),
 		SuggestSlug:      wikipages.NewSuggestSlugUseCase(w.tree, w.slug),
-		PreviewRefactor:  wikipages.NewPreviewPageRefactorUseCase(w.tree, w.slug, w.links, w.log),
-		ApplyRefactor:    wikipages.NewApplyPageRefactorUseCaseWithOrchestrator(w.tree, w.slug, w.revision, w.links, o, w.log),
-		UserResolver:     w.userResolver,
-		AuthService:      w.auth,
+		PreviewRefactor: wikipages.NewPreviewPageRefactorUseCaseWithOptions(w.tree, w.slug, w.links, w.log, wikipages.RefactorUseCaseOptions{
+			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+		}),
+		ApplyRefactor: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.revision, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
+			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+		}),
+		UserResolver: w.userResolver,
+		AuthService:  w.auth,
 	})
 }
 
@@ -611,7 +621,9 @@ func (w *Wiki) buildImporterRoutes(options *WikiOptions) *wikiimporter.Routes {
 	adapter := NewWikiImportAdapter(w)
 	planner := coreimporter.NewPlanner(adapter, w.slug)
 	store := coreimporter.NewPlanStore(filepath.Join(importerDir, "current-plan.json"))
-	svc := coreimporter.NewImporterService(planner, store, filepath.Join(importerDir, "workspaces"), options.MaxAssetUploadSizeBytes)
+	svc := coreimporter.NewImporterServiceWithOptions(planner, store, filepath.Join(importerDir, "workspaces"), options.MaxAssetUploadSizeBytes, coreimporter.ImporterServiceOptions{
+		MarkdownLinkRootPrefix: options.MarkdownLinkRootPrefix,
+	})
 	return wikiimporter.NewRoutes(wikiimporter.RoutesConfig{
 		CreatePlan:  wikiimporter.NewCreateImportPlanUseCase(svc),
 		GetPlan:     wikiimporter.NewGetImportPlanUseCase(svc),
@@ -641,8 +653,12 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		EnsurePath:   wikipages.NewEnsurePathUseCase(w.tree, w.slug, o, w.log),
 		ConvertPage:  wikipages.NewConvertPageUseCase(w.tree, w.revision, o, w.log),
 		CopyPage:     wikipages.NewCopyPageUseCase(w.tree, w.slug, o, w.asset, w.log),
-		PreviewRef:   wikipages.NewPreviewPageRefactorUseCase(w.tree, w.slug, w.links, w.log),
-		ApplyRef:     wikipages.NewApplyPageRefactorUseCaseWithOrchestrator(w.tree, w.slug, w.revision, w.links, o, w.log),
+		PreviewRef: wikipages.NewPreviewPageRefactorUseCaseWithOptions(w.tree, w.slug, w.links, w.log, wikipages.RefactorUseCaseOptions{
+			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+		}),
+		ApplyRef: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.revision, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
+			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+		}),
 		Search:       wikisearch.NewSearchUseCase(w.searchIndex, w.tags, w.tree),
 		SearchStatus: wikisearch.NewGetIndexingStatusUseCase(w.status),
 		GetTags:      wikitags.NewGetTagsUseCase(w.tags),
@@ -670,6 +686,7 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		ListWorkspaceSnapshots:   w.WorkspaceSyncSnapshotPage,
 		WorkspaceRootDir:         w.workspace.RootDir,
 		WorkspaceDataDir:         w.workspace.DataDir,
+		MarkdownLinkRootPrefix:   w.markdownLinkRootPrefix,
 		WebPresenceProvider:      w.WebPresenceSessions,
 		AgentPresenceProvider:    w.AgentPresenceSessions,
 		UserService:              w.user,

@@ -28,6 +28,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tools"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -54,6 +55,7 @@ func writeUsage(w io.Writer) {
 	--port             Port to run the server on (default: 8080)
 	--data-dir         Path to data directory (default: ./data)
 	--root-dir         Path to managed markdown content directory (default: <data-dir>/root)
+	--markdown-link-root-prefix Repository-root prefix for absolute Markdown links (for example /docs) (default: "")
 	--admin-password   Initial admin password (used only if no admin exists)
 	--jwt-secret       Secret for signing auth tokens (JWT) (required)
 	--public-access    Allow public access to the wiki only with read access (default: false)
@@ -90,6 +92,7 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_PORT
 	LEAFWIKI_DATA_DIR
 	LEAFWIKI_ROOT_DIR
+	LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX
 	LEAFWIKI_JWT_SECRET
 	LEAFWIKI_LOG_LEVEL
 	LEAFWIKI_ADMIN_PASSWORD
@@ -218,6 +221,7 @@ type cliFlags struct {
 	port                    *string
 	dataDir                 *string
 	rootDir                 *string
+	markdownLinkRootPrefix  *string
 	adminPassword           *string
 	jwtSecret               *string
 	publicAccess            *bool
@@ -280,6 +284,7 @@ type leafwikiRuntimeConfig struct {
 	DaemonIdleTimeout       time.Duration
 	DaemonStartupErrorPath  string
 	DetachDaemonOwnerIO     bool
+	MarkdownLinkRootPrefix  string
 }
 
 func registerFlags(fs *flag.FlagSet) *cliFlags {
@@ -289,6 +294,7 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		port:                    fs.String("port", "", "port to run the server on"),
 		dataDir:                 fs.String("data-dir", "", "path to data directory"),
 		rootDir:                 fs.String("root-dir", "", "path to managed markdown content directory"),
+		markdownLinkRootPrefix:  fs.String("markdown-link-root-prefix", "", "repository-root prefix for absolute Markdown links (for example /docs)"),
 		adminPassword:           fs.String("admin-password", "", "initial admin password"),
 		jwtSecret:               fs.String("jwt-secret", "", "JWT secret for authentication"),
 		publicAccess:            fs.Bool("public-access", false, "allow public access to the wiki with read access (default: false)"),
@@ -439,6 +445,10 @@ func main() {
 	// If disable-auth is set, later logic will override publicAccess accordingly
 	disableAuth := resolveBool("disable-auth", *flags.disableAuth, visited, "LEAFWIKI_DISABLE_AUTH")
 	basePath := normalizeBasePath(resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""))
+	markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
+	if err != nil {
+		fail("Invalid markdown link root prefix", "error", err)
+	}
 	maxAssetUploadSize := parseByteSize(
 		resolveString("max-asset-upload-size", *flags.maxAssetUploadSize, visited, "LEAFWIKI_MAX_ASSET_UPLOAD_SIZE", "50MiB"),
 		"max asset upload size",
@@ -500,6 +510,7 @@ func main() {
 		AccessTokenTimeout:      accessTokenTimeout,
 		RefreshTokenTimeout:     refreshTokenTimeout,
 		BasePath:                basePath,
+		MarkdownLinkRootPrefix:  markdownLinkRootPrefix,
 		MaxAssetUploadSize:      maxAssetUploadSize,
 		EnableRevision:          enableRevision,
 		EnableWorkspaceSync:     enableWorkspaceSync,
@@ -671,6 +682,7 @@ func valueTakingFlagNames() map[string]struct{} {
 		"jwt-secret":                   {},
 		"log-file":                     {},
 		"log-target":                   {},
+		"markdown-link-root-prefix":    {},
 		"max-asset-upload-size":        {},
 		"max-revision-history":         {},
 		"mcp":                          {},
@@ -1273,6 +1285,7 @@ func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, er
 		Host:                    cfg.Host,
 		Port:                    cfg.Port,
 		BasePath:                cfg.BasePath,
+		MarkdownLinkRootPrefix:  cfg.MarkdownLinkRootPrefix,
 		PublicAccess:            cfg.PublicAccess,
 		AllowInsecure:           cfg.AllowInsecure,
 		AccessTokenTimeout:      cfg.AccessTokenTimeout.String(),
@@ -1725,16 +1738,17 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	defer rootLock.Release()
 
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{ID: cfg.Workspace.ID, DataDir: ownerCfg.DataDir, RootDir: ownerCfg.RootDir},
-		StorageDir:          ownerCfg.DataDir,
-		AdminPassword:       cfg.AdminPassword,
-		JWTSecret:           cfg.JWTSecret,
-		AccessTokenTimeout:  cfg.AccessTokenTimeout,
-		RefreshTokenTimeout: cfg.RefreshTokenTimeout,
-		AuthDisabled:        cfg.DisableAuth,
-		EnableRevision:      cfg.EnableRevision,
-		EnableWorkspaceSync: cfg.EnableWorkspaceSync,
-		MaxRevisionHistory:  cfg.MaxRevisionHistory,
+		Workspace:              wiki.Workspace{ID: cfg.Workspace.ID, DataDir: ownerCfg.DataDir, RootDir: ownerCfg.RootDir},
+		StorageDir:             ownerCfg.DataDir,
+		AdminPassword:          cfg.AdminPassword,
+		JWTSecret:              cfg.JWTSecret,
+		AccessTokenTimeout:     cfg.AccessTokenTimeout,
+		RefreshTokenTimeout:    cfg.RefreshTokenTimeout,
+		AuthDisabled:           cfg.DisableAuth,
+		EnableRevision:         cfg.EnableRevision,
+		EnableWorkspaceSync:    cfg.EnableWorkspaceSync,
+		MaxRevisionHistory:     cfg.MaxRevisionHistory,
+		MarkdownLinkRootPrefix: cfg.MarkdownLinkRootPrefix,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize Wiki: %w", err)
@@ -1755,6 +1769,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 		refreshTokenTimeout:     cfg.RefreshTokenTimeout,
 		authDisabled:            cfg.DisableAuth,
 		basePath:                cfg.BasePath,
+		markdownLinkRootPrefix:  cfg.MarkdownLinkRootPrefix,
 		maxAssetUploadSize:      cfg.MaxAssetUploadSize,
 		enableRevision:          cfg.EnableRevision,
 		enableWorkspaceSync:     cfg.EnableWorkspaceSync,
@@ -2079,6 +2094,17 @@ func resolveString(flagName, flagVal string, visited map[string]bool, envVar str
 	return def
 }
 
+func resolveMarkdownLinkRootPrefix(flags *cliFlags, visited map[string]bool) (string, error) {
+	value := resolveString(
+		"markdown-link-root-prefix",
+		*flags.markdownLinkRootPrefix,
+		visited,
+		"LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX",
+		"",
+	)
+	return markdownlinks.NormalizeMarkdownLinkRootPrefix(value)
+}
+
 func resolveWorkspace(flags *cliFlags, visited map[string]bool) (wiki.Workspace, error) {
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	rootDir := resolveString("root-dir", *flags.rootDir, visited, "LEAFWIKI_ROOT_DIR", "")
@@ -2192,6 +2218,7 @@ func configFileFlagNames() map[string]struct{} {
 		"jwt-secret":                   {},
 		"log-file":                     {},
 		"log-target":                   {},
+		"markdown-link-root-prefix":    {},
 		"max-asset-upload-size":        {},
 		"max-revision-history":         {},
 		"mcp":                          {},
@@ -2432,6 +2459,7 @@ type httpRouterOptionsInput struct {
 	refreshTokenTimeout     time.Duration
 	authDisabled            bool
 	basePath                string
+	markdownLinkRootPrefix  string
 	maxAssetUploadSize      int64
 	enableRevision          bool
 	enableWorkspaceSync     bool
@@ -2454,6 +2482,7 @@ func buildHTTPRouterOptions(in httpRouterOptionsInput) httpinternal.RouterOption
 		RefreshTokenTimeout:     in.refreshTokenTimeout,
 		AuthDisabled:            in.authDisabled,
 		BasePath:                in.basePath,
+		MarkdownLinkRootPrefix:  in.markdownLinkRootPrefix,
 		MaxAssetUploadSizeBytes: in.maxAssetUploadSize,
 		EnableRevision:          in.enableRevision,
 		EnableWorkspaceSync:     in.enableWorkspaceSync,

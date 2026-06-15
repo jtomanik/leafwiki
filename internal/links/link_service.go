@@ -9,17 +9,37 @@ import (
 )
 
 type LinkService struct {
-	storageDir  string
-	treeService *tree.TreeService
-	store       *LinksStore
+	storageDir             string
+	treeService            *tree.TreeService
+	store                  *LinksStore
+	markdownLinkRootPrefix string
+}
+
+type LinkServiceOptions struct {
+	MarkdownLinkRootPrefix string
 }
 
 func NewLinkService(storageDir string, treeService *tree.TreeService, store *LinksStore) *LinkService {
+	return NewLinkServiceWithOptions(storageDir, treeService, store, LinkServiceOptions{})
+}
+
+func NewLinkServiceWithOptions(storageDir string, treeService *tree.TreeService, store *LinksStore, opts LinkServiceOptions) *LinkService {
 	return &LinkService{
-		storageDir:  storageDir,
-		treeService: treeService,
-		store:       store,
+		storageDir:             storageDir,
+		treeService:            treeService,
+		store:                  store,
+		markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
 	}
+}
+
+func (b *LinkService) markdownLinkOptions() markdownlinks.Options {
+	return markdownlinks.Options{
+		MarkdownLinkRootPrefix: b.markdownLinkRootPrefix,
+	}
+}
+
+func (b *LinkService) markdownLinkIndexForTree() *markdownlinks.Index {
+	return markdownLinkIndexForTreeWithOptions(b.treeService, b.markdownLinkOptions())
 }
 
 func (b *LinkService) IndexAllPages() error {
@@ -40,7 +60,7 @@ func (b *LinkService) IndexAllPages() error {
 	}
 
 	pages, errs := b.treeService.GetPages(ids)
-	markdownIndex := markdownLinkIndexForTree(b.treeService)
+	markdownIndex := b.markdownLinkIndexForTree()
 	for i, page := range pages {
 		if errs[i] != nil {
 			return errs[i]
@@ -98,7 +118,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 			continue
 		}
 		if markdownIndex == nil {
-			markdownIndex = markdownLinkIndexForTree(b.treeService)
+			markdownIndex = b.markdownLinkIndexForTree()
 		}
 		pagePath := normalizeWikiPath(page.CalculatePath())
 		targets := rewriteResolvedTargets(pagePath, page.Kind, outgoingByPageID[page.ID], rules, b.treeService, markdownIndex)
@@ -176,7 +196,7 @@ func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*Lin
 func (b *LinkService) UpdateLinksForPage(page *tree.Page, content string) error {
 	links := extractLinksFromMarkdown(content)
 
-	targets := resolveTargetLinksForSourceKind(b.treeService, page.CalculatePath(), page.Kind, links)
+	targets := resolveTargetLinksWithIndex(b.treeService, b.markdownLinkIndexForTree(), page.CalculatePath(), page.Kind, links)
 
 	err := b.store.AddLinks(page.ID, page.Title, targets)
 	if err != nil {
@@ -194,7 +214,7 @@ func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 			continue
 		}
 		if markdownIndex == nil {
-			markdownIndex = markdownLinkIndexForTree(b.treeService)
+			markdownIndex = b.markdownLinkIndexForTree()
 		}
 		pagePath := normalizeWikiPath(page.CalculatePath())
 		links := extractLinksFromMarkdown(page.Content)

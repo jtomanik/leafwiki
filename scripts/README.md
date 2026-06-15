@@ -174,6 +174,7 @@ Useful commands:
 ./scripts/run.sh mcp --dry-run --disable-workspace-sync
 ./scripts/run.sh mcp --dry-run --config ./leafwiki.yml
 ./scripts/run.sh mcp --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
+./scripts/run.sh mcp --root-dir "$PWD/docs" --markdown-link-root-prefix /docs
 ./scripts/run.sh agent-hook codex --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
 ./scripts/run.sh agent-hook codex --config ./leafwiki.yml
 LEAFWIKI_MCP_API_KEY=lwk_<id>_<secret> ./scripts/run.sh mcp --root-dir "$PWD/wiki"
@@ -186,6 +187,7 @@ Wrapper behavior:
 - Config mode rejects normal wrapper options such as `--root-dir`, `--data-dir`, `--disable-auth`, `--enable-workspace-sync`, `--api-key`, and `--server-arg`. Use YAML keys that mirror public LeafWiki CLI flags instead.
 - Config mode does not append wrapper defaults. YAML values override environment variables for present keys; omitted YAML keys still use LeafWiki environment/default behavior.
 - Workspace sync is enabled by default. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit `--enable-workspace-sync`.
+- `--markdown-link-root-prefix` and `LEAFWIKI_RUN_MCP_MARKDOWN_LINK_ROOT_PREFIX` pass through to LeafWiki outside config mode. Use YAML `markdown-link-root-prefix:` in config mode. This is separate from `--base-path`; it only controls authored/generated Markdown hrefs such as `/docs/page.md`.
 - Outside config mode, `--api-key` and `LEAFWIKI_RUN_MCP_API_KEY` are translated into `LEAFWIKI_MCP_API_KEY` for the child process. In config mode, wrapper env translation is skipped; put `api-key:` in YAML or set `LEAFWIKI_MCP_API_KEY` directly.
 - API-key attach mode does not need `LEAFWIKI_JWT_SECRET` or `LEAFWIKI_ADMIN_PASSWORD` when a compatible owner is already running.
 - If this invocation must bootstrap a new auth-enabled owner, pass `--jwt-secret` and `--admin-password`; dry-run output redacts these values.

@@ -261,6 +261,60 @@ func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
 	}
 }
 
+func TestWiki_MarkdownLinkRootPrefixFlowsToWorkspaceSyncAndLinkIndex(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "repo", "docs")
+	if err := os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755); err != nil {
+		t.Fatalf("create sync dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), []byte(`---
+leafwiki_id: source
+leafwiki_title: Source
+---
+# Source
+
+[Glossary](/docs/sync/glossary.md)
+`), 0o644); err != nil {
+		t.Fatalf("write source.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "sync", "glossary.md"), []byte(`---
+leafwiki_id: glossary
+leafwiki_title: Glossary
+---
+# Glossary
+`), 0o644); err != nil {
+		t.Fatalf("write glossary.md: %v", err)
+	}
+
+	w, err := NewWiki(&WikiOptions{
+		Workspace:              Workspace{DataDir: dataDir, RootDir: rootDir},
+		AdminPassword:          "admin",
+		JWTSecret:              "secretkey",
+		AccessTokenTimeout:     15 * time.Minute,
+		RefreshTokenTimeout:    7 * 24 * time.Hour,
+		EnableWorkspaceSync:    true,
+		MarkdownLinkRootPrefix: "/docs",
+	})
+	if err != nil {
+		t.Fatalf("NewWiki: %v", err)
+	}
+	if status := w.WorkspaceSyncStatus(); len(status.ValidationErrors) != 0 {
+		t.Fatalf("ValidationErrors = %#v, want prefix-aware validation", status.ValidationErrors)
+	}
+	source, err := w.tree.GetPage("source")
+	if err != nil {
+		t.Fatalf("GetPage source: %v", err)
+	}
+	outgoing, err := w.links.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage: %v", err)
+	}
+	if outgoing.Count != 1 || outgoing.Outgoings[0].ToPath != "/sync/glossary" || outgoing.Outgoings[0].Broken {
+		t.Fatalf("outgoing = %#v, want resolved /sync/glossary", outgoing)
+	}
+	test_utils.WrapCloseWithErrorCheck(w.Close, t)
+}
+
 func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")

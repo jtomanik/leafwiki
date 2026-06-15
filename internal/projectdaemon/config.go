@@ -29,6 +29,7 @@ type Config struct {
 	Host                    string `json:"host"`
 	Port                    string `json:"port"`
 	BasePath                string `json:"basePath"`
+	MarkdownLinkRootPrefix  string `json:"markdownLinkRootPrefix"`
 	PublicAccess            bool   `json:"publicAccess"`
 	AllowInsecure           bool   `json:"allowInsecure"`
 	AccessTokenTimeout      string `json:"accessTokenTimeout"`

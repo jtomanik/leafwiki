@@ -307,12 +307,14 @@ func TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars(t *testing.T
 	t.Setenv("LEAFWIKI_PORT", "9999")
 	t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
 	t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
+	t.Setenv("LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX", "/wiki-docs")
 	t.Setenv("LEAFWIKI_PUBLIC_ACCESS", "true")
 	t.Setenv("LEAFWIKI_MAX_REVISION_HISTORY", "100")
 
 	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
 	writeTestConfig(t, configPath, `port: 8088
 base-path: ""
+markdown-link-root-prefix: docs/
 public-access: false
 max-revision-history: 0
 `)
@@ -329,6 +331,13 @@ max-revision-history: 0
 	}
 	if got := resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""); got != "" {
 		t.Fatalf("base-path = %q, want explicit YAML empty string to override env", got)
+	}
+	markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
+	if err != nil {
+		t.Fatalf("resolve markdown-link-root-prefix: %v", err)
+	}
+	if markdownLinkRootPrefix != "/docs" {
+		t.Fatalf("markdown-link-root-prefix = %q, want /docs", markdownLinkRootPrefix)
 	}
 	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
 		t.Fatalf("public-access = true, want explicit YAML false to override env")
@@ -3511,6 +3520,7 @@ func TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields(t *testi
 		{name: "host", field: "host", mut: func(cfg *projectdaemon.Config) { cfg.Host = "127.0.0.2" }},
 		{name: "port", field: "port", mut: func(cfg *projectdaemon.Config) { cfg.Port = "9090" }},
 		{name: "base path", field: "base-path", mut: func(cfg *projectdaemon.Config) { cfg.BasePath = "/docs" }},
+		{name: "markdown link root prefix", field: "markdown-link-root-prefix", mut: func(cfg *projectdaemon.Config) { cfg.MarkdownLinkRootPrefix = "/docs" }},
 		{name: "public access", field: "public-access", mut: func(cfg *projectdaemon.Config) { cfg.PublicAccess = !cfg.PublicAccess }},
 		{name: "allow insecure", field: "allow-insecure", mut: func(cfg *projectdaemon.Config) { cfg.AllowInsecure = !cfg.AllowInsecure }},
 		{name: "access token timeout", field: "access-token-timeout", mut: func(cfg *projectdaemon.Config) { cfg.AccessTokenTimeout = "2h0m0s" }},

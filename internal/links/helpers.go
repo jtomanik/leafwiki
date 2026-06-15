@@ -235,18 +235,33 @@ func splitLinkDestinationSuffix(destination string) (string, string) {
 }
 
 func markdownLinkIndexForTree(treeService *tree.TreeService) *markdownlinks.Index {
+	return markdownLinkIndexForTreeWithOptions(treeService, markdownlinks.Options{})
+}
+
+func markdownLinkIndexForTreeWithOptions(treeService *tree.TreeService, opts markdownlinks.Options) *markdownlinks.Index {
 	if treeService == nil {
-		return markdownlinks.NewIndex(nil)
+		return markdownlinks.NewIndexWithOptions(nil, opts)
 	}
 	if rootDir := strings.TrimSpace(treeService.RootDir()); rootDir != "" {
-		if index, err := newMarkdownLinkIndexFromRoot(rootDir); err == nil {
+		var index *markdownlinks.Index
+		var err error
+		if strings.TrimSpace(opts.MarkdownLinkRootPrefix) == "" {
+			index, err = newMarkdownLinkIndexFromRoot(rootDir)
+		} else {
+			index, err = markdownlinks.NewIndexFromRootWithOptions(rootDir, opts)
+		}
+		if err == nil {
 			return index
 		}
 	}
-	return markdownLinkIndexFromLoadedTree(treeService.GetTree())
+	return markdownLinkIndexFromLoadedTreeWithOptions(treeService.GetTree(), opts)
 }
 
 func markdownLinkIndexFromLoadedTree(root *tree.PageNode) *markdownlinks.Index {
+	return markdownLinkIndexFromLoadedTreeWithOptions(root, markdownlinks.Options{})
+}
+
+func markdownLinkIndexFromLoadedTreeWithOptions(root *tree.PageNode, opts markdownlinks.Options) *markdownlinks.Index {
 	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, Path: "", ContentPath: "index.md"}}
 	var walk func(node *tree.PageNode)
 	walk = func(node *tree.PageNode) {
@@ -274,7 +289,7 @@ func markdownLinkIndexFromLoadedTree(root *tree.PageNode) *markdownlinks.Index {
 		}
 	}
 	walk(root)
-	return markdownlinks.NewIndex(entries)
+	return markdownlinks.NewIndexWithOptions(entries, opts)
 }
 
 func markdownSourceFileForRoute(routePath string, kind tree.NodeKind) string {

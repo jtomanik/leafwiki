@@ -46,27 +46,37 @@ type ExecutionItemResult struct {
 }
 
 type Executor struct {
-	plan          *PlanResult
-	planOptions   *PlanOptions
-	assetMaxBytes int64
-	wiki          ImporterWiki
-	logger        *slog.Logger
-	progressFn    func(ExecutionProgress, *ExecutionResult)
-	cancelFn      func() bool
-	startIndex    int
-	initialResult *ExecutionResult
+	plan                   *PlanResult
+	planOptions            *PlanOptions
+	assetMaxBytes          int64
+	wiki                   ImporterWiki
+	logger                 *slog.Logger
+	markdownLinkRootPrefix string
+	progressFn             func(ExecutionProgress, *ExecutionResult)
+	cancelFn               func() bool
+	startIndex             int
+	initialResult          *ExecutionResult
+}
+
+type ExecutorOptions struct {
+	MarkdownLinkRootPrefix string
 }
 
 func NewExecutor(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes int64, wiki ImporterWiki, logger *slog.Logger) *Executor {
+	return NewExecutorWithOptions(plan, planOptions, assetMaxBytes, wiki, logger, ExecutorOptions{})
+}
+
+func NewExecutorWithOptions(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes int64, wiki ImporterWiki, logger *slog.Logger, opts ExecutorOptions) *Executor {
 	if assetMaxBytes <= 0 {
 		assetMaxBytes = assets.DefaultMaxUploadSizeBytes
 	}
 	return &Executor{
-		plan:          plan,
-		planOptions:   planOptions,
-		assetMaxBytes: assetMaxBytes,
-		wiki:          wiki,
-		logger:        logger.With("component", "ImporterExecutor"),
+		plan:                   plan,
+		planOptions:            planOptions,
+		assetMaxBytes:          assetMaxBytes,
+		wiki:                   wiki,
+		logger:                 logger.With("component", "ImporterExecutor"),
+		markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
 	}
 }
 
@@ -115,7 +125,9 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("plan is stale: expected tree_hash %s but got %s", expectedTreeHash, beforeExecution)
 	}
 
-	transformer := newContentTransformer(e.plan, e.planOptions.SourceBasePath, e.assetMaxBytes)
+	transformer := newContentTransformerWithOptions(e.plan, e.planOptions.SourceBasePath, e.assetMaxBytes, ContentTransformerOptions{
+		MarkdownLinkRootPrefix: e.markdownLinkRootPrefix,
+	})
 	startedAt := time.Now()
 
 	result := cloneExecutionResult(e.initialResult)

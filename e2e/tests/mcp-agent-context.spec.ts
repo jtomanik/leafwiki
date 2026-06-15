@@ -15,6 +15,8 @@ test.skip(
   'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_LOCAL=1, and E2E_ENABLE_WORKSPACE_SYNC=1 to run MCP agent context E2E.',
 );
 
+const markdownLinkRootPrefix = process.env.E2E_MARKDOWN_LINK_ROOT_PREFIX || '';
+
 type ContextCheckpoint = {
   token?: string;
 };
@@ -210,6 +212,53 @@ test('wiki_get_context is the context-first MCP surface', async () => {
     ]);
     expect(subtree.depth).toBe(1);
     expect(typeof subtree.truncated).toBe('boolean');
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('markdown link root prefix is reported and used by MCP validation', async () => {
+  test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+  const suffix = Date.now();
+  writeRootMarkdown(
+    `sync/prefix-mcp-target-${suffix}.md`,
+    `<!-- leafwiki
+version: 1
+page:
+  id: prefix-mcp-target-${suffix}
+  title: Prefix MCP Target ${suffix}
+-->
+
+# Prefix MCP Target ${suffix}
+`,
+  );
+  writeRootMarkdown(
+    `prefix-mcp-source-${suffix}.md`,
+    `<!-- leafwiki
+version: 1
+page:
+  id: prefix-mcp-source-${suffix}
+  title: Prefix MCP Source ${suffix}
+-->
+
+# Prefix MCP Source ${suffix}
+
+[Target](/docs/sync/prefix-mcp-target-${suffix}.md)
+`,
+  );
+
+  const mcp = await connectMCPClient(appURL('/mcp'));
+
+  try {
+    const config = (await mcp.callTool('wiki_get_config')) as { markdownLinkRootPrefix?: string };
+    expect(config.markdownLinkRootPrefix).toBe('/docs');
+
+    const validation = (await mcp.callTool('wiki_validate_wiki', {
+      includeWarnings: false,
+    })) as { ok?: boolean; issues?: ValidationIssue[] };
+    expect(validation.ok).toBe(true);
+    expect((validation.issues ?? []).filter((issue) => issue.code === 'broken_link')).toEqual([]);
   } finally {
     await mcp.close();
   }

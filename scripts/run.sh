@@ -8,6 +8,7 @@ port="${LEAFWIKI_RUN_MCP_PORT:-${LEAFWIKI_PORT:-8080}}"
 base_path="${LEAFWIKI_RUN_MCP_BASE_PATH:-${LEAFWIKI_BASE_PATH:-}}"
 data_dir="${LEAFWIKI_RUN_MCP_DATA_DIR:-${LEAFWIKI_DATA_DIR:-./.wiki}}"
 root_dir="${LEAFWIKI_RUN_MCP_ROOT_DIR:-${LEAFWIKI_ROOT_DIR:-./wiki}}"
+markdown_link_root_prefix="${LEAFWIKI_RUN_MCP_MARKDOWN_LINK_ROOT_PREFIX:-${LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX:-}}"
 jwt_secret="${LEAFWIKI_RUN_MCP_JWT_SECRET:-${LEAFWIKI_JWT_SECRET:-}}"
 admin_password="${LEAFWIKI_RUN_MCP_ADMIN_PASSWORD:-${LEAFWIKI_ADMIN_PASSWORD:-}}"
 allow_insecure="${LEAFWIKI_RUN_MCP_ALLOW_INSECURE:-${LEAFWIKI_ALLOW_INSECURE:-1}}"
@@ -40,6 +41,8 @@ Options:
   --base-path <path>        LeafWiki base path, if any
   --data-dir <path>         LeafWiki data directory (default: ./.wiki)
   --root-dir <path>         LeafWiki root markdown directory (default: ./wiki)
+  --markdown-link-root-prefix <path>
+                            Repository-root Markdown href prefix, such as /docs
   --jwt-secret <secret>     JWT secret only when this run must bootstrap an auth-enabled owner
   --admin-password <pass>   Admin password only when this run must bootstrap an auth-enabled owner
   --disable-auth            Force disabled-auth STDIO identity
@@ -132,7 +135,7 @@ detect_config_mode_requested() {
 
 wrapper_flag_takes_value() {
   case "$1" in
-    --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg|--leafwiki-bin|--scheme|--host|--port|--base-path|--data-dir|--root-dir|--jwt-secret|--admin-password|--daemon-idle-timeout|--api-key|--config|--server-log|--server-arg)
+    --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg|--leafwiki-bin|--scheme|--host|--port|--base-path|--data-dir|--root-dir|--markdown-link-root-prefix|--jwt-secret|--admin-password|--daemon-idle-timeout|--api-key|--config|--server-log|--server-arg)
       return 0
       ;;
     *)
@@ -337,6 +340,17 @@ while [[ $# -gt 0 ]]; do
       record_config_conflict "--root-dir"
       shift 2
       ;;
+    --markdown-link-root-prefix=*)
+      markdown_link_root_prefix="${1#*=}"
+      record_config_conflict "--markdown-link-root-prefix"
+      shift
+      ;;
+    --markdown-link-root-prefix)
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--markdown-link-root-prefix" "--markdown-link-root-prefix requires a path"
+      markdown_link_root_prefix="$2"
+      record_config_conflict "--markdown-link-root-prefix"
+      shift 2
+      ;;
     --jwt-secret=*)
       jwt_secret="${1#*=}"
       record_config_conflict "--jwt-secret"
@@ -523,6 +537,9 @@ if [[ -z "$config_path" ]]; then
   fi
   if [[ -n "$base_path" ]]; then
     leafwiki_cmd+=(--base-path "$base_path")
+  fi
+  if [[ -n "$markdown_link_root_prefix" ]]; then
+    leafwiki_cmd+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
   fi
   if truthy "$disable_request_log"; then
     leafwiki_cmd+=(--disable-request-log)

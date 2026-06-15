@@ -74,10 +74,11 @@ func (r *Routes) validateWorkspaceMarkdownFiles(ctx context.Context, includeWarn
 		return r.validationAssetExists(ctx, pageID)
 	})
 	return wikivalidation.ValidateWorkspaceMarkdownFiles(wikivalidation.WorkspaceMarkdownValidationOptions{
-		RootDir:         r.workspaceRootDir,
-		IncludeWarnings: includeWarnings,
-		PageIDExists:    r.validationPageIDExists,
-		AssetExists:     assetExists,
+		RootDir:                r.workspaceRootDir,
+		IncludeWarnings:        includeWarnings,
+		MarkdownLinkRootPrefix: r.markdownLinkRootPrefix,
+		PageIDExists:           r.validationPageIDExists,
+		AssetExists:            assetExists,
 	})
 }
 
@@ -198,8 +199,9 @@ func (r *Routes) validateMarkdownContent(ctx context.Context, routePath string, 
 		ResolveMarkdownLink: func(destination string) (string, tree.NodeKind, bool, string) {
 			return r.resolveValidationMarkdownLink(routePath, sourceKind, destination)
 		},
-		PageIDExists: r.validationPageIDExists,
-		AssetExists:  r.validationAssetExists(ctx, existingPageID),
+		PageIDExists:           r.validationPageIDExists,
+		AssetExists:            r.validationAssetExists(ctx, existingPageID),
+		MarkdownLinkRootPrefix: r.markdownLinkRootPrefix,
 	})
 }
 
@@ -247,7 +249,7 @@ func markdownTargetNodeKind(kind markdownlinks.TargetKind) tree.NodeKind {
 
 func (r *Routes) validationMarkdownLinkIndex() *markdownlinks.Index {
 	if rootDir := strings.TrimSpace(r.workspaceRootDir); rootDir != "" {
-		if index, err := markdownlinks.NewIndexFromRoot(rootDir); err == nil {
+		if index, err := markdownlinks.NewIndexFromRootWithOptions(rootDir, markdownlinks.Options{MarkdownLinkRootPrefix: r.markdownLinkRootPrefix}); err == nil {
 			return index
 		}
 	}
@@ -282,7 +284,7 @@ func (r *Routes) validationMarkdownLinkIndex() *markdownlinks.Index {
 		}
 	}
 	walk(root)
-	return markdownlinks.NewIndex(entries)
+	return markdownlinks.NewIndexWithOptions(entries, markdownlinks.Options{MarkdownLinkRootPrefix: r.markdownLinkRootPrefix})
 }
 
 func validationSourceKindOrDefault(kind tree.NodeKind) tree.NodeKind {

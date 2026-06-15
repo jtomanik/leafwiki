@@ -1,5 +1,7 @@
 import { DIALOG_IMAGE_PREVIEW } from '@/lib/registries'
 import { withBasePath } from '@/lib/routePath'
+import { stripMarkdownLinkRootPrefix } from '@/lib/wikiPath'
+import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -40,9 +42,20 @@ export function MarkdownImage({
 }: MarkdownImageProps & { node?: unknown }) {
   void node
   const openDialog = useDialogsStore((s) => s.openDialog)
+  const markdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
   const resolvedSrc = useMemo(
-    () => resolveAssetUrl?.(src) ?? src,
-    [resolveAssetUrl, src],
+    () =>
+      resolveAssetUrl?.(
+        src.startsWith('/')
+          ? stripMarkdownLinkRootPrefix(src, markdownLinkRootPrefix)
+          : src,
+      ) ??
+      (src.startsWith('/')
+        ? stripMarkdownLinkRootPrefix(src, markdownLinkRootPrefix)
+        : src),
+    [markdownLinkRootPrefix, resolveAssetUrl, src],
   )
   const [versionedSrc, setVersionedSrc] = useState(() =>
     normalizeImageSrc(resolvedSrc),

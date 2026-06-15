@@ -24,13 +24,18 @@ type importTarget struct {
 }
 
 type contentTransformer struct {
-	sourceBasePath  string
-	assetMaxBytes   int64
-	slugger         *tree.SlugService
-	pagesBySource   map[string]importTarget
-	pagesByBasename map[string][]importTarget
-	pagesBySuffix   map[string][]importTarget
-	assetUploads    map[string]string
+	sourceBasePath         string
+	assetMaxBytes          int64
+	markdownLinkRootPrefix string
+	slugger                *tree.SlugService
+	pagesBySource          map[string]importTarget
+	pagesByBasename        map[string][]importTarget
+	pagesBySuffix          map[string][]importTarget
+	assetUploads           map[string]string
+}
+
+type ContentTransformerOptions struct {
+	MarkdownLinkRootPrefix string
 }
 
 var importerMarkdownParser = goldmark.New()
@@ -38,6 +43,10 @@ var importerMarkdownParser = goldmark.New()
 // newContentTransformer precomputes source->target lookups from the import plan.
 // We resolve links against planned imports so we only rewrite destinations we can actually create.
 func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxBytes int64) *contentTransformer {
+	return newContentTransformerWithOptions(plan, sourceBasePath, assetMaxBytes, ContentTransformerOptions{})
+}
+
+func newContentTransformerWithOptions(plan *PlanResult, sourceBasePath string, assetMaxBytes int64, opts ContentTransformerOptions) *contentTransformer {
 	pagesBySource := make(map[string]importTarget, len(plan.Items))
 	pagesByBasename := make(map[string][]importTarget, len(plan.Items))
 	pagesBySuffix := make(map[string][]importTarget, len(plan.Items))
@@ -59,13 +68,14 @@ func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxByte
 	}
 
 	return &contentTransformer{
-		sourceBasePath:  sourceBasePath,
-		assetMaxBytes:   assetMaxBytes,
-		slugger:         tree.NewSlugService(),
-		pagesBySource:   pagesBySource,
-		pagesByBasename: pagesByBasename,
-		pagesBySuffix:   pagesBySuffix,
-		assetUploads:    map[string]string{},
+		sourceBasePath:         sourceBasePath,
+		assetMaxBytes:          assetMaxBytes,
+		markdownLinkRootPrefix: strings.TrimRight(strings.TrimSpace(opts.MarkdownLinkRootPrefix), "/"),
+		slugger:                tree.NewSlugService(),
+		pagesBySource:          pagesBySource,
+		pagesByBasename:        pagesByBasename,
+		pagesBySuffix:          pagesBySuffix,
+		assetUploads:           map[string]string{},
 	}
 }
 
@@ -414,7 +424,7 @@ func (t *contentTransformer) resolveDestination(
 	rawTarget = decodeImportTarget(rawTarget)
 
 	if target, ok := t.resolvePageTarget(sourcePath, rawTarget); ok {
-		return "/" + formatResolvedTargetPath(target) + suffix, false, nil
+		return t.formatResolvedHref(target) + suffix, false, nil
 	}
 
 	assetPath, err := t.resolveAndUploadAsset(userID, sourcePath, page, rawTarget, wiki)
@@ -439,6 +449,21 @@ func formatResolvedTargetPath(target importTarget) string {
 		}
 		return trimmed + ".md"
 	}
+}
+
+func (t *contentTransformer) formatResolvedHref(target importTarget) string {
+	href := "/" + formatResolvedTargetPath(target)
+	prefix := strings.TrimSpace(t.markdownLinkRootPrefix)
+	if prefix == "" {
+		return href
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	if href == "/" {
+		return strings.TrimRight(prefix, "/")
+	}
+	return strings.TrimRight(prefix, "/") + href
 }
 
 // resolvePageTarget resolves links only against files that are part of the current import plan.
@@ -693,7 +718,7 @@ func (t *contentTransformer) fallbackWikiPageHref(sourcePath string, href string
 	if basenameKey, ok := basenameOnlyLookupKey(rawTarget); ok {
 		exactMatches, hasExactMatches := t.pagesByBasename[basenameKey]
 		if matches := uniqueImportTargets(exactMatches); len(matches) == 1 {
-			return "/" + formatResolvedTargetPath(matches[0]) + suffix, true
+			return t.formatResolvedHref(matches[0]) + suffix, true
 		}
 		if hasExactMatches && len(exactMatches) > 0 {
 			return "", false

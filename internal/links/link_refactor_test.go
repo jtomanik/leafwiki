@@ -67,6 +67,47 @@ func TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelat
 	}
 }
 
+func TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixForAbsoluteOutput(t *testing.T) {
+	content := "[Absolute](/sync/old.md)\n[Relative](./old.md)"
+
+	result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
+		MarkdownLinkRootPrefix: "/docs",
+	}).Rewrite(content, "/sync/source", []RewriteRule{{
+		OldPath: "/sync/old",
+		NewPath: "/sync/new",
+		Kind:    "page",
+	}})
+
+	if result.Count() != 2 {
+		t.Fatalf("expected 2 changes, got %d; content:\n%s", result.Count(), result.Content)
+	}
+	if !strings.Contains(result.Content, "[Absolute](/docs/sync/new.md)") {
+		t.Fatalf("expected prefixed absolute canonical link rewrite, got:\n%s", result.Content)
+	}
+	if !strings.Contains(result.Content, "[Relative](./new.md)") {
+		t.Fatalf("expected relative link to remain relative, got:\n%s", result.Content)
+	}
+}
+
+func TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixForPrefixedAbsoluteInput(t *testing.T) {
+	content := "[Absolute](/docs/sync/old.md)"
+
+	result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
+		MarkdownLinkRootPrefix: "/docs",
+	}).Rewrite(content, "/sync/source", []RewriteRule{{
+		OldPath: "/sync/old",
+		NewPath: "/sync/new",
+		Kind:    "page",
+	}})
+
+	if result.Count() != 1 {
+		t.Fatalf("expected 1 change, got %d; content:\n%s", result.Count(), result.Content)
+	}
+	if !strings.Contains(result.Content, "[Absolute](/docs/sync/new.md)") {
+		t.Fatalf("expected prefixed absolute canonical link rewrite, got:\n%s", result.Content)
+	}
+}
+
 func TestMarkdownRefactorEngine_RewriteCanonicalPageLinksPreservesExplicitDotSlashStyle(t *testing.T) {
 	content := "[Relative](./b.md)"
 

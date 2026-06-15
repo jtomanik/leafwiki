@@ -323,6 +323,68 @@ leafwiki_title: Page B
 	}
 }
 
+func TestServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix(t *testing.T) {
+	dataDir := t.TempDir()
+	repoRoot := t.TempDir()
+	rootDir := filepath.Join(repoRoot, "docs")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "a.md"), `---
+leafwiki_id: page-a
+leafwiki_title: Page A
+---
+# Page A
+
+[Glossary](/sync/glossary.md)
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "sync", "glossary.md"), `---
+leafwiki_id: glossary
+leafwiki_title: Glossary
+---
+# Glossary
+`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled:                true,
+		DataDir:                dataDir,
+		RootDir:                rootDir,
+		Tree:                   treeService,
+		MarkdownLinkRootPrefix: "/docs",
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		status, err := service.SyncNow(context.Background(), SyncRequest{
+			Reason: ReasonExplicit,
+			Source: SourceFilesystem,
+			Actor:  PublicEditorActor(),
+		})
+		if err != nil {
+			t.Fatalf("SyncNow %d: %v", i+1, err)
+		}
+		if len(status.ValidationErrors) != 0 {
+			t.Fatalf("SyncNow %d ValidationErrors = %#v, want none", i+1, status.ValidationErrors)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(rootDir, "a.md"))
+	if err != nil {
+		t.Fatalf("ReadFile a.md: %v", err)
+	}
+	if !strings.Contains(string(raw), "[Glossary](/docs/sync/glossary.md)") {
+		t.Fatalf("a.md = %q, want prefixed canonical link", string(raw))
+	}
+	snapshots, err := service.ListSnapshots(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want raw commit plus one prefixed canonical migration: %#v", len(snapshots), snapshots)
+	}
+}
+
 // - Relative old page link migrates to relative .md
 // - Existing canonical .md page link is not rewritten
 func TestServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical(t *testing.T) {

@@ -164,6 +164,7 @@ func (r *Routes) handleConfig(ctx httpinternal.RouterContext) gin.HandlerFunc {
 			"hideLinkMetadataSection": opts.HideLinkMetadataSection,
 			"authDisabled":            opts.AuthDisabled,
 			"basePath":                opts.BasePath,
+			"markdownLinkRootPrefix":  opts.MarkdownLinkRootPrefix,
 			"maxAssetUploadSizeBytes": opts.MaxAssetUploadSizeBytes,
 			"enableRevision":          opts.EnableRevision,
 			"enableWorkspaceSync":     opts.EnableWorkspaceSync,

@@ -244,6 +244,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--port`                         | Port the server listens on                                              | `8080`        | –       |
 | `--data-dir`                     | Directory where data is stored                                          | `./data`      | –       |
 | `--root-dir`                     | Directory where managed markdown pages and `.order.json` are stored     | `<data-dir>/root` | –    |
+| `--markdown-link-root-prefix`     | Repository-root prefix for absolute Markdown hrefs, for example `/docs` | `""`          | v0.11.0 |
 | `--config`                       | Flat YAML config file; cannot be combined with normal CLI flags         | `""`          | v0.11.0 |
 | `--public-access`                | Allow public read-only access                                           | `false`       | –       |
 | `--base-path`                    | URL prefix for reverse proxy setups (e.g. `/wiki`)                      | `""`          | v0.8.2  |
@@ -281,6 +282,7 @@ host: 127.0.0.1
 port: 8080
 data-dir: ./.wiki
 root-dir: ./wiki
+markdown-link-root-prefix: /docs
 jwt-secret: change-me
 admin-password: change-me
 allow-insecure: true
@@ -304,6 +306,7 @@ The config file is a flat mapping of scalar values. Unknown keys, duplicate keys
 | `LEAFWIKI_PORT`                         | Port                                                 | `8080`        | –       |
 | `LEAFWIKI_DATA_DIR`                     | Data directory path                                  | `./data`      | –       |
 | `LEAFWIKI_ROOT_DIR`                     | Managed markdown content directory                   | `<data-dir>/root` | –    |
+| `LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX`    | Repository-root prefix for absolute Markdown hrefs   | `""`          | v0.11.0 |
 | `LEAFWIKI_ADMIN_PASSWORD`               | Initial admin password *(required)*                  | –             | –       |
 | `LEAFWIKI_JWT_SECRET`                   | JWT signing secret *(required)*                      | –             | –       |
 | `LEAFWIKI_PUBLIC_ACCESS`                | Allow public read-only access                        | `false`       | –       |
@@ -442,6 +445,7 @@ LeafWiki separates app state from managed markdown content:
 - `RootDir` must not contain `DataDir` and must not point inside app-state paths such as `assets`, `.leafwiki`, `.importer`, or `branding`.
 - Changing `RootDir` does not migrate existing markdown. Move or copy content from the old `<data-dir>/root` before switching an existing install.
 - Managed Markdown uses [canonical internal links](docs/canonical-markdown-links.md): page hrefs end in `.md`, section hrefs omit `.md`.
+- `--markdown-link-root-prefix` only controls authored Markdown hrefs, such as `/docs/api.md`; it does not change LeafWiki route paths, API paths, MCP path inputs, or HTTP base paths.
 
 ### Root directory E2E smoke
 

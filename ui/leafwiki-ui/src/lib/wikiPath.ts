@@ -182,6 +182,36 @@ function markdownPathnameToBrowserRoutePath(pathname: string): string {
   return normalizeWikiRoutePath(normalized)
 }
 
+export function normalizeMarkdownLinkRootPrefix(prefix: string): string {
+  const trimmed = prefix.trim().replace(/\/+$/, '')
+  if (trimmed === '') return ''
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+export function stripMarkdownLinkRootPrefix(
+  pathname: string,
+  prefix: string,
+): string {
+  const normalizedPrefix = normalizeMarkdownLinkRootPrefix(prefix)
+  if (normalizedPrefix === '' || !pathname.startsWith('/')) {
+    return pathname
+  }
+  if (pathname === normalizedPrefix) {
+    return '/'
+  }
+  if (pathname.startsWith(`${normalizedPrefix}/`)) {
+    return pathname.slice(normalizedPrefix.length)
+  }
+  return pathname
+}
+
+function addMarkdownLinkRootPrefix(pathname: string, prefix: string): string {
+  const normalizedPrefix = normalizeMarkdownLinkRootPrefix(prefix)
+  if (normalizedPrefix === '') return pathname
+  if (pathname === '/') return normalizedPrefix
+  return `${normalizedPrefix}${pathname}`
+}
+
 function splitPathSuffix(href: string): { pathname: string; suffix: string } {
   const queryIndex = href.indexOf('?')
   const hashIndex = href.indexOf('#')
@@ -227,10 +257,15 @@ export function markdownHrefToWikiRoutePath(
   currentPath: string,
   href: string,
   sourceKind: WikiNodeKind = 'page',
+  markdownLinkRootPrefix = '',
 ): string {
   const { pathname: hrefPath, suffix } = splitPathSuffix(href)
   if (hrefPath.startsWith('/')) {
-    return `${normalizeWikiRoutePath(markdownPathnameToWikiRoutePath(hrefPath))}${suffix}`
+    const strippedPath = stripMarkdownLinkRootPrefix(
+      hrefPath,
+      markdownLinkRootPrefix,
+    )
+    return `${normalizeWikiRoutePath(markdownPathnameToWikiRoutePath(strippedPath))}${suffix}`
   }
 
   const sourceDir = dirname(markdownSourceFileForRoute(currentPath, sourceKind))
@@ -246,10 +281,15 @@ export function markdownHrefToWikiBrowserPath(
   currentPath: string,
   href: string,
   sourceKind: WikiNodeKind = 'page',
+  markdownLinkRootPrefix = '',
 ): string {
   const { pathname: hrefPath, suffix } = splitPathSuffix(href)
   if (hrefPath.startsWith('/')) {
-    return `${markdownPathnameToBrowserRoutePath(hrefPath)}${suffix}`
+    const strippedPath = stripMarkdownLinkRootPrefix(
+      hrefPath,
+      markdownLinkRootPrefix,
+    )
+    return `${markdownPathnameToBrowserRoutePath(strippedPath)}${suffix}`
   }
 
   const sourceDir = dirname(markdownSourceFileForRoute(currentPath, sourceKind))
@@ -279,12 +319,13 @@ export function browserRoutePathForWikiNode(
 export function markdownHrefForWikiPath(
   path: string,
   kind?: 'page' | 'section',
+  markdownLinkRootPrefix = '',
 ): string {
   const normalized = normalizeWikiRoutePath(path)
   if (kind === 'page') {
-    return `${normalized}.md`
+    return addMarkdownLinkRootPrefix(`${normalized}.md`, markdownLinkRootPrefix)
   }
-  return normalized
+  return addMarkdownLinkRootPrefix(normalized, markdownLinkRootPrefix)
 }
 
 /**

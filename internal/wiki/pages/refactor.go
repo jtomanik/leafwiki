@@ -64,10 +64,11 @@ type RefactorApplyInput struct {
 
 // PreviewPageRefactorUseCase computes what would change if a refactor is applied.
 type PreviewPageRefactorUseCase struct {
-	tree  *tree.TreeService
-	slug  *tree.SlugService
-	links *links.LinkService
-	log   *slog.Logger
+	tree                   *tree.TreeService
+	slug                   *tree.SlugService
+	links                  *links.LinkService
+	log                    *slog.Logger
+	markdownLinkRootPrefix string
 }
 
 // NewPreviewPageRefactorUseCase constructs a PreviewPageRefactorUseCase.
@@ -77,7 +78,21 @@ func NewPreviewPageRefactorUseCase(
 	l *links.LinkService,
 	log *slog.Logger,
 ) *PreviewPageRefactorUseCase {
-	return &PreviewPageRefactorUseCase{tree: t, slug: s, links: l, log: log}
+	return NewPreviewPageRefactorUseCaseWithOptions(t, s, l, log, RefactorUseCaseOptions{})
+}
+
+type RefactorUseCaseOptions struct {
+	MarkdownLinkRootPrefix string
+}
+
+func NewPreviewPageRefactorUseCaseWithOptions(
+	t *tree.TreeService,
+	s *tree.SlugService,
+	l *links.LinkService,
+	log *slog.Logger,
+	opts RefactorUseCaseOptions,
+) *PreviewPageRefactorUseCase {
+	return &PreviewPageRefactorUseCase{tree: t, slug: s, links: l, log: log, markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix}
 }
 
 // Execute computes the refactor preview without making changes.
@@ -210,7 +225,7 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 		totalMatches++
 	}
 
-	engine := links.NewMarkdownRefactorEngine()
+	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
 	items := make([]RefactorAffectedPage, 0, len(grouped))
 	for _, item := range grouped {
 		sourcePage, err := uc.tree.GetPage(item.FromPageID)
@@ -243,13 +258,14 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 
 // ApplyPageRefactorUseCase applies a rename or move with optional link rewriting.
 type ApplyPageRefactorUseCase struct {
-	tree         *tree.TreeService
-	slug         *tree.SlugService
-	revision     *revision.Service
-	links        *links.LinkService
-	orchestrator *pagesave.PageSaveOrchestrator
-	log          *slog.Logger
-	preview      *PreviewPageRefactorUseCase
+	tree                   *tree.TreeService
+	slug                   *tree.SlugService
+	revision               *revision.Service
+	links                  *links.LinkService
+	orchestrator           *pagesave.PageSaveOrchestrator
+	log                    *slog.Logger
+	preview                *PreviewPageRefactorUseCase
+	markdownLinkRootPrefix string
 }
 
 // NewApplyPageRefactorUseCase constructs an ApplyPageRefactorUseCase.
@@ -260,13 +276,25 @@ func NewApplyPageRefactorUseCase(
 	l *links.LinkService,
 	log *slog.Logger,
 ) *ApplyPageRefactorUseCase {
+	return NewApplyPageRefactorUseCaseWithOptions(t, s, r, l, log, RefactorUseCaseOptions{})
+}
+
+func NewApplyPageRefactorUseCaseWithOptions(
+	t *tree.TreeService,
+	s *tree.SlugService,
+	r *revision.Service,
+	l *links.LinkService,
+	log *slog.Logger,
+	opts RefactorUseCaseOptions,
+) *ApplyPageRefactorUseCase {
 	uc := &ApplyPageRefactorUseCase{
-		tree:     t,
-		slug:     s,
-		revision: r,
-		links:    l,
-		log:      log,
-		preview:  NewPreviewPageRefactorUseCase(t, s, l, log),
+		tree:                   t,
+		slug:                   s,
+		revision:               r,
+		links:                  l,
+		log:                    log,
+		markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
+		preview:                NewPreviewPageRefactorUseCaseWithOptions(t, s, l, log, opts),
 	}
 	uc.orchestrator = uc.defaultOrchestrator()
 	return uc
@@ -283,6 +311,22 @@ func NewApplyPageRefactorUseCaseWithOrchestrator(
 	log *slog.Logger,
 ) *ApplyPageRefactorUseCase {
 	uc := NewApplyPageRefactorUseCase(t, s, r, l, log)
+	if o != nil {
+		uc.orchestrator = o
+	}
+	return uc
+}
+
+func NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(
+	t *tree.TreeService,
+	s *tree.SlugService,
+	r *revision.Service,
+	l *links.LinkService,
+	o *pagesave.PageSaveOrchestrator,
+	log *slog.Logger,
+	opts RefactorUseCaseOptions,
+) *ApplyPageRefactorUseCase {
+	uc := NewApplyPageRefactorUseCaseWithOptions(t, s, r, l, log, opts)
 	if o != nil {
 		uc.orchestrator = o
 	}
@@ -491,7 +535,7 @@ func (uc *ApplyPageRefactorUseCase) captureSnapshots(page *tree.Page, in Refacto
 }
 
 func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source string, affectedPageIDs []string, rules []links.RewriteRule, legacyPageLinkSourceIDs map[string]struct{}) error {
-	engine := links.NewMarkdownRefactorEngine()
+	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
 
 	type pending struct {
 		page    *tree.Page
@@ -552,7 +596,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 }
 
 func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, source string, snapshots []pathChangeSnapshot, oldPath, newPath string) error {
-	engine := links.NewMarkdownRefactorEngine()
+	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
 	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath, Kind: string(planNodeKind(snapshots))}}
 
 	type pending struct {

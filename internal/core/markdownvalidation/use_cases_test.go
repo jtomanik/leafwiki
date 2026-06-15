@@ -114,6 +114,70 @@ func TestValidateWorkspaceMarkdownFiles_ResolvesCanonicalPageMdAndSectionLinks(t
 	}
 }
 
+func TestValidateWorkspaceMarkdownFiles_ResolvesMarkdownLinkRootPrefix(t *testing.T) {
+	repoRoot := t.TempDir()
+	rootDir := filepath.Join(repoRoot, "docs")
+	if err := os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755); err != nil {
+		t.Fatalf("create sync dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "index.md"), canonicalValidationMarkdown("root", "Root", "# Root\n\n[Glossary](/docs/sync/glossary.md)\n"), 0o644); err != nil {
+		t.Fatalf("write root markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "sync", "glossary.md"), canonicalValidationMarkdown("glossary", "Glossary", "# Glossary\n"), 0o644); err != nil {
+		t.Fatalf("write glossary markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{
+		RootDir:                rootDir,
+		MarkdownLinkRootPrefix: "/docs",
+	})
+
+	if !result.OK {
+		t.Fatalf("validation = %#v, want /docs prefix link to resolve inside docs root", result)
+	}
+}
+
+func TestValidateMarkdownContent_ResolvesPrefixedAssetWithMarkdownLinkRootPrefix(t *testing.T) {
+	seenDestination := ""
+	result := ValidateMarkdownContentWithOptions("source", "![Logo](/docs/assets/logo.png)", ContentValidationOptions{
+		ExistingPageID:         "source",
+		MarkdownLinkRootPrefix: "/docs",
+		AssetExists: func(destination string) bool {
+			seenDestination = destination
+			return destination == "/assets/logo.png"
+		},
+	})
+
+	if !result.OK {
+		t.Fatalf("validation = %#v, want prefixed asset to resolve", result)
+	}
+	if seenDestination != "/assets/logo.png" {
+		t.Fatalf("AssetExists destination = %q, want /assets/logo.png", seenDestination)
+	}
+}
+
+func TestValidateMarkdownContent_ReportsMissingPrefixedMarkdownAssetWithMarkdownLinkRootPrefix(t *testing.T) {
+	seenDestination := ""
+	result := ValidateMarkdownContentWithOptions("source", "[Manual](/docs/assets/manual.md)", ContentValidationOptions{
+		ExistingPageID:         "source",
+		MarkdownLinkRootPrefix: "/docs",
+		AssetExists: func(destination string) bool {
+			seenDestination = destination
+			return false
+		},
+	})
+
+	if result.OK {
+		t.Fatalf("validation = %#v, want missing prefixed markdown asset", result)
+	}
+	if len(result.Issues) != 1 || result.Issues[0].Code != "missing_asset" {
+		t.Fatalf("issues = %#v, want one missing_asset issue", result.Issues)
+	}
+	if seenDestination != "/assets/manual.md" {
+		t.Fatalf("AssetExists destination = %q, want /assets/manual.md", seenDestination)
+	}
+}
+
 func TestValidateWorkspaceMarkdownFiles_NormalizesWorkspaceRoutes(t *testing.T) {
 	rootDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {

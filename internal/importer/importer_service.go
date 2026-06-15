@@ -21,6 +21,11 @@ type ImporterService struct {
 	logger                  *slog.Logger
 	assetMaxUploadSizeBytes int64
 	workspaceBaseDir        string
+	markdownLinkRootPrefix  string
+}
+
+type ImporterServiceOptions struct {
+	MarkdownLinkRootPrefix string
 }
 
 type CurrentPlanState struct {
@@ -44,6 +49,10 @@ func (is *ImporterService) SetAssetMaxUploadSizeBytes(n int64) {
 }
 
 func NewImporterService(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes int64) *ImporterService {
+	return NewImporterServiceWithOptions(planner, planStore, workspaceBaseDir, assetMaxUploadSizeBytes, ImporterServiceOptions{})
+}
+
+func NewImporterServiceWithOptions(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes int64, opts ImporterServiceOptions) *ImporterService {
 	if assetMaxUploadSizeBytes <= 0 {
 		assetMaxUploadSizeBytes = assets.DefaultMaxUploadSizeBytes
 	}
@@ -57,6 +66,7 @@ func NewImporterService(planner *Planner, planStore *PlanStore, workspaceBaseDir
 		logger:                  slog.Default().With("component", "ImporterService"),
 		assetMaxUploadSizeBytes: assetMaxUploadSizeBytes,
 		workspaceBaseDir:        workspaceBaseDir,
+		markdownLinkRootPrefix:  opts.MarkdownLinkRootPrefix,
 	}
 	service.resumeInterruptedExecution()
 	return service
@@ -304,7 +314,9 @@ func (is *ImporterService) extractZipReaderToTemp(r io.Reader) (*ZipWorkspace, e
 }
 
 func (is *ImporterService) executeStoredPlan(sp *StoredPlan) (*ExecutionResult, error) {
-	exec := NewExecutor(sp.Plan, &sp.PlanOptions, is.assetMaxUploadSizeBytes, is.planner.wiki, is.planner.log).
+	exec := NewExecutorWithOptions(sp.Plan, &sp.PlanOptions, is.assetMaxUploadSizeBytes, is.planner.wiki, is.planner.log, ExecutorOptions{
+		MarkdownLinkRootPrefix: is.markdownLinkRootPrefix,
+	}).
 		WithProgressCallback(func(progress ExecutionProgress, result *ExecutionResult) {
 			if err := is.planStore.UpdateExecutionProgress(sp.Plan.ID, progress, result); err != nil {
 				is.logger.Error("failed to persist import progress", "error", err)

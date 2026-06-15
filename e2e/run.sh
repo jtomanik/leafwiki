@@ -10,6 +10,7 @@ if [ -n "$app_base_path" ] && [[ "$app_base_path" != /* ]]; then
   echo "❌ E2E_BASE_PATH must start with / when set."
   exit 1
 fi
+markdown_link_root_prefix="${E2E_MARKDOWN_LINK_ROOT_PREFIX:-}"
 app_url="${E2E_BASE_URL:-http://127.0.0.1:${app_port}${app_base_path}}"
 run_mode="${E2E_RUN_MODE:-docker}"
 server_pid=""
@@ -74,6 +75,9 @@ write_leafwiki_e2e_config() {
     printf 'data-dir: %s\n' "$(yaml_quote "$data_dir")"
     if [ -n "$root_dir" ]; then
       printf 'root-dir: %s\n' "$(yaml_quote "$root_dir")"
+    fi
+    if [ -n "$markdown_link_root_prefix" ]; then
+      printf 'markdown-link-root-prefix: %s\n' "$(yaml_quote "$markdown_link_root_prefix")"
     fi
     printf 'daemon-idle-timeout: %s\n' "$(yaml_quote "$idle_timeout")"
     printf 'allow-insecure: true\n'
@@ -193,6 +197,9 @@ prepare_mcp_stdio_command() {
   local sync_args=()
   collect_revision_or_workspace_sync_args
   native_args+=("${sync_args[@]}")
+  if [ -n "$markdown_link_root_prefix" ]; then
+    native_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
+  fi
   if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
     native_args+=(
       --jwt-secret=e2e-tests-secret
@@ -252,6 +259,9 @@ prepare_mcp_stdio_command() {
       printf ' %q' --root-dir "$mcp_stdio_root_dir"
       if [ -n "$app_base_path" ]; then
         printf ' %q' --base-path "$app_base_path"
+      fi
+      if [ -n "$markdown_link_root_prefix" ]; then
+        printf ' %q' --markdown-link-root-prefix "$markdown_link_root_prefix"
       fi
     fi
     printf ' "$@"\n'
@@ -321,6 +331,9 @@ start_docker() {
   local sync_args=()
   collect_revision_or_workspace_sync_args
   server_args+=("${sync_args[@]}")
+  if [ -n "$markdown_link_root_prefix" ]; then
+    server_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
+  fi
 
   if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ] || [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
     docker_root_volume="wiki-e2e-tests-root-${RANDOM}${RANDOM}"
@@ -378,6 +391,9 @@ start_local() {
   fi
   local sync_args=()
   collect_revision_or_workspace_sync_args
+  if [ -n "$markdown_link_root_prefix" ]; then
+    server_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
+  fi
 
   if is_stdio_e2e; then
     echo "✅ STDIO mode will start LeafWiki from the MCP client command."
@@ -583,6 +599,7 @@ run_playwright_tests() {
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
       E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
+      E2E_MARKDOWN_LINK_ROOT_PREFIX="$markdown_link_root_prefix" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \
@@ -600,6 +617,7 @@ run_playwright_tests() {
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
       E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
+      E2E_MARKDOWN_LINK_ROOT_PREFIX="$markdown_link_root_prefix" \
       E2E_REPO_ROOT="$repo_root" \
       E2E_MCP_CLIENT_TRANSPORT="${E2E_MCP_CLIENT_TRANSPORT:-http}" \
       E2E_MCP_STDIO_COMMAND="$mcp_stdio_command" \

@@ -28,6 +28,7 @@ import { e2eBasePath, toAppPath } from '../pages/appPath';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
+const markdownLinkRootPrefix = process.env.E2E_MARKDOWN_LINK_ROOT_PREFIX || '';
 
 const currentDir = __dirname;
 const markdownItSamplePath = join(currentDir, '..', 'assets', 'markdown-it-sample.md');
@@ -79,70 +80,73 @@ async function createPageWithContent(
   page: import('@playwright/test').Page,
   input: { title: string; slug: string; content: string; kind?: 'page' | 'section' },
 ) {
-  await page.evaluate(async ({ title, slug, content, kind }) => {
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+  await page.evaluate(
+    async ({ apiBasePath, title, slug, content, kind }) => {
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page setup');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page setup');
+      }
 
-    const createResponse = await fetch('/api/pages', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        parentId: null,
-        title,
-        slug,
-        kind: kind ?? 'page',
-      }),
-    });
+      const createResponse = await fetch(`${apiBasePath}/api/pages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          parentId: null,
+          title,
+          slug,
+          kind: kind ?? 'page',
+        }),
+      });
 
-    if (!createResponse.ok) {
-      throw new Error(`Failed to create page ${slug}: ${createResponse.status}`);
-    }
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create page ${slug}: ${createResponse.status}`);
+      }
 
-    const createdPage = (await createResponse.json()) as {
-      id: string;
-      title: string;
-      version: string;
-    };
+      const createdPage = (await createResponse.json()) as {
+        id: string;
+        title: string;
+        version: string;
+      };
 
-    const updateResponse = await fetch(`/api/pages/${createdPage.id}`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        version: createdPage.version,
-        title: createdPage.title,
-        slug,
-        content,
-      }),
-    });
+      const updateResponse = await fetch(`${apiBasePath}/api/pages/${createdPage.id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          version: createdPage.version,
+          title: createdPage.title,
+          slug,
+          content,
+        }),
+      });
 
-    if (!updateResponse.ok) {
-      throw new Error(`Failed to update page ${slug}: ${updateResponse.status}`);
-    }
-  }, input);
+      if (!updateResponse.ok) {
+        throw new Error(`Failed to update page ${slug}: ${updateResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function createPageWithMetadata(
@@ -155,71 +159,74 @@ async function createPageWithMetadata(
     properties?: Record<string, string>;
   },
 ) {
-  await page.evaluate(async ({ title, slug, content, tags, properties }) => {
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+  await page.evaluate(
+    async ({ apiBasePath, title, slug, content, tags, properties }) => {
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page setup');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page setup');
+      }
 
-    const createResponse = await fetch('/api/pages', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        parentId: null,
-        title,
-        slug,
-        kind: 'page',
-      }),
-    });
+      const createResponse = await fetch(`${apiBasePath}/api/pages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          parentId: null,
+          title,
+          slug,
+          kind: 'page',
+        }),
+      });
 
-    if (!createResponse.ok) {
-      throw new Error(`Failed to create page ${slug}: ${createResponse.status}`);
-    }
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create page ${slug}: ${createResponse.status}`);
+      }
 
-    const createdPage = (await createResponse.json()) as {
-      id: string;
-      version: string;
-    };
+      const createdPage = (await createResponse.json()) as {
+        id: string;
+        version: string;
+      };
 
-    const updateResponse = await fetch(`/api/pages/${createdPage.id}`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        version: createdPage.version,
-        title,
-        slug,
-        content,
-        tags: tags ?? [],
-        properties: properties ?? {},
-      }),
-    });
+      const updateResponse = await fetch(`${apiBasePath}/api/pages/${createdPage.id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          version: createdPage.version,
+          title,
+          slug,
+          content,
+          tags: tags ?? [],
+          properties: properties ?? {},
+        }),
+      });
 
-    if (!updateResponse.ok) {
-      throw new Error(`Failed to update page ${slug}: ${updateResponse.status}`);
-    }
-  }, input);
+      if (!updateResponse.ok) {
+        throw new Error(`Failed to update page ${slug}: ${updateResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function scrollMainContentTo(page: import('@playwright/test').Page, top: number) {
@@ -276,45 +283,48 @@ async function createTopLevelNode(
     kind: 'page' | 'section';
   },
 ) {
-  await page.evaluate(async ({ title, slug, kind }) => {
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+  await page.evaluate(
+    async ({ apiBasePath, title, slug, kind }) => {
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for top-level node setup');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for top-level node setup');
+      }
 
-    const createResponse = await fetch('/api/pages', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        parentId: null,
-        title,
-        slug,
-        kind,
-      }),
-    });
+      const createResponse = await fetch(`${apiBasePath}/api/pages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          parentId: null,
+          title,
+          slug,
+          kind,
+        }),
+      });
 
-    if (!createResponse.ok) {
-      throw new Error(`Failed to create ${kind} ${slug}: ${createResponse.status}`);
-    }
-  }, input);
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create ${kind} ${slug}: ${createResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function updatePageByPath(
@@ -327,147 +337,153 @@ async function updatePageByPath(
     kind?: 'page' | 'section';
   },
 ) {
-  await page.evaluate(async ({ path, title, slug, content, kind }) => {
-    const normalizedPath = path.replace(/^\/+/, '');
+  await page.evaluate(
+    async ({ apiBasePath, path, title, slug, content, kind }) => {
+      const normalizedPath = path.replace(/^\/+/, '');
 
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page update');
-    }
-
-    const params = new URLSearchParams({ path: normalizedPath });
-    if (kind) params.set('kind', kind);
-    const pageResponse = await fetch(`/api/pages/by-path?${params.toString()}`, {
-      credentials: 'include',
-      headers: {
-        'X-CSRF-Token': csrfToken,
-      },
-    });
-
-    if (!pageResponse.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
-    }
-
-    const currentPage = (await pageResponse.json()) as {
-      id: string;
-      title: string;
-      slug: string;
-      version: string;
-    };
-
-    const updateResponse = await fetch(`/api/pages/${currentPage.id}`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        version: currentPage.version,
-        title: title ?? currentPage.title,
-        slug: slug ?? currentPage.slug,
-        content,
-      }),
-    });
-
-    if (!updateResponse.ok) {
-      throw new Error(`Failed to update page ${normalizedPath}: ${updateResponse.status}`);
-    }
-  }, input);
-}
-
-async function createChildPagesByPath(
-  page: import('@playwright/test').Page,
-  input: { parentPath: string; titles: string[] },
-) {
-  await page.evaluate(async ({ parentPath, titles }) => {
-    const normalizedParentPath = parentPath.replace(/^\/+/, '');
-
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
-
-      if (!hostMatch) return null;
-
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page update');
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test child page setup');
-    }
-
-    const parentResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}`,
-      {
+      const params = new URLSearchParams({ path: normalizedPath });
+      if (kind) params.set('kind', kind);
+      const pageResponse = await fetch(`${apiBasePath}/api/pages/by-path?${params.toString()}`, {
         credentials: 'include',
         headers: {
           'X-CSRF-Token': csrfToken,
         },
-      },
-    );
+      });
 
-    if (!parentResponse.ok) {
-      throw new Error(
-        `Failed to load parent page ${normalizedParentPath}: ${parentResponse.status}`,
-      );
-    }
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
+      }
 
-    const parentPage = (await parentResponse.json()) as { id: string };
+      const currentPage = (await pageResponse.json()) as {
+        id: string;
+        title: string;
+        slug: string;
+        version: string;
+      };
 
-    for (const title of titles) {
-      const slug = title
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^\w-]/g, '');
-
-      const createResponse = await fetch('/api/pages', {
-        method: 'POST',
+      const updateResponse = await fetch(`${apiBasePath}/api/pages/${currentPage.id}`, {
+        method: 'PUT',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken,
         },
         body: JSON.stringify({
-          parentId: parentPage.id,
-          title,
-          slug,
-          kind: 'page',
+          version: currentPage.version,
+          title: title ?? currentPage.title,
+          slug: slug ?? currentPage.slug,
+          content,
         }),
       });
 
-      if (!createResponse.ok) {
-        throw new Error(`Failed to create child page ${slug}: ${createResponse.status}`);
+      if (!updateResponse.ok) {
+        throw new Error(`Failed to update page ${normalizedPath}: ${updateResponse.status}`);
       }
-    }
-  }, input);
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
+}
+
+async function createChildPagesByPath(
+  page: import('@playwright/test').Page,
+  input: { parentPath: string; titles: string[] },
+) {
+  await page.evaluate(
+    async ({ apiBasePath, parentPath, titles }) => {
+      const normalizedParentPath = parentPath.replace(/^\/+/, '');
+
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+
+        if (!hostMatch) return null;
+
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
+      }
+
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test child page setup');
+      }
+
+      const parentResponse = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}&kind=page`,
+        {
+          credentials: 'include',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+          },
+        },
+      );
+
+      if (!parentResponse.ok) {
+        throw new Error(
+          `Failed to load parent page ${normalizedParentPath}: ${parentResponse.status}`,
+        );
+      }
+
+      const parentPage = (await parentResponse.json()) as { id: string };
+
+      for (const title of titles) {
+        const slug = title
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^\w-]/g, '');
+
+        const createResponse = await fetch(`${apiBasePath}/api/pages`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({
+            parentId: parentPage.id,
+            title,
+            slug,
+            kind: 'page',
+          }),
+        });
+
+        if (!createResponse.ok) {
+          throw new Error(`Failed to create child page ${slug}: ${createResponse.status}`);
+        }
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 
   await expect
     .poll(
       async () =>
         page.evaluate(
-          async ({ parentPath }) => {
+          async ({ apiBasePath, parentPath }) => {
             const normalizedParentPath = parentPath.replace(/^\/+/, '');
-            const response = await fetch('/api/tree', {
+            const response = await fetch(`${apiBasePath}/api/tree`, {
               credentials: 'include',
             });
 
@@ -506,7 +522,7 @@ async function createChildPagesByPath(
             const parentPage = findNode(tree, normalizedParentPath);
             return parentPage?.children?.map((child) => child.title).sort() ?? [];
           },
-          { parentPath: input.parentPath },
+          { apiBasePath: e2eBasePath, parentPath: input.parentPath },
         ),
       { timeout: 15000 },
     )
@@ -517,162 +533,159 @@ async function sortChildPagesByPath(
   page: import('@playwright/test').Page,
   input: { parentPath: string; orderedTitles: string[] },
 ) {
-  await page.evaluate(async ({ parentPath, orderedTitles }) => {
-    const normalizedParentPath = parentPath.replace(/^\/+/, '');
+  await page.evaluate(
+    async ({ apiBasePath, parentPath, orderedTitles }) => {
+      const normalizedParentPath = parentPath.replace(/^\/+/, '');
 
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test sort setup');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test sort setup');
+      }
 
-    const parentResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}`,
-      {
+      const parentResponse = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}`,
+        {
+          credentials: 'include',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+          },
+        },
+      );
+
+      if (!parentResponse.ok) {
+        throw new Error(
+          `Failed to load parent page ${normalizedParentPath}: ${parentResponse.status}`,
+        );
+      }
+
+      const parentPage = (await parentResponse.json()) as {
+        id: string;
+        children?: Array<{ id: string; title: string }> | null;
+      };
+
+      const children = parentPage.children ?? [];
+      const orderedIds = orderedTitles.map((title) => {
+        const child = children.find((candidate) => candidate.title === title);
+        if (!child) {
+          throw new Error(`Missing child ${title} under ${normalizedParentPath}`);
+        }
+        return child.id;
+      });
+
+      const sortResponse = await fetch(`${apiBasePath}/api/pages/${parentPage.id}/sort`, {
+        method: 'PUT',
         credentials: 'include',
         headers: {
+          'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken,
         },
-      },
-    );
+        body: JSON.stringify({ orderedIDs: orderedIds }),
+      });
 
-    if (!parentResponse.ok) {
-      throw new Error(
-        `Failed to load parent page ${normalizedParentPath}: ${parentResponse.status}`,
-      );
-    }
-
-    const parentPage = (await parentResponse.json()) as {
-      id: string;
-      children?: Array<{ id: string; title: string }> | null;
-    };
-
-    const children = parentPage.children ?? [];
-    const orderedIds = orderedTitles.map((title) => {
-      const child = children.find((candidate) => candidate.title === title);
-      if (!child) {
-        throw new Error(`Missing child ${title} under ${normalizedParentPath}`);
+      if (!sortResponse.ok) {
+        throw new Error(
+          `Failed to sort children of ${normalizedParentPath}: ${sortResponse.status}`,
+        );
       }
-      return child.id;
-    });
-
-    const sortResponse = await fetch(`/api/pages/${parentPage.id}/sort`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({ orderedIDs: orderedIds }),
-    });
-
-    if (!sortResponse.ok) {
-      throw new Error(`Failed to sort children of ${normalizedParentPath}: ${sortResponse.status}`);
-    }
-  }, input);
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function getChildPageTitlesByPath(page: import('@playwright/test').Page, path: string) {
-  return await page.evaluate(async (targetPath) => {
-    const normalizedPath = targetPath.replace(/^\/+/, '');
-    const response = await fetch(`/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`, {
-      credentials: 'include',
-    });
+  return await page.evaluate(
+    async ({ apiBasePath, targetPath }) => {
+      const normalizedPath = targetPath.replace(/^\/+/, '');
+      const response = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
+        {
+          credentials: 'include',
+        },
+      );
 
-    if (!response.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
-    }
+      if (!response.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
+      }
 
-    const currentPage = (await response.json()) as {
-      children?: Array<{ title: string }> | null;
-    };
+      const currentPage = (await response.json()) as {
+        children?: Array<{ title: string }> | null;
+      };
 
-    return currentPage.children?.map((child) => child.title) ?? [];
-  }, path);
+      return currentPage.children?.map((child) => child.title) ?? [];
+    },
+    { apiBasePath: e2eBasePath, targetPath: path },
+  );
 }
 
 async function getPageContentByPath(page: import('@playwright/test').Page, path: string) {
-  return await page.evaluate(async (targetPath) => {
-    const normalizedPath = targetPath.replace(/^\/+/, '');
-    const response = await fetch(`/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`, {
-      credentials: 'include',
-    });
+  return await page.evaluate(
+    async ({ apiBasePath, targetPath }) => {
+      const normalizedPath = targetPath.replace(/^\/+/, '');
+      const response = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
+        {
+          credentials: 'include',
+        },
+      );
 
-    if (!response.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
-    }
+      if (!response.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${response.status}`);
+      }
 
-    const currentPage = (await response.json()) as {
-      content?: string;
-    };
+      const currentPage = (await response.json()) as {
+        content?: string;
+      };
 
-    return currentPage.content ?? '';
-  }, path);
+      return currentPage.content ?? '';
+    },
+    { apiBasePath: e2eBasePath, targetPath: path },
+  );
 }
 
 async function movePageByPath(
   page: import('@playwright/test').Page,
   input: { path: string; targetParentPath: string },
 ) {
-  await page.evaluate(async ({ path, targetParentPath }) => {
-    const normalizedPath = path.replace(/^\/+/, '');
-    const normalizedTargetParentPath = targetParentPath.replace(/^\/+/, '');
+  await page.evaluate(
+    async ({ apiBasePath, path, targetParentPath }) => {
+      const normalizedPath = path.replace(/^\/+/, '');
+      const normalizedTargetParentPath = targetParentPath.replace(/^\/+/, '');
 
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page move');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page move');
+      }
 
-    const pageResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
-      {
-        credentials: 'include',
-        headers: {
-          'X-CSRF-Token': csrfToken,
-        },
-      },
-    );
-
-    if (!pageResponse.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
-    }
-
-    const currentPage = (await pageResponse.json()) as {
-      id: string;
-      version: string;
-    };
-    let targetParentId: string | null = null;
-
-    if (normalizedTargetParentPath !== '') {
-      const targetParentResponse = await fetch(
-        `/api/pages/by-path?path=${encodeURIComponent(normalizedTargetParentPath)}`,
+      const pageResponse = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
         {
           credentials: 'include',
           headers: {
@@ -681,87 +694,90 @@ async function movePageByPath(
         },
       );
 
-      if (!targetParentResponse.ok) {
-        throw new Error(
-          `Failed to load target parent ${normalizedTargetParentPath}: ${targetParentResponse.status}`,
-        );
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
       }
 
-      const targetParent = (await targetParentResponse.json()) as {
+      const currentPage = (await pageResponse.json()) as {
         id: string;
+        version: string;
       };
-      targetParentId = targetParent.id;
-    }
+      let targetParentId: string | null = null;
 
-    const moveResponse = await fetch(`/api/pages/${currentPage.id}/move`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        version: currentPage.version,
-        parentId: targetParentId,
-      }),
-    });
+      if (normalizedTargetParentPath !== '') {
+        const targetParentResponse = await fetch(
+          `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedTargetParentPath)}`,
+          {
+            credentials: 'include',
+            headers: {
+              'X-CSRF-Token': csrfToken,
+            },
+          },
+        );
 
-    if (!moveResponse.ok) {
-      throw new Error(`Failed to move page ${normalizedPath}: ${moveResponse.status}`);
-    }
-  }, input);
+        if (!targetParentResponse.ok) {
+          throw new Error(
+            `Failed to load target parent ${normalizedTargetParentPath}: ${targetParentResponse.status}`,
+          );
+        }
+
+        const targetParent = (await targetParentResponse.json()) as {
+          id: string;
+        };
+        targetParentId = targetParent.id;
+      }
+
+      const moveResponse = await fetch(`${apiBasePath}/api/pages/${currentPage.id}/move`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({
+          version: currentPage.version,
+          parentId: targetParentId,
+        }),
+      });
+
+      if (!moveResponse.ok) {
+        throw new Error(`Failed to move page ${normalizedPath}: ${moveResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function movePageWithRefactorByPath(
   page: import('@playwright/test').Page,
   input: { path: string; targetParentPath: string; rewriteLinks: boolean },
 ) {
-  await page.evaluate(async ({ path, targetParentPath, rewriteLinks }) => {
-    const normalizedPath = path.replace(/^\/+/, '');
-    const normalizedTargetParentPath = targetParentPath.replace(/^\/+/, '');
+  await page.evaluate(
+    async ({ apiBasePath, path, targetParentPath, rewriteLinks }) => {
+      const normalizedPath = path.replace(/^\/+/, '');
+      const normalizedTargetParentPath = targetParentPath.replace(/^\/+/, '');
 
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page refactor move');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page refactor move');
+      }
 
-    const pageResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
-      {
-        credentials: 'include',
-        headers: {
-          'X-CSRF-Token': csrfToken,
-        },
-      },
-    );
-
-    if (!pageResponse.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
-    }
-
-    const currentPage = (await pageResponse.json()) as {
-      id: string;
-      version: string;
-    };
-
-    let targetParentId: string | null = null;
-    if (normalizedTargetParentPath !== '') {
-      const targetParentResponse = await fetch(
-        `/api/pages/by-path?path=${encodeURIComponent(normalizedTargetParentPath)}`,
+      const pageResponse = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
         {
           credentials: 'include',
           headers: {
@@ -770,97 +786,126 @@ async function movePageWithRefactorByPath(
         },
       );
 
-      if (!targetParentResponse.ok) {
-        throw new Error(
-          `Failed to load target parent ${normalizedTargetParentPath}: ${targetParentResponse.status}`,
-        );
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
       }
 
-      const targetParent = (await targetParentResponse.json()) as { id: string };
-      targetParentId = targetParent.id;
-    }
+      const currentPage = (await pageResponse.json()) as {
+        id: string;
+        version: string;
+      };
 
-    const refactorResponse = await fetch(`/api/pages/${currentPage.id}/refactor/apply`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken,
-      },
-      body: JSON.stringify({
-        kind: 'move',
-        version: currentPage.version,
-        parentId: targetParentId,
-        rewriteLinks,
-      }),
-    });
+      let targetParentId: string | null = null;
+      if (normalizedTargetParentPath !== '') {
+        const targetParentResponse = await fetch(
+          `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedTargetParentPath)}`,
+          {
+            credentials: 'include',
+            headers: {
+              'X-CSRF-Token': csrfToken,
+            },
+          },
+        );
 
-    if (!refactorResponse.ok) {
-      throw new Error(`Failed to refactor move ${normalizedPath}: ${refactorResponse.status}`);
-    }
-  }, input);
+        if (!targetParentResponse.ok) {
+          throw new Error(
+            `Failed to load target parent ${normalizedTargetParentPath}: ${targetParentResponse.status}`,
+          );
+        }
+
+        const targetParent = (await targetParentResponse.json()) as { id: string };
+        targetParentId = targetParent.id;
+      }
+
+      const refactorResponse = await fetch(
+        `${apiBasePath}/api/pages/${currentPage.id}/refactor/apply`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify({
+            kind: 'move',
+            version: currentPage.version,
+            parentId: targetParentId,
+            rewriteLinks,
+          }),
+        },
+      );
+
+      if (!refactorResponse.ok) {
+        throw new Error(`Failed to refactor move ${normalizedPath}: ${refactorResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function deletePageByPath(
   page: import('@playwright/test').Page,
   input: { path: string; recursive?: boolean },
 ) {
-  await page.evaluate(async ({ path, recursive = false }) => {
-    const normalizedPath = path.replace(/^\/+/, '');
+  await page.evaluate(
+    async ({ apiBasePath, path, recursive = false }) => {
+      const normalizedPath = path.replace(/^\/+/, '');
 
-    function getCsrfTokenFromCookie(): string | null {
-      const hostMatch =
-        document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
-        document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
+      function getCsrfTokenFromCookie(): string | null {
+        const hostMatch =
+          document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
+          document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
 
-      if (!hostMatch) return null;
+        if (!hostMatch) return null;
 
-      try {
-        return decodeURIComponent(hostMatch[1]);
-      } catch {
-        return hostMatch[1];
+        try {
+          return decodeURIComponent(hostMatch[1]);
+        } catch {
+          return hostMatch[1];
+        }
       }
-    }
 
-    const csrfToken = getCsrfTokenFromCookie();
-    if (!csrfToken) {
-      throw new Error('Missing CSRF token cookie for test page delete');
-    }
+      const csrfToken = getCsrfTokenFromCookie();
+      if (!csrfToken) {
+        throw new Error('Missing CSRF token cookie for test page delete');
+      }
 
-    const pageResponse = await fetch(
-      `/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
-      {
-        credentials: 'include',
-        headers: {
-          'X-CSRF-Token': csrfToken,
+      const pageResponse = await fetch(
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`,
+        {
+          credentials: 'include',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+          },
         },
-      },
-    );
+      );
 
-    if (!pageResponse.ok) {
-      throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
-    }
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to load page ${normalizedPath}: ${pageResponse.status}`);
+      }
 
-    const currentPage = (await pageResponse.json()) as {
-      id: string;
-      version: string;
-    };
+      const currentPage = (await pageResponse.json()) as {
+        id: string;
+        version: string;
+      };
 
-    const deleteResponse = await fetch(
-      `/api/pages/${currentPage.id}?recursive=${recursive ? 'true' : 'false'}&version=${encodeURIComponent(currentPage.version)}`,
-      {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: {
-          'X-CSRF-Token': csrfToken,
+      const deleteResponse = await fetch(
+        `${apiBasePath}/api/pages/${currentPage.id}?recursive=${recursive ? 'true' : 'false'}&version=${encodeURIComponent(currentPage.version)}`,
+        {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+          },
         },
-      },
-    );
+      );
 
-    if (!deleteResponse.ok) {
-      throw new Error(`Failed to delete page ${normalizedPath}: ${deleteResponse.status}`);
-    }
-  }, input);
+      if (!deleteResponse.ok) {
+        throw new Error(`Failed to delete page ${normalizedPath}: ${deleteResponse.status}`);
+      }
+    },
+    { ...input, apiBasePath: e2eBasePath },
+  );
 }
 
 async function navigateWithinApp(page: import('@playwright/test').Page, path: string) {
@@ -1467,6 +1512,46 @@ for the page edited at ${new Date().toISOString()}
     await expectMarkdownLinkAutocompleteWorks(page);
   });
 
+  test('markdown link root prefix autocomplete inserts prefixed page links', async ({ page }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+    const suffix = Date.now();
+    const sourceSlug = `prefix-autocomplete-source-${suffix}`;
+    const targetSlug = `prefix-autocomplete-target-${suffix}`;
+    const targetTitle = `prefix-autocomplete-target-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: `Prefix Autocomplete Source ${suffix}`,
+      slug: sourceSlug,
+      content: '',
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await viewPage.clickEditPageButton();
+
+    const editPage = new EditPage(page);
+    await editPage.writeContent(`[Target](/docs/${targetSlug.slice(0, 12)}`);
+
+    const completionList = page.locator('.cm-tooltip-autocomplete');
+    await completionList.waitFor({ state: 'visible' });
+    await completionList.locator('li').filter({ hasText: targetTitle }).first().click();
+    await page.keyboard.type(')');
+
+    await editPage.savePage();
+    await editPage.closeEditor();
+
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Target](/docs/${targetSlug}.md)`);
+  });
+
   // - Autocomplete inserts a canonical section link
   test('autocomplete-emits-section-links-without-md', async ({ page }) => {
     const suffix = Date.now();
@@ -1568,6 +1653,46 @@ for the page edited at ${new Date().toISOString()}
       .toContain(`[Section Target](/${sectionSlug})`);
   });
 
+  test('markdown link root prefix insert dialog emits prefixed page links', async ({ page }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+    const suffix = Date.now();
+    const sourceSlug = `prefix-dialog-source-${suffix}`;
+    const pageSlug = `prefix-dialog-target-${suffix}`;
+    const pageTitle = `prefix-dialog-target-${suffix}`;
+
+    await createPageWithContent(page, {
+      title: pageTitle,
+      slug: pageSlug,
+      content: `# ${pageTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: `Prefix Dialog Source ${suffix}`,
+      slug: sourceSlug,
+      content: '',
+    });
+    await reloadAndEnsureAuthenticated(page);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await viewPage.clickEditPageButton();
+
+    await page.getByTestId('format-link-button').click();
+    await page.getByLabel('Display Text').fill('Page Target');
+    await page.getByLabel('URL').fill(pageTitle);
+    await page.getByLabel('URL').press('Enter');
+    await expect(page.getByLabel('URL')).toHaveValue(`/docs/${pageSlug}.md`);
+    await page.getByRole('button', { name: 'Insert' }).click();
+
+    const editPage = new EditPage(page);
+    await editPage.savePage();
+    await editPage.closeEditor();
+
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Page Target](/docs/${pageSlug}.md)`);
+  });
+
   // - User can click a canonical page link in preview
   test('preview-clicks-canonical-absolute-page-link-with-query-fragment', async ({ page }) => {
     const suffix = Date.now();
@@ -1598,6 +1723,89 @@ for the page edited at ${new Date().toISOString()}
     await link.click();
 
     await page.waitForURL(new RegExp(`/${targetSlug}\\.md\\?mode=e2e#target-heading$`));
+    await expect(page.locator('article>h1')).toHaveText(targetTitle);
+  });
+
+  test('markdown link root prefix preview click navigates to unprefixed route', async ({
+    page,
+  }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+    const suffix = Date.now();
+    const sourceSlug = `prefix-preview-source-${suffix}`;
+    const targetSlug = `prefix-preview-target-${suffix}`;
+    const sourceTitle = `Prefix Preview Source ${suffix}`;
+    const targetTitle = `Prefix Preview Target ${suffix}`;
+
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: sourceTitle,
+      slug: sourceSlug,
+      content: `[Open Target](/docs/${targetSlug}.md?mode=e2e#target-heading)`,
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const link = page.getByRole('link', { name: 'Open Target' });
+    await expect(link).toHaveAttribute(
+      'href',
+      new RegExp(`${e2eBasePath}/${targetSlug}\\.md\\?mode=e2e#target-heading$`),
+    );
+    await link.click();
+
+    await page.waitForURL(
+      new RegExp(`${e2eBasePath}/${targetSlug}\\.md\\?mode=e2e#target-heading$`),
+    );
+    await expect(page.locator('article>h1')).toHaveText(targetTitle);
+  });
+
+  test('markdown link root prefix remains separate from base path', async ({ page }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+    test.skip(e2eBasePath !== '/wiki', 'requires E2E_BASE_PATH=/wiki');
+
+    const suffix = Date.now();
+    const parentSlug = `prefix-base-parent-${suffix}`;
+    const sourceSlug = `prefix-base-source-${suffix}`;
+    const targetSlug = `prefix-base-target-${suffix}`;
+    const targetTitle = `Prefix Base Target ${suffix}`;
+
+    await createPageWithContent(page, {
+      title: `Prefix Base Parent ${suffix}`,
+      slug: parentSlug,
+      content: `# Prefix Base Parent ${suffix}`,
+    });
+    await createChildPagesByPath(page, {
+      parentPath: parentSlug,
+      titles: [`Prefix Base Child ${suffix}`],
+    });
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: `Prefix Base Source ${suffix}`,
+      slug: sourceSlug,
+      content: `[Open Target](/docs/${targetSlug}.md)`,
+    });
+
+    await expect
+      .poll(() => getPageContentByPath(page, sourceSlug))
+      .toContain(`[Open Target](/docs/${targetSlug}.md)`);
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+
+    const link = page.getByRole('link', { name: 'Open Target' });
+    await expect(link).toHaveAttribute('href', new RegExp(`/wiki/${targetSlug}\\.md$`));
+    await link.click();
+
+    await page.waitForURL(new RegExp(`/wiki/${targetSlug}\\.md$`));
     await expect(page.locator('article>h1')).toHaveText(targetTitle);
   });
 
@@ -3507,13 +3715,13 @@ Paragraph outside the list.
       .poll(
         () =>
           page.evaluate(
-            async ({ childTitle, parentTitle }) => {
+            async ({ apiBasePath, childTitle, parentTitle }) => {
               const [movedPageResponse, previousPathResponse] = await Promise.all([
-                fetch(`/api/pages/by-path?path=${encodeURIComponent(childTitle)}`, {
+                fetch(`${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(childTitle)}`, {
                   credentials: 'include',
                 }),
                 fetch(
-                  `/api/pages/by-path?path=${encodeURIComponent(`${parentTitle}/${childTitle}`)}`,
+                  `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(`${parentTitle}/${childTitle}`)}`,
                   {
                     credentials: 'include',
                   },
@@ -3525,7 +3733,7 @@ Paragraph outside the list.
                 previousPathStatus: previousPathResponse.status,
               };
             },
-            { childTitle, parentTitle },
+            { apiBasePath: e2eBasePath, childTitle, parentTitle },
           ),
         { timeout: 15000 },
       )
@@ -3650,7 +3858,7 @@ Paragraph outside the list.
       .poll(
         () =>
           page.evaluate(
-            async ({ parentTitle, targetTitle }) => {
+            async ({ apiBasePath, parentTitle, targetTitle }) => {
               function getCsrfTokenFromCookie(): string | null {
                 const hostMatch =
                   document.cookie.match(/(?:^|;\\s*)__Host-leafwiki_csrf=([^;]+)/) ??
@@ -3671,7 +3879,7 @@ Paragraph outside the list.
               }
 
               const pageResponse = await fetch(
-                `/api/pages/by-path?path=${encodeURIComponent(`${parentTitle}/${targetTitle}`)}`,
+                `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(`${parentTitle}/${targetTitle}`)}`,
                 {
                   credentials: 'include',
                   headers: {
@@ -3687,18 +3895,21 @@ Paragraph outside the list.
               }
 
               const currentPage = (await pageResponse.json()) as { id: string };
-              const previewResponse = await fetch(`/api/pages/${currentPage.id}/refactor/preview`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-CSRF-Token': csrfToken,
+              const previewResponse = await fetch(
+                `${apiBasePath}/api/pages/${currentPage.id}/refactor/preview`,
+                {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken,
+                  },
+                  body: JSON.stringify({
+                    kind: 'move',
+                    parentId: null,
+                  }),
                 },
-                body: JSON.stringify({
-                  kind: 'move',
-                  parentId: null,
-                }),
-              });
+              );
 
               if (!previewResponse.ok) {
                 throw new Error(`Failed to preview move refactor: ${previewResponse.status}`);

@@ -18,6 +18,7 @@ const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 const assertRootFiles = process.env.E2E_ASSERT_SEPARATE_ROOT_FILES === '1';
 const dataDir = process.env.E2E_DATA_DIR ?? '';
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
+const markdownLinkRootPrefix = process.env.E2E_MARKDOWN_LINK_ROOT_PREFIX || '';
 const importMetadataZipPath = path.resolve(
   __dirname,
   '../../internal/importer/fixtures/import-metadata.zip',
@@ -214,6 +215,46 @@ test.describe('Separate root dir', () => {
     if (assertRootFiles) {
       expectMarkdownInConfiguredRoot('imported-metadata-page', 'Imported Metadata Page');
     }
+  });
+
+  test('markdown link root prefix preserves repo-root docs links with separate root dir', async ({
+    page,
+  }) => {
+    test.skip(markdownLinkRootPrefix !== '/docs', 'requires E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs');
+
+    const suffix = Date.now();
+    const sourceSlug = `prefix-root-source-${suffix}`;
+    const targetSlug = `prefix-root-target-${suffix}`;
+    const sourceTitle = `Prefix Root Source ${suffix}`;
+    const targetTitle = `Prefix Root Target ${suffix}`;
+
+    const config = await page.evaluate(async () => {
+      const response = await fetch('/api/config', { credentials: 'include' });
+      if (!response.ok) throw new Error(`config failed: ${response.status}`);
+      return (await response.json()) as { markdownLinkRootPrefix?: string };
+    });
+    expect(config.markdownLinkRootPrefix).toBe('/docs');
+
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: sourceTitle,
+      slug: sourceSlug,
+      content: `[Target](/docs/${targetSlug}.md)`,
+    });
+
+    if (assertRootFiles) {
+      expectMarkdownInConfiguredRoot(sourceSlug, `/docs/${targetSlug}.md`);
+    }
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${sourceSlug}.md`);
+    await page.locator('article').getByRole('link', { name: 'Target' }).click();
+    await page.waitForURL(new RegExp(`/${targetSlug}\\.md$`));
+    await expect(page.locator('article>h1')).toHaveText(targetTitle);
   });
 
   // - Separate root-dir mode migrates content in root dir only

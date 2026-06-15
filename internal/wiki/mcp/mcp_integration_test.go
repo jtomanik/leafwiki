@@ -304,7 +304,7 @@ var baseToolOutputProperties = map[string][]string{
 	"wiki_validate_wiki":         {"ok", "summary", "issues"},
 	"wiki_update_page_metadata":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
 	"wiki_replace_page_section":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
-	"wiki_get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl"},
+	"wiki_get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl", "markdownLinkRootPrefix"},
 	"wiki_get_current_user":      {"user"},
 	"wiki_get_tree":              {"tree"},
 	"wiki_get_page":              {"linkStatus", "page"},
@@ -3096,6 +3096,7 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		AuthDisabled:            true,
 		PublicAccess:            true,
 		AllowInsecure:           true,
+		MarkdownLinkRootPrefix:  "/docs",
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 		EnableWorkspaceSync:     true,
 		MCPEnabled:              true,
@@ -3121,12 +3122,16 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	if config["enableWorkspaceSync"] != true {
 		t.Fatalf("config enableWorkspaceSync = %v, want true", config["enableWorkspaceSync"])
 	}
+	if config["markdownLinkRootPrefix"] != "/docs" {
+		t.Fatalf("config markdownLinkRootPrefix = %v, want /docs", config["markdownLinkRootPrefix"])
+	}
 	httpConfig := getHTTPMap(t, router, "/api/config")
 	assertMapFieldsEqual(t, "wiki_get_config", config, httpConfig, []string{
 		"publicAccess",
 		"hideLinkMetadataSection",
 		"authDisabled",
 		"basePath",
+		"markdownLinkRootPrefix",
 		"maxAssetUploadSizeBytes",
 		"enableRevision",
 		"enableWorkspaceSync",

@@ -14,7 +14,12 @@ import (
 )
 
 type MarkdownRefactorEngine struct {
-	parser goldmark.Markdown
+	parser                 goldmark.Markdown
+	markdownLinkRootPrefix string
+}
+
+type MarkdownRefactorOptions struct {
+	MarkdownLinkRootPrefix string
 }
 
 type MarkdownSourceKind string
@@ -45,8 +50,13 @@ type rewriteCandidate struct {
 }
 
 func NewMarkdownRefactorEngine() *MarkdownRefactorEngine {
+	return NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{})
+}
+
+func NewMarkdownRefactorEngineWithOptions(opts MarkdownRefactorOptions) *MarkdownRefactorEngine {
 	return &MarkdownRefactorEngine{
-		parser: goldmark.New(),
+		parser:                 goldmark.New(),
+		markdownLinkRootPrefix: strings.TrimRight(strings.TrimSpace(opts.MarkdownLinkRootPrefix), "/"),
 	}
 }
 
@@ -104,7 +114,7 @@ func (e *MarkdownRefactorEngine) RewriteWithSourceKind(content string, currentPa
 	}
 
 	occurrences := markdownlinks.ScanInlineDestinations(content, markdownlinks.InlineScanOptions{})
-	replacements, warnings := buildRewritePlan(currentPath, sourceKind, rules, candidates, occurrences)
+	replacements, warnings := buildRewritePlan(currentPath, sourceKind, rules, candidates, occurrences, e.markdownLinkRootPrefix)
 	if len(replacements) == 0 {
 		return RewriteResult{
 			Content:  content,
@@ -143,14 +153,14 @@ func (e *MarkdownRefactorEngine) collectCandidates(content string) []rewriteCand
 	return candidates
 }
 
-func buildRewritePlan(currentPath string, sourceKind MarkdownSourceKind, rules []RewriteRule, candidates []rewriteCandidate, occurrences []markdownlinks.InlineDestination) ([]RewriteReplacement, []RewriteWarning) {
+func buildRewritePlan(currentPath string, sourceKind MarkdownSourceKind, rules []RewriteRule, candidates []rewriteCandidate, occurrences []markdownlinks.InlineDestination, markdownLinkRootPrefix string) ([]RewriteReplacement, []RewriteWarning) {
 	var replacements []RewriteReplacement
 	var warnings []RewriteWarning
 
 	occurrenceCounts := make(map[string]int, len(occurrences))
 	for _, occurrence := range occurrences {
 		occurrenceCounts[normalizeCandidateDestination(occurrence.Destination)]++
-		newDest, changed, warning := rewriteLinkDestination(currentPath, sourceKind, occurrence.Destination, rules)
+		newDest, changed, warning := rewriteLinkDestination(currentPath, sourceKind, occurrence.Destination, rules, markdownLinkRootPrefix)
 		if warning != nil {
 			warnings = append(warnings, *warning)
 		}
@@ -221,7 +231,7 @@ func normalizeCandidateDestination(destination string) string {
 	return destination
 }
 
-func rewriteLinkDestination(currentPath string, sourceKind MarkdownSourceKind, destination string, rules []RewriteRule) (string, bool, *RewriteWarning) {
+func rewriteLinkDestination(currentPath string, sourceKind MarkdownSourceKind, destination string, rules []RewriteRule, markdownLinkRootPrefix string) (string, bool, *RewriteWarning) {
 	baseDest, suffix := splitLinkDestination(destination)
 	if baseDest == "" || isExternalLinkDestination(baseDest) || isAssetLinkDestination(baseDest) {
 		return destination, false, nil
@@ -229,7 +239,8 @@ func rewriteLinkDestination(currentPath string, sourceKind MarkdownSourceKind, d
 
 	canonicalPageLink := strings.EqualFold(path.Ext(strings.TrimSpace(baseDest)), ".md")
 	targetKind := markdownLinkTargetKind(canonicalPageLink)
-	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(currentPath, sourceKind), baseDest)
+	resolutionDest := stripMarkdownLinkRootPrefix(baseDest, markdownLinkRootPrefix)
+	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(currentPath, sourceKind), resolutionDest)
 	if err != nil || resolvedPath == "" {
 		return destination, false, &RewriteWarning{
 			Message: fmt.Sprintf("Skipped unresolved link destination %q", destination),
@@ -252,6 +263,7 @@ func rewriteLinkDestination(currentPath string, sourceKind MarkdownSourceKind, d
 		if outputPageLink {
 			rewrittenBase = strings.TrimRight(rewrittenBase, "/") + ".md"
 		}
+		rewrittenBase = addMarkdownLinkRootPrefix(rewrittenBase, markdownLinkRootPrefix)
 	} else {
 		currentPathForRelative := currentPath
 		if nextCurrentPath, rewrittenCurrentPath := applyRewriteRulesForKind(normalizeWikiPath(currentPath), string(sourceKind), rules); rewrittenCurrentPath {
@@ -268,6 +280,37 @@ func rewriteLinkDestination(currentPath string, sourceKind MarkdownSourceKind, d
 	}
 
 	return rewrittenBase + suffix, true, nil
+}
+
+func addMarkdownLinkRootPrefix(destination string, prefix string) string {
+	trimmedPrefix := strings.TrimRight(strings.TrimSpace(prefix), "/")
+	if trimmedPrefix == "" {
+		return destination
+	}
+	if !strings.HasPrefix(trimmedPrefix, "/") {
+		trimmedPrefix = "/" + trimmedPrefix
+	}
+	if destination == "/" {
+		return trimmedPrefix
+	}
+	return trimmedPrefix + destination
+}
+
+func stripMarkdownLinkRootPrefix(destination string, prefix string) string {
+	trimmedPrefix := strings.TrimRight(strings.TrimSpace(prefix), "/")
+	if trimmedPrefix == "" || !strings.HasPrefix(destination, "/") {
+		return destination
+	}
+	if !strings.HasPrefix(trimmedPrefix, "/") {
+		trimmedPrefix = "/" + trimmedPrefix
+	}
+	if destination == trimmedPrefix {
+		return "/"
+	}
+	if strings.HasPrefix(destination, trimmedPrefix+"/") {
+		return destination[len(trimmedPrefix):]
+	}
+	return destination
 }
 
 func relativeMarkdownFileLinkPath(currentPath string, targetPath string) string {

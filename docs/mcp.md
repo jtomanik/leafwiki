@@ -172,7 +172,7 @@ Agents should call `wiki_get_context` before other tools. It returns the current
 
 The normal edit path is semantic MCP writes such as `wiki_update_page`, `wiki_update_page_metadata`, or `wiki_replace_page_section`. When workspace sync is enabled, direct Markdown file edits under `--root-dir` can be useful for large mechanical body changes. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. Then call `wiki_refresh` when humans or following tools need immediate web visibility, and run validation before reporting done.
 
-Most MCP page-path arguments are route paths such as `/docs/api`. Path-based page lookup, validation, and subtree tools also accept canonical Markdown file paths: `/docs/api.md` selects the page, `/docs/api/index.md` selects the section, and an active `/docs/api/README.md` fallback selects the section it backs. Route-structure tools such as `wiki_lookup_path` remain route-oriented and use an explicit `kind` argument when page and section twins share a route. Markdown content should use LeafWiki's canonical link format: page links end in `.md`, section links omit `.md`. Workspace sync and import canonicalize resolvable legacy page links before validation.
+Most MCP page-path arguments are route paths such as `api` or `sync/glossary`. Path-based page lookup, validation, and subtree tools also accept canonical Markdown file paths relative to the wiki route root: `api.md` selects the page, `api/index.md` selects the section, and an active `api/README.md` fallback selects the section it backs. Route-structure tools such as `wiki_lookup_path` remain route-oriented and use an explicit `kind` argument when page and section twins share a route. Markdown content should use LeafWiki's canonical link format: page links end in `.md`, section links omit `.md`. Markdown hrefs may include `/docs/` when `markdownLinkRootPrefix` is configured, for example `/docs/api.md`, but MCP route path inputs do not include that authored-href prefix. Workspace sync and import canonicalize resolvable legacy page links before validation.
 
 When workspace sync scans raw files, common documentation filenames are normalized into route-safe paths before validation and refresh status are reported. For example, `plans/agent_hooks.PLAN.md` validates as `/plans/agent-hooks-plan.md`; `wiki_validate_wiki` and `wiki_refresh` use the same mapping and report `path_conflict` if two source files normalize to the same route. This does not make raw filenames permanent route aliases.
 
@@ -182,11 +182,11 @@ Example validation and narrow edit flow:
 
 ```json
 {"tool":"wiki_get_context","arguments":{"syncMode":"auto","treeDepth":2}}
-{"tool":"wiki_validate_page","arguments":{"path":"/docs/api"}}
-{"tool":"wiki_get_page_by_path","arguments":{"path":"/docs/api"}}
-{"tool":"wiki_update_page_metadata","arguments":{"path":"/docs/api","version":"<page.version>","addTags":["api"],"setProperties":{"status":"ready"}}}
-{"tool":"wiki_replace_page_section","arguments":{"path":"/docs/api","version":"<version-from-metadata-result>","headingPath":["Authentication"],"content":"New section body\\n"}}
-{"tool":"wiki_validate_page","arguments":{"path":"/docs/api"}}
+{"tool":"wiki_validate_page","arguments":{"path":"api"}}
+{"tool":"wiki_get_page_by_path","arguments":{"path":"api"}}
+{"tool":"wiki_update_page_metadata","arguments":{"path":"api","version":"<page.version>","addTags":["api"],"setProperties":{"status":"ready"}}}
+{"tool":"wiki_replace_page_section","arguments":{"path":"api","version":"<version-from-metadata-result>","headingPath":["Authentication"],"content":"New section body\\n"}}
+{"tool":"wiki_validate_page","arguments":{"path":"api"}}
 ```
 
 ## Tools

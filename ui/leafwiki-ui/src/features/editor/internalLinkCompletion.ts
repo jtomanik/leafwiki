@@ -4,7 +4,11 @@ import type {
   CompletionResult,
 } from '@codemirror/autocomplete'
 import { FlatPageSearchItem, searchFlatPageSearchItems } from '@/lib/pageSearch'
-import { markdownHrefForWikiPath } from '@/lib/wikiPath'
+import {
+  markdownHrefForWikiPath,
+  stripMarkdownLinkRootPrefix,
+} from '@/lib/wikiPath'
+import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 
 const MAX_RESULTS = 20
@@ -50,12 +54,18 @@ function getLinkTargetRange(context: CompletionContext) {
 function buildCompletionOptions(
   items: FlatPageSearchItem[],
 ): InternalLinkCompletion[] {
+  const markdownLinkRootPrefix =
+    useConfigStore.getState().markdownLinkRootPrefix
   return items.map((item) => ({
     label: item.title,
     displayLabel: item.title,
     info: item.breadcrumb,
     type: 'text',
-    apply: markdownHrefForWikiPath(item.path, item.kind),
+    apply: markdownHrefForWikiPath(
+      item.path,
+      item.kind,
+      markdownLinkRootPrefix,
+    ),
     path: item.path,
   }))
 }
@@ -69,10 +79,16 @@ export function internalLinkCompletionSource(
   const items = useTreeStore.getState().flatPages
   if (items.length === 0) return null
 
+  const markdownLinkRootPrefix =
+    useConfigStore.getState().markdownLinkRootPrefix
+  const strippedQuery = stripMarkdownLinkRootPrefix(
+    range.query,
+    markdownLinkRootPrefix,
+  )
   const query =
-    range.query.startsWith('/') && range.query.length > 1
-      ? range.query.slice(1)
-      : range.query
+    strippedQuery.startsWith('/') && strippedQuery.length > 1
+      ? strippedQuery.slice(1)
+      : strippedQuery
 
   const matches = searchFlatPageSearchItems(items, query, MAX_RESULTS, {
     pathStartsWithScore: 820,

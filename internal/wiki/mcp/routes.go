@@ -81,6 +81,7 @@ type Routes struct {
 	listWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
 	workspaceRootDir         string
 	workspaceDataDir         string
+	markdownLinkRootPrefix   string
 	webPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	agentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
 	contextStore             *contextCheckpointStore
@@ -134,6 +135,7 @@ type RoutesConfig struct {
 	ListWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
 	WorkspaceRootDir         string
 	WorkspaceDataDir         string
+	MarkdownLinkRootPrefix   string
 	WebPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	AgentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
 }
@@ -187,6 +189,7 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 		listWorkspaceSnapshots:   cfg.ListWorkspaceSnapshots,
 		workspaceRootDir:         cfg.WorkspaceRootDir,
 		workspaceDataDir:         cfg.WorkspaceDataDir,
+		markdownLinkRootPrefix:   cfg.MarkdownLinkRootPrefix,
 		webPresenceProvider:      cfg.WebPresenceProvider,
 		agentPresenceProvider:    cfg.AgentPresenceProvider,
 		contextStore:             newContextCheckpointStore(10),

@@ -6,6 +6,7 @@ type ConfigStore = {
   publicAccess: boolean
   hideLinkMetadataSection: boolean
   authDisabled: boolean
+  markdownLinkRootPrefix: string
   maxAssetUploadSizeBytes: number
   enableRevision: boolean
   enableWorkspaceSync: boolean
@@ -22,6 +23,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   publicAccess: false,
   hideLinkMetadataSection: false,
   authDisabled: false,
+  markdownLinkRootPrefix: '',
   maxAssetUploadSizeBytes: DEFAULT_MAX_ASSET_UPLOAD_SIZE_BYTES,
   enableRevision: false,
   enableWorkspaceSync: false,
@@ -46,6 +48,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
         publicAccess: config.publicAccess,
         hideLinkMetadataSection: config.hideLinkMetadataSection,
         authDisabled: config.authDisabled,
+        markdownLinkRootPrefix: config.markdownLinkRootPrefix ?? '',
         maxAssetUploadSizeBytes,
         enableRevision: config.enableRevision ?? false,
         enableWorkspaceSync: config.enableWorkspaceSync ?? false,

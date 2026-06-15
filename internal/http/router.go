@@ -91,6 +91,7 @@ type RouterOptions struct {
 	HideLinkMetadataSection bool                 // Whether to hide the link metadata section in the frontend UI
 	AuthDisabled            bool                 // Whether authentication is disabled
 	BasePath                string               // URL prefix when served behind a reverse proxy (e.g. "/wiki")
+	MarkdownLinkRootPrefix  string               // Repository-root prefix for absolute Markdown links
 	MaxAssetUploadSizeBytes int64                // Maximum allowed size in bytes for asset uploads
 	EnableRevision          bool                 // Whether the revision / page history feature is enabled
 	EnableWorkspaceSync     bool                 // Whether workspace sync is enabled

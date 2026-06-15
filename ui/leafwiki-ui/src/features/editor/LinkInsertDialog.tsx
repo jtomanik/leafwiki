@@ -11,7 +11,11 @@ import { Label } from '@/components/ui/label'
 import { deferStateUpdate } from '@/lib/deferState'
 import { searchFlatPageSearchItems } from '@/lib/pageSearch'
 import { DIALOG_LINK_INSERT } from '@/lib/registries'
-import { markdownHrefForWikiPath } from '@/lib/wikiPath'
+import {
+  markdownHrefForWikiPath,
+  stripMarkdownLinkRootPrefix,
+} from '@/lib/wikiPath'
+import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { useTreeStore } from '@/stores/tree'
@@ -42,6 +46,9 @@ export function LinkInsertDialog({
   const registerHotkey = useHotKeysStore((s) => s.registerHotkey)
   const unregisterHotkey = useHotKeysStore((s) => s.unregisterHotkey)
   const flatPages = useTreeStore((s) => s.flatPages)
+  const markdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
 
   const [text, setText] = useState(selectedText)
   const [url, setUrl] = useState('')
@@ -68,7 +75,8 @@ export function LinkInsertDialog({
     }
   }, [open, selectedText])
 
-  const query = url.startsWith('/') ? url.slice(1) : url
+  const strippedUrl = stripMarkdownLinkRootPrefix(url, markdownLinkRootPrefix)
+  const query = strippedUrl.startsWith('/') ? strippedUrl.slice(1) : strippedUrl
   const showSuggestions = urlFocused && !isExternalUrl(url)
   const suggestions = showSuggestions
     ? searchFlatPageSearchItems(flatPages, query, MAX_SUGGESTIONS)
@@ -85,7 +93,7 @@ export function LinkInsertDialog({
     title: string,
     kind?: 'page' | 'section',
   ) => {
-    setUrl(markdownHrefForWikiPath(path, kind))
+    setUrl(markdownHrefForWikiPath(path, kind, markdownLinkRootPrefix))
     if (!text) setText(title)
     setUrlFocused(false)
   }

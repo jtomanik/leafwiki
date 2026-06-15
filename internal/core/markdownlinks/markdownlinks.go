@@ -73,11 +73,12 @@ type RewriteResult struct {
 }
 
 type Index struct {
-	pages        map[string]pageEntry
-	sourcePages  map[string]pageEntry
-	sections     map[string]string
-	sectionFiles map[string]string
-	assets       map[string]struct{}
+	pages                  map[string]pageEntry
+	sourcePages            map[string]pageEntry
+	sections               map[string]string
+	sectionFiles           map[string]string
+	assets                 map[string]struct{}
+	markdownLinkRootPrefix string
 }
 
 type pageEntry struct {
@@ -93,12 +94,18 @@ const (
 )
 
 func NewIndex(entries []Entry) *Index {
+	return NewIndexWithOptions(entries, Options{})
+}
+
+func NewIndexWithOptions(entries []Entry, opts Options) *Index {
+	prefix, _ := normalizeMarkdownLinkRootPrefix(opts.MarkdownLinkRootPrefix)
 	idx := &Index{
-		pages:        map[string]pageEntry{},
-		sourcePages:  map[string]pageEntry{},
-		sections:     map[string]string{},
-		sectionFiles: map[string]string{},
-		assets:       map[string]struct{}{},
+		pages:                  map[string]pageEntry{},
+		sourcePages:            map[string]pageEntry{},
+		sections:               map[string]string{},
+		sectionFiles:           map[string]string{},
+		assets:                 map[string]struct{}{},
+		markdownLinkRootPrefix: prefix,
 	}
 	for _, entry := range entries {
 		entryPath := cleanRelPath(entry.Path)
@@ -137,6 +144,10 @@ func NewIndex(entries []Entry) *Index {
 }
 
 func NewIndexFromRoot(rootDir string) (*Index, error) {
+	return NewIndexFromRootWithOptions(rootDir, Options{})
+}
+
+func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 	entries := []Entry{{Kind: EntryKindSection, Path: ""}}
 	err := filepath.WalkDir(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -181,7 +192,7 @@ func NewIndexFromRoot(rootDir string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewIndex(entries), nil
+	return NewIndexWithOptions(entries, opts), nil
 }
 
 func (idx *Index) Resolve(sourceFile string, href string) Resolution {
@@ -201,12 +212,13 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 	if base == "" {
 		return Resolution{Kind: TargetKindUnresolved, Code: "empty"}
 	}
-	if isAsset(base) {
+	resolveBase := idx.stripMarkdownLinkRootPrefix(base)
+	if isAsset(resolveBase) {
 		return Resolution{Kind: TargetKindAsset, CanonicalHref: href}
 	}
 	hasTrailingSlash := len(base) > 1 && strings.HasSuffix(strings.TrimRight(base, " \t\r\n"), "/")
 
-	decodedBase, err := url.PathUnescape(base)
+	decodedBase, err := url.PathUnescape(resolveBase)
 	if err != nil {
 		return Resolution{Kind: TargetKindInvalid, CanonicalHref: href, Code: "invalid_percent_encoding"}
 	}
@@ -225,19 +237,19 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 		if sectionPath, ok := idx.sectionFiles[targetPath]; ok {
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
 				RoutePath:     sectionPath,
 			}
 		}
 		if page, ok := idx.pages[targetRoute]; ok {
 			return Resolution{
 				Kind:          TargetKindPage,
-				CanonicalHref: formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
 				RoutePath:     page.RoutePath,
 			}
 		}
 		if page, ok := idx.sourcePages[targetRoute]; ok {
-			canonicalHref := formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base)
+			canonicalHref := idx.formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base)
 			if mode == resolveMigration {
 				return Resolution{
 					Kind:          TargetKindPage,
@@ -262,7 +274,7 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 			sectionPath := strings.TrimRight(targetPath, "/")
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
 				RoutePath:     sectionPath,
 			}
 		}
@@ -272,14 +284,14 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 	case hasPage && !hasSection:
 		return Resolution{
 			Kind:          TargetKindPage,
-			CanonicalHref: formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
+			CanonicalHref: idx.formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
 			RoutePath:     page.RoutePath,
 		}
 	case hasSection && !hasPage:
 		sectionPath := strings.TrimRight(targetPath, "/")
 		return Resolution{
 			Kind:          TargetKindSection,
-			CanonicalHref: formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
+			CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
 			RoutePath:     sectionPath,
 		}
 	case hasPage && hasSection:
@@ -287,7 +299,7 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 			sectionPath := strings.TrimRight(targetPath, "/")
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
 				RoutePath:     sectionPath,
 			}
 		}
@@ -951,6 +963,37 @@ func formatCanonicalHref(sourceFile string, targetPath string, page bool, absolu
 		return encodedSectionHrefBase(base) + suffix
 	}
 	return formatHref(sourceFile, targetPath, page, absolute, suffix)
+}
+
+func (idx *Index) formatCanonicalHref(sourceFile string, targetPath string, page bool, absolute bool, suffix string, originalBase string) string {
+	href := formatCanonicalHref(sourceFile, targetPath, page, absolute, suffix, idx.stripMarkdownLinkRootPrefix(originalBase))
+	if !absolute || idx.markdownLinkRootPrefix == "" {
+		return href
+	}
+	if href == "/" {
+		return idx.markdownLinkRootPrefix + suffix
+	}
+	if strings.HasPrefix(href, "/?") || strings.HasPrefix(href, "/#") {
+		return idx.markdownLinkRootPrefix + strings.TrimPrefix(href, "/")
+	}
+	if strings.HasPrefix(href, "/") {
+		return idx.markdownLinkRootPrefix + href
+	}
+	return href
+}
+
+func (idx *Index) stripMarkdownLinkRootPrefix(base string) string {
+	prefix := idx.markdownLinkRootPrefix
+	if prefix == "" || !strings.HasPrefix(base, "/") {
+		return base
+	}
+	if base == prefix {
+		return "/"
+	}
+	if strings.HasPrefix(base, prefix+"/") {
+		return strings.TrimPrefix(base, prefix)
+	}
+	return base
 }
 
 func encodedSectionHrefBase(base string) string {

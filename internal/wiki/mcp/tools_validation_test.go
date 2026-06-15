@@ -82,6 +82,35 @@ leafwiki_title: Sync Child
 	assertNoCoreValidationIssueCode(t, result, "broken_link")
 }
 
+func TestValidateWorkspaceMarkdownFilesResolvesMarkdownLinkRootPrefix(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "repo", "docs")
+	writeValidationMarkdown(t, filepath.Join(rootDir, "index.md"), `---
+leafwiki_id: root
+leafwiki_title: Root
+---
+# Root
+
+[Glossary](/docs/sync/glossary.md)
+`)
+	writeValidationMarkdown(t, filepath.Join(rootDir, "sync", "glossary.md"), `---
+leafwiki_id: glossary
+leafwiki_title: Glossary
+---
+# Glossary
+`)
+	routes := &Routes{
+		workspaceRootDir:       rootDir,
+		markdownLinkRootPrefix: "/docs",
+	}
+
+	result := routes.validateWorkspaceMarkdownFiles(context.Background(), false)
+
+	if !result.OK {
+		t.Fatalf("validateWorkspaceMarkdownFiles = %#v, want ok", result)
+	}
+	assertNoCoreValidationIssueCode(t, result, "broken_link")
+}
+
 func moveChildKindFirst(t *testing.T, root *tree.PageNode, routePath string, kind tree.NodeKind) {
 	t.Helper()
 	parent := root
