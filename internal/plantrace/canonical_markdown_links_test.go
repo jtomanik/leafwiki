@@ -18,7 +18,7 @@ type canonicalPlanScenarioCoverage struct {
 	evidence canonicalPlanEvidence
 }
 
-// Exact scenario titles from plans/canonical_markdown_links.PLAN.md, each with
+// Exact scenario titles from docs/plans/canonical_markdown_links.PLAN.md, each with
 // a stable automated-test evidence string that must exist in the repo.
 var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage{
 	{"Autocomplete inserts a canonical page link", evidence("e2e/tests/page.spec.ts", "markdown link autocomplete works")},
@@ -101,7 +101,7 @@ func evidence(file string, text string) canonicalPlanEvidence {
 
 func TestCanonicalMarkdownLinksPlanScenarioTitleAuditIndex(t *testing.T) {
 	repoRoot := canonicalPlanRepoRoot(t)
-	planTitles := canonicalPlanScenarioTitles(t, filepath.Join(repoRoot, "plans", "canonical_markdown_links.PLAN.md"))
+	planTitles := canonicalPlanScenarioTitles(t, filepath.Join(repoRoot, "docs", "plans", "canonical_markdown_links.PLAN.md"))
 	if len(planTitles) != len(canonicalMarkdownLinksPlanScenarioCoverage) {
 		t.Fatalf("plan scenario title count = %d, want %d mapped scenarios", len(planTitles), len(canonicalMarkdownLinksPlanScenarioCoverage))
 	}

@@ -1,0 +1,57 @@
+SUBROUTINE `WAIT FOR <@Agent>`
+	WHILE @Agent IS BUSY
+		SLEEP 15 MINUTES
+
+DECLARE Workflow:
+
+WAIT FOR @Implementer
+
+INPUT "Plan file: " -> $PlanFilename
+
+ROLE !Reviewer
+	Plan $PlanFilename was implemented.
+	Please review the implementation very carefully and provide me with PR style review that I can pass to the implementer.
+	Please focus on implementation truthfulness, completeness, correctness and code quality.
+
+	Also ask yourself this question: Does this code follows best practices and matches patterns in the rest of the codebase?
+	Would maintainers of the original repo find it as something that fits niecely with the rest of the code or something odd and out of place.
+
+	Please use subagents as needed.
+	Make one sub agent focus on reviewing implementation.
+	Make one sub agent focus on reviewing tests.
+	Make one sub agent focus on reviewing code quality and improvements.
+	Make one sub agent focus on reviewing skill and documentation for quality and improvements.
+	Please use relevant skills.
+	Please delegate running tests and other automatic checks to a subagents.
+
+LET ReviewRound = 1
+
+LOOP
+	REMARK We run three independent rounds of reviews
+
+	MAKE LOCAL THREAD @Reviewer{$ReviewRound}
+		WITH ROLE !Reviewer
+
+	LET NumberOfOutstandingIssues = 0
+	LOOP
+		WAIT FOR @REVIEWER{$ReviewRound}
+		READ FROM @REVIEWER{$ReviewRound} -> $Review
+		INPUT "How many issues have been identified: " -> $NumberOfOutstandingIssues
+		IF NumberOfOutstandingIssues$ > 0 THEN
+			REMARK Pass the review to Implementer, ask it to fix all issues, follow TDD skills and adhere to requirement of three reviews within its own thread.
+			INPUT "Your feedback for the Implementer based on the review: " -> $Feedback
+			SEND TO @Implementer
+				> $Feedback
+			WAIT FOR @Implementer
+			READ FROM @Implementer -> $Handoff
+			INPUT "Your request to REVIEWER asking for a re-review: " -> $ReReview
+			REMARK make sure that REVIEWER follows the same rules in re-review as in the first one
+			SEND TO @REVIEWER{$ReviewRound}
+				> $ReReview
+		ELSE
+			GOTO END
+	WHILE NumberOfOutstandingIssues$ > 0
+	$ReviewRound + 1
+WHILE $ReviewRound LESS OR EQUAL 3
+
+END

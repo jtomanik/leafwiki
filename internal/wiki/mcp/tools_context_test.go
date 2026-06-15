@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +86,27 @@ func TestPageIDsForMarkdownPathsResolvesReadmeFallbackSection(t *testing.T) {
 	}
 }
 
+func TestPageIDsForMarkdownPathsUsesWorkspaceRouteNormalizationForReadmeSection(t *testing.T) {
+	routes := newContextToolTestRoutes(t)
+	workspaceRoot := t.TempDir()
+	routes.workspaceRootDir = workspaceRoot
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "User Guides"), 0o755); err != nil {
+		t.Fatalf("create workspace section: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "User Guides", "README.md"), []byte("# User Guides\n"), 0o644); err != nil {
+		t.Fatalf("write workspace README: %v", err)
+	}
+	sectionID, err := routes.treeService.CreateNode("system", nil, "User Guides", "user-guides", testNodeKindPtr(tree.NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+
+	pageIDs := routes.pageIDsForMarkdownPaths([]string{"User Guides/README.md"})
+	if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
+		t.Fatalf("pageIDsForMarkdownPaths(User Guides/README.md) = %v, want [%s]", pageIDs, *sectionID)
+	}
+}
+
 func TestPageIDsForMarkdownPathsDoesNotFallbackLowercaseReadme(t *testing.T) {
 	routes := newContextToolTestRoutes(t)
 
@@ -95,6 +117,23 @@ func TestPageIDsForMarkdownPathsDoesNotFallbackLowercaseReadme(t *testing.T) {
 	pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/readme.md"})
 	if len(pageIDs) != 0 {
 		t.Fatalf("pageIDsForMarkdownPaths(guide/readme.md) = %v, want no fallback section", pageIDs)
+	}
+}
+
+func TestPageIDsForMarkdownPathsUsesWorkspaceRouteNormalization(t *testing.T) {
+	routes := newContextToolTestRoutes(t)
+	plansID, err := routes.treeService.CreateNode("system", nil, "Plans", "plans", testNodeKindPtr(tree.NodeKindSection))
+	if err != nil {
+		t.Fatalf("CreateNode section failed: %v", err)
+	}
+	pageID, err := routes.treeService.CreateNode("system", plansID, "Agent Hooks Plan", "agent-hooks-plan", testNodeKindPtr(tree.NodeKindPage))
+	if err != nil {
+		t.Fatalf("CreateNode page failed: %v", err)
+	}
+
+	pageIDs := routes.pageIDsForMarkdownPaths([]string{"plans/agent_hooks.PLAN.md"})
+	if len(pageIDs) != 1 || pageIDs[0] != *pageID {
+		t.Fatalf("pageIDsForMarkdownPaths(plans/agent_hooks.PLAN.md) = %v, want [%s]", pageIDs, *pageID)
 	}
 }
 

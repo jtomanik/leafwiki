@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -75,6 +76,60 @@ content`)
 	}
 	if !strings.Contains(page.RawContent, "content") {
 		t.Fatalf("page raw content = %q, want synced content", page.RawContent)
+	}
+}
+
+func TestServiceSyncNowImportsNormalizableWorkspaceRoutes(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "plans", "index.md"), `---
+leafwiki_id: plans
+leafwiki_title: Plans
+---
+# Plans
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), `---
+leafwiki_id: agent-hooks-plan
+leafwiki_title: Agent Hooks Plan
+---
+# Agent Hooks Plan
+
+content`)
+
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	for _, validationError := range status.ValidationErrors {
+		if validationError.Code == "invalid_slug" && strings.Contains(validationError.Path, "agent_hooks.PLAN.md") {
+			t.Fatalf("ValidationErrors = %#v, want no invalid_slug for normalizable plan filename", status.ValidationErrors)
+		}
+	}
+
+	page, err := treeService.FindPageByRoutePath("plans/agent-hooks-plan")
+	if err != nil {
+		t.Fatalf("FindPageByRoutePath plans/agent-hooks-plan: %v", err)
+	}
+	if page.Title != "Agent Hooks Plan" || !strings.Contains(page.Content, "content") {
+		t.Fatalf("page = %#v, want imported normalized plan content", page)
 	}
 }
 
@@ -1178,6 +1233,20 @@ leafwiki_title: Sync Section
 	assertValidationErrorContains("/docs/missing")
 }
 
+func TestCanonicalMigrationValidationErrorsUseNormalizedRoutePath(t *testing.T) {
+	validationErrors := canonicalMigrationValidationErrors(t.TempDir(), "plans/agent_hooks.PLAN.md", []markdownlinks.Issue{{
+		Code:        "ambiguous_legacy_link",
+		Destination: "/plans/sync",
+	}})
+
+	if len(validationErrors) != 1 {
+		t.Fatalf("validationErrors = %#v, want one ambiguous migration error", validationErrors)
+	}
+	if validationErrors[0].Path != "plans/agent-hooks-plan" {
+		t.Fatalf("validation error path = %q, want plans/agent-hooks-plan", validationErrors[0].Path)
+	}
+}
+
 // - Old extensionless section link remains extensionless
 func TestServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop(t *testing.T) {
 	dataDir := t.TempDir()
@@ -1459,7 +1528,7 @@ leafwiki_title: Valid Page
 
 # Valid Page
 `)
-	writeMarkdown(t, filepath.Join(rootDir, "Bad Slug.md"), "---\nleafwiki_id: bad-slug\nleafwiki_title: Bad Slug\n---\n# Bad Slug\n")
+	writeMarkdown(t, filepath.Join(rootDir, "!!!.md"), "---\nleafwiki_id: invalid-slug\nleafwiki_title: Invalid Slug\n---\n# Invalid Slug\n")
 	var afterSyncCalls int32
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -1843,6 +1912,62 @@ func TestServiceListPageRevisionsMatchesUppercaseMarkdownExtensionByLeafWikiID(t
 	}
 }
 
+func TestServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata(t *testing.T) {
+	page := &tree.Page{PageNode: &tree.PageNode{
+		ID:    "page-1",
+		Title: "Agent Hooks Plan",
+		Slug:  "agent-hooks-plan",
+		Kind:  tree.NodeKindPage,
+		Parent: &tree.PageNode{
+			ID:    "plans",
+			Slug:  "plans",
+			Title: "Plans",
+			Kind:  tree.NodeKindSection,
+		},
+	}}
+	store := &fakeRevisionStore{
+		commits: []gitrevisions.Commit{{Hash: "raw-normalized-commit", AuthorID: "alice"}},
+		filesAt: map[string]map[string]string{
+			"raw-normalized-commit": {
+				"plans/agent_hooks.PLAN.md": "# Agent Hooks Plan\n\nRaw content before writeback.\n",
+			},
+		},
+		changedPaths: map[string][]string{
+			"raw-normalized-commit": {"plans/agent_hooks.PLAN.md"},
+		},
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	result, err := service.ListPageRevisions(context.Background(), page, "", 10)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+
+	if len(result.Revisions) != 1 {
+		t.Fatalf("revision count = %d, want raw normalized path commit", len(result.Revisions))
+	}
+	if result.Revisions[0].Path != "plans/agent-hooks-plan" {
+		t.Fatalf("revision path = %q, want plans/agent-hooks-plan", result.Revisions[0].Path)
+	}
+	snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[0].ID)
+	if err != nil {
+		t.Fatalf("GetPageRevisionSnapshot: %v", err)
+	}
+	if snapshot.Revision.Path != "plans/agent-hooks-plan" {
+		t.Fatalf("snapshot revision path = %q, want plans/agent-hooks-plan", snapshot.Revision.Path)
+	}
+	if !strings.Contains(snapshot.Content, "Raw content before writeback.") {
+		t.Fatalf("snapshot content = %q, want raw content", snapshot.Content)
+	}
+}
+
 func TestServiceListPageRevisionsUsesHistoricalMarkdownMetadata(t *testing.T) {
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
@@ -1990,6 +2115,67 @@ func TestServiceListPageRevisionsNormalizesReadmeFallbackSectionPath(t *testing.
 	}
 	if revisions[0].Path != "guides" {
 		t.Fatalf("revision path = %q, want guides", revisions[0].Path)
+	}
+}
+
+func TestServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "User Guides"), 0o755); err != nil {
+		t.Fatalf("create workspace section: %v", err)
+	}
+	writeMarkdown(t, filepath.Join(rootDir, "User Guides", "index.md"), "# User Guides\n")
+	writeMarkdown(t, filepath.Join(rootDir, "User Guides", "README.md"), "---\nleafwiki_id: readme-page\nleafwiki_title: Historical README\n---\n# Historical README\n")
+
+	page := &tree.Page{PageNode: &tree.PageNode{
+		ID:    "readme-page",
+		Title: "README",
+		Slug:  "readme",
+		Kind:  tree.NodeKindPage,
+		Parent: &tree.PageNode{
+			ID:    "user-guides",
+			Slug:  "user-guides",
+			Title: "User Guides",
+			Kind:  tree.NodeKindSection,
+		},
+	}}
+	store := &fakeRevisionStore{
+		commits: []gitrevisions.Commit{{Hash: "readme-page-commit", AuthorID: "alice"}},
+		filesAt: map[string]map[string]string{
+			"readme-page-commit": {
+				"User Guides/README.md": "---\nleafwiki_id: readme-page\nleafwiki_title: Historical README\n---\n# Historical README\n",
+			},
+		},
+		changedPaths: map[string][]string{
+			"readme-page-commit": {"User Guides/README.md"},
+		},
+	}
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		RootDir: rootDir,
+		Tree:    &fakeTreeReconstructor{},
+		Store:   store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	result, err := service.ListPageRevisions(context.Background(), page, "", 1)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+	revisions := result.Revisions
+
+	if len(revisions) != 1 {
+		t.Fatalf("revision count = %d, want 1", len(revisions))
+	}
+	if revisions[0].Kind != string(tree.NodeKindPage) {
+		t.Fatalf("revision kind = %q, want page", revisions[0].Kind)
+	}
+	if revisions[0].Path != "user-guides/README" {
+		t.Fatalf("revision path = %q, want user-guides/README", revisions[0].Path)
+	}
+	if revisions[0].Slug != "README" {
+		t.Fatalf("revision slug = %q, want README", revisions[0].Slug)
 	}
 }
 
@@ -2954,7 +3140,7 @@ func TestServiceSyncNowReportsValidationForSkippedInvalidSlugMarkdown(t *testing
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
-	writeMarkdown(t, filepath.Join(rootDir, "Bad Slug.md"), "---\nleafwiki_id: bad-slug\nleafwiki_title: Bad Slug\n---\n# Bad Slug\n")
+	writeMarkdown(t, filepath.Join(rootDir, "!!!.md"), "---\nleafwiki_id: invalid-slug\nleafwiki_title: Invalid Slug\n---\n# Invalid Slug\n")
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
 		DataDir: dataDir,
@@ -2977,9 +3163,45 @@ func TestServiceSyncNowReportsValidationForSkippedInvalidSlugMarkdown(t *testing
 	if len(status.ValidationErrors) == 0 {
 		t.Fatalf("ValidationErrors empty, want invalid slug error")
 	}
-	if status.ValidationErrors[0].Path != "Bad Slug.md" {
-		t.Fatalf("validation error path = %q, want Bad Slug.md", status.ValidationErrors[0].Path)
+	if status.ValidationErrors[0].Path != "!!!.md" {
+		t.Fatalf("validation error path = %q, want !!!.md", status.ValidationErrors[0].Path)
 	}
+}
+
+func TestServiceSyncNowReportsNormalizedRouteConflictsAsPathConflict(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	writeMarkdown(t, filepath.Join(rootDir, "plans", "a_b.md"), "---\nleafwiki_id: a-b-one\nleafwiki_title: A B One\n---\n# A B One\n")
+	writeMarkdown(t, filepath.Join(rootDir, "plans", "a-b.md"), "---\nleafwiki_id: a-b-two\nleafwiki_title: A B Two\n---\n# A B Two\n")
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	for _, validationError := range status.ValidationErrors {
+		if validationError.Code == "path_conflict" {
+			if !strings.Contains(validationError.Message, "plans/a_b.md") || !strings.Contains(validationError.Message, "plans/a-b.md") {
+				t.Fatalf("path_conflict message = %q, want both source paths", validationError.Message)
+			}
+			return
+		}
+	}
+	t.Fatalf("ValidationErrors = %#v, want path_conflict for normalized collision", status.ValidationErrors)
 }
 
 func TestServiceStartWatcherSyncsMarkdownEvents(t *testing.T) {

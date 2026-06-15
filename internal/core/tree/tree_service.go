@@ -694,7 +694,7 @@ func (t *TreeService) rollbackCreatedNodeLocked(parent *PageNode, entry *PageNod
 	}
 
 	if parentWasConverted && len(parent.Children) == 0 {
-		orderPath, err := t.store.dirPathForNode(parent)
+		orderPath, err := t.store.sectionDirPathForNode(parent, "rollbackCreatedNode")
 		if err != nil {
 			return err
 		}
@@ -1862,7 +1862,7 @@ func (t *TreeService) rollbackMovedNodeLocked(node *PageNode, oldParent *PageNod
 	node.Metadata = previousMetadata
 
 	if newParentWasConverted && newParent != nil && newParent.ID != "root" && len(newParent.Children) == 0 {
-		newParentDir, dirErr := t.store.dirPathForNode(newParent)
+		newParentDir, dirErr := t.store.sectionDirPathForNode(newParent, "rollbackMovedNode")
 		if dirErr != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("resolve converted parent dir: %w", dirErr))
 		} else {

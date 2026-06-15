@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -72,10 +73,16 @@ type RewriteResult struct {
 }
 
 type Index struct {
-	pages        map[string]string
+	pages        map[string]pageEntry
+	sourcePages  map[string]pageEntry
 	sections     map[string]string
 	sectionFiles map[string]string
 	assets       map[string]struct{}
+}
+
+type pageEntry struct {
+	CanonicalPath string
+	RoutePath     string
 }
 
 type resolveMode int
@@ -87,7 +94,8 @@ const (
 
 func NewIndex(entries []Entry) *Index {
 	idx := &Index{
-		pages:        map[string]string{},
+		pages:        map[string]pageEntry{},
+		sourcePages:  map[string]pageEntry{},
 		sections:     map[string]string{},
 		sectionFiles: map[string]string{},
 		assets:       map[string]struct{}{},
@@ -100,7 +108,16 @@ func NewIndex(entries []Entry) *Index {
 				continue
 			}
 			if strings.EqualFold(path.Ext(entryPath), ".md") {
-				idx.pages[strings.TrimSuffix(entryPath, path.Ext(entryPath))] = entryPath
+				routePath := strings.TrimSuffix(entryPath, path.Ext(entryPath))
+				page := pageEntry{CanonicalPath: entryPath, RoutePath: routePath}
+				idx.pages[routePath] = page
+				contentPath := cleanRelPath(entry.ContentPath)
+				if contentPath != "" && strings.EqualFold(path.Ext(contentPath), ".md") {
+					sourceRoutePath := strings.TrimSuffix(contentPath, path.Ext(contentPath))
+					if _, exists := idx.sourcePages[sourceRoutePath]; !exists {
+						idx.sourcePages[sourceRoutePath] = page
+					}
+				}
 			}
 		case EntryKindSection:
 			idx.sections[strings.Trim(entryPath, "/")] = strings.Trim(entryPath, "/")
@@ -137,60 +154,34 @@ func NewIndexFromRoot(rootDir string) (*Index, error) {
 			if strings.HasPrefix(entry.Name(), ".") {
 				return filepath.SkipDir
 			}
-			entries = append(entries, Entry{Kind: EntryKindSection, Path: relPath})
+			route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, true)
+			if err != nil {
+				return filepath.SkipDir
+			}
+			if route.Skip {
+				return filepath.SkipDir
+			}
+			entries = append(entries, Entry{Kind: EntryKindSection, Path: route.RoutePath})
 			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
 			return nil
 		}
-		if sectionPath, ok := activeSectionContentFile(rootDir, relPath); ok {
-			entries = append(entries, Entry{Kind: EntryKindSection, Path: sectionPath, ContentPath: relPath})
+		route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false)
+		if err != nil || route.Skip {
 			return nil
 		}
-		entries = append(entries, Entry{Kind: EntryKindPage, Path: relPath})
+		if route.Kind == tree.NodeKindSection {
+			entries = append(entries, Entry{Kind: EntryKindSection, Path: route.RoutePath, ContentPath: relPath})
+			return nil
+		}
+		entries = append(entries, Entry{Kind: EntryKindPage, Path: route.RoutePath + ".md", ContentPath: relPath})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return NewIndex(entries), nil
-}
-
-func activeSectionContentFile(rootDir string, relPath string) (string, bool) {
-	name := path.Base(relPath)
-	dir := path.Dir(relPath)
-	if dir == "." {
-		dir = ""
-	}
-	if strings.EqualFold(name, "index.md") {
-		return dir, true
-	}
-	if name != "README.md" {
-		return "", false
-	}
-	if dirHasIndexFile(filepath.Join(rootDir, filepath.FromSlash(dir))) {
-		return "", false
-	}
-	return dir, true
-}
-
-func dirHasIndexFile(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		ext := path.Ext(name)
-		base := strings.TrimSuffix(name, ext)
-		if strings.EqualFold(base, "index") && strings.EqualFold(ext, ".md") {
-			return true
-		}
-	}
-	return false
 }
 
 func (idx *Index) Resolve(sourceFile string, href string) Resolution {
@@ -238,17 +229,33 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 				RoutePath:     sectionPath,
 			}
 		}
-		if pageFile, ok := idx.pages[targetRoute]; ok {
+		if page, ok := idx.pages[targetRoute]; ok {
 			return Resolution{
 				Kind:          TargetKindPage,
-				CanonicalHref: formatCanonicalHref(sourceFile, pageFile, true, isAbsolute, suffix, base),
-				RoutePath:     targetRoute,
+				CanonicalHref: formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
+				RoutePath:     page.RoutePath,
+			}
+		}
+		if page, ok := idx.sourcePages[targetRoute]; ok {
+			canonicalHref := formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base)
+			if mode == resolveMigration {
+				return Resolution{
+					Kind:          TargetKindPage,
+					CanonicalHref: canonicalHref,
+					RoutePath:     page.RoutePath,
+				}
+			}
+			return Resolution{
+				Kind:          TargetKindUnresolved,
+				CanonicalHref: canonicalHref,
+				RoutePath:     page.RoutePath,
+				Code:          "non_canonical_markdown_path",
 			}
 		}
 		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetRoute, Code: "broken_page"}
 	}
 
-	pageFile, hasPage := idx.pages[targetPath]
+	page, hasPage := idx.pages[targetPath]
 	_, hasSection := idx.sections[strings.TrimRight(targetPath, "/")]
 	if hasTrailingSlash {
 		if hasSection {
@@ -265,8 +272,8 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 	case hasPage && !hasSection:
 		return Resolution{
 			Kind:          TargetKindPage,
-			CanonicalHref: formatCanonicalHref(sourceFile, pageFile, true, isAbsolute, suffix, base),
-			RoutePath:     targetPath,
+			CanonicalHref: formatCanonicalHref(sourceFile, page.CanonicalPath, true, isAbsolute, suffix, base),
+			RoutePath:     page.RoutePath,
 		}
 	case hasSection && !hasPage:
 		sectionPath := strings.TrimRight(targetPath, "/")

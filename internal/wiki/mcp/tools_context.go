@@ -360,6 +360,11 @@ func (r *Routes) pageIDsForMarkdownPaths(paths []string) []string {
 
 func (r *Routes) pageIDForMarkdownPath(markdownPath string) string {
 	trimmed := strings.Trim(strings.TrimSpace(filepath.ToSlash(markdownPath)), "/")
+	if route, err := tree.MapWorkspaceMarkdownRoute(r.workspaceRootDir, trimmed, false); err == nil && !route.Skip {
+		if pageID := r.pageIDForRecentChangeRoute(route.RoutePath, route.Kind); pageID != "" {
+			return pageID
+		}
+	}
 	if path.Base(trimmed) == "README.md" {
 		if page, err := r.treeService.FindPageByRoutePathAndKind(tree.MarkdownPathToRoutePath(trimmed), tree.NodeKindPage); err == nil && page != nil {
 			return page.ID

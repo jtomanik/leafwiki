@@ -6,7 +6,6 @@ import PageEditor from '../editor/PageEditor'
 import Importer from '../importer/Importer'
 import PageHistoryPage from '../page/PageHistoryPage'
 import PermalinkRedirect from '../page/PermalinkRedirect'
-import RootRedirect from '../page/RootRedirect'
 import UserManagement from '../users/UserManagement'
 import PageViewer from '../viewer/PageViewer'
 import AuthWrapper from './RouterAuthWrapper'
@@ -38,11 +37,11 @@ export const createLeafWikiRouter = (
         path: '/',
         element: isReadOnlyViewer ? (
           <ReadOnlyWrapper>
-            <RootRedirect />
+            <PageViewer />
           </ReadOnlyWrapper>
         ) : (
           <AuthWrapper>
-            <RootRedirect />
+            <PageViewer />
           </AuthWrapper>
         ),
       },

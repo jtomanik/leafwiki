@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: 6Pjd2VavR
+  title: Local MCP Interface
+  created_at: "2026-06-14T13:51:34.183008424Z"
+  updated_at: "2026-06-14T13:51:34.183008424Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Local MCP Interface
 
 LeafWiki can expose MCP through a local Streamable HTTP endpoint, native STDIO, or both through one per-project owner daemon. MCP is disabled by default.
@@ -159,6 +170,8 @@ Agents should call `wiki_get_context` before other tools. It returns the current
 The normal edit path is semantic MCP writes such as `wiki_update_page`, `wiki_update_page_metadata`, or `wiki_replace_page_section`. When workspace sync is enabled, direct Markdown file edits under `--root-dir` can be useful for large mechanical body changes. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. Then call `wiki_refresh` when humans or following tools need immediate web visibility, and run validation before reporting done.
 
 Most MCP page-path arguments are route paths such as `/docs/api`. Path-based page lookup, validation, and subtree tools also accept canonical Markdown file paths: `/docs/api.md` selects the page, `/docs/api/index.md` selects the section, and an active `/docs/api/README.md` fallback selects the section it backs. Route-structure tools such as `wiki_lookup_path` remain route-oriented and use an explicit `kind` argument when page and section twins share a route. Markdown content should use LeafWiki's canonical link format: page links end in `.md`, section links omit `.md`. Workspace sync and import canonicalize resolvable legacy page links before validation.
+
+When workspace sync scans raw files, common documentation filenames are normalized into route-safe paths before validation and refresh status are reported. For example, `plans/agent_hooks.PLAN.md` validates as `/plans/agent-hooks-plan.md`; `wiki_validate_wiki` and `wiki_refresh` use the same mapping and report `path_conflict` if two source files normalize to the same route. This does not make raw filenames permanent route aliases.
 
 Presence is advisory and privacy-filtered. Web heartbeats are in memory, expire after 90 seconds, and expose sanitized user id/name/role plus page id/path/title when resolvable. User email is visible only to admin MCP callers. Agent hook presence is also in memory and exposes only provider, provider-scoped session hash, model/source metadata, event name, and timestamps; raw hook payloads, prompts, transcript paths, session ids, API keys, JWTs, and daemon control tokens are never exposed through `wiki_get_context`.
 

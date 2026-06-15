@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: PYCO2VaDR
+  title: Agent Collaboration
+  created_at: "2026-06-14T13:51:34.182517881Z"
+  updated_at: "2026-06-14T18:27:56.708083Z"
+  creator_id: system
+  last_author_id: public-editor
+-->
+
 # Agent Collaboration
 
 Thread context: `codex://threads/019e9c9b-92bc-74c1-820e-a758f051d779`
@@ -6,7 +17,7 @@ LeafWiki's MCP surface is a context-first collaboration layer for agents and hum
 
 ## Agent Skill
 
-Agents that support repo-local skills should use [LeafWiki Agent Workflow](../skills/llmwiki/SKILL.md) before editing or validating LeafWiki content. The skill packages the context-first workflow, viewer/editor refresh rules, version handling, direct Markdown flow, and validation expectations into a reusable agent instruction.
+Agents that support repo-local skills should use [LeafWiki Agent Workflow](/skills/llmwiki/SKILL.md) before editing or validating LeafWiki content. The skill packages the context-first workflow, viewer/editor refresh rules, version handling, direct Markdown flow, and validation expectations into a reusable agent instruction.
 
 ## First Call
 

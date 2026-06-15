@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: rLjOhV-Dg
+  title: Agent Hooks
+  created_at: "2026-06-13T20:11:32.48156493Z"
+  updated_at: "2026-06-13T20:11:32.48156493Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Agent Hooks
 
 Thread context: `codex://threads/019ea3a5-4240-7b80-b5f0-76c459294370`

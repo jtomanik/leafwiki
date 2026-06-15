@@ -3531,6 +3531,39 @@ func TestGetPageByPathEndpoint_MissingPath(t *testing.T) {
 	}
 }
 
+func TestGetPageByPathEndpoint_ExplicitEmptyPathReturnsRootSection(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("mkdir root fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: root\nleafwiki_title: Root README\n---\n# Root README\n"), 0o644); err != nil {
+		t.Fatalf("write root README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "child.md"), []byte("---\nleafwiki_id: child\nleafwiki_title: Child\n---\n# Child\n"), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	router := createRouterTestInstance(w, t)
+
+	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=&kind=section", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected root path status 200, got %d - %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse root response: %v", err)
+	}
+	if resp["id"] != "root" || resp["kind"] != "section" || resp["title"] != "Root README" {
+		t.Fatalf("root response = %#v, want root README section", resp)
+	}
+	if !strings.Contains(resp["content"].(string), "Root README") {
+		t.Fatalf("root content = %#v, want README body", resp["content"])
+	}
+}
+
 func TestGetPageByPathEndpoint_NotFound(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)

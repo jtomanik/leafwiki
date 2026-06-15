@@ -36,8 +36,9 @@ type PageNode struct {
 	Position int         `json:"position"` // Position is the position of the entry
 	Parent   *PageNode   `json:"-"`
 
-	Kind     NodeKind     `json:"kind"`     // Kind is the kind of the node (page or folder)
-	Metadata PageMetadata `json:"metadata"` // Metadata holds metadata about the page
+	Kind                NodeKind     `json:"kind"` // Kind is the kind of the node (page or folder)
+	WorkspaceSourcePath string       `json:"-"`    // root-relative source path for normalized workspace imports
+	Metadata            PageMetadata `json:"metadata"`
 }
 
 func (p *PageNode) HasChildren() bool {

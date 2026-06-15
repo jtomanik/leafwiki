@@ -1,8 +1,10 @@
 import { fetchWithAuth } from './auth'
 
 export type WorkspaceSyncValidationError = {
+  code?: string
   path?: string
   message: string
+  severity?: string
 }
 
 export type WorkspaceSyncStatus = {

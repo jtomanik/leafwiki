@@ -156,7 +156,12 @@ func (r *Routes) handleGetPage(c *gin.Context) {
 }
 
 func (r *Routes) handleGetByPath(c *gin.Context) {
-	out, err := r.findByPathInput(c.Request.Context(), c.Query("path"), c.Query("kind"))
+	rawPath, hasPath := c.GetQuery("path")
+	if !hasPath {
+		respondWithPageError(c, sharederrors.NewLocalizedError(ErrCodePageMissingPath, "Missing path", "missing path", nil))
+		return
+	}
+	out, err := r.findByPathInput(c.Request.Context(), rawPath, c.Query("kind"))
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -169,6 +174,24 @@ func (r *Routes) handleGetByPath(c *gin.Context) {
 }
 
 func (r *Routes) findByPathInput(ctx context.Context, rawPath string, rawKind string) (*FindByPathOutput, error) {
+	if rawPath == "" {
+		kind := tree.NodeKind("")
+		if strings.TrimSpace(rawKind) != "" {
+			validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
+			if err != nil {
+				return nil, err
+			}
+			kind = validKind
+		}
+		if kind != "" && kind != tree.NodeKindSection {
+			return nil, tree.ErrPageNotFound
+		}
+		page, err := r.treeService.GetPage("root")
+		if err != nil {
+			return nil, err
+		}
+		return &FindByPathOutput{Page: page}, nil
+	}
 	if out, handled, err := FindReadmeMarkdownPathFallback(rawPath, rawKind, ReadmeMarkdownPathFallbackLookup{
 		RootDir: r.treeService.RootDir(),
 		FindByPath: func(input FindByPathInput) (*FindByPathOutput, error) {

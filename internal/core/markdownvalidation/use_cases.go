@@ -155,7 +155,6 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 	seenRoutePaths := map[string]string{}
 	filesByRoute := map[string]string{}
 	files := []workspaceFile{}
-	slugger := tree.NewSlugService()
 	issues := []Issue{}
 	addIssue := func(severity string, code string, relPath string, pageID string, message string) {
 		issues = append(issues, Issue{
@@ -176,7 +175,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			if allowSectionIndex && firstPath == strings.Trim(strings.TrimSuffix(filepath.ToSlash(filepath.Dir(relPath)), "."), "/") {
 				return
 			}
-			addIssue("error", "path_conflict", relPath, "", "route path already appears in "+firstPath)
+			addIssue("error", "path_conflict", relPath, "", "route path conflict between "+firstPath+" and "+relPath)
 			return
 		}
 		seenRoutePaths[routeKey] = relPath
@@ -198,14 +197,17 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			if strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
 			}
-			if err := slugger.IsValidSlug(name); err != nil {
-				relPath := workspaceValidationRelPath(rootDir, filePath)
+			relPath := workspaceValidationRelPath(rootDir, filePath)
+			route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, true)
+			if err != nil {
 				addIssue("error", "invalid_slug", relPath, "", err.Error())
 				return filepath.SkipDir
 			}
-			relPath := workspaceValidationRelPath(rootDir, filePath)
-			recordRoutePath(relPath, strings.Trim(relPath, "/"), tree.NodeKindSection, false)
-			filesByRoute[workspaceValidationRouteConflictKey(relPath, tree.NodeKindSection)] = "filesystem:" + strings.Trim(relPath, "/")
+			if route.Skip {
+				return filepath.SkipDir
+			}
+			recordRoutePath(relPath, route.RoutePath, tree.NodeKindSection, false)
+			filesByRoute[workspaceValidationRouteConflictKey(route.RoutePath, tree.NodeKindSection)] = "filesystem:" + strings.Trim(route.RoutePath, "/")
 			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(name), ".md") {
@@ -218,18 +220,17 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			}
 			return nil
 		}
-		baseFilename := strings.TrimSuffix(name, filepath.Ext(name))
-		isSectionIndex := workspaceValidationActiveSectionContentFile(rootDir, relPath)
-		if !isSectionIndex {
-			if err := slugger.IsValidSlug(baseFilename); err != nil {
-				addIssue("error", "invalid_slug", relPath, "", err.Error())
-			}
+		route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false)
+		if err != nil {
+			addIssue("error", "invalid_slug", relPath, "", err.Error())
+			return nil
 		}
-		routePath := workspaceValidationMarkdownRoutePath(rootDir, relPath)
-		routeKind := tree.NodeKindPage
-		if isSectionIndex {
-			routeKind = tree.NodeKindSection
+		if route.Skip {
+			return nil
 		}
+		routePath := route.RoutePath
+		routeKind := route.Kind
+		isSectionIndex := route.Kind == tree.NodeKindSection && route.ContentPath != ""
 		recordRoutePath(relPath, routePath, routeKind, isSectionIndex)
 		rawBytes, err := os.ReadFile(filePath)
 		if err != nil {
@@ -298,7 +299,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			case markdownlinks.TargetKindInvalid:
 				return resolved.RoutePath, "", false, "invalid_link"
 			case markdownlinks.TargetKindUnresolved:
-				if resolved.Code == "ambiguous_legacy_link" {
+				if resolved.Code == "ambiguous_legacy_link" || resolved.Code == "non_canonical_markdown_path" {
 					return resolved.RoutePath, "", false, resolved.Code
 				}
 				return resolved.RoutePath, "", false, "broken_link"
@@ -325,56 +326,6 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		issues = append(issues, result.Issues...)
 	}
 	return resultFromIssues(issues)
-}
-
-func workspaceValidationActiveSectionContentFile(rootDir string, relPath string) bool {
-	name := path.Base(filepath.ToSlash(relPath))
-	dir := path.Dir(filepath.ToSlash(relPath))
-	if dir == "." {
-		dir = ""
-	}
-	if strings.EqualFold(name, "index.md") {
-		return true
-	}
-	if name != "README.md" {
-		return false
-	}
-	return !workspaceValidationDirHasIndexFile(filepath.Join(rootDir, filepath.FromSlash(dir)))
-}
-
-func workspaceValidationMarkdownRoutePath(rootDir string, relPath string) string {
-	if !workspaceValidationActiveSectionContentFile(rootDir, relPath) {
-		return tree.MarkdownPathToRoutePath(relPath)
-	}
-	slashPath := filepath.ToSlash(relPath)
-	name := path.Base(slashPath)
-	if strings.EqualFold(name, "index.md") {
-		return tree.MarkdownPathToRoutePath(relPath)
-	}
-	dir := path.Dir(slashPath)
-	if dir == "." {
-		return ""
-	}
-	return strings.Trim(dir, "/")
-}
-
-func workspaceValidationDirHasIndexFile(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		ext := path.Ext(name)
-		base := strings.TrimSuffix(name, ext)
-		if strings.EqualFold(base, "index") && strings.EqualFold(ext, ".md") {
-			return true
-		}
-	}
-	return false
 }
 
 func Combine(results ...Result) Result {

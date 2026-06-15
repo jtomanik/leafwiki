@@ -114,6 +114,94 @@ func TestValidateWorkspaceMarkdownFiles_ResolvesCanonicalPageMdAndSectionLinks(t
 	}
 }
 
+func TestValidateWorkspaceMarkdownFiles_NormalizesWorkspaceRoutes(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
+		t.Fatalf("create plans dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), canonicalValidationMarkdown("plans", "Plans", "# Plans\n"), 0o644); err != nil {
+		t.Fatalf("write plans index markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), canonicalValidationMarkdown("agent-hooks-plan", "Agent Hooks Plan", "# Agent Hooks Plan\n"), 0o644); err != nil {
+		t.Fatalf("write plan markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), canonicalValidationMarkdown("source", "Source", "# Source\n\n[Plan](/plans/agent-hooks-plan.md)\n"), 0o644); err != nil {
+		t.Fatalf("write source markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
+
+	if !result.OK {
+		t.Fatalf("validation = %#v, want normalizable plan filename and normalized link to validate", result)
+	}
+	for _, issue := range result.Issues {
+		if issue.Code == "invalid_slug" && strings.Contains(issue.Path, "agent_hooks.PLAN.md") {
+			t.Fatalf("issues = %#v, want no invalid_slug for normalizable plan filename", result.Issues)
+		}
+	}
+}
+
+func TestValidateWorkspaceMarkdownFiles_RejectsRawNormalizedSourceMarkdownLinks(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
+		t.Fatalf("create plans dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), canonicalValidationMarkdown("plans", "Plans", "# Plans\n"), 0o644); err != nil {
+		t.Fatalf("write plans index markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), canonicalValidationMarkdown("agent-hooks-plan", "Agent Hooks Plan", "# Agent Hooks Plan\n"), 0o644); err != nil {
+		t.Fatalf("write plan markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), canonicalValidationMarkdown("source", "Source", "# Source\n\n[Plan](/plans/agent_hooks.PLAN.md)\n"), 0o644); err != nil {
+		t.Fatalf("write source markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
+
+	if result.OK {
+		t.Fatalf("validation = %#v, want raw normalized source link to fail", result)
+	}
+	if len(result.Issues) != 1 || result.Issues[0].Code != "non_canonical_markdown_path" {
+		t.Fatalf("issues = %#v, want one non_canonical_markdown_path", result.Issues)
+	}
+	if result.Issues[0].Path != "source" {
+		t.Fatalf("issue path = %q, want source", result.Issues[0].Path)
+	}
+}
+
+func TestValidateWorkspaceMarkdownFiles_ReportsNormalizedRouteCollision(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
+		t.Fatalf("create plans dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "foo_bar.md"), canonicalValidationMarkdown("foo-bar-a", "Foo Bar A", "# Foo Bar A\n"), 0o644); err != nil {
+		t.Fatalf("write first markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "foo-bar.md"), canonicalValidationMarkdown("foo-bar-b", "Foo Bar B", "# Foo Bar B\n"), 0o644); err != nil {
+		t.Fatalf("write second markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
+
+	if result.OK {
+		t.Fatalf("validation = %#v, want normalized route collision", result)
+	}
+	var found bool
+	for _, issue := range result.Issues {
+		if issue.Code == "path_conflict" &&
+			(issue.Path == "plans/foo-bar.md" || issue.Path == "plans/foo_bar.md") &&
+			(strings.Contains(issue.Message, "plans/foo-bar.md") || strings.Contains(issue.Message, "plans/foo_bar.md")) {
+			found = true
+		}
+		if issue.Code == "invalid_slug" && strings.Contains(issue.Path, "foo_bar.md") {
+			t.Fatalf("issues = %#v, want path_conflict instead of invalid_slug for normalizable filename", result.Issues)
+		}
+	}
+	if !found {
+		t.Fatalf("issues = %#v, want path_conflict for normalized duplicate route", result.Issues)
+	}
+}
+
 func TestValidateWorkspaceMarkdownFiles_IgnoresProtocolRelativeAndSchemedURLs(t *testing.T) {
 	rootDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), []byte("---\nleafwiki_id: source\nleafwiki_title: Source\n---\n# Source\n\n[CDN](//cdn.example.com/lib.md)\n[Obsidian](obsidian://open?vault=wiki)\n"), 0o644); err != nil {

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test, { expect } from '@playwright/test';
 import LoginPage from '../pages/LoginPage';
@@ -19,6 +19,17 @@ const rootDir = process.env.E2E_ROOT_DIR ?? '';
 type WorkspaceSnapshot = {
   id: string;
   changedMarkdownPaths?: string[];
+};
+
+type WorkspaceSyncValidationError = {
+  code?: string;
+  message?: string;
+  path?: string;
+  severity?: string;
+};
+
+type WorkspaceSyncStatus = {
+  validationErrors?: WorkspaceSyncValidationError[];
 };
 
 async function listWorkspaceSnapshots(page: import('@playwright/test').Page) {
@@ -48,6 +59,66 @@ function readRootMarkdown(relativePath: string) {
   return readFileSync(path.join(rootDir, relativePath), 'utf8');
 }
 
+function readRootMarkdownIfExists(relativePath: string) {
+  expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
+  const fullPath = path.join(rootDir, relativePath);
+  return existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : null;
+}
+
+function removeRootPath(relativePath: string) {
+  expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
+  rmSync(path.join(rootDir, relativePath), { force: true, recursive: true });
+}
+
+async function expectWorkspaceStatusNotToMention(
+  page: import('@playwright/test').Page,
+  text: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const syncStatus = await getWorkspaceSyncStatus(page);
+        return validationErrorsMentioning(syncStatus.validationErrors ?? [], text);
+      },
+      { timeout: 15000 },
+    )
+    .toEqual([]);
+
+  const status = page.getByTestId('workspace-sync-status');
+  if ((await status.count()) === 0) return;
+  await expect(status).not.toContainText(text);
+}
+
+async function getWorkspaceSyncStatus(
+  page: import('@playwright/test').Page,
+): Promise<WorkspaceSyncStatus> {
+  return await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
+    const response = await fetch('/api/workspace-sync/status', {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Workspace sync status failed: ${response.status}`);
+    }
+
+    return (await response.json()) as WorkspaceSyncStatus;
+  });
+}
+
+function validationErrorsMentioning(
+  validationErrors: WorkspaceSyncValidationError[],
+  text: string,
+) {
+  return validationErrors.filter((validationError) =>
+    [
+      validationError.code,
+      validationError.message,
+      validationError.path,
+      validationError.severity,
+    ].some((value) => value?.includes(text)),
+  );
+}
+
 function canonicalPageMarkdown(id: string, title: string, body: string) {
   return `<!-- leafwiki
 version: 1
@@ -68,8 +139,10 @@ leafwiki_title: ${title}
 ${body}`;
 }
 
-async function refreshWorkspaceSync(page: import('@playwright/test').Page) {
-  await page.evaluate(async () => {
+async function refreshWorkspaceSync(
+  page: import('@playwright/test').Page,
+): Promise<WorkspaceSyncStatus> {
+  return await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
     const hostMatch =
       document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
       document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
@@ -96,6 +169,8 @@ async function refreshWorkspaceSync(page: import('@playwright/test').Page) {
     if (!response.ok) {
       throw new Error(`Workspace sync refresh failed: ${response.status}`);
     }
+
+    return (await response.json()) as WorkspaceSyncStatus;
   });
 }
 
@@ -159,6 +234,100 @@ Direct filesystem content`,
     });
     await treeView.clickPageByTitle('Workspace Sync Direct');
     await expect(page.locator('article')).toContainText('Direct filesystem content');
+  });
+
+  test('workspace-sync-imports-normalized-markdown-filenames', async ({ page }) => {
+    const suffix = Date.now();
+    const sectionSlug = `workspace-sync-normalized-${suffix}`;
+    const sourceFilename = `${sectionSlug}/agent_hooks.PLAN.md`;
+
+    writeRootMarkdown(
+      `${sectionSlug}/index.md`,
+      canonicalPageMarkdown(
+        sectionSlug,
+        'Workspace Sync Normalized Section',
+        '# Workspace Sync Normalized Section',
+      ),
+    );
+    writeRootMarkdown(
+      sourceFilename,
+      canonicalPageMarkdown(
+        `${sectionSlug}-agent-hooks-plan`,
+        'Workspace Sync Agent Hooks Plan',
+        `# Workspace Sync Agent Hooks Plan
+
+        Normalized filename content`,
+      ),
+    );
+    const syncStatus = await refreshWorkspaceSync(page);
+    expect(validationErrorsMentioning(syncStatus.validationErrors ?? [], sourceFilename)).toEqual(
+      [],
+    );
+
+    const treeView = new TreeView(page);
+    await treeView.expandNodeByTitle('Workspace Sync Normalized Section');
+    await expect(await treeView.findPageByTitle('Workspace Sync Agent Hooks Plan')).toBeVisible({
+      timeout: 15000,
+    });
+    await page.goto(toAppPath(`/${sectionSlug}/agent-hooks-plan.md`));
+    await expect(page.locator('article')).toContainText('Normalized filename content');
+    await expectWorkspaceStatusNotToMention(page, 'agent_hooks.PLAN.md');
+  });
+
+  test('root README renders at home and Explorer Home returns to slash', async ({ page }) => {
+    const suffix = Date.now();
+    const childSlug = `workspace-sync-home-child-${suffix}`;
+    const originalReadme = readRootMarkdownIfExists('README.md');
+    const originalIndex = readRootMarkdownIfExists('index.md');
+
+    await runCleanupPreservingTestError(
+      async () => {
+        writeRootMarkdown(
+          'README.md',
+          canonicalPageMarkdown(
+            'root',
+            'Workspace Sync Root Home',
+            `# Workspace Sync Root Home
+
+Root README home content`,
+          ),
+        );
+        removeRootPath('index.md');
+        writeRootMarkdown(
+          `${childSlug}.md`,
+          canonicalPageMarkdown(
+            childSlug,
+            'Workspace Sync Home Child',
+            '# Workspace Sync Home Child',
+          ),
+        );
+        await refreshWorkspaceSync(page);
+
+        await page.goto(toAppPath('/'));
+        await expect(page).toHaveURL(/\/$/);
+        await expect(page.locator('article')).toContainText('Root README home content');
+
+        await page.goto(toAppPath(`/${childSlug}.md`));
+        await expect(page.locator('article')).toContainText('Workspace Sync Home Child');
+        await page.getByTestId('tree-view-action-button-home').click();
+        await expect(page).toHaveURL(/\/$/);
+        await expect(page.locator('article')).toContainText('Root README home content');
+      },
+      async () => {
+        if (originalReadme === null) {
+          removeRootPath('README.md');
+        } else {
+          writeRootMarkdown('README.md', originalReadme);
+        }
+        if (originalIndex === null) {
+          removeRootPath('index.md');
+        } else {
+          writeRootMarkdown('index.md', originalIndex);
+        }
+        removeRootPath(`${childSlug}.md`);
+        await refreshWorkspaceSync(page);
+      },
+    );
   });
 
   test('workspace-sync-rewrites-resolvable-legacy-page-link-and-shows-no-validation-error', async ({
@@ -598,6 +767,52 @@ Legacy metadata should be canonicalized exactly once.`,
         );
         await refreshWorkspaceSync(page);
         await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+      },
+    );
+  });
+
+  test('normalized route conflicts are shown in the Explorer banner', async ({ page }) => {
+    const suffix = Date.now();
+    const conflictDir = `workspace-sync-route-conflict-${suffix}`;
+    const firstPath = `${conflictDir}/foo_bar.md`;
+    const secondPath = `${conflictDir}/foo-bar.md`;
+    writeRootMarkdown(
+      firstPath,
+      canonicalPageMarkdown(`${conflictDir}-a`, 'Route Conflict A', '# Route Conflict A'),
+    );
+    writeRootMarkdown(
+      secondPath,
+      canonicalPageMarkdown(`${conflictDir}-b`, 'Route Conflict B', '# Route Conflict B'),
+    );
+
+    await runCleanupPreservingTestError(
+      async () => {
+        const syncStatus = await refreshWorkspaceSync(page);
+        const conflicts = (syncStatus.validationErrors ?? []).filter(
+          (validationError) =>
+            validationError.code === 'path_conflict' &&
+            validationError.path?.startsWith(conflictDir) &&
+            validationError.message?.includes(firstPath) &&
+            validationError.message?.includes(secondPath),
+        );
+        expect(conflicts).toHaveLength(1);
+
+        await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
+        await expect(
+          page.getByText('Workspace synced, but some Markdown files could not be loaded.'),
+        ).toBeVisible();
+        await expect(page.getByTestId('workspace-sync-status')).toContainText(conflictDir);
+        await expect(page.getByTestId('workspace-sync-status')).toContainText(
+          'route path conflict',
+        );
+      },
+      async () => {
+        removeRootPath(conflictDir);
+        await refreshWorkspaceSync(page);
+        await page.reload();
+        const viewPage = new ViewPage(page);
+        await viewPage.expectUserLoggedIn();
+        await expectWorkspaceStatusNotToMention(page, conflictDir);
       },
     );
   });

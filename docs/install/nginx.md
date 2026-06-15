@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: 2ECO24avRz
+  title: LeafWiki Demo Setup (with nginx and HTTPS)
+  created_at: "2026-05-30T21:30:20.67249002Z"
+  updated_at: "2026-05-30T21:30:20.67249002Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki Demo Setup (with nginx and HTTPS)
 
 This guide demonstrates how to install **LeafWiki** on Ubuntu, configure **nginx** as a reverse proxy, and secure it with a free **Let's Encrypt** SSL certificate via **Certbot**.

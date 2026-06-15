@@ -1,6 +1,10 @@
 package markdownlinks
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Relative page links are resolved from the source file directory
@@ -135,6 +139,68 @@ func TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection(t
 	readmePage := index.Resolve("docs/a.md", "/docs/sync/README.md")
 	if readmePage.Kind != TargetKindPage || readmePage.CanonicalHref != "/docs/sync/README.md" {
 		t.Fatalf("README page resolution = %#v, want canonical page link", readmePage)
+	}
+}
+
+func TestNewIndexFromRootUsesWorkspaceRouteNormalization(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
+		t.Fatalf("create plans dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("# Plans"), 0o644); err != nil {
+		t.Fatalf("write plans index markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("# Agent Hooks Plan"), 0o644); err != nil {
+		t.Fatalf("write plan markdown: %v", err)
+	}
+
+	index, err := NewIndexFromRoot(rootDir)
+	if err != nil {
+		t.Fatalf("NewIndexFromRoot: %v", err)
+	}
+	result := index.Resolve("source.md", "/plans/agent-hooks-plan.md")
+
+	if result.Kind != TargetKindPage {
+		t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
+	}
+	if result.RoutePath != "plans/agent-hooks-plan" {
+		t.Fatalf("RoutePath = %q, want plans/agent-hooks-plan", result.RoutePath)
+	}
+	if result.CanonicalHref != "/plans/agent-hooks-plan.md" {
+		t.Fatalf("CanonicalHref = %q, want /plans/agent-hooks-plan.md", result.CanonicalHref)
+	}
+
+	rawAbsolute := index.Resolve("source.md", "/plans/agent_hooks.PLAN.md")
+	if rawAbsolute.Kind != TargetKindUnresolved {
+		t.Fatalf("raw absolute Kind = %q, want %q: %#v", rawAbsolute.Kind, TargetKindUnresolved, rawAbsolute)
+	}
+	if rawAbsolute.Code != "non_canonical_markdown_path" {
+		t.Fatalf("raw absolute Code = %q, want non_canonical_markdown_path", rawAbsolute.Code)
+	}
+	if rawAbsolute.RoutePath != "plans/agent-hooks-plan" {
+		t.Fatalf("raw absolute RoutePath = %q, want plans/agent-hooks-plan", rawAbsolute.RoutePath)
+	}
+
+	rawRelative := index.Resolve("plans/source.md", "./agent_hooks.PLAN.md")
+	if rawRelative.Kind != TargetKindUnresolved {
+		t.Fatalf("raw relative Kind = %q, want %q: %#v", rawRelative.Kind, TargetKindUnresolved, rawRelative)
+	}
+	if rawRelative.Code != "non_canonical_markdown_path" {
+		t.Fatalf("raw relative Code = %q, want non_canonical_markdown_path", rawRelative.Code)
+	}
+	if rawRelative.RoutePath != "plans/agent-hooks-plan" {
+		t.Fatalf("raw relative RoutePath = %q, want plans/agent-hooks-plan", rawRelative.RoutePath)
+	}
+
+	migration := index.ResolveForMigration("plans/source.md", "./agent_hooks.PLAN.md")
+	if migration.Kind != TargetKindPage {
+		t.Fatalf("migration Kind = %q, want %q: %#v", migration.Kind, TargetKindPage, migration)
+	}
+	if migration.RoutePath != "plans/agent-hooks-plan" {
+		t.Fatalf("migration RoutePath = %q, want plans/agent-hooks-plan", migration.RoutePath)
+	}
+	if migration.CanonicalHref != "agent-hooks-plan.md" {
+		t.Fatalf("migration CanonicalHref = %q, want agent-hooks-plan.md", migration.CanonicalHref)
 	}
 }
 

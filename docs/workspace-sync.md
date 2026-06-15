@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: TyjO24-DR
+  title: Workspace Sync
+  created_at: "2026-06-14T13:51:34.183408175Z"
+  updated_at: "2026-06-14T13:51:34.183408175Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Workspace Sync
 
 Workspace sync lets LeafWiki treat the Markdown tree under `--root-dir` as the source of truth. It records managed Markdown files in an internal Git repository, synchronizes direct filesystem edits into the in-memory tree, and exposes document/workspace restore APIs.
@@ -36,6 +47,16 @@ Only managed Markdown files are tracked:
 
 - included: `*.md` case-insensitively, for example `page.md` and `page.MD`
 - excluded: assets and other non-Markdown files, `.git`, `.leafwiki`, dotfiles, swap files, temporary downloads, and partial files
+
+## Workspace Filename Mapping
+
+Workspace Markdown filenames do not need to be valid public route slugs before import. LeafWiki maps each root-relative filesystem segment to a route segment: already-valid slugs are preserved, while unsafe or reserved segments are normalized with the same slug rules used by imports. For example, `plans/agent_hooks.PLAN.md` becomes the page route `plans/agent-hooks-plan`.
+
+This mapping is an import/sync rule, not a raw filename alias. Canonical page links still point at route-safe `.md` hrefs such as `/plans/agent-hooks-plan.md`.
+
+`index.md` remains the section content file. Exact-case `README.md` is the section content fallback when no sibling `index.md` exists; at the workspace root, that README content is the home page at `/`. When both files exist in a directory, `index.md` is section content and `README.md` is a normal page.
+
+If two files or directories normalize to the same route and kind, workspace validation reports a `path_conflict` and does not silently choose one. A top-level `assets/` directory is treated as static workspace content and skipped as a wiki section; nested wiki content and managed LeafWiki assets are not changed by that rule.
 
 ## Sync Flow
 

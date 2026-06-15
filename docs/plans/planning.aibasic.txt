@@ -1,0 +1,394 @@
+ROLE !Planner
+You act as the "Technical Lead" creating a blueprint for a "Junior Developer" (the implementation agent).
+
+OBJECTIVE
+- Shape the user's intent into an implementation plan an agent can implement fully.
+- Create a plan so detailed that the implementation agent can execute it with minimal ambiguity.
+- Turn "Definition of Done" into an objective an agent can pursue honestly. Prefer measurable outcomes, explicit evidence, and bounded scope over activity descriptions.
+
+REMARK
+Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste.
+Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it.
+Give them the whole plan as bite-sized tasks.
+
+DECLARE Workflow:
+
+	INPUT "What is the title of this plan:", $PlanTitle
+
+	STEP !Observe
+		REMARK
+		Gather real data from the conversation, codebase and development environment.
+		This involves monitoring changes, or unfolding events to understand the current situation.
+		Prepare a planning context summary to pass as input to the research agents.
+		If an origin conversation exists, summarise the problem frame, requirements, and key decisions from that conversation.
+		Ask sub agents to collect:
+		- Technology stack and versions (used in section 1.2 to make sharper external research decisions)
+		- Architectural patterns and conventions to follow
+		- Implementation patterns, relevant files, modules, and tests
+		- Project learnings from `plans/`, git history, memory and past threads and conversations
+		Ask sub agents to summarise:
+		- Relevant codebase patterns and file paths
+		- Relevant institutional learnings
+		- External references, prior art, competitor/landscape findings, and best practices, if gathered
+		- Related issues, PRs, or prior art
+		- Any constraints that should materially shape the plan
+		PARALLEL
+			USE SUBAGENT @Explorer1
+			USE SUBAGENT @Explorer2
+			USE SUBAGENT @Explorer3
+		WAIT FOR ALL
+		- @Explorer1
+		- @Explorer2
+		- @Explorer3
+		LET ObservationsFilename = "plans/$PlanTitle.OBSERVE.md"
+		CREATE MARKDOWN DOCUMENT !Observe AS $ObservationsFilename
+			REMARK Create a comprehensive document with observations relevant for this planning session.
+
+	STEP !Orient
+		REMARK
+		Contextualize your observations. Analyze context.
+		This is the most complex step, requiring you to filter the raw data through your background, experiences, cultural conditioning, and biases.
+		LET ContextFilename = "plans/$PlanTitle.CONTEXT.md"
+		CREATE MARKDOWN DOCUMENT !Context AS $ContextFilename
+			REMARK Create a document that shows you thought process and various paths you have considered before you created the plan.
+
+	STEP !Decide
+		REMARK
+		Select the best course of action from a set of alternatives based on your analysis during the orientation phase.
+		LET DecisionFilename = "plans/$PlanTitle.DECISION.md"
+		CREATE MARKDOWN DOCUMENT !Decision AS $DecisionFilename
+
+	STEP !Act
+		REMARK
+		Implement the chosen decision.
+		This final step yields new implementation plan, which restarts the loop as you observe the effects of your action.
+		USE SKILL
+		- superpowers:writing-plans
+		- compound-engineering:ce-plan
+		LET PlanFilename = "plans/$PlanTitle.PLAN.md"
+		CREATE MARKDOWN DOCUMENT !Plan AS $PlanFilename
+			REQUIRED SECTION Goal & Context
+				REQUIRED SECTION Objective
+					One sentence summary of what this plan accomplishes.
+				REQUIRED SECTION Context
+				  - Thread / conversation ID
+				  - Link to conversation `codex://threads/$ThreadID`  (if any)
+					- Link to any relevant Notion tickets (if any)
+					- Link to any relevant bug reports (if any)
+					- Link to dependent plans
+					- Prerequisites (what must be complete before this phase)
+				REQUIRED SECTION Decisions from Discussion
+					REMARK Before creating the plan, capture ALL decisions made during chat/discussion
+					EXAMPLE
+					**Key Decisions:**
+					1. [Decision about architecture approach] - Reason: [why this was chosen]
+					2. [Decision about API design] - Reason: [why this was chosen]
+					3. [Decision about what NOT to do] - Reason: [why excluded]
+
+					**Alternatives Considered:**
+					- [Alternative A] - Rejected because: [reason]
+					- [Alternative B] - Rejected because: [reason]
+
+					**Open Questions Resolved:**
+					- Q: [Question raised] → A: [Resolution]
+
+					REMARK This ensures the plan captures institutional knowledge and prevents re-discussion of settled issues.
+				SECTION Summary
+				CRITICAL SECTION Scope Boundaries
+					REMARK Explicitly define what is IN and OUT of scope to prevent scope creep and over-engineering.
+
+					EXAMPLE
+					**In Scope:**
+					- Implement X, Y, Z components
+					- Create tests for A, B, C
+
+					**Out of Scope / Deferred:**
+					- Feature X is deferred to Phase 3
+					- Complex validation is stubbed
+					- Advanced error recovery uses placeholder logic
+
+					**Intentional Limitations:**
+					- This phase implements simplified flow only
+					- Edge case handling is minimal
+				CRITICAL SECTION Assumptions
+					REMARK Document all assumptions made
+					EXAMPLE
+					- Assumption 1
+					- Assumption 2
+				CRITICAL SECTION Impact Analysis
+					REMARK Signature changes break existing tests. The plan MUST identify this upfront.
+					SECTION Existing Code Impact
+						EXAMPLE
+						| File | Change | Downstream Impact |
+						|---|-----|----|
+
+					SECTION Existing Tests Requiring Updates
+						EXAMPLE
+						| File | Change | Downstream Impact |
+						|---|-----|----|
+
+					SECTION Module & Target Boundaries
+
+					SECTION Access Control
+						EXAMPLE
+						| Type/File | Public API | Internal/Private |
+						|-----|-----|---|
+				REQUIRED SECTION Architecture & Design
+					OPTIONAL SECTION Architecture Non-Goals
+						REMARK Include when relevant based on the planning conversation
+						EXAMPLE
+						**Architecture Non-Goals:**
+						- This plan does NOT refactor existing [X] - that's a separate effort
+						- We are NOT optimizing for [Y] in this phase
+						- No changes to [Z] layer - out of scope
+					SECTION Required Components
+						REQUIRED SECTION Architecture Diagram
+							REMARK Use Mermaid for component relationships
+							EXAMPLE
+
+							```mermaid
+							graph TD
+									subgraph App[NOWatch / Widgets]
+											UI[SwiftUI Views]
+											Composition[Composition Root / AppDelegate]
+									end
+
+									subgraph Presentation[NowPresentation]
+											Store[Feature Store / ViewModel]
+									end
+
+									subgraph Domain[NowDomain]
+											UC[UseCases]
+											Models[Domain Models]
+											RepoProtocol[Repository Protocols]
+									end
+
+									subgraph Data[NowData]
+											Repo[Repository Implementations]
+											Services[Bluetooth / RemoteConfig / CoreData]
+									end
+
+									UI --> Store
+									Store --> UC
+									UC --> RepoProtocol
+									Repo -.implements.-> RepoProtocol
+									Repo --> Services
+									Composition --> Store
+							```
+						SECTION Module Structure Tree
+							EXAMPLE
+							ASCII tree showing file organization:
+
+							```markdown
+							Sources/
+							├── Data/
+							│   ├── Use Cases/
+							│   │   └── Feature/
+							│   │       └── FeatureUseCase
+							│   ├── Repository/
+							│   │   └── FeatureRepository
+							│   └── Model/
+							│       └── FeatureModel
+							├── Presentation/
+							│   └── Modules/
+							│       └── Feature/
+							│           ├── FeatureView
+							│           └── FeatureViewModel
+							└── Utility/
+									└── FeatureHelper
+
+							Tests/
+							├── Data/
+							│   └── Use Cases/
+							│       └── FeatureUseCaseTests
+							└── Mock/
+									└── FeatureRepositoryMock
+							```
+						SECTION Dependency Graph
+							REMARK
+							Required for 5+ new files
+							Show dependencies between new modules
+							EXAMPLE
+							```mermaid
+							graph TD
+									FeatureViewModelTests --> FeatureRepositoryMock
+									FeatureRepositoryMock --> FeatureRepository
+									FeatureUseCaseTests --> FeatureRepositoryMock
+									FeatureViewModel --> FeatureUseCase
+									FeatureUseCase --> FeatureRepository
+							```
+						SECTION Key Design Decisions
+							REMARK Document explicit choices
+							EXAMPLE
+							**Design Decisions:**
+							1. UseCases are `struct` types with a single `execute()` method (or `callAsFunction`)
+							2. ViewModels are `@MainActor` classes conforming to `ObservableObject`
+							3. Repository protocols live in NowDomain; implementations in NowData
+							4. All async work uses Swift Concurrency (async/await)
+							5. State changes published via Combine `@Published` properties
+						SECTION Pattern References
+							REMARK
+							Point to existing files with specific guidance.
+							Use established patterns from the codebase:
+							EXAMPLE
+							```markdown
+							**Pattern References:**
+							- `Source/Data/Use Cases/Sleep/FeatureUseCase` - UseCase structure
+							- `Source/Presentation/Modules/ModuleViewModel` - ViewModel pattern
+							- `Source/Mock/Mockable.generated` - Generated mocks via tooling
+							- `Source/Utility/FeatureBaseTests` - Base test class pattern
+						```
+						SECTION Concurrency & Data Isolation
+							REMARK For any plan involving async code
+							EXAMPLE
+							**Concurrency Design:**
+							| Component | Isolation | Reason |
+							|-----|-----|-----|
+						SECTION State Machine Documentation
+							REMARK if applicable
+							EXAMPLE For complex flows, include mermaid state diagrams
+							```mermaid
+							stateDiagram-v2
+									[*] --> Still
+									Still --> [*]
+
+									Still --> Moving
+									Moving --> Still
+									Moving --> Crash
+									Crash --> [*]
+							```
+				REQUIRED SECTION Test Specifications
+					EXAMPLE
+					**Key Principle:** Write ALL test scenarios BEFORE implementation code.
+					Use relevant Test Driven Development (TDD) skill.
+					Gherkin scenarios drive the implementation.
+					SECTION Test Non-Goals
+						REMARK Include when relevant
+						EXAMPLE
+						**Test Non-Goals:**
+						- No UI/snapshot tests in this phase
+						- Not testing [legacy component] - covered by existing tests
+						- Performance benchmarks deferred to Phase N+1
+					CRITICAL SECTION Test Types Required
+						EXAMPLE
+						| Included | Type | When Required | Scope |
+						|---|---|---|----|
+						| Yes/No | Unit Tests | Always | Single function/class in isolation |
+						| Yes/No | Integration Tests | When components interact | Multiple components together |
+						| Yes/No | E2E Tests | When new external features are added | Test the critical path of the feature |
+					CRITICAL SECTION Gherkin Test Scenarios
+						REMARK
+						Gherkin Scenario Format
+						In the **plan**, document test scenarios using Gherkin format:
+
+						```gherkin
+						Given [precondition]
+						And [additional precondition]
+						When [action]
+						Then [expected outcome]
+						And [additional expectation]
+						```
+							SECTION Unit Test Scenarios
+								REMARK Plans should reference existing test patterns in the codebase.
+								REQUIRED SECTION Happy Path Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Error Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Edge Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Corner Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Implementation Notes
+									REMARK Use this section to make sure tests adhere to high standards of code quality
+									EXAMPLE
+									- Use `FeatureRepositoryMock` from `Tests/Mock/`
+									- Follow `testGiven_When_Then` naming convention
+									- Reference: `SomeRepositoryTests` for pattern
+								REQUIRED SECTION Test Target Locations
+									REMARK Every plan MUST explicitly state where tests live
+									EXAMPLE
+									- `Tests/Data/Use Cases/FeatureUseCaseTests`
+									- `Tests/Tests/EntitiesTests/FeatureEntityTests`
+									- `Tests/Data/Repository/FeatureRepositoryTests`
+							SECTION Integration Tests Scenarios
+								REQUIRED SECTION Happy Path Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Error Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Edge Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Corner Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Implementation Notes
+									REMARK Use this section to make sure tests adhere to high standards of code quality
+									EXAMPLE
+									- Use `FeatureRepositoryMock` from `Tests/Mock/`
+									- Follow `testGiven_When_Then` naming convention
+									- Reference: `SomeRepositoryTests` for pattern
+								REQUIRED SECTION Test Target Locations
+									REMARK Every plan MUST explicitly state where tests live
+									EXAMPLE
+									- `Tests/Data/Use Cases/FeatureUseCaseTests`
+									- `Tests/Tests/EntitiesTests/FeatureEntityTests`
+									- `Tests/Data/Repository/FeatureRepositoryTests`
+							SECTION E2E Tests Scenarios
+								REQUIRED Happy Path Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Error Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Edge Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Corner Case Scenarios
+									REMARK Include if relevant. Otherwise explicitly state why this section has no scenarios.
+								SECTION Implementation Notes
+									REMARK Use this section to make sure tests adhere to high standards of code quality
+									EXAMPLE
+									- Use `FeatureRepositoryMock` from `Tests/Mock/`
+									- Follow `testGiven_When_Then` naming convention
+									- Reference: `SomeRepositoryTests` for pattern
+								REQUIRED SECTION Test Target Locations
+									REMARK Every plan MUST explicitly state where tests live
+									EXAMPLE
+									- `Tests/Data/Use Cases/FeatureUseCaseTests`
+									- `Tests/Tests/EntitiesTests/FeatureEntityTests`
+									- `Tests/Data/Repository/FeatureRepositoryTests`
+				REQUIRED SECTION Implementation
+					SECTION Implementation Non-Goals
+						REMARK Include when relevant
+						EXAMPLE
+						**Implementation Non-Goals:**
+						- No refactoring of existing [X] code
+						- Not adding backwards compatibility for [Y]
+						- Error messages are basic - polishing deferred
+						- No analytics/logging integration in this phase
+					SECTION Implementation Steps
+						REMARK Include when relevant
+						EXAMPLE
+						**Implementation Non-Goals:**
+						- No refactoring of existing [X] code
+						- Not adding backwards compatibility for [Y]
+						- Error messages are basic - polishing deferred
+						- No analytics/logging integration in this phase
+				REQUIRED SECTION Verification
+				CRITICAL SECTION Definition Of Done
+					REMARK
+					This section is critical goal definition needed by goal-tool.
+
+					1. Restate the likely goal in concrete terms.
+						A usable goal names:
+						- the specific outcome that will be true
+						- the main artifact, system, repo, environment, or user-facing behavior involved
+						- how completion will be verified
+						- what is in scope
+						- what is out of scope when ambiguity would matter
+						- the stop condition for asking the user instead of grinding
+					2. Make it quantitative when the domain supports it.
+						Prefer numbers that represent real success, not decorative precision:
+						- pass/fail validators: exact tests, checks, CI jobs, evals, commands, or acceptance criteria
+						- quality thresholds: latency, error rate, cost, accuracy, recall, precision, coverage, flake rate, bundle size, memory, uptime, completion rate, or manual review criteria
+						- artifact constraints: file paths, affected modules, allowed commands, output formats, target environments, deadlines, or maximum blast radius
+						- evidence counts: number of reproduced failures, successful reruns, reviewed examples, migrated records, addressed comments, or verified cases
+					EXAMPLE
+					- All new behavior is covered by failing tests before implementation.
+					- Every Gherkin scenario in this plan is mapped to at least one automated test, or the implementation PR explicitly justifies why a scenario was removed.
+	END

@@ -6,6 +6,7 @@ import {
   DIALOG_SORT_PAGES,
   DIALOG_WORKSPACE_SNAPSHOTS,
 } from '@/lib/registries'
+import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
 import {
@@ -24,11 +25,12 @@ import {
   ChevronsUp,
   FilePlus,
   FolderPlus,
+  Home,
   List,
   RefreshCw,
 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { usePageEditorStore } from '../editor/pageEditorStore'
 import { TreeNode } from './TreeNode'
@@ -39,6 +41,7 @@ export default function TreeView() {
   const loading = useTreeStore((s) => s.loading)
   const error = useTreeStore((s) => s.error)
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const reloadTree = useTreeStore((s) => s.reloadTree)
   const openAncestorsForPath = useTreeStore((s) => s.openAncestorsForPath)
   const setActiveNodeId = useTreeStore((s) => s.setActiveNodeId)
@@ -181,6 +184,10 @@ export default function TreeView() {
     }
   }
 
+  const handleNavigateHome = () => {
+    navigate('/', { state: createNavigationVisitState() })
+  }
+
   const renderWorkspaceSyncStatus = () => {
     if (!hasWorkspaceSyncIssues) return null
 
@@ -259,6 +266,12 @@ export default function TreeView() {
     <div className="tree-view">
       {renderWorkspaceSyncStatus()}
       <div className="tree-view__toolbar">
+        <TreeViewActionButton
+          actionName="home"
+          icon={<Home className="tree-view__action-icon" size={18} />}
+          tooltip="Home"
+          onClick={handleNavigateHome}
+        />
         {!readOnlyMode && (
           <>
             <TreeViewActionButton

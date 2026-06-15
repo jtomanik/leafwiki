@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: wECdhV-DR
+  title: Logging
+  created_at: "2026-06-05T16:05:51.107412964Z"
+  updated_at: "2026-06-05T16:05:51.107412964Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Logging
 
 LeafWiki writes structured JSON logs. Normal server logs do not go to stdout

@@ -1172,6 +1172,54 @@ func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
 	}
 }
 
+func TestLocalMCPValidateAndRefreshNormalizeWorkspaceRoutes(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		Workspace:           wiki.Workspace{RootDir: rootDir},
+		AuthDisabled:        true,
+		EnableWorkspaceSync: true,
+	})
+	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+		AuthDisabled:            true,
+		PublicAccess:            true,
+		AllowInsecure:           true,
+		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		EnableWorkspaceSync:     true,
+		MCPEnabled:              true,
+		MCPToolListPageSize:     200,
+	})
+	session := connectLocalMCP(t, router, "/mcp")
+
+	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
+		t.Fatalf("create plans dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("---\nleafwiki_id: plans\nleafwiki_title: Plans\n---\n# Plans\n"), 0o644); err != nil {
+		t.Fatalf("write plans index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("---\nleafwiki_id: agent-hooks-plan\nleafwiki_title: Agent Hooks Plan\n---\n# Agent Hooks Plan\n\ncontent\n"), 0o644); err != nil {
+		t.Fatalf("write plan markdown: %v", err)
+	}
+
+	validateOut := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+	if ok, _ := validateOut["ok"].(bool); !ok {
+		t.Fatalf("wiki_validate_wiki = %#v, want normalizable plan filename to validate", validateOut)
+	}
+	assertValidationIssueCodesAbsent(t, validateOut, []string{"invalid_slug"})
+
+	refreshOut := callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+	validation := nestedMap(t, refreshOut, "validation")
+	if ok, _ := validation["ok"].(bool); !ok {
+		t.Fatalf("wiki_refresh validation = %#v, want normalized route validation to agree", validation)
+	}
+	assertValidationIssueCodesAbsent(t, validation, []string{"invalid_slug"})
+
+	readBack := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "plans/agent-hooks-plan", "kind": "page"})
+	page := nestedMap(t, readBack, "page")
+	if page["id"] != "agent-hooks-plan" || page["title"] != "Agent Hooks Plan" {
+		t.Fatalf("readBack page = %#v, want normalized plan page", page)
+	}
+}
+
 func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
@@ -2005,7 +2053,7 @@ func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 	assertValidationIssueCodes(t, withWarnings, []string{"hidden_markdown_path"})
 	assertNoValidationIssuePath(t, withWarnings, ".scratch/bad.md")
 
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "Bad Slug.md"), []byte("# Bad Slug\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "!!!.md"), []byte("# Invalid Slug\n"), 0o644); err != nil {
 		t.Fatalf("write invalid slug markdown: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "missing-asset.md"), []byte(strings.Join([]string{

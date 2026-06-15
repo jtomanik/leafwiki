@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: KsCdhVaDRZ
+  title: Revisions
+  created_at: "2026-06-09T20:59:16.319489029Z"
+  updated_at: "2026-06-09T20:59:16.319489029Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Revisions
 
 LeafWiki has two revision backends:

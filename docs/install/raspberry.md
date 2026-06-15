@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: aPjdh4-Dg
+  title: Install `Leafwiki` on a Raspberry Pi
+  created_at: "2026-05-30T21:30:20.672592522Z"
+  updated_at: "2026-05-30T21:30:20.672592522Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Install `Leafwiki` on a Raspberry Pi
 
 Short introduction: this file explains how to install Leafwiki on a Raspberry Pi and how to expose it to the Internet using Cloudflare Tunnel.

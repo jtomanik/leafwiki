@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -219,6 +220,37 @@ func (f *NodeStore) ensureSectionIndex(entry *PageNode) (string, error) {
 	return filePath, nil
 }
 
+func (f *NodeStore) ensureSectionIndexAtPath(entry *PageNode, filePath string) (string, error) {
+	if entry == nil {
+		return "", &InvalidOpError{Op: "ensureSectionIndexAtPath", Reason: "an entry is required"}
+	}
+	if entry.Kind != NodeKindSection {
+		return "", &InvalidOpError{Op: "ensureSectionIndexAtPath", Reason: "entry must be a section"}
+	}
+	if err := f.requirePathInRoot("ensureSectionIndexAtPath", filePath); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return "", fmt.Errorf("could not ensure folder: %w", err)
+	}
+
+	mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
+	if fileExists(filePath) {
+		loaded, err := markdown.LoadMarkdownFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("could not load markdown file: %w", err)
+		}
+		mdFile = loaded
+	}
+
+	f.syncManagedMetadata(mdFile, entry)
+	if err := mdFile.WriteToFile(); err != nil {
+		return "", fmt.Errorf("could not write markdown file: %w", err)
+	}
+
+	return filePath, nil
+}
+
 func fallbackMetadataString(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return reconstructSystemUserID
@@ -325,6 +357,7 @@ func (f *NodeStore) ReconstructTreeFromFS() (*PageNode, error) {
 		Kind:     NodeKindSection,
 		Metadata: f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, f.rootDir),
 	}
+	root.WorkspaceSourcePath = ""
 	seenIDs := map[string]string{"root": f.rootDir}
 
 	info, err := os.Stat(f.rootDir)
@@ -396,27 +429,41 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 
 	for _, entry := range entries {
 		name := entry.Name()
+		entryPath := filepath.Join(currentPath, name)
 
 		// optional: skip hidden stuff
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
 
+		relPath, err := filepath.Rel(f.rootDir, entryPath)
+		if err != nil {
+			return fmt.Errorf("resolve workspace relative path for %s: %w", entryPath, err)
+		}
+		mappedRoute, err := MapWorkspaceMarkdownRoute(f.rootDir, relPath, entry.IsDir())
+		if err != nil {
+			f.log.Error("skipping workspace path with invalid route", "path", relPath, "error", err)
+			continue
+		}
+		if mappedRoute.Skip {
+			continue
+		}
+
 		// defaults
 		title := name
 		id, err := shared.GenerateUniqueID()
-		metadata := f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, filepath.Join(currentPath, name))
+		metadata := f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, entryPath)
 		if err != nil {
 			return fmt.Errorf("generate unique ID: %w", err)
 		}
 
 		if entry.IsDir() {
-			if err := f.slugger.IsValidSlug(name); err != nil {
-				f.log.Error("skipping directory with invalid slug", "directory", name, "error", err)
+			slug := workspaceRouteLeafSlug(mappedRoute.RoutePath)
+			if slug == "" {
+				f.log.Error("skipping directory with empty route slug", "directory", name)
 				continue
 			}
-
-			sectionDir := filepath.Join(currentPath, name)
+			sectionDir := entryPath
 			indexPath, hasIndex, err := f.sectionIndexPathInDir(sectionDir)
 			if err != nil {
 				return fmt.Errorf("resolve section index for %s: %w", sectionDir, err)
@@ -446,16 +493,17 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			}
 
 			child := &PageNode{
-				ID:       id,
-				Slug:     name,
-				Title:    title,
-				Parent:   parent,
-				Position: len(parent.Children),
-				Children: []*PageNode{},
-				Kind:     NodeKindSection,
-				Metadata: metadata,
+				ID:                  id,
+				Slug:                slug,
+				Title:               title,
+				Parent:              parent,
+				Position:            len(parent.Children),
+				Children:            []*PageNode{},
+				Kind:                NodeKindSection,
+				WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(mappedRoute),
+				Metadata:            metadata,
 			}
-			if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, filepath.Join(currentPath, name)); err != nil {
+			if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, entryPath); err != nil {
 				return err
 			}
 			if err := ensureUniqueReconstructedID(seenIDs, child.ID, indexPath); err != nil {
@@ -470,12 +518,12 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			}
 
 			if !hasIndex {
-				if _, err := f.ensureSectionIndex(child); err != nil {
+				if _, err := f.ensureSectionIndexAtPath(child, indexPath); err != nil {
 					return fmt.Errorf("materialize missing section index for %s: %w", indexPath, err)
 				}
 			}
 
-			if err := f.reconstructTreeRecursive(filepath.Join(currentPath, name), child, reconstructNow, seenIDs); err != nil {
+			if err := f.reconstructTreeRecursive(entryPath, child, reconstructNow, seenIDs); err != nil {
 				return err
 			}
 			continue
@@ -487,19 +535,19 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			continue
 		}
 
-		baseFilename := strings.TrimSuffix(name, ext)
 		// Skip index-style files handled by the section case. Active README.md
 		// fallback files are skipped by isSectionContentFileInDir below.
-		if strings.EqualFold(baseFilename, "index") {
-			continue
-		}
-		if err := f.slugger.IsValidSlug(baseFilename); err != nil {
-			f.log.Error("skipping file with invalid slug", "file", name, "error", err)
+		if mappedRoute.Kind == NodeKindSection {
 			continue
 		}
 
-		filePath := filepath.Join(currentPath, name)
+		filePath := entryPath
 		if f.isSectionContentFileInDir(currentPath, filePath) {
+			continue
+		}
+		slug := workspaceRouteLeafSlug(mappedRoute.RoutePath)
+		if slug == "" {
+			f.log.Error("skipping markdown file with empty route slug", "file", name)
 			continue
 		}
 
@@ -520,14 +568,15 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		needsWriteback := mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == ""
 
 		child := &PageNode{
-			ID:       id,
-			Slug:     baseFilename,
-			Title:    title,
-			Parent:   parent,
-			Position: len(parent.Children),
-			Children: nil,
-			Kind:     NodeKindPage,
-			Metadata: metadata,
+			ID:                  id,
+			Slug:                slug,
+			Title:               title,
+			Parent:              parent,
+			Position:            len(parent.Children),
+			Children:            nil,
+			Kind:                NodeKindPage,
+			WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(mappedRoute),
+			Metadata:            metadata,
 		}
 		if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, filePath); err != nil {
 			return err
@@ -614,7 +663,7 @@ func (f *NodeStore) SaveChildOrder(parent *PageNode) error {
 		return &InvalidOpError{Op: "SaveChildOrder", Reason: "parent entry must be root or a section"}
 	}
 
-	dirPath, err := f.dirPathForNode(parent)
+	dirPath, err := f.sectionDirPathForNode(parent, "SaveChildOrder")
 	if err != nil {
 		return err
 	}
@@ -677,8 +726,7 @@ func (f *NodeStore) CreatePage(parentEntry *PageNode, newEntry *PageNode) error 
 		return &InvalidOpError{Op: "CreatePage", Reason: "new entry must be a page"}
 	}
 
-	// Parent directory is determined by the tree path
-	parentDir, err := f.dirPathForNode(parentEntry)
+	parentDir, err := f.sectionDirPathForNode(parentEntry, "CreatePage")
 	if err != nil {
 		return err
 	}
@@ -704,6 +752,7 @@ func (f *NodeStore) CreatePage(parentEntry *PageNode, newEntry *PageNode) error 
 	if err := mdFile.WriteToFile(); err != nil {
 		return fmt.Errorf("could not create file: %w", err)
 	}
+	f.setWorkspaceSourcePathForPhysicalPath(newEntry, destFile, GenerateRoutePathFromPageNode(newEntry), NodeKindPage)
 
 	return nil
 }
@@ -731,8 +780,7 @@ func (f *NodeStore) CreateSection(parentEntry *PageNode, newEntry *PageNode) err
 		return &InvalidOpError{Op: "CreateSection", Reason: "new entry must be a section"}
 	}
 
-	// Parent directory from tree path
-	parentDir, err := f.dirPathForNode(parentEntry)
+	parentDir, err := f.sectionDirPathForNode(parentEntry, "CreateSection")
 	if err != nil {
 		return err
 	}
@@ -757,6 +805,7 @@ func (f *NodeStore) CreateSection(parentEntry *PageNode, newEntry *PageNode) err
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("could not create section folder: %w", err)
 	}
+	f.setWorkspaceSourcePathForPhysicalPath(newEntry, destDir, GenerateRoutePathFromPageNode(newEntry), NodeKindSection)
 
 	if _, err := f.ensureSectionIndex(newEntry); err != nil {
 		return err
@@ -876,8 +925,7 @@ func (f *NodeStore) MoveNode(entry *PageNode, parentEntry *PageNode) error {
 		return &InvalidOpError{Op: "MoveNode", Reason: fmt.Sprintf("parent entry must be a section, got %q", parentEntry.Kind)}
 	}
 
-	// Parent directory path from tree
-	parentDir, err := f.dirPathForNode(parentEntry)
+	parentDir, err := f.sectionDirPathForNode(parentEntry, "MoveNode")
 	if err != nil {
 		return err
 	}
@@ -886,20 +934,35 @@ func (f *NodeStore) MoveNode(entry *PageNode, parentEntry *PageNode) error {
 		return fmt.Errorf("could not ensure parent directory exists: %w", err)
 	}
 
-	// Current base path from tree (still at old location; TreeService updates Parent after success)
-	oldBase, err := f.dirPathForNode(entry)
-	if err != nil {
-		return err
+	oldRoutePath := GenerateRoutePathFromPageNode(entry)
+	newRoutePath := routePathForChild(parentEntry, entry.Slug)
+	oldSourcePath := f.workspaceSourcePathForNode(entry)
+	newSourcePath := joinWorkspaceRoutePath(f.workspaceSourceDirForSection(parentEntry), path.Base(oldSourcePath))
+	if newSourcePath == "" {
+		return &InvalidOpError{Op: "MoveNode", Reason: "could not resolve destination source path"}
 	}
-	oldFile := oldBase + ".md"
-	oldDir := oldBase
 
-	// Destination base path (same slug, under new parent)
-	destBase := filepath.Join(parentDir, entry.Slug)
+	oldFile := ""
+	oldDir := ""
+	switch entry.Kind {
+	case NodeKindPage:
+		oldFile, err = f.pageFilePathForNode(entry, "MoveNode")
+		if err != nil {
+			return err
+		}
+	case NodeKindSection:
+		oldDir, err = f.sectionDirPathForNode(entry, "MoveNode")
+		if err != nil {
+			return err
+		}
+	}
+
+	// Destination physical path keeps the source filename/dirname.
+	destBase := filepath.Join(parentDir, path.Base(oldSourcePath))
 	if err := f.requirePathInRoot("MoveNode", destBase); err != nil {
 		return err
 	}
-	destFile := destBase + ".md"
+	destFile := destBase
 	destDir := destBase
 
 	switch entry.Kind {
@@ -935,6 +998,7 @@ func (f *NodeStore) MoveNode(entry *PageNode, parentEntry *PageNode) error {
 		if err := os.Rename(oldDir, destDir); err != nil {
 			return fmt.Errorf("could not move folder: %w", err)
 		}
+		f.updateWorkspaceSourcePathsForSubtree(entry, oldRoutePath, newRoutePath, oldSourcePath, newSourcePath)
 
 	case NodeKindPage:
 		// src must be a file
@@ -954,6 +1018,7 @@ func (f *NodeStore) MoveNode(entry *PageNode, parentEntry *PageNode) error {
 		if err := os.Rename(oldFile, destFile); err != nil {
 			return fmt.Errorf("could not move file: %w", err)
 		}
+		f.setWorkspaceSourcePath(entry, newRoutePath, NodeKindPage, newSourcePath)
 
 	default:
 		return &InvalidOpError{Op: "MoveNode", Reason: fmt.Sprintf("unknown node kind: %q", entry.Kind)}
@@ -974,11 +1039,10 @@ func (f *NodeStore) DeletePage(entry *PageNode) error {
 		return &InvalidOpError{Op: "DeletePage", Reason: "entry must be a page"}
 	}
 
-	base, err := f.dirPathForNode(entry)
+	file, err := f.pageFilePathForNode(entry, "DeletePage")
 	if err != nil {
 		return err
 	}
-	file := base + ".md"
 
 	info, err := os.Stat(file)
 	if err != nil {
@@ -1012,7 +1076,7 @@ func (f *NodeStore) DeleteSection(entry *PageNode) error {
 		return &InvalidOpError{Op: "DeleteSection", Reason: "entry must be a section"}
 	}
 
-	dir, err := f.dirPathForNode(entry)
+	dir, err := f.sectionDirPathForNode(entry, "DeleteSection")
 	if err != nil {
 		return err
 	}
@@ -1055,26 +1119,29 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 		return &InvalidOpError{Op: "RenameNode", Reason: "cannot rename root"}
 	}
 
-	// old base path computed from current entry (still has old slug)
-	oldBase, err := f.dirPathForNode(entry)
-	if err != nil {
-		return err
+	oldRoutePath := GenerateRoutePathFromPageNode(entry)
+	newRoutePath := routePathWithLeafSlug(entry, newSlug)
+	oldSourcePath := f.workspaceSourcePathForNode(entry)
+	newSourcePath := joinWorkspaceRoutePath(path.Dir(oldSourcePath), newSlug)
+	if path.Dir(oldSourcePath) == "." {
+		newSourcePath = newSlug
 	}
-
-	// new base path: same parent dir, last segment replaced
-	newBase := filepath.Join(filepath.Dir(oldBase), newSlug)
-	if err := f.requirePathInRoot("RenameNode", newBase); err != nil {
+	if entry.Kind == NodeKindPage {
+		newSourcePath += ".md"
+	}
+	newPath := filepath.Join(f.rootDir, filepath.FromSlash(newSourcePath))
+	if err := f.requirePathInRoot("RenameNode", newPath); err != nil {
 		return err
 	}
 
 	switch entry.Kind {
 	case NodeKindPage:
-		if fileExists(newBase + ".md") {
-			return &PageAlreadyExistsError{Path: newBase}
+		if fileExists(newPath) {
+			return &PageAlreadyExistsError{Path: strings.TrimSuffix(newPath, ".md")}
 		}
 	case NodeKindSection:
-		if fileExists(newBase) {
-			return &PageAlreadyExistsError{Path: newBase}
+		if fileExists(newPath) {
+			return &PageAlreadyExistsError{Path: newPath}
 		}
 	default:
 		return &InvalidOpError{Op: "RenameNode", Reason: fmt.Sprintf("unknown node kind: %q", entry.Kind)}
@@ -1082,8 +1149,11 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 	// perform rename based on kind
 	switch entry.Kind {
 	case NodeKindSection:
-		srcDir := oldBase
-		dstDir := newBase
+		srcDir, err := f.sectionDirPathForNode(entry, "RenameNode")
+		if err != nil {
+			return err
+		}
+		dstDir := newPath
 
 		// strict: source dir must exist and be dir
 		info, err := os.Stat(srcDir)
@@ -1102,10 +1172,14 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 		if err := os.Rename(srcDir, dstDir); err != nil {
 			return fmt.Errorf("could not rename folder: %w", err)
 		}
+		f.updateWorkspaceSourcePathsForSubtree(entry, oldRoutePath, newRoutePath, oldSourcePath, newSourcePath)
 		return nil
 	case NodeKindPage:
-		srcFile := oldBase + ".md"
-		dstFile := newBase + ".md"
+		srcFile, err := f.pageFilePathForNode(entry, "RenameNode")
+		if err != nil {
+			return err
+		}
+		dstFile := newPath
 
 		// strict: source file must exist
 		info, err := os.Stat(srcFile)
@@ -1124,6 +1198,7 @@ func (f *NodeStore) RenameNode(entry *PageNode, newSlug string) error {
 		if err := os.Rename(srcFile, dstFile); err != nil {
 			return fmt.Errorf("could not rename file: %w", err)
 		}
+		f.setWorkspaceSourcePath(entry, newRoutePath, NodeKindPage, newSourcePath)
 		return nil
 
 	default:
@@ -1267,6 +1342,154 @@ func (f *NodeStore) dirPathForNode(entry *PageNode) (string, error) {
 	return path, nil
 }
 
+func (f *NodeStore) sectionDirPathForNode(entry *PageNode, op string) (string, error) {
+	if entry == nil {
+		return "", &InvalidOpError{Op: op, Reason: "an entry is required"}
+	}
+	if entry.ID != "root" && entry.Kind != NodeKindSection {
+		return "", &InvalidOpError{Op: op, Reason: "entry must be root or a section"}
+	}
+	sourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath)
+	if sourcePath != "" {
+		dirPath := filepath.Join(f.rootDir, filepath.FromSlash(sourcePath))
+		if err := f.requirePathInRoot(op, dirPath); err != nil {
+			return "", err
+		}
+		return dirPath, nil
+	}
+	return f.dirPathForNode(entry)
+}
+
+func (f *NodeStore) pageFilePathForNode(entry *PageNode, op string) (string, error) {
+	if entry == nil {
+		return "", &InvalidOpError{Op: op, Reason: "an entry is required"}
+	}
+	if entry.Kind != NodeKindPage && entry.Kind != "" {
+		return "", &InvalidOpError{Op: op, Reason: "entry must be a page"}
+	}
+	sourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath)
+	if sourcePath != "" {
+		filePath := filepath.Join(f.rootDir, filepath.FromSlash(sourcePath))
+		if err := f.requirePathInRoot(op, filePath); err != nil {
+			return "", err
+		}
+		return filePath, nil
+	}
+	base, err := f.dirPathForNode(entry)
+	if err != nil {
+		return "", err
+	}
+	return base + ".md", nil
+}
+
+func (f *NodeStore) workspaceSourceDirForSection(entry *PageNode) string {
+	if entry == nil || entry.ID == "root" {
+		return ""
+	}
+	if sourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath); sourcePath != "" {
+		return sourcePath
+	}
+	return defaultWorkspaceSourcePath(GenerateRoutePathFromPageNode(entry), NodeKindSection)
+}
+
+func (f *NodeStore) workspaceSourcePathForNode(entry *PageNode) string {
+	if entry == nil || entry.ID == "root" {
+		return ""
+	}
+	if sourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath); sourcePath != "" {
+		return sourcePath
+	}
+	return defaultWorkspaceSourcePath(GenerateRoutePathFromPageNode(entry), entry.Kind)
+}
+
+func routePathForChild(parent *PageNode, slug string) string {
+	parentRoutePath := ""
+	if parent != nil && parent.ID != "root" {
+		parentRoutePath = GenerateRoutePathFromPageNode(parent)
+	}
+	return joinWorkspaceRoutePath(parentRoutePath, slug)
+}
+
+func routePathWithLeafSlug(entry *PageNode, slug string) string {
+	if entry == nil {
+		return ""
+	}
+	parentRoutePath := ""
+	if entry.Parent != nil && entry.Parent.ID != "root" {
+		parentRoutePath = GenerateRoutePathFromPageNode(entry.Parent)
+	}
+	return joinWorkspaceRoutePath(parentRoutePath, slug)
+}
+
+func childRoutePathUnder(parentRoutePath string, child *PageNode) string {
+	if child == nil {
+		return strings.Trim(parentRoutePath, "/")
+	}
+	return joinWorkspaceRoutePath(parentRoutePath, child.Slug)
+}
+
+func (f *NodeStore) setWorkspaceSourcePathForPhysicalPath(entry *PageNode, physicalPath string, routePath string, kind NodeKind) {
+	if entry == nil {
+		return
+	}
+	relPath, err := filepath.Rel(f.rootDir, physicalPath)
+	if err != nil {
+		return
+	}
+	f.setWorkspaceSourcePath(entry, routePath, kind, filepath.ToSlash(relPath))
+}
+
+func (f *NodeStore) setWorkspaceSourcePath(entry *PageNode, routePath string, kind NodeKind, sourcePath string) {
+	if entry == nil {
+		return
+	}
+	sourcePath = cleanWorkspaceSourcePath(sourcePath)
+	if sourcePath == "" || sourcePath == defaultWorkspaceSourcePath(routePath, kind) {
+		entry.WorkspaceSourcePath = ""
+		return
+	}
+	entry.WorkspaceSourcePath = sourcePath
+}
+
+func (f *NodeStore) updateWorkspaceSourcePathsForSubtree(entry *PageNode, oldRoutePath string, newRoutePath string, oldSourcePrefix string, newSourcePrefix string) {
+	if entry == nil {
+		return
+	}
+	f.updateWorkspaceSourcePathsForSubtreeRecursive(entry, strings.Trim(oldRoutePath, "/"), strings.Trim(newRoutePath, "/"), cleanWorkspaceSourcePath(oldSourcePrefix), cleanWorkspaceSourcePath(newSourcePrefix))
+}
+
+func (f *NodeStore) updateWorkspaceSourcePathsForSubtreeRecursive(entry *PageNode, oldRoutePath string, newRoutePath string, oldSourcePrefix string, newSourcePrefix string) {
+	oldSourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath)
+	if oldSourcePath == "" {
+		oldSourcePath = defaultWorkspaceSourcePath(oldRoutePath, entry.Kind)
+	}
+	newSourcePath := replaceWorkspaceSourcePrefix(oldSourcePath, oldSourcePrefix, newSourcePrefix)
+	f.setWorkspaceSourcePath(entry, newRoutePath, entry.Kind, newSourcePath)
+
+	for _, child := range entry.Children {
+		childOldRoutePath := childRoutePathUnder(oldRoutePath, child)
+		childNewRoutePath := childRoutePathUnder(newRoutePath, child)
+		f.updateWorkspaceSourcePathsForSubtreeRecursive(child, childOldRoutePath, childNewRoutePath, oldSourcePrefix, newSourcePrefix)
+	}
+}
+
+func replaceWorkspaceSourcePrefix(sourcePath string, oldPrefix string, newPrefix string) string {
+	sourcePath = cleanWorkspaceSourcePath(sourcePath)
+	oldPrefix = cleanWorkspaceSourcePath(oldPrefix)
+	newPrefix = cleanWorkspaceSourcePath(newPrefix)
+	if oldPrefix == "" {
+		return joinWorkspaceRoutePath(newPrefix, sourcePath)
+	}
+	if sourcePath == oldPrefix {
+		return newPrefix
+	}
+	prefix := oldPrefix + "/"
+	if strings.HasPrefix(sourcePath, prefix) {
+		return joinWorkspaceRoutePath(newPrefix, strings.TrimPrefix(sourcePath, prefix))
+	}
+	return sourcePath
+}
+
 func (f *NodeStore) validateNodeRoute(entry *PageNode) error {
 	for current := entry; current != nil; current = current.Parent {
 		if current.ID == "root" {
@@ -1336,6 +1559,39 @@ func resolvePathForContainment(path string) (string, error) {
 	}
 }
 
+func (f *NodeStore) workspaceContentPathForNode(entry *PageNode, op string) (string, bool, error) {
+	sourcePath := cleanWorkspaceSourcePath(entry.WorkspaceSourcePath)
+	if sourcePath == "" {
+		return "", false, nil
+	}
+
+	base := f.rootDir
+	if sourcePath != "" {
+		base = filepath.Join(f.rootDir, filepath.FromSlash(sourcePath))
+	}
+	switch entry.Kind {
+	case NodeKindSection:
+		indexPath, _, err := f.sectionIndexPathInDir(base)
+		if err != nil {
+			return "", false, err
+		}
+		if err := f.requirePathInRoot(op, indexPath); err != nil {
+			return "", false, err
+		}
+		return indexPath, true, nil
+	case NodeKindPage:
+		if sourcePath == "" {
+			return "", false, nil
+		}
+		if err := f.requirePathInRoot(op, base); err != nil {
+			return "", false, err
+		}
+		return base, true, nil
+	default:
+		return "", false, nil
+	}
+}
+
 // contentPathForNodeRead returns the expected content file path for a node
 // based purely on the tree Kind (NO side effects, NO mkdir):
 //   - page    => <base>.md
@@ -1344,6 +1600,12 @@ func resolvePathForContainment(path string) (string, error) {
 func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeRead", Reason: "an entry is required"}
+	}
+	if err := f.validateNodeRoute(entry); err != nil {
+		return "", err
+	}
+	if sourcePath, ok, err := f.workspaceContentPathForNode(entry, "contentPathForNodeRead"); err != nil || ok {
+		return sourcePath, err
 	}
 
 	base, err := f.dirPathForNode(entry)
@@ -1379,6 +1641,20 @@ func (f *NodeStore) contentPathForNodeRead(entry *PageNode) (string, error) {
 func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 	if entry == nil {
 		return "", &InvalidOpError{Op: "contentPathForNodeWrite", Reason: "an entry is required"}
+	}
+	if err := f.validateNodeRoute(entry); err != nil {
+		return "", err
+	}
+	if sourcePath, ok, err := f.workspaceContentPathForNode(entry, "contentPathForNodeWrite"); err != nil || ok {
+		if err != nil {
+			return "", err
+		}
+		if entry.Kind == NodeKindSection {
+			if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+				return "", fmt.Errorf("could not ensure folder: %w", err)
+			}
+		}
+		return sourcePath, nil
 	}
 
 	base, err := f.dirPathForNode(entry)
@@ -1465,16 +1741,25 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 		return &InvalidOpError{Op: "ConvertNode", Reason: "an entry is required"}
 	}
 
-	base, err := f.dirPathForNode(entry)
-	if err != nil {
-		return err
+	routePath := GenerateRoutePathFromPageNode(entry)
+	parentSourceDir := ""
+	if entry.Parent != nil {
+		parentSourceDir = f.workspaceSourceDirForSection(entry.Parent)
 	}
-	filePath := base + ".md"
-	folderPath := base
-	indexPath := filepath.Join(folderPath, "index.md")
 
 	switch target {
 	case NodeKindSection:
+		filePath, err := f.pageFilePathForNode(entry, "ConvertNode")
+		if err != nil {
+			return err
+		}
+		folderSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug)
+		folderPath := filepath.Join(f.rootDir, filepath.FromSlash(folderSourcePath))
+		if err := f.requirePathInRoot("ConvertNode", folderPath); err != nil {
+			return err
+		}
+		indexPath := filepath.Join(folderPath, "index.md")
+
 		// page -> folder
 		if _, err := os.Stat(filePath); err == nil {
 			if err := os.MkdirAll(folderPath, 0o755); err != nil {
@@ -1485,6 +1770,7 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 				return fmt.Errorf("could not move page into folder: %w", err)
 			}
 			entry.Kind = NodeKindSection
+			f.setWorkspaceSourcePath(entry, routePath, NodeKindSection, folderSourcePath)
 			if _, err := f.ensureSectionIndex(entry); err != nil {
 				return err
 			}
@@ -1496,12 +1782,24 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 			return fmt.Errorf("could not ensure folder exists: %w", err)
 		}
 		entry.Kind = NodeKindSection
+		f.setWorkspaceSourcePath(entry, routePath, NodeKindSection, folderSourcePath)
 		if _, err := f.ensureSectionIndex(entry); err != nil {
 			return err
 		}
 		return nil
 
 	case NodeKindPage:
+		folderPath, err := f.sectionDirPathForNode(entry, "ConvertNode")
+		if err != nil {
+			return err
+		}
+		pageSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug+".md")
+		filePath := filepath.Join(f.rootDir, filepath.FromSlash(pageSourcePath))
+		if err := f.requirePathInRoot("ConvertNode", filePath); err != nil {
+			return err
+		}
+		indexPath := filepath.Join(folderPath, "index.md")
+
 		// folder -> page (strict, safe order)
 		info, err := os.Stat(folderPath)
 		if err != nil {
@@ -1551,6 +1849,7 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 				return fmt.Errorf("could not write page file: %w", err)
 			}
 		}
+		f.setWorkspaceSourcePath(entry, routePath, NodeKindPage, pageSourcePath)
 
 		if err := os.Remove(filepath.Join(folderPath, orderFilename)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("could not remove child order file: %w", err)

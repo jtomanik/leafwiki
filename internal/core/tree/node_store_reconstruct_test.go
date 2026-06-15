@@ -793,6 +793,94 @@ leafwiki_title: Notes Page
 	}
 }
 
+func TestNodeStore_ReconstructTreeFromFS_ImportsNormalizableWorkspaceRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustMkdir(t, filepath.Join(tmp, "root", "plans"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "plans", "index.md"), "# Plans", 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md"), "# Agent Hooks Plan", 0o644)
+	mustMkdir(t, filepath.Join(tmp, "root", "User Guides"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "User Guides", "index.md"), "# User Guides", 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	plans := findChildBySlug(t, tree, "plans")
+	if plans.Kind != NodeKindSection {
+		t.Fatalf("plans.Kind = %q, want %q", plans.Kind, NodeKindSection)
+	}
+	plan := findChildBySlug(t, plans, "agent-hooks-plan")
+	if plan.Kind != NodeKindPage {
+		t.Fatalf("plan.Kind = %q, want %q", plan.Kind, NodeKindPage)
+	}
+	if plan.Title != "Agent Hooks Plan" {
+		t.Fatalf("plan.Title = %q, want Agent Hooks Plan", plan.Title)
+	}
+	raw, err := store.ReadPageRaw(plan)
+	if err != nil {
+		t.Fatalf("ReadPageRaw normalized plan: %v", err)
+	}
+	if !strings.Contains(raw, "Agent Hooks Plan") {
+		t.Fatalf("ReadPageRaw normalized plan = %q, want original file content", raw)
+	}
+
+	guides := findChildBySlug(t, tree, "user-guides")
+	if guides.Kind != NodeKindSection {
+		t.Fatalf("guides.Kind = %q, want %q", guides.Kind, NodeKindSection)
+	}
+	rawGuides, err := store.ReadPageRaw(guides)
+	if err != nil {
+		t.Fatalf("ReadPageRaw normalized section: %v", err)
+	}
+	if !strings.Contains(rawGuides, "User Guides") {
+		t.Fatalf("ReadPageRaw normalized section = %q, want original section content", rawGuides)
+	}
+}
+
+func TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnNormalizedDuplicatePageRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustMkdir(t, filepath.Join(tmp, "root", "plans"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "plans", "foo_bar.md"), "# Foo Bar", 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "plans", "foo-bar.md"), "# Foo Bar Duplicate", 0o644)
+
+	_, err := store.ReconstructTreeFromFS()
+	if err == nil {
+		t.Fatalf("expected duplicate normalized slug error")
+	}
+	if !strings.Contains(err.Error(), "duplicate page slug") {
+		t.Fatalf("expected duplicate page slug error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "foo_bar.md") || !strings.Contains(err.Error(), "foo-bar.md") {
+		t.Fatalf("expected both conflicting paths in error, got: %v", err)
+	}
+}
+
+func TestNodeStore_ReconstructTreeFromFS_SkipsTopLevelStaticAssets(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	mustMkdir(t, filepath.Join(tmp, "root", "assets", "install"))
+	mustWriteFile(t, filepath.Join(tmp, "root", "assets", "install", "image.png"), "png", 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "guide.md"), "# Guide", 0o644)
+
+	tree, err := store.ReconstructTreeFromFS()
+	if err != nil {
+		t.Fatalf("ReconstructTreeFromFS: %v", err)
+	}
+
+	findChildBySlug(t, tree, "guide")
+	for _, child := range tree.Children {
+		if strings.EqualFold(child.Slug, "assets") || strings.EqualFold(child.Slug, "assets-1") {
+			t.Fatalf("top-level static assets directory became wiki child: %#v", child)
+		}
+	}
+}
+
 func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -854,15 +942,17 @@ func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	}
 }
 
-func TestNodeStore_ReconstructTreeFromFS_SkipsInvalidSlugs(t *testing.T) {
+func TestNodeStore_ReconstructTreeFromFS_NormalizesImportableSlugsAndSkipsEmptyNormalizedSlugs(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
 
-	// Create files and directories with invalid slug names
+	// Create files and directories with names that were invalid route slugs but
+	// can be normalized safely.
 	mustWriteFile(t, filepath.Join(tmp, "root", "Valid Page.md"), "# Valid", 0o644)
 	mustWriteFile(t, filepath.Join(tmp, "root", "UPPERCASE.md"), "# Upper", 0o644)
 	mustMkdir(t, filepath.Join(tmp, "root", "Valid Section"))
 	mustWriteFile(t, filepath.Join(tmp, "root", "Valid Section", "index.md"), "# Section", 0o644)
+	mustWriteFile(t, filepath.Join(tmp, "root", "!!!.md"), "# Invalid", 0o644)
 
 	// Create a valid file to ensure the test still works
 	mustWriteFile(t, filepath.Join(tmp, "root", "valid.md"), "# Valid", 0o644)
@@ -874,11 +964,12 @@ func TestNodeStore_ReconstructTreeFromFS_SkipsInvalidSlugs(t *testing.T) {
 
 	// The valid file should be present with normalized slug
 	findChildBySlug(t, tree, "valid")
-
 	findChildBySlug(t, tree, "UPPERCASE")
+	findChildBySlug(t, tree, "valid-page")
+	findChildBySlug(t, tree, "valid-section")
 
-	if len(tree.Children) != 2 {
-		t.Fatalf("expected only invalid names with spaces to be skipped, got %v", slugs(tree.Children))
+	if len(tree.Children) != 4 {
+		t.Fatalf("expected only empty-normalized names to be skipped, got %v", slugs(tree.Children))
 	}
 }
 

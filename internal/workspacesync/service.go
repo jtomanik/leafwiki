@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -508,7 +509,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 			return err
 		}
 		result := index.RewriteMarkdown(relPath, string(raw))
-		migrationIssues = append(migrationIssues, canonicalMigrationValidationErrors(relPath, result.Issues)...)
+		migrationIssues = append(migrationIssues, canonicalMigrationValidationErrors(s.rootDir, relPath, result.Issues)...)
 		if !result.Changed {
 			return nil
 		}
@@ -544,7 +545,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 	}, nil
 }
 
-func canonicalMigrationValidationErrors(relPath string, issues []markdownlinks.Issue) []ValidationError {
+func canonicalMigrationValidationErrors(rootDir string, relPath string, issues []markdownlinks.Issue) []ValidationError {
 	if len(issues) == 0 {
 		return nil
 	}
@@ -553,9 +554,13 @@ func canonicalMigrationValidationErrors(relPath string, issues []markdownlinks.I
 		if issue.Code != "ambiguous_legacy_link" {
 			continue
 		}
+		routePath := tree.MarkdownPathToRoutePath(relPath)
+		if route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false); err == nil && !route.Skip {
+			routePath = route.RoutePath
+		}
 		out = append(out, ValidationError{
 			Code:     issue.Code,
-			Path:     tree.MarkdownPathToRoutePath(relPath),
+			Path:     routePath,
 			Message:  fmt.Sprintf("ambiguous_legacy_link: %s is ambiguous during canonical Markdown link migration", issue.Destination),
 			Severity: "error",
 		})
@@ -873,6 +878,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	}
 	store := s.store
 	relPath := pageMarkdownPath(page)
+	rootDir := s.rootDir
 	s.mu.Unlock()
 
 	s.storeMu.Lock()
@@ -881,7 +887,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 		s.storeMu.Unlock()
 		return nil, err
 	}
-	content, revisionPath, ok := changedContentForPageAtCommit(page, relPath, changedFiles)
+	content, revisionPath, ok := changedContentForPageAtCommit(rootDir, page, relPath, changedFiles)
 	if !ok {
 		s.storeMu.Unlock()
 		return nil, fmt.Errorf("document %s did not change in commit %s", relPath, commitID)
@@ -892,7 +898,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 		return nil, err
 	}
 	return &revision.RevisionSnapshot{
-		Revision: revisionForPageContent(page, commit, revisionPath, content),
+		Revision: revisionForPageContent(rootDir, page, commit, revisionPath, content),
 		Content:  content,
 		Assets:   nil,
 	}, nil
@@ -920,7 +926,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		return s.status, err
 	}
 	targetRelPath := s.currentPageMarkdownPath(page)
-	content, _, ok := changedContentForPageAtCommit(page, targetRelPath, changedFiles)
+	content, _, ok := changedContentForPageAtCommit(s.rootDir, page, targetRelPath, changedFiles)
 	if !ok {
 		err := fmt.Errorf("document %s did not change in commit %s", targetRelPath, commitID)
 		s.status.LastError = err.Error()
@@ -1078,6 +1084,7 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 		return PageRevisionList{}, nil
 	}
 	store := s.store
+	rootDir := s.rootDir
 	s.mu.Unlock()
 
 	requestedLimit := limit
@@ -1101,11 +1108,11 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 		if err != nil {
 			return false, err
 		}
-		content, revisionPath, ok := changedContentForPageAtCommit(page, relPath, changedFiles)
+		content, revisionPath, ok := changedContentForPageAtCommit(rootDir, page, relPath, changedFiles)
 		if !ok {
 			return true, nil
 		}
-		revisions = append(revisions, revisionForPageContent(page, commit, revisionPath, content))
+		revisions = append(revisions, revisionForPageContent(rootDir, page, commit, revisionPath, content))
 		if len(revisions) >= scanLimit {
 			return false, nil
 		}
@@ -1124,6 +1131,12 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 }
 
 func pageMarkdownPath(page *tree.Page) string {
+	if sourcePath := pageWorkspaceSourcePath(page); sourcePath != "" {
+		if page.Kind == tree.NodeKindSection {
+			return joinWorkspaceMarkdownPath(sourcePath, "index.md")
+		}
+		return sourcePath
+	}
 	path := strings.TrimPrefix(page.CalculatePath(), "/")
 	if page != nil && page.Kind == tree.NodeKindSection {
 		if path == "" {
@@ -1139,6 +1152,15 @@ func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
 	rootDir := strings.TrimSpace(s.rootDir)
 	if rootDir == "" {
 		return preferred
+	}
+	if sourcePath := pageWorkspaceSourcePath(page); sourcePath != "" {
+		if page.Kind == tree.NodeKindSection {
+			return s.currentSectionContentPath(sourcePath, preferred)
+		}
+		return sourcePath
+	}
+	if mappedPath, ok := s.currentWorkspaceMarkdownPathByRoute(page); ok {
+		return mappedPath
 	}
 	dir, base := filepath.Split(filepath.FromSlash(preferred))
 	entries, err := os.ReadDir(filepath.Join(rootDir, dir))
@@ -1167,32 +1189,126 @@ func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
 	return preferred
 }
 
-func contentForPageAtCommit(page *tree.Page, files map[string]string) (string, string, bool) {
-	return contentForPageAtCommitPath(page, pageMarkdownPath(page), files)
+func pageWorkspaceSourcePath(page *tree.Page) string {
+	if page == nil || page.PageNode == nil {
+		return ""
+	}
+	return cleanWorkspaceMarkdownPath(page.PageNode.WorkspaceSourcePath)
 }
 
-func contentForPageAtCommitPath(page *tree.Page, preferredPath string, files map[string]string) (string, string, bool) {
+func cleanWorkspaceMarkdownPath(value string) string {
+	return strings.Trim(strings.TrimSpace(filepath.ToSlash(value)), "/")
+}
+
+func joinWorkspaceMarkdownPath(parts ...string) string {
+	nonEmpty := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Trim(cleanWorkspaceMarkdownPath(part), "/")
+		if part != "" {
+			nonEmpty = append(nonEmpty, part)
+		}
+	}
+	return strings.Join(nonEmpty, "/")
+}
+
+func (s *Service) currentSectionContentPath(sourcePath string, fallback string) string {
+	dir := filepath.Join(s.rootDir, filepath.FromSlash(sourcePath))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fallback
+	}
+	readmeFallback := ""
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		ext := path.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		if strings.EqualFold(base, "index") && strings.EqualFold(ext, ".md") {
+			return joinWorkspaceMarkdownPath(sourcePath, name)
+		}
+		if name == "README.md" {
+			readmeFallback = joinWorkspaceMarkdownPath(sourcePath, name)
+		}
+	}
+	if readmeFallback != "" {
+		return readmeFallback
+	}
+	return fallback
+}
+
+func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, bool) {
+	if page == nil || page.PageNode == nil {
+		return "", false
+	}
+	targetRoutePath := strings.Trim(page.CalculatePath(), "/")
+	var found string
+	err := filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if filePath == s.rootDir {
+			return nil
+		}
+		if entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			return nil
+		}
+		relPath, err := filepath.Rel(s.rootDir, filePath)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath)
+		routePath, kind := revisionRoutePathAndKind(s.rootDir, relPath, page)
+		if kind != page.Kind || strings.Trim(routePath, "/") != targetRoutePath {
+			return nil
+		}
+		found = relPath
+		return filepath.SkipAll
+	})
+	if err != nil || found == "" {
+		return "", false
+	}
+	return found, true
+}
+
+func contentForPageAtCommit(rootDir string, page *tree.Page, files map[string]string) (string, string, bool) {
+	return contentForPageAtCommitPath(rootDir, page, pageMarkdownPath(page), files)
+}
+
+func contentForPageAtCommitPath(rootDir string, page *tree.Page, preferredPath string, files map[string]string) (string, string, bool) {
 	if content, ok := files[preferredPath]; ok {
 		if contentMatchesLeafWikiID(page, content) {
 			return content, preferredPath, true
 		}
 	}
-	for path, content := range files {
-		if !gitrevisions.IsManagedMarkdownRelPath(path) {
-			continue
+	paths := sortedMarkdownPaths(files)
+	for _, markdownPath := range paths {
+		content := files[markdownPath]
+		if markdownPathMatchesPageRoute(rootDir, page, markdownPath) && contentMatchesLeafWikiID(page, content) {
+			return content, markdownPath, true
 		}
+	}
+	for _, markdownPath := range paths {
+		content := files[markdownPath]
 		leafWikiID, ok := leafWikiIDFromContent(content)
 		if !ok {
 			continue
 		}
 		if leafWikiID == page.ID {
-			return content, path, true
+			return content, markdownPath, true
 		}
 	}
 	return "", "", false
 }
 
-func changedContentForPageAtCommit(page *tree.Page, preferredPath string, changedFiles map[string]string) (string, string, bool) {
+func changedContentForPageAtCommit(rootDir string, page *tree.Page, preferredPath string, changedFiles map[string]string) (string, string, bool) {
 	if len(changedFiles) == 0 {
 		return "", "", false
 	}
@@ -1201,25 +1317,44 @@ func changedContentForPageAtCommit(page *tree.Page, preferredPath string, change
 			return content, preferredPath, true
 		}
 	}
-	paths := make([]string, 0, len(changedFiles))
-	for path := range changedFiles {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		if !gitrevisions.IsManagedMarkdownRelPath(path) {
-			continue
+	paths := sortedMarkdownPaths(changedFiles)
+	for _, markdownPath := range paths {
+		content := changedFiles[markdownPath]
+		if markdownPathMatchesPageRoute(rootDir, page, markdownPath) && contentMatchesLeafWikiID(page, content) {
+			return content, markdownPath, true
 		}
-		content := changedFiles[path]
+	}
+	for _, markdownPath := range paths {
+		content := changedFiles[markdownPath]
 		leafWikiID, ok := leafWikiIDFromContent(content)
 		if !ok {
 			continue
 		}
 		if leafWikiID == page.ID {
-			return content, path, true
+			return content, markdownPath, true
 		}
 	}
 	return "", "", false
+}
+
+func sortedMarkdownPaths(files map[string]string) []string {
+	paths := make([]string, 0, len(files))
+	for markdownPath := range files {
+		if !gitrevisions.IsManagedMarkdownRelPath(markdownPath) {
+			continue
+		}
+		paths = append(paths, markdownPath)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func markdownPathMatchesPageRoute(rootDir string, page *tree.Page, relPath string) bool {
+	if page == nil || page.PageNode == nil {
+		return false
+	}
+	routePath, kind := revisionRoutePathAndKind(rootDir, relPath, page)
+	return kind == page.Kind && strings.Trim(routePath, "/") == strings.Trim(page.CalculatePath(), "/")
 }
 
 func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
@@ -1238,7 +1373,7 @@ func leafWikiIDFromContent(content string) (string, bool) {
 	return strings.TrimSpace(doc.Metadata.Page.ID), true
 }
 
-func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
+func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
 	sum := sha256.Sum256([]byte(content))
 	authorID := strings.TrimSpace(commit.AuthorID)
 	if authorID == "" {
@@ -1254,7 +1389,7 @@ func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath
 			title = strings.TrimSpace(historicalTitle)
 		}
 	}
-	path, slug, kind := revisionRoutePathSlugAndKind(relPath, page)
+	path, slug, kind := revisionRoutePathSlugAndKind(rootDir, relPath, page)
 	return &revision.Revision{
 		ID:            commit.Hash,
 		PageID:        page.ID,
@@ -1274,20 +1409,9 @@ func revisionForPageContent(page *tree.Page, commit gitrevisions.Commit, relPath
 	}
 }
 
-func revisionRoutePathSlugAndKind(relPath string, page *tree.Page) (string, string, tree.NodeKind) {
+func revisionRoutePathSlugAndKind(rootDir string, relPath string, page *tree.Page) (string, string, tree.NodeKind) {
 	relPath = filepath.ToSlash(relPath)
-	path := tree.MarkdownPathToRoutePath(relPath)
-	kind := tree.NodeKindPage
-	base := filepath.Base(relPath)
-	dir := filepath.ToSlash(filepath.Dir(relPath))
-	if dir == "." {
-		dir = ""
-	}
-	dir = strings.Trim(dir, "/")
-	if strings.EqualFold(base, "index.md") || isRevisionReadmeFallbackSection(relPath, page, dir) {
-		kind = tree.NodeKindSection
-		path = dir
-	}
+	path, kind := revisionRoutePathAndKind(rootDir, relPath, page)
 	slug := ""
 	if path != "" {
 		slug = filepath.Base(path)
@@ -1298,8 +1422,29 @@ func revisionRoutePathSlugAndKind(relPath string, page *tree.Page) (string, stri
 	return path, slug, kind
 }
 
+func revisionRoutePathAndKind(rootDir string, relPath string, page *tree.Page) (string, tree.NodeKind) {
+	relPath = filepath.ToSlash(relPath)
+	base := path.Base(relPath)
+	dir := path.Dir(relPath)
+	if dir == "." {
+		dir = ""
+	}
+	dir = strings.Trim(dir, "/")
+	route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false)
+	if err == nil && !route.Skip {
+		return route.RoutePath, route.Kind
+	}
+	if isRevisionReadmeFallbackSection(relPath, page, dir) {
+		return dir, tree.NodeKindSection
+	}
+	if strings.EqualFold(base, "index.md") {
+		return dir, tree.NodeKindSection
+	}
+	return tree.MarkdownPathToRoutePath(relPath), tree.NodeKindPage
+}
+
 func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string) bool {
-	if filepath.Base(filepath.ToSlash(relPath)) != "README.md" {
+	if path.Base(filepath.ToSlash(relPath)) != "README.md" {
 		return false
 	}
 	if page == nil || page.PageNode == nil || page.Kind != tree.NodeKindSection {
@@ -1332,6 +1477,9 @@ func (s *Service) validationErrorsFromError(err error) []ValidationError {
 	if err == nil {
 		return nil
 	}
+	if validationErrors := s.validateWorkspaceMarkdownFiles(); validationErrorsIncludeCode(validationErrors, "path_conflict") {
+		return validationErrors
+	}
 	message := err.Error()
 	paths := markdownPathsInError(s.rootDir, message)
 	if len(paths) == 0 {
@@ -1342,6 +1490,15 @@ func (s *Service) validationErrorsFromError(err error) []ValidationError {
 		errors = append(errors, ValidationError{Code: "workspace_sync_error", Path: path, Message: message, Severity: "error"})
 	}
 	return errors
+}
+
+func validationErrorsIncludeCode(errors []ValidationError, code string) bool {
+	for _, validationError := range errors {
+		if validationError.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func markdownPathsInError(rootDir string, message string) []string {

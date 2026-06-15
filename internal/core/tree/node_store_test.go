@@ -752,6 +752,41 @@ func TestNodeStore_MoveNode_Page_MovesFileStrict(t *testing.T) {
 	}
 }
 
+func TestNodeStore_MoveNode_PageUsesWorkspaceSourcePath(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+	plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
+	archive := &PageNode{ID: "archive", Slug: "archive", Title: "Archive", Kind: NodeKindSection, Parent: root}
+	page := &PageNode{
+		ID:                  "p1",
+		Slug:                "agent-hooks-plan",
+		Title:               "Agent Hooks Plan",
+		Kind:                NodeKindPage,
+		Parent:              plans,
+		WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+	}
+
+	src := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
+	mustWriteFile(t, src, "# plan", 0o644)
+
+	if err := store.MoveNode(page, archive); err != nil {
+		t.Fatalf("MoveNode: %v", err)
+	}
+
+	dst := filepath.Join(tmp, "root", "archive", "agent_hooks.PLAN.md")
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("expected retained source filename at destination: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("expected original source file removed")
+	}
+	if page.WorkspaceSourcePath != "archive/agent_hooks.PLAN.md" {
+		t.Fatalf("WorkspaceSourcePath = %q, want archive/agent_hooks.PLAN.md", page.WorkspaceSourcePath)
+	}
+}
+
 func TestNodeStore_MoveNode_DriftWhenMissingSource(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -767,6 +802,34 @@ func TestNodeStore_MoveNode_DriftWhenMissingSource(t *testing.T) {
 	var de *DriftError
 	if !errors.As(err, &de) {
 		t.Fatalf("expected DriftError, got %T: %v", err, err)
+	}
+}
+
+func TestNodeStore_CreatePageUsesWorkspaceSourceParentDir(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+	parent := &PageNode{
+		ID:                  "s1",
+		Slug:                "my-docs",
+		Title:               "My Docs",
+		Kind:                NodeKindSection,
+		Parent:              root,
+		WorkspaceSourcePath: "My Docs",
+	}
+	page := &PageNode{ID: "p1", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: parent}
+
+	if err := store.CreatePage(parent, page); err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	want := filepath.Join(tmp, "root", "My Docs", "child.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected page under retained parent source dir: %v", err)
+	}
+	if page.WorkspaceSourcePath != "My Docs/child.md" {
+		t.Fatalf("WorkspaceSourcePath = %q, want My Docs/child.md", page.WorkspaceSourcePath)
 	}
 }
 
@@ -794,6 +857,32 @@ func TestNodeStore_DeletePage_RemovesFile_OrDriftIfMissing(t *testing.T) {
 	}
 }
 
+func TestNodeStore_DeletePageUsesWorkspaceSourcePath(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+	plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
+	page := &PageNode{
+		ID:                  "p1",
+		Slug:                "agent-hooks-plan",
+		Title:               "Agent Hooks Plan",
+		Kind:                NodeKindPage,
+		Parent:              plans,
+		WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+	}
+
+	rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
+	mustWriteFile(t, rawSource, "# plan", 0o644)
+
+	if err := store.DeletePage(page); err != nil {
+		t.Fatalf("DeletePage: %v", err)
+	}
+	if _, err := os.Stat(rawSource); !os.IsNotExist(err) {
+		t.Fatalf("expected raw source file deleted")
+	}
+}
+
 func TestNodeStore_DeleteSection_RemovesFolderRecursive_OrDriftIfMissing(t *testing.T) {
 	tmp := t.TempDir()
 	store := NewNodeStore(tmp)
@@ -816,6 +905,36 @@ func TestNodeStore_DeleteSection_RemovesFolderRecursive_OrDriftIfMissing(t *test
 	err := store.DeleteSection(sec)
 	if err == nil {
 		t.Fatalf("expected DriftError")
+	}
+}
+
+func TestNodeStore_SaveChildOrderUsesWorkspaceSourceSectionDir(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+	parent := &PageNode{
+		ID:                  "s1",
+		Slug:                "my-docs",
+		Title:               "My Docs",
+		Kind:                NodeKindSection,
+		Parent:              root,
+		WorkspaceSourcePath: "My Docs",
+		Children: []*PageNode{
+			{ID: "p1", Slug: "child", Title: "Child", Kind: NodeKindPage},
+		},
+	}
+	assignParentToChildren(parent)
+
+	if err := store.SaveChildOrder(parent); err != nil {
+		t.Fatalf("SaveChildOrder: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "root", "My Docs", orderFilename)); err != nil {
+		t.Fatalf("expected child order under retained source dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "root", "my-docs", orderFilename)); !os.IsNotExist(err) {
+		t.Fatalf("expected no child order file under normalized route dir")
 	}
 }
 
@@ -848,6 +967,38 @@ func TestNodeStore_RenameNode_PageAndSection(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(tmp, "root", "docs2")); err != nil || !st.IsDir() {
 		t.Fatalf("expected renamed section dir")
+	}
+}
+
+func TestNodeStore_RenameNode_PageUsesWorkspaceSourcePathAndClearsDefaultSource(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewNodeStore(tmp)
+
+	root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+	plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
+	page := &PageNode{
+		ID:                  "p1",
+		Slug:                "agent-hooks-plan",
+		Title:               "Agent Hooks Plan",
+		Kind:                NodeKindPage,
+		Parent:              plans,
+		WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+	}
+	rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
+	mustWriteFile(t, rawSource, "# plan", 0o644)
+
+	if err := store.RenameNode(page, "agent-hooks-v2"); err != nil {
+		t.Fatalf("RenameNode: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "root", "plans", "agent-hooks-v2.md")); err != nil {
+		t.Fatalf("expected renamed canonical page file: %v", err)
+	}
+	if _, err := os.Stat(rawSource); !os.IsNotExist(err) {
+		t.Fatalf("expected raw source filename removed")
+	}
+	if page.WorkspaceSourcePath != "" {
+		t.Fatalf("WorkspaceSourcePath = %q, want cleared default source", page.WorkspaceSourcePath)
 	}
 }
 
