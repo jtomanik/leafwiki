@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: dxh-uI-Dg
+  title: Page Metadata V1 - Observe
+  created_at: "2026-06-15T05:44:44.857311367Z"
+  updated_at: "2026-06-15T05:44:44.857311367Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Page Metadata V1 - Observe
 
 ## Purpose

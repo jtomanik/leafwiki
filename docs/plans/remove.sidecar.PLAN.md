@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: wbh-uIavR
+  title: LeafWiki MCP Transport Unification and Sidecar Removal Plan
+  created_at: "2026-06-15T05:44:44.85837011Z"
+  updated_at: "2026-06-15T05:44:44.85837011Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki MCP Transport Unification and Sidecar Removal Plan
 
 > **Superseded duplicate:** This visible copy is retained for migration/history only. Use [`mcp_transport_unification.PLAN.md`](/plans/mcp-transport-unification-plan.md) as the canonical plan page.

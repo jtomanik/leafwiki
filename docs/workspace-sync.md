@@ -64,7 +64,9 @@ Each sync commits raw Markdown changes before parsing. If Git capture fails, syn
 
 After capture, LeafWiki reconstructs the tree from the filesystem. On success, it rebuilds links, tags, properties, and search. On invalid Markdown or invalid wiki state, the raw state remains committed and the app keeps running with validation errors in workspace sync status.
 
-Before writeback capture, workspace sync canonicalizes resolvable internal Markdown links. Page links are rewritten to `.md` hrefs, section links stay extensionless, and section trailing slashes are removed. Unresolved legacy extensionless page links are left unchanged and reported as validation errors. See [canonical Markdown links](canonical-markdown-links.md).
+Before writeback capture, workspace sync canonicalizes resolvable internal Markdown links. Page links are rewritten to `.md` hrefs, section links stay extensionless, and section trailing slashes are removed. When `markdown-link-root-prefix` is configured, generated absolute Markdown hrefs include that prefix; for example, a wiki rooted at `docs` with prefix `/docs` rewrites `/sync/glossary.md` to `/docs/sync/glossary.md`. Unresolved legacy extensionless page links are left unchanged and reported as validation errors. See [canonical Markdown links](canonical-markdown-links.md).
+
+The prefix is not a route alias. LeafWiki route APIs still use paths like `sync/glossary`; the prefix is applied only while reading or writing Markdown hrefs. HTTP `base-path` remains the browser/API mount path and is independent from Markdown link root prefix.
 
 Web and MCP page mutations write Markdown before the required workspace-sync side effect captures Git history. If that capture fails, the API call returns an error but the Markdown mutation is left on disk. The next explicit refresh, watcher-triggered sync, or successful page mutation retries full Git capture from the filesystem source of truth.
 

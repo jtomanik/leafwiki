@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: MJhaXI-vR
+  title: Agent-Friendly LeafWiki MCP Surface Implementation Plan
+  created_at: "2026-06-15T05:44:44.85564092Z"
+  updated_at: "2026-06-15T05:44:44.85564092Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Agent-Friendly LeafWiki MCP Surface Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Use TDD first. Split into subagents for MCP contract, validation/partial edits, presence/UI, and docs/E2E review.

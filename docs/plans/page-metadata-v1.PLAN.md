@@ -1,8 +1,18 @@
----
-title: Page Metadata V1
-type: refactor
-date: 2026-06-13
----
+<!-- leafwiki
+version: 1
+page:
+  id: oxh-uIaDR
+  title: Page Metadata V1
+  created_at: "2026-06-15T05:44:44.857713822Z"
+  updated_at: "2026-06-15T05:44:44.857713822Z"
+  creator_id: system
+  last_author_id: system
+fields:
+  type: refactor
+extra:
+  date: 2026-06-13T00:00:00Z
+-->
+
 
 # Page Metadata V1 Implementation Plan
 

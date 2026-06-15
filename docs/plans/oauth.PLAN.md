@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: u1h-uI-Dg
+  title: Authenticated Local MCP via Minimal OAuth
+  created_at: "2026-06-15T05:44:44.856502414Z"
+  updated_at: "2026-06-15T05:44:44.856502414Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Authenticated Local MCP via Minimal OAuth
 
 ## Summary

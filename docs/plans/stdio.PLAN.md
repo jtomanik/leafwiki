@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: WahauSaDR
+  title: Native Combined STDIO + HTTP MCP Implementation Plan
+  created_at: "2026-06-15T05:44:44.858949106Z"
+  updated_at: "2026-06-15T05:44:44.858949106Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Native Combined STDIO + HTTP MCP Implementation Plan
 
 > **Superseded duplicate:** This visible copy is retained for migration/history only. Use [`native_mcp_stdio_combined.PLAN.md`](/plans/native-mcp-stdio-combined-plan.md) as the canonical plan page.

@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: X02auIavg
+  title: Local MCP Streamable HTTP Interface For LeafWiki
+  created_at: "2026-06-15T05:44:44.855223006Z"
+  updated_at: "2026-06-15T05:44:44.855223006Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Local MCP Streamable HTTP Interface For LeafWiki
 
 ## Summary

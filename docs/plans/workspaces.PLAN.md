@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: oa2auSavR
+  title: LeafWiki Workspace Boundary and `--root-dir` Implementation Plan
+  created_at: "2026-06-15T05:44:44.860692677Z"
+  updated_at: "2026-06-15T05:44:44.860692677Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki Workspace Boundary and `--root-dir` Implementation Plan
 
 ## Summary

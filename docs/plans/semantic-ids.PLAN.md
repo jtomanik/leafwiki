@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: Cb2auI-Dg
+  title: Typed Stable IDs Implementation Plan
+  created_at: "2026-06-15T05:44:44.858722941Z"
+  updated_at: "2026-06-15T05:44:44.858722941Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Typed Stable IDs Implementation Plan
 
 > **For agentic workers:** Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Follow TDD: write failing identifier-contract tests first, then implementation, then full verification.

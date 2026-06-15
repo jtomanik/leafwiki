@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: V-hauSaDRM
+  title: Workspace Sync + Git-Backed Markdown Revisions Implementation Plan
+  created_at: "2026-06-15T05:44:44.860402346Z"
+  updated_at: "2026-06-15T05:44:44.860402346Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Workspace Sync + Git-Backed Markdown Revisions Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this task-by-task. Use a fresh subagent for backend sync/revision work, frontend/history UX, and test/docs review if available.

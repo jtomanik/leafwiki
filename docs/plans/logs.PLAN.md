@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: 6A2auS-Dg
+  title: LeafWiki Logging Targets Implementation Plan
+  created_at: "2026-06-15T05:44:44.855530421Z"
+  updated_at: "2026-06-15T05:44:44.855530421Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki Logging Targets Implementation Plan
 
 **Thread:** [codex://threads/019e82ba-6a29-7502-a63c-c68792356356](codex://threads/019e82ba-6a29-7502-a63c-c68792356356)

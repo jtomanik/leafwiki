@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: xahauS-Dg
+  title: YAML Configuration File Support Implementation Plan
+  created_at: "2026-06-15T05:44:44.860822968Z"
+  updated_at: "2026-06-15T05:44:44.860822968Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # YAML Configuration File Support Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Use TDD first. Suggested workers: CLI/config parser, wrapper/docs, Go process tests, E2E.

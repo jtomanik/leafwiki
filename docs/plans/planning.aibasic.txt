@@ -12,6 +12,7 @@ Document everything they need to know: which files to touch for each task, code,
 Give them the whole plan as bite-sized tasks.
 
 DECLARE Workflow:
+	CREATE WORKFLOW STATE as "planning.aibasic.json"
 
 	INPUT "What is the title of this plan:", $PlanTitle
 
@@ -25,7 +26,7 @@ DECLARE Workflow:
 		- Technology stack and versions (used in section 1.2 to make sharper external research decisions)
 		- Architectural patterns and conventions to follow
 		- Implementation patterns, relevant files, modules, and tests
-		- Project learnings from `plans/`, git history, memory and past threads and conversations
+		- Project learnings from `docs/plans/`, git history, memory and past threads and conversations
 		Ask sub agents to summarise:
 		- Relevant codebase patterns and file paths
 		- Relevant institutional learnings
@@ -36,11 +37,13 @@ DECLARE Workflow:
 			USE SUBAGENT @Explorer1
 			USE SUBAGENT @Explorer2
 			USE SUBAGENT @Explorer3
+			USE SUBAGENT @Explorer4
 		WAIT FOR ALL
 		- @Explorer1
 		- @Explorer2
 		- @Explorer3
-		LET ObservationsFilename = "plans/$PlanTitle.OBSERVE.md"
+		- @Explorer3
+		LET ObservationsFilename = "docs/plans/$PlanTitle.OBSERVE.md"
 		CREATE MARKDOWN DOCUMENT !Observe AS $ObservationsFilename
 			REMARK Create a comprehensive document with observations relevant for this planning session.
 
@@ -48,14 +51,14 @@ DECLARE Workflow:
 		REMARK
 		Contextualize your observations. Analyze context.
 		This is the most complex step, requiring you to filter the raw data through your background, experiences, cultural conditioning, and biases.
-		LET ContextFilename = "plans/$PlanTitle.CONTEXT.md"
+		LET ContextFilename = "docs/plans/$PlanTitle.CONTEXT.md"
 		CREATE MARKDOWN DOCUMENT !Context AS $ContextFilename
 			REMARK Create a document that shows you thought process and various paths you have considered before you created the plan.
 
 	STEP !Decide
 		REMARK
 		Select the best course of action from a set of alternatives based on your analysis during the orientation phase.
-		LET DecisionFilename = "plans/$PlanTitle.DECISION.md"
+		LET DecisionFilename = "docs/plans/$PlanTitle.DECISION.md"
 		CREATE MARKDOWN DOCUMENT !Decision AS $DecisionFilename
 
 	STEP !Act
@@ -65,7 +68,7 @@ DECLARE Workflow:
 		USE SKILL
 		- superpowers:writing-plans
 		- compound-engineering:ce-plan
-		LET PlanFilename = "plans/$PlanTitle.PLAN.md"
+		LET PlanFilename = "docs/plans/$PlanTitle.PLAN.md"
 		CREATE MARKDOWN DOCUMENT !Plan AS $PlanFilename
 			REQUIRED SECTION Goal & Context
 				REQUIRED SECTION Objective

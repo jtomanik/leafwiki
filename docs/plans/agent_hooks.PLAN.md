@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: ET2aXIaDR
+  title: Agent Presence Hooks Implementation Plan
+  created_at: "2026-06-15T05:44:44.853712266Z"
+  updated_at: "2026-06-15T05:44:44.853712266Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Agent Presence Hooks Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Use TDD first. Save this as `plans/agent_hooks.PLAN.md`. Thread context: `codex://threads/019ea3a5-4240-7b80-b5f0-76c459294370`.

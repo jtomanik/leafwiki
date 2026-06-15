@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: 212-uSaDg
+  title: LeafWiki MCP STDIO Sidecar Implementation Plan
+  created_at: "2026-06-15T05:44:44.856177416Z"
+  updated_at: "2026-06-15T05:44:44.856177416Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki MCP STDIO Sidecar Implementation Plan
 
 > **For agentic workers:** Use `superpowers:subagent-driven-development` or equivalent task isolation. Suggested split: one worker for the Go transport bridge, one for TypeScript/Playwright E2E, one for docs/release wiring.

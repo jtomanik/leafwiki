@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: i0hauSavg
+  title: Canonical Filesystem Markdown Links Plan
+  created_at: "2026-06-15T05:44:44.854020139Z"
+  updated_at: "2026-06-15T05:44:44.854020139Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Canonical Filesystem Markdown Links Plan
 
 Reference thread: `codex://threads/019eb2fd-c83c-7d52-ad25-180701842e35`

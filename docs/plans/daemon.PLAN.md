@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: v02-XIaDg
+  title: LeafWiki Transparent Per-Project Daemon Plan
+  created_at: "2026-06-15T05:44:44.854141263Z"
+  updated_at: "2026-06-15T05:44:44.854141263Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki Transparent Per-Project Daemon Plan
 
 ## Summary

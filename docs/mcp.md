@@ -31,6 +31,7 @@ http://127.0.0.1:8080/mcp
 ```
 
 When `--base-path /wiki` is configured, the endpoint is `http://127.0.0.1:8080/wiki/mcp`.
+`--markdown-link-root-prefix` is unrelated to the HTTP mount path: it only affects how authored Markdown hrefs such as `/docs/sync/glossary.md` are interpreted and generated when the wiki root is the `docs` directory.
 
 Transport unification is tracked by `codex://threads/019e8a0f-9674-7780-b6ee-1cfd7be07f67`. The transparent project daemon design is tracked by `codex://threads/019e8df8-d944-71f3-956e-59eb999abdff`. The context-first agent collaboration surface is tracked by `codex://threads/019e9c9b-92bc-74c1-820e-a758f051d779`.
 
@@ -40,7 +41,7 @@ YAML config-file startup is tracked by `codex://threads/019eb504-6cf3-7803-b033-
 
 Every normal LeafWiki startup joins a per-project owner daemon. The project identity is the canonical resolved `(data-dir, root-dir)` pair. The first compatible startup starts the owner and writes `<data-dir>/.leafwiki/project-daemon.json` with mode `0600`; later compatible startups register session handles and attach without taking data/root ownership locks themselves.
 
-Daemon-relevant configuration must match the first owner for owner-affecting starts: auth mode, host, port, base path, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, revision/workspace-sync/link-refactor settings, max revision history, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change owner settings, so they inherit the owner value for host, public HTTP MCP, log target/file, and request logging while still matching the rest of the project identity. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
+Daemon-relevant configuration must match the first owner for owner-affecting starts: auth mode, host, port, base path, Markdown link root prefix, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, revision/workspace-sync/link-refactor settings, max revision history, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change owner settings, so they inherit the owner value for host, public HTTP MCP, log target/file, and request logging while still matching the rest of the project identity. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
 
 The owner exits after active project activity reaches zero and `--daemon-idle-timeout` elapses. Project activity is the sum of registered session handles and active in-memory agent presence. Agent presence records expire on the same idle-timeout cadence, so a hook-started owner stays alive while the observed agent session is fresh and can shut down once that presence expires. The default is `10m`; `0` stops immediately after the last handle or presence record is gone. Stale descriptors are ignored when the private control endpoint is unreachable and the project locks are free.
 
@@ -166,6 +167,8 @@ All MCP transports operate against the same owner LeafWiki wiki state as the web
 This means an agent can create or update a page through MCP and a human can immediately see it in the UI. A human can edit through the UI and an agent can read the updated page through MCP.
 
 Agents should call `wiki_get_context` before other tools. It returns the current user/config, enabled tools, workspace sync status, validation summary, recent changes, active web/agent sessions, a compact tree, recommended next tools, and an opaque context token. Later calls can pass `sinceToken` to see whether the workspace changed since a prior context response.
+
+`wiki_get_config` and `wiki_get_context.config` include `markdownLinkRootPrefix`. When it is set, Markdown processors strip that prefix from absolute internal hrefs before route lookup and add it to generated absolute Markdown links. MCP page path inputs remain LeafWiki route paths; pass `sync/glossary`, not `docs/sync/glossary`, when calling route-oriented tools.
 
 The normal edit path is semantic MCP writes such as `wiki_update_page`, `wiki_update_page_metadata`, or `wiki_replace_page_section`. When workspace sync is enabled, direct Markdown file edits under `--root-dir` can be useful for large mechanical body changes. Preserve any top-of-file `<!-- leafwiki ... -->` metadata block exactly, edit page body content below that block, and use `wiki_update_page_metadata` for tags and properties instead of hand-editing metadata. Then call `wiki_refresh` when humans or following tools need immediate web visibility, and run validation before reporting done.
 

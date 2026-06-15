@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: E02auS-DRz
+  title: LLM Wiki Companion Skill Implementation Plan
+  created_at: "2026-06-15T05:44:44.855011674Z"
+  updated_at: "2026-06-15T05:44:44.855011674Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LLM Wiki Companion Skill Implementation Plan
 
 > **Historical note:** This plan is retained as an older design artifact. `--enable-mcp` examples are historical; current LeafWiki MCP startup uses `--mcp`, and current tools use the `wiki_*` naming described in [Local MCP Interface](/mcp.md).

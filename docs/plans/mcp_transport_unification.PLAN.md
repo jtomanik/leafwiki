@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: bJh-uI-vg
+  title: LeafWiki MCP Transport Unification and Sidecar Removal Plan
+  created_at: "2026-06-15T05:44:44.856263666Z"
+  updated_at: "2026-06-15T05:44:44.856263666Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki MCP Transport Unification and Sidecar Removal Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Suggested workers: CLI/config, native STDIO auth, sidecar/removal scripts, E2E, docs/release cleanup.

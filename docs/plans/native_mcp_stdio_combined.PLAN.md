@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: P12-uIavg
+  title: Native Combined STDIO + HTTP MCP Implementation Plan
+  created_at: "2026-06-15T05:44:44.856342248Z"
+  updated_at: "2026-06-15T05:44:44.856342248Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Native Combined STDIO + HTTP MCP Implementation Plan
 
 **Goal:** Add a project-local `leafwiki` runtime where one process exposes MCP over STDIO for the agent and HTTP UI for the human.

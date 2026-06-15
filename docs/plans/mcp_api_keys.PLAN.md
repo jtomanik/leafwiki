@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: O12-XIaDg
+  title: LeafWiki MCP API Keys Management Plan
+  created_at: "2026-06-15T05:44:44.855972418Z"
+  updated_at: "2026-06-15T05:44:44.855972418Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # LeafWiki MCP API Keys Management Plan
 
 > **Superseded duplicate:** This visible copy is retained for migration/history only. Use [`api_keys.PLAN.md`](/plans/api-keys-plan.md) as the canonical plan page.

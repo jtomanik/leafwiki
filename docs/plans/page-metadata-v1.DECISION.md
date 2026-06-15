@@ -1,3 +1,14 @@
+<!-- leafwiki
+version: 1
+page:
+  id: nxh-uIavg
+  title: Page Metadata V1 - Decision
+  created_at: "2026-06-15T05:44:44.857028827Z"
+  updated_at: "2026-06-15T05:44:44.857028827Z"
+  creator_id: system
+  last_author_id: system
+-->
+
 # Page Metadata V1 - Decision
 
 ## Decision
