@@ -236,6 +236,7 @@ export async function startMCPClientSDKOAuthFlow(
     typeof clientInformation?.client_id === 'string' ? clientInformation.client_id : undefined;
   const authProvider: OAuthClientProvider = {
     redirectUrl: options.redirectURI,
+    state: () => 'mcp-sdk-oauth-state',
     clientMetadata: {
       client_name: options.clientName || 'leafwiki-e2e-oauth-discovery',
       redirect_uris: [options.redirectURI],

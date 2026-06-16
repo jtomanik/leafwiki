@@ -1,19 +1,20 @@
 package oauth
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	gooauth "github.com/go-oauth2/oauth2/v4"
-	"github.com/go-oauth2/oauth2/v4/errors"
-	oauthserver "github.com/go-oauth2/oauth2/v4/server"
+	"github.com/ory/fosite"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
+
+type fixedClientRedirectContextKey struct{}
 
 func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -23,13 +24,13 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			return
 		}
 
-		req, err := r.service.server.ValidationAuthorizeRequest(c.Request)
+		req, err := r.service.newAuthorizeRequest(c.Request, redirectURI, state)
 		if err != nil {
 			r.redirectAuthorizeError(c, redirectURI, state, err)
 			return
 		}
 		if err := r.validateAuthorizeRequest(c.Request, req, ctx.Opts.BasePath); err != nil {
-			r.redirectAuthorizeError(c, req.RedirectURI, req.State, err)
+			r.redirectAuthorizeError(c, redirectURI, state, err)
 			return
 		}
 
@@ -43,18 +44,18 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 
 		approvalValues, approvalKey, err := authorizeApprovalValues(c.Request)
 		if err != nil {
-			r.redirectAuthorizeError(c, req.RedirectURI, req.State, errors.ErrInvalidRequest)
+			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrInvalidRequest)
 			return
 		}
 		switch c.PostForm("decision") {
 		case "approve":
 			if !r.service.consumeApproval(c.PostForm("approval_token"), user.ID, approvalKey) {
-				writeOAuthBadRequest(c, errors.ErrInvalidRequest)
+				writeOAuthBadRequest(c, fosite.ErrInvalidRequest)
 				return
 			}
 		case "deny":
 			_ = r.service.consumeApproval(c.PostForm("approval_token"), user.ID, approvalKey)
-			r.redirectAuthorizeError(c, req.RedirectURI, req.State, errors.ErrAccessDenied)
+			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrAccessDenied)
 			return
 		default:
 			details := r.service.approvalPageData(c.Request, req, ctx.Opts.BasePath)
@@ -68,21 +69,15 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			return
 		}
 
-		req.UserID = user.ID
-		req.Scope = ScopeMCP
-		req.AccessTokenExp = r.service.accessTTL
-
-		info, err := r.service.server.GetAuthorizeToken(c.Request.Context(), req)
+		session := newFositeSession(user.ID, user.Username)
+		req.SetSession(session)
+		req.GrantScope(ScopeMCP)
+		info, err := r.service.fositeProvider.NewAuthorizeResponse(c.Request.Context(), req, session)
 		if err != nil {
-			writeOAuthBadRequest(c, err)
+			r.redirectAuthorizeError(c, redirectURI, state, err)
 			return
 		}
-		targetURI, err := r.service.server.GetRedirectURI(req, r.service.server.GetAuthorizeData(req.ResponseType, info))
-		if err != nil {
-			writeOAuthBadRequest(c, err)
-			return
-		}
-		c.Redirect(http.StatusFound, targetURI)
+		writeAuthorizeRedirect(c, req, info)
 	}
 }
 
@@ -94,28 +89,43 @@ func (r *Routes) currentWebUser(c *gin.Context, ctx httpinternal.RouterContext) 
 	return user
 }
 
-func (r *Routes) validateAuthorizeRequest(req *http.Request, ar *oauthserver.AuthorizeRequest, basePath string) error {
-	client, ok := r.service.client(ar.ClientID)
+func (s *Service) newAuthorizeRequest(req *http.Request, redirectURI, state string) (fosite.AuthorizeRequester, error) {
+	if err := req.ParseForm(); err != nil {
+		return nil, fosite.ErrInvalidRequest
+	}
+	parseRequest := req
+	if strings.TrimSpace(req.FormValue("client_id")) == ClientID {
+		ctx := context.WithValue(req.Context(), fixedClientRedirectContextKey{}, redirectURI)
+		parseRequest = req.WithContext(ctx)
+	}
+	return s.fositeProvider.NewAuthorizeRequest(parseRequest.Context(), parseRequest)
+}
+
+func (r *Routes) validateAuthorizeRequest(req *http.Request, ar fosite.AuthorizeRequester, basePath string) error {
+	clientID := ar.GetClient().GetID()
+	client, ok := r.service.client(clientID)
 	if !ok {
 		return fmt.Errorf("unknown oauth client")
 	}
-	if !stringSliceContains(client.ResponseTypes, string(ar.ResponseType)) {
-		return errors.ErrUnsupportedResponseType
+	if !ar.GetResponseTypes().ExactOne(responseTypeCode) || !stringSliceContains(client.ResponseTypes, responseTypeCode) {
+		return fosite.ErrUnsupportedResponseType
 	}
-	if !clientScopeAllowed(client, ar.Scope) {
-		return errors.ErrInvalidScope
+	scope := strings.Join(ar.GetRequestedScopes(), " ")
+	if !clientScopeAllowed(client, scope) {
+		return fosite.ErrInvalidScope
 	}
-	if ar.CodeChallenge == "" || ar.CodeChallengeMethod != gooauth.CodeChallengeS256 {
-		return errors.ErrInvalidRequest
+	if req.FormValue("code_challenge") == "" || req.FormValue("code_challenge_method") != "S256" {
+		return fosite.ErrInvalidRequest
 	}
-	if err := validateLoopbackRedirectURI(ar.RedirectURI); err != nil {
+	redirectURI := ar.GetRedirectURI().String()
+	if err := validateLoopbackRedirectURI(redirectURI); err != nil {
 		return err
 	}
-	if !clientRedirectURIAllowed(client, ar.RedirectURI) {
-		return errors.ErrInvalidRequest
+	if !clientRedirectURIAllowed(client, redirectURI) {
+		return fosite.ErrInvalidRequest
 	}
 	if err := validateAuthorizeResource(req, basePath); err != nil {
-		return errors.ErrInvalidRequest
+		return fosite.ErrInvalidRequest
 	}
 	return nil
 }
@@ -154,17 +164,37 @@ func (r *Routes) validateAuthorizeRedirectTarget(req *http.Request) (string, str
 }
 
 func (r *Routes) redirectAuthorizeError(c *gin.Context, redirectURI, state string, err error) {
-	data, _, _ := r.service.server.GetErrorData(err)
-	target, redirectErr := r.service.server.GetRedirectURI(&oauthserver.AuthorizeRequest{
-		RedirectURI:  redirectURI,
-		ResponseType: gooauth.Code,
-		State:        state,
-	}, data)
-	if redirectErr != nil {
-		writeOAuthBadRequest(c, redirectErr)
+	target, parseErr := url.Parse(redirectURI)
+	if parseErr != nil {
+		writeOAuthBadRequest(c, parseErr)
 		return
 	}
-	c.Redirect(http.StatusFound, target)
+	query := target.Query()
+	query.Set("error", fosite.ErrorToRFC6749Error(err).ErrorField)
+	if state != "" {
+		query.Set("state", state)
+	}
+	target.RawQuery = query.Encode()
+	c.Redirect(http.StatusFound, target.String())
+}
+
+func writeAuthorizeRedirect(c *gin.Context, req fosite.AuthorizeRequester, resp fosite.AuthorizeResponder) {
+	for name, values := range resp.GetHeader() {
+		for _, value := range values {
+			c.Header(name, value)
+		}
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	target := *req.GetRedirectURI()
+	query := target.Query()
+	for name, values := range resp.GetParameters() {
+		if len(values) > 0 {
+			query.Set(name, values[0])
+		}
+	}
+	target.RawQuery = query.Encode()
+	c.Redirect(http.StatusFound, target.String())
 }
 
 func requestedScopeAllowed(scope string) bool {

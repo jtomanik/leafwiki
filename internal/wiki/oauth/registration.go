@@ -8,8 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	gooauth "github.com/go-oauth2/oauth2/v4"
-	"github.com/go-oauth2/oauth2/v4/models"
+	"github.com/ory/fosite"
 )
 
 type registeredClient struct {
@@ -107,7 +106,7 @@ func (s *Service) registerDynamicClient(client registeredClient) (string, error)
 			s.clientsMu.Unlock()
 			continue
 		}
-		if err := s.clientStore.Set(clientID, &models.Client{ID: clientID, Public: true}); err != nil {
+		if err := s.store.setClient(oauthClientFromRegistration(clientID, client)); err != nil {
 			s.clientsMu.Unlock()
 			return "", err
 		}
@@ -146,16 +145,16 @@ func normalizeRedirectURIs(values []string) ([]string, error) {
 
 func normalizeRegistrationGrantTypes(values []string) ([]string, error) {
 	if len(values) == 0 {
-		return []string{string(gooauth.AuthorizationCode), string(gooauth.Refreshing)}, nil
+		return []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)}, nil
 	}
 
 	hasAuthorizationCode := false
 	hasRefreshToken := false
 	for _, value := range values {
 		switch value {
-		case string(gooauth.AuthorizationCode):
+		case string(fosite.GrantTypeAuthorizationCode):
 			hasAuthorizationCode = true
-		case string(gooauth.Refreshing):
+		case string(fosite.GrantTypeRefreshToken):
 			hasRefreshToken = true
 		default:
 			return nil, fmt.Errorf("unsupported grant_type %q", value)
@@ -164,23 +163,23 @@ func normalizeRegistrationGrantTypes(values []string) ([]string, error) {
 	if !hasAuthorizationCode {
 		return nil, fmt.Errorf("authorization_code grant_type is required")
 	}
-	out := []string{string(gooauth.AuthorizationCode)}
+	out := []string{string(fosite.GrantTypeAuthorizationCode)}
 	if hasRefreshToken {
-		out = append(out, string(gooauth.Refreshing))
+		out = append(out, string(fosite.GrantTypeRefreshToken))
 	}
 	return out, nil
 }
 
 func normalizeRegistrationResponseTypes(values []string) ([]string, error) {
 	if len(values) == 0 {
-		return []string{string(gooauth.Code)}, nil
+		return []string{responseTypeCode}, nil
 	}
 	for _, value := range values {
-		if value != string(gooauth.Code) {
+		if value != responseTypeCode {
 			return nil, fmt.Errorf("unsupported response_type %q", value)
 		}
 	}
-	return []string{string(gooauth.Code)}, nil
+	return []string{responseTypeCode}, nil
 }
 
 func normalizeRegistrationScope(scope string) (string, error) {

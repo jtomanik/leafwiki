@@ -4,7 +4,7 @@ page:
   id: Jcx5CS-Dg
   title: Federated Workspaces and Session Daemon
   created_at: "2026-06-15T08:07:21.745535Z"
-  updated_at: "2026-06-15T08:08:23.634043Z"
+  updated_at: "2026-06-15T20:53:56.611022Z"
   creator_id: public-editor
   last_author_id: public-editor
 tags:
@@ -174,6 +174,10 @@ scope: leafwiki:mcp leafwiki:workspace:read leafwiki:workspace:write
 ```
 
 `workspaced` validates the token or assertion, then enforces the resulting permissions locally.
+
+### Related Discovery
+
+The OAuth-library migration question is split into [Fosite OAuth Migration](/discovery/fosite-oauth-migration.md). That page records the historical decision to move the pre-migration `go-oauth2` implementation to ORY Fosite as a clean enabling cut before this broader daemon split.
 
 ## Mandatory Workspace Sync And Git Revisions
 

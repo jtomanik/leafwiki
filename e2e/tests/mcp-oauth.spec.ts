@@ -97,11 +97,11 @@ async function exerciseMCPUIRoundTrip(
     version: createdPage.version,
     title,
     slug,
-    content: `Seeded through authenticated MCP\n\n[Target](/${targetSlug}) and [Missing](/${slug}-missing)`,
+    content: `Seeded through authenticated MCP\n\n[Target](/${targetSlug}.md) and [Missing](/${slug}-missing.md)`,
   });
 
   const viewPage = new ViewPage(page);
-  await page.goto(pageURL(`/${slug}`));
+  await page.goto(pageURL(`/${slug}.md`));
   await page.locator('article').waitFor({ state: 'visible' });
   await expect(page.locator('article')).toContainText('Seeded through authenticated MCP');
 
@@ -235,6 +235,7 @@ test('mcp oauth sdk dynamically registers, discovers protected resource metadata
   expect(registeredClientID).not.toBe('leafwiki-local-mcp');
   expect(oauthFlow.authorizationURL.searchParams.get('client_id')).toBe(registeredClientID);
   expect(oauthFlow.authorizationURL.searchParams.get('resource')).toBe(mcpURL);
+  expect(oauthFlow.authorizationURL.searchParams.get('state')).toBe('mcp-sdk-oauth-state');
 
   await loginAsAdminAt(page, loopbackAppURL('/login'));
   const authorize = await page.context().request.get(oauthFlow.authorizationURL.toString(), {

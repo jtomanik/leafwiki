@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	oauthserver "github.com/go-oauth2/oauth2/v4/server"
+	"github.com/ory/fosite"
 )
 
 type oauthApproval struct {
@@ -89,13 +89,14 @@ func (s *Service) approvalDetails(token, userID string) (approvalPageData, bool)
 	return approval.Details, true
 }
 
-func (s *Service) approvalPageData(req *http.Request, ar *oauthserver.AuthorizeRequest, basePath string) approvalPageData {
-	client, _ := s.client(ar.ClientID)
+func (s *Service) approvalPageData(req *http.Request, ar fosite.AuthorizeRequester, basePath string) approvalPageData {
+	clientID := ar.GetClient().GetID()
+	client, _ := s.client(clientID)
 	label := strings.TrimSpace(client.ClientName)
 	if label == "" {
-		label = ar.ClientID
+		label = clientID
 	}
-	scope := strings.TrimSpace(ar.Scope)
+	scope := strings.TrimSpace(strings.Join(ar.GetRequestedScopes(), " "))
 	if scope == "" {
 		scope = ScopeMCP
 	}
@@ -105,8 +106,8 @@ func (s *Service) approvalPageData(req *http.Request, ar *oauthserver.AuthorizeR
 	}
 	return approvalPageData{
 		ClientLabel: label,
-		ClientID:    ar.ClientID,
-		RedirectURI: ar.RedirectURI,
+		ClientID:    clientID,
+		RedirectURI: ar.GetRedirectURI().String(),
 		Scope:       scope,
 		Resource:    resource,
 	}

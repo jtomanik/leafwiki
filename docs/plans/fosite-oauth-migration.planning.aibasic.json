@@ -1,0 +1,59 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "fosite-oauth-migration",
+  "createdAt": "2026-06-15T21:40:00+02:00",
+  "status": "plan-written",
+  "artifacts": {
+    "observe": "docs/plans/fosite-oauth-migration.OBSERVE.md",
+    "context": "docs/plans/fosite-oauth-migration.CONTEXT.md",
+    "decision": "docs/plans/fosite-oauth-migration.DECISION.md",
+    "plan": "docs/plans/fosite-oauth-migration.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/discovery/fosite-oauth-migration.md",
+    "docs/discovery/federated-workspaces-session-daemon.md",
+    "docs/plans/oauth.PLAN.md",
+    "docs/plans/api_keys.PLAN.md",
+    "docs/mcp.md",
+    "README.md",
+    "references/fosite"
+  ],
+  "subagents": [
+    {
+      "id": "019ecd27-e991-78e0-ad88-999962fa476a",
+      "role": "Explorer1",
+      "focus": "technology stack and versions",
+      "status": "completed"
+    },
+    {
+      "id": "019ecd27-f7e7-7e12-8e59-e16113098259",
+      "role": "Explorer2",
+      "focus": "architecture patterns and conventions",
+      "status": "completed"
+    },
+    {
+      "id": "019ecd28-06db-7b30-92a8-338242bfff74",
+      "role": "Explorer3",
+      "focus": "implementation files and tests",
+      "status": "completed"
+    },
+    {
+      "id": "019ecd28-15fa-7bd0-bb24-ad678541daff",
+      "role": "Explorer4",
+      "focus": "project learnings and constraints",
+      "status": "completed"
+    }
+  ],
+  "decisions": [
+    "Switch the OAuth engine from go-oauth2 to Fosite behind the existing LeafWiki OAuth/MCP route contract.",
+    "Do not add, remove, or expose user-facing OAuth capabilities in the first cut.",
+    "Add only internal Fosite support needed for current behavior: narrow handler composition, in-memory Fosite storage, internal bearer verification, and revocation state required for refresh/code correctness.",
+    "Preserve fixed leafwiki-local-mcp loopback redirect compatibility with an adapter if needed.",
+    "Accept Fosite state strictness and update tests/examples to use realistic state values."
+  ],
+  "validation": {
+    "wikiContextToken": "ctx_6",
+    "preWriteValidation": "clean"
+  }
+}

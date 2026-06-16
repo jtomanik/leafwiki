@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	oauthserver "github.com/go-oauth2/oauth2/v4/server"
+	"github.com/ory/fosite"
 	httpinternal "github.com/perber/wiki/internal/http"
 )
 
@@ -19,14 +19,28 @@ func writeRegistrationError(c *gin.Context, description string) {
 	})
 }
 
-func writeTokenError(c *gin.Context, server *oauthserver.Server, err error) {
-	data, status, header := server.GetErrorData(err)
-	for name, values := range header {
-		for _, value := range values {
-			c.Header(name, value)
-		}
+func writeTokenError(c *gin.Context, err error) {
+	rfcErr := fosite.ErrorToRFC6749Error(err)
+	status := rfcErr.StatusCode()
+	if rfcErr.ErrorField == "invalid_grant" {
+		status = http.StatusUnauthorized
 	}
-	c.JSON(status, data)
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.JSON(status, gin.H{
+		"error":             rfcErr.ErrorField,
+		"error_description": rfcErr.GetDescription(),
+	})
+}
+
+func writeTokenResponse(c *gin.Context, response fosite.AccessResponder) {
+	body := response.ToMap()
+	if body["token_type"] == fosite.BearerAccessToken {
+		body["token_type"] = "Bearer"
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.JSON(http.StatusOK, body)
 }
 
 func (r *Routes) handleApprovalDetails(ctx httpinternal.RouterContext) gin.HandlerFunc {

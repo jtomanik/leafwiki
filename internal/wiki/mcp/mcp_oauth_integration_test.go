@@ -84,6 +84,9 @@ func TestLocalMCPOAuthMetadata(t *testing.T) {
 				if _, exists := authMeta["revocation_endpoint"]; exists {
 					t.Fatalf("authorization metadata advertised revocation_endpoint: %#v", authMeta)
 				}
+				if _, exists := authMeta["introspection_endpoint"]; exists {
+					t.Fatalf("authorization metadata advertised introspection_endpoint: %#v", authMeta)
+				}
 			}
 
 			for _, path := range tt.prMetadataPaths {
@@ -172,6 +175,13 @@ func TestLocalMCPOAuthDynamicClientRegistration(t *testing.T) {
 	cookies := loginCookies(t, router, "admin", "admin")
 	redirectURI := "http://127.0.0.1:49152/callback"
 	verifier := "oauth-dynamic-client-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+
+	mismatchQ := validAuthorizeQueryForClient(clientID, "http://127.0.0.1:49153/callback", "dynamic-client-mismatch-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+	mismatch := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+mismatchQ.Encode(), cookies, nil)
+	if mismatch.Code != http.StatusBadRequest {
+		t.Fatalf("dynamic client authorize with unregistered redirect = %d, want 400: %s", mismatch.Code, mismatch.Body.String())
+	}
+
 	q := validAuthorizeQueryForClient(clientID, redirectURI, "dynamic-client-state", pkceS256(verifier), "http://leafwiki.local/mcp")
 	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
 	form := approvalFormFromAuthorizeRedirect(t, rec, "")
@@ -262,6 +272,51 @@ func TestLocalMCPOAuthDynamicClientRegistrationDefaultsRefreshAndBindsRefreshCli
 	}
 }
 
+func TestLocalMCPOAuthDynamicClientRegistrationOmittedScopeCanRequestAdvertisedScope(t *testing.T) {
+	w := newLocalMCPAuthTestWiki(t)
+	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+	redirectURI := "http://127.0.0.1:49152/callback"
+
+	registration := registerOAuthClient(t, router, "", `{
+		"client_name":"SDK style client",
+		"redirect_uris":["http://127.0.0.1:49152/callback"],
+		"grant_types":["authorization_code","refresh_token"],
+		"response_types":["code"],
+		"token_endpoint_auth_method":"none"
+	}`)
+	clientID := stringFromMap(t, registration, "client_id")
+	if _, ok := registration["scope"]; ok {
+		t.Fatalf("DCR response included omitted scope: %#v", registration)
+	}
+
+	cookies := loginCookies(t, router, "admin", "admin")
+	verifier := "oauth-dcr-omitted-scope-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+	q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-omitted-scope-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+	form := approvalFormFromAuthorizeRedirect(t, rec, "")
+	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+	if approved.Code != http.StatusFound {
+		t.Fatalf("omitted-scope DCR approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
+	}
+	redirected, err := url.Parse(approved.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse omitted-scope DCR authorize redirect: %v", err)
+	}
+	if got := redirected.Query().Get("state"); got != "dcr-omitted-scope-state" {
+		t.Fatalf("omitted-scope DCR authorize state = %q, want dcr-omitted-scope-state", got)
+	}
+	code := redirected.Query().Get("code")
+	if code == "" {
+		t.Fatalf("omitted-scope DCR authorize redirect missing code: %s", redirected.String())
+	}
+
+	token := exchangeCodeForClient(t, router, "", clientID, code, redirectURI, verifier)
+	assertStringField(t, token, "scope", oauthScope)
+	if stringFromMap(t, token, "access_token") == "" || stringFromMap(t, token, "refresh_token") == "" {
+		t.Fatalf("omitted-scope DCR token response missing tokens: %#v", token)
+	}
+}
+
 func TestLocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGrant(t *testing.T) {
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -336,12 +391,15 @@ func TestLocalMCPOAuthAuthorizeValidationAndLoginRedirect(t *testing.T) {
 		name      string
 		override  func(url.Values)
 		wantError string
+		wantState string
 	}{
-		{name: "missing pkce", override: func(q url.Values) { q.Del("code_challenge") }, wantError: "invalid_request"},
-		{name: "plain pkce", override: func(q url.Values) { q.Set("code_challenge_method", "plain") }, wantError: "invalid_request"},
-		{name: "resource mismatch", override: func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request"},
-		{name: "mixed duplicate resource", override: func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request"},
-		{name: "unsupported scope", override: func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, wantError: "invalid_scope"},
+		{name: "missing state", override: func(q url.Values) { q.Del("state") }, wantError: "invalid_state", wantState: ""},
+		{name: "short state", override: func(q url.Values) { q.Set("state", "short") }, wantError: "invalid_state", wantState: "short"},
+		{name: "missing pkce", override: func(q url.Values) { q.Del("code_challenge") }, wantError: "invalid_request", wantState: "redirect-error-state"},
+		{name: "plain pkce", override: func(q url.Values) { q.Set("code_challenge_method", "plain") }, wantError: "invalid_request", wantState: "redirect-error-state"},
+		{name: "resource mismatch", override: func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request", wantState: "redirect-error-state"},
+		{name: "mixed duplicate resource", override: func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request", wantState: "redirect-error-state"},
+		{name: "unsupported scope", override: func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, wantError: "invalid_scope", wantState: "redirect-error-state"},
 	}
 
 	for _, tt := range redirectedErrors {
@@ -359,8 +417,8 @@ func TestLocalMCPOAuthAuthorizeValidationAndLoginRedirect(t *testing.T) {
 			if got := redirected.Scheme + "://" + redirected.Host + redirected.Path; got != validRedirect {
 				t.Fatalf("authorize error redirect target = %q, want %q", got, validRedirect)
 			}
-			if got := redirected.Query().Get("state"); got != "redirect-error-state" {
-				t.Fatalf("authorize error redirect state = %q, want redirect-error-state", got)
+			if got := redirected.Query().Get("state"); got != tt.wantState {
+				t.Fatalf("authorize error redirect state = %q, want %q", got, tt.wantState)
 			}
 			if got := redirected.Query().Get("error"); got != tt.wantError {
 				t.Fatalf("authorize error = %q, want %q in %s", got, tt.wantError, redirected.String())
@@ -492,6 +550,7 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 	if accessToken == "" || refreshToken == "" {
 		t.Fatalf("token response missing access or refresh token: %#v", token)
 	}
+	assertMCPBearerUnauthorized(t, router, "/mcp", refreshToken)
 
 	refreshForm := url.Values{
 		"grant_type":    {"refresh_token"},
@@ -499,9 +558,55 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 		"refresh_token": {refreshToken},
 	}
 	refreshed := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusOK)
-	if stringFromMap(t, refreshed, "access_token") == "" {
+	refreshedAccessToken := stringFromMap(t, refreshed, "access_token")
+	refreshedRefreshToken := stringFromMap(t, refreshed, "refresh_token")
+	if refreshedAccessToken == "" {
 		t.Fatalf("refresh token response missing access token: %#v", refreshed)
 	}
+	if refreshedRefreshToken == "" {
+		t.Fatalf("refresh token response missing replacement refresh token: %#v", refreshed)
+	}
+	if refreshedRefreshToken == refreshToken {
+		t.Fatalf("refresh token response reused refresh token %q", refreshToken)
+	}
+	assertMCPBearerUnauthorized(t, router, "/mcp", accessToken)
+	refreshedSession := connectLocalMCPWithToken(t, router, "/mcp", refreshedAccessToken)
+	current := callToolStructured(t, refreshedSession, "wiki_get_current_user", nil)
+	user := nestedMap(t, current, "user")
+	assertStringField(t, user, "username", "admin")
+
+	secondRefresh := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {oauthClientID},
+		"refresh_token": {refreshedRefreshToken},
+	}), http.StatusOK)
+	if stringFromMap(t, secondRefresh, "access_token") == "" {
+		t.Fatalf("replacement refresh token response missing access token: %#v", secondRefresh)
+	}
+
+	reusedRefreshError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusUnauthorized)
+	assertStringField(t, reusedRefreshError, "error", "invalid_grant")
+
+	reuseVerifier := "oauth-code-reuse-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+	reuseCode := authorizeCode(t, router, cookies, redirectURI, "code-reuse-state", reuseVerifier, resource)
+	reuseToken := exchangeCode(t, router, reuseCode, redirectURI, reuseVerifier)
+	reuseAccessToken := stringFromMap(t, reuseToken, "access_token")
+	reuseRefreshToken := stringFromMap(t, reuseToken, "refresh_token")
+	reuseCodeError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {oauthClientID},
+		"redirect_uri":  {redirectURI},
+		"code":          {reuseCode},
+		"code_verifier": {reuseVerifier},
+	}), http.StatusUnauthorized)
+	assertStringField(t, reuseCodeError, "error", "invalid_grant")
+	assertMCPBearerUnauthorized(t, router, "/mcp", reuseAccessToken)
+	reuseRefreshError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {oauthClientID},
+		"refresh_token": {reuseRefreshToken},
+	}), http.StatusUnauthorized)
+	assertStringField(t, reuseRefreshError, "error", "invalid_grant")
 
 	deleted, err := w.UserService().CreateUser("refresh-deleted", "refresh-deleted@example.com", "deletedpass", coreauth.RoleEditor)
 	if err != nil {
@@ -525,6 +630,10 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 	rec := performRequest(t, router, http.MethodPost, "http://leafwiki.local/oauth/revoke", nil, strings.NewReader(""))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("POST /oauth/revoke = %d, want 404", rec.Code)
+	}
+	rec = performRequest(t, router, http.MethodPost, "http://leafwiki.local/oauth/introspect", nil, strings.NewReader(""))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /oauth/introspect = %d, want 404", rec.Code)
 	}
 }
 
