@@ -128,7 +128,7 @@ test('admin api key authenticates native stdio and live revocation affects later
     });
 
     await loginAsAdmin(page);
-    await page.goto(appURL(`/${slug}`));
+    await page.goto(appURL(`/${slug}.md`));
     await page.locator('article').waitFor({ state: 'visible' });
     await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
 

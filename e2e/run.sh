@@ -183,35 +183,8 @@ prepare_mcp_stdio_command() {
   fi
   echo "🔨 Building native LeafWiki STDIO binary for E2E..."
   build_leafwiki_binary "$leafwiki_bin"
-  local native_args=(
-    --mcp=stdio
-    --host 127.0.0.1
-    --port "$app_port"
-    --data-dir "$local_data_dir"
-    --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}"
-    --allow-insecure=true
-    --enable-link-refactor=true
-    --log-target stderr
-    --disable-request-log
-  )
   local sync_args=()
   collect_revision_or_workspace_sync_args
-  native_args+=("${sync_args[@]}")
-  if [ -n "$markdown_link_root_prefix" ]; then
-    native_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
-  fi
-  if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
-    native_args+=(
-      --jwt-secret=e2e-tests-secret
-      --admin-password=admin
-    )
-  else
-    native_args+=(--disable-auth=true)
-  fi
-  native_args+=(--root-dir "$mcp_stdio_root_dir")
-  if [ -n "$app_base_path" ]; then
-    native_args+=(--base-path "$app_base_path")
-  fi
   if use_config_file_e2e; then
     mcp_stdio_config_file="$mcp_stdio_dir/leafwiki.yml"
     local auth_mode="disabled"
@@ -223,11 +196,32 @@ prepare_mcp_stdio_command() {
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
-    printf 'exec %q' "$leafwiki_bin"
+    printf 'exec %q mcp' "$repo_root/scripts/run.sh"
+    printf ' %q' --leafwiki-bin "$leafwiki_bin"
     if use_config_file_e2e; then
       printf ' %q' --config "$mcp_stdio_config_file"
     else
-      printf ' %q' "${native_args[@]}"
+      printf ' %q' --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log
+      printf ' %q' --server-arg --enable-link-refactor=true
+      for arg in "${sync_args[@]}"; do
+        if [ "$arg" = "--enable-workspace-sync" ]; then
+          printf ' %q' --enable-workspace-sync
+        else
+          printf ' %q' --disable-workspace-sync --server-arg "$arg"
+        fi
+      done
+      if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
+        printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
+      else
+        printf ' %q' --disable-auth
+      fi
+      printf ' %q' --root-dir "$mcp_stdio_root_dir"
+      if [ -n "$app_base_path" ]; then
+        printf ' %q' --base-path "$app_base_path"
+      fi
+      if [ -n "$markdown_link_root_prefix" ]; then
+        printf ' %q' --markdown-link-root-prefix "$markdown_link_root_prefix"
+      fi
     fi
     printf '\n'
   } >"$mcp_stdio_command"

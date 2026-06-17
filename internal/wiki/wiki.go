@@ -90,6 +90,9 @@ const SYSTEM_USER_ID = "system"
 type WikiOptions struct {
 	Workspace               Workspace
 	StorageDir              string        // Path to storage directory
+	AuthStorageDir          string        // Optional path for user/session/API-key stores
+	WorkspaceOnly           bool          // Skip identity, OAuth, API-key, session, and branding stores
+	ControlPlaneOnly        bool          // Skip workspace services while keeping identity, OAuth, and branding routes
 	AdminPassword           string        // Initial admin password
 	JWTSecret               string        // JWT secret for authentication
 	AccessTokenTimeout      time.Duration // Access token timeout duration
@@ -106,6 +109,9 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 	if options.EnableRevision && options.EnableWorkspaceSync {
 		return nil, fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined")
 	}
+	if options.WorkspaceOnly && options.ControlPlaneOnly {
+		return nil, fmt.Errorf("workspace-only and control-plane-only modes cannot be combined")
+	}
 	workspace := resolveWorkspaceOptions(options)
 	if err := ValidateWorkspace(workspace); err != nil {
 		return nil, err
@@ -119,11 +125,20 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		markdownLinkRootPrefix: options.MarkdownLinkRootPrefix,
 		log:                    slog.Default().With("component", "Wiki"),
 	}
-	if err := w.initAuth(options); err != nil {
-		return nil, err
+	if !options.WorkspaceOnly {
+		if err := w.initAuth(options); err != nil {
+			return nil, err
+		}
+		if err := w.initOAuth(options); err != nil {
+			return nil, err
+		}
 	}
-	if err := w.initOAuth(options); err != nil {
-		return nil, err
+	if options.ControlPlaneOnly {
+		if err := w.initBranding(); err != nil {
+			return nil, err
+		}
+		w.buildControlPlaneRoutes(options)
+		return w, nil
 	}
 	if err := w.initCoreServices(options); err != nil {
 		return nil, err
@@ -142,8 +157,10 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		return nil, err
 	}
 	w.configureWorkspaceSyncRebuilder()
-	if err := w.initBranding(); err != nil {
-		return nil, err
+	if !options.WorkspaceOnly {
+		if err := w.initBranding(); err != nil {
+			return nil, err
+		}
 	}
 	w.webPresence = wikipresence.NewWebPresenceRegistry(wikipresence.DefaultWebPresenceTTL, nil)
 	// Welcome page must exist before the revision service starts recording.
@@ -218,12 +235,16 @@ func (w *Wiki) ensureBaselineRevisions() {
 // ─── Subsystem initializers ───────────────────────────────────────────────────
 
 func (w *Wiki) initAuth(options *WikiOptions) error {
-	store, err := auth.NewUserStore(w.storageDir)
+	authStorageDir := w.storageDir
+	if strings.TrimSpace(options.AuthStorageDir) != "" {
+		authStorageDir = options.AuthStorageDir
+	}
+	store, err := auth.NewUserStore(authStorageDir)
 	if err != nil {
 		return err
 	}
 	w.user = auth.NewUserService(store)
-	apiKeyStore, err := auth.NewAPIKeyStore(w.storageDir)
+	apiKeyStore, err := auth.NewAPIKeyStore(authStorageDir)
 	if err != nil {
 		return err
 	}
@@ -238,7 +259,7 @@ func (w *Wiki) initAuth(options *WikiOptions) error {
 		return err
 	}
 	if !options.AuthDisabled {
-		sessionStore, err := auth.NewSessionStore(w.storageDir)
+		sessionStore, err := auth.NewSessionStore(authStorageDir)
 		if err != nil {
 			return err
 		}
@@ -459,6 +480,15 @@ func (w *Wiki) buildRoutes(options *WikiOptions) {
 	})
 	w.oauthRoutes = wikioauth.NewRoutes(w.oauth)
 	w.mcpRoutes = w.buildMCPRoutes()
+}
+
+func (w *Wiki) buildControlPlaneRoutes(_ *WikiOptions) {
+	w.authRoutes = w.buildAuthRoutes()
+	w.brandingRoutes = w.buildBrandingRoutes()
+	w.healthRoutes = wikihealth.NewRoutes(wikihealth.RoutesConfig{
+		StorageDir: w.storageDir,
+	})
+	w.oauthRoutes = wikioauth.NewRoutes(w.oauth)
 }
 
 // ─── Domain route builder helpers ────────────────────────────────────────────
@@ -692,6 +722,7 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		UserService:              w.user,
 		APIKeys:                  w.apiKeys,
 		OAuthService:             w.oauth,
+		WorkspaceID:              w.workspace.ID,
 	})
 }
 
@@ -718,8 +749,39 @@ func (w *Wiki) Registrars() []httpinternal.RouteRegistrar {
 	}
 }
 
+func (w *Wiki) FrontdRegistrars() []httpinternal.RouteRegistrar {
+	return []httpinternal.RouteRegistrar{
+		w.authRoutes,
+		w.brandingRoutes,
+		w.healthRoutes,
+		w.oauthRoutes,
+	}
+}
+
+func (w *Wiki) WorkspacedRegistrars() []httpinternal.RouteRegistrar {
+	return []httpinternal.RouteRegistrar{
+		w.pagesRoutes,
+		w.assetsRoutes,
+		w.revisionsRoutes,
+		w.searchRoutes,
+		w.linksRoutes,
+		w.tagsRoutes,
+		w.propertiesRoutes,
+		w.importerRoutes,
+		w.workspaceSyncRoutes,
+		w.presenceRoutes,
+	}
+}
+
 func (w *Wiki) SetAgentPresenceRegistry(registry *projectdaemon.AgentPresenceRegistry) {
 	w.agentPresence = registry
+}
+
+func (w *Wiki) SetRuntimeRoleHealth(required []projectdaemon.RoleName, roleHealth func() []projectdaemon.RoleHealth) {
+	if w.healthRoutes == nil {
+		return
+	}
+	w.healthRoutes.SetRoleHealth(required, roleHealth)
 }
 
 func (w *Wiki) WebPresenceSessions(viewer *auth.User) ([]wikipresence.Session, error) {
@@ -762,11 +824,21 @@ func (w *Wiki) PrivateMCPHTTPHandler(opts httpinternal.RouterOptions) http.Handl
 	return w.mcpRoutes.NewPrivateHTTPHandler(opts)
 }
 
+func (w *Wiki) ActorContextMCPHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	if opts.MCPToolListPageSize <= 0 {
+		opts.MCPToolListPageSize = 100
+	}
+	return w.mcpRoutes.NewActorContextHTTPHandler(opts)
+}
+
 // FrontendConfig returns the minimal runtime data required by the router to serve the SPA.
 func (w *Wiki) FrontendConfig() httpinternal.FrontendConfig {
 	return httpinternal.FrontendConfig{
 		StorageDir: w.storageDir,
 		GetSiteName: func() string {
+			if w.branding == nil {
+				return ""
+			}
 			cfg, err := w.branding.GetBranding()
 			if err != nil || cfg == nil {
 				return ""
@@ -774,6 +846,9 @@ func (w *Wiki) FrontendConfig() httpinternal.FrontendConfig {
 			return cfg.SiteName
 		},
 		GetFaviconFile: func() string {
+			if w.branding == nil {
+				return ""
+			}
 			cfg, err := w.branding.GetBranding()
 			if err != nil || cfg == nil {
 				return ""
@@ -922,8 +997,16 @@ func (w *Wiki) UserService() *auth.UserService {
 	return w.user
 }
 
+func (w *Wiki) AuthService() *auth.AuthService {
+	return w.auth
+}
+
 func (w *Wiki) APIKeyService() *auth.APIKeyService {
 	return w.apiKeys
+}
+
+func (w *Wiki) OAuthService() *wikioauth.Service {
+	return w.oauth
 }
 
 func (w *Wiki) Close() error {
@@ -933,9 +1016,13 @@ func (w *Wiki) Close() error {
 	if w.workspaceSync != nil {
 		w.workspaceSync.StopWatcher()
 	}
-	w.status.Finish()
-	if err := w.user.Close(); err != nil {
-		return err
+	if w.status != nil {
+		w.status.Finish()
+	}
+	if w.user != nil {
+		if err := w.user.Close(); err != nil {
+			return err
+		}
 	}
 	if w.apiKeys != nil {
 		if err := w.apiKeys.Close(); err != nil {
@@ -949,5 +1036,8 @@ func (w *Wiki) Close() error {
 		}
 	}
 
-	return w.searchIndex.Close()
+	if w.searchIndex != nil {
+		return w.searchIndex.Close()
+	}
+	return nil
 }

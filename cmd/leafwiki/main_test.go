@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,11 +28,14 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/frontd"
+	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
+	"github.com/perber/wiki/internal/wikid"
 )
 
 func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
@@ -90,6 +95,417 @@ func TestRegisterFlagsParsesEnableWorkspaceSync(t *testing.T) {
 	if !*flags.enableWorkspaceSync {
 		t.Fatalf("enableWorkspaceSync = false, want true")
 	}
+}
+
+func TestResolveRuntimeStackDefaultsToWikidFrontdAfterParityFlip(t *testing.T) {
+	t.Setenv("LEAFWIKI_RUNTIME_STACK", "")
+
+	got, err := resolveRuntimeStack()
+	if err != nil {
+		t.Fatalf("resolveRuntimeStack failed: %v", err)
+	}
+	if got != projectdaemon.RuntimeStackWikidFrontd {
+		t.Fatalf("runtime stack = %q, want %q", got, projectdaemon.RuntimeStackWikidFrontd)
+	}
+}
+
+func TestControlPlaneRouterRegistersOAuthWhenHTTPMCPEnabled(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := t.TempDir()
+	cfg := leafwikiRuntimeConfig{
+		Workspace:           wiki.Workspace{ID: "current", DataDir: dataDir, RootDir: rootDir},
+		Host:                "127.0.0.1",
+		Port:                "8085",
+		AdminPassword:       "admin",
+		JWTSecret:           "secret",
+		AllowInsecure:       true,
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		MCPTransports:       mcpTransports{HTTP: true},
+		RuntimeStack:        projectdaemon.RuntimeStackWikidFrontd,
+	}
+	ownerCfg, err := daemonConfigForRuntime(cfg)
+	if err != nil {
+		t.Fatalf("daemonConfigForRuntime failed: %v", err)
+	}
+	stores, err := wikid.OpenAuthStores(ownerCfg.DataDir)
+	if err != nil {
+		t.Fatalf("open wikid auth stores: %v", err)
+	}
+	if err := stores.Close(); err != nil {
+		t.Fatalf("close wikid auth stores: %v", err)
+	}
+	w, err := newRuntimeWiki(cfg, ownerCfg, runtimeWikiControlPlaneOnly)
+	if err != nil {
+		t.Fatalf("newRuntimeWiki failed: %v", err)
+	}
+	defer w.Close()
+	opts, err := controlPlaneRouterOptionsForRuntime(cfg, w)
+	if err != nil {
+		t.Fatalf("controlPlaneRouterOptionsForRuntime failed: %v", err)
+	}
+	router := frontd.NewRouter(w, opts)
+
+	q := url.Values{
+		"client_id":             {"leafwiki-local-mcp"},
+		"response_type":         {"code"},
+		"redirect_uri":          {"http://127.0.0.1:49152/callback"},
+		"scope":                 {"leafwiki:mcp"},
+		"state":                 {"control-plane-oauth"},
+		"resource":              {"http://127.0.0.1/mcp"},
+		"code_challenge":        {"abcdefghijklmnopqrstuvwxyz0123456789abcdefghi"},
+		"code_challenge_method": {"S256"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/oauth/authorize?"+q.Encode(), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GET /oauth/authorize status = %d, want 302: %s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/login?returnTo=") {
+		t.Fatalf("GET /oauth/authorize location = %q, want login redirect", location)
+	}
+}
+
+func TestFrontdActorUserAllowsPublicAccessReadsAsViewer(t *testing.T) {
+	w := newFrontdActorTestWiki(t)
+	defer w.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+
+	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+		PublicAccess: true,
+		Workspace:    wiki.Workspace{ID: "current"},
+	})
+
+	if err != nil {
+		t.Fatalf("frontdActorUser public read failed: %v", err)
+	}
+	if method != "public_access" {
+		t.Fatalf("auth method = %q, want public_access", method)
+	}
+	if user.ID != "public-viewer" || user.Role != coreauth.RoleViewer {
+		t.Fatalf("public actor = %#v, want public viewer", user)
+	}
+}
+
+func TestFrontdActorUserHonorsTrustedRemoteUserHeader(t *testing.T) {
+	w := newFrontdActorTestWiki(t)
+	defer w.Close()
+	created, err := w.UserService().CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
+	if err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Remote-User", "editor")
+
+	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+		EnableHTTPRemoteUser: true,
+		HTTPRemoteUserHeader: "Remote-User",
+		TrustedProxyIPsRaw:   "127.0.0.1",
+		Workspace:            wiki.Workspace{ID: "current"},
+	})
+
+	if err != nil {
+		t.Fatalf("frontdActorUser remote user failed: %v", err)
+	}
+	if method != "remote_user" {
+		t.Fatalf("auth method = %q, want remote_user", method)
+	}
+	if user.ID != created.ID || user.Username != "editor" || user.Role != coreauth.RoleEditor {
+		t.Fatalf("remote actor = %#v, want created editor %#v", user, created)
+	}
+}
+
+func TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI(t *testing.T) {
+	w := newFrontdActorTestWiki(t)
+	defer w.Close()
+	editor, err := w.UserService().CreateUser("mcp-editor", "mcp-editor@example.com", "password", coreauth.RoleEditor)
+	if err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+	created, err := w.APIKeyService().CreateAPIKey(editor.ID, "MCP client", editor.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Via API key"}`))
+	req.Header.Set("Authorization", "Bearer "+created.Secret)
+
+	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+		Workspace: wiki.Workspace{ID: "current"},
+	})
+
+	if err == nil {
+		t.Fatalf("frontdActorUser allowed MCP API key as workspace user %#v with method %q, want error", user, method)
+	}
+}
+
+func TestExtractedFrontdFrontendConfigUsesBrandingForSPAHTML(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "branding.json"), []byte(`{"siteName":"Runtime Wiki","faviconFile":"favicon.ico"}`), 0o644); err != nil {
+		t.Fatalf("write branding config: %v", err)
+	}
+	embedFrontendOrig := httpinternal.EmbedFrontend
+	httpinternal.EmbedFrontend = "true"
+	t.Cleanup(func() {
+		httpinternal.EmbedFrontend = embedFrontendOrig
+	})
+	router := httpinternal.NewRouter(nil, frontendConfigForRuntimeStorage(dataDir), httpinternal.RouterOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/page", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /page status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "<title>Runtime Wiki</title>") {
+		t.Fatalf("SPA title did not use branding: %s", body)
+	}
+	if !strings.Contains(body, `href="/branding/favicon.ico"`) {
+		t.Fatalf("SPA favicon did not use branding: %s", body)
+	}
+}
+
+func TestWikidFrontdRuntimeWithProcessLockSerializesProcessMapAccess(t *testing.T) {
+	runtime := &wikidFrontdRuntime{}
+	runtime.mu.Lock()
+	entered := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		_ = runtime.withProcessLock(func() error {
+			close(entered)
+			return nil
+		})
+		close(done)
+	}()
+
+	select {
+	case <-entered:
+		t.Fatalf("withProcessLock entered callback while process mutex was held")
+	case <-done:
+		t.Fatalf("withProcessLock returned while process mutex was held")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	runtime.mu.Unlock()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatalf("withProcessLock did not enter callback after process mutex was released")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("withProcessLock did not return after callback completed")
+	}
+}
+
+func TestFrontdPublicMCPRequiresBearerBeforeProxying(t *testing.T) {
+	var upstreamCalled bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		upstreamCalled = true
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer upstream.Close()
+
+	handler, err := frontdPublicMCPHandler(leafwikiRuntimeConfig{
+		BasePath:  "",
+		Workspace: wiki.Workspace{ID: "current"},
+	}, upstream.URL, "private-token", "http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("frontdPublicMCPHandler failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("WWW-Authenticate = %q, want public OAuth protected-resource metadata", rec.Header().Get("WWW-Authenticate"))
+	}
+	if upstreamCalled {
+		t.Fatalf("public MCP request reached workspaced without bearer auth")
+	}
+}
+
+func TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore(t *testing.T) {
+	authDir := t.TempDir()
+	userStore, err := coreauth.NewUserStore(authDir)
+	if err != nil {
+		t.Fatalf("NewUserStore failed: %v", err)
+	}
+	defer userStore.Close()
+	userService := coreauth.NewUserService(userStore)
+	editor, err := userService.CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
+	if err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+	apiKeyStore, err := coreauth.NewAPIKeyStore(authDir)
+	if err != nil {
+		t.Fatalf("NewAPIKeyStore failed: %v", err)
+	}
+	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
+	defer apiKeyService.Close()
+	created, err := apiKeyService.CreateAPIKey(editor.ID, "Native STDIO", editor.ID)
+	if err != nil {
+		t.Fatalf("CreateAPIKey failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer "+created.Secret)
+	actor, err := wikidControlMCPActorResolver(authDir, leafwikiRuntimeConfig{
+		Workspace: wiki.Workspace{ID: "current"},
+	})(req)
+
+	if err != nil {
+		t.Fatalf("wikidControlMCPActorResolver failed: %v", err)
+	}
+	if actor.Subject != "user:"+editor.ID || actor.Username != "editor" || actor.AuthMethod != "api_key" {
+		t.Fatalf("actor = %#v, want API-key editor actor", actor)
+	}
+}
+
+func TestHandleWikidActorContextResolvesOAuthBearerForMCP(t *testing.T) {
+	w := newFrontdActorTestWiki(t)
+	defer w.Close()
+	cfg := leafwikiRuntimeConfig{
+		Workspace:           wiki.Workspace{ID: "current"},
+		Host:                "127.0.0.1",
+		AllowInsecure:       true,
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		MCPTransports:       mcpTransports{HTTP: true},
+	}
+	opts, err := routerOptionsForRuntime(cfg, w, "", true, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("routerOptionsForRuntime failed: %v", err)
+	}
+	router := frontd.NewRouter(w, opts)
+	token := issueOAuthAccessTokenForTest(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
+	rec := httptest.NewRecorder()
+	handleWikidActorContext(rec, req, w, cfg)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("actor context status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Actor projectdaemon.ActorContext `json:"actor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode actor context: %v", err)
+	}
+	if body.Actor.Username != "admin" || body.Actor.AuthMethod != "oauth" {
+		t.Fatalf("actor = %#v, want OAuth admin actor", body.Actor)
+	}
+}
+
+func newFrontdActorTestWiki(t *testing.T) *wiki.Wiki {
+	t.Helper()
+	w, err := wiki.NewWiki(&wiki.WikiOptions{
+		StorageDir:          t.TempDir(),
+		AdminPassword:       "admin",
+		JWTSecret:           "test-secret-key-for-unit-tests-1",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki failed: %v", err)
+	}
+	return w
+}
+
+func issueOAuthAccessTokenForTest(t *testing.T, router http.Handler) string {
+	t.Helper()
+	loginReq := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/api/auth/login", strings.NewReader(`{"identifier":"admin","password":"admin"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/auth/login = %d, want 200: %s", loginRec.Code, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+
+	verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+	q := url.Values{
+		"client_id":             {"leafwiki-local-mcp"},
+		"response_type":         {"code"},
+		"redirect_uri":          {"http://127.0.0.1:49152/callback"},
+		"scope":                 {"leafwiki:mcp"},
+		"state":                 {"oauth-actor-context"},
+		"resource":              {"http://leafwiki.local/mcp"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
+	authorizeReq := httptest.NewRequest(http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil)
+	for _, cookie := range cookies {
+		authorizeReq.AddCookie(cookie)
+	}
+	authorizeRec := httptest.NewRecorder()
+	router.ServeHTTP(authorizeRec, authorizeReq)
+	if authorizeRec.Code != http.StatusFound {
+		t.Fatalf("GET /oauth/authorize = %d, want 302: %s", authorizeRec.Code, authorizeRec.Body.String())
+	}
+	approvalURL, err := url.Parse(authorizeRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse approval redirect: %v", err)
+	}
+	form := approvalURL.Query()
+	form.Set("decision", "approve")
+	approveReq := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/oauth/authorize", strings.NewReader(form.Encode()))
+	approveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, cookie := range cookies {
+		approveReq.AddCookie(cookie)
+	}
+	approveRec := httptest.NewRecorder()
+	router.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusFound {
+		t.Fatalf("POST /oauth/authorize = %d, want 302: %s", approveRec.Code, approveRec.Body.String())
+	}
+	callbackURL, err := url.Parse(approveRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse authorize callback: %v", err)
+	}
+	code := callbackURL.Query().Get("code")
+	if code == "" {
+		t.Fatalf("authorize callback missing code: %s", callbackURL.String())
+	}
+
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {"http://127.0.0.1:49152/callback"},
+		"client_id":     {"leafwiki-local-mcp"},
+		"code_verifier": {verifier},
+	}
+	tokenReq := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/oauth/token", strings.NewReader(tokenForm.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRec := httptest.NewRecorder()
+	router.ServeHTTP(tokenRec, tokenReq)
+	if tokenRec.Code != http.StatusOK {
+		t.Fatalf("POST /oauth/token = %d, want 200: %s", tokenRec.Code, tokenRec.Body.String())
+	}
+	var tokenBody struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(tokenRec.Body.Bytes(), &tokenBody); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if tokenBody.AccessToken == "" {
+		t.Fatalf("token response missing access_token: %s", tokenRec.Body.String())
+	}
+	return tokenBody.AccessToken
 }
 
 func TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent(t *testing.T) {
@@ -173,7 +589,9 @@ func TestMainProcess_DefaultServerLoggingUsesFileForStartupAndRequestLogsAndKeep
 		"--data-dir", dataDir,
 		"--host", "127.0.0.1",
 		"--port", port,
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
 
 	waitForLeafwikiReady(t, proc, port)
 	logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
@@ -355,6 +773,7 @@ func TestConfigFileFlagNamesCoverPublicRegisteredFlags(t *testing.T) {
 		"config":                  true,
 		"enable-mcp":              true,
 		"internal-project-daemon": true,
+		"internal-runtime-role":   true,
 		"mcp-stdio":               true,
 	}
 	allowed := configFileFlagNames()
@@ -775,7 +1194,9 @@ func TestMainProcess_ResetAdminPasswordUsesConfigDataDir(t *testing.T) {
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--config", configPath,
 		"reset-admin-password",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	})
 
 	if err != nil {
 		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
@@ -1211,7 +1632,7 @@ func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
-	apiKey := createMCPAPIKey(t, dataDir)
+	apiKey := createWikidMCPAPIKey(t, dataDir)
 	port := freeTCPPort(t)
 	first := startLeafwikiHelper(t, []string{
 		"--mcp=http",
@@ -1223,7 +1644,9 @@ func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(
 		"--admin-password", "owner-admin-password",
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
 	waitForLeafwikiReady(t, first, port)
 
 	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
@@ -1234,7 +1657,10 @@ func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(
 		"--port", port,
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, 5*time.Second)
+	}, map[string]string{
+		"LEAFWIKI_MCP_API_KEY":   apiKey,
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	}, 5*time.Second)
 
 	if err != nil {
 		t.Fatalf("stdio API-key startup should attach without owner bootstrap secrets, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
@@ -1271,9 +1697,10 @@ func TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey(t *testing.T)
 	}))
 	t.Cleanup(staleControl.Close)
 
-	apiKey := createMCPAPIKey(t, dataDir)
+	apiKey := createWikidMCPAPIKey(t, dataDir)
 	port := freeTCPPort(t)
 	runtimeCfg := testRuntimeConfig(dataDir, rootDir, port, mcpTransports{Stdio: true}, false)
+	runtimeCfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
 	runtimeCfg.JWTSecret = "owner-jwt-secret"
 	runtimeCfg.AdminPassword = "owner-admin-password"
 	ownerCfg, err := daemonRequestConfigForRuntime(runtimeCfg)
@@ -1314,9 +1741,13 @@ func TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey(t *testing.T)
 		"--jwt-secret", "owner-jwt-secret",
 		"--admin-password", "owner-admin-password",
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, stdinReader)
+	}, map[string]string{
+		"LEAFWIKI_MCP_API_KEY":   apiKey,
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	}, stdinReader)
 	waitForLeafwikiReady(t, proc, port)
 
+	_ = waitForProjectDaemonDescriptor(t, dataDir)
 	replaced := readFileString(t, descriptorPath)
 	if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
 		t.Fatalf("descriptor was not replaced:\n%s", replaced)
@@ -2289,7 +2720,9 @@ func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) 
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	})
 	waitForLeafwikiReady(t, first, port)
 
 	second := startLeafwikiHelper(t, []string{
@@ -2299,9 +2732,12 @@ func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) 
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	})
 	waitForLeafwikiReady(t, second, port)
 
+	waitForForegroundSignalHandler()
 	if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
 		t.Fatalf("signal first foreground process: %v", err)
 	}
@@ -2313,6 +2749,7 @@ func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) 
 			t.Fatalf("second foreground startup stderr = %q, want no ownership failure %q", stderr, unexpected)
 		}
 	}
+	waitForForegroundSignalHandler()
 	if err := signalLeafwikiProcess(second.cmd.Process); err != nil {
 		t.Fatalf("signal second foreground process: %v", err)
 	}
@@ -2368,7 +2805,7 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
-	apiKey := createMCPAPIKey(t, dataDir)
+	apiKey := createWikidMCPAPIKey(t, dataDir)
 	port := freeTCPPort(t)
 	first := startLeafwikiHelper(t, []string{
 		"--mcp=http",
@@ -2380,7 +2817,9 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--admin-password", "owner-admin-password",
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
 	waitForLeafwikiReady(t, first, port)
 
 	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
@@ -2391,7 +2830,10 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--port", port,
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
+	}, map[string]string{
+		"LEAFWIKI_MCP_API_KEY":   apiKey,
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
 
 	if err != nil {
 		t.Fatalf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
@@ -2589,6 +3031,168 @@ func TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecifie
 	}
 	if desc.Config.DaemonIdleTimeout != "10m0s" {
 		t.Fatalf("descriptor config daemon idle timeout = %q, want core CLI default 10m0s", desc.Config.DaemonIdleTimeout)
+	}
+	proc.stop(t)
+}
+
+func TestMainProcess_WikidFrontdRuntimeWritesRoleDescriptor(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
+
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	if desc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd || desc.Role != projectdaemon.RoleWikid {
+		t.Fatalf("descriptor runtime metadata = %q/%q, want %q/%q", desc.RuntimeStack, desc.Role, projectdaemon.RuntimeStackWikidFrontd, projectdaemon.RoleWikid)
+	}
+	gotRoles := map[projectdaemon.RoleName]projectdaemon.RoleHealth{}
+	for _, role := range desc.Roles {
+		gotRoles[role.Name] = role
+	}
+	for _, name := range []projectdaemon.RoleName{projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced} {
+		if gotRoles[name].State != projectdaemon.RoleStateReady {
+			t.Fatalf("role %s state = %q, want ready; all roles = %#v", name, gotRoles[name].State, desc.Roles)
+		}
+		if gotRoles[name].PID <= 0 {
+			t.Fatalf("role %s PID = %d, want live role process; all roles = %#v", name, gotRoles[name].PID, desc.Roles)
+		}
+		if !processExists(gotRoles[name].PID) {
+			t.Fatalf("role %s PID %d is not running; all roles = %#v", name, gotRoles[name].PID, desc.Roles)
+		}
+	}
+	if gotRoles[projectdaemon.RoleWikid].PID != desc.PID {
+		t.Fatalf("wikid PID = %d, want descriptor owner PID %d", gotRoles[projectdaemon.RoleWikid].PID, desc.PID)
+	}
+	if gotRoles[projectdaemon.RoleFrontd].PID == desc.PID ||
+		gotRoles[projectdaemon.RoleWorkspaced].PID == desc.PID ||
+		gotRoles[projectdaemon.RoleFrontd].PID == gotRoles[projectdaemon.RoleWorkspaced].PID {
+		t.Fatalf("role PIDs must be distinct for wikid/frontd/workspaced; descriptor PID = %d roles = %#v", desc.PID, desc.Roles)
+	}
+	proc.stop(t)
+}
+
+func TestMainProcess_WikidFrontdRuntimeRestartsWorkspacedAndUpdatesDescriptor(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--disable-auth",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
+
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+	initial, ok := findRoleHealth(desc.Roles, projectdaemon.RoleWorkspaced)
+	if !ok || initial.PID <= 0 {
+		t.Fatalf("initial workspaced role = %#v, want child PID", initial)
+	}
+	if err := syscall.Kill(initial.PID, syscall.SIGTERM); err != nil {
+		t.Fatalf("kill workspaced PID %d: %v", initial.PID, err)
+	}
+
+	descriptorPath := projectdaemon.DescriptorPath(dataDir)
+	var restarted projectdaemon.RoleHealth
+	waitForRuntimeCondition(t, 10*time.Second, func() bool {
+		raw, err := os.ReadFile(descriptorPath)
+		if err != nil {
+			return false
+		}
+		var current projectdaemon.Descriptor
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return false
+		}
+		var ok bool
+		restarted, ok = findRoleHealth(current.Roles, projectdaemon.RoleWorkspaced)
+		return ok && restarted.State == projectdaemon.RoleStateReady && restarted.PID > 0 && restarted.PID != initial.PID && processExists(restarted.PID)
+	})
+
+	proc.stop(t)
+}
+
+func TestMainProcess_WikidFrontdRuntimeUsesFreshWikidAuthStores(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
+		"--jwt-secret", "auth-store-secret",
+		"--admin-password", "admin-pass",
+		"--allow-insecure",
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--log-target", "stderr",
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
+
+	desc := waitForProjectDaemonDescriptor(t, dataDir)
+	ownerPID = desc.PID
+	waitForLeafwikiReady(t, proc, port)
+
+	for _, path := range []string{
+		filepath.Join(dataDir, ".leafwiki", "wikid", "auth", "users.db"),
+		filepath.Join(dataDir, ".leafwiki", "wikid", "auth", "sessions.db"),
+		filepath.Join(dataDir, ".leafwiki", "wikid", "auth", "api_keys.db"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected wikid auth store %s to exist: %v", path, err)
+		}
+	}
+	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
+		if _, err := os.Stat(filepath.Join(dataDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("legacy root auth DB %s stat err = %v, want not exist", name, err)
+		}
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	httpReq, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+port+"/api/auth/login", strings.NewReader(`{"identifier":"admin","password":"admin-pass"}`))
+	if err != nil {
+		t.Fatalf("build login request: %v", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		t.Fatalf("POST /api/auth/login: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login status = %d, want 200: %s", resp.StatusCode, body)
 	}
 	proc.stop(t)
 }
@@ -3799,9 +4403,12 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", firstPort,
 		"--log-target", "stderr",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	})
 	waitForLeafwikiReady(t, first, firstPort)
 
+	waitForForegroundSignalHandler()
 	if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
 		t.Fatalf("send SIGTERM: %v", err)
 	}
@@ -3819,7 +4426,9 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", secondPort,
 		"--log-target", "stderr",
-	}, nil, secondStdinReader)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	}, secondStdinReader)
 	waitForLeafwikiReady(t, second, secondPort)
 
 	if err := secondStdinWriter.Close(); err != nil {
@@ -3847,6 +4456,7 @@ func TestMainProcess_ForegroundServerSignalLeavesDetachedOwnerUntilIdleTimeout(t
 	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
 
 	waitForLeafwikiReady(t, proc, port)
+	waitForForegroundSignalHandler()
 	if err := signalLeafwikiProcessGroup(proc.cmd.Process); err != nil {
 		t.Fatalf("send process-group SIGTERM: %v", err)
 	}
@@ -3970,6 +4580,7 @@ func TestMainProcess_ResetAdminPasswordIgnoresDirtyServerOnlyEnvironment(t *test
 		"reset-admin-password",
 	}, map[string]string{
 		"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
+		"LEAFWIKI_RUNTIME_STACK":         projectdaemon.RuntimeStackLegacy,
 	})
 
 	if err != nil {
@@ -4008,7 +4619,9 @@ func TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly(t *testing.T
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--data-dir", dataDir,
 		"reset-admin-password",
-	}, nil)
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
+	})
 
 	if err != nil {
 		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
@@ -4021,6 +4634,28 @@ func TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("log file stat error = %v, want not exist", err)
+	}
+}
+
+func TestMainProcess_WikidFrontdResetAdminPasswordUsesWikidAuthStore(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	initWikidAdminUser(t, dataDir)
+
+	stdout, stderr, err := runLeafwikiHelper(t, []string{
+		"--data-dir", dataDir,
+		"reset-admin-password",
+	}, map[string]string{
+		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+	})
+
+	if err != nil {
+		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+	}
+	if !strings.Contains(stdout, "Admin password reset successfully") || !strings.Contains(stdout, "New password") {
+		t.Fatalf("stdout = %q, want reset credentials", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "users.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy root users.db stat err = %v, want not exist", err)
 	}
 }
 
@@ -4778,19 +5413,45 @@ func (p *leafwikiHelperProcess) stop(t *testing.T) {
 		return
 	}
 	p.stopped = true
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+	if p.ready && supportsGracefulProcessSignal() && p.cmd.Process != nil {
+		_ = signalLeafwikiProcess(p.cmd.Process)
+		select {
+		case err := <-done:
+			if expectedLeafwikiHelperStopError(err, p.ready) {
+				return
+			}
+			t.Fatalf("wait leafwiki helper after graceful signal: %v\nstdout:\n%s\nstderr:\n%s", err, readFileString(t, p.stdoutPath), readFileString(t, p.stderrPath))
+		case <-time.After(2 * time.Second):
+		}
+	}
 	p.cancel()
-	err := p.cmd.Wait()
+	select {
+	case err := <-done:
+		if expectedLeafwikiHelperStopError(err, p.ready) {
+			return
+		}
+		t.Fatalf("wait leafwiki helper: %v\nstdout:\n%s\nstderr:\n%s", err, readFileString(t, p.stdoutPath), readFileString(t, p.stderrPath))
+	case <-time.After(5 * time.Second):
+		t.Fatalf("leafwiki helper did not stop\nstdout:\n%s\nstderr:\n%s", readFileString(t, p.stdoutPath), readFileString(t, p.stderrPath))
+	}
+}
+
+func expectedLeafwikiHelperStopError(err error, ready bool) bool {
 	if err == nil {
-		return
+		return true
 	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && p.ready && exitErr.ProcessState.ExitCode() == -1 {
-		return
+	if errors.As(err, &exitErr) && ready && exitErr.ProcessState.ExitCode() == -1 {
+		return true
 	}
 	if errors.Is(err, context.Canceled) {
-		return
+		return true
 	}
-	t.Fatalf("wait leafwiki helper: %v", err)
+	return false
 }
 
 func (p *leafwikiHelperProcess) waitForExit(t *testing.T) {
@@ -4952,6 +5613,44 @@ func terminateProjectDaemonProcess(t *testing.T, pid int) {
 	_ = process.Signal(os.Interrupt)
 }
 
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+func findRoleHealth(roles []projectdaemon.RoleHealth, name projectdaemon.RoleName) (projectdaemon.RoleHealth, bool) {
+	for _, role := range roles {
+		if role.Name == name {
+			return role, true
+		}
+	}
+	return projectdaemon.RoleHealth{}, false
+}
+
+func waitForRuntimeCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if condition() {
+		return
+	}
+	t.Fatalf("condition not met within %s", timeout)
+}
+
 func waitForFileContaining(t *testing.T, path string, want string) {
 	t.Helper()
 
@@ -4994,6 +5693,10 @@ func supportsGracefulProcessSignal() bool {
 
 func signalLeafwikiProcess(process *os.Process) error {
 	return process.Signal(os.Interrupt)
+}
+
+func waitForForegroundSignalHandler() {
+	time.Sleep(200 * time.Millisecond)
 }
 
 func supportsProcessGroupSignal() bool {
@@ -5370,13 +6073,47 @@ func initAdminUser(t *testing.T, dataDir string) {
 	}
 }
 
+func initWikidAdminUser(t *testing.T, dataDir string) {
+	t.Helper()
+
+	paths := wikid.AuthStoragePaths(dataDir)
+	if err := os.MkdirAll(paths.AuthDir, 0o755); err != nil {
+		t.Fatalf("create wikid auth dir: %v", err)
+	}
+	store, err := coreauth.NewUserStore(paths.AuthDir)
+	if err != nil {
+		t.Fatalf("create wikid user store: %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close wikid user store: %v", err)
+		}
+	}()
+	service := coreauth.NewUserService(store)
+	if err := service.InitDefaultAdmin("old-password"); err != nil {
+		t.Fatalf("init wikid admin user: %v", err)
+	}
+}
+
 func createMCPAPIKey(t *testing.T, dataDir string) string {
 	t.Helper()
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
+	return createMCPAPIKeyInStorageDir(t, dataDir)
+}
+
+func createWikidMCPAPIKey(t *testing.T, dataDir string) string {
+	t.Helper()
+
+	return createMCPAPIKeyInStorageDir(t, wikid.AuthStoragePaths(dataDir).AuthDir)
+}
+
+func createMCPAPIKeyInStorageDir(t *testing.T, storageDir string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(storageDir, 0o755); err != nil {
+		t.Fatalf("create auth storage dir: %v", err)
 	}
-	userStore, err := coreauth.NewUserStore(dataDir)
+	userStore, err := coreauth.NewUserStore(storageDir)
 	if err != nil {
 		t.Fatalf("create user store: %v", err)
 	}
@@ -5390,7 +6127,7 @@ func createMCPAPIKey(t *testing.T, dataDir string) string {
 	if err != nil {
 		t.Fatalf("create API-key user: %v", err)
 	}
-	apiKeyStore, err := coreauth.NewAPIKeyStore(dataDir)
+	apiKeyStore, err := coreauth.NewAPIKeyStore(storageDir)
 	if err != nil {
 		t.Fatalf("create api key store: %v", err)
 	}

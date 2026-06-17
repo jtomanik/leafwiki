@@ -4,13 +4,16 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
+	"github.com/perber/wiki/internal/projectdaemon"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 )
 
@@ -43,6 +46,9 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 	if extra == nil {
 		return r.actorForMissingTokenInfo()
 	}
+	if actor, ok, err := r.actorFromPrivateContextHeader(extra.Header); ok || err != nil {
+		return actor, err
+	}
 	tokenInfo := extra.TokenInfo
 	if tokenInfo == nil {
 		return r.actorForMissingTokenInfo()
@@ -58,6 +64,36 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 		return nil, fmt.Errorf("authenticated MCP user not found")
 	}
 	return user, nil
+}
+
+func (r *Routes) actorFromPrivateContextHeader(header http.Header) (*coreauth.User, bool, error) {
+	if !r.actorContextAllowed {
+		return nil, false, nil
+	}
+	encoded := strings.TrimSpace(header.Get(projectdaemon.ActorContextHeader))
+	if encoded == "" {
+		if r.actorContextRequired {
+			return nil, true, fmt.Errorf("private MCP actor context missing")
+		}
+		return nil, false, nil
+	}
+	now := time.Now().UTC()
+	if r.now != nil {
+		now = r.now()
+	}
+	actor, err := projectdaemon.DecodeActorContext(encoded, projectdaemon.ActorContextValidation{
+		Now:         now,
+		WorkspaceID: r.workspaceID,
+	})
+	if err != nil {
+		return nil, true, fmt.Errorf("private MCP actor context invalid: %w", err)
+	}
+	return &coreauth.User{
+		ID:       actor.SubjectID(),
+		Username: actor.Username,
+		Email:    actor.Email,
+		Role:     actor.Role,
+	}, true, nil
 }
 
 func (r *Routes) actorForMissingTokenInfo() (*coreauth.User, error) {

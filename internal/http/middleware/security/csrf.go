@@ -8,6 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const trustedPrivateChannelKey = "leafwiki.trustedPrivateChannel"
+
+func TrustPrivateChannel(c *gin.Context) {
+	c.Set(trustedPrivateChannelKey, true)
+}
+
+func isTrustedPrivateChannel(c *gin.Context) bool {
+	trusted, _ := c.Get(trustedPrivateChannelKey)
+	value, _ := trusted.(bool)
+	return value
+}
+
 // CSRFMiddleware is a Gin middleware that protects against CSRF attacks.
 func CSRFMiddleware(csrf *CSRFCookie) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -15,6 +27,10 @@ func CSRFMiddleware(csrf *CSRFCookie) gin.HandlerFunc {
 
 		// Only protect mutating methods (POST, PUT, PATCH, DELETE)
 		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			c.Next()
+			return
+		}
+		if isTrustedPrivateChannel(c) {
 			c.Next()
 			return
 		}

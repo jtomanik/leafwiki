@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/projectdaemon"
 )
 
 func TestActorForRequestRejectsMissingTokenInfoByDefault(t *testing.T) {
@@ -25,6 +28,48 @@ func TestActorForRequestRejectsMissingTokenInfoByDefault(t *testing.T) {
 		if user, err := routes.actorForRequest(req); err == nil {
 			t.Fatalf("actorForRequest(%#v) returned user %#v, want missing-token error", req, user)
 		}
+	}
+}
+
+func TestActorForRequestUsesPrivateActorContextHeader(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
+		Version:     1,
+		Issuer:      projectdaemon.ActorContextIssuerWikid,
+		Subject:     "user:editor-1",
+		Username:    "editor",
+		Email:       "editor@example.com",
+		Role:        coreauth.RoleEditor,
+		WorkspaceID: "current",
+		AuthMethod:  "oauth",
+		IssuedAt:    now,
+		ExpiresAt:   now.Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("EncodeActorContext failed: %v", err)
+	}
+
+	routes := &Routes{
+		workspaceID:          "current",
+		now:                  func() time.Time { return now.Add(time.Minute) },
+		actorContextAllowed:  true,
+		actorContextRequired: true,
+	}
+	header := http.Header{}
+	header.Set(projectdaemon.ActorContextHeader, encoded)
+	req := &sdkmcp.CallToolRequest{
+		Extra: &sdkmcp.RequestExtra{
+			Header: header,
+		},
+	}
+	user, err := routes.actorForRequest(req)
+	if err != nil {
+		t.Fatalf("actorForRequest with actor context failed: %v", err)
+	}
+	if user.ID != "editor-1" || user.Username != "editor" || user.Role != coreauth.RoleEditor {
+		t.Fatalf("actor = %#v, want private actor context user", user)
 	}
 }
 

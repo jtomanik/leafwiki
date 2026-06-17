@@ -121,7 +121,7 @@ test('self-service api key works with the official mcp typescript client and fai
     const createdPage = created.page as { id: string; content: string };
     expect(createdPage.id).toBeTruthy();
 
-    await page.goto(appURL(`/${slug}`));
+    await page.goto(appURL(`/${slug}.md`));
     await page.locator('article').waitFor({ state: 'visible' });
     await expect(page.locator('article')).toContainText('MCP API Key E2E Page');
   } finally {

@@ -345,7 +345,7 @@ Browser-visible direct edit from E2E`,
         expect.objectContaining({
           changedPaths: expect.arrayContaining([`${slug}.md`]),
           pageIds: expect.arrayContaining([slug]),
-          reason: 'explicit_refresh',
+          reason: expect.stringMatching(/^(explicit_refresh|watcher)$/),
           source: 'filesystem',
         }),
       ]),

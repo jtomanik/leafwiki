@@ -297,6 +297,25 @@ native_env_enabled_workspace_output="$(
 )"
 assert_contains "$native_env_enabled_workspace_output" "--enable-workspace-sync" "native env overridden workspace dry-run"
 
+extracted_runtime_output="$(
+  LEAFWIKI_RUNTIME_STACK=wikid-frontd \
+  "$script" \
+    mcp \
+    --dry-run \
+    --leafwiki-bin /tmp/fake-leafwiki \
+    --data-dir "$tmp_dir/nowatch-data" \
+    --root-dir "$tmp_dir/nowatch-root" \
+    --markdown-link-root-prefix /docs \
+    2>&1
+)"
+assert_contains "$extracted_runtime_output" "LEAFWIKI_RUNTIME_STACK=wikid-frontd" "extracted runtime dry-run"
+assert_contains "$extracted_runtime_output" "--mcp=stdio" "extracted runtime dry-run"
+assert_contains "$extracted_runtime_output" "--data-dir $tmp_dir/nowatch-data" "extracted runtime dry-run"
+assert_contains "$extracted_runtime_output" "--root-dir $tmp_dir/nowatch-root" "extracted runtime dry-run"
+assert_contains "$extracted_runtime_output" "--markdown-link-root-prefix /docs" "extracted runtime dry-run"
+assert_contains "$extracted_runtime_output" "--enable-workspace-sync" "extracted runtime dry-run"
+assert_not_contains "$extracted_runtime_output" "$removed_binary" "extracted runtime dry-run"
+
 legacy_output="$(
   "$script" \
     mcp \

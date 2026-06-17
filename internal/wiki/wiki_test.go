@@ -2,7 +2,10 @@ package wiki
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/test_utils"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -208,6 +212,152 @@ func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testin
 		if _, err := os.Stat(filepath.Join(rootDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("expected no branding state %s in root dir, got err=%v", rel, err)
 		}
+	}
+}
+
+func TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace: Workspace{
+			ID:      "current",
+			DataDir: dataDir,
+			RootDir: rootDir,
+		},
+		WorkspaceOnly:       true,
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki workspace-only failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	if w.UserService() != nil || w.AuthService() != nil || w.APIKeyService() != nil || w.OAuthService() != nil {
+		t.Fatalf("workspace-only wiki owns identity services: user=%v auth=%v apiKeys=%v oauth=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService())
+	}
+	for _, rel := range []string{
+		"users.db",
+		"sessions.db",
+		"api_keys.db",
+		"oauth",
+		"branding",
+		"branding.json",
+	} {
+		if _, err := os.Stat(filepath.Join(dataDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("workspace-only state %s stat err = %v, want not exist", rel, err)
+		}
+	}
+	for _, rel := range []string{
+		"search.db",
+		"links.db",
+		"tags.db",
+		"properties.db",
+		"assets",
+	} {
+		if _, err := os.Stat(filepath.Join(dataDir, rel)); err != nil {
+			t.Fatalf("expected workspace state %s: %v", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
+		t.Fatalf("expected workspace content in root dir: %v", err)
+	}
+}
+
+func TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	rootDir := filepath.Join(t.TempDir(), "content")
+	w, err := NewWiki(&WikiOptions{
+		Workspace: Workspace{
+			ID:      "current",
+			DataDir: dataDir,
+			RootDir: rootDir,
+		},
+		ControlPlaneOnly:    true,
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		EnableWorkspaceSync: true,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki control-plane-only failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	if w.UserService() == nil || w.AuthService() == nil || w.APIKeyService() == nil || w.OAuthService() == nil || w.branding == nil {
+		t.Fatalf("control-plane-only wiki did not own identity/branding services: user=%v auth=%v apiKeys=%v oauth=%v branding=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService(), w.branding)
+	}
+	if w.tree != nil || w.asset != nil || w.searchIndex != nil || w.links != nil || w.tags != nil || w.props != nil || w.workspaceSync != nil {
+		t.Fatalf("control-plane-only wiki owns workspace services: tree=%v asset=%v search=%v links=%v tags=%v props=%v sync=%v", w.tree, w.asset, w.searchIndex, w.links, w.tags, w.props, w.workspaceSync)
+	}
+	for _, rel := range []string{
+		"search.db",
+		"links.db",
+		"tags.db",
+		"properties.db",
+		"assets",
+		".importer",
+	} {
+		if _, err := os.Stat(filepath.Join(dataDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("control-plane-only workspace state %s stat err = %v, want not exist", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); !os.IsNotExist(err) {
+		t.Fatalf("control-plane-only root welcome stat err = %v, want not exist", err)
+	}
+}
+
+func TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth(t *testing.T) {
+	w, err := NewWiki(&WikiOptions{
+		Workspace: Workspace{
+			ID:      "current",
+			DataDir: filepath.Join(t.TempDir(), "data"),
+			RootDir: filepath.Join(t.TempDir(), "content"),
+		},
+		AuthStorageDir:      t.TempDir(),
+		ControlPlaneOnly:    true,
+		AdminPassword:       "admin",
+		JWTSecret:           "secretkey",
+		AccessTokenTimeout:  15 * time.Minute,
+		RefreshTokenTimeout: 7 * 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewWiki control-plane-only failed: %v", err)
+	}
+	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	w.SetRuntimeRoleHealth([]projectdaemon.RoleName{
+		projectdaemon.RoleWikid,
+		projectdaemon.RoleFrontd,
+		projectdaemon.RoleWorkspaced,
+	}, func() []projectdaemon.RoleHealth {
+		return []projectdaemon.RoleHealth{
+			{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateReady, PID: 1, UpdatedAt: now},
+			{Name: projectdaemon.RoleFrontd, State: projectdaemon.RoleStateReady, PID: 2, UpdatedAt: now},
+			{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, PID: 3, Error: "restart exhausted", UpdatedAt: now},
+		}
+	})
+	router := httpinternal.NewRouter(w.FrontdRegistrars(), w.FrontendConfig(), httpinternal.RouterOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /api/health status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Checks map[string]string `json:"checks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if body.Checks["role_workspaced"] != "crashed" {
+		t.Fatalf("role_workspaced = %q, want crashed; checks=%#v", body.Checks["role_workspaced"], body.Checks)
 	}
 }
 

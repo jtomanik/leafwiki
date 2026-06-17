@@ -40,6 +40,14 @@ function expectMarkdownInConfiguredRoot(slug: string, expectedContent: string) {
   expect(existsSync(defaultRootFile), `${defaultRootFile} should not exist`).toBe(false);
 }
 
+test('mcp stdio command uses run.sh wrapper', async () => {
+  expect(stdioCommand, 'E2E_MCP_STDIO_COMMAND should be exported by the local runner').not.toBe('');
+  const commandScript = readFileSync(stdioCommand, 'utf8');
+  expect(commandScript).toContain('/scripts/run.sh');
+  expect(commandScript).toContain(' mcp');
+  expect(commandScript).toContain('--leafwiki-bin');
+});
+
 test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }) => {
   if (process.env.E2E_USE_CONFIG_FILE === '1') {
     expect(stdioConfigFile).not.toBe('');
@@ -70,7 +78,7 @@ test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await expect(page.locator('article')).toContainText('Seeded through MCP STDIO');
 
     if (assertRootFiles) {

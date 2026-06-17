@@ -85,6 +85,10 @@ type Routes struct {
 	webPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	agentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
 	contextStore             *contextCheckpointStore
+	workspaceID              string
+	now                      func() time.Time
+	actorContextAllowed      bool
+	actorContextRequired     bool
 }
 
 type RoutesConfig struct {
@@ -138,6 +142,7 @@ type RoutesConfig struct {
 	MarkdownLinkRootPrefix   string
 	WebPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	AgentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
+	WorkspaceID              string
 }
 
 func NewRoutes(cfg RoutesConfig) *Routes {
@@ -193,6 +198,7 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 		webPresenceProvider:      cfg.WebPresenceProvider,
 		agentPresenceProvider:    cfg.AgentPresenceProvider,
 		contextStore:             newContextCheckpointStore(10),
+		workspaceID:              cfg.WorkspaceID,
 	}
 }
 
@@ -242,6 +248,13 @@ func (r *Routes) NewPrivateHTTPHandler(opts httpinternal.RouterOptions) http.Han
 		return handler
 	}
 	return r.requirePrivateStdioAPIKey(handler)
+}
+
+func (r *Routes) NewActorContextHTTPHandler(opts httpinternal.RouterOptions) http.Handler {
+	server := r.NewActorContextServer(opts)
+	return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return server
+	}, streamableHTTPOptions())
 }
 
 func streamableHTTPOptions() *sdkmcp.StreamableHTTPOptions {
@@ -313,6 +326,8 @@ func (r *Routes) NewServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
 	serverRoutes := *r
 	serverRoutes.authDisabled = opts.AuthDisabled
 	serverRoutes.stdioAPIKey = ""
+	serverRoutes.actorContextAllowed = false
+	serverRoutes.actorContextRequired = false
 	return serverRoutes.newServer(opts)
 }
 
@@ -325,6 +340,17 @@ func (r *Routes) NewStdioServer(opts httpinternal.RouterOptions, auth StdioAuth)
 	serverRoutes := *r
 	serverRoutes.authDisabled = auth.DisabledAuth
 	serverRoutes.stdioAPIKey = auth.APIKey
+	serverRoutes.actorContextAllowed = false
+	serverRoutes.actorContextRequired = false
+	return serverRoutes.newServer(opts)
+}
+
+func (r *Routes) NewActorContextServer(opts httpinternal.RouterOptions) *sdkmcp.Server {
+	serverRoutes := *r
+	serverRoutes.authDisabled = false
+	serverRoutes.stdioAPIKey = ""
+	serverRoutes.actorContextAllowed = true
+	serverRoutes.actorContextRequired = true
 	return serverRoutes.newServer(opts)
 }
 

@@ -101,6 +101,7 @@ type RouterOptions struct {
 	MCPToolListPageSize     int                  // MCP feature-list page size; 0 uses the production default
 	HTTPRemoteUser          HTTPRemoteUserConfig // Reverse-proxy authentication via HTTP header
 	DisableRequestLog       bool                 // Whether to suppress per-request access log lines
+	DisableFrontendRoutes   bool                 // Whether to suppress embedded frontend/static route wiring
 }
 
 func IsLoopbackHost(host string) bool {
@@ -172,37 +173,39 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 		r.RegisterRoutes(ctx)
 	}
 
-	// Resolve custom stylesheet: prefer pre-validated FrontendConfig path,
-	// fall back to normalizing opts.CustomStylesheet against StorageDir.
 	customStylesheetPath := frontendCfg.CustomStylesheetPath
-	if customStylesheetPath == "" && opts.CustomStylesheet != "" {
-		resolved, err := NormalizeCustomStylesheetPath(frontendCfg.StorageDir, opts.CustomStylesheet)
-		if err != nil {
-			slog.Default().Error("custom stylesheet disabled", "error", err)
-		} else {
-			customStylesheetPath = resolved
+	if !opts.DisableFrontendRoutes {
+		// Resolve custom stylesheet: prefer pre-validated FrontendConfig path,
+		// fall back to normalizing opts.CustomStylesheet against StorageDir.
+		if customStylesheetPath == "" && opts.CustomStylesheet != "" {
+			resolved, err := NormalizeCustomStylesheetPath(frontendCfg.StorageDir, opts.CustomStylesheet)
+			if err != nil {
+				slog.Default().Error("custom stylesheet disabled", "error", err)
+			} else {
+				customStylesheetPath = resolved
+			}
+		}
+
+		// Serve custom stylesheet if a valid path was provided.
+		if customStylesheetPath != "" {
+			cssPath := customStylesheetPath
+			base.GET("/custom.css", func(c *gin.Context) {
+				if _, err := os.Stat(cssPath); os.IsNotExist(err) {
+					c.Status(http.StatusNotFound)
+					return
+				} else if err != nil {
+					slog.Default().Error("error checking custom stylesheet existence", "error", err, "path", cssPath)
+					c.Status(http.StatusInternalServerError)
+					return
+				}
+				c.Header("Content-Type", "text/css; charset=utf-8")
+				c.File(cssPath)
+			})
 		}
 	}
 
-	// Serve custom stylesheet if a valid path was provided.
-	if customStylesheetPath != "" {
-		cssPath := customStylesheetPath
-		base.GET("/custom.css", func(c *gin.Context) {
-			if _, err := os.Stat(cssPath); os.IsNotExist(err) {
-				c.Status(http.StatusNotFound)
-				return
-			} else if err != nil {
-				slog.Default().Error("error checking custom stylesheet existence", "error", err, "path", cssPath)
-				c.Status(http.StatusInternalServerError)
-				return
-			}
-			c.Header("Content-Type", "text/css; charset=utf-8")
-			c.File(cssPath)
-		})
-	}
-
 	// Serve the embedded frontend SPA on all unknown routes.
-	if EmbedFrontend == "true" {
+	if EmbedFrontend == "true" && !opts.DisableFrontendRoutes {
 		fsys, err := fs.Sub(frontend, "dist")
 		if err != nil {
 			panic("failed to create sub FS: " + err.Error())

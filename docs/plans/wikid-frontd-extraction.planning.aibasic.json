@@ -1,0 +1,29 @@
+{
+  "planTitle": "wikid-frontd-extraction",
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "state": "Act complete",
+  "createdAt": "2026-06-16",
+  "sourceDiscovery": "docs/discovery/sessiond-frontd-extraction.md",
+  "artifacts": {
+    "observe": "docs/plans/wikid-frontd-extraction.OBSERVE.md",
+    "context": "docs/plans/wikid-frontd-extraction.CONTEXT.md",
+    "decision": "docs/plans/wikid-frontd-extraction.DECISION.md",
+    "plan": "docs/plans/wikid-frontd-extraction.PLAN.md"
+  },
+  "roleNames": {
+    "parentDaemon": "wikid",
+    "publicIngress": "frontd",
+    "workspaceAuthority": "workspaced"
+  },
+  "decisionsCaptured": [
+    "This is a one-workspace compatibility extraction, not federated workspaces.",
+    "Use hidden same-binary role processes.",
+    "Keep scripts/run.sh stable for MCP and agent hooks.",
+    "Move auth, user, session, API-key, OAuth, and user management ownership out of workspaced.",
+    "Do not migrate legacy auth data; delete only known legacy auth DBs on launch.",
+    "Keep branding global to wikid/frontd.",
+    "Keep one public OAuth MCP resource.",
+    "Make wikid the only child-role supervisor."
+  ],
+  "validationStatus": "wiki refresh passed; four new plan pages validate cleanly; whole-wiki validation still reports 10 pre-existing missing_asset errors on unrelated pages"
+}

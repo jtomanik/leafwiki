@@ -17,6 +17,7 @@ disable_request_log="${LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG:-${LEAFWIKI_DISABLE_
 daemon_idle_timeout="${LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT:-${LEAFWIKI_DAEMON_IDLE_TIMEOUT:-10m}}"
 enable_workspace_sync="${LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC:-1}"
 api_key="${LEAFWIKI_RUN_MCP_API_KEY:-${LEAFWIKI_MCP_API_KEY:-}}"
+runtime_stack="${LEAFWIKI_RUN_MCP_RUNTIME_STACK:-${LEAFWIKI_RUNTIME_STACK:-}}"
 server_log="${LEAFWIKI_RUN_MCP_SERVER_LOG:-}"
 dry_run=0
 config_path=""
@@ -483,6 +484,14 @@ if [[ "$config_mode_requested" == "1" && -n "$config_conflict" ]]; then
   fail_error "--config cannot be combined with $config_conflict"
 fi
 
+case "$runtime_stack" in
+  ""|legacy|wikid-frontd)
+    ;;
+  *)
+    fail "unsupported LEAFWIKI_RUNTIME_STACK: $runtime_stack"
+    ;;
+esac
+
 base_path="$(normalize_base_path "$base_path")"
 url_host_value="$(url_host "$host")"
 http_url="$scheme://$url_host_value:$port$base_path"
@@ -554,6 +563,10 @@ fi
 
 child_env=()
 print_env=()
+if [[ -n "$runtime_stack" ]]; then
+  child_env+=(LEAFWIKI_RUNTIME_STACK="$runtime_stack")
+  print_env+=(LEAFWIKI_RUNTIME_STACK="$runtime_stack")
+fi
 if [[ -z "$config_path" && -n "$api_key" ]]; then
   child_env+=(LEAFWIKI_MCP_API_KEY="$api_key")
   print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED)

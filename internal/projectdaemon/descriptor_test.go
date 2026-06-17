@@ -60,6 +60,68 @@ func TestWriteDescriptorAtomicUses0600AndOmitsSessionAPIKey(t *testing.T) {
 	}
 }
 
+func TestDescriptorRoundTripIncludesRuntimeStackAndRoleHealth(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	now := time.Now().UTC().Truncate(time.Second)
+	desc := &Descriptor{
+		SchemaVersion:    DescriptorSchemaVersion,
+		RuntimeStack:     RuntimeStackWikidFrontd,
+		Role:             RoleWikid,
+		PID:              1234,
+		StartedAt:        now,
+		DataDir:          dataDir,
+		RootDir:          rootDir,
+		PublicURL:        "http://127.0.0.1:8080",
+		PublicMCPEnabled: true,
+		BasePath:         "",
+		ControlURL:       "http://127.0.0.1:12345",
+		ConfigHash:       "hash",
+		IdleTimeout:      "10m0s",
+		ControlToken:     "control-token",
+		Config: Config{
+			DataDir:      dataDir,
+			RootDir:      rootDir,
+			AuthDisabled: true,
+			RuntimeStack: RuntimeStackWikidFrontd,
+		},
+		Roles: []RoleHealth{
+			{Name: RoleWikid, State: RoleStateReady, PID: 1234, UpdatedAt: now},
+			{Name: RoleFrontd, State: RoleStateReady, PID: 2345, URL: "http://127.0.0.1:8080", UpdatedAt: now},
+			{Name: RoleWorkspaced, State: RoleStateReady, PID: 3456, URL: "http://127.0.0.1:43111", Private: true, UpdatedAt: now},
+		},
+	}
+
+	path := DescriptorPath(dataDir)
+	if err := WriteDescriptorAtomic(path, desc); err != nil {
+		t.Fatalf("WriteDescriptorAtomic failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read descriptor: %v", err)
+	}
+	for _, expected := range []string{`"runtimeStack": "wikid-frontd"`, `"role": "wikid"`, `"name": "frontd"`, `"name": "workspaced"`, `"private": true`} {
+		if !strings.Contains(string(raw), expected) {
+			t.Fatalf("descriptor missing %s:\n%s", expected, raw)
+		}
+	}
+	if strings.Contains(string(raw), "session-api-key") {
+		t.Fatalf("descriptor leaked session API key material:\n%s", raw)
+	}
+
+	loaded, err := ReadTrustedDescriptor(path)
+	if err != nil {
+		t.Fatalf("ReadTrustedDescriptor failed: %v", err)
+	}
+	if loaded.RuntimeStack != RuntimeStackWikidFrontd || loaded.Role != RoleWikid {
+		t.Fatalf("runtime metadata = %q/%q, want %q/%q", loaded.RuntimeStack, loaded.Role, RuntimeStackWikidFrontd, RoleWikid)
+	}
+	if len(loaded.Roles) != 3 || loaded.Roles[2].Name != RoleWorkspaced || !loaded.Roles[2].Private {
+		t.Fatalf("role health round trip = %#v", loaded.Roles)
+	}
+}
+
 func TestReadTrustedDescriptorRejectsGroupReadableFile(t *testing.T) {
 	dataDir := t.TempDir()
 	path := DescriptorPath(dataDir)

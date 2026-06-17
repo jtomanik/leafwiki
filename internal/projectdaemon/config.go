@@ -17,11 +17,13 @@ const (
 	DescriptorSchemaVersion = 1
 	DescriptorFileName      = "project-daemon.json"
 	ControlTokenHeader      = "X-LeafWiki-Daemon-Token"
+	ActorContextHeader      = "X-LeafWiki-Actor-Context"
 	DefaultIdleTimeout      = 10 * time.Minute
 	DefaultHeartbeatTTL     = 15 * time.Second
 )
 
 type Config struct {
+	RuntimeStack            string `json:"runtimeStack,omitempty"`
 	DataDir                 string `json:"dataDir"`
 	RootDir                 string `json:"rootDir"`
 	AuthDisabled            bool   `json:"authDisabled"`
@@ -53,19 +55,22 @@ type Config struct {
 }
 
 type Descriptor struct {
-	SchemaVersion    int       `json:"schemaVersion"`
-	PID              int       `json:"pid"`
-	StartedAt        time.Time `json:"startedAt"`
-	DataDir          string    `json:"dataDir"`
-	RootDir          string    `json:"rootDir"`
-	PublicURL        string    `json:"publicUrl"`
-	PublicMCPEnabled bool      `json:"publicMcpEnabled"`
-	BasePath         string    `json:"basePath"`
-	ControlURL       string    `json:"controlUrl"`
-	ConfigHash       string    `json:"configHash"`
-	IdleTimeout      string    `json:"idleTimeout"`
-	ControlToken     string    `json:"controlToken"`
-	Config           Config    `json:"config"`
+	SchemaVersion    int          `json:"schemaVersion"`
+	RuntimeStack     string       `json:"runtimeStack,omitempty"`
+	Role             RoleName     `json:"role,omitempty"`
+	PID              int          `json:"pid"`
+	StartedAt        time.Time    `json:"startedAt"`
+	DataDir          string       `json:"dataDir"`
+	RootDir          string       `json:"rootDir"`
+	PublicURL        string       `json:"publicUrl"`
+	PublicMCPEnabled bool         `json:"publicMcpEnabled"`
+	BasePath         string       `json:"basePath"`
+	ControlURL       string       `json:"controlUrl"`
+	ConfigHash       string       `json:"configHash"`
+	IdleTimeout      string       `json:"idleTimeout"`
+	ControlToken     string       `json:"controlToken"`
+	Config           Config       `json:"config"`
+	Roles            []RoleHealth `json:"roles,omitempty"`
 }
 
 type Mismatch struct {

@@ -35,7 +35,7 @@ test('mcp disable auth seeds page and UI edit is readable through mcp', async ({
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}`);
+    await viewPage.goto(`/${slug}.md`);
     await expect(page.locator('article')).toContainText('Seeded through MCP');
 
     await viewPage.clickEditPageButton();
