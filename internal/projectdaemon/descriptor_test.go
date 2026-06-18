@@ -122,6 +122,74 @@ func TestDescriptorRoundTripIncludesRuntimeStackAndRoleHealth(t *testing.T) {
 	}
 }
 
+func TestDescriptorRoundTripIncludesWorkspaceIdentityAndPrivateMCPAttach(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "root")
+	desc := &Descriptor{
+		SchemaVersion:    DescriptorSchemaVersion,
+		RuntimeStack:     RuntimeStackWikidFrontd,
+		Role:             RoleWorkspaced,
+		WorkspaceID:      "home",
+		PID:              1234,
+		StartedAt:        time.Now().UTC().Truncate(time.Second),
+		DataDir:          dataDir,
+		RootDir:          rootDir,
+		PublicURL:        "http://127.0.0.1:8080",
+		PublicMCPEnabled: true,
+		BasePath:         "",
+		ControlURL:       "http://127.0.0.1:12345",
+		PrivateMCPURL:    "http://127.0.0.1:23456/mcp",
+		PrivateMCPToken:  "super-secret-token",
+		ConfigHash:       "hash",
+		IdleTimeout:      "10m0s",
+		ControlToken:     "control-token",
+		Config: Config{
+			RuntimeStack:    RuntimeStackWikidFrontd,
+			WorkspaceID:     "home",
+			DataDir:         dataDir,
+			RootDir:         rootDir,
+			PrivateMCPURL:   "http://127.0.0.1:23456/mcp",
+			PrivateMCPToken: "super-secret-token",
+		},
+	}
+
+	path := DescriptorPath(dataDir)
+	if err := WriteDescriptorAtomic(path, desc); err != nil {
+		t.Fatalf("WriteDescriptorAtomic failed: %v", err)
+	}
+
+	loaded, err := ReadTrustedDescriptor(path)
+	if err != nil {
+		t.Fatalf("ReadTrustedDescriptor failed: %v", err)
+	}
+	if loaded.WorkspaceID != "home" || loaded.Config.WorkspaceID != "home" {
+		t.Fatalf("workspace IDs = %q/%q, want home/home", loaded.WorkspaceID, loaded.Config.WorkspaceID)
+	}
+	if loaded.PrivateMCPURL != desc.PrivateMCPURL || loaded.PrivateMCPToken != desc.PrivateMCPToken {
+		t.Fatalf("private MCP fields = %q/%q", loaded.PrivateMCPURL, loaded.PrivateMCPToken)
+	}
+
+	requested := loaded.Config
+	requested.PrivateMCPToken = "different-secret"
+	message := FormatConfigMismatch(CompareConfig(loaded.Config, requested))
+	if strings.Contains(message, "super-secret-token") || strings.Contains(message, "different-secret") {
+		t.Fatalf("mismatch leaked private MCP token: %s", message)
+	}
+	if !strings.Contains(message, "private-mcp-token") || !strings.Contains(message, "redacted") {
+		t.Fatalf("mismatch message = %q, want redacted private MCP token field", message)
+	}
+}
+
+func TestGlobalDescriptorPath(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), ".leafwiki", "runtime")
+
+	got := GlobalDescriptorPath(runtimeDir, RoleWikid)
+
+	if got != filepath.Join(runtimeDir, "wikid.json") {
+		t.Fatalf("GlobalDescriptorPath = %q", got)
+	}
+}
+
 func TestReadTrustedDescriptorRejectsGroupReadableFile(t *testing.T) {
 	dataDir := t.TempDir()
 	path := DescriptorPath(dataDir)

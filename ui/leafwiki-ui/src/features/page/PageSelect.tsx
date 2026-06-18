@@ -29,12 +29,16 @@ export function PageSelect({
   pageID,
   onChange,
   autoFocus = false,
+  workspaceId,
 }: {
   pageID: string
   onChange: (id: string) => void
   autoFocus?: boolean
+  workspaceId?: string
 }) {
-  const { tree } = useTreeStore()
+  const tree = useTreeStore(
+    (state) => state.getWorkspaceState(workspaceId).tree,
+  )
   const [search, setSearch] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const resultRefs = useRef<(HTMLButtonElement | null)[]>([])

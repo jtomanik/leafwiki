@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type IndexingStatus = {
   active: boolean
@@ -34,6 +35,7 @@ export async function searchPages(
   query: string,
   offset: number,
   limit: number,
+  workspaceId: string,
   tags: string[] = [],
 ): Promise<SearchResult> {
   if (offset < 0) offset = 0
@@ -52,12 +54,18 @@ export async function searchPages(
     params.append('tags', tag)
   }
 
-  const data = await fetchWithAuth(`/api/search?${params}`)
+  const data = await fetchWithAuth(
+    workspaceApiPath(`/api/search?${params}`, workspaceId),
+  )
 
   return data as SearchResult
 }
 
-export async function getSearchStatus(): Promise<IndexingStatus> {
-  const res = await fetchWithAuth('/api/search/status')
+export async function getSearchStatus(
+  workspaceId: string,
+): Promise<IndexingStatus> {
+  const res = await fetchWithAuth(
+    workspaceApiPath('/api/search/status', workspaceId),
+  )
   return res as IndexingStatus
 }

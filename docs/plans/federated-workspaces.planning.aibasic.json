@@ -1,0 +1,35 @@
+{
+  "planTitle": "federated-workspaces",
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "state": "Act complete",
+  "createdAt": "2026-06-17",
+  "sourceDiscovery": "docs/discovery/federated-workspaces-session-daemon.md",
+  "dependencyPlans": [
+    "docs/plans/wikid-frontd-extraction.PLAN.md",
+    "docs/plans/fosite-oauth-migration.PLAN.md"
+  ],
+  "artifacts": {
+    "observe": "docs/plans/federated-workspaces.OBSERVE.md",
+    "context": "docs/plans/federated-workspaces.CONTEXT.md",
+    "decision": "docs/plans/federated-workspaces.DECISION.md",
+    "plan": "docs/plans/federated-workspaces.PLAN.md"
+  },
+  "roleNames": {
+    "controlPlane": "wikid",
+    "publicIngress": "frontd",
+    "workspaceAuthority": "workspaced"
+  },
+  "decisionsCaptured": [
+    "Promote wikid into one install-wide user-session daemon.",
+    "Use ~/.leafwiki as the global data root.",
+    "Reserve home as the automatically created workspace ID.",
+    "Keep registry, grants, and runtime descriptors separate.",
+    "Use role-only grants in v1.",
+    "Keep frontd thin and proxy-first.",
+    "Use /w/:workspaceId browser routes and /api/workspaces/:workspaceId API routes.",
+    "Keep /mcp as the HTTP MCP bootstrap route and add /mcp/workspaces/:workspaceId as optional explicit route.",
+    "Keep run.sh mcp stable and target direct STDIO attach to workspaced.",
+    "Make workspace sync and Git-backed revisions mandatory for federated runtime."
+  ],
+  "validationStatus": "wiki refresh passed; four new plan pages validate cleanly; markdown structure and git diff whitespace checks passed"
+}

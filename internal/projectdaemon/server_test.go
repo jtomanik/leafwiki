@@ -316,13 +316,14 @@ func TestClientReportsMalformedJSONResponses(t *testing.T) {
 	}
 }
 
-func TestAuthRoundTripperAddsControlAndBearerTokens(t *testing.T) {
-	var seenControlToken, seenBearerToken string
+func TestAuthRoundTripperAddsControlBearerAndActorContext(t *testing.T) {
+	var seenControlToken, seenBearerToken, seenActorContext string
 	client := &http.Client{
 		Transport: AuthRoundTripper{
 			Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				seenControlToken = req.Header.Get(ControlTokenHeader)
 				seenBearerToken = req.Header.Get("Authorization")
+				seenActorContext = req.Header.Get(ActorContextHeader)
 				return &http.Response{
 					StatusCode: http.StatusNoContent,
 					Body:       io.NopCloser(bytes.NewReader(nil)),
@@ -332,6 +333,7 @@ func TestAuthRoundTripperAddsControlAndBearerTokens(t *testing.T) {
 			}),
 			ControlToken: "control-token",
 			BearerToken:  "stdio-api-key",
+			ActorContext: "encoded-actor",
 		},
 	}
 
@@ -351,7 +353,10 @@ func TestAuthRoundTripperAddsControlAndBearerTokens(t *testing.T) {
 	if seenBearerToken != "Bearer stdio-api-key" {
 		t.Fatalf("authorization header = %q, want bearer API key", seenBearerToken)
 	}
-	if req.Header.Get(ControlTokenHeader) != "" || req.Header.Get("Authorization") != "" {
+	if seenActorContext != "encoded-actor" {
+		t.Fatalf("actor context header = %q, want encoded actor", seenActorContext)
+	}
+	if req.Header.Get(ControlTokenHeader) != "" || req.Header.Get("Authorization") != "" || req.Header.Get(ActorContextHeader) != "" {
 		t.Fatalf("original request headers were mutated: %#v", req.Header)
 	}
 }

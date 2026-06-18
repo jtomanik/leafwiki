@@ -2,17 +2,10 @@ import { Button } from '@/components/ui/button'
 import { ListViewItem } from '@/components/ListView'
 import { mapApiError, type ApiUiError } from '@/lib/api/errors'
 import { type Page } from '@/lib/api/pages'
-import {
-  buildRevisionAssetUrl,
-  restoreRevision,
-  type Revision,
-  type RevisionAssetChange,
-  type RevisionComparison,
-  type RevisionSnapshot,
-} from '@/lib/api/revisions'
+import { restoreRevision, type Revision } from '@/lib/api/revisions'
 import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
-import { buildHistoryUrl, withBasePath } from '@/lib/routePath'
+import { buildHistoryUrl } from '@/lib/routePath'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
@@ -20,7 +13,6 @@ import { useTreeStore } from '@/stores/tree'
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -28,19 +20,15 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import {
-  Download,
-  ExternalLink,
-  FileText,
-  History,
-  Loader2,
-  PanelLeftOpen,
-  RotateCcw,
-} from 'lucide-react'
+import { History, Loader2, PanelLeftOpen, RotateCcw } from 'lucide-react'
 import { useLinkStatusStore } from '../links/linkstatus_store'
-import { AssetPreviewTooltip } from '../assets/AssetPreviewTooltip'
-import MarkdownPreview from '../preview/MarkdownPreview'
 import { useViewerStore } from '../viewer/viewer'
+import {
+  AssetsPanel,
+  ChangesPanel,
+  PreviewPanel,
+  RawTextPanel,
+} from './historyPanels'
 import { confirmRestoreRevision } from './restoreRevisionDialogState'
 import {
   type HistoryTab,
@@ -48,9 +36,11 @@ import {
   reloadPageHistory,
   usePageHistoryStore,
 } from './pageHistory'
+import { buildLineDiff } from './revisionDiff'
 
 export type PageHistoryContentProps = {
   pageId: string
+  workspaceId: string
   pageTitle: string
   pageSlug?: string
   testidPrefix?: string
@@ -132,18 +122,6 @@ function getPathLeaf(path: string) {
 
 // --- Diff / detail helpers ---
 
-type DiffLine = {
-  kind: 'context' | 'added' | 'removed'
-  value: string
-  oldLineNumber: number | null
-  newLineNumber: number | null
-}
-
-type DiffSummary = {
-  addedLines: number
-  removedLines: number
-}
-
 function revisionTriggerLabel(type: string) {
   switch (type) {
     case 'content_update':
@@ -161,19 +139,6 @@ function revisionTriggerLabel(type: string) {
   }
 }
 
-function assetChangeLabel(status: RevisionAssetChange['status']) {
-  switch (status) {
-    case 'added':
-      return 'Added'
-    case 'removed':
-      return 'Removed'
-    case 'modified':
-      return 'Replaced'
-    default:
-      return status
-  }
-}
-
 function displayAuthor(revision: Revision) {
   return revision.author?.username || revision.authorId || 'Unknown'
 }
@@ -188,111 +153,6 @@ function formatTimestamp(value?: string) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
-}
-
-function buildLineDiff(
-  baseContent: string,
-  targetContent: string,
-): {
-  lines: DiffLine[]
-  summary: DiffSummary
-} {
-  const baseLines = baseContent.split('\n')
-  const targetLines = targetContent.split('\n')
-  const rows = baseLines.length
-  const cols = targetLines.length
-  const matrix = new Uint32Array((rows + 1) * (cols + 1))
-
-  const index = (row: number, col: number) => row * (cols + 1) + col
-
-  for (let row = rows - 1; row >= 0; row -= 1) {
-    for (let col = cols - 1; col >= 0; col -= 1) {
-      if (baseLines[row] === targetLines[col]) {
-        matrix[index(row, col)] = matrix[index(row + 1, col + 1)] + 1
-      } else {
-        matrix[index(row, col)] = Math.max(
-          matrix[index(row + 1, col)],
-          matrix[index(row, col + 1)],
-        )
-      }
-    }
-  }
-
-  const lines: DiffLine[] = []
-  let row = 0
-  let col = 0
-  let oldLineNumber = 1
-  let newLineNumber = 1
-  let addedLines = 0
-  let removedLines = 0
-
-  while (row < rows && col < cols) {
-    if (baseLines[row] === targetLines[col]) {
-      lines.push({
-        kind: 'context',
-        value: baseLines[row],
-        oldLineNumber,
-        newLineNumber,
-      })
-      row += 1
-      col += 1
-      oldLineNumber += 1
-      newLineNumber += 1
-      continue
-    }
-
-    if (matrix[index(row + 1, col)] >= matrix[index(row, col + 1)]) {
-      lines.push({
-        kind: 'removed',
-        value: baseLines[row],
-        oldLineNumber,
-        newLineNumber: null,
-      })
-      row += 1
-      oldLineNumber += 1
-      removedLines += 1
-      continue
-    }
-
-    lines.push({
-      kind: 'added',
-      value: targetLines[col],
-      oldLineNumber: null,
-      newLineNumber,
-    })
-    col += 1
-    newLineNumber += 1
-    addedLines += 1
-  }
-
-  while (row < rows) {
-    lines.push({
-      kind: 'removed',
-      value: baseLines[row],
-      oldLineNumber,
-      newLineNumber: null,
-    })
-    row += 1
-    oldLineNumber += 1
-    removedLines += 1
-  }
-
-  while (col < cols) {
-    lines.push({
-      kind: 'added',
-      value: targetLines[col],
-      oldLineNumber: null,
-      newLineNumber,
-    })
-    col += 1
-    newLineNumber += 1
-    addedLines += 1
-  }
-
-  return {
-    lines,
-    summary: { addedLines, removedLines },
-  }
 }
 
 function ErrorNotice({ error }: { error: ApiUiError }) {
@@ -353,323 +213,9 @@ function EmptyState({ title, message }: { title: string; message: string }) {
   )
 }
 
-function SummaryStat({
-  label,
-  value,
-  emphasized = false,
-  tone = 'default',
-}: {
-  label: string
-  value: string
-  emphasized?: boolean
-  tone?: 'default' | 'added' | 'removed'
-}) {
-  return (
-    <div
-      className={`page-history__summary-stat page-history__summary-stat--${tone} ${
-        emphasized ? 'page-history__summary-stat--emphasized' : ''
-      }`.trim()}
-    >
-      <div className="page-history__summary-stat-value">{value}</div>
-      <div className="page-history__summary-stat-label">{label}</div>
-    </div>
-  )
-}
-
-function DiffView({ comparison }: { comparison: RevisionComparison }) {
-  const diff = useMemo(
-    () => buildLineDiff(comparison.base.content, comparison.target.content),
-    [comparison.base.content, comparison.target.content],
-  )
-
-  if (!comparison.contentChanged) {
-    return (
-      <div className="page-history__empty-message">
-        No text difference between this revision and the active version.
-      </div>
-    )
-  }
-
-  return (
-    <div className="page-history__diff">
-      {diff.lines.map((line, index) => (
-        <div
-          key={`${line.kind}-${line.oldLineNumber}-${line.newLineNumber}-${index}`}
-          className={`page-history__diff-line page-history__diff-line--${line.kind}`}
-        >
-          <span className="page-history__diff-gutter">
-            {line.oldLineNumber ?? ''}
-          </span>
-          <span className="page-history__diff-gutter">
-            {line.newLineNumber ?? ''}
-          </span>
-          <span className="page-history__diff-marker">
-            {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}
-          </span>
-          <code className="page-history__diff-content">
-            {line.value || ' '}
-          </code>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ChangesPanel({
-  comparison,
-  gitBackedWorkspace,
-}: {
-  comparison: RevisionComparison
-  gitBackedWorkspace: boolean
-}) {
-  const diff = useMemo(
-    () => buildLineDiff(comparison.base.content, comparison.target.content),
-    [comparison.base.content, comparison.target.content],
-  )
-
-  const assetSummary = useMemo(() => {
-    const counts = { added: 0, modified: 0, removed: 0 }
-    comparison.assetChanges.forEach((change) => {
-      counts[change.status] += 1
-    })
-    return counts
-  }, [comparison.assetChanges])
-
-  return (
-    <div className="page-history__detail-stack">
-      <section className="page-history__summary">
-        <div className="page-history__section-heading">Change Summary</div>
-        <div className="page-history__summary-grid">
-          <SummaryStat
-            label="Lines added since"
-            value={String(diff.summary.addedLines)}
-            emphasized={diff.summary.addedLines > 0}
-            tone="added"
-          />
-          <SummaryStat
-            label="Lines removed since"
-            value={String(diff.summary.removedLines)}
-            emphasized={diff.summary.removedLines > 0}
-            tone="removed"
-          />
-          {!gitBackedWorkspace ? (
-            <SummaryStat
-              label="Assets changed"
-              value={String(comparison.assetChanges.length)}
-              emphasized={comparison.assetChanges.length > 0}
-            />
-          ) : null}
-        </div>
-      </section>
-
-      <section className="page-history__section">
-        <div className="page-history__section-heading">
-          Diff{' '}
-          <span className="page-history__section-heading-note">
-            compared to the active version
-          </span>
-        </div>
-        <DiffView comparison={comparison} />
-      </section>
-
-      {!gitBackedWorkspace && comparison.assetChanges.length > 0 ? (
-        <details className="page-history__asset-details">
-          <summary className="page-history__asset-summary">
-            Assets ({comparison.assetChanges.length})
-          </summary>
-          <div className="page-history__asset-list">
-            {comparison.assetChanges.map((change) => (
-              <div
-                key={`${change.name}-${change.status}`}
-                className="page-history__asset-change"
-              >
-                <span className="page-history__asset-name">{change.name}</span>
-                <span className="page-history__asset-meta">
-                  {assetChangeLabel(change.status)}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="page-history__asset-summary-row">
-            {assetSummary.added > 0 ? (
-              <span>{assetSummary.added} added</span>
-            ) : null}
-            {assetSummary.modified > 0 ? (
-              <span>{assetSummary.modified} replaced</span>
-            ) : null}
-            {assetSummary.removed > 0 ? (
-              <span>{assetSummary.removed} removed</span>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
-    </div>
-  )
-}
-
-function PreviewPanel({
-  snapshot,
-  gitBackedWorkspace,
-}: {
-  snapshot: RevisionSnapshot
-  gitBackedWorkspace: boolean
-}) {
-  const pageId = snapshot.revision.pageId
-  const revisionId = snapshot.revision.id
-
-  const resolveAssetUrl = useCallback(
-    (src: string) => {
-      if (gitBackedWorkspace) return src
-
-      const normalizedSrc = src.startsWith('assets/') ? `/${src}` : src
-      const assetPrefix = `/assets/${pageId}/`
-
-      if (!normalizedSrc.startsWith(assetPrefix)) {
-        return src
-      }
-
-      return buildRevisionAssetUrl(
-        pageId,
-        revisionId,
-        normalizedSrc.slice(assetPrefix.length),
-      )
-    },
-    [gitBackedWorkspace, pageId, revisionId],
-  )
-
-  return (
-    <div className="page-history__preview-panel custom-scrollbar">
-      <div className="page-history__preview-body">
-        <MarkdownPreview
-          content={snapshot.content}
-          path={snapshot.revision.path}
-          pageKind={snapshot.revision.kind === 'section' ? 'section' : 'page'}
-          resolveAssetUrl={resolveAssetUrl}
-          enableHeadlineLinks={false}
-        />
-      </div>
-    </div>
-  )
-}
-
-function RawTextPanel({ snapshot }: { snapshot: RevisionSnapshot }) {
-  return (
-    <div className="page-history__detail-stack">
-      <section className="page-history__section">
-        <div className="page-history__section-heading">Raw Text</div>
-        <div className="custom-scrollbar markdown-code-block page-history__raw-text-block">
-          <pre className="custom-scrollbar page-history__snapshot-content">
-            <code>{snapshot.content || '(empty)'}</code>
-          </pre>
-        </div>
-      </section>
-    </div>
-  )
-}
-
-function HistoryAssetItem({
-  asset,
-  pageId,
-  revisionId,
-}: {
-  asset: RevisionSnapshot['assets'][number]
-  pageId: string
-  revisionId: string
-}) {
-  const assetUrl = withBasePath(
-    buildRevisionAssetUrl(pageId, revisionId, asset.name),
-  )
-  const baseName = asset.name.split('/').pop() ?? asset.name
-
-  return (
-    <li className="group asset-item page-history__asset-item">
-      <div className="flex min-w-0 flex-1 items-center gap-1">
-        <AssetPreviewTooltip url={assetUrl} name={baseName}>
-          {asset.mimeType?.startsWith('image/') ? (
-            <img
-              src={assetUrl}
-              alt={baseName}
-              className="asset-item__preview-image"
-            />
-          ) : (
-            <div className="asset-item__preview-file">
-              <FileText size={18} />
-            </div>
-          )}
-        </AssetPreviewTooltip>
-
-        <div className="page-history__asset-copy">
-          <span className="asset-item__filename">{baseName}</span>
-          <span className="page-history__asset-copy-meta">
-            {asset.mimeType || 'application/octet-stream'} ·{' '}
-            {Intl.NumberFormat().format(asset.sizeBytes)} bytes
-          </span>
-        </div>
-      </div>
-
-      <Button
-        asChild
-        variant="outline"
-        size="icon"
-        className="asset-item__action-button"
-      >
-        <a
-          href={assetUrl}
-          target="_blank"
-          rel="noreferrer"
-          title="Open asset"
-          data-testid={`history-asset-open-${baseName}`}
-        >
-          <ExternalLink size={16} />
-        </a>
-      </Button>
-      <Button
-        asChild
-        variant="outline"
-        size="icon"
-        className="asset-item__action-button"
-      >
-        <a
-          href={assetUrl}
-          download={baseName}
-          title="Download asset"
-          data-testid={`history-asset-download-${baseName}`}
-        >
-          <Download size={16} />
-        </a>
-      </Button>
-    </li>
-  )
-}
-
-function AssetsPanel({ snapshot }: { snapshot: RevisionSnapshot }) {
-  return (
-    <div className="page-history__detail-stack">
-      <section className="page-history__section">
-        <div className="page-history__section-heading">Assets</div>
-        {snapshot.assets.length === 0 ? (
-          <div className="page-history__empty-message">
-            No assets were stored with this revision.
-          </div>
-        ) : (
-          <ul className="page-history__asset-list">
-            {snapshot.assets.map((asset) => (
-              <HistoryAssetItem
-                key={`${asset.name}-${asset.sha256}`}
-                asset={asset}
-                pageId={snapshot.revision.pageId}
-                revisionId={snapshot.revision.id}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
-  )
-}
-
 export function PageHistoryContent({
   pageId,
+  workspaceId,
   pageTitle,
   pageSlug,
   testidPrefix = 'page-history',
@@ -766,6 +312,11 @@ export function PageHistoryContent({
     return changes
   }, [comparison])
 
+  const comparisonDiff = useMemo(() => {
+    if (!comparison) return null
+    return buildLineDiff(comparison.base.content, comparison.target.content)
+  }, [comparison])
+
   // Preview is first and the default active tab so users immediately see the
   // rendered content of the selected revision without an extra click.
   const tabs: { id: HistoryTab; label: string }[] = [
@@ -850,24 +401,36 @@ export function PageHistoryContent({
       const restoredPage = (await restoreRevision(
         pageId,
         selectedRevision.id,
+        workspaceId,
       )) as Page
 
-      await useTreeStore.getState().reloadTree()
+      await useTreeStore.getState().reloadTree(workspaceId)
       await useViewerStore
         .getState()
-        .loadPageData(restoredPage.path, undefined, restoredPage.kind)
+        .loadPageData(
+          restoredPage.path,
+          undefined,
+          restoredPage.kind,
+          workspaceId,
+        )
 
       const viewerPageID = useViewerStore.getState().page?.id
       if (viewerPageID) {
-        await useLinkStatusStore.getState().fetchLinkStatusForPage(viewerPageID)
+        await useLinkStatusStore
+          .getState()
+          .fetchLinkStatusForPage(viewerPageID, workspaceId)
       } else {
         useLinkStatusStore.getState().clear()
       }
 
-      await reloadPageHistory(pageId)
+      await reloadPageHistory(pageId, workspaceId)
       navigate(
         buildHistoryUrl(
-          browserRoutePathForWikiNode(restoredPage.path, restoredPage.kind),
+          browserRoutePathForWikiNode(
+            restoredPage.path,
+            restoredPage.kind,
+            workspaceId,
+          ),
         ),
         {
           replace: true,
@@ -957,6 +520,7 @@ export function PageHistoryContent({
         <PreviewPanel
           snapshot={snapshot}
           gitBackedWorkspace={enableWorkspaceSync}
+          workspaceId={workspaceId}
         />
       ) : (
         <div className="page-history__empty-message page-history__empty-message--padded">
@@ -974,9 +538,10 @@ export function PageHistoryContent({
         )
       }
 
-      return comparison ? (
+      return comparison && comparisonDiff ? (
         <ChangesPanel
           comparison={comparison}
+          diff={comparisonDiff}
           gitBackedWorkspace={enableWorkspaceSync}
         />
       ) : (
@@ -1005,7 +570,7 @@ export function PageHistoryContent({
     }
 
     return snapshot ? (
-      <AssetsPanel snapshot={snapshot} />
+      <AssetsPanel snapshot={snapshot} workspaceId={workspaceId} />
     ) : (
       <div className="page-history__empty-message page-history__empty-message--padded">
         No asset data available.

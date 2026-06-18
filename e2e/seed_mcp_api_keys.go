@@ -22,11 +22,12 @@ type seededUser struct {
 }
 
 type seedOutput struct {
-	Admin   seededUser `json:"admin"`
-	Editor  seededUser `json:"editor"`
-	Viewer  seededUser `json:"viewer"`
-	Revoked seededUser `json:"revoked"`
-	Deleted seededUser `json:"deleted"`
+	Admin        seededUser `json:"admin"`
+	Editor       seededUser `json:"editor"`
+	SecondEditor seededUser `json:"secondEditor"`
+	Viewer       seededUser `json:"viewer"`
+	Revoked      seededUser `json:"revoked"`
+	Deleted      seededUser `json:"deleted"`
 }
 
 func main() {
@@ -87,6 +88,10 @@ func seedMCPAPIKeysForRuntime(dataDir string, runtimeStack string) (seedOutput, 
 	if err != nil {
 		return seedOutput{}, err
 	}
+	secondEditor, err := createUser(users, "stdio-second-editor", "stdio-second-editor@example.com", coreauth.RoleEditor)
+	if err != nil {
+		return seedOutput{}, err
+	}
 	viewer, err := createUser(users, "stdio-viewer", "stdio-viewer@example.com", coreauth.RoleViewer)
 	if err != nil {
 		return seedOutput{}, err
@@ -105,6 +110,9 @@ func seedMCPAPIKeysForRuntime(dataDir string, runtimeStack string) (seedOutput, 
 		return seedOutput{}, err
 	}
 	if out.Editor, err = createKey(apiKeys, editor, "E2E STDIO editor"); err != nil {
+		return seedOutput{}, err
+	}
+	if out.SecondEditor, err = createKey(apiKeys, secondEditor, "E2E STDIO second editor"); err != nil {
 		return seedOutput{}, err
 	}
 	if out.Viewer, err = createKey(apiKeys, viewer, "E2E STDIO viewer"); err != nil {

@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type WorkspaceSyncValidationError = {
   code?: string
@@ -71,19 +72,31 @@ function normalizeStatus(value: unknown): WorkspaceSyncStatus {
   }
 }
 
-export async function getWorkspaceSyncStatus(): Promise<WorkspaceSyncStatus> {
-  return normalizeStatus(await fetchWithAuth('/api/workspace-sync/status'))
+export async function getWorkspaceSyncStatus(
+  workspaceId: string,
+): Promise<WorkspaceSyncStatus> {
+  return normalizeStatus(
+    await fetchWithAuth(
+      workspaceApiPath('/api/workspace-sync/status', workspaceId),
+    ),
+  )
 }
 
-export async function refreshWorkspaceSync(): Promise<WorkspaceSyncStatus> {
+export async function refreshWorkspaceSync(
+  workspaceId: string,
+): Promise<WorkspaceSyncStatus> {
   return normalizeStatus(
-    await fetchWithAuth('/api/workspace-sync/refresh', {
-      method: 'POST',
-    }),
+    await fetchWithAuth(
+      workspaceApiPath('/api/workspace-sync/refresh', workspaceId),
+      {
+        method: 'POST',
+      },
+    ),
   )
 }
 
 export async function listWorkspaceSnapshots(
+  workspaceId: string,
   cursor = '',
   limit = 50,
 ): Promise<WorkspaceSnapshotsResponse> {
@@ -92,16 +105,23 @@ export async function listWorkspaceSnapshots(
   params.set('limit', String(limit))
 
   return (await fetchWithAuth(
-    `/api/workspace-sync/snapshots?${params.toString()}`,
+    workspaceApiPath(
+      `/api/workspace-sync/snapshots?${params.toString()}`,
+      workspaceId,
+    ),
   )) as WorkspaceSnapshotsResponse
 }
 
 export async function restoreWorkspaceSnapshot(
   commitId: string,
+  workspaceId: string,
 ): Promise<WorkspaceSyncStatus> {
   return normalizeStatus(
     await fetchWithAuth(
-      `/api/workspace-sync/snapshots/${encodeURIComponent(commitId)}/restore`,
+      workspaceApiPath(
+        `/api/workspace-sync/snapshots/${encodeURIComponent(commitId)}/restore`,
+        workspaceId,
+      ),
       {
         method: 'POST',
       },

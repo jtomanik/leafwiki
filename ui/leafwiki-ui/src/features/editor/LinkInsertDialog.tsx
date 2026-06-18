@@ -35,20 +35,22 @@ function isExternalUrl(value: string) {
 type LinkInsertDialogProps = {
   editorRef: React.RefObject<MarkdownEditorRef>
   selectedText: string
+  workspaceId: string
 }
 
 export function LinkInsertDialog({
   editorRef,
   selectedText,
+  workspaceId,
 }: LinkInsertDialogProps) {
   const closeDialog = useDialogsStore((s) => s.closeDialog)
   const open = useDialogsStore((s) => s.dialogType === DIALOG_LINK_INSERT)
   const registerHotkey = useHotKeysStore((s) => s.registerHotkey)
   const unregisterHotkey = useHotKeysStore((s) => s.unregisterHotkey)
-  const flatPages = useTreeStore((s) => s.flatPages)
-  const markdownLinkRootPrefix = useConfigStore(
-    (s) => s.markdownLinkRootPrefix,
+  const flatPages = useTreeStore(
+    (s) => s.getWorkspaceState(workspaceId).flatPages,
   )
+  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
 
   const [text, setText] = useState(selectedText)
   const [url, setUrl] = useState('')
@@ -178,12 +180,16 @@ export function LinkInsertDialog({
                 autoComplete="off"
               />
               {suggestions.length > 0 && (
-                <ul className="border-border bg-surface absolute top-full right-0 left-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-md border shadow-md">
+                <ul
+                  className="border-border bg-surface absolute top-full right-0 left-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-md border shadow-md"
+                  data-testid="link-insert-suggestions"
+                >
                   {suggestions.map((s, i) => (
                     <li key={s.id}>
                       <button
                         type="button"
                         className={`w-full px-3 py-2 text-left text-sm ${i === highlightedIndex ? 'bg-accent' : 'hover:bg-accent'}`}
+                        data-testid="link-insert-suggestion"
                         onMouseDown={(e) => {
                           e.preventDefault()
                           selectSuggestion(s.path, s.title, s.kind)

@@ -42,9 +42,7 @@ export function MarkdownImage({
 }: MarkdownImageProps & { node?: unknown }) {
   void node
   const openDialog = useDialogsStore((s) => s.openDialog)
-  const markdownLinkRootPrefix = useConfigStore(
-    (s) => s.markdownLinkRootPrefix,
-  )
+  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
   const resolvedSrc = useMemo(
     () =>
       resolveAssetUrl?.(

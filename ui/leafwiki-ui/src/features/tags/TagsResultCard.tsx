@@ -1,6 +1,7 @@
 import { TaggedPage } from '@/lib/api/tags'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildViewUrl } from '@/lib/routePath'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import {
   browserRoutePathForWikiNode,
   getWikiTargetRoutePath,
@@ -15,6 +16,7 @@ import { usePageEditorStore } from '../editor/pageEditorStore'
 type TagsResultCardProps = {
   item: TaggedPage
   activeTags: string[]
+  workspaceId?: string
   isSelected?: boolean
   onMouseEnter?: () => void
   onFocus?: () => void
@@ -25,10 +27,20 @@ const MAX_VISIBLE_TAGS = 4
 
 const TagsResultCard = forwardRef<HTMLDivElement, TagsResultCardProps>(
   function TagsResultCard(
-    { item, activeTags, isSelected = false, onMouseEnter, onFocus, onTagClick },
+    {
+      item,
+      activeTags,
+      workspaceId: workspaceIdProp,
+      isSelected = false,
+      onMouseEnter,
+      onFocus,
+      onTagClick,
+    },
     ref,
   ) {
     const location = useLocation()
+    const workspaceId =
+      workspaceIdProp ?? splitWorkspaceRoute(location.pathname).workspaceId
     const currentEditorPageId = usePageEditorStore(
       (state: PageEditorState) => state.page?.id ?? state.initialPage?.id,
     )
@@ -38,7 +50,11 @@ const TagsResultCard = forwardRef<HTMLDivElement, TagsResultCardProps>(
     const currentRouteKind =
       markdownRouteLookupKind(location.pathname) ?? 'section'
     const resultPath = normalizeWikiRoutePath(`/${item.path}`)
-    const resultUrl = browserRoutePathForWikiNode(item.path, item.kind)
+    const resultUrl = browserRoutePathForWikiNode(
+      item.path,
+      item.kind,
+      workspaceId,
+    )
     const isRouteActive =
       currentViewPath === resultPath && currentRouteKind === item.kind
     const isEditorActive = currentEditorPageId === item.id

@@ -18,11 +18,17 @@ import { PageSelect } from './PageSelect'
 import { refreshAfterPageRefactor } from './pageMutationRefresh'
 import { confirmPageRefactor } from './pageRefactorDialogState'
 
-export function MovePageDialog({ pageId }: { pageId: string }) {
-  const { tree } = useTreeStore()
+export function MovePageDialog({
+  pageId,
+  workspaceId,
+}: {
+  pageId: string
+  workspaceId: string
+}) {
+  const tree = useTreeStore((s) => s.workspaceTrees[workspaceId]?.tree ?? null)
   const [loading, setLoading] = useState(false)
   const [, setFieldErrors] = useState<Record<string, string>>({})
-  const page = useTreeStore((s) => s.getPageById(pageId))
+  const page = useTreeStore((s) => s.getPageById(pageId, workspaceId))
   const enableLinkRefactor = useConfigStore((s) => s.enableLinkRefactor)
   // get opened route from react router
   const currentPath = useLocation().pathname
@@ -53,7 +59,7 @@ export function MovePageDialog({ pageId }: { pageId: string }) {
 
   const getSyntheticMovePreview = (): PageRefactorPreview => {
     const nextParent = newParentId
-      ? useTreeStore.getState().getPageById(newParentId)
+      ? useTreeStore.getState().getPageById(newParentId, workspaceId)
       : null
     const nextParentPath = nextParent?.path ?? ''
     const normalizedParentPath =
@@ -83,23 +89,31 @@ export function MovePageDialog({ pageId }: { pageId: string }) {
       let preview: PageRefactorPreview
 
       if (enableLinkRefactor) {
-        preview = await previewPageRefactor(pageId, {
-          kind: 'move',
-          parentId: newParentId,
-        })
+        preview = await previewPageRefactor(
+          pageId,
+          {
+            kind: 'move',
+            parentId: newParentId,
+          },
+          workspaceId,
+        )
         const rewriteLinks = await confirmPageRefactor(preview)
         if (rewriteLinks === null) {
           return false
         }
 
-        await applyPageRefactor(pageId, {
-          kind: 'move',
-          version: page.version,
-          parentId: newParentId,
-          rewriteLinks,
-        })
+        await applyPageRefactor(
+          pageId,
+          {
+            kind: 'move',
+            version: page.version,
+            parentId: newParentId,
+            rewriteLinks,
+          },
+          workspaceId,
+        )
       } else {
-        await movePage(pageId, page.version, newParentId)
+        await movePage(pageId, page.version, newParentId, workspaceId)
         preview = getSyntheticMovePreview()
       }
 
@@ -107,6 +121,7 @@ export function MovePageDialog({ pageId }: { pageId: string }) {
         preview,
         currentPath,
         navigate,
+        workspaceId,
       })
 
       toast.success('Page moved successfully')
@@ -148,7 +163,12 @@ export function MovePageDialog({ pageId }: { pageId: string }) {
         },
       ]}
     >
-      <PageSelect pageID={newParentId} onChange={setNewParentId} autoFocus />
+      <PageSelect
+        pageID={newParentId}
+        onChange={setNewParentId}
+        autoFocus
+        workspaceId={workspaceId}
+      />
     </BaseDialog>
   )
 }

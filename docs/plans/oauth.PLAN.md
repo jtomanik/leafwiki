@@ -11,6 +11,12 @@ page:
 
 # Authenticated Local MCP via Minimal OAuth
 
+> Historical plan. This OAuth MVP was superseded by the Fosite-based MCP OAuth
+> implementation and the later API-key/federated MCP work. Keep this file as
+> design history only; use `docs/plans/fosite-oauth-migration.PLAN.md`,
+> `docs/mcp.md`, and the current MCP/API-key plans as the implementation
+> contract.
+
 ## Summary
 
 Implement authenticated MCP for LeafWiki’s local Streamable HTTP endpoint so users can run `--enable-mcp` without `--disable-auth`.

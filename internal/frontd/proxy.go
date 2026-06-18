@@ -19,6 +19,7 @@ type WorkspaceProxyOptions struct {
 type IngressOptions struct {
 	BasePath     string
 	Workspace    http.Handler
+	Workspaces   http.Handler
 	MCP          http.Handler
 	ControlPlane http.Handler
 }
@@ -36,8 +37,12 @@ func NewIngressHandler(public http.Handler, opts IngressOptions) http.Handler {
 			public.ServeHTTP(w, req)
 			return
 		}
-		if opts.MCP != nil && strippedPath == "/mcp" {
+		if opts.MCP != nil && isMCPPath(strippedPath) {
 			opts.MCP.ServeHTTP(w, cloneRequestPath(req, strippedPath))
+			return
+		}
+		if opts.Workspaces != nil && isWorkspacesPath(strippedPath) {
+			opts.Workspaces.ServeHTTP(w, cloneRequestPath(req, strippedPath))
 			return
 		}
 		if opts.Workspace != nil && isWorkspacePath(strippedPath) {
@@ -91,16 +96,9 @@ func NewWorkspaceProxy(opts WorkspaceProxyOptions) (http.Handler, error) {
 		return nil, fmt.Errorf("actor context resolver is required")
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
-	proxy.ErrorHandler = retryableUnavailable
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = upstream.Host
-		req.Header.Del("Authorization")
-		req.Header.Del("Cookie")
-		req.Header.Set(projectdaemon.ControlTokenHeader, opts.DaemonToken)
-	}
+	proxy := newPrivateActorProxy(upstream, func(*http.Request) string {
+		return opts.DaemonToken
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		actor, err := opts.Actor(req)
 		if err != nil {
@@ -141,43 +139,24 @@ func NewMCPProxy(upstreamURL string, daemonToken string) (http.Handler, error) {
 }
 
 func NewMCPProxyWithActor(opts WorkspaceProxyOptions) (http.Handler, error) {
-	upstream, err := url.Parse(strings.TrimSpace(opts.Upstream))
-	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid workspaced upstream %q", opts.Upstream)
-	}
-	if strings.TrimSpace(opts.DaemonToken) == "" {
-		return nil, fmt.Errorf("daemon token is required")
-	}
-	if opts.Actor == nil {
-		return nil, fmt.Errorf("actor context resolver is required")
-	}
+	return NewWorkspaceProxy(opts)
+}
+
+func newPrivateActorProxy(upstream *url.URL, daemonToken func(*http.Request) string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.ErrorHandler = retryableUnavailable
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
+		actorContext := req.Header.Get(projectdaemon.ActorContextHeader)
+		token := daemonToken(req)
 		originalDirector(req)
 		req.Host = upstream.Host
 		req.Header.Del("Authorization")
 		req.Header.Del("Cookie")
-		req.Header.Set(projectdaemon.ControlTokenHeader, opts.DaemonToken)
+		req.Header.Set(projectdaemon.ActorContextHeader, actorContext)
+		req.Header.Set(projectdaemon.ControlTokenHeader, token)
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		actor, err := opts.Actor(req)
-		if err != nil {
-			http.Error(w, "resolve actor context", http.StatusUnauthorized)
-			return
-		}
-		encoded, err := projectdaemon.EncodeActorContext(actor)
-		if err != nil {
-			http.Error(w, "encode actor context", http.StatusInternalServerError)
-			return
-		}
-		clone := req.Clone(req.Context())
-		clone.Body = req.Body
-		clone.Header = req.Header.Clone()
-		clone.Header.Set(projectdaemon.ActorContextHeader, encoded)
-		proxy.ServeHTTP(w, clone)
-	}), nil
+	return proxy
 }
 
 func retryableUnavailable(w http.ResponseWriter, _ *http.Request, _ error) {
@@ -218,7 +197,18 @@ func ensureLeadingSlash(path string) string {
 	return "/" + path
 }
 
+func isWorkspacesPath(path string) bool {
+	return isWorkspacesAPIPath(http.MethodGet, path) || isWorkspacesAPIPath(http.MethodPost, path)
+}
+
+func isMCPPath(path string) bool {
+	return path == "/mcp" || strings.HasPrefix(path, "/mcp/workspaces/")
+}
+
 func isWorkspacePath(path string) bool {
+	if strings.HasPrefix(path, PublicWorkspacesPrefix+"/") {
+		return true
+	}
 	for _, prefix := range []string{
 		"/assets",
 		"/api/tree",

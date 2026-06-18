@@ -3,7 +3,8 @@ import { FormInput } from '@/components/FormInput'
 import { Button } from '@/components/ui/button'
 import type { Page } from '@/lib/api/pages'
 import { DIALOG_PAGE_PERMALINK } from '@/lib/registries'
-import { buildPermalinkPath, withBasePath } from '@/lib/routePath'
+import { withBasePath } from '@/lib/routePath'
+import { buildWorkspacePermalinkPath } from '@/lib/workspaceRoute'
 import copy from 'copy-to-clipboard'
 import { Copy, ExternalLink } from 'lucide-react'
 import { useMemo } from 'react'
@@ -11,16 +12,19 @@ import { toast } from 'sonner'
 
 type PermalinkDialogProps = {
   page: Pick<Page, 'id' | 'slug' | 'title'>
+  workspaceId: string
 }
 
-export function PermalinkDialog({ page }: PermalinkDialogProps) {
+export function PermalinkDialog({ page, workspaceId }: PermalinkDialogProps) {
   const permalink = useMemo(() => {
-    const path = withBasePath(buildPermalinkPath(page.id, page.slug))
+    const path = withBasePath(
+      buildWorkspacePermalinkPath(workspaceId, page.id, page.slug),
+    )
     if (typeof window === 'undefined') {
       return path
     }
     return new URL(path, window.location.origin).toString()
-  }, [page.id, page.slug])
+  }, [page.id, page.slug, workspaceId])
 
   const handleCopy = () => {
     if (!copy(permalink)) {

@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type ImportPlan = {
   id: string
@@ -50,33 +51,52 @@ export type ImportResult = {
   tree_hash_before: string
 }
 
-export async function createImportPlanFromZip(file: File): Promise<ImportPlan> {
+export async function createImportPlanFromZip(
+  file: File,
+  workspaceId: string,
+): Promise<ImportPlan> {
   const formData = new FormData()
   formData.append('file', file)
 
-  return (await fetchWithAuth('/api/import/plan', {
-    method: 'POST',
-    body: formData,
-    headers: {}, // Let browser set Content-Type for FormData
-  })) as ImportPlan
+  return (await fetchWithAuth(
+    workspaceApiPath('/api/import/plan', workspaceId),
+    {
+      method: 'POST',
+      body: formData,
+      headers: {}, // Let browser set Content-Type for FormData
+    },
+  )) as ImportPlan
 }
 
-export async function getImportPlan(): Promise<ImportPlan> {
-  return (await fetchWithAuth('/api/import/plan', {
-    method: 'GET',
-  })) as ImportPlan
+export async function getImportPlan(workspaceId: string): Promise<ImportPlan> {
+  return (await fetchWithAuth(
+    workspaceApiPath('/api/import/plan', workspaceId),
+    {
+      method: 'GET',
+    },
+  )) as ImportPlan
 }
 
-export async function executeImportPlan(): Promise<ImportPlan> {
-  return (await fetchWithAuth('/api/import/execute', {
-    method: 'POST',
-  })) as ImportPlan
+export async function executeImportPlan(
+  workspaceId: string,
+): Promise<ImportPlan> {
+  return (await fetchWithAuth(
+    workspaceApiPath('/api/import/execute', workspaceId),
+    {
+      method: 'POST',
+    },
+  )) as ImportPlan
 }
 
-export async function cancelImportPlan(): Promise<ImportPlan | null> {
-  const response = await fetchWithAuth('/api/import/plan', {
-    method: 'DELETE',
-  })
+export async function cancelImportPlan(
+  workspaceId: string,
+): Promise<ImportPlan | null> {
+  const response = await fetchWithAuth(
+    workspaceApiPath('/api/import/plan', workspaceId),
+    {
+      method: 'DELETE',
+    },
+  )
 
   if (response === null) {
     return null

@@ -1,20 +1,9 @@
 import { useDesignModeStore } from '@/features/designtoggle/designmode'
-import { withBasePath } from '@/lib/routePath'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import {
-  AnchorHTMLAttributes,
-  AudioHTMLAttributes,
-  BlockquoteHTMLAttributes,
-  Children,
-  ClassAttributes,
   Component,
   ErrorInfo,
-  HTMLAttributes,
-  ReactElement,
   ReactNode,
-  VideoHTMLAttributes,
-  isValidElement,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -22,55 +11,31 @@ import {
   useSyncExternalStore,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { JSX } from 'react/jsx-runtime'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { extractTocEntries } from './extractTocEntries'
 import { TocDropdownButton } from './TocDropdownButton'
-import Headline from './Headline'
-import MarkdownCodeBlock from './MarkdownCodeBlock'
-import { MarkdownImage } from './MarkdownImage'
-import { MarkdownLink } from './MarkdownLink'
 import './markdownPreviewCodeTheme.css'
-import MermaidBlock from './MermaidBlock'
+import { useMarkdownComponents } from './markdownComponents'
 import { normalizeMarkdownListIndentation } from './normalizeMarkdownListIndentation'
 import { normalizeMarkdownShoutouts } from './normalizeMarkdownShoutouts'
+import {
+  markdownSanitizeSchema,
+  normalizeSafeUrlSchemes,
+} from './markdownSafety'
 import { rehypeLineNumber } from './rehypeLineNumber'
 import { rehypeWhitelistStyles } from './rehypeWhitelistStyles'
 import 'katex/dist/katex.min.css'
-
-const schema = {
-  ...defaultSchema,
-  clobberPrefix: '',
-  tagNames: [...(defaultSchema.tagNames || []), 'audio', 'video'],
-  attributes: {
-    ...defaultSchema.attributes,
-    '*': [
-      ...(defaultSchema.attributes?.['*'] || []),
-      'class',
-      'className',
-      'data-leafwiki-generated-id',
-      'data-line',
-      'style',
-    ],
-    audio: [...(defaultSchema.attributes?.audio || []), 'controls', 'src'],
-    video: [
-      ...(defaultSchema.attributes?.video || []),
-      'controls',
-      'src',
-      'preload',
-    ],
-  },
-}
 
 type Props = {
   content: string
   path?: string
   pageKind?: WikiNodeKind
+  workspaceId?: string
   resolveAssetUrl?: (src: string) => string
   enableHeadlineLinks?: boolean
   showToc?: boolean
@@ -80,88 +45,6 @@ type Props = {
 
 type MarkdownPreviewErrorBoundaryState = {
   hasError: boolean
-}
-
-const CLOBBER_PREFIX = ''
-const FOOTNOTE_TARGET_PREFIX = '#user-content-fn'
-const SAFE_URL_SCHEMES = new Set(['http', 'https', 'mailto'])
-
-type MarkdownNodeProp = {
-  node?: unknown
-}
-
-type RehypeNode = {
-  type?: string
-  tagName?: string
-  properties?: Record<string, unknown>
-  children?: RehypeNode[]
-}
-
-type SemanticAlertKind = 'info' | 'success' | 'warning' | 'error'
-
-type ShoutoutConfig = {
-  kind: string
-}
-
-function getTextContent(node: ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') {
-    return String(node)
-  }
-
-  if (Array.isArray(node)) {
-    return node.map(getTextContent).join('')
-  }
-
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return getTextContent(node.props.children)
-  }
-
-  return ''
-}
-
-function getShoutoutConfig(children: ReactNode): ShoutoutConfig | null {
-  const childArray = Children.toArray(children)
-  const firstChild = childArray.find(
-    (child) => typeof child !== 'string' || child.trim() !== '',
-  )
-
-  if (!isValidElement<{ children?: ReactNode }>(firstChild)) {
-    return null
-  }
-
-  if (firstChild.type !== 'p') {
-    return null
-  }
-
-  const marker = getTextContent(firstChild.props.children).trim()
-  const match = marker.match(/^\[!(?<kind>[A-Z][A-Z0-9_-]*)\]$/)
-  if (!match?.groups?.kind) {
-    return null
-  }
-
-  const kind = match.groups.kind.toLowerCase()
-
-  return { kind }
-}
-
-function getAlertLabel(kind: SemanticAlertKind) {
-  if (kind === 'info') return 'Info'
-  if (kind === 'success') return 'Success'
-  if (kind === 'warning') return 'Warning'
-  return 'Error'
-}
-
-function getSemanticShoutoutTitle(kind: string) {
-  if (
-    kind === 'info' ||
-    kind === 'success' ||
-    kind === 'warning' ||
-    kind === 'error'
-  ) {
-    return getAlertLabel(kind)
-  }
-
-  return null
 }
 
 class MarkdownPreviewErrorBoundary extends Component<
@@ -197,76 +80,6 @@ class MarkdownPreviewErrorBoundary extends Component<
   }
 }
 
-function normalizeAssetMediaSrc(src?: string) {
-  if (!src) return src
-  if (src.startsWith('/assets/')) {
-    return withBasePath(src)
-  }
-  if (src.startsWith('assets/')) {
-    return withBasePath(`/${src}`)
-  }
-  return src
-}
-
-function normalizeFootnoteHref(href?: string) {
-  if (!href?.startsWith(FOOTNOTE_TARGET_PREFIX)) {
-    return href
-  }
-
-  return `#${CLOBBER_PREFIX}${href.slice(1)}`
-}
-
-function normalizeSafeUrlSchemes() {
-  return (tree: RehypeNode) => {
-    visitRehypeNode(tree, (node) => {
-      if (node.tagName !== 'a') {
-        return
-      }
-      const properties = node.properties
-      if (!properties) {
-        return
-      }
-      const href = properties.href
-      if (typeof href !== 'string') {
-        return
-      }
-      properties.href = normalizeSafeUrlScheme(href)
-    })
-  }
-}
-
-function visitRehypeNode(
-  node: RehypeNode,
-  visitor: (node: RehypeNode) => void,
-) {
-  visitor(node)
-  for (const child of node.children ?? []) {
-    visitRehypeNode(child, visitor)
-  }
-}
-
-function normalizeSafeUrlScheme(href: string) {
-  return href.replace(/^([A-Za-z][A-Za-z0-9+.-]*):/, (scheme, name: string) =>
-    SAFE_URL_SCHEMES.has(name.toLowerCase())
-      ? `${name.toLowerCase()}:`
-      : scheme,
-  )
-}
-
-function isPlainListParagraph(
-  child: ReactNode,
-): child is ReactElement<{ children?: ReactNode; 'data-line'?: string }> {
-  if (
-    !isValidElement<{ children?: ReactNode; 'data-line'?: string }>(child) ||
-    child.type !== 'p'
-  ) {
-    return false
-  }
-
-  const propKeys = Object.keys(child.props)
-  return propKeys.every((key) => key === 'children' || key === 'data-line')
-}
-
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   let node: HTMLElement | null = el?.parentElement ?? null
   while (node) {
@@ -281,6 +94,7 @@ export default function MarkdownPreview({
   content,
   path,
   pageKind = 'page',
+  workspaceId,
   resolveAssetUrl,
   enableHeadlineLinks = true,
   showToc = false,
@@ -310,287 +124,14 @@ export default function MarkdownPreview({
   const resolvedMode =
     designMode === 'system' ? (prefersLight ? 'light' : 'dark') : designMode
 
-  const markdownLink = useCallback(
-    ({
-      node,
-      ...props
-    }: MarkdownNodeProp &
-      ClassAttributes<HTMLAnchorElement> &
-      AnchorHTMLAttributes<HTMLAnchorElement>) => {
-      void node
-      return (
-        <MarkdownLink
-          path={path}
-          sourceKind={pageKind}
-          resolveAssetUrl={resolveAssetUrl}
-          {...props}
-          href={normalizeFootnoteHref(props.href)}
-        />
-      )
-    },
-    [path, pageKind, resolveAssetUrl],
-  )
-
-  const components = useMemo(
-    () => ({
-      a: markdownLink,
-      img: ({
-        node,
-        ...props
-      }: MarkdownNodeProp &
-        JSX.IntrinsicAttributes &
-        ClassAttributes<HTMLImageElement> &
-        HTMLAttributes<HTMLImageElement>) => {
-        void node
-        return <MarkdownImage resolveAssetUrl={resolveAssetUrl} {...props} />
-      },
-      audio: ({
-        node,
-        ...props
-      }: MarkdownNodeProp & AudioHTMLAttributes<HTMLAudioElement>) => {
-        void node
-        const resolvedSrc = resolveAssetUrl?.(props.src ?? '') ?? props.src
-        return <audio {...props} src={normalizeAssetMediaSrc(resolvedSrc)} />
-      },
-      video: ({
-        node,
-        ...props
-      }: MarkdownNodeProp & VideoHTMLAttributes<HTMLVideoElement>) => {
-        void node
-        const resolvedSrc = resolveAssetUrl?.(props.src ?? '') ?? props.src
-        return <video {...props} src={normalizeAssetMediaSrc(resolvedSrc)} />
-      },
-      section: ({
-        children,
-        node,
-        className,
-        ...props
-      }: MarkdownNodeProp &
-        HTMLAttributes<HTMLElement> & {
-          'data-footnotes'?: boolean | string
-        }) => {
-        void node
-        if ('data-footnotes' in props) {
-          return (
-            <div
-              {...props}
-              className={`markdown-footnotes ${className ?? ''}`.trim()}
-            >
-              {children}
-            </div>
-          )
-        }
-
-        return (
-          <section {...props} className={className}>
-            {children}
-          </section>
-        )
-      },
-      li: ({
-        children,
-        node,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLLIElement> &
-        HTMLAttributes<HTMLLIElement>) => {
-        void node
-        const childArray = Array.isArray(children) ? children : [children]
-        const meaningfulChildren = childArray.filter(
-          (child) => child !== null && child !== undefined && child !== false,
-        )
-        const onlyChild = meaningfulChildren[0]
-
-        if (
-          meaningfulChildren.length === 1 &&
-          isPlainListParagraph(onlyChild)
-        ) {
-          return <li {...props}>{onlyChild.props.children}</li>
-        }
-
-        return <li {...props}>{children}</li>
-      },
-      blockquote: ({
-        children,
-        node,
-        className,
-        'data-line': dataLine,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLQuoteElement> &
-        BlockquoteHTMLAttributes<HTMLQuoteElement> & {
-          'data-line'?: string
-        }) => {
-        void node
-        const shoutoutConfig = getShoutoutConfig(children)
-
-        if (!shoutoutConfig) {
-          return (
-            <blockquote {...props} data-line={dataLine} className={className}>
-              {children}
-            </blockquote>
-          )
-        }
-
-        const childArray = Children.toArray(children)
-        const markerIndex = childArray.findIndex(
-          (child) => isValidElement(child) && child.type === 'p',
-        )
-        const contentChildren = (
-          markerIndex >= 0 ? childArray.slice(markerIndex + 1) : []
-        ).filter((child) => typeof child !== 'string' || child.trim() !== '')
-
-        const title = getSemanticShoutoutTitle(shoutoutConfig.kind)
-
-        return (
-          <aside
-            {...props}
-            data-line={dataLine}
-            className={`markdown-shoutout markdown-shoutout--${shoutoutConfig.kind} ${className ?? ''}`.trim()}
-          >
-            {title ? <p className="markdown-shoutout__title">{title}</p> : null}
-            <div className="markdown-shoutout__content">{contentChildren}</div>
-          </aside>
-        )
-      },
-      h1: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={1} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h1 {...props}>{children}</h1>
-        ),
-      h2: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={2} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h2 {...props}>{children}</h2>
-        ),
-      h3: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={3} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h3 {...props}>{children}</h3>
-        ),
-      h4: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={4} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h4 {...props}>{children}</h4>
-        ),
-      h5: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={5} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h5 {...props}>{children}</h5>
-        ),
-      h6: ({
-        children,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLHeadingElement> &
-        HTMLAttributes<HTMLHeadingElement>) =>
-        enableHeadlineLinks ? (
-          <Headline level={6} {...props}>
-            {children}
-          </Headline>
-        ) : (
-          <h6 {...props}>{children}</h6>
-        ),
-      table: ({
-        node,
-        ...props
-      }: MarkdownNodeProp &
-        ClassAttributes<HTMLTableElement> &
-        HTMLAttributes<HTMLTableElement>) => {
-        void node
-        return (
-          <div className="table-wrapper custom-scrollbar">
-            <table
-              {...props}
-              className={`custom-scrollbar ${props.className ?? ''}`.trim()}
-            />
-          </div>
-        )
-      },
-      pre: MarkdownCodeBlock,
-      code: ({
-        node,
-        ...props
-      }: MarkdownNodeProp &
-        JSX.IntrinsicAttributes &
-        ClassAttributes<HTMLElement> &
-        HTMLAttributes<HTMLElement> & { 'data-line'?: string }) => {
-        void node
-        const { className, children, 'data-line': dataLine } = props
-        if (className?.includes('language-mermaid')) {
-          const code = String(children ?? '').trim()
-          return (
-            <MermaidBlock
-              code={code}
-              dataLine={dataLine}
-              theme={resolvedMode === 'dark' ? 'dark' : 'default'}
-            />
-          )
-        }
-
-        if (className?.includes('language-')) {
-          return (
-            <code data-line={dataLine} className={className} {...props}>
-              {children}
-            </code>
-          )
-        }
-        if (
-          children &&
-          typeof children === 'string' &&
-          children.includes('\n')
-        ) {
-          return <code data-line={dataLine}>{children}</code>
-        }
-        return (
-          <code data-line={dataLine} className="inline-code">
-            {children}
-          </code>
-        )
-      },
-    }),
-    [enableHeadlineLinks, markdownLink, resolveAssetUrl, resolvedMode],
-  )
+  const components = useMarkdownComponents({
+    path,
+    pageKind,
+    workspaceId,
+    resolveAssetUrl,
+    enableHeadlineLinks,
+    resolvedMode,
+  })
 
   const normalizedContent = useMemo(
     () => normalizeMarkdownListIndentation(normalizeMarkdownShoutouts(content)),
@@ -633,7 +174,7 @@ export default function MarkdownPreview({
             rehypeWhitelistStyles,
             normalizeSafeUrlSchemes,
             [rehypeKatex, { output: 'html', strict: 'ignore' }],
-            [rehypeSanitize, schema],
+            [rehypeSanitize, markdownSanitizeSchema],
             rehypeHighlight,
           ]}
           components={components}

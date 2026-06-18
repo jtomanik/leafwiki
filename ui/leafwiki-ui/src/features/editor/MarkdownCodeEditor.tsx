@@ -45,6 +45,7 @@ type MarkdownCodeEditorProps = {
   onChange: (value: string) => void
   onCursorLineChange?: (line: number) => void
   editorViewRef: React.RefObject<EditorView | null>
+  workspaceId: string
   lineWrap?: boolean
 }
 
@@ -72,10 +73,12 @@ export default function MarkdownCodeEditor({
   editorViewRef,
   onChange,
   onCursorLineChange,
+  workspaceId,
   lineWrap = true,
 }: MarkdownCodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const workspaceIdRef = useRef(workspaceId)
   const onChangeRef = useRef(onChange)
   const valueRef = useRef(initialValue)
 
@@ -87,6 +90,10 @@ export default function MarkdownCodeEditor({
   useEffect(() => {
     onChangeRef.current = onChange
   }, [onChange])
+
+  useEffect(() => {
+    workspaceIdRef.current = workspaceId
+  }, [workspaceId])
 
   // Initial editor setup (only once)
   useEffect(() => {
@@ -183,7 +190,10 @@ export default function MarkdownCodeEditor({
           top: true,
         }),
         autocompletion({
-          override: [internalLinkCompletionSource],
+          override: [
+            (context) =>
+              internalLinkCompletionSource(context, workspaceIdRef.current),
+          ],
           icons: false,
           optionClass: () => 'cm-internal-link-option',
           addToOptions: [

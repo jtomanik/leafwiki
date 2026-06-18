@@ -6,6 +6,7 @@ import {
   normalizeWikiRoutePath,
   type WikiNodeKind,
 } from '@/lib/wikiPath'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import { useTreeStore } from '@/stores/tree'
 import { NavigateFunction } from 'react-router-dom'
 import { useLinkStatusStore } from '../links/linkstatus_store'
@@ -15,6 +16,7 @@ type RefreshAfterPageRefactorOptions = {
   preview: PageRefactorPreview
   currentPath: string
   navigate: NavigateFunction
+  workspaceId: string
 }
 
 function normalizeRoutePath(path: string) {
@@ -32,21 +34,30 @@ function buildRefactorRoutePath(
   currentPath: string,
   nextWikiPath: string,
   nextKind?: WikiNodeKind,
+  workspaceId?: string,
 ) {
   const normalizedCurrentPath = normalizeRoutePath(currentPath)
-  const nextBrowserPath = browserRoutePathForWikiNode(nextWikiPath, nextKind)
+  const currentWorkspace = splitWorkspaceRoute(normalizedCurrentPath)
+  const currentModePath = normalizedCurrentPath.startsWith('/w/')
+    ? currentWorkspace.innerPath
+    : normalizedCurrentPath
+  const nextBrowserPath = browserRoutePathForWikiNode(
+    nextWikiPath,
+    nextKind,
+    workspaceId,
+  )
 
-  if (
-    normalizedCurrentPath === '/history' ||
-    normalizedCurrentPath === '/history/'
-  ) {
+  if (currentModePath === '/history' || currentModePath === '/history/') {
     return buildHistoryUrl(nextBrowserPath)
   }
-  if (normalizedCurrentPath.startsWith('/history/')) {
+  if (currentModePath.startsWith('/history/')) {
     return buildHistoryUrl(nextBrowserPath)
   }
-  if (normalizedCurrentPath.startsWith('/e/')) {
+  if (currentModePath.startsWith('/e/')) {
     return buildEditUrl(nextBrowserPath)
+  }
+  if (normalizedCurrentPath.startsWith('/w/')) {
+    return nextBrowserPath
   }
 
   return buildViewUrl(nextBrowserPath)
@@ -56,8 +67,9 @@ export async function refreshAfterPageRefactor({
   preview,
   currentPath,
   navigate,
+  workspaceId,
 }: RefreshAfterPageRefactorOptions) {
-  await useTreeStore.getState().reloadTree()
+  await useTreeStore.getState().reloadTree(workspaceId)
 
   const currentViewerPage = useViewerStore.getState().page
   const normalizedViewerPath = normalizeWikiRoutePath(
@@ -80,6 +92,7 @@ export async function refreshAfterPageRefactor({
       currentPath,
       preview.newPath,
       currentViewerPage?.kind,
+      workspaceId,
     )
     if (normalizeRoutePath(currentPath) !== nextRoutePath) {
       navigate(nextRoutePath, {
@@ -101,6 +114,7 @@ export async function refreshAfterPageRefactor({
       toPageLookupPath(nextPath),
       undefined,
       currentViewerPage?.kind,
+      workspaceId,
     )
 
   const viewerPageID = useViewerStore.getState().page?.id
@@ -109,5 +123,7 @@ export async function refreshAfterPageRefactor({
     return
   }
 
-  await useLinkStatusStore.getState().fetchLinkStatusForPage(viewerPageID)
+  await useLinkStatusStore
+    .getState()
+    .fetchLinkStatusForPage(viewerPageID, workspaceId)
 }

@@ -25,6 +25,8 @@ var reservedDataDirEntries = []string{
 	"tree.json",
 	"assets",
 	".leafwiki",
+	"wikid",
+	"runtime",
 	".importer",
 	"branding",
 	"branding.json",

@@ -38,11 +38,12 @@ import (
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
+	"github.com/perber/wiki/internal/runtimeconfig"
 	"github.com/perber/wiki/internal/wiki"
 	wikioauth "github.com/perber/wiki/internal/wiki/oauth"
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaced"
-	"gopkg.in/yaml.v3"
+	"golang.org/x/sync/singleflight"
 )
 
 func writeUsage(w io.Writer) {
@@ -53,8 +54,12 @@ func writeUsage(w io.Writer) {
 	leafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki --mcp=stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
 	leafwiki agent-hook <codex|claude|cursor|unknown> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
+	leafwiki daemon
 	leafwiki reset-admin-password
 	leafwiki --help
+
+	Service mode:
+	leafwiki daemon reads ~/.leafwiki/leafwiki.yml and runs the install-wide wikid/frontd/workspaced runtime in the foreground.
 
 	Options:
 	--host             Host/IP address to bind the server to (default: 127.0.0.1)
@@ -84,7 +89,7 @@ func writeUsage(w io.Writer) {
 	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
 	--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)
 	--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY
-	--daemon-idle-timeout         Project daemon idle timeout after last session exits; 0 stops immediately (default: 10m)
+	--daemon-idle-timeout         Federated runtime idle timeout after the last session or presence record exits; 0 stops immediately (default: 10m)
 	--max-revision-history        Maximum revisions kept per page; 0 = unlimited (default: 100)
 	--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)
 	--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)
@@ -158,21 +163,9 @@ func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io
 
 var failOpenAgentHookProvider string
 
-type configFlagMixError struct {
-	flag string
-}
-
-func (err configFlagMixError) Error() string {
-	return "--config cannot be combined with " + err.flag
-}
-
-type configUsageError struct {
-	message string
-}
-
-func (err configUsageError) Error() string {
-	return err.message
-}
+type configFlagMixError = runtimeconfig.ConfigFlagMixError
+type configUsageError = runtimeconfig.ConfigUsageError
+type daemonServiceConfigMissingError = runtimeconfig.DaemonServiceConfigMissingError
 
 func fail(msg string, args ...any) {
 	if failOpenAgentHookProvider != "" {
@@ -260,40 +253,7 @@ type cliFlags struct {
 	internalRuntimeRole     *string
 }
 
-type leafwikiRuntimeConfig struct {
-	Workspace               wiki.Workspace
-	Host                    string
-	Port                    string
-	AdminPassword           string
-	JWTSecret               string
-	PublicAccess            bool
-	AllowInsecure           bool
-	InjectCodeInHeader      string
-	CustomStylesheet        string
-	Logging                 leaflogging.Config
-	DisableAuth             bool
-	HideLinkMetadataSection bool
-	AccessTokenTimeout      time.Duration
-	RefreshTokenTimeout     time.Duration
-	BasePath                string
-	MaxAssetUploadSize      int64
-	EnableRevision          bool
-	EnableWorkspaceSync     bool
-	EnableLinkRefactor      bool
-	MCPTransports           mcpTransports
-	APIKey                  string
-	MaxRevisionHistory      int
-	EnableHTTPRemoteUser    bool
-	HTTPRemoteUserHeader    string
-	TrustedProxyIPsRaw      string
-	HTTPRemoteUserLogoutURL string
-	DisableRequestLog       bool
-	DaemonIdleTimeout       time.Duration
-	DaemonStartupErrorPath  string
-	DetachDaemonOwnerIO     bool
-	MarkdownLinkRootPrefix  string
-	RuntimeStack            string
-}
+type leafwikiRuntimeConfig = runtimeconfig.LeafWikiRuntimeConfig
 
 func registerFlags(fs *flag.FlagSet) *cliFlags {
 	return &cliFlags{
@@ -322,7 +282,7 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		enableLinkRefactor:      fs.Bool("enable-link-refactor", false, "enable the link refactoring dialog and rewrite flow (default: false)"),
 		mcp:                     fs.String("mcp", "", "MCP transports: none, http, stdio, http,stdio, or stdio,http"),
 		apiKey:                  fs.String("api-key", "", "native STDIO MCP API key; prefer LEAFWIKI_MCP_API_KEY"),
-		daemonIdleTimeout:       fs.Duration("daemon-idle-timeout", projectdaemon.DefaultIdleTimeout, "project daemon idle timeout after last session exits; 0 stops immediately"),
+		daemonIdleTimeout:       fs.Duration("daemon-idle-timeout", projectdaemon.DefaultIdleTimeout, "federated runtime idle timeout after the last session or presence record exits; 0 stops immediately"),
 		internalProjectDaemon:   fs.String("internal-project-daemon", "", "internal project daemon startup config path"),
 		enableMCP:               fs.Bool("enable-mcp", false, "compatibility flag for local MCP Streamable HTTP endpoint"),
 		mcpStdio:                fs.Bool("mcp-stdio", false, "compatibility flag for native MCP STDIO"),
@@ -338,8 +298,35 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 
 func main() {
 	setupBootstrapLogger(os.Stderr)
+	startup, ok := parseStartupCLI(os.Args[1:])
+	if !ok {
+		return
+	}
+	if runInternalStartupCommand(startup.flags) {
+		return
+	}
+
+	dataDir := resolveStartupDataDir(startup.flags, startup.visited, startup.serviceModeRequested)
+	agentHookRequested := configureAgentHookRequest(startup.args)
+	transports := resolveStartupMCPTransports(startup.flags, startup.visited, agentHookRequested)
+	validateStartupCommandTransport(startup.serviceModeRequested, transports, startup.args)
+	if handleStartupPositionalCommand(startup.args, agentHookRequested, dataDir) {
+		return
+	}
+
+	cfg := buildRuntimeConfigForStartup(startup.flags, startup.visited, startup.serviceModeRequested, transports, dataDir)
+	dispatchRuntimeCommand(startup.args, startup.serviceModeRequested, agentHookRequested, cfg)
+}
+
+type startupCLI struct {
+	flags                *cliFlags
+	visited              map[string]bool
+	args                 []string
+	serviceModeRequested bool
+}
+
+func parseStartupCLI(rawArgs []string) (startupCLI, bool) {
 	failOpenAgentHookProvider = ""
-	rawArgs := os.Args[1:]
 	if provider, ok := agentHookProviderFromRawArgs(rawArgs); ok {
 		failOpenAgentHookProvider = provider
 	}
@@ -351,7 +338,7 @@ func main() {
 	}
 	if !configModeRequested && shouldPrintUsage(rawArgs) {
 		printUsage()
-		return
+		return startupCLI{}, false
 	}
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
@@ -371,189 +358,262 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Track which flags were explicitly set on CLI
 	visited := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	flag.CommandLine.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	args := flag.CommandLine.Args()
+	if isDaemonHelpCommand(args) {
+		printUsage()
+		return startupCLI{}, false
+	}
+	serviceModeRequested := isDaemonCommand(args)
+	applyStartupConfig(flag.CommandLine, flags, visited, args, serviceModeRequested)
+	return startupCLI{
+		flags:                flags,
+		visited:              visited,
+		args:                 args,
+		serviceModeRequested: serviceModeRequested,
+	}, true
+}
+
+func applyStartupConfig(fs *flag.FlagSet, flags *cliFlags, visited map[string]bool, args []string, serviceModeRequested bool) {
 	if visited["config"] {
-		if err := validateConfigModeArgs(flag.CommandLine.Args()); err != nil {
+		if err := validateConfigModeArgs(args); err != nil {
 			failInvalidConfigFile(err)
 		}
-		if err := applyYAMLConfigFile(flag.CommandLine, flags, visited); err != nil {
+		if err := applyYAMLConfigFile(fs, flags, visited); err != nil {
 			failInvalidConfigFile(err)
 		}
 	}
+	if !serviceModeRequested {
+		return
+	}
+	if err := applyDaemonServiceConfig(fs, flags, visited, args); err != nil {
+		var missingConfig daemonServiceConfigMissingError
+		if errors.As(err, &missingConfig) {
+			failWithoutAgentHook("Service config file is required for service mode", "error", err)
+		}
+		failWithoutAgentHook("Invalid service config file", "error", err)
+	}
+}
+
+func runInternalStartupCommand(flags *cliFlags) bool {
 	if strings.TrimSpace(*flags.internalProjectDaemon) != "" {
 		if err := runInternalProjectDaemon(context.Background(), *flags.internalProjectDaemon); err != nil {
 			fail("Project daemon failed", "error", err)
 		}
-		return
+		return true
 	}
 	if strings.TrimSpace(*flags.internalRuntimeRole) != "" {
 		if err := runInternalRuntimeRole(context.Background(), *flags.internalRuntimeRole); err != nil {
 			fail("Runtime role failed", "error", err)
 		}
-		return
+		return true
 	}
+	return false
+}
 
-	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
-	args := flag.Args()
+func resolveStartupDataDir(flags *cliFlags, visited map[string]bool, serviceModeRequested bool) string {
+	defaultDataDir := "./data"
+	if serviceModeRequested && !visited["data-dir"] {
+		serviceDataDir, err := defaultDaemonServiceDataDir()
+		if err != nil {
+			failWithoutAgentHook("Service config file is required for service mode", "error", err)
+		}
+		defaultDataDir = serviceDataDir
+	}
+	return resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", defaultDataDir)
+}
+
+func configureAgentHookRequest(args []string) bool {
 	agentHookRequested := isAgentHookCommand(args)
 	if !agentHookRequested {
 		failOpenAgentHookProvider = ""
+		return false
 	}
+	if provider, ok := agentHookProviderFromArgs(args); ok {
+		failOpenAgentHookProvider = provider
+	}
+	return true
+}
+
+func resolveStartupMCPTransports(flags *cliFlags, visited map[string]bool, agentHookRequested bool) mcpTransports {
 	if agentHookRequested {
-		if provider, ok := agentHookProviderFromArgs(args); ok {
-			failOpenAgentHookProvider = provider
-		}
+		return mcpTransports{}
 	}
-	resolvedMCPTransports := mcpTransports{}
-	if !agentHookRequested {
-		var err error
-		resolvedMCPTransports, err = resolveMCPTransports(flags, visited)
-		if err != nil {
-			fail("Invalid MCP configuration", "error", err)
-		}
+	transports, err := resolveMCPTransports(flags, visited)
+	if err != nil {
+		fail("Invalid MCP configuration", "error", err)
 	}
-	if resolvedMCPTransports.Stdio && len(args) > 0 {
+	return transports
+}
+
+func validateStartupCommandTransport(serviceModeRequested bool, transports mcpTransports, args []string) {
+	if serviceModeRequested && transports.Stdio {
+		failWithoutAgentHook("Invalid service config file", "error", fmt.Errorf("leafwiki daemon does not support mcp: stdio; use scripts/run.sh mcp for native STDIO clients"))
+	}
+	if transports.Stdio && len(args) > 0 {
 		fail("Invalid native STDIO configuration", "error", fmt.Errorf("native STDIO does not support positional commands"))
 	}
-	if len(args) > 0 && !agentHookRequested {
-		switch args[0] {
-		case "reset-admin-password":
-			runtimeStack, stackErr := resolveRuntimeStack()
-			if stackErr != nil {
-				fail("Invalid runtime stack", "error", stackErr)
-			}
-			resetDataDir := authStorageDirForRuntime(dataDir, runtimeStack)
-			if runtimeStack == projectdaemon.RuntimeStackWikidFrontd {
-				if err := wikid.CleanupLegacyAuthDBs(dataDir); err != nil {
-					fail("Password reset failed", "error", err)
-				}
-			}
-			user, err := tools.ResetAdminPassword(resetDataDir)
-			if err != nil {
-				fail("Password reset failed", "error", err)
-			}
+}
 
-			fmt.Println("Admin password reset successfully.")
-			fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
-			return
-		case "--help", "-h", "help":
-			printUsage()
-			return
-		default:
-			fmt.Printf("Unknown command: %s\n\n", args[0])
-			printUsage()
-			return
+func handleStartupPositionalCommand(args []string, agentHookRequested bool, dataDir string) bool {
+	if len(args) == 0 || agentHookRequested {
+		return false
+	}
+	switch args[0] {
+	case "daemon":
+		return false
+	case "reset-admin-password":
+		resetAdminPasswordCommand(dataDir)
+		return true
+	case "--help", "-h", "help":
+		printUsage()
+		return true
+	default:
+		fmt.Printf("Unknown command: %s\n\n", args[0])
+		printUsage()
+		return true
+	}
+}
+
+func resetAdminPasswordCommand(dataDir string) {
+	runtimeStack, stackErr := resolveRuntimeStack()
+	if stackErr != nil {
+		fail("Invalid runtime stack", "error", stackErr)
+	}
+	resetDataDir := authStorageDirForRuntime(dataDir, runtimeStack)
+	if runtimeStack == projectdaemon.RuntimeStackWikidFrontd {
+		if err := wikid.CleanupLegacyAuthDBs(dataDir); err != nil {
+			fail("Password reset failed", "error", err)
 		}
 	}
+	user, err := tools.ResetAdminPassword(resetDataDir)
+	if err != nil {
+		fail("Password reset failed", "error", err)
+	}
+	fmt.Println("Admin password reset successfully.")
+	fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
+}
 
+func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serviceModeRequested bool, transports mcpTransports, dataDir string) leafwikiRuntimeConfig {
 	host := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1")
 	port := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080")
-	workspace, shouldStartWiki, err := resolveStartupWorkspace(flags, visited, flag.Args())
-	if err != nil {
-		fail("Invalid workspace configuration", "error", err)
-	}
-	if shouldStartWiki {
+	workspace := resolveWorkspaceForStartup(flags, visited)
+	if workspace.ID != "" {
 		dataDir = workspace.DataDir
 	}
-	adminPassword := resolveString("admin-password", *flags.adminPassword, visited, "LEAFWIKI_ADMIN_PASSWORD", "")
-	jwtSecret := resolveString("jwt-secret", *flags.jwtSecret, visited, "LEAFWIKI_JWT_SECRET", "")
-	injectCodeInHeader := resolveString("inject-code-in-header", *flags.injectCodeInHeader, visited, "LEAFWIKI_INJECT_CODE_IN_HEADER", "")
-	customStylesheet := resolveString("custom-stylesheet", *flags.customStylesheet, visited, "LEAFWIKI_CUSTOM_STYLESHEET", "")
-	allowInsecure := resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE")
-	publicAccess := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS")
-	hideLinkMetadataSection := resolveBool("hide-link-metadata-section", *flags.hideLinkMetadataSection, visited, "LEAFWIKI_HIDE_LINK_METADATA_SECTION")
-	accessTokenTimeout := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT")
-	refreshTokenTimeout := resolveDuration("refresh-token-timeout", *flags.refreshTokenTimeout, visited, "LEAFWIKI_REFRESH_TOKEN_TIMEOUT")
-	daemonIdleTimeout := resolveDuration("daemon-idle-timeout", *flags.daemonIdleTimeout, visited, "LEAFWIKI_DAEMON_IDLE_TIMEOUT")
-	// If disable-auth is set, later logic will override publicAccess accordingly
-	disableAuth := resolveBool("disable-auth", *flags.disableAuth, visited, "LEAFWIKI_DISABLE_AUTH")
-	basePath := normalizeBasePath(resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""))
 	markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
 	if err != nil {
 		fail("Invalid markdown link root prefix", "error", err)
 	}
-	maxAssetUploadSize := parseByteSize(
-		resolveString("max-asset-upload-size", *flags.maxAssetUploadSize, visited, "LEAFWIKI_MAX_ASSET_UPLOAD_SIZE", "50MiB"),
-		"max asset upload size",
-	)
 	enableRevision := resolveBool("enable-revision", *flags.enableRevision, visited, "LEAFWIKI_ENABLE_REVISION")
 	enableWorkspaceSync := resolveBool("enable-workspace-sync", *flags.enableWorkspaceSync, visited, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
 	if enableRevision && enableWorkspaceSync {
 		fail("Invalid revision configuration", "error", fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined"))
 	}
-	enableLinkRefactor := resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR")
 	apiKey := ""
-	if resolvedMCPTransports.Stdio {
+	if transports.Stdio {
 		apiKey = resolveString("api-key", *flags.apiKey, visited, "LEAFWIKI_MCP_API_KEY", "")
 	}
-	maxRevisionHistory := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100)
-	enableHTTPRemoteUser := resolveBool("enable-http-remote-user", *flags.enableHTTPRemoteUser, visited, "LEAFWIKI_ENABLE_HTTP_REMOTE_USER")
-	httpRemoteUserHeader := resolveString("http-remote-user-header-name", *flags.httpRemoteUserHeader, visited, "LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME", "Remote-User")
 	trustedProxyIPsRaw := resolveString("trusted-proxy-ips", *flags.trustedProxyIPs, visited, "LEAFWIKI_TRUSTED_PROXY_IPS", "")
-	httpRemoteUserLogoutURL := resolveString("http-remote-user-logout-url", *flags.httpRemoteUserLogoutURL, visited, "LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL", "")
-	disableRequestLog := resolveBool("disable-request-log", *flags.disableRequestLog, visited, "LEAFWIKI_DISABLE_REQUEST_LOG")
-	runtimeStack, err := resolveRuntimeStack()
-	if err != nil {
-		fail("Invalid runtime stack", "error", err)
+	validateProxyAuthSettings(trustedProxyIPsRaw, resolveBool("enable-http-remote-user", *flags.enableHTTPRemoteUser, visited, "LEAFWIKI_ENABLE_HTTP_REMOTE_USER"))
+	loggingConfig := resolveLoggingConfigForStartup(flags, visited, dataDir)
+	disableAuth := resolveBool("disable-auth", *flags.disableAuth, visited, "LEAFWIKI_DISABLE_AUTH")
+	validateMCPSettings(transports, disableAuth, loggingConfig.Target, host, apiKey)
+	runtimeStack := resolveRuntimeStackForStartup(serviceModeRequested)
+
+	return leafwikiRuntimeConfig{
+		Workspace:               workspace,
+		Host:                    host,
+		Port:                    port,
+		AdminPassword:           resolveString("admin-password", *flags.adminPassword, visited, "LEAFWIKI_ADMIN_PASSWORD", ""),
+		JWTSecret:               resolveString("jwt-secret", *flags.jwtSecret, visited, "LEAFWIKI_JWT_SECRET", ""),
+		PublicAccess:            resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS") || disableAuth,
+		AllowInsecure:           resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE"),
+		InjectCodeInHeader:      resolveString("inject-code-in-header", *flags.injectCodeInHeader, visited, "LEAFWIKI_INJECT_CODE_IN_HEADER", ""),
+		CustomStylesheet:        resolveString("custom-stylesheet", *flags.customStylesheet, visited, "LEAFWIKI_CUSTOM_STYLESHEET", ""),
+		Logging:                 loggingConfig,
+		DisableAuth:             disableAuth,
+		HideLinkMetadataSection: resolveBool("hide-link-metadata-section", *flags.hideLinkMetadataSection, visited, "LEAFWIKI_HIDE_LINK_METADATA_SECTION"),
+		AccessTokenTimeout:      resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT"),
+		RefreshTokenTimeout:     resolveDuration("refresh-token-timeout", *flags.refreshTokenTimeout, visited, "LEAFWIKI_REFRESH_TOKEN_TIMEOUT"),
+		BasePath:                normalizeBasePath(resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", "")),
+		MarkdownLinkRootPrefix:  markdownLinkRootPrefix,
+		MaxAssetUploadSize: parseByteSize(
+			resolveString("max-asset-upload-size", *flags.maxAssetUploadSize, visited, "LEAFWIKI_MAX_ASSET_UPLOAD_SIZE", "50MiB"),
+			"max asset upload size",
+		),
+		EnableRevision:          enableRevision,
+		EnableWorkspaceSync:     enableWorkspaceSync,
+		EnableLinkRefactor:      resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR"),
+		MCPTransports:           transports,
+		APIKey:                  apiKey,
+		MaxRevisionHistory:      resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100),
+		EnableHTTPRemoteUser:    resolveBool("enable-http-remote-user", *flags.enableHTTPRemoteUser, visited, "LEAFWIKI_ENABLE_HTTP_REMOTE_USER"),
+		HTTPRemoteUserHeader:    resolveString("http-remote-user-header-name", *flags.httpRemoteUserHeader, visited, "LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME", "Remote-User"),
+		TrustedProxyIPsRaw:      trustedProxyIPsRaw,
+		HTTPRemoteUserLogoutURL: resolveString("http-remote-user-logout-url", *flags.httpRemoteUserLogoutURL, visited, "LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL", ""),
+		DisableRequestLog:       resolveBool("disable-request-log", *flags.disableRequestLog, visited, "LEAFWIKI_DISABLE_REQUEST_LOG"),
+		DaemonIdleTimeout:       resolveDuration("daemon-idle-timeout", *flags.daemonIdleTimeout, visited, "LEAFWIKI_DAEMON_IDLE_TIMEOUT"),
+		DisableIdleShutdown:     serviceModeRequested,
+		RuntimeStack:            runtimeStack,
 	}
+}
+
+func resolveWorkspaceForStartup(flags *cliFlags, visited map[string]bool) wiki.Workspace {
+	workspace, _, err := resolveStartupWorkspace(flags, visited, flag.Args())
+	if err != nil {
+		fail("Invalid workspace configuration", "error", err)
+	}
+	return workspace
+}
+
+func validateProxyAuthSettings(trustedProxyIPsRaw string, enableHTTPRemoteUser bool) {
 	if _, err := authmw.ParseTrustedProxies(trustedProxyIPsRaw); err != nil {
 		fail("invalid --trusted-proxy-ips value", "error", err)
 	}
-
 	if err := validateHTTPRemoteUserConfig(enableHTTPRemoteUser, trustedProxyIPsRaw); err != nil {
 		fail("Invalid HTTP remote user configuration", "error", err)
 	}
+}
 
+func resolveLoggingConfigForStartup(flags *cliFlags, visited map[string]bool, dataDir string) leaflogging.Config {
 	loggingConfig, err := resolveLoggingConfig(flags, visited, dataDir)
 	if err != nil {
 		fail("Invalid logging configuration", "error", err)
 	}
+	return loggingConfig
+}
+
+func validateMCPSettings(transports mcpTransports, disableAuth bool, logTarget leaflogging.Target, host string, apiKey string) {
 	if err := validateMCPTransportOptions(mcpTransportOptions{
-		Transports:  resolvedMCPTransports,
+		Transports:  transports,
 		DisableAuth: disableAuth,
-		LogTarget:   loggingConfig.Target,
+		LogTarget:   logTarget,
 		Host:        host,
 		APIKey:      apiKey,
 	}); err != nil {
 		fail("Invalid MCP configuration", "error", err)
 	}
-	if disableAuth {
-		publicAccess = true
-	}
+}
 
-	cfg := leafwikiRuntimeConfig{
-		Workspace:               workspace,
-		Host:                    host,
-		Port:                    port,
-		AdminPassword:           adminPassword,
-		JWTSecret:               jwtSecret,
-		PublicAccess:            publicAccess,
-		AllowInsecure:           allowInsecure,
-		InjectCodeInHeader:      injectCodeInHeader,
-		CustomStylesheet:        customStylesheet,
-		Logging:                 loggingConfig,
-		DisableAuth:             disableAuth,
-		HideLinkMetadataSection: hideLinkMetadataSection,
-		AccessTokenTimeout:      accessTokenTimeout,
-		RefreshTokenTimeout:     refreshTokenTimeout,
-		BasePath:                basePath,
-		MarkdownLinkRootPrefix:  markdownLinkRootPrefix,
-		MaxAssetUploadSize:      maxAssetUploadSize,
-		EnableRevision:          enableRevision,
-		EnableWorkspaceSync:     enableWorkspaceSync,
-		EnableLinkRefactor:      enableLinkRefactor,
-		MCPTransports:           resolvedMCPTransports,
-		APIKey:                  apiKey,
-		MaxRevisionHistory:      maxRevisionHistory,
-		EnableHTTPRemoteUser:    enableHTTPRemoteUser,
-		HTTPRemoteUserHeader:    httpRemoteUserHeader,
-		TrustedProxyIPsRaw:      trustedProxyIPsRaw,
-		HTTPRemoteUserLogoutURL: httpRemoteUserLogoutURL,
-		DisableRequestLog:       disableRequestLog,
-		DaemonIdleTimeout:       daemonIdleTimeout,
-		RuntimeStack:            runtimeStack,
+func resolveRuntimeStackForStartup(serviceModeRequested bool) string {
+	if serviceModeRequested {
+		return projectdaemon.RuntimeStackWikidFrontd
+	}
+	runtimeStack, err := resolveRuntimeStack()
+	if err != nil {
+		fail("Invalid runtime stack", "error", err)
+	}
+	return runtimeStack
+}
+
+func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookRequested bool, cfg leafwikiRuntimeConfig) {
+	if serviceModeRequested {
+		if err := runDaemonService(context.Background(), cfg); err != nil {
+			failWithoutAgentHook("LeafWiki daemon failed", "error", err)
+		}
+		return
 	}
 	if agentHookRequested {
 		provider := agenthooks.ProviderUnknown
@@ -631,27 +691,7 @@ func agentHookProviderFromRawArgs(args []string) (string, bool) {
 }
 
 func rawFlagName(arg string) (string, bool, bool) {
-	if !strings.HasPrefix(arg, "-") || arg == "-" {
-		return "", false, false
-	}
-	var trimmed string
-	if strings.HasPrefix(arg, "--") {
-		trimmed = strings.TrimPrefix(arg, "--")
-		if strings.HasPrefix(trimmed, "-") {
-			return "", false, false
-		}
-	} else {
-		trimmed = strings.TrimPrefix(arg, "-")
-	}
-	if trimmed == "" {
-		return "", false, false
-	}
-	name, value, hasInlineValue := strings.Cut(trimmed, "=")
-	if strings.TrimSpace(name) == "" {
-		return "", false, false
-	}
-	_ = value
-	return name, hasInlineValue, true
+	return runtimeconfig.RawFlagName(arg)
 }
 
 func rawArgsContainFlag(args []string, flagName string) bool {
@@ -675,70 +715,27 @@ func rawArgsContainFlag(args []string, flagName string) bool {
 }
 
 func validateRawConfigFlagUsage(args []string) error {
-	skipNext := false
-	for i, arg := range args {
-		if skipNext {
-			skipNext = false
-			continue
-		}
-		name, hasInlineValue, ok := rawFlagName(arg)
-		if !ok {
-			continue
-		}
-		if name == "config" {
-			if hasInlineValue {
-				_, value, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-				if isInvalidBareConfigPathValue(value) {
-					return configUsageError{message: "--config requires a path"}
-				}
-			} else if i+1 >= len(args) || isInvalidBareConfigPathValue(args[i+1]) {
-				return configUsageError{message: "--config requires a path"}
-			}
-		}
-		if _, takesValue := valueTakingFlagNames()[name]; takesValue && !hasInlineValue {
-			skipNext = true
-		}
-	}
-	return nil
+	return runtimeconfig.ValidateRawConfigFlagUsage(args)
 }
 
 func isInvalidBareConfigPathValue(path string) bool {
-	path = strings.TrimSpace(path)
-	return path == "" || strings.HasPrefix(path, "-")
+	return runtimeconfig.IsInvalidBareConfigPathValue(path)
 }
 
 func valueTakingFlagNames() map[string]struct{} {
-	return map[string]struct{}{
-		"access-token-timeout":         {},
-		"admin-password":               {},
-		"api-key":                      {},
-		"base-path":                    {},
-		"config":                       {},
-		"custom-stylesheet":            {},
-		"daemon-idle-timeout":          {},
-		"data-dir":                     {},
-		"host":                         {},
-		"http-remote-user-header-name": {},
-		"http-remote-user-logout-url":  {},
-		"inject-code-in-header":        {},
-		"internal-project-daemon":      {},
-		"internal-runtime-role":        {},
-		"jwt-secret":                   {},
-		"log-file":                     {},
-		"log-target":                   {},
-		"markdown-link-root-prefix":    {},
-		"max-asset-upload-size":        {},
-		"max-revision-history":         {},
-		"mcp":                          {},
-		"port":                         {},
-		"refresh-token-timeout":        {},
-		"root-dir":                     {},
-		"trusted-proxy-ips":            {},
-	}
+	return runtimeconfig.ValueTakingFlagNames()
 }
 
 func isAgentHookCommand(args []string) bool {
 	return len(args) > 0 && args[0] == "agent-hook"
+}
+
+func isDaemonCommand(args []string) bool {
+	return runtimeconfig.IsDaemonCommand(args)
+}
+
+func isDaemonHelpCommand(args []string) bool {
+	return runtimeconfig.IsDaemonHelpCommand(args)
 }
 
 func shouldPrintUsage(args []string) bool {
@@ -754,6 +751,14 @@ func shouldPrintUsage(args []string) bool {
 
 func buildListenAddress(host, port string) string {
 	return net.JoinHostPort(host, port)
+}
+
+func defaultDaemonServiceDataDir() (string, error) {
+	return runtimeconfig.DefaultDaemonServiceDataDir()
+}
+
+func defaultDaemonServiceConfigPath() (string, error) {
+	return runtimeconfig.DefaultDaemonServiceConfigPath()
 }
 
 func newNativeStdioJSONFilter(stdin io.ReadCloser, stdout io.Writer) (io.ReadCloser, <-chan error) {
@@ -834,12 +839,7 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 		case <-ctx.Done():
 		}
 	}()
-	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
-	if err != nil {
-		return err
-	}
-	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	desc, err := attachOrStartProjectDaemon(ctx, cfg, ownerCfg, descriptorPath)
+	desc, err := attachOrStartRuntimeDaemon(ctx, cfg)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil
@@ -880,9 +880,17 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 	if cfg.MCPTransports.Stdio {
 		bridgeCtx, stopBridge := context.WithCancel(ctx)
 		defer stopBridge()
+		bridgeCfg := daemonStdioBridgeConfig(desc, cfg)
+		if strings.TrimSpace(desc.PrivateMCPURL) != "" {
+			actorContext, err := daemonStdioActorContext(ctx, desc, cfg)
+			if err != nil {
+				return err
+			}
+			bridgeCfg.ActorContext = actorContext
+		}
 		bridgeErr := make(chan error, 1)
 		go func() {
-			bridgeErr <- runDaemonStdioBridge(bridgeCtx, daemonStdioBridgeConfig(desc, cfg))
+			bridgeErr <- runDaemonStdioBridge(bridgeCtx, bridgeCfg)
 		}()
 		select {
 		case err := <-bridgeErr:
@@ -902,6 +910,24 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 		return err
 	}
 	return nil
+}
+
+func runDaemonService(parent context.Context, cfg leafwikiRuntimeConfig) error {
+	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+	cfg.DisableIdleShutdown = true
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return runProjectDaemonOwner(ctx, cfg)
 }
 
 func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, provider string, stdin io.Reader, stdout io.Writer) (err error) {
@@ -932,11 +958,7 @@ func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, prov
 	cfg.DetachDaemonOwnerIO = true
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
-	if err != nil {
-		return err
-	}
-	desc, err := attachOrStartProjectDaemon(ctx, cfg, ownerCfg, projectdaemon.DescriptorPath(ownerCfg.DataDir))
+	desc, err := attachOrStartRuntimeDaemon(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -948,14 +970,48 @@ func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, prov
 }
 
 func daemonStdioBridgeConfig(desc *projectdaemon.Descriptor, cfg leafwikiRuntimeConfig) daemonStdioBridge {
-	return daemonStdioBridge{
-		ControlURL:   desc.ControlURL,
-		ControlToken: desc.ControlToken,
-		APIKey:       cfg.APIKey,
-		Stdin:        os.Stdin,
-		Stdout:       os.Stdout,
-		Stderr:       os.Stderr,
+	endpointURL := strings.TrimRight(desc.ControlURL, "/") + "/mcp"
+	controlToken := desc.ControlToken
+	if strings.TrimSpace(desc.PrivateMCPURL) != "" && strings.TrimSpace(desc.PrivateMCPToken) != "" {
+		endpointURL = strings.TrimSpace(desc.PrivateMCPURL)
+		controlToken = strings.TrimSpace(desc.PrivateMCPToken)
 	}
+	return daemonStdioBridge{
+		EndpointURL:      endpointURL,
+		ControlToken:     controlToken,
+		AuthControlURL:   strings.TrimSpace(desc.ControlURL),
+		AuthControlToken: strings.TrimSpace(desc.ControlToken),
+		WorkspaceID:      strings.TrimSpace(desc.WorkspaceID),
+		APIKey:           cfg.APIKey,
+		Stdin:            os.Stdin,
+		Stdout:           os.Stdout,
+		Stderr:           os.Stderr,
+	}
+}
+
+func daemonStdioActorContext(ctx context.Context, desc *projectdaemon.Descriptor, cfg leafwikiRuntimeConfig) (string, error) {
+	source := &http.Request{
+		Method: http.MethodPost,
+		URL:    &url.URL{Path: "/mcp"},
+		Header: http.Header{},
+	}
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		source.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.APIKey))
+	}
+	if strings.TrimSpace(desc.WorkspaceID) != "" {
+		source.Header.Set(projectdaemon.WorkspaceIDHeader, strings.TrimSpace(desc.WorkspaceID))
+	}
+	out := struct {
+		Actor projectdaemon.ActorContext `json:"actor"`
+	}{}
+	if err := callWikidPrivateEndpoint(ctx, desc.ControlURL, desc.ControlToken, "/__leafwiki/actor-context", source, &out); err != nil {
+		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
+	}
+	encoded, err := projectdaemon.EncodeActorContext(out.Actor)
+	if err != nil {
+		return "", fmt.Errorf("encode native STDIO actor context: %w", err)
+	}
+	return encoded, nil
 }
 
 func validateAuthStartupConfig(cfg leafwikiRuntimeConfig) error {
@@ -983,13 +1039,25 @@ func logStartupValidationFailure(cfg leaflogging.Config, msg string) {
 	logger.Error(msg)
 }
 
+func attachOrStartRuntimeDaemon(ctx context.Context, cfg leafwikiRuntimeConfig) (*projectdaemon.Descriptor, error) {
+	requestCfg, err := daemonWorkspaceRequestConfigForRuntime(cfg)
+	if err != nil {
+		return nil, err
+	}
+	descriptorPath := projectdaemon.DescriptorPath(requestCfg.DataDir)
+	if cfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
+		return attachOrStartFederatedProjectDaemon(ctx, cfg, requestCfg, descriptorPath)
+	}
+	return attachOrStartProjectDaemon(ctx, cfg, requestCfg, descriptorPath)
+}
+
 func attachOrStartProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config, descriptorPath string) (*projectdaemon.Descriptor, error) {
 	desc, healthy, err := readHealthyProjectDaemon(ctx, descriptorPath, ownerCfg)
 	if err != nil {
 		return nil, err
 	}
 	if healthy {
-		if mismatches := compareProjectDaemonConfigForRequest(desc.Config, ownerCfg, cfg.MCPTransports); len(mismatches) > 0 {
+		if mismatches := compareProjectDaemonDescriptorForRequest(desc, ownerCfg, cfg.MCPTransports); len(mismatches) > 0 {
 			return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
 		}
 		return desc, nil
@@ -1022,6 +1090,202 @@ func attachOrStartProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, 
 		return nil, err
 	}
 	return waitForProjectDaemon(ctx, descriptorPath, errorPath, spawnOwnerCfg, cfg.MCPTransports)
+}
+
+func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, requestCfg projectdaemon.Config, workspaceDescriptorPath string) (*projectdaemon.Descriptor, error) {
+	globalCfg, err := daemonRequestConfigForRuntime(cfg)
+	if err != nil {
+		return nil, err
+	}
+	layout := wikid.GlobalLayout(globalCfg.DataDir)
+	if cfg.MCPTransports.Stdio {
+		if workspace, ok, err := registeredFederatedWorkspaceForRequest(layout, requestCfg); err != nil {
+			return nil, err
+		} else if ok {
+			directRequestCfg := requestCfg
+			directRequestCfg.WorkspaceID = workspace.ID
+			desc, healthy, err := readHealthyProjectDaemon(ctx, workspaceDescriptorPath, directRequestCfg)
+			if err != nil {
+				return nil, err
+			}
+			if healthy {
+				if mismatches := compareProjectDaemonDescriptorForRequest(desc, directRequestCfg, cfg.MCPTransports); len(mismatches) > 0 {
+					return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+				}
+				return desc, nil
+			}
+			if desc != nil {
+				_ = projectdaemon.RemoveDescriptor(workspaceDescriptorPath)
+			}
+		}
+	}
+
+	globalDescriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
+	globalDesc, healthy, err := readHealthyProjectDaemon(ctx, globalDescriptorPath, globalCfg)
+	if err != nil {
+		return nil, err
+	}
+	if !healthy {
+		if globalDesc != nil {
+			_ = projectdaemon.RemoveDescriptor(globalDescriptorPath)
+		}
+		if err := validateAuthStartupConfig(cfg); err != nil {
+			logStartupValidationFailure(cfg.Logging, err.Error())
+			return nil, err
+		}
+		if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
+			if err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(globalCfg.DataDir, globalCfg.RuntimeStack), cfg.APIKey); err != nil {
+				if errors.Is(err, coreauth.ErrInvalidToken) {
+					return nil, fmt.Errorf("invalid native STDIO API key")
+				}
+				return nil, fmt.Errorf("verify native STDIO API key: %w", err)
+			}
+		}
+		errorPath, err := spawnProjectDaemonOwner(cfg)
+		if err != nil {
+			return nil, err
+		}
+		globalDesc, err = waitForProjectDaemon(ctx, globalDescriptorPath, errorPath, globalCfg, cfg.MCPTransports)
+		if err != nil {
+			return nil, err
+		}
+	} else if mismatches := compareProjectDaemonDescriptorForRequest(globalDesc, globalCfg, cfg.MCPTransports); len(mismatches) > 0 {
+		return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+	}
+
+	workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if isHome {
+		return globalDesc, nil
+	}
+	requestCfg.WorkspaceID = workspace.ID
+	requestCfg.MarkdownLinkRootPrefix = workspace.MarkdownLinkRootPrefix
+	shouldEnsure := cfg.DisableAuth || cfg.MCPTransports.Stdio
+	if shouldEnsure {
+		if err := ensureFederatedWorkspace(ctx, globalDesc, workspace.ID, cfg); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.MCPTransports.Stdio {
+		return waitForProjectDaemon(ctx, workspaceDescriptorPath, "", requestCfg, cfg.MCPTransports)
+	}
+	return globalDesc, nil
+}
+
+func registeredFederatedWorkspaceForRequest(layout wikid.Layout, requestCfg projectdaemon.Config) (wikid.WorkspaceRecord, bool, error) {
+	if filepath.Clean(requestCfg.DataDir) == filepath.Clean(layout.HomeDir) &&
+		filepath.Clean(requestCfg.RootDir) == filepath.Clean(layout.HomeRootDir) {
+		return wikid.WorkspaceRecord{ID: wikid.HomeWorkspaceID, DataDir: layout.HomeDir, RootDir: layout.HomeRootDir}, true, nil
+	}
+	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+	workspaces, err := registry.ListWorkspaces()
+	if err != nil {
+		return wikid.WorkspaceRecord{}, false, err
+	}
+	for _, workspace := range workspaces {
+		if filepath.Clean(workspace.DataDir) == filepath.Clean(requestCfg.DataDir) &&
+			filepath.Clean(workspace.RootDir) == filepath.Clean(requestCfg.RootDir) {
+			return workspace, true, nil
+		}
+	}
+	return wikid.WorkspaceRecord{}, false, nil
+}
+
+func registerFederatedFirstContact(layout wikid.Layout, requestCfg projectdaemon.Config, cfg leafwikiRuntimeConfig) (wikid.WorkspaceRecord, bool, error) {
+	if requestCfg.DataDir == layout.HomeDir && requestCfg.RootDir == layout.HomeRootDir {
+		return wikid.WorkspaceRecord{ID: wikid.HomeWorkspaceID, DataDir: layout.HomeDir, RootDir: layout.HomeRootDir}, true, nil
+	}
+	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+	registration, err := registry.RegisterWorkspaceWithResultAndGrants(wikid.RegisterWorkspaceRequest{
+		DisplayName:            federatedWorkspaceDisplayName(requestCfg),
+		DataDir:                requestCfg.DataDir,
+		RootDir:                requestCfg.RootDir,
+		MarkdownLinkRootPrefix: cfg.MarkdownLinkRootPrefix,
+	}, func(registration wikid.RegisterWorkspaceResult) ([]wikid.Grant, error) {
+		workspace := registration.Workspace
+		var grants []wikid.Grant
+		if cfg.DisableAuth {
+			grants = append(grants, wikid.Grant{Subject: "user:public-editor", WorkspaceID: workspace.ID, Role: wikid.GrantRoleEditor})
+		}
+		if cfg.PublicAccess {
+			grants = append(grants, wikid.Grant{Subject: "user:public-viewer", WorkspaceID: workspace.ID, Role: wikid.GrantRoleViewer})
+		}
+		if cfg.MCPTransports.Stdio && !cfg.DisableAuth && registration.Created {
+			grant, ok, err := federatedStdioAPIKeyWorkspaceGrant(layout, cfg, workspace.ID)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				grants = append(grants, grant)
+			}
+		}
+		return grants, nil
+	})
+	if err != nil {
+		return wikid.WorkspaceRecord{}, false, err
+	}
+	return registration.Workspace, false, nil
+}
+
+func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntimeConfig, workspaceID string) (wikid.Grant, bool, error) {
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if apiKey == "" {
+		return wikid.Grant{}, false, nil
+	}
+	user, err := stdioAPIKeyUserFromStorage(authStorageDirForRuntime(layout.HomeDir, cfg.RuntimeStack), apiKey)
+	if err != nil {
+		return wikid.Grant{}, false, fmt.Errorf("resolve native STDIO API-key grant user: %w", err)
+	}
+	userRole := wikidGrantRoleForCoreRole(user.Role)
+	role := userRole
+	if role == "" {
+		return wikid.Grant{}, false, fmt.Errorf("native STDIO API-key user role %q cannot access workspaces", user.Role)
+	}
+	return wikid.Grant{Subject: "user:" + user.ID, WorkspaceID: workspaceID, Role: role}, true, nil
+}
+
+func federatedWorkspaceDisplayName(cfg projectdaemon.Config) string {
+	if base := strings.TrimSpace(filepath.Base(cfg.RootDir)); base != "" && base != "." && base != string(filepath.Separator) {
+		return base
+	}
+	if base := strings.TrimSpace(filepath.Base(cfg.DataDir)); base != "" && base != "." && base != string(filepath.Separator) {
+		return base
+	}
+	return "Workspace"
+}
+
+func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descriptor, workspaceID string, cfg leafwikiRuntimeConfig) error {
+	if desc == nil {
+		return fmt.Errorf("global wikid descriptor is unavailable")
+	}
+	endpoint := strings.TrimRight(desc.ControlURL, "/") + "/__leafwiki/workspaces/" + url.PathEscape(workspaceID) + "/ensure"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set(projectdaemon.ControlTokenHeader, desc.ControlToken)
+	req.Header.Set("X-LeafWiki-Original-Method", http.MethodPost)
+	req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.APIKey))
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := strings.TrimSpace(string(raw))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return fmt.Errorf("ensure workspace %q: %s", workspaceID, msg)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 func readHealthyProjectDaemon(ctx context.Context, descriptorPath string, ownerCfg projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
@@ -1071,6 +1335,15 @@ func projectDaemonDescriptorHealthy(ctx context.Context, desc *projectdaemon.Des
 	if desc == nil {
 		return false, nil
 	}
+	if desc.Role == projectdaemon.RoleWorkspaced && strings.TrimSpace(desc.PrivateMCPURL) != "" && strings.TrimSpace(desc.PrivateMCPToken) != "" {
+		if !isTrustedDaemonControlURL(desc.PrivateMCPURL) {
+			return false, fmt.Errorf("workspaced descriptor private MCP URL is not trusted")
+		}
+		if !processPIDAlive(desc.PID) {
+			return false, nil
+		}
+		return workspacedPrivateMCPEndpointReachable(ctx, desc), nil
+	}
 	locksHeld, err := projectDaemonLocksHeld(desc.DataDir, desc.RootDir)
 	if err != nil {
 		return false, err
@@ -1091,6 +1364,38 @@ func projectDaemonDescriptorHealthy(ctx context.Context, desc *projectdaemon.Des
 		return false, fmt.Errorf("project daemon locks are held but control health does not match descriptor")
 	}
 	return true, nil
+}
+
+func workspacedPrivateMCPEndpointReachable(ctx context.Context, desc *projectdaemon.Descriptor) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimSpace(desc.PrivateMCPURL), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set(projectdaemon.ControlTokenHeader, strings.TrimSpace(desc.PrivateMCPToken))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false
+	}
+	return resp.StatusCode < http.StatusInternalServerError
+}
+
+func processPIDAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func projectDaemonIdentityMismatch(desc *projectdaemon.Descriptor, ownerCfg projectdaemon.Config) error {
@@ -1127,7 +1432,7 @@ func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath 
 		if err != nil {
 			lastErr = err
 		} else if healthy {
-			if mismatches := compareProjectDaemonConfigForRequest(desc.Config, ownerCfg, requestTransports); len(mismatches) > 0 {
+			if mismatches := compareProjectDaemonDescriptorForRequest(desc, ownerCfg, requestTransports); len(mismatches) > 0 {
 				return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
 			}
 			return desc, nil
@@ -1343,11 +1648,47 @@ func compareProjectDaemonConfigForRequest(owner projectdaemon.Config, requested 
 	if requestTransports.Stdio && !requestTransports.HTTP {
 		normalized.PublicMCPEnabled = owner.PublicMCPEnabled
 		normalized.Host = owner.Host
+		normalized.Port = owner.Port
 		normalized.LogTarget = owner.LogTarget
 		normalized.LogFile = owner.LogFile
 		normalized.DisableRequestLog = owner.DisableRequestLog
 	}
 	return projectdaemon.CompareConfig(owner, normalized)
+}
+
+func compareProjectDaemonDescriptorForRequest(desc *projectdaemon.Descriptor, requested projectdaemon.Config, requestTransports mcpTransports) []projectdaemon.Mismatch {
+	if desc == nil {
+		return nil
+	}
+	normalized := requested
+	if desc.Role == projectdaemon.RoleWorkspaced && requestTransports.Stdio && strings.TrimSpace(desc.PrivateMCPURL) != "" {
+		normalized.Host = desc.Config.Host
+		normalized.Port = desc.Config.Port
+		normalized.PublicMCPEnabled = desc.Config.PublicMCPEnabled
+		normalized.LogTarget = desc.Config.LogTarget
+		normalized.LogFile = desc.Config.LogFile
+		normalized.DisableRequestLog = desc.Config.DisableRequestLog
+	}
+	mismatches := compareProjectDaemonConfigForRequest(desc.Config, normalized, requestTransports)
+	requestedWorkspaceID := strings.TrimSpace(normalized.WorkspaceID)
+	descriptorWorkspaceID := strings.TrimSpace(desc.WorkspaceID)
+	if requestedWorkspaceID != "" && descriptorWorkspaceID != "" && requestedWorkspaceID != descriptorWorkspaceID && !hasProjectDaemonMismatch(mismatches, "workspace-id") {
+		mismatches = append(mismatches, projectdaemon.Mismatch{
+			Field: "workspace-id",
+			Want:  descriptorWorkspaceID,
+			Got:   requestedWorkspaceID,
+		})
+	}
+	return mismatches
+}
+
+func hasProjectDaemonMismatch(mismatches []projectdaemon.Mismatch, field string) bool {
+	for _, mismatch := range mismatches {
+		if mismatch.Field == field {
+			return true
+		}
+	}
+	return false
 }
 
 func authStorageDirForRuntime(dataDir string, runtimeStack string) string {
@@ -1410,6 +1751,7 @@ func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, er
 	logFile := daemonLogFileForConfig(cfg, dataDir)
 	return projectdaemon.Config{
 		RuntimeStack:            cfg.RuntimeStack,
+		WorkspaceID:             runtimeWorkspaceID(cfg.Workspace),
 		DataDir:                 dataDir,
 		RootDir:                 rootDir,
 		AuthDisabled:            cfg.DisableAuth,
@@ -1447,6 +1789,36 @@ func daemonRequestConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Con
 		return projectdaemon.Config{}, err
 	}
 	return daemonConfigForRuntime(ownerCfg)
+}
+
+func daemonWorkspaceRequestConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, error) {
+	workspaceCfg, err := daemonWorkspaceRuntimeConfig(cfg)
+	if err != nil {
+		return projectdaemon.Config{}, err
+	}
+	return daemonConfigForRuntime(workspaceCfg)
+}
+
+func daemonWorkspaceRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig, error) {
+	ownerCfg := cfg
+	ownerCfg.APIKey = ""
+	if ownerCfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
+		ownerCfg.EnableWorkspaceSync = true
+		ownerCfg.EnableRevision = false
+	}
+	if ownerCfg.MCPTransports.Stdio && ownerCfg.Logging.Target == leaflogging.TargetStderr {
+		fileLogging, err := leaflogging.Resolve(leaflogging.ConfigInput{
+			Target:    string(leaflogging.TargetFile),
+			TargetSet: true,
+			DataDir:   ownerCfg.Workspace.DataDir,
+		})
+		if err != nil {
+			return leafwikiRuntimeConfig{}, err
+		}
+		fileLogging.Level = ownerCfg.Logging.Level
+		ownerCfg.Logging = fileLogging
+	}
+	return ownerCfg, nil
 }
 
 func daemonLogFileForConfig(cfg leafwikiRuntimeConfig, canonicalDataDir string) string {
@@ -1566,21 +1938,43 @@ func scheduleProjectDaemonStartupConfigCleanup(path string) {
 }
 
 func daemonOwnerRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig, error) {
-	ownerCfg := cfg
-	ownerCfg.APIKey = ""
-	if ownerCfg.MCPTransports.Stdio && ownerCfg.Logging.Target == leaflogging.TargetStderr {
-		fileLogging, err := leaflogging.Resolve(leaflogging.ConfigInput{
-			Target:    string(leaflogging.TargetFile),
-			TargetSet: true,
-			DataDir:   ownerCfg.Workspace.DataDir,
-		})
+	ownerCfg, err := daemonWorkspaceRuntimeConfig(cfg)
+	if err != nil {
+		return leafwikiRuntimeConfig{}, err
+	}
+	if ownerCfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
+		workspace, err := globalRuntimeWorkspace()
 		if err != nil {
 			return leafwikiRuntimeConfig{}, err
 		}
-		fileLogging.Level = ownerCfg.Logging.Level
-		ownerCfg.Logging = fileLogging
+		ownerCfg.Workspace = workspace
+		ownerCfg.MarkdownLinkRootPrefix = ""
 	}
 	return ownerCfg, nil
+}
+
+func globalRuntimeWorkspace() (wiki.Workspace, error) {
+	homeDir, err := globalRuntimeHomeDir()
+	if err != nil {
+		return wiki.Workspace{}, err
+	}
+	return wiki.NormalizeWorkspace(wiki.Workspace{
+		ID:      wikid.HomeWorkspaceID,
+		DataDir: homeDir,
+		RootDir: filepath.Join(homeDir, "root"),
+	}), nil
+}
+
+func globalRuntimeHomeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return "", fmt.Errorf("user home is empty")
+	}
+	return filepath.Clean(filepath.Join(home, ".leafwiki")), nil
 }
 
 func configureDaemonOwnerIO(cmd *exec.Cmd, cfg leafwikiRuntimeConfig) (func(), error) {
@@ -1670,12 +2064,16 @@ func runDaemonHeartbeat(ctx context.Context, client *projectdaemon.Client, sessi
 }
 
 type daemonStdioBridge struct {
-	ControlURL   string
-	ControlToken string
-	APIKey       string
-	Stdin        io.ReadCloser
-	Stdout       io.Writer
-	Stderr       io.Writer
+	EndpointURL      string
+	ControlToken     string
+	AuthControlURL   string
+	AuthControlToken string
+	WorkspaceID      string
+	APIKey           string
+	ActorContext     string
+	Stdin            io.ReadCloser
+	Stdout           io.Writer
+	Stderr           io.Writer
 }
 
 func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
@@ -1711,7 +2109,7 @@ func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
 		Writer: nopWriteCloser{Writer: protocolStdout},
 	}
 	httpTransport := &sdkmcp.StreamableClientTransport{
-		Endpoint:             strings.TrimRight(cfg.ControlURL, "/") + "/mcp",
+		Endpoint:             cfg.EndpointURL,
 		HTTPClient:           daemonStdioBridgeHTTPClient(cfg),
 		DisableStandaloneSSE: true,
 		MaxRetries:           -1,
@@ -1733,20 +2131,96 @@ func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
 
 func daemonStdioBridgeHTTPClient(cfg daemonStdioBridge) *http.Client {
 	return &http.Client{
-		Transport: projectdaemon.AuthRoundTripper{
-			Base: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-				ForceAttemptHTTP2:     true,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			},
-			ControlToken: cfg.ControlToken,
-			BearerToken:  cfg.APIKey,
-		},
+		Transport: daemonStdioBridgeHTTPTransport(cfg, &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}),
 	}
+}
+
+func daemonStdioBridgeHTTPTransport(cfg daemonStdioBridge, base http.RoundTripper) http.RoundTripper {
+	actorContext := cfg.ActorContext
+	if strings.TrimSpace(cfg.APIKey) != "" &&
+		strings.TrimSpace(cfg.AuthControlURL) != "" &&
+		strings.TrimSpace(cfg.AuthControlToken) != "" {
+		actorContext = ""
+	}
+	authTransport := projectdaemon.AuthRoundTripper{
+		Base:         base,
+		ControlToken: cfg.ControlToken,
+		BearerToken:  cfg.APIKey,
+		ActorContext: actorContext,
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" ||
+		strings.TrimSpace(cfg.AuthControlURL) == "" ||
+		strings.TrimSpace(cfg.AuthControlToken) == "" {
+		return authTransport
+	}
+	return stdioActorContextRoundTripper{
+		Base:             authTransport,
+		AuthControlURL:   cfg.AuthControlURL,
+		AuthControlToken: cfg.AuthControlToken,
+		WorkspaceID:      cfg.WorkspaceID,
+		APIKey:           cfg.APIKey,
+	}
+}
+
+type stdioActorContextRoundTripper struct {
+	Base             http.RoundTripper
+	AuthControlURL   string
+	AuthControlToken string
+	WorkspaceID      string
+	APIKey           string
+}
+
+func (rt stdioActorContextRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	actorContext, err := rt.actorContext(req)
+	if err != nil {
+		return nil, err
+	}
+	next := rt.Base
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	clone.Header.Set(projectdaemon.ActorContextHeader, actorContext)
+	return next.RoundTrip(clone)
+}
+
+func (rt stdioActorContextRoundTripper) actorContext(req *http.Request) (string, error) {
+	source := &http.Request{
+		Method: http.MethodPost,
+		URL:    &url.URL{Path: "/mcp"},
+		Header: http.Header{},
+	}
+	if req != nil {
+		source = req.Clone(req.Context())
+		source.Header = req.Header.Clone()
+	}
+	source.Header.Set("Authorization", "Bearer "+strings.TrimSpace(rt.APIKey))
+	if strings.TrimSpace(rt.WorkspaceID) != "" {
+		source.Header.Set(projectdaemon.WorkspaceIDHeader, strings.TrimSpace(rt.WorkspaceID))
+	}
+	out := struct {
+		Actor projectdaemon.ActorContext `json:"actor"`
+	}{}
+	if err := callWikidPrivateEndpoint(source.Context(), rt.AuthControlURL, rt.AuthControlToken, "/__leafwiki/actor-context", source, &out); err != nil {
+		if strings.Contains(err.Error(), "unauthorized") || strings.Contains(err.Error(), "invalid") {
+			return "", fmt.Errorf("unauthorized native STDIO API key: %w", err)
+		}
+		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
+	}
+	encoded, err := projectdaemon.EncodeActorContext(out.Actor)
+	if err != nil {
+		return "", fmt.Errorf("encode native STDIO actor context: %w", err)
+	}
+	return encoded, nil
 }
 
 func bridgeTransports(ctx context.Context, left sdkmcp.Transport, right sdkmcp.Transport) error {
@@ -1761,23 +2235,48 @@ func bridgeTransports(ctx context.Context, left sdkmcp.Transport, right sdkmcp.T
 	}
 	defer rightConn.Close()
 
-	errs := make(chan error, 2)
-	pump := func(from sdkmcp.Connection, to sdkmcp.Connection) {
+	type pumpResult struct {
+		fromLeft  bool
+		forwarded int
+		err       error
+	}
+	errs := make(chan pumpResult, 2)
+	pump := func(from sdkmcp.Connection, to sdkmcp.Connection, fromLeft bool) {
+		forwarded := 0
 		for {
 			msg, err := from.Read(ctx)
 			if err != nil {
-				errs <- err
+				errs <- pumpResult{fromLeft: fromLeft, forwarded: forwarded, err: err}
 				return
 			}
 			if err := to.Write(ctx, msg); err != nil {
-				errs <- err
+				errs <- pumpResult{fromLeft: fromLeft, forwarded: forwarded, err: err}
 				return
 			}
+			forwarded++
 		}
 	}
-	go pump(leftConn, rightConn)
-	go pump(rightConn, leftConn)
-	err = <-errs
+	go pump(leftConn, rightConn, true)
+	go pump(rightConn, leftConn, false)
+	result := <-errs
+	err = result.err
+	if result.fromLeft && isCleanNativeStdioClose(result.err) {
+		if result.forwarded == 0 {
+			_ = leftConn.Close()
+			_ = rightConn.Close()
+			return nil
+		}
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case responseResult := <-errs:
+			err = responseResult.err
+		case <-timer.C:
+			err = nil
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+	}
 	_ = leftConn.Close()
 	_ = rightConn.Close()
 	return err
@@ -1827,7 +2326,6 @@ type wikidFrontdRuntime struct {
 	processes      map[projectdaemon.RoleName]*internalRuntimeRoleProcess
 	roles          []projectdaemon.RoleHealth
 	workspacedURL  string
-	workspacedPort string
 	wikidURL       string
 	stopping       bool
 	onRolesChanged func([]projectdaemon.RoleHealth)
@@ -1860,22 +2358,294 @@ type internalRuntimeRoleProcess struct {
 	waitErr  error
 }
 
+type federatedWorkspaceManager struct {
+	mu               sync.Mutex
+	base             leafwikiRuntimeConfig
+	daemonToken      string
+	wikidURL         string
+	layout           wikid.Layout
+	supervisor       *wikid.WorkspaceSupervisor
+	processes        map[string]*internalRuntimeRoleProcess
+	descriptors      map[string][]string
+	workspaces       map[string]wikid.WorkspaceRecord
+	ensureGroup      singleflight.Group
+	stopped          bool
+	startRole        func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error)
+	removeDescriptor func(string) error
+	writeDescriptor  func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error
+}
+
+func newFederatedWorkspaceManager(base leafwikiRuntimeConfig, daemonToken string, wikidURL string, layout wikid.Layout, supervisor *wikid.WorkspaceSupervisor) *federatedWorkspaceManager {
+	return &federatedWorkspaceManager{
+		base:             base,
+		daemonToken:      daemonToken,
+		wikidURL:         wikidURL,
+		layout:           layout,
+		supervisor:       supervisor,
+		processes:        map[string]*internalRuntimeRoleProcess{},
+		descriptors:      map[string][]string{},
+		workspaces:       map[string]wikid.WorkspaceRecord{},
+		startRole:        startInternalRuntimeRoleProcess,
+		removeDescriptor: projectdaemon.RemoveDescriptor,
+	}
+}
+
+func (m *federatedWorkspaceManager) MarkReady(workspaceID string, pid int, url string) {
+	if m == nil || m.supervisor == nil {
+		return
+	}
+	m.supervisor.MarkReady(workspaceID, pid, url)
+}
+
+func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
+	if m == nil || m.supervisor == nil {
+		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace manager is unavailable")
+	}
+	workspaceID := strings.TrimSpace(workspace.ID)
+	if workspaceID == "" {
+		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace ID is required")
+	}
+	m.mu.Lock()
+	if current := m.supervisor.Status(workspaceID); current.State == wikid.WorkspaceStateRunning {
+		if proc := m.processes[workspaceID]; proc == nil || !proc.isDone() {
+			m.mu.Unlock()
+			return current, nil
+		}
+	}
+	m.mu.Unlock()
+
+	resultCh := m.ensureGroup.DoChan(workspaceID, func() (any, error) {
+		return m.ensureWorkspace(workspaceID, workspace)
+	})
+	select {
+	case <-ctx.Done():
+		return m.supervisor.Status(workspaceID), ctx.Err()
+	case result := <-resultCh:
+		status, ok := result.Val.(wikid.WorkspaceStatus)
+		if !ok && result.Err == nil {
+			return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID, result.Val)
+		}
+		return status, result.Err
+	}
+}
+
+func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID string, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
+	m.mu.Lock()
+	if current := m.supervisor.Status(workspaceID); current.State == wikid.WorkspaceStateRunning {
+		if proc := m.processes[workspaceID]; proc == nil || !proc.isDone() {
+			m.mu.Unlock()
+			return current, nil
+		}
+	}
+	m.workspaces[workspaceID] = workspace
+	m.supervisor.MarkStarting(workspaceID)
+	cfg := m.workspaceRuntimeConfig(workspace, "0")
+	m.mu.Unlock()
+
+	proc, ready, err := m.startRole(internalRuntimeRoleStartupConfig{
+		Role:        projectdaemon.RoleWorkspaced,
+		Runtime:     cfg,
+		DaemonToken: m.daemonToken,
+		WikidURL:    m.wikidURL,
+	})
+	if err != nil {
+		m.supervisor.RecordCrash(workspaceID, err.Error())
+		return m.supervisor.Status(workspaceID), err
+	}
+	writeDescriptor := m.writeWorkspaceDescriptor
+	if m.writeDescriptor != nil {
+		writeDescriptor = m.writeDescriptor
+	}
+	if err := writeDescriptor(workspace, cfg, ready); err != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = proc.stop(stopCtx)
+		cancel()
+		m.supervisor.RecordCrash(workspaceID, err.Error())
+		return m.supervisor.Status(workspaceID), err
+	}
+
+	m.mu.Lock()
+	m.processes[workspaceID] = proc
+	m.supervisor.MarkReady(workspaceID, ready.PID, ready.URL)
+	status := m.supervisor.Status(workspaceID)
+	m.mu.Unlock()
+	go m.monitorWorkspaceProcess(workspaceID, proc)
+	return status, nil
+}
+
+func (m *federatedWorkspaceManager) workspaceRuntimeConfig(workspace wikid.WorkspaceRecord, port string) leafwikiRuntimeConfig {
+	cfg := m.base
+	cfg.Workspace = wiki.Workspace{
+		ID:      strings.TrimSpace(workspace.ID),
+		DataDir: strings.TrimSpace(workspace.DataDir),
+		RootDir: strings.TrimSpace(workspace.RootDir),
+	}
+	cfg.MarkdownLinkRootPrefix = strings.TrimSpace(workspace.MarkdownLinkRootPrefix)
+	cfg.Host = "127.0.0.1"
+	cfg.Port = port
+	cfg.EnableWorkspaceSync = true
+	cfg.EnableRevision = false
+	return cfg
+}
+
+func (m *federatedWorkspaceManager) writeWorkspaceDescriptor(workspace wikid.WorkspaceRecord, cfg leafwikiRuntimeConfig, ready internalRuntimeRoleReady) error {
+	ownerCfg, err := daemonConfigForRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	hash, err := projectdaemon.ConfigHash(ownerCfg)
+	if err != nil {
+		return err
+	}
+	privateMCPURL := strings.TrimRight(ready.URL, "/") + "/mcp"
+	desc := &projectdaemon.Descriptor{
+		SchemaVersion:   projectdaemon.DescriptorSchemaVersion,
+		RuntimeStack:    cfg.RuntimeStack,
+		Role:            projectdaemon.RoleWorkspaced,
+		WorkspaceID:     workspace.ID,
+		PID:             ready.PID,
+		StartedAt:       time.Now().UTC(),
+		DataDir:         ownerCfg.DataDir,
+		RootDir:         ownerCfg.RootDir,
+		BasePath:        cfg.BasePath,
+		ControlURL:      m.wikidURL,
+		PrivateMCPURL:   privateMCPURL,
+		PrivateMCPToken: m.daemonToken,
+		ConfigHash:      hash,
+		IdleTimeout:     cfg.DaemonIdleTimeout.String(),
+		ControlToken:    m.daemonToken,
+		Config:          ownerCfg,
+		Roles: []projectdaemon.RoleHealth{
+			{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateReady, PID: ready.PID, URL: ready.URL, Private: true, UpdatedAt: time.Now().UTC()},
+		},
+	}
+	paths := []string{
+		projectdaemon.DescriptorPath(ownerCfg.DataDir),
+		workspaceRuntimeDescriptorPath(m.layout.RuntimeDir, workspace.ID),
+	}
+	for _, path := range paths {
+		if err := removeNonRegularDescriptor(path); err != nil {
+			return err
+		}
+		if err := projectdaemon.WriteDescriptorAtomic(path, desc); err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
+	m.descriptors[workspace.ID] = paths
+	m.mu.Unlock()
+	return nil
+}
+
+func removeNonRegularDescriptor(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("inspect descriptor target %s: %w", path, err)
+	}
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	if err := projectdaemon.RemoveDescriptor(path); err != nil {
+		return fmt.Errorf("remove non-regular descriptor %s: %w", path, err)
+	}
+	return nil
+}
+
+func (m *federatedWorkspaceManager) monitorWorkspaceProcess(workspaceID string, proc *internalRuntimeRoleProcess) {
+	err := proc.wait()
+	m.mu.Lock()
+	current := m.processes[workspaceID]
+	if current != proc {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.processes, workspaceID)
+	descriptorPaths := append([]string(nil), m.descriptors[workspaceID]...)
+	delete(m.descriptors, workspaceID)
+	workspace := m.workspaces[workspaceID]
+	stopped := m.stopped
+	message := "process exited"
+	if err != nil {
+		message = err.Error()
+	}
+	restartAt, restart := m.supervisor.RecordCrash(workspaceID, message)
+	m.mu.Unlock()
+	m.removeDescriptors(descriptorPaths)
+	if restart && !stopped && strings.TrimSpace(workspace.ID) != "" {
+		go m.restartWorkspaceAfter(workspace, restartAt)
+	}
+}
+
+func (m *federatedWorkspaceManager) removeDescriptors(paths []string) {
+	for _, path := range paths {
+		if err := m.removeDescriptor(path); err != nil {
+			fmt.Fprintf(os.Stderr, "leafwiki: remove workspace descriptor %s: %v\n", path, err)
+		}
+	}
+}
+
+func (m *federatedWorkspaceManager) restartWorkspaceAfter(workspace wikid.WorkspaceRecord, restartAt time.Time) {
+	delay := time.Until(restartAt)
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		<-timer.C
+	}
+	m.mu.Lock()
+	stopped := m.stopped
+	m.mu.Unlock()
+	if stopped {
+		return
+	}
+	_, _ = m.Ensure(context.Background(), workspace)
+}
+
+func (m *federatedWorkspaceManager) stop(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	m.stopped = true
+	processes := make([]*internalRuntimeRoleProcess, 0, len(m.processes))
+	for _, proc := range m.processes {
+		processes = append(processes, proc)
+	}
+	descriptors := make([]string, 0)
+	for _, paths := range m.descriptors {
+		descriptors = append(descriptors, paths...)
+	}
+	m.processes = map[string]*internalRuntimeRoleProcess{}
+	m.mu.Unlock()
+	var errs []error
+	for _, proc := range processes {
+		if err := proc.stop(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, path := range descriptors {
+		if err := m.removeDescriptor(path); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func workspaceRuntimeDescriptorPath(runtimeDir string, workspaceID string) string {
+	return filepath.Join(runtimeDir, "workspaces", strings.TrimSpace(workspaceID)+".json")
+}
+
 func startWikidFrontdRuntime(parent context.Context, cfg leafwikiRuntimeConfig, daemonToken string, wikidURL string) (*wikidFrontdRuntime, error) {
 	ctx, cancel := context.WithCancel(parent)
-	workspacedPort, err := reserveLoopbackPort()
-	if err != nil {
-		cancel()
-		return nil, err
-	}
 	runtime := &wikidFrontdRuntime{
-		cfg:            cfg,
-		daemonToken:    daemonToken,
-		ctx:            ctx,
-		cancel:         cancel,
-		supervisor:     wikid.NewSupervisor(wikid.SupervisorOptions{}),
-		processes:      map[projectdaemon.RoleName]*internalRuntimeRoleProcess{},
-		workspacedPort: workspacedPort,
-		wikidURL:       wikidURL,
+		cfg:         cfg,
+		daemonToken: daemonToken,
+		ctx:         ctx,
+		cancel:      cancel,
+		supervisor:  wikid.NewSupervisor(wikid.SupervisorOptions{}),
+		processes:   map[projectdaemon.RoleName]*internalRuntimeRoleProcess{},
+		wikidURL:    wikidURL,
 	}
 	runtime.supervisor.MarkReady(projectdaemon.RoleWikid, os.Getpid(), "", false)
 	if err := runtime.withProcessLock(func() error {
@@ -1897,23 +2667,10 @@ func startWikidFrontdRuntime(parent context.Context, cfg leafwikiRuntimeConfig, 
 	return runtime, nil
 }
 
-func reserveLoopbackPort() (string, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", fmt.Errorf("reserve workspaced port: %w", err)
-	}
-	defer listener.Close()
-	_, port, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		return "", fmt.Errorf("reserve workspaced port: %w", err)
-	}
-	return port, nil
-}
-
 func (s *wikidFrontdRuntime) startWorkspacedLocked() error {
 	workspacedCfg := s.cfg
 	workspacedCfg.Host = "127.0.0.1"
-	workspacedCfg.Port = s.workspacedPort
+	workspacedCfg.Port = "0"
 	proc, ready, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{
 		Role:        projectdaemon.RoleWorkspaced,
 		Runtime:     workspacedCfg,
@@ -2101,6 +2858,9 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 		return nil, internalRuntimeRoleReady{}, err
 	}
 	if ready.Role != startup.Role {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = proc.stop(stopCtx)
+		stopCancel()
 		return nil, internalRuntimeRoleReady{}, fmt.Errorf("%s role reported readiness for %s", startup.Role, ready.Role)
 	}
 	return proc, ready, nil
@@ -2359,16 +3119,78 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	if err != nil {
 		return err
 	}
+	workspacesAPI, err := frontd.NewWorkspacesAPI(startup.WikidURL, startup.DaemonToken)
+	if err != nil {
+		return err
+	}
+	workspaceResolver, err := frontd.NewWikidWorkspaceResolver(startup.WikidURL, startup.DaemonToken)
+	if err != nil {
+		return err
+	}
+	actorResolver := wikidActorResolver(startup.WikidURL, startup.DaemonToken)
+	workspaceRouterProxy := frontd.NewWorkspaceRouterProxy(frontd.WorkspaceRouterProxyOptions{
+		Resolve: workspaceResolver,
+		Actor: func(req *http.Request, workspaceID string) (projectdaemon.ActorContext, error) {
+			clone := req.Clone(req.Context())
+			clone.Header = req.Header.Clone()
+			clone.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceID)
+			return actorResolver(clone)
+		},
+	})
+	workspaceMux := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, frontd.PublicWorkspacesPrefix+"/") {
+			workspaceRouterProxy.ServeHTTP(w, req)
+			return
+		}
+		workspaceProxy.ServeHTTP(w, req)
+	})
 	var mcpProxy http.Handler
 	if cfg.MCPTransports.HTTP {
-		mcpProxy, err = frontdPublicMCPHandler(cfg, startup.WorkspacedURL, startup.DaemonToken, startup.WikidURL)
+		baseMCPProxy, err := frontdPublicMCPHandler(cfg, startup.WorkspacedURL, startup.DaemonToken, startup.WikidURL)
 		if err != nil {
 			return err
 		}
+		rootMCPWorkspaceResolver, err := frontd.NewWikidSingleWorkspaceResolver(startup.WikidURL, startup.DaemonToken)
+		if err != nil {
+			return err
+		}
+		mcpSessions := frontd.NewMCPSessionBindings()
+		workspaceMCP := frontd.NewWorkspaceMCPHandler(frontd.WorkspaceMCPHandlerOptions{
+			Sessions:    mcpSessions,
+			Resolve:     workspaceResolver,
+			ResolveRoot: rootMCPWorkspaceResolver,
+			Proxy: func(route frontd.WorkspaceRoute) http.Handler {
+				proxy, err := frontd.NewMCPProxyWithActor(frontd.WorkspaceProxyOptions{
+					Upstream:    route.Upstream,
+					DaemonToken: route.DaemonToken,
+					Actor: func(req *http.Request) (projectdaemon.ActorContext, error) {
+						clone := req.Clone(req.Context())
+						clone.Header = req.Header.Clone()
+						clone.Header.Set(projectdaemon.WorkspaceIDHeader, route.WorkspaceID)
+						return actorResolver(clone)
+					},
+				})
+				if err != nil {
+					return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						http.Error(w, "workspace mcp unavailable", http.StatusServiceUnavailable)
+					})
+				}
+				return proxy
+			},
+		})
+		workspaceMCP = frontdMCPBearerAuthHandler(cfg, startup.WikidURL, startup.DaemonToken, workspaceMCP)
+		mcpProxy = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path == "/mcp" || strings.HasPrefix(req.URL.Path, "/mcp/workspaces/") {
+				workspaceMCP.ServeHTTP(w, req)
+				return
+			}
+			baseMCPProxy.ServeHTTP(w, req)
+		})
 	}
 	handler := frontd.NewIngressHandler(publicRouter, frontd.IngressOptions{
 		BasePath:     cfg.BasePath,
-		Workspace:    workspaceProxy,
+		Workspace:    workspaceMux,
+		Workspaces:   workspacesAPI,
 		MCP:          mcpProxy,
 		ControlPlane: controlPlaneProxy,
 	})
@@ -2642,13 +3464,20 @@ func frontdPublicMCPHandler(cfg leafwikiRuntimeConfig, workspacedURL string, dae
 	if cfg.DisableAuth {
 		return proxy, nil
 	}
+	return frontdMCPBearerAuthHandler(cfg, wikidURL, daemonToken, proxy), nil
+}
+
+func frontdMCPBearerAuthHandler(cfg leafwikiRuntimeConfig, wikidURL string, daemonToken string, next http.Handler) http.Handler {
+	if cfg.DisableAuth {
+		return next
+	}
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		authenticated := sdkauth.RequireBearerToken(wikidMCPTokenVerifier(wikidURL, daemonToken), &sdkauth.RequireBearerTokenOptions{
 			ResourceMetadataURL: wikioauth.ProtectedResourceMetadataURL(req, cfg.BasePath),
 			Scopes:              []string{wikioauth.ScopeMCP},
-		})(proxy)
+		})(next)
 		authenticated.ServeHTTP(rw, req)
-	}), nil
+	})
 }
 
 func wikidActorResolver(wikidURL string, daemonToken string) func(*http.Request) (projectdaemon.ActorContext, error) {
@@ -2829,6 +3658,35 @@ func actorContextForUser(user *coreauth.User, method string, cfg leafwikiRuntime
 	}, nil
 }
 
+func actorContextForWorkspaceGrant(user *coreauth.User, method string, cfg leafwikiRuntimeConfig, workspaceID string, role wikid.GrantRole) (projectdaemon.ActorContext, error) {
+	actor, err := actorContextForUser(user, method, cfg)
+	if err != nil {
+		return projectdaemon.ActorContext{}, err
+	}
+	actor.WorkspaceID = strings.TrimSpace(workspaceID)
+	actor.Role = string(role)
+	actor.Scopes = scopesForGrantRole(role)
+	return actor, nil
+}
+
+func scopesForGrantRole(role wikid.GrantRole) []string {
+	caps, err := wikid.CapabilitiesForRole(role)
+	if err != nil {
+		return nil
+	}
+	var scopes []string
+	if caps.ReadContent {
+		scopes = append(scopes, "leafwiki:workspace:read", "leafwiki:mcp")
+	}
+	if caps.WriteContent {
+		scopes = append(scopes, "leafwiki:workspace:write")
+	}
+	if caps.AdministerGrants {
+		scopes = append(scopes, "leafwiki:workspace:admin")
+	}
+	return scopes
+}
+
 func frontdRemoteUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig) (*coreauth.User, string, bool, error) {
 	if req == nil || !cfg.EnableHTTPRemoteUser {
 		return nil, "", false, nil
@@ -2914,13 +3772,12 @@ func originalPath(req *http.Request) string {
 	return "/"
 }
 
-func isMCPActorPath(path string) bool {
-	return path == "/mcp" || strings.HasPrefix(path, "/mcp/")
-}
-
-func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity *wiki.Wiki, cfg leafwikiRuntimeConfig) {
+func cloneWithOriginalRequest(req *http.Request) *http.Request {
+	if req == nil {
+		return nil
+	}
 	clone := req.Clone(req.Context())
-	clone.Body = nil
+	clone.Body = req.Body
 	clone.Method = originalMethod(req)
 	clone.URL.Path = originalPath(req)
 	clone.URL.RawPath = ""
@@ -2928,12 +3785,64 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 	clone.Header = req.Header.Clone()
 	clone.Header.Del(projectdaemon.ControlTokenHeader)
 	clone.Header.Del(projectdaemon.ActorContextHeader)
+	return clone
+}
+
+func isMCPActorPath(path string) bool {
+	return path == "/mcp" || strings.HasPrefix(path, "/mcp/")
+}
+
+func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity *wiki.Wiki, cfg leafwikiRuntimeConfig, registry *wikid.RegistryService, grants *wikid.GrantStore) {
+	clone := cloneWithOriginalRequest(req)
+	clone.Body = nil
 	user, method, err := frontdActorUser(clone, identity, cfg)
 	if err != nil {
 		http.Error(w, "resolve actor context", http.StatusUnauthorized)
 		return
 	}
-	actor, err := actorContextForUser(user, method, cfg)
+	workspaceID := strings.TrimSpace(req.Header.Get(projectdaemon.WorkspaceIDHeader))
+	if workspaceID == "" {
+		workspaceID = runtimeWorkspaceID(cfg.Workspace)
+	}
+	if registry != nil {
+		if _, ok, err := registry.Workspace(workspaceID); err != nil {
+			http.Error(w, "load workspace", http.StatusInternalServerError)
+			return
+		} else if !ok {
+			http.Error(w, "workspace not found", http.StatusNotFound)
+			return
+		}
+	}
+	userRole := wikidGrantRoleForCoreRole(user.Role)
+	role := userRole
+	if grants != nil {
+		if err := ensureRuntimeHomeGrant(grants, user); err != nil {
+			http.Error(w, "seed home workspace grant", http.StatusInternalServerError)
+			return
+		}
+		if userRole == wikid.GrantRoleAdmin {
+			role = wikid.GrantRoleAdmin
+		} else {
+			subject := "user:" + user.ID
+			userGrants, err := grants.GrantsForSubject(subject)
+			if err != nil {
+				http.Error(w, "load workspace grants", http.StatusInternalServerError)
+				return
+			}
+			role = ""
+			for _, grant := range userGrants {
+				if grant.WorkspaceID == workspaceID {
+					role = effectiveWorkspaceGrantRole(userRole, grant.Role)
+					break
+				}
+			}
+			if role == "" {
+				http.Error(w, "workspace access denied", http.StatusForbidden)
+				return
+			}
+		}
+	}
+	actor, err := actorContextForWorkspaceGrant(user, method, cfg, workspaceID, role)
 	if err != nil {
 		http.Error(w, "encode actor context", http.StatusInternalServerError)
 		return
@@ -3008,6 +3917,10 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	controlPlaneWiki.SetRuntimeRoleHealth(requiredRuntimeRoleHealth(), runtime.roleHealthSnapshot)
 	runtime.mu.Lock()
 	workspacedURL := runtime.workspacedURL
+	workspacedPID := 0
+	if role, ok := findRuntimeRoleHealth(runtime.roles, projectdaemon.RoleWorkspaced); ok {
+		workspacedPID = role.PID
+	}
 	runtime.mu.Unlock()
 	privateMCP, err := frontd.NewMCPProxyWithActor(frontd.WorkspaceProxyOptions{
 		Upstream:    workspacedURL,
@@ -3020,9 +3933,12 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 
 	var sessions *projectdaemon.SessionRegistry
 	var agentPresence *projectdaemon.AgentPresenceRegistry
-	activityChanged := idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
-		return projectDaemonActivityCount(sessions, agentPresence)
-	})
+	activityChanged := func(int) {}
+	if !cfg.DisableIdleShutdown {
+		activityChanged = idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
+			return projectDaemonActivityCount(sessions, agentPresence)
+		})
+	}
 	notifyActivityChanged := func(int) {
 		activityChanged(projectDaemonActivityCount(sessions, agentPresence))
 	}
@@ -3030,6 +3946,48 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	agentPresence = projectdaemon.NewAgentPresenceRegistry(cfg.DaemonIdleTimeout, notifyActivityChanged)
 	go sessions.RunExpiryLoop(ctx, 0)
 	go agentPresence.RunExpiryLoop(ctx, 0)
+
+	layout := wikid.GlobalLayout(ownerCfg.DataDir)
+	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+	if _, err := registry.BootstrapHomeWorkspace(ownerCfg.DataDir, ownerCfg.RootDir); err != nil {
+		return fmt.Errorf("bootstrap home workspace: %w", err)
+	}
+	grants := wikid.NewGrantStore(layout.DBPath)
+	if err := seedRuntimeHomeGrants(grants, cfg); err != nil {
+		return err
+	}
+	workspaceSupervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+	workspaceSupervisor.MarkReady(wikid.HomeWorkspaceID, workspacedPID, workspacedURL)
+	workspaceManager := newFederatedWorkspaceManager(cfg, controlToken, wikidURL, layout, workspaceSupervisor)
+	workspaceManager.MarkReady(wikid.HomeWorkspaceID, workspacedPID, workspacedURL)
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		if err := workspaceManager.stop(stopCtx); err != nil {
+			slog.Default().Warn("Workspace runtime shutdown failed", "error", err)
+		}
+	}()
+	workspaceAPI := wikid.NewPrivateWorkspaceAPI(wikid.PrivateWorkspaceAPIOptions{
+		Registry:   registry,
+		Grants:     grants,
+		Supervisor: workspaceSupervisor,
+		Subject: func(req *http.Request) (wikid.WorkspaceSubject, error) {
+			user, _, err := frontdActorUser(cloneWithOriginalRequest(req), controlPlaneWiki, cfg)
+			if err != nil {
+				return wikid.WorkspaceSubject{}, err
+			}
+			if err := ensureRuntimeHomeGrant(grants, user); err != nil {
+				return wikid.WorkspaceSubject{}, err
+			}
+			return wikid.WorkspaceSubject{
+				Subject: "user:" + user.ID,
+				Role:    wikidGrantRoleForCoreRole(user.Role),
+			}, nil
+		},
+		Ensure: func(ctx context.Context, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
+			return workspaceManager.Ensure(ctx, workspace)
+		},
+	})
 
 	controlHandler := projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
 		Token:         controlToken,
@@ -3058,11 +4016,12 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		Control:      controlHandler,
 		ControlPlane: controlPlaneRouter,
 		ActorContext: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			handleWikidActorContext(w, req, controlPlaneWiki, cfg)
+			handleWikidActorContext(w, req, controlPlaneWiki, cfg, registry, grants)
 		}),
 		TokenVerify: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			handleWikidTokenVerify(w, req, controlPlaneWiki)
 		}),
+		WorkspaceAPI: workspaceAPI,
 	})}
 	serverDone := make(chan error, 1)
 	go func() {
@@ -3077,6 +4036,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
 		RuntimeStack:     cfg.RuntimeStack,
 		Role:             projectDaemonDescriptorRole(cfg.RuntimeStack),
+		WorkspaceID:      runtimeWorkspaceID(cfg.Workspace),
 		PID:              os.Getpid(),
 		StartedAt:        time.Now().UTC(),
 		DataDir:          ownerCfg.DataDir,
@@ -3085,6 +4045,8 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		PublicMCPEnabled: cfg.MCPTransports.HTTP,
 		BasePath:         cfg.BasePath,
 		ControlURL:       "http://" + controlListener.Addr().String(),
+		PrivateMCPURL:    strings.TrimRight(workspacedURL, "/") + "/mcp",
+		PrivateMCPToken:  controlToken,
 		ConfigHash:       hash,
 		IdleTimeout:      cfg.DaemonIdleTimeout.String(),
 		ControlToken:     controlToken,
@@ -3098,20 +4060,31 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
 		return err
 	}
+	globalDescriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
+	if err := projectdaemon.WriteDescriptorAtomic(globalDescriptorPath, desc); err != nil {
+		return err
+	}
 	var descriptorMu sync.Mutex
 	runtime.setRoleChangeCallback(func(roles []projectdaemon.RoleHealth) {
 		descriptorMu.Lock()
 		defer descriptorMu.Unlock()
 		desc.Roles = append([]projectdaemon.RoleHealth(nil), roles...)
+		syncHomeWorkspaceStatus(workspaceSupervisor, roles)
 		if publicURL := roleURL(roles, projectdaemon.RoleFrontd); publicURL != "" {
 			desc.PublicURL = publicURL
 		}
 		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
 			slog.Default().Warn("Runtime role descriptor update failed", "error", err)
 		}
+		if err := projectdaemon.WriteDescriptorAtomic(globalDescriptorPath, desc); err != nil {
+			slog.Default().Warn("Runtime role global descriptor update failed", "error", err)
+		}
 	})
 	defer projectdaemon.RemoveDescriptor(descriptorPath)
-	go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, agentPresence, projectdaemon.DefaultHeartbeatTTL)
+	defer projectdaemon.RemoveDescriptor(globalDescriptorPath)
+	if !cfg.DisableIdleShutdown {
+		go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, agentPresence, projectdaemon.DefaultHeartbeatTTL)
+	}
 
 	slog.Default().Info("Starting LeafWiki", "address", buildListenAddress(cfg.Host, cfg.Port), "data_dir", ownerCfg.DataDir)
 	select {
@@ -3133,6 +4106,103 @@ func roleURL(roles []projectdaemon.RoleHealth, name projectdaemon.RoleName) stri
 		}
 	}
 	return ""
+}
+
+func findRuntimeRoleHealth(roles []projectdaemon.RoleHealth, name projectdaemon.RoleName) (projectdaemon.RoleHealth, bool) {
+	for _, role := range roles {
+		if role.Name == name {
+			return role, true
+		}
+	}
+	return projectdaemon.RoleHealth{}, false
+}
+
+func syncHomeWorkspaceStatus(supervisor *wikid.WorkspaceSupervisor, roles []projectdaemon.RoleHealth) {
+	if supervisor == nil {
+		return
+	}
+	role, ok := findRuntimeRoleHealth(roles, projectdaemon.RoleWorkspaced)
+	if !ok {
+		return
+	}
+	status := wikid.WorkspaceStatus{
+		WorkspaceID: wikid.HomeWorkspaceID,
+		PID:         role.PID,
+		URL:         strings.TrimSpace(role.URL),
+		Error:       role.Error,
+		UpdatedAt:   role.UpdatedAt,
+	}
+	switch role.State {
+	case projectdaemon.RoleStateReady:
+		status.State = wikid.WorkspaceStateRunning
+	case projectdaemon.RoleStateStarting:
+		status.State = wikid.WorkspaceStateStarting
+	case projectdaemon.RoleStateRestarting:
+		status.State = wikid.WorkspaceStateRestarting
+	case projectdaemon.RoleStateCrashed, projectdaemon.RoleStateStopped:
+		status.State = wikid.WorkspaceStateCrashed
+	default:
+		status.State = wikid.WorkspaceStateRegistered
+	}
+	supervisor.MarkStatus(status)
+}
+
+func seedRuntimeHomeGrants(store *wikid.GrantStore, cfg leafwikiRuntimeConfig) error {
+	if cfg.DisableAuth {
+		if err := store.Upsert(wikid.Grant{Subject: "user:public-editor", WorkspaceID: wikid.HomeWorkspaceID, Role: wikid.GrantRoleEditor}); err != nil {
+			return fmt.Errorf("seed disabled-auth home grant: %w", err)
+		}
+	}
+	if cfg.PublicAccess {
+		if err := store.Upsert(wikid.Grant{Subject: "user:public-viewer", WorkspaceID: wikid.HomeWorkspaceID, Role: wikid.GrantRoleViewer}); err != nil {
+			return fmt.Errorf("seed public home grant: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureRuntimeHomeGrant(store *wikid.GrantStore, user *coreauth.User) error {
+	if user == nil {
+		return fmt.Errorf("user is required")
+	}
+	role := wikidGrantRoleForCoreRole(user.Role)
+	if role == "" {
+		return nil
+	}
+	return store.Upsert(wikid.Grant{Subject: "user:" + user.ID, WorkspaceID: wikid.HomeWorkspaceID, Role: role})
+}
+
+func wikidGrantRoleForCoreRole(role string) wikid.GrantRole {
+	switch role {
+	case coreauth.RoleViewer:
+		return wikid.GrantRoleViewer
+	case coreauth.RoleEditor:
+		return wikid.GrantRoleEditor
+	case coreauth.RoleAdmin:
+		return wikid.GrantRoleAdmin
+	default:
+		return ""
+	}
+}
+
+func effectiveWorkspaceGrantRole(userRole wikid.GrantRole, grantRole wikid.GrantRole) wikid.GrantRole {
+	if wikidGrantRoleRank(userRole) < wikidGrantRoleRank(grantRole) {
+		return userRole
+	}
+	return grantRole
+}
+
+func wikidGrantRoleRank(role wikid.GrantRole) int {
+	switch role {
+	case wikid.GrantRoleViewer:
+		return 1
+	case wikid.GrantRoleEditor:
+		return 2
+	case wikid.GrantRoleAdmin:
+		return 3
+	default:
+		return 0
+	}
 }
 
 func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) error {
@@ -3588,7 +4658,7 @@ func resolveWorkspace(flags *cliFlags, visited map[string]bool) (wiki.Workspace,
 	dataDir := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data")
 	rootDir := resolveString("root-dir", *flags.rootDir, visited, "LEAFWIKI_ROOT_DIR", "")
 	workspace := wiki.NormalizeWorkspace(wiki.Workspace{
-		ID:      "default",
+		ID:      wikid.HomeWorkspaceID,
 		DataDir: dataDir,
 		RootDir: rootDir,
 	})
@@ -3599,72 +4669,23 @@ func resolveWorkspace(flags *cliFlags, visited map[string]bool) (wiki.Workspace,
 }
 
 func applyYAMLConfigFile(fs *flag.FlagSet, flags *cliFlags, visited map[string]bool) error {
-	path := strings.TrimSpace(*flags.config)
-	if isInvalidBareConfigPathValue(path) {
-		return configUsageError{message: "--config requires a path"}
-	}
-	if name, _, ok := rawFlagName(path); ok {
-		return configFlagMixError{flag: configModeFlagDisplay(path, name)}
-	}
-	for name := range visited {
-		if name == "config" {
-			continue
-		}
-		return configFlagMixError{flag: "--" + name}
-	}
+	return runtimeconfig.ApplyYAMLConfigFile(fs, *flags.config, visited)
+}
 
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read --config %q: %w", path, err)
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return fmt.Errorf("parse --config %q: %w", path, err)
-	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("--config root must be a YAML mapping")
-	}
+func applyYAMLConfigPath(fs *flag.FlagSet, visited map[string]bool, path string, source string) error {
+	return runtimeconfig.ApplyYAMLConfigPath(fs, visited, path, source)
+}
 
-	root := doc.Content[0]
-	seen := map[string]struct{}{}
-	allowed := configFileFlagNames()
-	for i := 0; i < len(root.Content); i += 2 {
-		keyNode := root.Content[i]
-		valueNode := root.Content[i+1]
-		if keyNode.Kind != yaml.ScalarNode {
-			return fmt.Errorf("--config keys must be scalar strings")
-		}
-		key := keyNode.Value
-		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate --config key %q", key)
-		}
-		seen[key] = struct{}{}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("unknown --config key %q", key)
-		}
-		if valueNode.Kind != yaml.ScalarNode || valueNode.Tag == "!!null" {
-			return fmt.Errorf("--config key %q requires a non-null scalar value", key)
-		}
-		if err := fs.Set(key, valueNode.Value); err != nil {
-			return fmt.Errorf("invalid --config value for %q: %w", key, err)
-		}
-		visited[key] = true
-	}
-	return nil
+func applyDaemonServiceConfig(fs *flag.FlagSet, flags *cliFlags, visited map[string]bool, args []string) error {
+	return runtimeconfig.ApplyDaemonServiceConfig(fs, visited, args)
+}
+
+func applyDaemonServiceDefaults(fs *flag.FlagSet, flags *cliFlags, visited map[string]bool) error {
+	return runtimeconfig.ApplyDaemonServiceDefaults(fs, visited)
 }
 
 func validateConfigModeArgs(args []string) error {
-	for _, arg := range args {
-		if arg == "help" {
-			return configFlagMixError{flag: "help"}
-		}
-		name, _, ok := rawFlagName(arg)
-		if !ok {
-			continue
-		}
-		return configFlagMixError{flag: configModeFlagDisplay(arg, name)}
-	}
-	return nil
+	return runtimeconfig.ValidateConfigModeArgs(args)
 }
 
 func configModeFlagDisplay(arg string, name string) string {
@@ -3675,43 +4696,11 @@ func configModeFlagDisplay(arg string, name string) string {
 }
 
 func configFileFlagNames() map[string]struct{} {
-	return map[string]struct{}{
-		"access-token-timeout":         {},
-		"admin-password":               {},
-		"api-key":                      {},
-		"base-path":                    {},
-		"custom-stylesheet":            {},
-		"daemon-idle-timeout":          {},
-		"data-dir":                     {},
-		"disable-auth":                 {},
-		"disable-request-log":          {},
-		"enable-http-remote-user":      {},
-		"enable-link-refactor":         {},
-		"enable-revision":              {},
-		"enable-workspace-sync":        {},
-		"hide-link-metadata-section":   {},
-		"host":                         {},
-		"http-remote-user-header-name": {},
-		"http-remote-user-logout-url":  {},
-		"inject-code-in-header":        {},
-		"jwt-secret":                   {},
-		"log-file":                     {},
-		"log-target":                   {},
-		"markdown-link-root-prefix":    {},
-		"max-asset-upload-size":        {},
-		"max-revision-history":         {},
-		"mcp":                          {},
-		"port":                         {},
-		"public-access":                {},
-		"allow-insecure":               {},
-		"refresh-token-timeout":        {},
-		"root-dir":                     {},
-		"trusted-proxy-ips":            {},
-	}
+	return runtimeconfig.ConfigFileFlagNames()
 }
 
 func resolveStartupWorkspace(flags *cliFlags, visited map[string]bool, args []string) (wiki.Workspace, bool, error) {
-	if len(args) > 0 && !isAgentHookCommand(args) {
+	if len(args) > 0 && !isAgentHookCommand(args) && !isDaemonCommand(args) {
 		return wiki.Workspace{}, false, nil
 	}
 	workspace, err := resolveWorkspace(flags, visited)
@@ -3796,14 +4785,7 @@ func resolveDuration(flagName string, flagVal time.Duration, visited map[string]
 	return flagVal // default from flag
 }
 
-type mcpTransports struct {
-	HTTP  bool
-	Stdio bool
-}
-
-func (t mcpTransports) any() bool {
-	return t.HTTP || t.Stdio
-}
+type mcpTransports = runtimeconfig.MCPTransports
 
 func resolveMCPTransports(flags *cliFlags, visited map[string]bool) (mcpTransports, error) {
 	raw := resolveString("mcp", *flags.mcp, visited, "LEAFWIKI_MCP", "none")
@@ -3811,42 +4793,7 @@ func resolveMCPTransports(flags *cliFlags, visited map[string]bool) (mcpTranspor
 }
 
 func parseMCPTransports(raw string) (mcpTransports, error) {
-	value := strings.TrimSpace(strings.ToLower(raw))
-	if value == "" {
-		value = "none"
-	}
-
-	parts := strings.Split(value, ",")
-	if len(parts) > 2 {
-		return mcpTransports{}, fmt.Errorf("invalid MCP transport %q", raw)
-	}
-
-	var transports mcpTransports
-	seen := map[string]bool{}
-	for _, part := range parts {
-		name := strings.TrimSpace(part)
-		if name == "" {
-			return mcpTransports{}, fmt.Errorf("invalid MCP transport %q", raw)
-		}
-		if seen[name] {
-			return mcpTransports{}, fmt.Errorf("duplicate MCP transport %q", name)
-		}
-		seen[name] = true
-		switch name {
-		case "none":
-		case "http":
-			transports.HTTP = true
-		case "stdio":
-			transports.Stdio = true
-		default:
-			return mcpTransports{}, fmt.Errorf("invalid MCP transport %q", name)
-		}
-	}
-
-	if seen["none"] && len(seen) > 1 {
-		return mcpTransports{}, fmt.Errorf("none cannot be combined with other MCP transports")
-	}
-	return transports, nil
+	return runtimeconfig.ParseMCPTransports(raw)
 }
 
 type mcpTransportOptions struct {

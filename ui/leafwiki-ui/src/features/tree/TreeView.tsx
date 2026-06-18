@@ -14,10 +14,18 @@ import {
   markdownRouteLookupKind,
   toWikiLookupPath,
 } from '@/lib/wikiPath'
+import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
-import { useWorkspaceSyncStore } from '@/stores/workspaceSync'
+import {
+  selectWorkspaceSyncState,
+  useWorkspaceSyncStore,
+} from '@/stores/workspaceSync'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -36,10 +44,19 @@ import { usePageEditorStore } from '../editor/pageEditorStore'
 import { TreeNode } from './TreeNode'
 import { refreshCurrentViewerPageAndLinkStatus } from './workspaceSyncRefresh'
 
-export default function TreeView() {
-  const tree = useTreeStore((s) => s.tree)
-  const loading = useTreeStore((s) => s.loading)
-  const error = useTreeStore((s) => s.error)
+type TreeViewProps = {
+  workspaceId?: string
+}
+
+export default function TreeView({
+  workspaceId: workspaceIdProp,
+}: TreeViewProps = {}) {
+  const activeWorkspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
+  const workspaceId = workspaceIdProp ?? activeWorkspaceId
+  const workspaceTree = useTreeStore((s) => s.workspaceTrees[workspaceId])
+  const tree = workspaceTree?.tree ?? null
+  const loading = workspaceTree?.loading ?? false
+  const error = workspaceTree?.error ?? null
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const reloadTree = useTreeStore((s) => s.reloadTree)
@@ -49,11 +66,12 @@ export default function TreeView() {
   const expandAll = useTreeStore((s) => s.expandAll)
   const collapseAll = useTreeStore((s) => s.collapseAll)
   const enableWorkspaceSync = useConfigStore((s) => s.enableWorkspaceSync)
-  const workspaceSyncStatus = useWorkspaceSyncStore((s) => s.status)
-  const workspaceSyncStatusError = useWorkspaceSyncStore((s) => s.statusError)
-  const workspaceSyncRefreshLoading = useWorkspaceSyncStore(
-    (s) => s.refreshLoading,
+  const workspaceSyncState = useWorkspaceSyncStore((s) =>
+    selectWorkspaceSyncState(s, workspaceId),
   )
+  const workspaceSyncStatus = workspaceSyncState.status
+  const workspaceSyncStatusError = workspaceSyncState.statusError
+  const workspaceSyncRefreshLoading = workspaceSyncState.refreshLoading
   const loadWorkspaceSyncStatus = useWorkspaceSyncStore((s) => s.loadStatus)
   const refreshWorkspaceSync = useWorkspaceSyncStore((s) => s.refresh)
   const appMode = useAppMode()
@@ -61,9 +79,16 @@ export default function TreeView() {
     (state) => state.page?.id ?? state.initialPage?.id,
   )
   const observedWorkspaceCommitRef = useRef<string | null>(null)
+  const observedWorkspaceIdRef = useRef<string | null>(null)
 
-  const currentPath = toWikiLookupPath(getWikiTargetRoutePath(pathname))
-  const currentKind = markdownRouteLookupKind(pathname) ?? 'section'
+  const route = splitWorkspaceRoute(pathname)
+  const routeMatchesWorkspace = route.workspaceId === workspaceId
+  const currentPath = routeMatchesWorkspace
+    ? toWikiLookupPath(getWikiTargetRoutePath(route.innerPath))
+    : ''
+  const currentKind = routeMatchesWorkspace
+    ? (markdownRouteLookupKind(route.innerPath) ?? 'section')
+    : 'section'
 
   const openDialog = useDialogsStore((state) => state.openDialog)
   const readOnlyMode = useIsReadOnly()
@@ -100,47 +125,67 @@ export default function TreeView() {
     enableWorkspaceSync && workspaceSyncIssues.length > 0
 
   useEffect(() => {
-    if (!tree || !currentPath) return
-    openAncestorsForPath(currentPath, currentKind)
-  }, [tree, currentPath, currentKind, openAncestorsForPath])
+    if (!tree || !routeMatchesWorkspace || !currentPath) return
+    openAncestorsForPath(currentPath, currentKind, workspaceId)
+  }, [
+    tree,
+    routeMatchesWorkspace,
+    currentPath,
+    currentKind,
+    openAncestorsForPath,
+    workspaceId,
+  ])
 
   useEffect(() => {
     if (!tree) return
+    if (!routeMatchesWorkspace) {
+      setActiveNodeId(null, workspaceId)
+      return
+    }
     if (appMode === 'edit' && currentEditorPageId) {
-      openNode(currentEditorPageId)
-      setActiveNodeId(currentEditorPageId)
+      openNode(currentEditorPageId, workspaceId)
+      setActiveNodeId(currentEditorPageId, workspaceId)
       return
     }
 
     if (!currentPath) {
-      setActiveNodeId(null)
+      setActiveNodeId(null, workspaceId)
       return
     }
 
-    const node = useTreeStore.getState().getPageByPath(currentPath, currentKind)
-    setActiveNodeId(node?.id ?? null)
+    const node = useTreeStore
+      .getState()
+      .getPageByPath(currentPath, currentKind, workspaceId)
+    setActiveNodeId(node?.id ?? null, workspaceId)
   }, [
     tree,
     appMode,
     currentEditorPageId,
     currentPath,
     currentKind,
+    routeMatchesWorkspace,
     openNode,
     setActiveNodeId,
+    workspaceId,
   ])
 
   useEffect(() => {
-    if (tree === null) {
-      reloadTree()
+    if (observedWorkspaceIdRef.current !== workspaceId) {
+      observedWorkspaceIdRef.current = workspaceId
+      void reloadTree(workspaceId)
+      return
     }
-  }, [tree, reloadTree])
+    if (tree === null) {
+      void reloadTree(workspaceId)
+    }
+  }, [tree, reloadTree, workspaceId])
 
   useEffect(() => {
     if (!enableWorkspaceSync) return
     let cancelled = false
 
     const refreshSyncedViews = async () => {
-      const status = await loadWorkspaceSyncStatus()
+      const status = await loadWorkspaceSyncStatus(workspaceId)
       if (cancelled) return
 
       const nextCommit = status?.lastCommitHash ?? null
@@ -153,8 +198,8 @@ export default function TreeView() {
         return
       }
 
-      await reloadTree()
-      await refreshCurrentViewerPageAndLinkStatus()
+      await reloadTree(workspaceId)
+      await refreshCurrentViewerPageAndLinkStatus(workspaceId)
     }
 
     void refreshSyncedViews()
@@ -166,13 +211,13 @@ export default function TreeView() {
       cancelled = true
       window.clearInterval(intervalID)
     }
-  }, [enableWorkspaceSync, loadWorkspaceSyncStatus, reloadTree])
+  }, [enableWorkspaceSync, loadWorkspaceSyncStatus, reloadTree, workspaceId])
 
   const handleWorkspaceSyncRefresh = async () => {
     try {
-      const status = await refreshWorkspaceSync()
-      await reloadTree()
-      await refreshCurrentViewerPageAndLinkStatus()
+      const status = await refreshWorkspaceSync(workspaceId)
+      await reloadTree(workspaceId)
+      await refreshCurrentViewerPageAndLinkStatus(workspaceId)
       if (status.validationErrors.length > 0 || status.lastError) {
         toast.warning('Workspace synced with Markdown errors')
       } else {
@@ -185,7 +230,9 @@ export default function TreeView() {
   }
 
   const handleNavigateHome = () => {
-    navigate('/', { state: createNavigationVisitState() })
+    navigate(buildWorkspaceViewPath(workspaceId, '/'), {
+      state: createNavigationVisitState(),
+    })
   }
 
   const renderWorkspaceSyncStatus = () => {
@@ -282,6 +329,7 @@ export default function TreeView() {
                 openDialog(DIALOG_ADD_PAGE, {
                   parentId: '',
                   nodeKind: NODE_KIND_PAGE,
+                  workspaceId,
                 })
               }
             />
@@ -293,6 +341,7 @@ export default function TreeView() {
                 openDialog(DIALOG_ADD_PAGE, {
                   parentId: '',
                   nodeKind: NODE_KIND_SECTION,
+                  workspaceId,
                 })
               }
             />
@@ -303,13 +352,13 @@ export default function TreeView() {
             actionName="expand-all"
             icon={<ChevronsDown className="tree-view__action-icon" size={18} />}
             tooltip="Expand all"
-            onClick={expandAll}
+            onClick={() => expandAll(workspaceId)}
           />
           <TreeViewActionButton
             actionName="collapse-all"
             icon={<ChevronsUp className="tree-view__action-icon" size={18} />}
             tooltip="Collapse all"
-            onClick={collapseAll}
+            onClick={() => collapseAll(workspaceId)}
           />
         </>
         {!readOnlyMode && enableWorkspaceSync && (
@@ -319,7 +368,9 @@ export default function TreeView() {
               <ArchiveRestore className="tree-view__action-icon" size={18} />
             }
             tooltip="Restore workspace snapshot"
-            onClick={() => openDialog(DIALOG_WORKSPACE_SNAPSHOTS)}
+            onClick={() =>
+              openDialog(DIALOG_WORKSPACE_SNAPSHOTS, { workspaceId })
+            }
           />
         )}
         {!readOnlyMode && tree && (
@@ -327,13 +378,15 @@ export default function TreeView() {
             actionName="sort"
             icon={<List className="tree-view__action-icon" size={18} />}
             tooltip="Sort pages"
-            onClick={() => openDialog(DIALOG_SORT_PAGES, { parent: tree })}
+            onClick={() =>
+              openDialog(DIALOG_SORT_PAGES, { parent: tree, workspaceId })
+            }
           />
         )}
       </div>
       <div className="tree-view__nodes">
         {tree?.children?.map((node) => (
-          <TreeNode key={node.id} node={node} />
+          <TreeNode key={node.id} node={node} workspaceId={workspaceId} />
         ))}
       </div>
     </div>

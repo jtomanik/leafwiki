@@ -2,7 +2,6 @@ import { NODE_KIND_PAGE, type Page } from '@/lib/api/pages'
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
-import { useTreeStore } from '@/stores/tree'
 import { useCallback, useState } from 'react'
 import { SlugInputWithSuggestion } from './SlugInputWithSuggestion'
 
@@ -10,6 +9,8 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type EditPageMetadataDialogProps = {
   parentId: string
+  parentPath: string
+  workspaceId: string
   currentId?: string
   itemKind?: Page['kind']
   title: string
@@ -19,13 +20,14 @@ type EditPageMetadataDialogProps = {
 
 export function EditPageMetadataDialog({
   parentId,
+  parentPath,
+  workspaceId,
   currentId,
   itemKind = NODE_KIND_PAGE,
   title: propTitle,
   slug: propSlug,
   onChange,
 }: EditPageMetadataDialogProps) {
-  const parentPath = useTreeStore((s) => s.getPathById(parentId) || '')
   const itemLabel = itemKind === NODE_KIND_PAGE ? 'page' : 'section'
   const itemLabelCapitalized = itemKind === NODE_KIND_PAGE ? 'Page' : 'Section'
 
@@ -104,6 +106,7 @@ export function EditPageMetadataDialog({
           slug={slug}
           currentId={currentId}
           parentId={parentId}
+          workspaceId={workspaceId}
           enableSlugSuggestion={true}
           onSlugChange={handleSlugChange}
           onSlugTouchedChange={setSlugTouched}

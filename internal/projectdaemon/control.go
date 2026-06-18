@@ -158,6 +158,7 @@ type AuthRoundTripper struct {
 	Base         http.RoundTripper
 	ControlToken string
 	BearerToken  string
+	ActorContext string
 }
 
 func (rt AuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -170,6 +171,9 @@ func (rt AuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	clone.Header.Set(ControlTokenHeader, rt.ControlToken)
 	if strings.TrimSpace(rt.BearerToken) != "" {
 		clone.Header.Set("Authorization", "Bearer "+strings.TrimSpace(rt.BearerToken))
+	}
+	if strings.TrimSpace(rt.ActorContext) != "" {
+		clone.Header.Set(ActorContextHeader, strings.TrimSpace(rt.ActorContext))
 	}
 	return next.RoundTrip(clone)
 }

@@ -247,6 +247,7 @@ func TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken(t *testi
 
 func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
 	var workspacePath string
+	var workspacesPath string
 	var mcpPath string
 	var controlPath string
 	public := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -255,6 +256,10 @@ func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
 	workspace := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		workspacePath = req.URL.Path
 		_, _ = w.Write([]byte("workspace"))
+	})
+	workspaces := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		workspacesPath = req.URL.Path
+		_, _ = w.Write([]byte("workspaces"))
 	})
 	mcp := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mcpPath = req.URL.Path
@@ -267,6 +272,7 @@ func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
 	handler := NewIngressHandler(public, IngressOptions{
 		BasePath:     "/wiki",
 		Workspace:    workspace,
+		Workspaces:   workspaces,
 		MCP:          mcp,
 		ControlPlane: control,
 	})
@@ -278,9 +284,21 @@ func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/wiki/api/workspaces", nil))
+	if rec.Body.String() != "workspaces" || workspacesPath != "/api/workspaces" {
+		t.Fatalf("workspaces dispatch body/path = %q/%q", rec.Body.String(), workspacesPath)
+	}
+
+	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/wiki/mcp", nil))
 	if rec.Body.String() != "mcp" || mcpPath != "/mcp" {
 		t.Fatalf("mcp dispatch body/path = %q/%q", rec.Body.String(), mcpPath)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/wiki/mcp/workspaces/home", nil))
+	if rec.Body.String() != "mcp" || mcpPath != "/mcp/workspaces/home" {
+		t.Fatalf("workspace mcp dispatch body/path = %q/%q", rec.Body.String(), mcpPath)
 	}
 
 	rec = httptest.NewRecorder()

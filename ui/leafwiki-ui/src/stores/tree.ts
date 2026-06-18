@@ -1,5 +1,7 @@
 import { fetchTree, PageNode } from '@/lib/api/pages'
+import { HOME_WORKSPACE_ID } from '@/lib/api/workspaces'
 import { FlatPageSearchItem, buildFlatPageSearchItems } from '@/lib/pageSearch'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -53,25 +55,12 @@ function toSetRecord(ids: string[]): Record<string, true> {
   return rec
 }
 
-type TreeStore = {
+export type TreeWorkspaceState = {
   tree: PageNode | null
   loading: boolean
+  reloadRequestId: number
   error: string | null
   activeNodeId: string | null
-  expandAll: () => void
-  collapseAll: () => void
-  reloadTree: () => Promise<void>
-  patchNodeVersion: (id: string, version: string) => void
-  toggleNode: (id: string) => void
-  openNode: (id: string) => void
-  closeNode: (id: string) => void
-  setActiveNodeId: (id: string | null) => void
-  isNodeOpen: (id: string) => boolean
-  getPageById: (id: string) => PageNode | null
-  getPageByPath: (path: string, kind?: PageNode['kind']) => PageNode | null
-  getPathById: (id: string) => string | null
-  getAncestors: (id: string) => string[]
-  openAncestorsForPath: (path: string, kind?: PageNode['kind']) => void
   openNodeIds: string[]
   openNodeIdSet: Record<string, true>
   byPath: Record<string, PageNode>
@@ -79,78 +68,182 @@ type TreeStore = {
   byId: Record<string, PageNode>
   flatPages: FlatPageSearchItem[]
 }
+
+type TreeStore = {
+  workspaceTrees: Record<string, TreeWorkspaceState>
+  getWorkspaceState: (workspaceId?: string) => TreeWorkspaceState
+  expandAll: (workspaceId?: string) => void
+  collapseAll: (workspaceId?: string) => void
+  reloadTree: (workspaceId?: string) => Promise<void>
+  patchNodeVersion: (id: string, version: string, workspaceId?: string) => void
+  toggleNode: (id: string, workspaceId?: string) => void
+  openNode: (id: string, workspaceId?: string) => void
+  closeNode: (id: string, workspaceId?: string) => void
+  setActiveNodeId: (id: string | null, workspaceId?: string) => void
+  isNodeOpen: (id: string, workspaceId?: string) => boolean
+  getPageById: (id: string, workspaceId?: string) => PageNode | null
+  getPageByPath: (
+    path: string,
+    kind?: PageNode['kind'],
+    workspaceId?: string,
+  ) => PageNode | null
+  getPathById: (id: string, workspaceId?: string) => string | null
+  getAncestors: (id: string, workspaceId?: string) => string[]
+  openAncestorsForPath: (
+    path: string,
+    kind?: PageNode['kind'],
+    workspaceId?: string,
+  ) => void
+}
+
+function normalizeWorkspaceId(workspaceId?: string): string {
+  return (
+    workspaceId?.trim() ||
+    useWorkspacesStore.getState().activeWorkspaceId ||
+    HOME_WORKSPACE_ID
+  )
+}
+
+function emptyTreeState(openNodeIds: string[] = []): TreeWorkspaceState {
+  return {
+    tree: null,
+    loading: false,
+    reloadRequestId: 0,
+    error: null,
+    activeNodeId: null,
+    openNodeIds,
+    openNodeIdSet: toSetRecord(openNodeIds),
+    byPath: {},
+    byPathKind: {},
+    byId: {},
+    flatPages: [],
+  }
+}
+
+let treeReloadRequestId = 0
+
+function mergeWorkspaceState(
+  current: TreeWorkspaceState | undefined,
+  patch: Partial<TreeWorkspaceState>,
+): TreeWorkspaceState {
+  return { ...(current ?? emptyTreeState()), ...patch }
+}
+
 export const useTreeStore = create<TreeStore>()(
   persist(
     (set, get) => ({
-      tree: null,
-      loading: false,
-      error: null,
-      activeNodeId: null,
-      openNodeIds: [],
-      openNodeIdSet: {},
-      byPath: {},
-      byPathKind: {},
-      byId: {},
-      flatPages: [],
-      expandAll: () => {
-        const tree = get().tree
+      workspaceTrees: {},
+      getWorkspaceState: (workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        return get().workspaceTrees[normalized] ?? emptyTreeState()
+      },
+      expandAll: (workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        const tree = state.tree
         const ids = collectExpandableNodeIds(tree)
-        set({ openNodeIds: ids, openNodeIdSet: toSetRecord(ids) })
+        const next = mergeWorkspaceState(state, {
+          openNodeIds: ids,
+          openNodeIdSet: toSetRecord(ids),
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      collapseAll: () => {
-        set({ openNodeIds: [], openNodeIdSet: {} })
+      collapseAll: (workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const next = mergeWorkspaceState(get().getWorkspaceState(normalized), {
+          openNodeIds: [],
+          openNodeIdSet: {},
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
-      toggleNode: (id: string) => {
-        const current = new Set(get().openNodeIds)
+      toggleNode: (id: string, workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        const current = new Set(state.openNodeIds)
 
         if (current.has(id)) current.delete(id)
         else current.add(id)
 
         const ids = Array.from(current)
-        set({ openNodeIds: ids, openNodeIdSet: toSetRecord(ids) })
+        const next = mergeWorkspaceState(state, {
+          openNodeIds: ids,
+          openNodeIdSet: toSetRecord(ids),
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      openNode: (id: string) => {
-        if (get().openNodeIdSet?.[id]) {
+      openNode: (id: string, workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        if (state.openNodeIdSet?.[id]) {
           return
         }
-        const current = new Set(get().openNodeIds)
+        const current = new Set(state.openNodeIds)
         current.add(id)
         const ids = Array.from(current)
-        set({ openNodeIds: ids, openNodeIdSet: toSetRecord(ids) })
+        const next = mergeWorkspaceState(state, {
+          openNodeIds: ids,
+          openNodeIdSet: toSetRecord(ids),
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      closeNode: (id: string) => {
-        if (!get().openNodeIdSet?.[id]) {
+      closeNode: (id: string, workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        if (!state.openNodeIdSet?.[id]) {
           return
         }
-        const current = new Set(get().openNodeIds)
+        const current = new Set(state.openNodeIds)
         current.delete(id)
         const ids = Array.from(current)
-        set({ openNodeIds: ids, openNodeIdSet: toSetRecord(ids) })
+        const next = mergeWorkspaceState(state, {
+          openNodeIds: ids,
+          openNodeIdSet: toSetRecord(ids),
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      setActiveNodeId: (id: string | null) => {
-        if (get().activeNodeId === id) {
+      setActiveNodeId: (id: string | null, workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        if (state.activeNodeId === id) {
           return
         }
-        set({ activeNodeId: id })
+        const next = mergeWorkspaceState(state, { activeNodeId: id })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      isNodeOpen: (id: string) => !!get().openNodeIdSet?.[id],
+      isNodeOpen: (id: string, workspaceId) =>
+        !!get().getWorkspaceState(workspaceId).openNodeIdSet?.[id],
 
-      getPageByPath: (path: string, kind?: PageNode['kind']) => {
+      getPageByPath: (path: string, kind?: PageNode['kind'], workspaceId?) => {
+        const state = get().getWorkspaceState(workspaceId)
         if (kind) {
-          return get().byPathKind?.[path]?.[kind] ?? null
+          return state.byPathKind?.[path]?.[kind] ?? null
         }
-        return get().byPath?.[path] ?? null
+        return state.byPath?.[path] ?? null
       },
-      getPageById: (id: string) => get().byId?.[id] ?? null,
-      getPathById: (id: string) => get().byId?.[id]?.path ?? null,
+      getPageById: (id: string, workspaceId) =>
+        get().getWorkspaceState(workspaceId).byId?.[id] ?? null,
+      getPathById: (id: string, workspaceId) =>
+        get().getWorkspaceState(workspaceId).byId?.[id]?.path ?? null,
 
-      getAncestors: (id: string) => {
-        const byId = get().byId
+      getAncestors: (id: string, workspaceId) => {
+        const byId = get().getWorkspaceState(workspaceId).byId
         const out: string[] = []
         let cur = byId?.[id]
         while (cur?.parentId) {
@@ -160,18 +253,24 @@ export const useTreeStore = create<TreeStore>()(
         return out
       },
 
-      openAncestorsForPath: (path: string, kind?: PageNode['kind']) => {
-        const node = get().getPageByPath(path, kind)
+      openAncestorsForPath: (
+        path: string,
+        kind?: PageNode['kind'],
+        workspaceId?,
+      ) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        const node = get().getPageByPath(path, kind, normalized)
         if (!node) return
 
-        const ancestors = get().getAncestors(node.id)
+        const ancestors = get().getAncestors(node.id, normalized)
         if (ancestors.length === 0) return
 
-        const merged = new Set(get().openNodeIds)
+        const merged = new Set(state.openNodeIds)
         let changed = false
         for (const id of ancestors) merged.add(id)
         for (const id of ancestors) {
-          if (!get().openNodeIdSet?.[id]) {
+          if (!state.openNodeIdSet?.[id]) {
             changed = true
           }
         }
@@ -181,13 +280,21 @@ export const useTreeStore = create<TreeStore>()(
         }
 
         const ids = Array.from(merged)
-        set({ openNodeIds: ids, openNodeIdSet: toSetRecord(ids) })
+        const next = mergeWorkspaceState(state, {
+          openNodeIds: ids,
+          openNodeIdSet: toSetRecord(ids),
+        })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      patchNodeVersion: (id: string, version: string) => {
-        const byId = get().byId
-        const byPath = get().byPath
-        const byPathKind = get().byPathKind
+      patchNodeVersion: (id: string, version: string, workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const state = get().getWorkspaceState(normalized)
+        const byId = state.byId
+        const byPath = state.byPath
+        const byPathKind = state.byPathKind
         const node = byId?.[id]
         if (!node) return
         const updatedNode = { ...node, version }
@@ -196,7 +303,7 @@ export const useTreeStore = create<TreeStore>()(
           node.path && byPath[node.path]?.id === id
             ? { ...byPath, [node.path]: updatedNode }
             : byPath
-        set({
+        const next = mergeWorkspaceState(state, {
           byId: { ...byId, [id]: updatedNode },
           byPath: nextByPath,
           byPathKind: node.path
@@ -206,42 +313,109 @@ export const useTreeStore = create<TreeStore>()(
               }
             : byPathKind,
         })
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+        })
       },
 
-      reloadTree: async () => {
-        set({ loading: true, error: null })
+      reloadTree: async (workspaceId) => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const requestId = ++treeReloadRequestId
+        const started = mergeWorkspaceState(
+          get().getWorkspaceState(normalized),
+          {
+            loading: true,
+            reloadRequestId: requestId,
+            error: null,
+          },
+        )
+        set({
+          workspaceTrees: { ...get().workspaceTrees, [normalized]: started },
+        })
 
         try {
-          const tree = await fetchTree()
+          const tree = await fetchTree(normalized)
+          if (
+            get().getWorkspaceState(normalized).reloadRequestId !== requestId
+          ) {
+            return
+          }
           assignParentIds(tree)
           const { byPath, byPathKind, byId } = buildIndexes(tree)
           const flatPages = buildFlatPageSearchItems(tree)
-          const persistedOpen = get().openNodeIds
+          const persistedOpen = get().getWorkspaceState(normalized).openNodeIds
+          const next = mergeWorkspaceState(
+            get().getWorkspaceState(normalized),
+            {
+              tree,
+              byPath,
+              byPathKind,
+              byId,
+              flatPages,
+              loading: false,
+              error: null,
+              openNodeIdSet: toSetRecord(persistedOpen),
+            },
+          )
           set({
-            tree,
-            byPath,
-            byPathKind,
-            byId,
-            flatPages,
-            openNodeIdSet: toSetRecord(persistedOpen),
+            workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
           })
           // FIXME: a better error handling is required here
         } catch (err: unknown) {
-          if (err instanceof Error) {
-            set({ error: err.message })
-          } else {
-            set({ error: 'An unknown error occurred' })
+          if (
+            get().getWorkspaceState(normalized).reloadRequestId !== requestId
+          ) {
+            return
           }
+          const state = get().getWorkspaceState(normalized)
+          const next = mergeWorkspaceState(state, {
+            loading: false,
+            error:
+              err instanceof Error ? err.message : 'An unknown error occurred',
+          })
+          set({
+            workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+          })
         } finally {
-          set({ loading: false })
+          const state = get().getWorkspaceState(normalized)
+          if (state.loading && state.reloadRequestId === requestId) {
+            const next = mergeWorkspaceState(state, { loading: false })
+            set({
+              workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
+            })
+          }
         }
       },
     }),
     {
       name: 'leafwiki-tree-open-node-ids',
       partialize: (state) => ({
-        openNodeIds: state.openNodeIds,
+        workspaceTrees: Object.fromEntries(
+          Object.entries(state.workspaceTrees).map(([workspaceId, tree]) => [
+            workspaceId,
+            {
+              openNodeIds: tree.openNodeIds,
+            },
+          ]),
+        ),
       }),
+      merge: (persisted, current) => {
+        const raw = persisted as
+          | { workspaceTrees?: Record<string, Partial<TreeWorkspaceState>> }
+          | undefined
+        const restored = Object.fromEntries(
+          Object.entries(raw?.workspaceTrees ?? {}).map(
+            ([workspaceId, tree]) => [
+              workspaceId,
+              emptyTreeState(tree.openNodeIds ?? []),
+            ],
+          ),
+        )
+        return {
+          ...current,
+          workspaceTrees: restored,
+        }
+      },
     },
   ),
 )

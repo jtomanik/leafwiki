@@ -1,5 +1,6 @@
 // useAppMode returns the current application mode.
 import { stripBasePath } from '@/lib/routePath'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import { useLocation } from 'react-router-dom'
 
 export type AppMode =
@@ -14,24 +15,27 @@ export type AppMode =
 export function useAppMode(): AppMode {
   const location = useLocation()
   const pathname = stripBasePath(location.pathname) ?? location.pathname
+  const routePath = pathname.startsWith('/w/')
+    ? splitWorkspaceRoute(pathname).innerPath
+    : pathname
 
-  if (pathname.startsWith('/e/')) {
+  if (routePath === '/e' || routePath.startsWith('/e/')) {
     return 'edit'
   }
 
   if (
-    pathname === '/history' ||
-    pathname === '/history/' ||
-    pathname.startsWith('/history/')
+    routePath === '/history' ||
+    routePath === '/history/' ||
+    routePath.startsWith('/history/')
   ) {
     return 'history'
   }
 
-  if (pathname.startsWith('/users')) {
+  if (routePath.startsWith('/users')) {
     return 'user-management'
   }
 
-  if (pathname.startsWith('/settings')) {
+  if (routePath.startsWith('/settings')) {
     return 'settings'
   }
 

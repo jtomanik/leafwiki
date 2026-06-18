@@ -41,6 +41,23 @@ func TestValidateWorkspace_RejectsRootDirInsideReservedDataDirState(t *testing.T
 	}
 }
 
+func TestValidateWorkspace_RejectsRootDirInsideFederatedControlDirs(t *testing.T) {
+	for _, reserved := range []string{"wikid", "runtime"} {
+		t.Run(reserved, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), ".leafwiki")
+			rootDir := filepath.Join(dataDir, reserved, "workspace")
+
+			err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+			if err == nil {
+				t.Fatalf("expected root dir inside %s control state to be rejected", reserved)
+			}
+			if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateWorkspace_RejectsRootDirSymlinkContainingDataDir(t *testing.T) {
 	baseDir := t.TempDir()
 	rootTarget := filepath.Join(baseDir, "wiki")

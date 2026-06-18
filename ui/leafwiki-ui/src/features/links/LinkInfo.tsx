@@ -9,6 +9,7 @@ import { useLinkStatusStore } from './linkstatus_store'
 
 export function BacklinkInfo() {
   const pageID = useViewerStore((s) => s.page?.id)
+  const workspaceId = useViewerStore((s) => s.workspaceId)
   const hideLinkMetadataSection = useConfigStore(
     (s) => s.hideLinkMetadataSection,
   )
@@ -25,12 +26,18 @@ export function BacklinkInfo() {
   useEffect(() => {
     // Clear link status when there is no page or the link metadata section is hidden,
     // and fetch link status when a page is selected and the section is visible.
-    if (!pageID || hideLinkMetadataSection) {
+    if (!pageID || !workspaceId || hideLinkMetadataSection) {
       clear()
       return
     }
-    fetchLinkStatusForPage(pageID)
-  }, [fetchLinkStatusForPage, pageID, clear, hideLinkMetadataSection])
+    fetchLinkStatusForPage(pageID, workspaceId)
+  }, [
+    fetchLinkStatusForPage,
+    pageID,
+    clear,
+    hideLinkMetadataSection,
+    workspaceId,
+  ])
 
   if (hideLinkMetadataSection) return null
   const backlinks = status?.backlinks ?? []
@@ -52,7 +59,11 @@ export function BacklinkInfo() {
               {backlinks.map((bl) => (
                 <li key={bl.from_page_id} className="backlinks__item">
                   <Link
-                    to={browserRoutePathForWikiNode(bl.from_path, bl.from_kind)}
+                    to={browserRoutePathForWikiNode(
+                      bl.from_path,
+                      bl.from_kind,
+                      workspaceId ?? undefined,
+                    )}
                     state={createNavigationVisitState()}
                   >
                     <Paperclip size={16} className="backlinks__icon" />{' '}
@@ -128,6 +139,7 @@ export function BacklinkInfo() {
                           to={browserRoutePathForWikiNode(
                             bl.from_path,
                             bl.from_kind,
+                            workspaceId ?? undefined,
                           )}
                           state={createNavigationVisitState()}
                         >

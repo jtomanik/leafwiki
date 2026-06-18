@@ -1,4 +1,5 @@
 import { buildViewUrl } from './routePath'
+import { buildWorkspaceViewPath } from './workspaceRoute'
 
 export type WikiNodeKind = 'page' | 'section'
 
@@ -304,8 +305,18 @@ export function markdownHrefToWikiBrowserPath(
 export function browserRoutePathForWikiNode(
   path: string,
   kind?: WikiNodeKind,
+  workspaceId?: string,
 ): string {
   const normalized = normalizeWikiRoutePath(path)
+  const routePath =
+    kind === 'page' &&
+    normalized !== '/' &&
+    !normalized.toLowerCase().endsWith('.md')
+      ? `${normalized}.md`
+      : normalized
+  if (workspaceId) {
+    return buildWorkspaceViewPath(workspaceId, routePath)
+  }
   if (
     kind === 'page' &&
     normalized !== '/' &&

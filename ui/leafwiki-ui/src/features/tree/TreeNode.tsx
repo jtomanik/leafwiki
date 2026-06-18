@@ -5,6 +5,7 @@ import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import clsx from 'clsx'
@@ -16,11 +17,21 @@ import TreeNodeActionsMenu from './TreeNodeActionsMenu'
 
 type Props = {
   node: PageNode
+  workspaceId?: string
 }
 
-export const TreeNode = React.memo(function TreeNode({ node }: Props) {
-  const open = useTreeStore((s) => !!s.openNodeIdSet?.[node.id])
-  const isStoreActive = useTreeStore((s) => s.activeNodeId === node.id)
+export const TreeNode = React.memo(function TreeNode({
+  node,
+  workspaceId,
+}: Props) {
+  const activeWorkspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
+  const resolvedWorkspaceId = workspaceId ?? activeWorkspaceId
+  const open = useTreeStore(
+    (s) => !!s.workspaceTrees[resolvedWorkspaceId]?.openNodeIdSet?.[node.id],
+  )
+  const isStoreActive = useTreeStore(
+    (s) => s.workspaceTrees[resolvedWorkspaceId]?.activeNodeId === node.id,
+  )
   const toggleNode = useTreeStore((s) => s.toggleNode)
   const hasChildren = node.children && node.children.length > 0
   const openDialog = useDialogsStore((state) => state.openDialog)
@@ -38,7 +49,11 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
   const linkText = (
     <div className={clsx('flex', 'tree-node__tooltip-parent')}>
       <Link
-        to={browserRoutePathForWikiNode(node.path, node.kind)}
+        to={browserRoutePathForWikiNode(
+          node.path,
+          node.kind,
+          resolvedWorkspaceId,
+        )}
         state={createNavigationVisitState()}
         className="tree-node__link"
         data-testid={`tree-node-link-${node.id}`}
@@ -86,7 +101,8 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
                 'tree-node__toggle--closed': !open,
               })}
               onClick={() =>
-                node.kind === NODE_KIND_SECTION && toggleNode(node.id)
+                node.kind === NODE_KIND_SECTION &&
+                toggleNode(node.id, resolvedWorkspaceId)
               }
             />
           )}
@@ -104,10 +120,16 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
                 icon={<FilePlus size={18} className="tree-node__action-icon" />}
                 tooltip="Create new page"
                 onClick={() =>
-                  openDialog(DIALOG_ADD_PAGE, { parentId: node.id })
+                  openDialog(DIALOG_ADD_PAGE, {
+                    parentId: node.id,
+                    workspaceId: resolvedWorkspaceId,
+                  })
                 }
               />
-              <TreeNodeActionsMenu node={node} />
+              <TreeNodeActionsMenu
+                node={node}
+                workspaceId={resolvedWorkspaceId}
+              />
             </div>
           )}
         </div>
@@ -120,7 +142,11 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
       >
         {hasChildren &&
           node.children?.map((child) => (
-            <TreeNode key={child.id} node={child} />
+            <TreeNode
+              key={child.id}
+              node={child}
+              workspaceId={resolvedWorkspaceId}
+            />
           ))}
       </div>
     </>

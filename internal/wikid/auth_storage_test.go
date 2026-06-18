@@ -28,6 +28,19 @@ func TestAuthStorageOpensFreshStoresUnderWikidAuthRoot(t *testing.T) {
 	}
 }
 
+func TestAuthStoragePathsUseGlobalWikidDirWhenDataRootIsLeafwiki(t *testing.T) {
+	globalRoot := filepath.Join(t.TempDir(), ".leafwiki")
+
+	paths := AuthStoragePaths(globalRoot)
+
+	if got, want := paths.AuthDir, filepath.Join(globalRoot, "wikid", "auth"); got != want {
+		t.Fatalf("AuthDir = %q, want %q", got, want)
+	}
+	if got, want := paths.OAuthDir, filepath.Join(globalRoot, "wikid", "oauth"); got != want {
+		t.Fatalf("OAuthDir = %q, want %q", got, want)
+	}
+}
+
 func TestCleanupLegacyAuthDBsDeletesOnlyKnownRootFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	for _, name := range []string{"users.db", "sessions.db", "api_keys.db", "pages.db"} {

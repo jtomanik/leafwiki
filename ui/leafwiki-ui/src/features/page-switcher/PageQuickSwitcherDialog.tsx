@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { File, FolderTree } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -20,11 +21,14 @@ import { searchQuickSwitcherItems } from './pageQuickSwitcher'
 
 export function PageQuickSwitcherDialog() {
   const navigate = useNavigate()
+  const workspaceId = useWorkspacesStore((state) => state.activeWorkspaceId)
   const closeDialog = useDialogsStore((state) => state.closeDialog)
   const isOpen = useDialogsStore(
     (state) => state.dialogType === DIALOG_PAGE_QUICK_SWITCHER,
   )
-  const items = useTreeStore((state) => state.flatPages)
+  const items = useTreeStore(
+    (state) => state.workspaceTrees[workspaceId]?.flatPages ?? [],
+  )
   const openAncestorsForPath = useTreeStore(
     (state) => state.openAncestorsForPath,
   )
@@ -78,8 +82,8 @@ export function PageQuickSwitcherDialog() {
 
   const openResult = (path: string, kind: 'page' | 'section') => {
     queueMicrotask(() => {
-      openAncestorsForPath(path, kind)
-      navigate(browserRoutePathForWikiNode(path, kind), {
+      openAncestorsForPath(path, kind, workspaceId)
+      navigate(browserRoutePathForWikiNode(path, kind, workspaceId), {
         state: createNavigationVisitState(),
       })
       closeDialog()

@@ -4,6 +4,10 @@ import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildBrowserEditUrl } from '@/lib/routePath'
 import { DIALOG_LINK_INSERT } from '@/lib/registries'
 import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
+import {
   browserRoutePathForWikiNode,
   getWikiTargetRoutePath,
   wikiPageLookupInputForBrowserRoute,
@@ -25,6 +29,7 @@ export default function PageEditor() {
   const { '*': path } = useParams()
 
   const { pathname } = useLocation()
+  const workspaceId = splitWorkspaceRoute(pathname).workspaceId
   const navigate = useNavigate()
   const editorRef = useRef<MarkdownEditorRef>(null)
   const skipNavigationGuardRef = useRef(false)
@@ -36,6 +41,9 @@ export default function PageEditor() {
   const setTags = usePageEditorStore((s) => s.setTags)
   const setFrontmatterFields = usePageEditorStore((s) => s.setFrontmatterFields)
   const loadPageData = usePageEditorStore((s) => s.loadPageData)
+  const invalidateActiveRequest = usePageEditorStore(
+    (s) => s.invalidateActiveRequest,
+  )
   const initialPage = usePageEditorStore((s) => s.initialPage) // contains the initial page data when loaded
   const tags = usePageEditorStore((s) => s.tags)
   const frontmatterFields = usePageEditorStore((s) => s.frontmatterFields)
@@ -53,7 +61,7 @@ export default function PageEditor() {
   useNavigationGuard({
     when: () => dirty && !skipNavigationGuardRef.current,
     onNavigate: async () => {
-      await reloadTree()
+      await reloadTree(workspaceId)
     },
   })
 
@@ -61,14 +69,20 @@ export default function PageEditor() {
   useEffect(() => {
     if (!path) return
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
-    loadPageData(lookup.path, lookup.fallbackPath, lookup.kind)
-  }, [path, pathname, loadPageData])
+    loadPageData(lookup.path, lookup.fallbackPath, lookup.kind, workspaceId)
+  }, [path, pathname, loadPageData, workspaceId])
+
+  useEffect(() => {
+    return () => {
+      invalidateActiveRequest()
+    }
+  }, [invalidateActiveRequest])
 
   // Open node
   useEffect(() => {
     if (!initialPage?.id) return
-    openNode(initialPage.id)
-  }, [openNode, initialPage?.id])
+    openNode(initialPage.id, workspaceId)
+  }, [openNode, initialPage?.id, workspaceId])
 
   // callbacks to save / close
   const handleSave = useCallback(() => {
@@ -79,7 +93,7 @@ export default function PageEditor() {
             null,
             '',
             buildBrowserEditUrl(
-              browserRoutePathForWikiNode(page.path, page.kind),
+              browserRoutePathForWikiNode(page.path, page.kind, workspaceId),
             ),
           )
           toast.success('Page saved successfully')
@@ -106,7 +120,11 @@ export default function PageEditor() {
                         null,
                         '',
                         buildBrowserEditUrl(
-                          browserRoutePathForWikiNode(page.path, page.kind),
+                          browserRoutePathForWikiNode(
+                            page.path,
+                            page.kind,
+                            workspaceId,
+                          ),
                         ),
                       )
                       toast.success('Page saved successfully')
@@ -135,7 +153,7 @@ export default function PageEditor() {
           toast.error(mapped.message)
         }
       })
-  }, [savePage, forceOverwrite])
+  }, [savePage, forceOverwrite, workspaceId])
 
   const handleClose = useCallback(() => {
     const state = usePageEditorStore.getState()
@@ -151,15 +169,21 @@ export default function PageEditor() {
 
     if (currentPage?.path) {
       navigate(
-        browserRoutePathForWikiNode(currentPage.path, currentPage.kind),
+        browserRoutePathForWikiNode(
+          currentPage.path,
+          currentPage.kind,
+          workspaceId,
+        ),
         {
           state: createNavigationVisitState(),
         },
       )
     } else {
-      navigate('/', { state: createNavigationVisitState() })
+      navigate(buildWorkspaceViewPath(workspaceId, '/'), {
+        state: createNavigationVisitState(),
+      })
     }
-  }, [navigate])
+  }, [navigate, workspaceId])
 
   const openLinkDialog = useCallback(() => {
     const view = editorRef.current?.editorViewRef.current
@@ -169,8 +193,8 @@ export default function PageEditor() {
           view.state.selection.main.to,
         )
       : ''
-    openDialog(DIALOG_LINK_INSERT, { editorRef, selectedText })
-  }, [editorRef, openDialog])
+    openDialog(DIALOG_LINK_INSERT, { editorRef, selectedText, workspaceId })
+  }, [editorRef, openDialog, workspaceId])
 
   // register toolbar actions
   useToolbarActions({
@@ -217,6 +241,7 @@ export default function PageEditor() {
             <MarkdownEditor
               ref={editorRef}
               pageId={initialPage.id}
+              workspaceId={workspaceId}
               initialValue={initialPage.content || ''}
               onChange={handleEditorChange}
             />

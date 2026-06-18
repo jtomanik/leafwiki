@@ -15,11 +15,13 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type AddPageDialogProps = {
   parentId: string
+  workspaceId: string
   nodeKind?: 'page' | 'section'
 }
 
 export function AddPageDialog({
   parentId,
+  workspaceId,
   nodeKind = NODE_KIND_PAGE,
 }: AddPageDialogProps) {
   const [title, setTitle] = useState('')
@@ -30,7 +32,9 @@ export function AddPageDialog({
   const [slugTouched, setSlugTouched] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const reloadTree = useTreeStore((s) => s.reloadTree)
-  const parentPath = useTreeStore((s) => s.getPathById(parentId) || '')
+  const parentPath = useTreeStore(
+    (s) => s.getPathById(parentId, workspaceId) || '',
+  )
   const navigate = useNavigate()
   const itemLabel = nodeKind === NODE_KIND_PAGE ? 'page' : 'section'
   const itemLabelCapitalized = nodeKind === NODE_KIND_PAGE ? 'Page' : 'Section'
@@ -81,13 +85,15 @@ export function AddPageDialog({
       setLoading(true)
       setFieldErrors({})
       try {
-        await createPage({ title, slug, parentId, kind: nodeKind })
+        await createPage({ title, slug, parentId, kind: nodeKind, workspaceId })
         toast.success(`${itemLabelCapitalized} created`)
-        await reloadTree()
+        await reloadTree(workspaceId)
         if (redirect) {
           const fullPath = parentPath !== '' ? `${parentPath}/${slug}` : slug
           navigate(
-            buildEditUrl(browserRoutePathForWikiNode(fullPath, nodeKind)),
+            buildEditUrl(
+              browserRoutePathForWikiNode(fullPath, nodeKind, workspaceId),
+            ),
           )
         }
         resetForm()
@@ -104,6 +110,7 @@ export function AddPageDialog({
       title,
       slug,
       parentId,
+      workspaceId,
       slugTouched,
       slugLoading,
       lastSlugTitle,
@@ -194,6 +201,7 @@ export function AddPageDialog({
           onLastSlugTitleChange={setLastSlugTitle}
           error={fieldErrors.slug}
           allowedHotkeys={DIALOG_INPUT_ALLOWED_HOTKEYS}
+          workspaceId={workspaceId}
         />
       </div>
       <span className="dialog__path" data-testid="add-page-path-display">

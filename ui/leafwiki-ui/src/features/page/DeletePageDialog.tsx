@@ -18,16 +18,18 @@ import { toast } from 'sonner'
 export type DeletePageDialogProps = {
   pageId: string
   redirectTo: string
+  workspaceId: string
 }
 
 export function DeletePageDialog({
   pageId,
   redirectTo,
+  workspaceId,
 }: DeletePageDialogProps) {
   const enableLinkRefactor = useConfigStore((s) => s.enableLinkRefactor)
   const navigate = useNavigate()
   const reloadTree = useTreeStore((s) => s.reloadTree)
-  const page = useTreeStore((s) => s.getPageById(pageId))
+  const page = useTreeStore((s) => s.getPageById(pageId, workspaceId))
 
   const [loading, setLoading] = useState(false)
   const [deleteRecursive, setDeleteRecursive] = useState(false)
@@ -52,7 +54,7 @@ export function DeletePageDialog({
       setBacklinksError(null)
 
       try {
-        const status = await fetchLinkStatus(pageId)
+        const status = await fetchLinkStatus(pageId, workspaceId)
         if (cancelled) return
         setBacklinks(status.backlinks ?? [])
       } catch (err) {
@@ -73,7 +75,7 @@ export function DeletePageDialog({
     return () => {
       cancelled = true
     }
-  }, [enableLinkRefactor, pageId])
+  }, [enableLinkRefactor, pageId, workspaceId])
 
   if (!page) return null
   const hasChildren = (page.children?.length ?? 0) > 0
@@ -83,21 +85,31 @@ export function DeletePageDialog({
   const handleDelete = async (): Promise<boolean> => {
     setLoading(true)
     try {
-      await deletePage(pageId, deleteRecursive, page?.version ?? '')
+      await deletePage(
+        pageId,
+        deleteRecursive,
+        page?.version ?? '',
+        workspaceId,
+      )
       toast.success(`${itemLabelCapitalized} deleted successfully`)
       navigate(redirectTo, { state: createNavigationVisitState() })
-      reloadTree().catch(console.error)
+      reloadTree(workspaceId).catch(console.error)
       return true
     } catch (err) {
       console.warn(err)
       const localized = asApiLocalizedError(err)
       if (localized?.code === 'page_version_conflict') {
-        reloadTree().catch(console.error)
+        reloadTree(workspaceId).catch(console.error)
         const viewerPage = useViewerStore.getState().page
         if (viewerPage?.id === pageId && viewerPage.path) {
           useViewerStore
             .getState()
-            .loadPageData(viewerPage.path, undefined, viewerPage.kind)
+            .loadPageData(
+              viewerPage.path,
+              undefined,
+              viewerPage.kind,
+              workspaceId,
+            )
             .catch(console.error)
         }
         setPageModifiedWarning(true)
@@ -195,6 +207,7 @@ export function DeletePageDialog({
                       to={browserRoutePathForWikiNode(
                         backlink.from_path,
                         backlink.from_kind,
+                        workspaceId,
                       )}
                       state={createNavigationVisitState()}
                     >

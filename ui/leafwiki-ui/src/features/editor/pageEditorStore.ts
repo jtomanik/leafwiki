@@ -33,6 +33,9 @@ export interface PageEditorState {
   notFound: boolean
   page: Page | null // current page being edited
   initialPage: Page | null // initial page data when loaded
+  workspaceId: string | null
+  activeRequestKey: string | null
+  activeRequestId: number
   setTitle: (title: string) => void // set the current title
   setSlug: (slug: string) => void // set the current slug
   setContent: (content: string) => void // set the current markdown content
@@ -43,10 +46,12 @@ export interface PageEditorState {
   setPage: (page: Page | null) => void // set the current page
   savePage: () => Promise<Page | null | undefined> // save the current page
   forceOverwrite: () => Promise<Page | null | undefined> // re-fetch server version, then save
+  invalidateActiveRequest: () => void
   loadPageData: (
     path: string,
     fallbackPath?: string,
     kind?: WikiNodeKind,
+    workspaceId?: string,
   ) => Promise<void> // load page data by path
 }
 
@@ -93,6 +98,8 @@ export const isDirtyState = (s: PageEditorState) => {
   )
 }
 
+let pageEditorRequestId = 0
+
 export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   error: null,
   notFound: false,
@@ -107,6 +114,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   frontmatterErrors: {},
   lastStoredPage: null,
   initialPage: null,
+  workspaceId: null,
+  activeRequestKey: null,
+  activeRequestId: 0,
   setTitle: (title) => set({ title }),
   setSlug: (slug) => set({ slug }),
   setContent: (content) => set({ content }),
@@ -134,8 +144,28 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   setError: (error) => set({ error }),
   setPage: (page) => set({ page }),
   savePage: async () => {
-    const { page, title, slug, content, tags, frontmatterFields } = get()
+    const {
+      page,
+      title,
+      slug,
+      content,
+      tags,
+      frontmatterFields,
+      workspaceId,
+      activeRequestId,
+    } = get()
     if (!page || !isDirtyState(get())) return
+    if (!workspaceId) throw new Error('workspaceId is required')
+    const savePageId = page.id
+    const saveWorkspaceId = workspaceId
+    const isCurrentSaveTarget = () => {
+      const state = get()
+      return (
+        state.activeRequestId === activeRequestId &&
+        state.workspaceId === saveWorkspaceId &&
+        state.page?.id === savePageId
+      )
+    }
 
     const frontmatterErrors = validateEditorFrontmatterMetadata(
       tags,
@@ -161,24 +191,34 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       let updatedPage: Page | null = null
 
       if (slugChanged && enableLinkRefactor) {
-        const preview = await previewPageRefactor(page.id, {
-          kind: 'rename',
-          title,
-          slug,
-        })
+        const preview = await previewPageRefactor(
+          page.id,
+          {
+            kind: 'rename',
+            title,
+            slug,
+          },
+          workspaceId,
+        )
         const rewriteLinks = await confirmPageRefactor(preview)
         if (rewriteLinks === null) {
           return null
         }
 
-        updatedPage = await applyPageRefactor(page.id, {
-          kind: 'rename',
-          version: page.version,
-          title,
-          slug,
-          content,
-          rewriteLinks,
-        })
+        if (!isCurrentSaveTarget()) return undefined
+
+        updatedPage = await applyPageRefactor(
+          page.id,
+          {
+            kind: 'rename',
+            version: page.version,
+            title,
+            slug,
+            content,
+            rewriteLinks,
+          },
+          workspaceId,
+        )
 
         if (updatedPage && frontmatterChanged) {
           updatedPage = await updatePage(
@@ -189,6 +229,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             content,
             tags,
             properties,
+            workspaceId,
           )
         }
       } else {
@@ -200,8 +241,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
           content,
           tags,
           properties,
+          workspaceId,
         )
       }
+
+      if (!isCurrentSaveTarget()) return undefined
 
       const nextTags = updatedPage?.tags ?? tags
       const nextProperties =
@@ -246,53 +290,92 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
 
       // sync tree: full reload on structural changes, version-only patch otherwise
       if (titleChanged || slugChanged) {
-        await useTreeStore.getState().reloadTree()
+        await useTreeStore.getState().reloadTree(workspaceId)
       } else if (updatedPage?.id && updatedPage?.version) {
         useTreeStore
           .getState()
-          .patchNodeVersion(updatedPage.id, updatedPage.version)
+          .patchNodeVersion(updatedPage.id, updatedPage.version, workspaceId)
       }
+
+      if (!isCurrentSaveTarget()) return undefined
 
       // reload backlinks
       const editorPageID = get().page?.id
       if (editorPageID) {
         const fetchLinkStatusForPage =
           useLinkStatusStore.getState().fetchLinkStatusForPage
-        await fetchLinkStatusForPage(editorPageID)
+        void fetchLinkStatusForPage(editorPageID, workspaceId)
       }
 
       return updatedPage
     } finally {
-      useProgressbarStore.getState().setLoading(false)
+      if (isCurrentSaveTarget()) {
+        useProgressbarStore.getState().setLoading(false)
+      }
     }
   },
   forceOverwrite: async () => {
-    const { page } = get()
+    const { page, workspaceId, activeRequestId } = get()
     if (!page?.path) return
+    if (!workspaceId) throw new Error('workspaceId is required')
+    const pageId = page.id
+    const isCurrentOverwriteTarget = () => {
+      const state = get()
+      return (
+        state.activeRequestId === activeRequestId &&
+        state.workspaceId === workspaceId &&
+        state.page?.id === pageId
+      )
+    }
 
-    const fresh = await getPageByPath(page.path, page.kind)
+    const fresh = await getPageByPath(page.path, page.kind, workspaceId)
+    if (!isCurrentOverwriteTarget()) return undefined
     set((state) => {
-      if (!state.page) return {}
+      if (!isCurrentOverwriteTarget() || !state.page) return {}
       state.page.version = fresh.version
       return { page: state.page }
     })
     return get().savePage()
   },
+  invalidateActiveRequest: () => {
+    const requestId = ++pageEditorRequestId
+    set({
+      activeRequestId: requestId,
+      activeRequestKey: null,
+    })
+    useProgressbarStore.getState().setLoading(false)
+  },
   loadPageData: async (
     path: string,
     fallbackPath?: string,
     kind?: WikiNodeKind,
+    workspaceId?: string,
   ) => {
+    if (!workspaceId) throw new Error('workspaceId is required')
+    const requestKey = `${workspaceId}:${kind ?? ''}:${path}:${fallbackPath ?? ''}`
+    const requestId = ++pageEditorRequestId
+    const commit = (next: Partial<PageEditorState>) => {
+      const state = get()
+      if (
+        state.activeRequestId === requestId &&
+        state.activeRequestKey === requestKey
+      ) {
+        set(next)
+      }
+    }
     set({
       error: null,
       notFound: false,
       page: null,
       initialPage: null,
+      workspaceId,
+      activeRequestKey: requestKey,
+      activeRequestId: requestId,
       frontmatterErrors: {},
     })
     useProgressbarStore.getState().setLoading(true)
     try {
-      const page = await getPageByPath(path, kind)
+      const page = await getPageByPath(path, kind, workspaceId)
       const fields: EditorFrontmatterField[] = Object.entries(
         page.properties ?? {},
       ).map(([key, value]) => ({
@@ -300,9 +383,10 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
         value: String(value ?? ''),
         type: 'text' as const,
       }))
-      set({
+      commit({
         page,
         initialPage: { ...page },
+        workspaceId,
         notFound: false,
         title: page.title,
         slug: page.slug,
@@ -315,7 +399,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       if (isPageNotFoundError(err)) {
         if (fallbackPath) {
           try {
-            const fallbackPage = await getPageByPath(fallbackPath, 'section')
+            const fallbackPage = await getPageByPath(
+              fallbackPath,
+              'section',
+              workspaceId,
+            )
             if (fallbackPage.kind === 'section') {
               const fields: EditorFrontmatterField[] = Object.entries(
                 fallbackPage.properties ?? {},
@@ -324,9 +412,10 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
                 value: String(value ?? ''),
                 type: 'text' as const,
               }))
-              set({
+              commit({
                 page: fallbackPage,
                 initialPage: { ...fallbackPage },
+                workspaceId,
                 notFound: false,
                 title: fallbackPage.title,
                 slug: fallbackPage.slug,
@@ -343,7 +432,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
                 fallbackErr,
                 'An unknown error occurred',
               )
-              set({
+              commit({
                 error: mapped.message,
                 notFound: false,
               })
@@ -351,7 +440,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             }
           }
         }
-        set({
+        commit({
           error: null,
           notFound: true,
         })
@@ -359,12 +448,18 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       }
 
       const mapped = mapApiError(err, 'An unknown error occurred')
-      set({
+      commit({
         error: mapped.message,
         notFound: false,
       })
     } finally {
-      useProgressbarStore.getState().setLoading(false)
+      const state = get()
+      if (
+        state.activeRequestId === requestId &&
+        state.activeRequestKey === requestKey
+      ) {
+        useProgressbarStore.getState().setLoading(false)
+      }
     }
   },
 }))

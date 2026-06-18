@@ -7,6 +7,7 @@ import {
   VIDEO_EXTENSIONS,
 } from '@/lib/config'
 import { withBasePath } from '@/lib/routePath'
+import { workspaceAssetPath } from '@/lib/workspaceAssets'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { Check, FileText, Link2, Pencil, Play, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -19,6 +20,7 @@ const videoExtensions = VIDEO_EXTENSIONS
 
 type Props = {
   pageId: string
+  workspaceId: string
   filename: string
   editingFilename: string | null
   setEditingFilename: (filename: string | null) => void
@@ -30,6 +32,7 @@ type Props = {
 
 export function AssetItem({
   pageId,
+  workspaceId,
   filename,
   editingFilename,
   setEditingFilename,
@@ -38,13 +41,8 @@ export function AssetItem({
   onFilenameChange,
   onAssetVersionChange,
 }: Props) {
-  const markdownAssetUrl = filename
-  const assetPath = filename.startsWith('/assets/')
-    ? filename
-    : filename.startsWith('assets/')
-      ? `/${filename}`
-      : `/assets/${filename}`
-  const assetUrl = withBasePath(assetPath)
+  const markdownAssetUrl = workspaceAssetPath(filename, workspaceId)
+  const assetUrl = withBasePath(markdownAssetUrl)
   const ext = filename.split('.').pop()?.toLowerCase()
   const isImage = imageExtensions.includes(ext ?? '')
   const isAudio = audioExtensions.includes(ext ?? '')
@@ -65,7 +63,7 @@ export function AssetItem({
         return
       }
 
-      await renameAsset(pageId, baseName, newFilename)
+      await renameAsset(pageId, baseName, newFilename, workspaceId)
       toast.success('Asset renamed')
       onFilenameChange?.(baseName, newFilename)
       onAssetVersionChange?.()
@@ -82,11 +80,12 @@ export function AssetItem({
     onFilenameChange,
     onAssetVersionChange,
     setEditingFilename,
+    workspaceId,
   ])
 
   const handleDelete = async () => {
     try {
-      await deleteAsset(pageId, baseName)
+      await deleteAsset(pageId, baseName, workspaceId)
       toast.success('Asset deleted')
       onReload()
       onAssetVersionChange?.()

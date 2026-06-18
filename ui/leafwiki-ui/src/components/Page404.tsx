@@ -6,19 +6,24 @@ import { toWikiLookupPath, type WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useSessionStore } from '@/stores/session'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useState } from 'react'
 
 type Page404Props = {
   targetPath?: string
   targetKind?: WikiNodeKind
   allowCreate?: boolean
+  workspaceId?: string
 }
 
 export default function Page404({
   targetPath,
   targetKind = 'page',
   allowCreate = false,
+  workspaceId: workspaceIdProp,
 }: Page404Props) {
+  const activeWorkspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
+  const workspaceId = workspaceIdProp ?? activeWorkspaceId
   const user = useSessionStore((s) => s.user)
   const authDisabled = useConfigStore((s) => s.authDisabled)
   const readOnlyMode = useIsReadOnly()
@@ -41,7 +46,11 @@ export default function Page404({
 
     const loadLookup = async () => {
       try {
-        const lookup = await lookupPath(lookupPathValue, targetKind)
+        const lookup = await lookupPath(
+          lookupPathValue,
+          workspaceId,
+          targetKind,
+        )
         if (active) {
           setLookupState({
             path: lookupPathValue,
@@ -65,7 +74,7 @@ export default function Page404({
     return () => {
       active = false
     }
-  }, [allowCreate, targetKind, targetPath])
+  }, [allowCreate, targetKind, targetPath, workspaceId])
 
   const createPath = targetPath ? toWikiLookupPath(targetPath) : ''
 
@@ -97,6 +106,7 @@ export default function Page404({
                 openDialog(DIALOG_CREATE_PAGE_BY_PATH, {
                   initialPath: createPath,
                   initialKind: targetKind,
+                  workspaceId,
                   readOnlyPath: true,
                   forwardToEditMode: true,
                 })

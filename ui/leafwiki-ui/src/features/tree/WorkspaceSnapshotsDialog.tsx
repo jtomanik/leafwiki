@@ -5,7 +5,10 @@ import { type WorkspaceSnapshot } from '@/lib/api/workspaceSync'
 import { DIALOG_WORKSPACE_SNAPSHOTS } from '@/lib/registries'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
-import { useWorkspaceSyncStore } from '@/stores/workspaceSync'
+import {
+  selectWorkspaceSyncState,
+  useWorkspaceSyncStore,
+} from '@/stores/workspaceSync'
 import { ArchiveRestore, GitCommit, Loader2, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -64,24 +67,23 @@ function snapshotChangedMarkdownPaths(snapshot: WorkspaceSnapshot) {
     : []
 }
 
-export function WorkspaceSnapshotsDialog() {
+export function WorkspaceSnapshotsDialog({
+  workspaceId,
+}: {
+  workspaceId: string
+}) {
   const open = useDialogsStore(
     (state) => state.dialogType === DIALOG_WORKSPACE_SNAPSHOTS,
   )
-  const snapshots = useWorkspaceSyncStore((state) => state.snapshots)
-  const snapshotsNextCursor = useWorkspaceSyncStore(
-    (state) => state.snapshotsNextCursor,
+  const workspaceSyncState = useWorkspaceSyncStore((state) =>
+    selectWorkspaceSyncState(state, workspaceId),
   )
-  const snapshotsLoading = useWorkspaceSyncStore(
-    (state) => state.snapshotsLoading,
-  )
-  const snapshotsLoadingMore = useWorkspaceSyncStore(
-    (state) => state.snapshotsLoadingMore,
-  )
-  const snapshotsError = useWorkspaceSyncStore((state) => state.snapshotsError)
-  const restoringCommitId = useWorkspaceSyncStore(
-    (state) => state.restoringCommitId,
-  )
+  const snapshots = workspaceSyncState.snapshots
+  const snapshotsNextCursor = workspaceSyncState.snapshotsNextCursor
+  const snapshotsLoading = workspaceSyncState.snapshotsLoading
+  const snapshotsLoadingMore = workspaceSyncState.snapshotsLoadingMore
+  const snapshotsError = workspaceSyncState.snapshotsError
+  const restoringCommitId = workspaceSyncState.restoringCommitId
   const loadSnapshots = useWorkspaceSyncStore((state) => state.loadSnapshots)
   const loadMoreSnapshots = useWorkspaceSyncStore(
     (state) => state.loadMoreSnapshots,
@@ -101,7 +103,7 @@ export function WorkspaceSnapshotsDialog() {
     }
 
     setSelectedCommitId(null)
-    void loadSnapshots()
+    void loadSnapshots(workspaceId)
       .then((items) => {
         setSelectedCommitId(snapshotCommitId(items[0] ?? { id: '' }) || null)
       })
@@ -109,7 +111,7 @@ export function WorkspaceSnapshotsDialog() {
         const mapped = mapApiError(err, 'Failed to load workspace snapshots')
         toast.error(mapped.message)
       })
-  }, [loadSnapshots, open])
+  }, [loadSnapshots, open, workspaceId])
 
   const selectedSnapshot = useMemo(
     () =>
@@ -125,10 +127,10 @@ export function WorkspaceSnapshotsDialog() {
     if (!selectedCommitId || restoring) return false
 
     try {
-      const status = await restoreSnapshot(selectedCommitId)
-      await reloadTree()
-      await refreshCurrentViewerPageAndLinkStatus()
-      await loadStatus()
+      const status = await restoreSnapshot(selectedCommitId, workspaceId)
+      await reloadTree(workspaceId)
+      await refreshCurrentViewerPageAndLinkStatus(workspaceId)
+      await loadStatus(workspaceId)
       if (status.validationErrors.length > 0 || status.lastError) {
         toast.warning('Workspace restored with Markdown errors')
       } else {
@@ -186,7 +188,7 @@ export function WorkspaceSnapshotsDialog() {
           <button
             type="button"
             className="workspace-snapshots-dialog__reload"
-            onClick={() => void loadSnapshots()}
+            onClick={() => void loadSnapshots(workspaceId)}
             disabled={snapshotsLoading || restoring}
           >
             <RefreshCw
@@ -264,7 +266,7 @@ export function WorkspaceSnapshotsDialog() {
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={() => void loadMoreSnapshots()}
+                  onClick={() => void loadMoreSnapshots(workspaceId)}
                   disabled={snapshotsLoadingMore || restoring}
                   data-testid="workspace-snapshots-dialog-load-more"
                 >

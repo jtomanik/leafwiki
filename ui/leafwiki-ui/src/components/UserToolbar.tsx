@@ -11,9 +11,11 @@ import {
   DIALOG_CHANGE_OWN_PASSWORD,
   DIALOG_MCP_API_KEYS,
 } from '@/lib/registries'
+import { buildWorkspaceViewPath } from '@/lib/workspaceRoute'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useSessionStore } from '@/stores/session'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { useNavigate } from 'react-router-dom'
 import { RoleGuard } from './RoleGuard'
 
@@ -22,6 +24,7 @@ export default function UserToolbar() {
   const logout = useSessionStore((s) => s.logout)
   const navigate = useNavigate()
   const openDialog = useDialogsStore((state) => state.openDialog)
+  const activeWorkspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
   const authDisabled = useConfigStore((s) => s.authDisabled)
   const httpRemoteUserEnabled = useConfigStore((s) => s.httpRemoteUserEnabled)
   const httpRemoteUserLogoutUrl = useConfigStore(
@@ -90,7 +93,14 @@ export default function UserToolbar() {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="cursor-pointer"
-              onClick={() => navigate('/settings/importer')}
+              onClick={() =>
+                navigate(
+                  buildWorkspaceViewPath(
+                    activeWorkspaceId,
+                    '/settings/importer',
+                  ),
+                )
+              }
             >
               Import
             </DropdownMenuItem>

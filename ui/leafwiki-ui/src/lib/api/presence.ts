@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type PresenceMode =
   | 'view'
@@ -16,16 +17,30 @@ export type PresenceHeartbeat = {
   dirty: boolean
 }
 
-export async function sendPresenceHeartbeat(input: PresenceHeartbeat) {
-  await fetchWithAuth('/api/presence/heartbeat', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+export async function sendPresenceHeartbeat(
+  input: PresenceHeartbeat,
+  workspaceId: string,
+  signal?: AbortSignal,
+) {
+  await fetchWithAuth(
+    workspaceApiPath('/api/presence/heartbeat', workspaceId),
+    {
+      method: 'POST',
+      signal,
+      body: JSON.stringify(input),
+    },
+  )
 }
 
-export async function deletePresenceSession(sessionId: string) {
+export async function deletePresenceSession(
+  sessionId: string,
+  workspaceId: string,
+) {
   await fetchWithAuth(
-    `/api/presence/session/${encodeURIComponent(sessionId)}`,
+    workspaceApiPath(
+      `/api/presence/session/${encodeURIComponent(sessionId)}`,
+      workspaceId,
+    ),
     {
       method: 'DELETE',
       keepalive: true,

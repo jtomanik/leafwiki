@@ -165,20 +165,20 @@ A conceptual global layout could look like:
 ~/.leafwiki/
   root/
     # home workspace root
+  .leafwiki/
+    project-daemon.json
+    # home workspace-local workspaced descriptor
   wikid/
     auth/
     oauth/
-    grants/
-    registry.*
+    wikid.db
   runtime/
     wikid.json
-    frontd.json
     workspaces/
-      home.json
       <workspace-id>.json
 ```
 
-This is a shape, not a schema commitment. Exact file names, schema fields, descriptor structs, migration behavior, and compatibility pointers belong in implementation planning.
+This is a shape, not a schema commitment. In the implemented v1 runtime, the home workspace writes its compatibility descriptor under the home data directory and non-home workspace children write runtime workspace descriptor mirrors. Exact file names, schema fields, descriptor structs, migration behavior, and compatibility pointers belong in implementation planning.
 
 ## Workspace Registration And Lifecycle
 
@@ -196,9 +196,10 @@ user login
 
 run.sh from a workspace
   -> resolves that workspace's root/data/config
-  -> connects to wikid
-  -> wikid registers the workspace if missing
-  -> wikid starts or attaches that workspaced
+  -> reads the workspace-local descriptor
+  -> attaches directly to the selected workspaced when healthy
+  -> asks install-wide wikid to register/ensure/start the workspace when the descriptor is missing or stale
+  -> retries direct workspaced attach
 
 web UI selects a registered workspace
   -> frontd asks wikid to ensure workspaced is running
@@ -365,14 +366,15 @@ agent:codex  -> leafwiki-docs -> editor
 agent:claude -> client-notes  -> viewer
 ```
 
-V1 roles:
+V1 stored grant roles:
 
 ```text
-none    no access
 viewer  read pages/tree/search/revisions, use read-only MCP tools
 editor  viewer + write/import/sync/editing MCP tools
 admin   editor + workspace admin/settings/grants
 ```
+
+No access is represented by the absence of a grant row, not by storing a `none` role.
 
 Do not add per-workspace allow/deny capability overrides in v1. Overrides are flexible, but they make authorization harder to reason about before there is evidence that role assignments are insufficient.
 
@@ -527,7 +529,9 @@ The theoretical direct `leafwiki` invocation behind that wrapper is:
   --markdown-link-root-prefix /docs
 ```
 
-That foreground `leafwiki --mcp=stdio` process is the STDIO frontend. In the compatibility-preserving extraction, it bridges stdin/stdout to the owner daemon's private MCP endpoint through `wikid`; `wikid` then proxies the request to the current `workspaced` MCP handler.
+That foreground `leafwiki --mcp=stdio` process is the STDIO frontend. In the federated runtime it reads the workspace-local descriptor as its rendezvous point and attaches directly to the selected `workspaced` private MCP endpoint when the descriptor is healthy.
+
+The federated target should keep descriptor-first lookup, but make the healthy descriptor attach path direct to the selected `workspaced` private MCP endpoint. `wikid` participates when lifecycle or registration is needed; it should not remain in the steady-state STDIO MCP transport once the target `workspaced` is running.
 
 The intended control/data split is:
 
@@ -537,21 +541,22 @@ leafwiki --mcp=stdio
   -> reads the workspace-local descriptor at <workspace-data-dir>/.leafwiki/project-daemon.json
 
   if descriptor is present, healthy, and config-compatible:
-    -> attach to the owner daemon private MCP endpoint exposed through wikid
+    -> attach directly to workspaced private MCP
 
   if descriptor is missing or stale:
-    -> ask global wikid to ensure/start/register the target workspaced
+    -> ask install-wide wikid to ensure/start/register the target workspaced
+    -> wikid starts or attaches the workspaced
     -> workspaced writes or updates its workspace-local descriptor
-    -> foreground leafwiki retries wikid-backed descriptor attachment
+    -> foreground leafwiki retries and attaches to workspaced private MCP
 
   if descriptor is healthy but config-incompatible:
     -> fail fast rather than reconciling or restarting automatically in v1
 
   after attachment:
-    -> foreground leafwiki bridges stdin/stdout to wikid, which proxies MCP to workspaced
+    -> MCP client <-> foreground STDIO adapter <-> workspaced private MCP
 ```
 
-So `wikid` is in the control path for registration, lookup, lifecycle, descriptor trust, and the foreground STDIO bridge. `workspaced` still owns the MCP server and workspace tools, but the public wrapper no longer attaches directly to a workspaced endpoint in this extraction slice. A direct-to-workspaced STDIO data path can be reconsidered as future federation work if the descriptor model grows a per-workspace private MCP rendezvous.
+So `wikid` is in the lifecycle/control path for STDIO MCP, not the steady-state MCP transport path. `workspaced` owns the MCP server, MCP tools, private MCP endpoint, and workspace enforcement.
 
 The exact global `wikid` descriptor/socket path under `~/.leafwiki`, the exact shape of an ensure-workspace API, and whether that API returns a descriptor directly or simply causes the workspace descriptor to appear are implementation-planning details. For discovery, the important contract is descriptor-first attach, `wikid` fallback for lifecycle, hard fail on healthy config mismatch, and stable `run.sh mcp` compatibility.
 
@@ -656,12 +661,12 @@ Important caveat: OAuth controls LeafWiki API, MCP, and frontend access. It does
 - Route HTTP MCP through stable `frontd` workspace URLs, but keep the MCP tool implementation in `workspaced`.
 - Limit native `frontd` APIs to shell-level workspace listing, status/capability display, route roots, and possibly explicit ensure/start.
 - Keep page, tree, search, tags, properties, imports, sync, revisions, assets, and MCP tool semantics in `workspaced` behind the proxy.
-- Keep STDIO MCP workspace-scoped and attached to the target `workspaced`.
+- Keep STDIO MCP workspace-scoped and attached directly to the target `workspaced` private MCP endpoint once its descriptor is healthy.
 - Keep `run.sh mcp` as the stable MCP client surface.
 - Use the workspace-local descriptor as the primary STDIO MCP rendezvous point.
 - If the workspace descriptor is missing or stale, have the STDIO foreground process ask global `wikid` to ensure/start/register the target `workspaced`, then retry attachment.
 - If the workspace descriptor is healthy but config-incompatible, hard fail in v1 rather than reconciling or restarting automatically.
-- Keep `wikid` out of the STDIO MCP JSON-RPC data path.
+- Keep `wikid` out of the steady-state STDIO MCP transport and semantics. Its role is lifecycle, registration, descriptor trust, and ensure/start fallback.
 - Keep workspace daemons as the enforcement point for workspace operations.
 - Use OAuth scopes for capability classes and central grants for selected-workspace access.
 - Treat workspaces similarly to repositories in the GitHub access model.

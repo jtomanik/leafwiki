@@ -17,6 +17,7 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 type CreatePageByPathDialogProps = {
   initialPath?: string
   initialKind?: WikiNodeKind
+  workspaceId: string
   readOnlyPath?: boolean
   forwardToEditMode?: boolean
 }
@@ -24,6 +25,7 @@ type CreatePageByPathDialogProps = {
 export function CreatePageByPathDialog({
   initialPath,
   initialKind = 'page',
+  workspaceId,
   readOnlyPath,
   forwardToEditMode,
 }: CreatePageByPathDialogProps) {
@@ -45,7 +47,7 @@ export function CreatePageByPathDialog({
   const runLookup = useCallback(
     async (path: string) => {
       try {
-        const result = await lookupPath(path, initialKind)
+        const result = await lookupPath(path, workspaceId, initialKind)
         if (result) {
           setLookup(result)
         }
@@ -53,7 +55,7 @@ export function CreatePageByPathDialog({
         console.error('Error looking up path:', error)
       }
     },
-    [initialKind],
+    [initialKind, workspaceId],
   )
 
   const isCreateButtonDisabled = !title || !path || loading
@@ -64,11 +66,15 @@ export function CreatePageByPathDialog({
 
     try {
       // Here you would call your API to create the page
-      await ensurePage(path, title, initialKind)
-      await reloadTree()
+      await ensurePage(path, title, workspaceId, initialKind)
+      await reloadTree(workspaceId)
       // On success, close the dialog
       if (forwardToEditMode) {
-        navigate(buildEditUrl(browserRoutePathForWikiNode(path, initialKind)))
+        navigate(
+          buildEditUrl(
+            browserRoutePathForWikiNode(path, initialKind, workspaceId),
+          ),
+        )
       }
 
       toast.success('Page created successfully')

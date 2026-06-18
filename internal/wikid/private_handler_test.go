@@ -28,6 +28,46 @@ func TestPrivateHandlerRequiresDaemonTokenForWikidEndpoints(t *testing.T) {
 	}
 }
 
+func TestPrivateHandlerRequiresDaemonTokenForWorkspaceAPI(t *testing.T) {
+	handler := NewPrivateHandler(PrivateHandlerOptions{
+		DaemonToken: "private-token",
+		WorkspaceAPI: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			t.Fatalf("workspace API handler was called without daemon token")
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPrivateHandlerForwardsWorkspaceAPIWithDaemonToken(t *testing.T) {
+	var seenPath string
+	handler := NewPrivateHandler(PrivateHandlerOptions{
+		DaemonToken: "private-token",
+		WorkspaceAPI: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			seenPath = req.URL.Path
+			w.WriteHeader(http.StatusAccepted)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
+	req.Header.Set(projectdaemon.ControlTokenHeader, "private-token")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	if seenPath != "/__leafwiki/workspaces" {
+		t.Fatalf("seen path = %q", seenPath)
+	}
+}
+
 func TestPrivateHandlerForwardsControlPlaneWithBasePathAndPrivateHeadersStripped(t *testing.T) {
 	var seen struct {
 		path         string

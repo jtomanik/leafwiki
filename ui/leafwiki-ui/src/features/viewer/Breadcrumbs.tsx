@@ -1,17 +1,21 @@
 import { useAppMode } from '@/lib/useAppMode'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
+import { buildWorkspaceViewPath } from '@/lib/workspaceRoute'
 import { useTreeStore } from '@/stores/tree'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { FolderTree } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useViewerStore } from './viewer'
 
 export default function Breadcrumbs() {
-  const tree = useTreeStore((s) => s.tree)
   const page = useViewerStore((s) => s.page)
+  const activeWorkspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
+  const workspaceId = activeWorkspaceId
+  const tree = useTreeStore((s) => s.getWorkspaceState(workspaceId).tree)
 
   const appMode = useAppMode()
 
-  if (!page || !tree || !tree.children) return null
+  if (!page) return null
 
   if (appMode === 'edit') {
     return null
@@ -21,14 +25,16 @@ export default function Breadcrumbs() {
 
   const buildBreadcrumbs = () => {
     const crumbs = []
-    let current = tree
+    let current = tree || undefined
     let path = ''
-    for (const segment of segments) {
-      if (!current.children) break
-      const match = current.children.find((child) => child.slug === segment)
-      if (!match) break
-      path += `/${match.slug}`
-      crumbs.push({ title: match.title, path })
+    for (const [index, segment] of segments.entries()) {
+      const match = current?.children?.find((child) => child.slug === segment)
+      path += `/${match?.slug || segment}`
+      crumbs.push({
+        title:
+          index === segments.length - 1 ? page.title : match?.title || segment,
+        path,
+      })
       current = match
     }
 
@@ -50,7 +56,7 @@ export default function Breadcrumbs() {
               <span className="breadcrumbs-nav__current">{crumb.title}</span>
             ) : (
               <Link
-                to={crumb.path}
+                to={buildWorkspaceViewPath(workspaceId, crumb.path)}
                 state={createNavigationVisitState()}
                 className="breadcrumbs-nav__link"
               >

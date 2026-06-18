@@ -1,8 +1,12 @@
 import { Button } from '@/components/ui/button'
+import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
 import { useImportStore } from '@/stores/import'
 import { FileUp, Loader2, PlayIcon, UploadIcon, XIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useSetTitle } from '../viewer/setTitle'
 import { useToolbarActions } from './useToolbarActions'
 
@@ -73,6 +77,8 @@ export default function Importer() {
   useToolbarActions()
   useSetTitle({ title: 'Import' })
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const workspaceId = splitWorkspaceRoute(pathname).workspaceId
   const zipRef = useRef<HTMLInputElement>(null)
   const [zipFileName, setZipFileName] = useState('')
   const [resultFilter, setResultFilter] = useState<ResultFilter>('all')
@@ -95,27 +101,27 @@ export default function Importer() {
   const loadImportPlan = useImportStore((store) => store.loadImportPlan)
 
   useEffect(() => {
-    void loadImportPlan()
-  }, [loadImportPlan])
+    void loadImportPlan(workspaceId)
+  }, [loadImportPlan, workspaceId])
 
   const createImportPlanFromZip = useCallback(() => {
     const zipFile = zipRef.current?.files?.[0]
     if (!zipFile) {
       return
     }
-    void createImportPlan(zipFile)
-  }, [createImportPlan])
+    void createImportPlan(zipFile, workspaceId)
+  }, [createImportPlan, workspaceId])
 
   const closeImporter = useCallback(async () => {
-    const cleared = importPlan ? await cancelImportPlan() : true
+    const cleared = importPlan ? await cancelImportPlan(workspaceId) : true
     if (!cleared) {
       return
     }
-    navigate('/')
-  }, [cancelImportPlan, importPlan, navigate])
+    navigate(buildWorkspaceViewPath(workspaceId, '/'))
+  }, [cancelImportPlan, importPlan, navigate, workspaceId])
 
   const startNewImport = useCallback(async () => {
-    const cleared = importPlan ? await cancelImportPlan() : true
+    const cleared = importPlan ? await cancelImportPlan(workspaceId) : true
     if (!cleared) {
       return
     }
@@ -125,7 +131,7 @@ export default function Importer() {
     setZipFileName('')
     setResultFilter('all')
     setResultSearch('')
-  }, [cancelImportPlan, importPlan])
+  }, [cancelImportPlan, importPlan, workspaceId])
 
   const importStatus = importPlan?.execution_status ?? null
   const progressLabel =
@@ -683,7 +689,7 @@ export default function Importer() {
               <Button
                 variant="default"
                 onClick={() => {
-                  executeImportPlan()
+                  executeImportPlan(workspaceId)
                 }}
                 disabled={
                   importPlan.items.length === 0 ||
@@ -706,7 +712,7 @@ export default function Importer() {
               <Button
                 variant="destructive"
                 onClick={() => {
-                  cancelImportPlan()
+                  cancelImportPlan(workspaceId)
                 }}
                 disabled={
                   cancelingImportPlan ||

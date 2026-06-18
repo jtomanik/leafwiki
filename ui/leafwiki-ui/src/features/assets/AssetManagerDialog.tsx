@@ -13,6 +13,7 @@ import { AssetManager } from './AssetManager'
 
 export type AssetManagerDialogProps = {
   pageId: string
+  workspaceId: string
   editorRef: React.RefObject<{
     insertAtCursor: (md: string) => void
     replaceFilenameInMarkdown?: (before: string, after: string) => void
@@ -22,7 +23,13 @@ export type AssetManagerDialogProps = {
 }
 
 export function AssetManagerDialog(props: AssetManagerDialogProps) {
-  const { pageId, editorRef, onAssetVersionChange, isRenamingRef } = props
+  const {
+    pageId,
+    workspaceId,
+    editorRef,
+    onAssetVersionChange,
+    isRenamingRef,
+  } = props
   const closeDialog = useDialogsStore((s) => s.closeDialog)
   const open = useDialogsStore((s) => s.dialogType === DIALOG_ASSET_MANAGER)
   const registerHotkey = useHotKeysStore((s) => s.registerHotkey)
@@ -73,6 +80,7 @@ export function AssetManagerDialog(props: AssetManagerDialogProps) {
         </DialogHeader>
         <AssetManager
           pageId={pageId}
+          workspaceId={workspaceId}
           onAssetVersionChange={onAssetVersionChange}
           onInsert={(md) => {
             editorRef.current?.insertAtCursor(md)

@@ -99,7 +99,13 @@ function SortableItem({
   )
 }
 
-export function SortPagesDialog({ parent }: { parent: PageNode }) {
+export function SortPagesDialog({
+  parent,
+  workspaceId,
+}: {
+  parent: PageNode
+  workspaceId: string
+}) {
   const itemLabel = parent.kind === NODE_KIND_PAGE ? 'page' : 'section'
   const itemLabelCapitalized =
     parent.kind === NODE_KIND_PAGE ? 'Page' : 'Section'
@@ -164,8 +170,8 @@ export function SortPagesDialog({ parent }: { parent: PageNode }) {
   const handleSave = async (): Promise<boolean> => {
     setLoading(true)
     try {
-      await sortPages(parent.id, order)
-      await reloadTree()
+      await sortPages(parent.id, order, workspaceId)
+      await reloadTree(workspaceId)
       toast.success(`${itemLabelCapitalized} children sorted successfully`)
       return true
     } catch (err) {

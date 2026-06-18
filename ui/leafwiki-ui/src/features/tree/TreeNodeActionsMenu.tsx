@@ -24,6 +24,10 @@ import {
   browserRoutePathForWikiNode,
   getDeleteRedirectRoutePath,
 } from '@/lib/wikiPath'
+import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useViewerStore } from '@/features/viewer/viewer'
 import { useTreeStore } from '@/stores/tree'
@@ -47,10 +51,12 @@ import { useTreeNodeActionsMenusStore } from './treeNodeActionsMenus'
 
 export type TreeNodeActionsMenuProps = {
   node: PageNode
+  workspaceId: string
 }
 
 export default function TreeNodeActionsMenu({
   node,
+  workspaceId,
 }: TreeNodeActionsMenuProps) {
   const { id: nodeId, kind: nodeKind, children, version: nodeVersion } = node
   const currentEditorPageId = usePageEditorStore((state) => state.page?.id)
@@ -68,20 +74,26 @@ export default function TreeNodeActionsMenu({
       nodeId,
       nodeKind === NODE_KIND_PAGE ? NODE_KIND_SECTION : NODE_KIND_PAGE,
       nodeVersion,
+      workspaceId,
     )
       .then(() => {
         toast.success('Page converted successfully')
-        reloadTree()
+        reloadTree(workspaceId)
       })
       .catch((err) => {
         const localized = asApiLocalizedError(err)
         if (localized?.code === 'page_version_conflict') {
-          reloadTree()
+          reloadTree(workspaceId)
           const viewerPage = useViewerStore.getState().page
           if (viewerPage?.id === nodeId && viewerPage.path) {
             useViewerStore
               .getState()
-              .loadPageData(viewerPage.path, undefined, viewerPage.kind)
+              .loadPageData(
+                viewerPage.path,
+                undefined,
+                viewerPage.kind,
+                workspaceId,
+              )
               .catch(console.error)
           }
           toast.error(
@@ -92,7 +104,7 @@ export default function TreeNodeActionsMenu({
           toast.error(mapped.message)
         }
       })
-  }, [nodeId, nodeKind, nodeVersion, reloadTree])
+  }, [nodeId, nodeKind, nodeVersion, reloadTree, workspaceId])
 
   const getCurrentRoutePath = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -120,6 +132,7 @@ export default function TreeNodeActionsMenu({
             openDialog(DIALOG_ADD_PAGE, {
               parentId: nodeId,
               nodeKind: NODE_KIND_PAGE,
+              workspaceId,
             })
           }}
         >
@@ -131,6 +144,7 @@ export default function TreeNodeActionsMenu({
             openDialog(DIALOG_ADD_PAGE, {
               parentId: nodeId,
               nodeKind: NODE_KIND_SECTION,
+              workspaceId,
             })
           }}
         >
@@ -142,7 +156,9 @@ export default function TreeNodeActionsMenu({
           className="cursor-pointer"
           onClick={() => {
             navigate(
-              buildEditUrl(browserRoutePathForWikiNode(node.path, node.kind)),
+              buildEditUrl(
+                browserRoutePathForWikiNode(node.path, node.kind, workspaceId),
+              ),
             )
           }}
         >
@@ -153,7 +169,7 @@ export default function TreeNodeActionsMenu({
           <DropdownMenuItem
             className="cursor-pointer"
             onClick={() => {
-              openDialog(DIALOG_COPY_PAGE, { sourcePage: node })
+              openDialog(DIALOG_COPY_PAGE, { sourcePage: node, workspaceId })
             }}
           >
             <Copy size={18} className="tree-node__action-icon" /> Copy Page
@@ -163,7 +179,9 @@ export default function TreeNodeActionsMenu({
           <DropdownMenuItem
             className="cursor-pointer"
             data-testid="tree-view-action-button-sort"
-            onClick={() => openDialog(DIALOG_SORT_PAGES, { parent: node })}
+            onClick={() =>
+              openDialog(DIALOG_SORT_PAGES, { parent: node, workspaceId })
+            }
           >
             <List size={18} className="tree-node__action-icon" /> Sort{' '}
             {nodeKind === NODE_KIND_SECTION ? 'Section' : 'Page'} Children
@@ -172,7 +190,9 @@ export default function TreeNodeActionsMenu({
         <DropdownMenuItem
           className="cursor-pointer"
           data-testid="tree-view-action-button-move"
-          onClick={() => openDialog(DIALOG_MOVE_PAGE, { pageId: node.id })}
+          onClick={() =>
+            openDialog(DIALOG_MOVE_PAGE, { pageId: node.id, workspaceId })
+          }
         >
           <Move size={18} className="tree-node__action-icon" /> Move{' '}
           {nodeKind === NODE_KIND_PAGE ? 'Page' : 'Section'}
@@ -194,8 +214,10 @@ export default function TreeNodeActionsMenu({
             const currentRoutePath = getCurrentRoutePath()
             const currentRouterPath =
               stripBasePath(currentRoutePath) ?? currentRoutePath
+            const currentWorkspaceRoute = splitWorkspaceRoute(currentRouterPath)
             const isCurrentlyEditedNode =
-              currentRouterPath.startsWith('/e/') &&
+              currentWorkspaceRoute.workspaceId === workspaceId &&
+              currentWorkspaceRoute.innerPath.startsWith('/e/') &&
               currentEditorPageId === node.id
 
             if (isCurrentlyEditedNode) {
@@ -205,13 +227,17 @@ export default function TreeNodeActionsMenu({
               return
             }
 
+            const redirectTo = getDeleteRedirectRoutePath(
+              currentWorkspaceRoute.innerPath,
+              node.path,
+              node.kind,
+            )
             openDialog(DIALOG_DELETE_PAGE_CONFIRMATION, {
               pageId: node?.id,
-              redirectTo: getDeleteRedirectRoutePath(
-                currentRouterPath,
-                node.path,
-                node.kind,
-              ),
+              workspaceId,
+              redirectTo: redirectTo.startsWith('/w/')
+                ? redirectTo
+                : buildWorkspaceViewPath(workspaceId, redirectTo),
             })
           }}
         >

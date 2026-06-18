@@ -32,6 +32,12 @@ Call `wiki_get_context` first. It returns:
 
 Use `sinceToken` from a prior response when continuing work as the same MCP user in the same retained MCP session. Tokens expire after a short retention window; true handoffs or new sessions should call `wiki_get_context` fresh. If the token is unknown, LeafWiki returns current context and a warning instead of failing.
 
+## Workspace Guard
+
+Before direct filesystem work or any write, confirm the selected workspace is the intended workspace. Check any workspace ID, display name, data/root directory, or route prefix exposed by context, and cross-check it with the selected `/mcp/workspaces/:id` endpoint, STDIO command/config, user request, or local repo context.
+
+If `wiki_get_context` does not expose workspace identity, require a single unambiguous fallback: the canonical root directory plus the selected MCP endpoint or STDIO command/config must identify exactly one workspace. If multiple registered workspaces could match, or the selected endpoint/command and root directory disagree, stop before writing and ask for the intended workspace.
+
 ## Editing Policy
 
 Prefer semantic MCP writes for normal page work:
@@ -67,7 +73,7 @@ Context and scoped read:
 
 ```json
 {"tool":"wiki_get_context","arguments":{"syncMode":"auto","treeDepth":2}}
-{"tool":"wiki_get_subtree","arguments":{"path":"/docs","depth":2}}
+{"tool":"wiki_get_subtree","arguments":{"path":"plans","depth":2}}
 {"tool":"wiki_search_pages","arguments":{"q":"authentication","limit":10}}
 ```
 
@@ -77,7 +83,7 @@ Direct Markdown edit:
 {"tool":"wiki_get_context","arguments":{"syncMode":"auto"}}
 ```
 
-Edit files under `--root-dir`, preserving canonical `<!-- leafwiki ... -->` metadata blocks and changing only body content unless the task is an explicit metadata repair. Then:
+Confirm the selected workspace using the workspace guard above. Then edit files under that workspace's `--root-dir`, preserving canonical `<!-- leafwiki ... -->` metadata blocks and changing only body content unless the task is an explicit metadata repair. Then:
 
 ```json
 {"tool":"wiki_refresh","arguments":{"validate":true,"source":"filesystem"}}

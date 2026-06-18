@@ -15,6 +15,7 @@ type PrivateHandlerOptions struct {
 	ControlPlane http.Handler
 	ActorContext http.Handler
 	TokenVerify  http.Handler
+	WorkspaceAPI http.Handler
 }
 
 func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
@@ -40,6 +41,16 @@ func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
 				return
 			}
 			opts.TokenVerify.ServeHTTP(w, req)
+		case req.URL.Path == PrivateWorkspacesPrefix || strings.HasPrefix(req.URL.Path, PrivateWorkspacesPrefix+"/"):
+			if !hasDaemonToken(req, opts.DaemonToken) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if opts.WorkspaceAPI == nil {
+				http.NotFound(w, req)
+				return
+			}
+			opts.WorkspaceAPI.ServeHTTP(w, req)
 		case strings.HasPrefix(req.URL.Path, frontd.ControlPlanePrefix):
 			if !hasDaemonToken(req, opts.DaemonToken) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)

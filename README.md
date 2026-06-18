@@ -263,7 +263,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
 | `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP requires a loopback host | `none` | v0.11.0 |
 | `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
-| `--daemon-idle-timeout`          | Project daemon idle timeout after the last session exits; `0` = immediate | `10m`       | v0.11.0 |
+| `--daemon-idle-timeout`          | Federated runtime idle timeout after the last session or presence record exits; `0` = immediate | `10m`       | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
@@ -296,7 +296,44 @@ leafwiki --config ./leafwiki.yml
 
 YAML keys mirror public CLI flag names without the leading `--`. `--config` cannot be combined with normal CLI flags, so `leafwiki --config ./leafwiki.yml --port 8081` fails. Values in YAML are treated like supplied CLI flag values: present YAML keys override environment variables, while omitted keys still fall back to environment variables and defaults. Explicit `""`, `false`, and `0` values are honored.
 
-The config file is a flat mapping of scalar values. Unknown keys, duplicate keys, `null`, lists, maps, hidden compatibility flags such as `enable-mcp`/`mcp-stdio`, and internal-only flags such as `internal-project-daemon` are rejected. Secrets are allowed in YAML, so protect the file accordingly. The config file path itself is not part of project daemon identity; only the resolved runtime values are matched. This config-file contract is tracked by `codex://threads/019eb504-6cf3-7803-b033-bee91c3b028b`.
+The config file is a flat mapping of scalar values. Unknown keys, duplicate keys, `null`, lists, maps, hidden compatibility flags such as `enable-mcp`/`mcp-stdio`, and internal-only flags such as `internal-project-daemon` are rejected. Secrets are allowed in YAML, so protect the file accordingly. The config file path itself is not part of runtime or workspace daemon identity; only the resolved runtime values are matched. This config-file contract is tracked by `codex://threads/019eb504-6cf3-7803-b033-bee91c3b028b`.
+
+For the local service template, see [`config/leafwiki.service.example.yml`](config/leafwiki.service.example.yml). It contains the minimal local defaults plus commented examples for every public YAML key.
+
+### Service Daemon
+
+Use `leafwiki daemon` for service managers such as Homebrew `brew services` or launchd:
+
+```bash
+leafwiki daemon
+```
+
+Service mode runs the install-wide `wikid`/`frontd`/home-`workspaced` runtime in the foreground and keeps it alive until `SIGTERM`, `SIGINT`, or a runtime failure. It reads `~/.leafwiki/leafwiki.yml`; the file is required and uses the same public flat YAML keys described above. Do not pass hidden internal startup flags such as `--internal-project-daemon` or `--internal-runtime-role`.
+
+When `data-dir` is omitted from the service config, service mode uses `~/.leafwiki`; when `root-dir` is omitted, it uses `~/.leafwiki/root`. Other omitted keys use service defaults rather than `LEAFWIKI_*` environment variables. Put durable settings such as `host`, `port`, `jwt-secret`, `admin-password`, `mcp: http`, logging, auth, and feature flags in `~/.leafwiki/leafwiki.yml`.
+
+Homebrew service installs use the same config file. Edit it directly:
+
+```bash
+$EDITOR "$HOME/.leafwiki/leafwiki.yml"
+```
+
+Then restart the service so launchd starts LeafWiki with the new settings:
+
+```bash
+brew services restart jtomanik/leafwiki/leafwiki
+brew services list
+```
+
+The bundled local service template is designed for a single-machine workflow: it binds to `127.0.0.1`, disables auth, enables local HTTP MCP, and writes logs to `~/.leafwiki/logs/leafwiki.log`. Before changing `host` to `0.0.0.0`, a LAN address, or a VPN/Tailscale address, enable auth and set appropriate secrets in `~/.leafwiki/leafwiki.yml`.
+
+For non-Homebrew service runs from a checkout, bootstrap the config once:
+
+```bash
+install -d -m 700 "$HOME/.leafwiki"
+install -m 600 config/leafwiki.service.example.yml "$HOME/.leafwiki/leafwiki.yml"
+leafwiki daemon
+```
 
 ### Environment Variables
 
@@ -327,7 +364,7 @@ The config file is a flat mapping of scalar values. Unknown keys, duplicate keys
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
 | `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
 | `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
-| `LEAFWIKI_DAEMON_IDLE_TIMEOUT`          | Project daemon idle timeout after last session exits  | `10m`         | v0.11.0 |
+| `LEAFWIKI_DAEMON_IDLE_TIMEOUT`          | Federated runtime idle timeout after last session or presence record exits | `10m`         | v0.11.0 |
 | `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
@@ -337,7 +374,7 @@ The config file is a flat mapping of scalar values. Unknown keys, duplicate keys
 
 ### Logging
 
-By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. Native STDIO owners are detached with stdout reserved for protocol traffic, so their owner logs are retained in the log file. `--log-target stdout` is available only when you explicitly want server logs on stdout.
+By default, LeafWiki writes structured JSON logs to `<data-dir>/.leafwiki/logs/leafwiki.log`. Relative `--log-file` paths resolve under `--data-dir`; absolute paths are used as-is. Use `--log-target stderr` for Docker, systemd, or other supervisors that collect process stderr. Native STDIO session frontends keep stdout reserved for protocol traffic, so detached `wikid`, `frontd`, and `workspaced` logs are retained in the log file. `--log-target stdout` is available only when you explicitly want server logs on stdout.
 
 LeafWiki does not rotate log files in-process. Configure external rotation with your service manager, container runtime, or a tool such as `logrotate`.
 
@@ -397,7 +434,7 @@ For most setups, prefer `--public-access` for read-only public access and the vi
 
 ### Local MCP
 
-LeafWiki runs a transparent per-project owner daemon for each canonical `(data-dir, root-dir)` pair. The first compatible startup starts the owner; later compatible server or STDIO startups attach to it. The owner tracks active session handles plus in-memory agent presence, and exits after both reach zero and `--daemon-idle-timeout` elapses. Agent presence expires on the same idle-timeout cadence.
+LeafWiki runs a federated local runtime rooted at `~/.leafwiki`. The install-wide `wikid`/`frontd` runtime owns the workspace registry, grants, public UI/API entrypoint, global descriptors, session handles, and in-memory agent presence. `leafwiki daemon` is the first-class foreground service entrypoint for that runtime. Each canonical `(data-dir, root-dir)` pair is registered as a workspace and served by a workspace daemon (`workspaced`). Compatible server starts join the existing runtime through the global runtime descriptor and control path. Native STDIO starts first try the workspace-local descriptor at `<data-dir>/.leafwiki/project-daemon.json` for direct private MCP attach, then fall back to `wikid` registration/ensure when that descriptor is missing, stale, or rejected by the private descriptor token. Workspace-grant denial is separate: a healthy descriptor can still fail actor-context resolution until an operator grants that user access to the selected workspace. `wikid` supervises child workspace daemons and stops them when the global runtime shuts down after the idle timeout; service mode disables idle shutdown and exits only on signal or runtime failure.
 
 The easiest project-local STDIO setup is the wrapper script:
 
@@ -408,7 +445,7 @@ The easiest project-local STDIO setup is the wrapper script:
 
 When using `run.sh mcp --config`, set `mcp: stdio` or `mcp: http,stdio` in the YAML file so the spawned process speaks MCP over stdin/stdout.
 
-Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in the daemon descriptor and do not affect daemon config matching.
+Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in daemon descriptors and do not affect daemon config matching. A STDIO startup first reads `<data-dir>/.leafwiki/project-daemon.json` and bridges directly to that workspace daemon's private MCP endpoint when the descriptor is healthy. If the descriptor is missing, stale, or rejected by the private descriptor token, it asks the install-wide runtime to register or ensure the workspace and then retries descriptor attach. If the selected API-key user lacks a workspace grant, STDIO attach fails with authorization instead of self-granting access.
 
 LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
 
@@ -439,7 +476,9 @@ See [Local MCP Interface](docs/mcp.md) for native STDIO setup, OAuth client sett
 
 LeafWiki separates app state from managed markdown content:
 
-- `DataDir` stores app state: auth/session/search/link/tag/property SQLite files, assets, revisions, branding, and importer state.
+- The install-wide `~/.leafwiki/wikid` directory stores durable federation authority and identity state: workspace registry, workspace grants, and auth/session/API-key/OAuth data.
+- The install-wide `~/.leafwiki/runtime` directory stores runtime descriptors such as `wikid.json` and non-home workspace mirrors under `runtime/workspaces/<workspace-id>.json`.
+- A workspace `DataDir` stores workspace-local app state: search/link/tag/property SQLite files, assets, revisions, importer state, workspace-local `.leafwiki/project-daemon.json`, and workspace-local logs. In federated mode, identity/auth/session stores live in `wikid`, not inside each workspace data directory.
 - `RootDir` stores LeafWiki-managed markdown pages and `.order.json` files.
 - `RootDir` is writable and managed by LeafWiki. It is not a passive arbitrary-folder viewer.
 - `RootDir` must not contain `DataDir` and must not point inside app-state paths such as `assets`, `.leafwiki`, `.importer`, or `branding`.

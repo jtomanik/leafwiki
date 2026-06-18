@@ -1,12 +1,17 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 
 import { Page, expect, test } from '@playwright/test';
 import LoginPage from '../pages/LoginPage';
 import { toAppPath } from '../pages/appPath';
-import { connectMCPStdioClient, requestMCPStdioFrame } from './mcpClient';
+import { MCPTestClient, connectMCPStdioClient, requestMCPStdioFrame } from './mcpClient';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
+const dataDir = process.env.E2E_DATA_DIR ?? '';
+const globalDataDir = process.env.E2E_GLOBAL_DATA_DIR ?? dataDir;
+const rootDir = process.env.E2E_ROOT_DIR ?? '';
 
 test.skip(
   process.env.E2E_RUN_MODE !== 'local' ||
@@ -34,11 +39,87 @@ type SeededKeys = {
   deleted: SeededUser;
 };
 
+type RegistryDocument = {
+  workspaces: {
+    id: string;
+    dataDir: string;
+    rootDir: string;
+  }[];
+};
+
 const liveRevocationError =
   /authenticated MCP user|Upstream MCP request failed|unauthorized|Connection closed|Not connected/i;
 
+let keepaliveClient: MCPTestClient | undefined;
+
 function appURL(path: string): string {
   return new URL(toAppPath(path), process.env.E2E_BASE_URL || 'http://localhost:8080').toString();
+}
+
+function runWikidStore(command: string, input?: unknown) {
+  expect(globalDataDir, 'E2E_GLOBAL_DATA_DIR should be exported by the local E2E runner').not.toBe(
+    '',
+  );
+  const repoRoot = process.env.E2E_REPO_ROOT ?? path.resolve(__dirname, '../..');
+  return execFileSync(
+    'go',
+    ['run', './e2e/cmd/wikid-store', command, '--global-data-dir', globalDataDir],
+    {
+      cwd: repoRoot,
+      input: input === undefined ? undefined : JSON.stringify(input),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  ).toString('utf8');
+}
+
+function canonicalPath(value: string) {
+  try {
+    return realpathSync.native(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function configuredWorkspace() {
+  expect(globalDataDir, 'E2E_GLOBAL_DATA_DIR should be exported by the local E2E runner').not.toBe(
+    '',
+  );
+  expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
+
+  const registry = JSON.parse(runWikidStore('read-registry')) as RegistryDocument;
+  const configuredRoot = canonicalPath(rootDir);
+  const configuredData = dataDir ? canonicalPath(dataDir) : '';
+  const workspace = registry.workspaces.find((candidate) => {
+    return (
+      canonicalPath(candidate.rootDir) === configuredRoot ||
+      (configuredData !== '' && canonicalPath(candidate.dataDir) === configuredData)
+    );
+  });
+
+  expect(
+    workspace,
+    `wikid registry should include configured STDIO workspace root=${configuredRoot} data=${configuredData}: ${JSON.stringify(registry.workspaces)}`,
+  ).toBeTruthy();
+  return workspace!;
+}
+
+function routeForConfiguredWorkspace(slug: string) {
+  const workspace = configuredWorkspace();
+  return {
+    path: `/w/${workspace.id}/${slug}.md`,
+    workspaceId: workspace.id,
+  };
+}
+
+function grantConfiguredWorkspaceAccess(owner: SeededUser) {
+  const workspace = configuredWorkspace();
+  runWikidStore('upsert-grants', [
+    {
+      subject: `user:${owner.id}`,
+      workspaceId: workspace.id,
+      role: owner.role,
+    },
+  ]);
 }
 
 function seededKeys(): SeededKeys {
@@ -48,6 +129,21 @@ function seededKeys(): SeededKeys {
   }
   return JSON.parse(readFileSync(path, 'utf8')) as SeededKeys;
 }
+
+test.beforeAll(async () => {
+  const seeds = seededKeys();
+  keepaliveClient = await connectMCPStdioClient(appURL('/mcp'), {
+    accessToken: seeds.viewer.apiKey,
+    clientName: 'leafwiki-e2e-native-stdio-api-key-keepalive',
+  });
+  grantConfiguredWorkspaceAccess(seeds.admin);
+  grantConfiguredWorkspaceAccess(seeds.editor);
+  grantConfiguredWorkspaceAccess(seeds.viewer);
+});
+
+test.afterAll(async () => {
+  await keepaliveClient?.close();
+});
 
 async function loginAsAdmin(page: Page) {
   const loginPage = new LoginPage(page);
@@ -73,15 +169,32 @@ async function revokeAPIKey(page: Page, owner: SeededUser) {
 }
 
 async function updateUserRole(page: Page, owner: SeededUser, role: SeededUser['role']) {
-  const response = await page.request.put(appURL(`/api/users/${owner.id}`), {
-    data: {
-      username: owner.username,
-      email: owner.email,
-      role,
-    },
-    headers: await csrfHeaders(page),
-  });
-  expect(response.status(), await response.text()).toBe(200);
+  let lastStatus = 0;
+  let lastBody = '';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const response = await page.request.put(appURL(`/api/users/${owner.id}`), {
+      data: {
+        username: owner.username,
+        email: owner.email,
+        role,
+      },
+      headers: await csrfHeaders(page),
+    });
+    lastStatus = response.status();
+    lastBody = await response.text();
+    if (lastStatus === 200) {
+      return;
+    }
+    if (
+      lastStatus >= 500 &&
+      /auth_internal_error|Authentication request failed|database is locked/i.test(lastBody)
+    ) {
+      await page.waitForTimeout(250);
+      continue;
+    }
+    expect(lastStatus, lastBody).toBe(200);
+  }
+  throw new Error(`update user role did not settle: ${lastStatus} ${lastBody}`);
 }
 
 async function expectRawStartupRejected(apiKey: string) {
@@ -105,45 +218,6 @@ async function expectRawStartupRejected(apiKey: string) {
   expect(result.stdoutLines).toHaveLength(0);
   expect(result.stderr).toMatch(/invalid native STDIO API key|unauthorized|upstream/i);
 }
-
-test('admin api key authenticates native stdio and live revocation affects later tools', async ({
-  page,
-}) => {
-  const seeds = seededKeys();
-  const mcp = await connectMCPStdioClient(appURL('/mcp'), {
-    accessToken: seeds.admin.apiKey,
-    clientName: 'leafwiki-e2e-native-stdio-admin-api-key',
-  });
-  try {
-    const current = await mcp.callTool('wiki_get_current_user');
-    const currentUser = current.user as { username: string; role: string };
-    expect(currentUser.username).toBe('admin');
-    expect(currentUser.role).toBe('admin');
-
-    const slug = `mcp-stdio-admin-api-key-e2e-${Date.now()}`;
-    await mcp.callTool('wiki_create_page', {
-      title: 'MCP STDIO Admin API Key E2E Page',
-      slug,
-      kind: 'page',
-    });
-
-    await loginAsAdmin(page);
-    await page.goto(appURL(`/${slug}.md`));
-    await page.locator('article').waitFor({ state: 'visible' });
-    await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
-
-    await revokeAPIKey(page, seeds.admin);
-    await expect(mcp.callTool('wiki_get_tree')).rejects.toThrow(liveRevocationError);
-    await expect(
-      mcp.callTool('wiki_create_page', {
-        title: 'Revoked Admin STDIO API Key Write',
-        slug: `revoked-admin-stdio-api-key-write-${Date.now()}`,
-      }),
-    ).rejects.toThrow(liveRevocationError);
-  } finally {
-    await mcp.close();
-  }
-});
 
 test('viewer api key can read through native stdio but cannot mutate', async () => {
   const seeds = seededKeys();
@@ -260,6 +334,47 @@ test('role downgrade takes effect during a live native stdio session', async ({ 
       }),
     ).rejects.toThrow(/editor|admin/i);
     await expect(mcp.callTool('wiki_get_tree')).resolves.toBeTruthy();
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('admin api key authenticates native stdio and live revocation affects later tools', async ({
+  page,
+}) => {
+  const seeds = seededKeys();
+  const mcp = await connectMCPStdioClient(appURL('/mcp'), {
+    accessToken: seeds.admin.apiKey,
+    clientName: 'leafwiki-e2e-native-stdio-admin-api-key',
+  });
+  try {
+    const current = await mcp.callTool('wiki_get_current_user');
+    const currentUser = current.user as { username: string; role: string };
+    expect(currentUser.username).toBe('admin');
+    expect(currentUser.role).toBe('admin');
+
+    const slug = `mcp-stdio-admin-api-key-e2e-${Date.now()}`;
+    await mcp.callTool('wiki_create_page', {
+      title: 'MCP STDIO Admin API Key E2E Page',
+      slug,
+      kind: 'page',
+    });
+
+    const route = routeForConfiguredWorkspace(slug);
+    await loginAsAdmin(page);
+    await page.goto(appURL(route.path));
+    await expect(page).toHaveURL(new RegExp(`/w/${route.workspaceId}/`));
+    await page.locator('article').waitFor({ state: 'visible' });
+    await expect(page.locator('article')).toContainText('MCP STDIO Admin API Key E2E Page');
+
+    await revokeAPIKey(page, seeds.admin);
+    await expect(mcp.callTool('wiki_get_tree')).rejects.toThrow(liveRevocationError);
+    await expect(
+      mcp.callTool('wiki_create_page', {
+        title: 'Revoked Admin STDIO API Key Write',
+        slug: `revoked-admin-stdio-api-key-write-${Date.now()}`,
+      }),
+    ).rejects.toThrow(liveRevocationError);
   } finally {
     await mcp.close();
   }

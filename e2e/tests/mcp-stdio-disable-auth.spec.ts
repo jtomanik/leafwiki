@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import EditPage from '../pages/EditPage';
@@ -17,15 +18,73 @@ test.skip(
 
 const assertRootFiles = process.env.E2E_ASSERT_SEPARATE_ROOT_FILES === '1';
 const dataDir = process.env.E2E_DATA_DIR ?? '';
+const globalDataDir = process.env.E2E_GLOBAL_DATA_DIR ?? dataDir;
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
 const stdioConfigFile = process.env.E2E_MCP_STDIO_CONFIG_FILE ?? '';
 const stdioCommand = process.env.E2E_MCP_STDIO_COMMAND ?? '';
+
+type RegistryDocument = {
+  workspaces: {
+    id: string;
+    dataDir: string;
+    rootDir: string;
+  }[];
+};
 
 function appURL(routePath: string): string {
   return new URL(
     toAppPath(routePath),
     process.env.E2E_BASE_URL || 'http://localhost:8080',
   ).toString();
+}
+
+function runWikidStore(command: string) {
+  expect(globalDataDir, 'E2E_GLOBAL_DATA_DIR should be exported by the local E2E runner').not.toBe(
+    '',
+  );
+  const repoRoot = process.env.E2E_REPO_ROOT ?? path.resolve(__dirname, '../..');
+  return execFileSync(
+    'go',
+    ['run', './e2e/cmd/wikid-store', command, '--global-data-dir', globalDataDir],
+    {
+      cwd: repoRoot,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  ).toString('utf8');
+}
+
+function canonicalPath(value: string) {
+  try {
+    return realpathSync.native(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function routeForConfiguredWorkspace(slug: string) {
+  expect(globalDataDir, 'E2E_GLOBAL_DATA_DIR should be exported by the local E2E runner').not.toBe(
+    '',
+  );
+  expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
+
+  const registry = JSON.parse(runWikidStore('read-registry')) as RegistryDocument;
+  const configuredRoot = canonicalPath(rootDir);
+  const configuredData = dataDir ? canonicalPath(dataDir) : '';
+  const workspace = registry.workspaces.find((candidate) => {
+    return (
+      canonicalPath(candidate.rootDir) === configuredRoot ||
+      (configuredData !== '' && canonicalPath(candidate.dataDir) === configuredData)
+    );
+  });
+
+  expect(
+    workspace,
+    `wikid registry should include configured STDIO workspace root=${configuredRoot} data=${configuredData}: ${JSON.stringify(registry.workspaces)}`,
+  ).toBeTruthy();
+  return {
+    path: `/w/${workspace!.id}/${slug}.md`,
+    workspaceId: workspace!.id,
+  };
 }
 
 function expectMarkdownInConfiguredRoot(slug: string, expectedContent: string) {
@@ -77,19 +136,31 @@ test('mcp stdio seeds page and UI edit is readable through mcp', async ({ page }
       content: 'Seeded through MCP STDIO',
     });
 
+    const route = routeForConfiguredWorkspace(slug);
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}.md`);
-    await expect(page.locator('article')).toContainText('Seeded through MCP STDIO');
+    await test.step('open seeded page in configured workspace', async () => {
+      await viewPage.goto(route.path);
+      await expect(page).toHaveURL(new RegExp(`/w/${route.workspaceId}/`));
+      await expect(page.locator('article')).toContainText('Seeded through MCP STDIO', {
+        timeout: 15000,
+      });
+    });
 
     if (assertRootFiles) {
       expectMarkdownInConfiguredRoot(slug, 'Seeded through MCP STDIO');
     }
 
-    await viewPage.clickEditPageButton();
-    const editPage = new EditPage(page);
-    await editPage.writeContent('\nUpdated from the UI');
-    await editPage.savePage();
-    await editPage.closeEditor();
+    await test.step('edit seeded page in configured workspace', async () => {
+      await viewPage.clickEditPageButton();
+      await expect(page).toHaveURL(new RegExp(`/w/${route.workspaceId}/e/`));
+      const editPage = new EditPage(page);
+      await editPage.writeContent('\nUpdated from the UI');
+      const saveButton = page.locator('button[data-testid="save-page-button"]');
+      await expect(saveButton).toBeEnabled({ timeout: 10000 });
+      await saveButton.click();
+      await expect(saveButton).toBeDisabled({ timeout: 30000 });
+      await page.goto(toAppPath(route.path));
+    });
 
     const readBack = await mcp.callTool('wiki_get_page', { id: createdPage.id });
     const pageFromMCP = readBack.page as { content: string };

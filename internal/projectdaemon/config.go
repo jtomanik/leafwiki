@@ -18,14 +18,18 @@ const (
 	DescriptorFileName      = "project-daemon.json"
 	ControlTokenHeader      = "X-LeafWiki-Daemon-Token"
 	ActorContextHeader      = "X-LeafWiki-Actor-Context"
+	WorkspaceIDHeader       = "X-LeafWiki-Workspace-ID"
 	DefaultIdleTimeout      = 10 * time.Minute
 	DefaultHeartbeatTTL     = 15 * time.Second
 )
 
 type Config struct {
 	RuntimeStack            string `json:"runtimeStack,omitempty"`
+	WorkspaceID             string `json:"workspaceId,omitempty"`
 	DataDir                 string `json:"dataDir"`
 	RootDir                 string `json:"rootDir"`
+	PrivateMCPURL           string `json:"privateMcpUrl,omitempty"`
+	PrivateMCPToken         string `json:"privateMcpToken,omitempty"`
 	AuthDisabled            bool   `json:"authDisabled"`
 	PublicMCPEnabled        bool   `json:"publicMcpEnabled"`
 	Host                    string `json:"host"`
@@ -58,6 +62,7 @@ type Descriptor struct {
 	SchemaVersion    int          `json:"schemaVersion"`
 	RuntimeStack     string       `json:"runtimeStack,omitempty"`
 	Role             RoleName     `json:"role,omitempty"`
+	WorkspaceID      string       `json:"workspaceId,omitempty"`
 	PID              int          `json:"pid"`
 	StartedAt        time.Time    `json:"startedAt"`
 	DataDir          string       `json:"dataDir"`
@@ -66,6 +71,8 @@ type Descriptor struct {
 	PublicMCPEnabled bool         `json:"publicMcpEnabled"`
 	BasePath         string       `json:"basePath"`
 	ControlURL       string       `json:"controlUrl"`
+	PrivateMCPURL    string       `json:"privateMcpUrl,omitempty"`
+	PrivateMCPToken  string       `json:"privateMcpToken,omitempty"`
 	ConfigHash       string       `json:"configHash"`
 	IdleTimeout      string       `json:"idleTimeout"`
 	ControlToken     string       `json:"controlToken"`
@@ -93,6 +100,10 @@ func CanonicalizeProject(dataDir, rootDir string) (string, string, error) {
 
 func DescriptorPath(dataDir string) string {
 	return filepath.Join(dataDir, ".leafwiki", DescriptorFileName)
+}
+
+func GlobalDescriptorPath(runtimeDir string, role RoleName) string {
+	return filepath.Join(runtimeDir, string(role)+".json")
 }
 
 func ConfigHash(cfg Config) (string, error) {
@@ -212,7 +223,7 @@ func configFieldName(field reflect.StructField) string {
 
 func redactedValue(field string, value any) string {
 	switch field {
-	case "InjectCodeInHeaderHash":
+	case "InjectCodeInHeaderHash", "PrivateMCPToken":
 		if fmt.Sprint(value) == "" {
 			return "empty"
 		}

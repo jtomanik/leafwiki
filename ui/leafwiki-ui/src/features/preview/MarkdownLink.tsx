@@ -5,6 +5,11 @@ import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildViewUrl, stripBasePath, withBasePath } from '@/lib/routePath'
 import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
+import { isAssetPath, workspaceAssetPath } from '@/lib/workspaceAssets'
+import {
   markdownHrefToWikiBrowserPath,
   markdownHrefToWikiRoutePath,
   markdownRouteLookupKind,
@@ -22,6 +27,7 @@ import { useSessionStore } from '@/stores/session'
 import { useTreeStore } from '@/stores/tree'
 import clsx from 'clsx'
 import { AnchorHTMLAttributes, ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 
 interface MarkdownLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   href?: string
@@ -29,6 +35,7 @@ interface MarkdownLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   path?: string
   sourceKind?: WikiNodeKind
   node?: unknown
+  workspaceId?: string
   resolveAssetUrl?: (src: string) => string
 }
 
@@ -36,19 +43,21 @@ export function MarkdownLink({
   href,
   children,
   node,
+  workspaceId: workspaceIdProp,
   resolveAssetUrl,
   sourceKind = 'page',
   ...props
 }: MarkdownLinkProps) {
   void node
+  const location = useLocation()
   const openDialog = useDialogsStore((s) => s.openDialog)
   const getPageByPath = useTreeStore((s) => s.getPageByPath)
   const user = useSessionStore((s) => s.user)
-  const markdownLinkRootPrefix = useConfigStore(
-    (s) => s.markdownLinkRootPrefix,
-  )
+  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
 
   const editMode = useAppMode() === 'edit'
+  const workspaceId =
+    workspaceIdProp ?? splitWorkspaceRoute(location.pathname).workspaceId
 
   if (href === undefined) {
     return <>{children}</>
@@ -64,6 +73,7 @@ export function MarkdownLink({
     openDialog(DIALOG_CREATE_PAGE_BY_PATH, {
       initialPath: path,
       initialKind: kind,
+      workspaceId,
       readOnlyPath: true,
       forwardToEditMode: !editMode,
     })
@@ -74,12 +84,10 @@ export function MarkdownLink({
       ? stripMarkdownLinkRootPrefix(href, markdownLinkRootPrefix)
       : href
     // check if it is a asset link
-    if (hrefForLookup.startsWith('assets/') || hrefForLookup.startsWith('/assets/')) {
-      const path = hrefForLookup.startsWith('/assets/')
-        ? hrefForLookup
-        : '/assets/' + hrefForLookup.slice('assets/'.length)
-
-      const resolvedPath = resolveAssetUrl?.(path) ?? path
+    if (isAssetPath(hrefForLookup)) {
+      const resolvedPath =
+        resolveAssetUrl?.(hrefForLookup) ??
+        workspaceAssetPath(hrefForLookup, workspaceId)
       const assetHref = withBasePath(resolvedPath)
       return (
         <a
@@ -133,9 +141,12 @@ export function MarkdownLink({
     normalizedHref = resolveReadmeFallbackHref(
       normalizedHref,
       href,
-      getPageByPath,
+      (path, kind) => getPageByPath(path, kind, workspaceId),
     )
-    browserHref = resolveReadmeFallbackHref(browserHref, href, getPageByPath)
+    browserHref = resolveReadmeFallbackHref(browserHref, href, (path, kind) =>
+      getPageByPath(path, kind, workspaceId),
+    )
+    browserHref = buildWorkspaceViewPath(workspaceId, browserHref)
 
     /**
      *  When a page link is internal and not an asset link and the page doesn't exist yet,
@@ -149,7 +160,7 @@ export function MarkdownLink({
     const targetKind = markdownRouteLookupKind(browserHref) ?? 'section'
 
     // Check if the page exists
-    const page = getPageByPath(normalizedTargetPath, targetKind)
+    const page = getPageByPath(normalizedTargetPath, targetKind, workspaceId)
     const pageExists = !!page
     if (!pageExists && user) {
       return (

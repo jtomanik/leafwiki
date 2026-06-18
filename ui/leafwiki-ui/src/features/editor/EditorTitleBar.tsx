@@ -1,4 +1,5 @@
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
+import { lookupPath } from '@/lib/api/pages'
 import { getParentWikiRoutePath, toWikiLookupPath } from '@/lib/wikiPath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsMobile } from '@/lib/useIsMobile'
@@ -13,6 +14,7 @@ export function EditorTitleBar() {
   const isMobile = useIsMobile()
   const appMode = useAppMode()
   const page = usePageEditorStore((state) => state.page)
+  const workspaceId = usePageEditorStore((state) => state.workspaceId)
   const title = usePageEditorStore((state) => state.title)
   const slug = usePageEditorStore((state) => state.slug)
   const setTitle = usePageEditorStore((state) => state.setTitle)
@@ -21,22 +23,29 @@ export function EditorTitleBar() {
   const getPageByPath = useTreeStore((state) => state.getPageByPath)
   const dirty = usePageEditorStore(isDirtyState)
 
-  const onEditClicked = () => {
-    if (!page) return
+  const onEditClicked = async () => {
+    if (!page || !workspaceId) return
 
-    const parentId = () => {
-      const parentPath = toWikiLookupPath(getParentWikiRoutePath(page.path))
-      const p = getPageByPath(parentPath, 'section')
-      if (!p) return ''
-      return p.id
+    const parentPath = toWikiLookupPath(getParentWikiRoutePath(page.path))
+    const parentId = async () => {
+      if (!parentPath) return ''
+      const p = getPageByPath(parentPath, 'section', workspaceId)
+      if (p) return p.id
+      const lookup = await lookupPath(parentPath, workspaceId, 'section')
+      if (!lookup.exists) return ''
+      const lastSegment = lookup.segments[lookup.segments.length - 1]
+      return lastSegment?.id || ''
     }
+    const resolvedParentId = await parentId()
 
     openDialog(DIALOG_EDIT_PAGE_METADATA, {
       title: title,
       currentId: page.id,
       itemKind: page.kind,
       slug: slug,
-      parentId: parentId(),
+      parentId: resolvedParentId,
+      parentPath,
+      workspaceId,
       onChange: (title: string, slug: string) => {
         setTitle(title)
         setSlug(slug)

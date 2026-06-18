@@ -37,7 +37,7 @@ This script builds the frontend, copies it into `internal/http/dist`, builds the
 
 ### Run LeafWiki As An MCP STDIO Command
 
-Use this when an MCP client wants a single command that speaks MCP over STDIO. The script execs a foreground `leafwiki --mcp=stdio` session frontend, which attaches to the per-project owner daemon that serves the HTTP UI.
+Use this when an MCP client wants a single command that speaks MCP over STDIO. The script execs a foreground `leafwiki --mcp=stdio` session frontend, which first attaches through the selected workspace descriptor when it is healthy. If that descriptor is missing, stale, or not authorized for the selected workspace, the frontend asks `wikid` in the install-wide LeafWiki runtime to register or ensure the workspace and then retries descriptor attach.
 
 ```bash
 ./scripts/run.sh mcp
@@ -49,7 +49,7 @@ Example MCP client command:
 /path/to/leafwiki/scripts/run.sh mcp --root-dir /path/to/wiki
 ```
 
-The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; owner startup and server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
+The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; `wikid`, `frontd`, and `workspaced` startup/server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
 
 `run.sh mcp` enables workspace sync by default, so markdown files under `--root-dir` are synchronized and recorded in LeafWiki's internal Git history. Pass `--disable-workspace-sync` or set `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` when you explicitly need the legacy no-sync behavior.
 
@@ -112,7 +112,7 @@ Important side effects:
 
 ### `run.sh`
 
-Starts a project-local MCP STDIO command for clients that spawn one process. The foreground `leafwiki --mcp=stdio` process speaks MCP over STDIO and attaches to the per-project owner daemon that serves the HTTP UI.
+Starts a project-local MCP STDIO command for clients that spawn one process. The foreground `leafwiki --mcp=stdio` process speaks MCP over STDIO, first reads the workspace-local descriptor at `<data-dir>/.leafwiki/project-daemon.json`, and bridges to the selected workspace daemon's private MCP endpoint when the descriptor is healthy. Missing, stale, or unauthorized descriptors fall back through the install-wide `wikid` runtime before descriptor attach is retried.
 
 Default disabled-auth command shape:
 
@@ -189,13 +189,13 @@ Wrapper behavior:
 - Workspace sync is enabled by default. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit `--enable-workspace-sync`.
 - `--markdown-link-root-prefix` and `LEAFWIKI_RUN_MCP_MARKDOWN_LINK_ROOT_PREFIX` pass through to LeafWiki outside config mode. Use YAML `markdown-link-root-prefix:` in config mode. This is separate from `--base-path`; it only controls authored/generated Markdown hrefs such as `/docs/page.md`.
 - Outside config mode, `--api-key` and `LEAFWIKI_RUN_MCP_API_KEY` are translated into `LEAFWIKI_MCP_API_KEY` for the child process. In config mode, wrapper env translation is skipped; put `api-key:` in YAML or set `LEAFWIKI_MCP_API_KEY` directly.
-- API-key attach mode does not need `LEAFWIKI_JWT_SECRET` or `LEAFWIKI_ADMIN_PASSWORD` when a compatible owner is already running.
-- If this invocation must bootstrap a new auth-enabled owner, pass `--jwt-secret` and `--admin-password`; dry-run output redacts these values.
+- API-key attach mode does not need `LEAFWIKI_JWT_SECRET` or `LEAFWIKI_ADMIN_PASSWORD` when a compatible install-wide runtime is already running.
+- If this invocation must bootstrap a new auth-enabled runtime, pass `--jwt-secret` and `--admin-password`; dry-run output redacts these values.
 - `--disable-auth` cannot be combined with an API key.
-- `--daemon-idle-timeout` controls how long the owner daemon remains alive after the last STDIO/server session exits. Use `0` for immediate shutdown.
-- Wrapper diagnostics and foreground validation errors go to stderr. The detached owner writes startup and server logs to the LeafWiki log file by default.
-- When the wrapper attaches to an existing owner, the owner's host, public MCP, log target/file, and request-log settings remain authoritative.
-- Public HTTP MCP must use a loopback host, but this wrapper starts only a native STDIO frontend and may attach to an owner bound to a non-loopback web host through private loopback control.
+- `--daemon-idle-timeout` controls how long the install-wide runtime remains alive after the last STDIO/server session or presence record exits. `wikid` supervises child workspace daemons and stops them during global runtime shutdown. Use `0` for immediate shutdown.
+- Wrapper diagnostics and foreground validation errors go to stderr. Detached `wikid`, `frontd`, and `workspaced` processes write startup and server logs to the LeafWiki log file by default.
+- When the wrapper attaches to an existing install-wide runtime, `frontd`'s host, public MCP, log target/file, and request-log settings remain authoritative.
+- Public HTTP MCP must use a loopback host, but this wrapper starts only a native STDIO frontend and may attach to an existing runtime bound to a non-loopback web host through private loopback control.
 - `--log-target stdout` is not used because stdout is reserved for MCP protocol frames.
 - Repeated `--server-arg <arg>` values are appended to the `leafwiki` command.
 
@@ -222,7 +222,7 @@ bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/
 Related Go and E2E checks:
 
 ```bash
-go test ./cmd/leafwiki ./internal/projectdaemon ./internal/wiki ./internal/wiki/mcp ./internal/locking
+rtk go test ./cmd/leafwiki ./internal/projectdaemon ./internal/wikid ./internal/frontd ./internal/workspaced ./internal/wiki ./internal/wiki/mcp
 E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-disable-auth.spec.ts
 E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/mcp-stdio-api-keys.spec.ts
 E2E_RUN_MODE=local E2E_USE_CONFIG_FILE=1 ./e2e/run.sh tests/health.spec.ts

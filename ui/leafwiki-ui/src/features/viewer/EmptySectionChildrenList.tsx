@@ -9,6 +9,7 @@ import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import { FilePlus, FolderPlus } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useViewerStore } from './viewer'
 
 type EmptySectionChildrenListProps = {
   page: Page
@@ -21,13 +22,16 @@ function displayUser(label?: { username: string }) {
 export default function EmptySectionChildrenList({
   page,
 }: EmptySectionChildrenListProps) {
+  const workspaceId = useViewerStore((s) => s.workspaceId)
   const getPageById = useTreeStore((s) => s.getPageById)
-  const node = getPageById(page.id)
+  const node = workspaceId ? getPageById(page.id, workspaceId) : null
   const openDialog = useDialogsStore((s) => s.openDialog)
-  const tree = useTreeStore((s) => s.tree)
+  const tree = useTreeStore((s) =>
+    workspaceId ? s.workspaceTrees[workspaceId]?.tree : null,
+  )
   const isReadOnly = useIsReadOnly()
 
-  if (!tree) {
+  if (!workspaceId || !tree) {
     return null
   }
 
@@ -73,7 +77,11 @@ export default function EmptySectionChildrenList({
               return (
                 <li key={n.id}>
                   <Link
-                    to={browserRoutePathForWikiNode(n.path, n.kind)}
+                    to={browserRoutePathForWikiNode(
+                      n.path,
+                      n.kind,
+                      workspaceId,
+                    )}
                     state={createNavigationVisitState()}
                   >
                     {n.title}
@@ -99,6 +107,7 @@ export default function EmptySectionChildrenList({
                   openDialog(DIALOG_ADD_PAGE, {
                     parentId: page.id,
                     nodeKind: NODE_KIND_PAGE,
+                    workspaceId,
                   })
                 }
                 variant="default"
@@ -133,6 +142,7 @@ export default function EmptySectionChildrenList({
                   openDialog(DIALOG_ADD_PAGE, {
                     parentId: page.id,
                     nodeKind: NODE_KIND_PAGE,
+                    workspaceId,
                   })
                 }
                 variant="default"
@@ -146,6 +156,7 @@ export default function EmptySectionChildrenList({
                   openDialog(DIALOG_ADD_PAGE, {
                     parentId: page.id,
                     nodeKind: NODE_KIND_SECTION,
+                    workspaceId,
                   })
                 }
                 variant="default"

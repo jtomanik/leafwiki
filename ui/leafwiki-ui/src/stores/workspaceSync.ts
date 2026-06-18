@@ -9,7 +9,7 @@ import {
 } from '@/lib/api/workspaceSync'
 import { create } from 'zustand'
 
-type WorkspaceSyncStore = {
+export type WorkspaceSyncWorkspaceState = {
   status: WorkspaceSyncStatus | null
   statusLoading: boolean
   statusError: string | null
@@ -20,14 +20,21 @@ type WorkspaceSyncStore = {
   snapshotsLoadingMore: boolean
   snapshotsError: string | null
   restoringCommitId: string | null
-  loadStatus: () => Promise<WorkspaceSyncStatus | null>
-  refresh: () => Promise<WorkspaceSyncStatus>
-  loadSnapshots: () => Promise<WorkspaceSnapshot[]>
-  loadMoreSnapshots: () => Promise<WorkspaceSnapshot[]>
-  restoreSnapshot: (commitId: string) => Promise<WorkspaceSyncStatus>
 }
 
-export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
+type WorkspaceSyncStore = {
+  workspaces: Record<string, WorkspaceSyncWorkspaceState>
+  loadStatus: (workspaceId: string) => Promise<WorkspaceSyncStatus | null>
+  refresh: (workspaceId: string) => Promise<WorkspaceSyncStatus>
+  loadSnapshots: (workspaceId: string) => Promise<WorkspaceSnapshot[]>
+  loadMoreSnapshots: (workspaceId: string) => Promise<WorkspaceSnapshot[]>
+  restoreSnapshot: (
+    commitId: string,
+    workspaceId: string,
+  ) => Promise<WorkspaceSyncStatus>
+}
+
+const emptyWorkspaceSyncState: WorkspaceSyncWorkspaceState = {
   status: null,
   statusLoading: false,
   statusError: null,
@@ -38,98 +45,204 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
   snapshotsLoadingMore: false,
   snapshotsError: null,
   restoringCommitId: null,
+}
 
-  loadStatus: async () => {
-    set({ statusLoading: true, statusError: null })
+function workspaceState(
+  state: WorkspaceSyncStore,
+  workspaceId: string,
+): WorkspaceSyncWorkspaceState {
+  return state.workspaces[workspaceId] ?? emptyWorkspaceSyncState
+}
+
+export function selectWorkspaceSyncState(
+  state: WorkspaceSyncStore,
+  workspaceId: string,
+): WorkspaceSyncWorkspaceState {
+  return workspaceState(state, workspaceId)
+}
+
+function patchWorkspaceState(
+  current: WorkspaceSyncStore,
+  workspaceId: string,
+  patch: Partial<WorkspaceSyncWorkspaceState>,
+) {
+  return {
+    workspaces: {
+      ...current.workspaces,
+      [workspaceId]: {
+        ...workspaceState(current, workspaceId),
+        ...patch,
+      },
+    },
+  }
+}
+
+export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
+  workspaces: {},
+
+  loadStatus: async (workspaceId) => {
+    set((state) =>
+      patchWorkspaceState(state, workspaceId, {
+        statusLoading: true,
+        statusError: null,
+      }),
+    )
     try {
-      const status = await getWorkspaceSyncStatus()
-      set({ status, statusError: null })
+      const status = await getWorkspaceSyncStatus(workspaceId)
+      set((state) => patchWorkspaceState(state, workspaceId, { status }))
       return status
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to load workspace sync status')
-      set({ statusError: mapped.message })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          statusError: mapped.message,
+        }),
+      )
       return null
     } finally {
-      set({ statusLoading: false })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, { statusLoading: false }),
+      )
     }
   },
 
-  refresh: async () => {
-    set({ refreshLoading: true, statusError: null })
+  refresh: async (workspaceId) => {
+    set((state) =>
+      patchWorkspaceState(state, workspaceId, {
+        refreshLoading: true,
+        statusError: null,
+      }),
+    )
     try {
-      const status = await refreshWorkspaceSync()
-      set({ status, statusError: null })
+      const status = await refreshWorkspaceSync(workspaceId)
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          status,
+          statusError: null,
+        }),
+      )
       return status
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to sync workspace')
-      set({ statusError: mapped.message })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          statusError: mapped.message,
+        }),
+      )
       throw err
     } finally {
-      set({ refreshLoading: false })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, { refreshLoading: false }),
+      )
     }
   },
 
-  loadSnapshots: async () => {
-    set({
-      snapshotsLoading: true,
-      snapshotsLoadingMore: false,
-      snapshotsError: null,
-      snapshotsNextCursor: '',
-    })
-    try {
-      const data = await listWorkspaceSnapshots()
-      set({
-        snapshots: data.snapshots,
-        snapshotsNextCursor: data.nextCursor ?? '',
+  loadSnapshots: async (workspaceId) => {
+    set((state) =>
+      patchWorkspaceState(state, workspaceId, {
+        snapshotsLoading: true,
+        snapshotsLoadingMore: false,
         snapshotsError: null,
-      })
+        snapshotsNextCursor: '',
+      }),
+    )
+    try {
+      const data = await listWorkspaceSnapshots(workspaceId)
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          snapshots: data.snapshots,
+          snapshotsNextCursor: data.nextCursor ?? '',
+          snapshotsError: null,
+        }),
+      )
       return data.snapshots
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to load workspace snapshots')
-      set({ snapshotsError: mapped.message })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          snapshotsError: mapped.message,
+        }),
+      )
       throw err
     } finally {
-      set({ snapshotsLoading: false })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, { snapshotsLoading: false }),
+      )
     }
   },
 
-  loadMoreSnapshots: async () => {
-    const state = get()
-    if (!state.snapshotsNextCursor || state.snapshotsLoadingMore) {
-      return state.snapshots
+  loadMoreSnapshots: async (workspaceId) => {
+    const current = workspaceState(get(), workspaceId)
+    if (!current.snapshotsNextCursor || current.snapshotsLoadingMore) {
+      return current.snapshots
     }
 
-    set({ snapshotsLoadingMore: true, snapshotsError: null })
-    try {
-      const data = await listWorkspaceSnapshots(state.snapshotsNextCursor)
-      const snapshots = [...get().snapshots, ...data.snapshots]
-      set({
-        snapshots,
-        snapshotsNextCursor: data.nextCursor ?? '',
+    set((state) =>
+      patchWorkspaceState(state, workspaceId, {
+        snapshotsLoadingMore: true,
         snapshotsError: null,
-      })
+      }),
+    )
+    try {
+      const data = await listWorkspaceSnapshots(
+        workspaceId,
+        current.snapshotsNextCursor,
+      )
+      const latest = workspaceState(get(), workspaceId)
+      const snapshots = [...latest.snapshots, ...data.snapshots]
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          snapshots,
+          snapshotsNextCursor: data.nextCursor ?? '',
+          snapshotsError: null,
+        }),
+      )
       return snapshots
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to load more workspace snapshots')
-      set({ snapshotsError: mapped.message })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          snapshotsError: mapped.message,
+        }),
+      )
       throw err
     } finally {
-      set({ snapshotsLoadingMore: false })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          snapshotsLoadingMore: false,
+        }),
+      )
     }
   },
 
-  restoreSnapshot: async (commitId: string) => {
-    set({ restoringCommitId: commitId, statusError: null })
+  restoreSnapshot: async (commitId: string, workspaceId: string) => {
+    set((state) =>
+      patchWorkspaceState(state, workspaceId, {
+        restoringCommitId: commitId,
+        statusError: null,
+      }),
+    )
     try {
-      const status = await restoreWorkspaceSnapshot(commitId)
-      set({ status, statusError: null })
+      const status = await restoreWorkspaceSnapshot(commitId, workspaceId)
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          status,
+          statusError: null,
+        }),
+      )
       return status
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to restore workspace snapshot')
-      set({ statusError: mapped.message })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, {
+          statusError: mapped.message,
+        }),
+      )
       throw err
     } finally {
-      set({ restoringCommitId: null })
+      set((state) =>
+        patchWorkspaceState(state, workspaceId, { restoringCommitId: null }),
+      )
     }
   },
 }))

@@ -9,6 +9,7 @@ import { AssetItem } from './AssetItem'
 
 type Props = {
   pageId: string
+  workspaceId: string
   onInsert?: (md: string) => void
   onFilenameChange?: (before: string, after: string) => void
   onAssetVersionChange?: () => void
@@ -17,6 +18,7 @@ type Props = {
 
 export function AssetManager({
   pageId,
+  workspaceId,
   onInsert,
   onFilenameChange,
   onAssetVersionChange,
@@ -43,7 +45,7 @@ export function AssetManager({
     async (showLoading = false) => {
       if (showLoading) setLoading(true)
       try {
-        const result = await getAssets(pageId)
+        const result = await getAssets(pageId, workspaceId)
         setAssets(result)
       } catch (err) {
         console.error('Failed to load assets', err)
@@ -51,7 +53,7 @@ export function AssetManager({
         if (showLoading) setLoading(false)
       }
     },
-    [pageId],
+    [pageId, workspaceId],
   )
 
   useEffect(() => {
@@ -69,7 +71,7 @@ export function AssetManager({
     setUploadingFiles((prev) => new Set(prev).add(file.name))
 
     try {
-      await uploadAsset(pageId, file)
+      await uploadAsset(pageId, file, workspaceId)
       await loadAssets(false)
       onAssetVersionChange?.()
     } catch (err) {
@@ -167,6 +169,7 @@ export function AssetManager({
                 editingFilename={editingFilename}
                 setEditingFilename={handleSetEditingFilename}
                 pageId={pageId}
+                workspaceId={workspaceId}
                 onReload={loadAssets}
                 onAssetVersionChange={onAssetVersionChange}
                 onInsert={(md) => onInsert?.(md)}

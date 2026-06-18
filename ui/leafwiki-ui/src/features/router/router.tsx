@@ -46,6 +46,18 @@ export const createLeafWikiRouter = (
         ),
       },
       {
+        path: '/w/:workspaceId',
+        element: isReadOnlyViewer ? (
+          <ReadOnlyWrapper>
+            <PageViewer />
+          </ReadOnlyWrapper>
+        ) : (
+          <AuthWrapper>
+            <PageViewer />
+          </AuthWrapper>
+        ),
+      },
+      {
         path: '/users',
         element:
           isReadOnlyViewer || authDisabled ? (
@@ -77,7 +89,27 @@ export const createLeafWikiRouter = (
         ),
       },
       {
+        path: '/w/:workspaceId/settings/importer',
+        element: isReadOnlyViewer ? (
+          <Navigate to="/" />
+        ) : (
+          <AuthWrapper>
+            <Importer />
+          </AuthWrapper>
+        ),
+      },
+      {
         path: '/e/*',
+        element: isReadOnlyViewer ? (
+          <Navigate to="/" />
+        ) : (
+          <AuthWrapper>
+            <PageEditor />
+          </AuthWrapper>
+        ),
+      },
+      {
+        path: '/w/:workspaceId/e/*',
         element: isReadOnlyViewer ? (
           <Navigate to="/" />
         ) : (
@@ -101,6 +133,20 @@ export const createLeafWikiRouter = (
         ),
       },
       {
+        path: '/w/:workspaceId/history/*',
+        element: !enablePageHistory ? (
+          <Navigate to="/" replace />
+        ) : isReadOnlyViewer ? (
+          <ReadOnlyWrapper>
+            <PageHistoryPage />
+          </ReadOnlyWrapper>
+        ) : (
+          <AuthWrapper>
+            <PageHistoryPage />
+          </AuthWrapper>
+        ),
+      },
+      {
         path: '/p/:id/:slug?',
         element: isReadOnlyViewer ? (
           <ReadOnlyWrapper>
@@ -109,6 +155,30 @@ export const createLeafWikiRouter = (
         ) : (
           <AuthWrapper>
             <PermalinkRedirect />
+          </AuthWrapper>
+        ),
+      },
+      {
+        path: '/w/:workspaceId/p/:id/:slug?',
+        element: isReadOnlyViewer ? (
+          <ReadOnlyWrapper>
+            <PermalinkRedirect />
+          </ReadOnlyWrapper>
+        ) : (
+          <AuthWrapper>
+            <PermalinkRedirect />
+          </AuthWrapper>
+        ),
+      },
+      {
+        path: '/w/:workspaceId/*',
+        element: isReadOnlyViewer ? (
+          <ReadOnlyWrapper>
+            <PageViewer />
+          </ReadOnlyWrapper>
+        ) : (
+          <AuthWrapper>
+            <PageViewer />
           </AuthWrapper>
         ),
       },

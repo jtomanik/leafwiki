@@ -72,11 +72,12 @@ function buildCompletionOptions(
 
 export function internalLinkCompletionSource(
   context: CompletionContext,
+  workspaceId?: string,
 ): CompletionResult | null {
   const range = getLinkTargetRange(context)
   if (!range) return null
 
-  const items = useTreeStore.getState().flatPages
+  const items = useTreeStore.getState().getWorkspaceState(workspaceId).flatPages
   if (items.length === 0) return null
 
   const markdownLinkRootPrefix =

@@ -15,13 +15,13 @@ import PermalinkDialog from '@/features/page/PermalinkDialog'
 import { PageRefactorDialog } from '@/features/page/PageRefactorDialog'
 import { SortPagesDialog } from '@/features/page/SortPagesDialog'
 import Search from '@/features/search/Search'
-import TreeView from '@/features/tree/TreeView'
 import { WorkspaceSnapshotsDialog } from '@/features/tree/WorkspaceSnapshotsDialog'
 import { ChangeOwnPasswordDialog } from '@/features/users/ChangeOwnPasswordDialog'
 import { ChangePasswordDialog } from '@/features/users/ChangePasswordDialog'
 import { DeleteUserDialog } from '@/features/users/DeleteUserDialog'
 import { MCPAPIKeysDialog } from '@/features/users/MCPAPIKeysDialog'
 import { UserFormDialog } from '@/features/users/UserFormDialog'
+import WorkspaceAccordion from '@/features/workspaces/WorkspaceAccordion'
 import { DialogRegistry } from '@/lib/registries/dialogRegistry'
 import { PanelItemRegistry } from '@/lib/registries/panelItemRegistry'
 import { FolderTree, Search as SearchIcon } from 'lucide-react'
@@ -41,7 +41,7 @@ panelItemRegistry.register({
   modes: ['view', 'edit', 'history', 'settings', 'user-management'],
   icon: () => <FolderTree size={16} />,
   render: () => {
-    return <TreeView />
+    return <WorkspaceAccordion />
   },
 })
 
@@ -318,7 +318,12 @@ dialogRegistry.register({
 
 dialogRegistry.register({
   type: DIALOG_WORKSPACE_SNAPSHOTS,
-  render: () => {
-    return <WorkspaceSnapshotsDialog key={DIALOG_WORKSPACE_SNAPSHOTS} />
+  render: (props) => {
+    return (
+      <WorkspaceSnapshotsDialog
+        key={DIALOG_WORKSPACE_SNAPSHOTS}
+        {...(props as React.ComponentProps<typeof WorkspaceSnapshotsDialog>)}
+      />
+    )
   },
 })

@@ -1,4 +1,8 @@
 function readBasePathFromMeta(): string {
+  if (typeof document === 'undefined') {
+    return ''
+  }
+
   const raw =
     document
       .querySelector('meta[name="base-path"]')

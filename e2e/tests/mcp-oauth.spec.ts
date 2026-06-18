@@ -79,6 +79,7 @@ async function exerciseMCPUIRoundTrip(
   mcp: Awaited<ReturnType<typeof connectMCPClient>>,
   slugPrefix: string,
   pageURL: (path: string) => string = appURL,
+  workspaceId = 'home',
 ) {
   const slug = `${slugPrefix}-${Date.now()}`;
   const targetSlug = `${slug}-target`;
@@ -101,7 +102,7 @@ async function exerciseMCPUIRoundTrip(
   });
 
   const viewPage = new ViewPage(page);
-  await page.goto(pageURL(`/${slug}.md`));
+  await page.goto(pageURL(`/w/${workspaceId}/${slug}.md`));
   await page.locator('article').waitFor({ state: 'visible' });
   await expect(page.locator('article')).toContainText('Seeded through authenticated MCP');
 
@@ -138,7 +139,11 @@ async function exerciseMCPUIRoundTrip(
   );
 }
 
-async function authorizeAndExchange(page: Page, request: APIRequestContext): Promise<string> {
+async function authorizeAndExchange(
+  page: Page,
+  request: APIRequestContext,
+  resourceURL = appURL('/mcp'),
+): Promise<string> {
   const { verifier, challenge } = pkcePair();
   const redirectURI = 'http://127.0.0.1:49152/callback';
   const authorizeURL = new URL(appURL('/oauth/authorize'));
@@ -147,7 +152,7 @@ async function authorizeAndExchange(page: Page, request: APIRequestContext): Pro
   authorizeURL.searchParams.set('redirect_uri', redirectURI);
   authorizeURL.searchParams.set('scope', 'leafwiki:mcp');
   authorizeURL.searchParams.set('state', 'mcp-oauth-e2e');
-  authorizeURL.searchParams.set('resource', appURL('/mcp'));
+  authorizeURL.searchParams.set('resource', resourceURL);
   authorizeURL.searchParams.set('code_challenge', challenge);
   authorizeURL.searchParams.set('code_challenge_method', 'S256');
 
@@ -192,8 +197,9 @@ async function authorizeAndExchange(page: Page, request: APIRequestContext): Pro
 
 test('mcp oauth creates page and UI edit is readable through mcp', async ({ page, request }) => {
   await loginAsAdmin(page);
+  const mcpEndpoint = appURL('/mcp/workspaces/home');
   const accessToken = await authorizeAndExchange(page, request);
-  const mcp = await connectMCPClient(appURL('/mcp'), {
+  const mcp = await connectMCPClient(mcpEndpoint, {
     accessToken,
     clientName: 'leafwiki-e2e-oauth',
   });
@@ -219,7 +225,8 @@ test('mcp oauth creates page and UI edit is readable through mcp', async ({ page
 test('mcp oauth sdk dynamically registers, discovers protected resource metadata, and connects', async ({
   page,
 }) => {
-  const mcpURL = loopbackAppURL('/mcp');
+  const mcpURL = loopbackAppURL('/mcp/workspaces/home');
+  const protectedResourceURL = loopbackAppURL('/mcp');
   const redirectURI = 'http://127.0.0.1:49152/callback';
   const oauthFlow = await startMCPClientSDKOAuthFlow(mcpURL, {
     clientName: 'leafwiki-e2e-oauth-discovery',
@@ -234,7 +241,7 @@ test('mcp oauth sdk dynamically registers, discovers protected resource metadata
   expect(registeredClientID).toBeTruthy();
   expect(registeredClientID).not.toBe('leafwiki-local-mcp');
   expect(oauthFlow.authorizationURL.searchParams.get('client_id')).toBe(registeredClientID);
-  expect(oauthFlow.authorizationURL.searchParams.get('resource')).toBe(mcpURL);
+  expect(oauthFlow.authorizationURL.searchParams.get('resource')).toBe(protectedResourceURL);
   expect(oauthFlow.authorizationURL.searchParams.get('state')).toBe('mcp-sdk-oauth-state');
 
   await loginAsAdminAt(page, loopbackAppURL('/login'));

@@ -5,30 +5,69 @@ type LinkStatusStore = {
   status: LinkStatusResult | null
   loading: boolean
   error: string | null
-  fetchLinkStatusForPage: (pageId: string) => Promise<void>
+  activeRequestKey: string | null
+  activeRequestId: number
+  fetchLinkStatusForPage: (pageId: string, workspaceId: string) => Promise<void>
   clear: () => void
+}
+
+let linkStatusRequestId = 0
+
+function requestKey(pageId: string, workspaceId: string) {
+  return `${workspaceId}:${pageId}`
 }
 
 export const useLinkStatusStore = create<LinkStatusStore>((set) => ({
   status: null,
   loading: false,
   error: null,
+  activeRequestKey: null,
+  activeRequestId: 0,
 
-  clear: () => set({ status: null, loading: false, error: null }),
+  clear: () =>
+    set({
+      status: null,
+      loading: false,
+      error: null,
+      activeRequestKey: null,
+      activeRequestId: ++linkStatusRequestId,
+    }),
 
-  fetchLinkStatusForPage: async (pageId: string) => {
+  fetchLinkStatusForPage: async (pageId: string, workspaceId: string) => {
     if (!pageId) {
-      set({ status: null, loading: false, error: 'Page ID is required' })
+      set({
+        status: null,
+        loading: false,
+        error: 'Page ID is required',
+        activeRequestKey: null,
+        activeRequestId: ++linkStatusRequestId,
+      })
       return
     }
-    set({ loading: true, error: null })
+    const key = requestKey(pageId, workspaceId)
+    const requestId = ++linkStatusRequestId
+    set({
+      status: null,
+      loading: true,
+      error: null,
+      activeRequestKey: key,
+      activeRequestId: requestId,
+    })
     try {
-      const data = await fetchLinkStatus(pageId)
-      set({ status: data, loading: false })
+      const data = await fetchLinkStatus(pageId, workspaceId)
+      set((state) =>
+        state.activeRequestId === requestId && state.activeRequestKey === key
+          ? { status: data, loading: false }
+          : {},
+      )
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : 'Failed to fetch link status'
-      set({ error: msg, loading: false })
+      set((state) =>
+        state.activeRequestId === requestId && state.activeRequestKey === key
+          ? { error: msg, loading: false }
+          : {},
+      )
     }
   },
 }))

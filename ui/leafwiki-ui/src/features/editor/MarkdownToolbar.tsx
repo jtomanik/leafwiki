@@ -30,6 +30,7 @@ type Props = {
   editorRef: React.RefObject<MarkdownEditorRef>
   onAssetVersionChange?: (version: number) => void
   pageId: string
+  workspaceId: string
   previewVisible: boolean
   onTogglePreview: () => void
 }
@@ -38,6 +39,7 @@ export default function MarkdownToolbar({
   editorRef,
   onAssetVersionChange,
   pageId,
+  workspaceId,
   previewVisible,
   onTogglePreview,
 }: Props) {
@@ -133,7 +135,11 @@ export default function MarkdownToolbar({
                     view.state.selection.main.to,
                   )
                 : ''
-              openDialog(DIALOG_LINK_INSERT, { editorRef, selectedText })
+              openDialog(DIALOG_LINK_INSERT, {
+                editorRef,
+                selectedText,
+                workspaceId,
+              })
             }}
           >
             <Link className="markdown-toolbar__icon" />
@@ -275,6 +281,7 @@ export default function MarkdownToolbar({
             onClick={() =>
               openDialog(DIALOG_ASSET_MANAGER, {
                 pageId,
+                workspaceId,
                 editorRef,
                 isRenamingRef,
                 onAssetVersionChange: assetChangedHandler,

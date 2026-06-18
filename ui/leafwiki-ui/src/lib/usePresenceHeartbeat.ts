@@ -4,7 +4,7 @@ import {
   type PresenceHeartbeat,
   type PresenceMode,
 } from '@/lib/api/presence'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 const HEARTBEAT_INTERVAL_MS = 25_000
 const SESSION_STORAGE_KEY = 'leafwiki-presence-session-id'
@@ -13,29 +13,50 @@ type PresenceHeartbeatState = {
   mode: PresenceMode
   path?: string
   dirty: boolean
+  workspaceId: string
 }
 
 export function usePresenceHeartbeat(state: PresenceHeartbeatState) {
   const sessionIdRef = useRef<string | null>(null)
   const latestStateRef = useRef(state)
-  const { dirty, mode, path } = state
+  const pendingHeartbeatsRef = useRef<Set<AbortController>>(new Set())
+  const { dirty, mode, path, workspaceId } = state
+
+  const sendHeartbeat = useCallback(
+    (
+      sessionId: string,
+      heartbeatState: PresenceHeartbeatState,
+      targetWorkspaceId: string,
+    ) => {
+      const controller = new AbortController()
+      pendingHeartbeatsRef.current.add(controller)
+      sendPresenceHeartbeat(
+        buildHeartbeat(sessionId, heartbeatState),
+        targetWorkspaceId,
+        controller.signal,
+      )
+        .catch(() => {})
+        .finally(() => {
+          pendingHeartbeatsRef.current.delete(controller)
+        })
+    },
+    [],
+  )
 
   useEffect(() => {
-    const nextState = { dirty, mode, path }
+    const nextState = { dirty, mode, path, workspaceId }
     latestStateRef.current = nextState
     const sessionId = sessionIdRef.current
     if (!sessionId) return
-    sendPresenceHeartbeat(buildHeartbeat(sessionId, nextState)).catch(() => {})
-  }, [dirty, mode, path])
+    sendHeartbeat(sessionId, nextState, workspaceId)
+  }, [dirty, mode, path, sendHeartbeat, workspaceId])
 
   useEffect(() => {
     const sessionId = getPresenceSessionId()
     sessionIdRef.current = sessionId
 
     const send = () => {
-      sendPresenceHeartbeat(
-        buildHeartbeat(sessionId, latestStateRef.current),
-      ).catch(() => {})
+      sendHeartbeat(sessionId, latestStateRef.current, workspaceId)
     }
 
     send()
@@ -43,7 +64,11 @@ export function usePresenceHeartbeat(state: PresenceHeartbeatState) {
 
     const cleanup = () => {
       window.clearInterval(intervalId)
-      deletePresenceSession(sessionId).catch(() => {})
+      for (const controller of pendingHeartbeatsRef.current) {
+        controller.abort()
+      }
+      pendingHeartbeatsRef.current.clear()
+      deletePresenceSession(sessionId, workspaceId).catch(() => {})
     }
     window.addEventListener('beforeunload', cleanup)
 
@@ -51,7 +76,7 @@ export function usePresenceHeartbeat(state: PresenceHeartbeatState) {
       window.removeEventListener('beforeunload', cleanup)
       cleanup()
     }
-  }, [])
+  }, [sendHeartbeat, workspaceId])
 }
 
 function buildHeartbeat(

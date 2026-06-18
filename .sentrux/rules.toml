@@ -1,0 +1,52 @@
+[constraints]
+# Current Sentrux scan reports 2 cycles, so start by preventing regression.
+# Ratchet to 0 after the existing cycles are removed.
+max_cycles = 2
+
+# Keep coupling in a sane band while federated runtime work continues.
+max_coupling = "B"
+
+# Ratcheted from 57 after CLI startup/config flow was split out of
+# cmd/leafwiki/main.go. Ratchet further after the remaining 43-CC functions
+# are split.
+max_cc = 43
+
+# Enable after the current fan-out hotspots are split:
+# - internal/wiki/wiki.go
+# - ui/leafwiki-ui/src/layout/AppLayout.tsx
+# - ui/leafwiki-ui/src/features/viewer/PageViewer.tsx
+# - ui/leafwiki-ui/src/features/history/PageHistoryContent.tsx
+# - internal/wiki/mcp/routes.go
+# - ui/leafwiki-ui/src/features/tree/TreeView.tsx
+# - ui/leafwiki-ui/src/features/preview/MarkdownPreview.tsx
+# no_god_files = true
+
+[[boundaries]]
+from = "internal/core/*"
+to = "internal/wiki/*"
+reason = "Core domain code must not depend on HTTP/wiki route adapters."
+
+[[boundaries]]
+from = "internal/core/*"
+to = "internal/http/*"
+reason = "Core domain code must stay transport-agnostic."
+
+[[boundaries]]
+from = "internal/core/*"
+to = "internal/projectdaemon/*"
+reason = "Core domain code must not know daemon/runtime orchestration."
+
+[[boundaries]]
+from = "internal/wiki/*"
+to = "cmd/leafwiki/*"
+reason = "Route/domain assembly must not depend on CLI startup code."
+
+[[boundaries]]
+from = "internal/projectdaemon/*"
+to = "cmd/leafwiki/*"
+reason = "Daemon primitives must not depend on the executable entrypoint."
+
+[[boundaries]]
+from = "internal/workspaced/*"
+to = "internal/frontd/*"
+reason = "workspaced should expose workspace services without depending on the frontend proxy."

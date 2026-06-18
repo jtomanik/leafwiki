@@ -21,9 +21,13 @@ type ConnectMCPClientOptions = {
 
 type ConnectMCPStdioClientOptions = ConnectMCPClientOptions & {
   captureStderr?: boolean;
+  command?: string;
+  env?: Record<string, string>;
 };
 
 type MCPStdioRawOptions = ConnectMCPClientOptions & {
+  command?: string;
+  env?: Record<string, string>;
   timeoutMs?: number;
 };
 
@@ -69,8 +73,8 @@ async function loadSDKModule(): Promise<typeof import('@modelcontextprotocol/cli
   return import('@modelcontextprotocol/client');
 }
 
-function stdioCommand(): string {
-  const command = process.env.E2E_MCP_STDIO_COMMAND;
+function stdioCommand(commandOverride?: string): string {
+  const command = commandOverride || process.env.E2E_MCP_STDIO_COMMAND;
   if (!command) {
     throw new Error('E2E_MCP_STDIO_COMMAND must be set for stdio MCP client tests');
   }
@@ -91,6 +95,9 @@ function leafwikiStdioEnv(
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
   }
+  if ('env' in options && options.env) {
+    Object.assign(env, options.env);
+  }
   return env;
 }
 
@@ -105,6 +112,9 @@ function leafwikiStdioProcessEnv(
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
   } else {
     delete env.LEAFWIKI_MCP_API_KEY;
+  }
+  if ('env' in options && options.env) {
+    Object.assign(env, options.env);
   }
   return env;
 }
@@ -143,7 +153,7 @@ export async function connectMCPStdioClient(
     version: 'test',
   });
   const transport = new StdioClientTransport({
-    command: stdioCommand(),
+    command: stdioCommand(options.command),
     cwd: process.env.E2E_REPO_ROOT,
     env,
     stderr: options.captureStderr === false ? 'inherit' : 'pipe',
@@ -158,7 +168,15 @@ export async function requestMCPStdioFrame(
   frame: Record<string, unknown>,
   options: MCPStdioRawOptions = {},
 ): Promise<MCPStdioRawResult> {
-  const child = spawn(stdioCommand(), [], {
+  return requestMCPStdioFrames(endpoint, [frame], options);
+}
+
+export async function requestMCPStdioFrames(
+  endpoint: string,
+  frames: Record<string, unknown>[],
+  options: MCPStdioRawOptions = {},
+): Promise<MCPStdioRawResult> {
+  const child = spawn(stdioCommand(options.command), [], {
     cwd: process.env.E2E_REPO_ROOT,
     env: leafwikiStdioProcessEnv(endpoint, options),
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -203,7 +221,7 @@ export async function requestMCPStdioFrame(
     child.kill('SIGTERM');
   }, timeoutMs);
 
-  child.stdin.write(`${JSON.stringify(frame)}\n`);
+  child.stdin.write(`${frames.map((frame) => JSON.stringify(frame)).join('\n')}\n`);
   await firstStdoutLine;
   child.stdin.end();
   const closed = await close;

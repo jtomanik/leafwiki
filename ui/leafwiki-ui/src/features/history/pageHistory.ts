@@ -15,6 +15,7 @@ import { useProgressbarStore } from '../progressbar/progressbarStore'
 export type HistoryTab = 'changes' | 'preview' | 'raw' | 'assets'
 
 type PageHistoryState = {
+  workspaceId: string
   pageId: string
   revisions: Revision[]
   selectedRevisionId: string | null
@@ -42,6 +43,7 @@ type PageHistoryStore = PageHistoryState & {
 }
 
 const initialState: PageHistoryState = {
+  workspaceId: '',
   pageId: '',
   revisions: [],
   selectedRevisionId: null,
@@ -61,9 +63,11 @@ const initialState: PageHistoryState = {
 
 async function loadPageHistoryState(
   pageId: string,
+  workspaceId: string,
   update: (patch: Partial<PageHistoryState>) => void,
 ) {
   update({
+    workspaceId,
     pageId,
     revisions: [],
     selectedRevisionId: null,
@@ -82,7 +86,7 @@ async function loadPageHistoryState(
   })
 
   try {
-    const historyData = await listRevisions(pageId)
+    const historyData = await listRevisions(pageId, workspaceId)
 
     if (historyData.revisions.length === 0) {
       update({
@@ -94,7 +98,7 @@ async function loadPageHistoryState(
       return
     }
 
-    const latestRevision = await getLatestRevision(pageId)
+    const latestRevision = await getLatestRevision(pageId, workspaceId)
     const revisions = historyData.revisions
     const firstHistoricalRevision =
       revisions.find((revision) => revision.id !== latestRevision.id) ?? null
@@ -142,7 +146,11 @@ export const usePageHistoryStore = create<PageHistoryStore>((set) => ({
   setActiveTab: (activeTab) => set({ activeTab }),
 }))
 
-export function usePageHistory(pageId: string | null, enabled = true) {
+export function usePageHistory(
+  pageId: string | null,
+  workspaceId: string,
+  enabled = true,
+) {
   const update = usePageHistoryStore((state) => state.update)
   const reset = usePageHistoryStore((state) => state.reset)
   const selectedRevisionId = usePageHistoryStore(
@@ -166,7 +174,7 @@ export function usePageHistory(pageId: string | null, enabled = true) {
     let cancelled = false
 
     const load = async () => {
-      await loadPageHistoryState(pageId, (patch) => {
+      await loadPageHistoryState(pageId, workspaceId, (patch) => {
         if (!cancelled) {
           update(patch)
         }
@@ -178,7 +186,7 @@ export function usePageHistory(pageId: string | null, enabled = true) {
     return () => {
       cancelled = true
     }
-  }, [enabled, pageId, reset, update])
+  }, [enabled, pageId, reset, update, workspaceId])
 
   useEffect(() => {
     if (
@@ -198,7 +206,11 @@ export function usePageHistory(pageId: string | null, enabled = true) {
         previewError: null,
       })
       try {
-        const data = await getRevisionSnapshot(pageId, selectedRevisionId)
+        const data = await getRevisionSnapshot(
+          pageId,
+          selectedRevisionId,
+          workspaceId,
+        )
         if (cancelled) return
         update({ snapshot: data })
       } catch (err) {
@@ -220,7 +232,7 @@ export function usePageHistory(pageId: string | null, enabled = true) {
     return () => {
       cancelled = true
     }
-  }, [activeTab, pageId, selectedRevisionId, update])
+  }, [activeTab, pageId, selectedRevisionId, update, workspaceId])
 
   useEffect(() => {
     if (
@@ -245,6 +257,7 @@ export function usePageHistory(pageId: string | null, enabled = true) {
           pageId,
           selectedRevisionId,
           latestRevisionId,
+          workspaceId,
         )
         if (cancelled) return
         update({ comparison: data })
@@ -267,12 +280,37 @@ export function usePageHistory(pageId: string | null, enabled = true) {
     return () => {
       cancelled = true
     }
-  }, [activeTab, latestRevisionId, pageId, selectedRevisionId, update])
+  }, [
+    activeTab,
+    latestRevisionId,
+    pageId,
+    selectedRevisionId,
+    update,
+    workspaceId,
+  ])
 }
 
 export async function loadMorePageHistory() {
   const state = usePageHistoryStore.getState()
-  if (!state.pageId || !state.nextCursor || state.loadingMore) return
+  if (
+    !state.pageId ||
+    !state.workspaceId ||
+    !state.nextCursor ||
+    state.loadingMore
+  ) {
+    return
+  }
+  const pageId = state.pageId
+  const workspaceId = state.workspaceId
+  const nextCursor = state.nextCursor
+  const isCurrentRequest = () => {
+    const current = usePageHistoryStore.getState()
+    return (
+      current.pageId === pageId &&
+      current.workspaceId === workspaceId &&
+      current.nextCursor === nextCursor
+    )
+  }
 
   state.update({
     loadingMore: true,
@@ -280,23 +318,31 @@ export async function loadMorePageHistory() {
   })
 
   try {
-    const data = await listRevisions(state.pageId, state.nextCursor)
+    const data = await listRevisions(pageId, workspaceId, nextCursor)
+    if (!isCurrentRequest()) return
     const currentRevisions = usePageHistoryStore.getState().revisions
     usePageHistoryStore.getState().update({
       revisions: [...currentRevisions, ...data.revisions],
       nextCursor: data.nextCursor,
     })
   } catch (err) {
+    if (!isCurrentRequest()) return
     usePageHistoryStore.getState().update({
       listError: mapApiError(err, 'Failed to load more revisions'),
     })
   } finally {
-    usePageHistoryStore.getState().update({
-      loadingMore: false,
-    })
+    if (isCurrentRequest()) {
+      usePageHistoryStore.getState().update({
+        loadingMore: false,
+      })
+    }
   }
 }
 
-export async function reloadPageHistory(pageId: string) {
-  await loadPageHistoryState(pageId, usePageHistoryStore.getState().update)
+export async function reloadPageHistory(pageId: string, workspaceId: string) {
+  await loadPageHistoryState(
+    pageId,
+    workspaceId,
+    usePageHistoryStore.getState().update,
+  )
 }

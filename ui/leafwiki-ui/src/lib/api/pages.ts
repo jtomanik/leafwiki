@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export const NODE_KIND_PAGE = 'page'
 export const NODE_KIND_SECTION = 'section'
@@ -75,19 +76,25 @@ export type PageRefactorPreview = {
   warnings: string[]
 }
 
-export async function fetchTree(): Promise<PageNode> {
-  return (await fetchWithAuth(`/api/tree`)) as PageNode
+export async function fetchTree(workspaceId: string): Promise<PageNode> {
+  return (await fetchWithAuth(
+    workspaceApiPath('/api/tree', workspaceId),
+  )) as PageNode
 }
 
 export async function suggestSlug(
   parentId: string,
   title: string,
+  workspaceId: string,
   currentId?: string,
 ): Promise<string> {
   if (!currentId) currentId = ''
 
   const data = await fetchWithAuth(
-    `/api/pages/slug-suggestion?parentId=${parentId}&title=${encodeURIComponent(title)}${currentId ? `&currentId=${currentId}` : ''}`,
+    workspaceApiPath(
+      `/api/pages/slug-suggestion?parentId=${parentId}&title=${encodeURIComponent(title)}${currentId ? `&currentId=${currentId}` : ''}`,
+      workspaceId,
+    ),
   )
   const typedData = data as { slug: string }
   return typedData.slug
@@ -96,17 +103,27 @@ export async function suggestSlug(
 export async function getPageByPath(
   path: string,
   kind?: 'page' | 'section',
+  workspaceId?: string,
 ): Promise<Page> {
+  if (!workspaceId) throw new Error('workspaceId is required')
   const query = new URLSearchParams({ path })
   if (kind) {
     query.set('kind', kind)
   }
-  return (await fetchWithAuth(`/api/pages/by-path?${query}`)) as Page
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/by-path?${query}`, workspaceId),
+  )) as Page
 }
 
-export async function getPermalinkTarget(id: string): Promise<PermalinkTarget> {
+export async function getPermalinkTarget(
+  id: string,
+  workspaceId: string,
+): Promise<PermalinkTarget> {
   return (await fetchWithAuth(
-    `/api/pages/permalink/${encodeURIComponent(id)}`,
+    workspaceApiPath(
+      `/api/pages/permalink/${encodeURIComponent(id)}`,
+      workspaceId,
+    ),
   )) as PermalinkTarget
 }
 
@@ -115,15 +132,17 @@ export async function createPage({
   slug,
   parentId,
   kind,
+  workspaceId,
 }: {
   title: string
   slug: string
   parentId: string | null
   kind: 'page' | 'section'
+  workspaceId: string
 }) {
   if (parentId === '') parentId = null
 
-  return await fetchWithAuth(`/api/pages`, {
+  return await fetchWithAuth(workspaceApiPath('/api/pages', workspaceId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, slug, parentId, kind }),
@@ -135,17 +154,21 @@ export async function copyPage(
   targetParentId: string | null,
   targetTitle: string,
   targetSlug: string,
+  workspaceId: string,
 ) {
   if (targetParentId === '' || targetParentId === 'root') targetParentId = null
-  return await fetchWithAuth(`/api/pages/copy/${id}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      targetParentId,
-      title: targetTitle,
-      slug: targetSlug,
-    }),
-  })
+  return await fetchWithAuth(
+    workspaceApiPath(`/api/pages/copy/${id}`, workspaceId),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetParentId,
+        title: targetTitle,
+        slug: targetSlug,
+      }),
+    },
+  )
 }
 
 export async function updatePage(
@@ -156,18 +179,23 @@ export async function updatePage(
   content: string,
   tags: string[],
   properties: Record<string, string>,
+  workspaceId: string,
 ): Promise<Page | null> {
-  return (await fetchWithAuth(`/api/pages/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ version, title, slug, content, tags, properties }),
-  })) as Page | null
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${id}`, workspaceId),
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, title, slug, content, tags, properties }),
+    },
+  )) as Page | null
 }
 
 export async function deletePage(
   id: string,
   recursive: boolean,
   version: string,
+  workspaceId: string,
 ) {
   if (recursive === undefined) recursive = false
 
@@ -176,23 +204,30 @@ export async function deletePage(
   })
   if (version) params.set('version', version)
 
-  return await fetchWithAuth(`/api/pages/${id}?${params.toString()}`, {
-    method: 'DELETE',
-  })
+  return await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${id}?${params.toString()}`, workspaceId),
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 export async function movePage(
   id: string,
   version: string,
   parentId: string | null,
+  workspaceId: string,
 ) {
   if (parentId === '' || parentId == 'root') parentId = null
 
-  return await fetchWithAuth(`/api/pages/${id}/move`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ version, parentId }),
-  })
+  return await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${id}/move`, workspaceId),
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, parentId }),
+    },
+  )
 }
 
 export async function previewPageRefactor(
@@ -207,12 +242,16 @@ export async function previewPageRefactor(
         kind: 'move'
         parentId: string | null
       },
+  workspaceId: string,
 ): Promise<PageRefactorPreview> {
-  return (await fetchWithAuth(`/api/pages/${id}/refactor/preview`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })) as PageRefactorPreview
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${id}/refactor/preview`, workspaceId),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )) as PageRefactorPreview
 }
 
 export async function applyPageRefactor(
@@ -232,34 +271,49 @@ export async function applyPageRefactor(
         parentId: string | null
         rewriteLinks: boolean
       },
+  workspaceId: string,
 ): Promise<Page | null> {
-  return (await fetchWithAuth(`/api/pages/${id}/refactor/apply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })) as Page | null
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${id}/refactor/apply`, workspaceId),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )) as Page | null
 }
 
-export async function sortPages(parentId: string, orderedIDs: string[]) {
+export async function sortPages(
+  parentId: string,
+  orderedIDs: string[],
+  workspaceId: string,
+) {
   if (parentId === '') parentId = 'root'
 
-  return await fetchWithAuth(`/api/pages/${parentId}/sort`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderedIDs }),
-  })
+  return await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${parentId}/sort`, workspaceId),
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderedIDs }),
+    },
+  )
 }
 
 export async function convertPage(
   id: string,
   targetKind: 'page' | 'section',
   version: string,
+  workspaceId: string,
 ) {
-  return await fetchWithAuth(`/api/pages/convert/${id}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targetKind, version }),
-  })
+  return await fetchWithAuth(
+    workspaceApiPath(`/api/pages/convert/${id}`, workspaceId),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetKind, version }),
+    },
+  )
 }
 
 export type PathLookupResult = {
@@ -271,13 +325,16 @@ export type PathLookupResult = {
 
 export async function lookupPath(
   path: string,
+  workspaceId: string,
   kind?: Page['kind'],
 ): Promise<PathLookupResult> {
   const query = new URLSearchParams({ path })
   if (kind) {
     query.set('kind', kind)
   }
-  return (await fetchWithAuth(`/api/pages/lookup?${query}`)) as {
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/lookup?${query}`, workspaceId),
+  )) as {
     path: string
     exists: boolean
     canCreate: boolean
@@ -288,11 +345,15 @@ export async function lookupPath(
 export async function ensurePage(
   path: string,
   targetTitle: string,
+  workspaceId: string,
   kind: Page['kind'] = 'page',
 ) {
-  return await fetchWithAuth(`/api/pages/ensure`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, title: targetTitle, kind }),
-  })
+  return await fetchWithAuth(
+    workspaceApiPath('/api/pages/ensure', workspaceId),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, title: targetTitle, kind }),
+    },
+  )
 }

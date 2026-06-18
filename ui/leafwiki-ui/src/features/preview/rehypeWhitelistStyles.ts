@@ -37,7 +37,7 @@ const ALLOWED_STYLE_PROPS = new Set([
   'vertical-align',
 ])
 
-function sanitizeStyle(style: string): string | undefined {
+export function sanitizeMarkdownStyle(style: string): string | undefined {
   const declarations = style
     .split(';')
     .map((d) => d.trim())
@@ -72,7 +72,7 @@ export function rehypeWhitelistStyles() {
       const style = node.properties?.style
       if (!style || typeof style !== 'string') return
 
-      const sanitized = sanitizeStyle(style)
+      const sanitized = sanitizeMarkdownStyle(style)
       if (sanitized) {
         node.properties.style = sanitized
       } else {

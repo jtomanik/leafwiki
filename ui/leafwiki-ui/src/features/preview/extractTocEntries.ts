@@ -1,4 +1,5 @@
 import { slugifyHeadline } from './rehypeLineNumber'
+import { normalizeGeneratedMarkdownId } from './markdownSafety'
 
 export type TocEntry = {
   level: 1 | 2 | 3
@@ -62,7 +63,9 @@ export function extractTocEntries(markdown: string): TocEntry[] {
       if (!baseSlug) continue
       const count = slugCounts[baseSlug] ?? 0
       slugCounts[baseSlug] = count + 1
-      const id = count === 0 ? baseSlug : `${baseSlug}-${count}`
+      const id = normalizeGeneratedMarkdownId(
+        count === 0 ? baseSlug : `${baseSlug}-${count}`,
+      )
       if (level <= 3) {
         entries.push({ level: level as 1 | 2 | 3, text, id })
       }
@@ -83,7 +86,9 @@ export function extractTocEntries(markdown: string): TocEntry[] {
             entries.push({
               level: 1,
               text,
-              id: count === 0 ? baseSlug : `${baseSlug}-${count}`,
+              id: normalizeGeneratedMarkdownId(
+                count === 0 ? baseSlug : `${baseSlug}-${count}`,
+              ),
             })
           }
         }
@@ -101,7 +106,9 @@ export function extractTocEntries(markdown: string): TocEntry[] {
             entries.push({
               level: 2,
               text,
-              id: count === 0 ? baseSlug : `${baseSlug}-${count}`,
+              id: normalizeGeneratedMarkdownId(
+                count === 0 ? baseSlug : `${baseSlug}-${count}`,
+              ),
             })
           }
         }

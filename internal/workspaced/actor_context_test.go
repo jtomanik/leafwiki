@@ -49,6 +49,26 @@ func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
 		})
 	}
 
+	wrongWorkspaceActor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
+		Version:     1,
+		Issuer:      projectdaemon.ActorContextIssuerWikid,
+		Subject:     "user:admin",
+		Username:    "admin",
+		Role:        "admin",
+		WorkspaceID: "other",
+		AuthMethod:  "disabled",
+		IssuedAt:    now,
+		ExpiresAt:   now.Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("EncodeActorContext failed: %v", err)
+	}
+	wrongWorkspaceReq := newPrivateRequest(http.MethodGet, "/api/tree", "private-token", wrongWorkspaceActor)
+	wrongWorkspaceRec := requestWithRequest(router, wrongWorkspaceReq)
+	if wrongWorkspaceRec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-workspace actor status = %d, want 401: %s", wrongWorkspaceRec.Code, wrongWorkspaceRec.Body.String())
+	}
+
 	actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 		Version:     1,
 		Issuer:      projectdaemon.ActorContextIssuerWikid,

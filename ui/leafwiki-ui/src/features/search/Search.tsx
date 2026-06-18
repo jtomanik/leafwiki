@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { searchPages, SearchResultItem, SearchTagFacet } from '@/lib/api/search'
 import { deferStateUpdate } from '@/lib/deferState'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import { fetchTags, TagCount } from '@/lib/api/tags'
 import { useDebounce } from '@/lib/useDebounce'
 import { X } from 'lucide-react'
@@ -30,6 +31,7 @@ type SearchProps = {
 
 export default function Search({ active = false }: SearchProps) {
   const location = useLocation()
+  const workspaceId = splitWorkspaceRoute(location.pathname).workspaceId
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const urlQuery = searchParams.get('q') ?? ''
@@ -164,7 +166,7 @@ export default function Search({ active = false }: SearchProps) {
 
     let cancelled = false
 
-    fetchTags('', 200)
+    fetchTags(workspaceId, '', 200)
       .then((tags) => {
         if (cancelled) return
         setAvailableTags(tags)
@@ -183,7 +185,7 @@ export default function Search({ active = false }: SearchProps) {
     return () => {
       cancelled = true
     }
-  }, [active])
+  }, [active, workspaceId])
 
   useEffect(() => {
     resultRefs.current = resultRefs.current.slice(0, results.length)
@@ -209,6 +211,7 @@ export default function Search({ active = false }: SearchProps) {
       hasSearchQuery ? debouncedQuery : '',
       page * limit,
       limit,
+      workspaceId,
       debouncedActiveTags,
     )
       .then((data) => {
@@ -234,6 +237,7 @@ export default function Search({ active = false }: SearchProps) {
     hasDebouncedFilters,
     hasSearchQuery,
     page,
+    workspaceId,
   ])
 
   const clearSearch = () => {
@@ -270,6 +274,7 @@ export default function Search({ active = false }: SearchProps) {
       pathname: browserRoutePathForWikiNode(
         activeResult.path,
         activeResult.kind,
+        workspaceId,
       ),
       search: location.search,
     })
@@ -499,6 +504,7 @@ export default function Search({ active = false }: SearchProps) {
                     resultRefs.current[index] = element
                   }}
                   item={item}
+                  workspaceId={workspaceId}
                   isSelected={index === clampedActiveIndex}
                   onMouseEnter={() => setActiveIndex(index)}
                   onFocus={() => setActiveIndex(index)}

@@ -24,7 +24,11 @@ type AuthStores struct {
 }
 
 func AuthStoragePaths(dataDir string) AuthStorageLayout {
+	dataDir = filepath.Clean(dataDir)
 	wikidDir := filepath.Join(dataDir, ".leafwiki", "wikid")
+	if filepath.Base(dataDir) == ".leafwiki" {
+		wikidDir = filepath.Join(dataDir, "wikid")
+	}
 	authDir := filepath.Join(wikidDir, "auth")
 	return AuthStorageLayout{
 		AuthDir:    authDir,

@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type Backlink = {
   from_page_id: string
@@ -35,7 +36,10 @@ export type LinkStatusResult = {
 
 export async function fetchLinkStatus(
   pageId: string,
+  workspaceId: string,
 ): Promise<LinkStatusResult> {
   if (!pageId) throw new Error('Page ID is required')
-  return (await fetchWithAuth(`/api/pages/${pageId}/links`)) as LinkStatusResult
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/pages/${pageId}/links`, workspaceId),
+  )) as LinkStatusResult
 }

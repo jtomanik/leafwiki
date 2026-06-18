@@ -16,7 +16,13 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type CopyPageSource = Pick<PageNode, 'id' | 'title' | 'kind'>
 
-export function CopyPageDialog({ sourcePage }: { sourcePage: CopyPageSource }) {
+export function CopyPageDialog({
+  sourcePage,
+  workspaceId,
+}: {
+  sourcePage: CopyPageSource
+  workspaceId: string
+}) {
   const [targetParentID, setTargetParentID] = useState<string>('root')
   const [title, setTitle] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
@@ -25,13 +31,16 @@ export function CopyPageDialog({ sourcePage }: { sourcePage: CopyPageSource }) {
   const [slugTouched, setSlugTouched] = useState<boolean>(false)
   const [lastSlugTitle, setLastSlugTitle] = useState<string>('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const parentPath = useTreeStore((s) => s.getPathById(targetParentID) || '')
+  const parentPath = useTreeStore(
+    (s) => s.getPathById(targetParentID, workspaceId) || '',
+  )
   const navigate = useNavigate()
   const itemLabel = sourcePage.kind === NODE_KIND_PAGE ? 'page' : 'section'
   const itemLabelCapitalized =
     sourcePage.kind === NODE_KIND_PAGE ? 'Page' : 'Section'
 
-  const { tree, reloadTree } = useTreeStore()
+  const tree = useTreeStore((s) => s.workspaceTrees[workspaceId]?.tree ?? null)
+  const reloadTree = useTreeStore((s) => s.reloadTree)
 
   const handleTitleChange = (val: string) => {
     setTitle(val)
@@ -101,13 +110,15 @@ export function CopyPageDialog({ sourcePage }: { sourcePage: CopyPageSource }) {
     setLoading(true)
     setFieldErrors({})
     try {
-      await copyPage(sourcePage.id, targetParentID, title, slug)
+      await copyPage(sourcePage.id, targetParentID, title, slug, workspaceId)
       toast.success(`${itemLabelCapitalized} copied`)
-      await reloadTree()
+      await reloadTree(workspaceId)
       if (redirect) {
         const fullPath = parentPath !== '' ? `${parentPath}/${slug}` : slug
         navigate(
-          buildEditUrl(browserRoutePathForWikiNode(fullPath, sourcePage.kind)),
+          buildEditUrl(
+            browserRoutePathForWikiNode(fullPath, sourcePage.kind, workspaceId),
+          ),
         )
       }
       resetForm()
@@ -181,8 +192,13 @@ export function CopyPageDialog({ sourcePage }: { sourcePage: CopyPageSource }) {
         onLastSlugTitleChange={setLastSlugTitle}
         error={fieldErrors.slug}
         allowedHotkeys={DIALOG_INPUT_ALLOWED_HOTKEYS}
+        workspaceId={workspaceId}
       />
-      <PageSelect pageID={targetParentID} onChange={setTargetParentID} />
+      <PageSelect
+        pageID={targetParentID}
+        onChange={setTargetParentID}
+        workspaceId={workspaceId}
+      />
       <span className="dialog__path">
         Path: {parentPath !== '' && `${parentPath}/`}
         {slug && `${slug}`}

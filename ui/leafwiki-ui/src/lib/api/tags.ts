@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './auth'
+import { workspaceApiPath } from './workspaces'
 
 export type TagCount = {
   tag: string
@@ -17,6 +18,7 @@ export type TaggedPage = {
 }
 
 export async function fetchTags(
+  workspaceId: string,
   filter = '',
   limit = 50,
   selected: string[] = [],
@@ -26,18 +28,24 @@ export async function fetchTags(
   for (const tag of selected) {
     params.append('selected', tag)
   }
-  return (await fetchWithAuth(`/api/tags?${params}`)) as TagCount[]
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/tags?${params}`, workspaceId),
+  )) as TagCount[]
 }
 
 export async function fetchPagesByTags(
   tags: string[],
+  workspaceId: string,
   signal?: AbortSignal,
 ): Promise<TaggedPage[]> {
   const params = new URLSearchParams()
   for (const tag of tags) {
     params.append('tags', tag)
   }
-  return (await fetchWithAuth(`/api/tags/pages?${params}`, {
-    signal,
-  })) as TaggedPage[]
+  return (await fetchWithAuth(
+    workspaceApiPath(`/api/tags/pages?${params}`, workspaceId),
+    {
+      signal,
+    },
+  )) as TaggedPage[]
 }

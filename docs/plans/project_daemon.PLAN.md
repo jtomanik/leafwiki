@@ -11,6 +11,12 @@ page:
 
 # LeafWiki Transparent Per-Project Daemon Plan
 
+> Historical plan. This transparent per-project daemon design has since evolved
+> into the federated `wikid`/`frontd`/`workspaced` runtime and the public
+> `leafwiki daemon` service entrypoint. Keep this file as design history; use
+> `docs/plans/federated-workspaces.PLAN.md`, `docs/mcp.md`, and
+> `scripts/README.md` for the current runtime contract.
+
 ## Summary
 
 Reference thread: `codex://threads/019e8df8-d944-71f3-956e-59eb999abdff`
@@ -24,7 +30,7 @@ Key behavior:
 - `http` means “the project owner exposes public HTTP `/mcp`”; this is daemon-relevant and locked by the first startup.
 - `LEAFWIKI_MCP_API_KEY` / `--api-key` is per-STDIO-session identity and must not be part of daemon config matching.
 - The daemon shuts down after the last session handle exits plus `--daemon-idle-timeout`, default `10m`; `0` means immediate shutdown after the last handle.
-- Existing `--mcp=stdio`, `--mcp=stdio,http`, disabled-auth, API-key STDIO, base-path, root-dir, logging, and `run-mcp.sh` user-facing invocations must continue working.
+- Existing `--mcp=stdio`, `--mcp=stdio,http`, disabled-auth, API-key STDIO, base-path, root-dir, logging, and `scripts/run.sh mcp` user-facing invocations must continue working.
 
 ## References
 
@@ -33,7 +39,7 @@ Use these as implementation context:
 - `cmd/leafwiki/main.go`: CLI parsing, startup validation, locking, current native STDIO runtime.
 - `internal/locking`: existing data/root lock semantics.
 - `internal/wiki/mcp`: HTTP MCP route registration, `NewStdioServer`, API-key actor fallback.
-- `scripts/run-mcp.sh` and `scripts/test-run-mcp.sh`: keep external wrapper stable.
+- `scripts/run.sh mcp` and `scripts/test-run.sh`: keep external wrapper stable.
 - `e2e/run.sh`, `e2e/tests/mcpClient.ts`, `mcp-stdio-disable-auth.spec.ts`, `mcp-stdio-api-keys.spec.ts`.
 - This plan is the self-contained implementation contract for the transparent project daemon work.
 
@@ -86,7 +92,7 @@ Use these as implementation context:
   - Update `docs/mcp.md`, `scripts/README.md`, README/help text, and troubleshooting.
   - Explain transparent project daemon, project identity, idle timeout, config mismatch, per-agent API keys, and that `--mcp=stdio` does not expose public `/mcp`.
   - Include the reference thread link.
-  - Preserve `run-mcp.sh` examples and explain that it still spawns the agent-owned STDIO process.
+  - Preserve `scripts/run.sh mcp` examples and explain that it still spawns the agent-owned STDIO process.
 
 - Suggested subagents:
   - CLI/daemon lifecycle worker: config resolution, descriptor, spawn, handles, idle shutdown.
@@ -315,14 +321,14 @@ Feature: Public HTTP MCP and private STDIO MCP separation
 ```gherkin
 Feature: Wrapper and E2E behavior
 
-  Scenario: run-mcp dry-run remains stable
-    When "scripts/run-mcp.sh --dry-run" is run
+  Scenario: run.sh mcp dry-run remains stable
+    When "scripts/run.sh mcp --dry-run" is run
     Then stderr shows a LeafWiki command with "--mcp=stdio"
     And it does not mention "leafwiki-mcp-stdio"
     And API keys are redacted
 
-  Scenario: run-mcp runtime preserves protocol passthrough
-    Given "run-mcp.sh" starts a fake leafwiki binary
+  Scenario: run.sh mcp runtime preserves protocol passthrough
+    Given "scripts/run.sh mcp" starts a fake leafwiki binary
     When stdin receives a JSON-RPC initialize frame
     Then wrapper stdout contains only the fake protocol stdout
     And wrapper stderr contains diagnostics
@@ -353,8 +359,8 @@ Run the focused suite first, then the full suite:
 ```bash
 rtk go test ./cmd/leafwiki ./internal/projectdaemon ./internal/locking ./internal/wiki ./internal/wiki/mcp ./internal/http
 rtk go test ./...
-rtk bash -n scripts/run-mcp.sh scripts/test-run-mcp.sh scripts/install-all-macos.sh scripts/test-install-all-macos.sh
-rtk bash scripts/test-run-mcp.sh
+rtk bash -n scripts/run.sh scripts/test-run.sh scripts/install-all-macos.sh scripts/test-install-all-macos.sh
+rtk bash scripts/test-run.sh
 rtk bash scripts/test-install-all-macos.sh
 rtk npm --prefix e2e run lint
 rtk npm --prefix e2e run format:check
@@ -385,7 +391,7 @@ rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_OAUTH_LOCAL=1 ./e2e/run.sh tests/mcp-o
 - [ ] Malformed STDIO JSON returns parse errors and subsequent valid frames still work.
 - [ ] STDIO stdout remains protocol-only.
 - [ ] Daemon idle timeout works, including `0`, heartbeat expiry, and lock release.
-- [ ] `run-mcp.sh` remains externally compatible and keeps redaction/stdout hygiene.
+- [ ] `scripts/run.sh mcp` remains externally compatible and keeps redaction/stdout hygiene.
 - [ ] Docs and help explain transparent daemon behavior, project identity, config mismatch, idle timeout, per-session API keys, and troubleshooting.
 - [ ] All verification commands pass.
 - [ ] Independent review confirms no stale sidecar packages, no secret leakage, no public `/mcp` regression for `--mcp=stdio`, and no data/root lock bypass.

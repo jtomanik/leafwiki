@@ -51,7 +51,7 @@ Options:
   --no-allow-insecure       Do not pass --allow-insecure
   --request-log             Keep LeafWiki request logs enabled
   --disable-request-log     Pass --disable-request-log to LeafWiki (default)
-  --daemon-idle-timeout <d> Project daemon idle timeout after last session exits (default: 10m)
+  --daemon-idle-timeout <d> Federated runtime idle timeout after the last session or presence record exits (default: 10m)
   --enable-workspace-sync   Pass --enable-workspace-sync to LeafWiki (default)
   --disable-workspace-sync  Do not pass --enable-workspace-sync
   --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
@@ -586,6 +586,7 @@ if [[ "$dry_run" -eq 1 ]]; then
       log "Would run LeafWiki with YAML config for MCP"
     else
       log "Would run LeafWiki native MCP STDIO"
+      log "STDIO attach: descriptor-first attach via <data-dir>/.leafwiki/project-daemon.json; wikid ensure/control for missing or stale descriptors"
     fi
   else
     log "Would run LeafWiki agent hook"

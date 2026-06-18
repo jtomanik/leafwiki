@@ -16,6 +16,7 @@ run_mode="${E2E_RUN_MODE:-docker}"
 server_pid=""
 server_log=""
 local_data_dir=""
+local_home_dir=""
 local_root_dir=""
 local_config_file=""
 local_leafwiki_bin_dir=""
@@ -196,6 +197,9 @@ prepare_mcp_stdio_command() {
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
+    if [ -n "$local_home_dir" ]; then
+      printf 'export HOME=%q\n' "$local_home_dir"
+    fi
     printf 'exec %q mcp' "$repo_root/scripts/run.sh"
     printf ' %q' --leafwiki-bin "$leafwiki_bin"
     if use_config_file_e2e; then
@@ -230,6 +234,9 @@ prepare_mcp_stdio_command() {
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
+    if [ -n "$local_home_dir" ]; then
+      printf 'export HOME=%q\n' "$local_home_dir"
+    fi
     printf 'provider="${1:-}"\n'
     printf 'shift || true\n'
     printf 'exec %q agent-hook "$provider"' "$repo_root/scripts/run.sh"
@@ -270,9 +277,13 @@ seed_mcp_stdio_api_keys() {
   mcp_stdio_seed_dir="$(mktemp -d /tmp/leafwiki-mcp-seed.XXXXXX)"
   mcp_stdio_seed_file="$mcp_stdio_seed_dir/seed.json"
   echo "🌱 Seeding native STDIO MCP API-key users..."
+  local auth_data_dir="$local_data_dir"
+  if [ -n "$local_home_dir" ]; then
+    auth_data_dir="$local_home_dir/.leafwiki"
+  fi
   (
     cd "$repo_root"
-    go run ./e2e/seed_mcp_api_keys.go --data-dir "$local_data_dir" --output "$mcp_stdio_seed_file"
+    go run ./e2e/seed_mcp_api_keys.go --data-dir "$auth_data_dir" --output "$mcp_stdio_seed_file"
   )
 }
 
@@ -362,6 +373,7 @@ start_local() {
   build_frontend_for_local_e2e
 
   local_data_dir="$(mktemp -d /tmp/leafwiki-e2e-data.XXXXXX)"
+  local_home_dir="$(mktemp -d /tmp/leafwiki-e2e-home.XXXXXX)"
   server_log="$(mktemp /tmp/leafwiki-e2e-server.XXXXXX)"
   rm -f "$server_log"
   server_log="${server_log}.log"
@@ -440,6 +452,7 @@ start_local() {
   fi
 
   (
+    export HOME="$local_home_dir"
     exec "$local_leafwiki_bin" "${command_args[@]}"
   ) >"$server_log" 2>&1 &
 
@@ -456,6 +469,9 @@ stop_local() {
   wait_until_local_port_released
   if [ -n "$local_data_dir" ] && [ -d "$local_data_dir" ]; then
     rm -rf "$local_data_dir"
+  fi
+  if [ -n "$local_home_dir" ] && [ -d "$local_home_dir" ]; then
+    rm -rf "$local_home_dir"
   fi
   if [ -n "$local_root_dir" ] && [ -d "$local_root_dir" ]; then
     rm -rf "$local_root_dir"
@@ -592,6 +608,7 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
+      E2E_GLOBAL_DATA_DIR="${local_home_dir:+$local_home_dir/.leafwiki}" \
       E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_MARKDOWN_LINK_ROOT_PREFIX="$markdown_link_root_prefix" \
       E2E_REPO_ROOT="$repo_root" \
@@ -610,6 +627,7 @@ run_playwright_tests() {
       E2E_ENABLE_SEPARATE_ROOT_DIR="${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" \
       E2E_ASSERT_SEPARATE_ROOT_FILES="$assert_root_files" \
       E2E_DATA_DIR="$local_data_dir" \
+      E2E_GLOBAL_DATA_DIR="${local_home_dir:+$local_home_dir/.leafwiki}" \
       E2E_ROOT_DIR="${mcp_stdio_root_dir:-$local_root_dir}" \
       E2E_MARKDOWN_LINK_ROOT_PREFIX="$markdown_link_root_prefix" \
       E2E_REPO_ROOT="$repo_root" \

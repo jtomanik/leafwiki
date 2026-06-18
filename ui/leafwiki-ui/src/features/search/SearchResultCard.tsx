@@ -13,6 +13,7 @@ import { usePageEditorStore } from '../editor/pageEditorStore'
 
 type SearchResultCardProps = {
   item: SearchResultItem
+  workspaceId: string
   isSelected?: boolean
   onMouseEnter?: () => void
   onFocus?: () => void
@@ -20,7 +21,7 @@ type SearchResultCardProps = {
 
 const SearchResultCard = forwardRef<HTMLAnchorElement, SearchResultCardProps>(
   function SearchResultCard(
-    { item, isSelected = false, onMouseEnter, onFocus },
+    { item, workspaceId, isSelected = false, onMouseEnter, onFocus },
     ref,
   ) {
     const location = useLocation()
@@ -33,7 +34,11 @@ const SearchResultCard = forwardRef<HTMLAnchorElement, SearchResultCardProps>(
     const currentRouteKind =
       markdownRouteLookupKind(location.pathname) ?? 'section'
     const resultPath = normalizeWikiRoutePath(item.path)
-    const resultUrl = `${browserRoutePathForWikiNode(resultPath, item.kind)}${location.search}`
+    const resultUrl = `${browserRoutePathForWikiNode(
+      resultPath,
+      item.kind,
+      workspaceId,
+    )}${location.search}`
     const isRouteActive =
       currentViewPath === resultPath && currentRouteKind === item.kind
     const isEditorActive = currentEditorPageId === item.page_id

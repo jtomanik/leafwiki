@@ -9,8 +9,12 @@ import {
   DIALOG_DELETE_PAGE_CONFIRMATION,
   DIALOG_PAGE_PERMALINK,
 } from '@/lib/registries'
-import { buildHistoryUrl } from '@/lib/routePath'
+import { buildEditUrl, buildHistoryUrl } from '@/lib/routePath'
 import { useScrollRestoration } from '@/lib/useScrollRestoration'
+import {
+  buildWorkspaceViewPath,
+  splitWorkspaceRoute,
+} from '@/lib/workspaceRoute'
 import {
   browserRoutePathForWikiNode,
   getParentWikiRoutePath,
@@ -42,6 +46,7 @@ function displayUser(label?: { username: string }) {
 export default function PageViewer() {
   const location = useLocation()
   const { pathname } = location
+  const workspaceId = splitWorkspaceRoute(pathname).workspaceId
   const navigate = useNavigate()
   const openDialog = useDialogsStore((state) => state.openDialog)
   const openNode = useTreeStore((state) => state.openNode)
@@ -60,35 +65,44 @@ export default function PageViewer() {
     }, []),
     editPage: useCallback(() => {
       navigate(
-        pagePath
-          ? `/e${browserRoutePathForWikiNode(pagePath, pageKind)}`
-          : '/e/',
+        buildEditUrl(
+          pagePath
+            ? browserRoutePathForWikiNode(pagePath, pageKind, workspaceId)
+            : buildWorkspaceViewPath(workspaceId, '/'),
+        ),
       )
-    }, [navigate, pageKind, pagePath]),
+    }, [navigate, pageKind, pagePath, workspaceId]),
     showHistory: useCallback(() => {
       navigate(
         buildHistoryUrl(
-          pagePath ? browserRoutePathForWikiNode(pagePath, pageKind) : pathname,
+          pagePath
+            ? browserRoutePathForWikiNode(pagePath, pageKind, workspaceId)
+            : pathname,
         ),
         {
           state: createNavigationVisitState(),
         },
       )
-    }, [navigate, pageKind, pagePath, pathname]),
+    }, [navigate, pageKind, pagePath, pathname, workspaceId]),
     showPermalink: useCallback(() => {
       if (!page) return
-      openDialog(DIALOG_PAGE_PERMALINK, { page })
-    }, [page, openDialog]),
+      openDialog(DIALOG_PAGE_PERMALINK, { page, workspaceId })
+    }, [page, openDialog, workspaceId]),
     deletePage: useCallback(() => {
       openDialog(DIALOG_DELETE_PAGE_CONFIRMATION, {
         pageId: page?.id,
-        redirectTo: getParentWikiRoutePath(page?.path || '/'),
+        redirectTo: browserRoutePathForWikiNode(
+          getParentWikiRoutePath(page?.path || '/'),
+          'section',
+          workspaceId,
+        ),
+        workspaceId,
       })
-    }, [page, openDialog]),
+    }, [page, openDialog, workspaceId]),
     copyPage: useCallback(() => {
       if (!page) return
-      openDialog(DIALOG_COPY_PAGE, { sourcePage: page })
-    }, [page, openDialog]),
+      openDialog(DIALOG_COPY_PAGE, { sourcePage: page, workspaceId })
+    }, [page, openDialog, workspaceId]),
   }
 
   useScrollRestoration(getNavigationVisitKey(location), loading)
@@ -98,13 +112,13 @@ export default function PageViewer() {
 
   useEffect(() => {
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
-    loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind)
-  }, [pathname, loadPageData])
+    loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind, workspaceId)
+  }, [pathname, loadPageData, workspaceId])
 
   useEffect(() => {
     if (!page?.id) return
-    openNode(page.id)
-  }, [openNode, page?.id])
+    openNode(page.id, workspaceId)
+  }, [openNode, page?.id, workspaceId])
 
   const renderError = () => {
     if (!loading && notFound) {
@@ -114,6 +128,7 @@ export default function PageViewer() {
           allowCreate
           targetPath={createTarget.path}
           targetKind={createTarget.kind}
+          workspaceId={workspaceId}
         />
       )
     }
@@ -183,6 +198,7 @@ export default function PageViewer() {
                 content={page.content}
                 path={page.path}
                 pageKind={page.kind}
+                workspaceId={workspaceId}
               />
               <EmptySectionChildrenList page={page} />
             </article>

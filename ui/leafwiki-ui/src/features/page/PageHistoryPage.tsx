@@ -21,10 +21,12 @@ import { useSetPageTitle } from '../viewer/useSetPageTitle'
 import { useViewerStore } from '../viewer/viewer'
 import { PageHistoryContent } from '@/features/history/PageHistoryContent'
 import { usePageHistory } from '@/features/history/pageHistory'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 
 export default function PageHistoryPage() {
   const location = useLocation()
   const { pathname } = location
+  const workspaceId = splitWorkspaceRoute(pathname).workspaceId
   const navigate = useNavigate()
   const openNode = useTreeStore((state) => state.openNode)
   const setToolbarButtons = useToolbarStore((state) => state.setButtons)
@@ -38,29 +40,34 @@ export default function PageHistoryPage() {
   const pagePath = page?.path
   const pageKind = page?.kind
 
-  usePageHistory(page?.id ?? null)
+  usePageHistory(page?.id ?? null, workspaceId)
 
   const closeHistory = useCallback(() => {
     const targetPath = pagePath
-      ? browserRoutePathForWikiNode(pagePath, pageKind)
+      ? browserRoutePathForWikiNode(pagePath, pageKind, workspaceId)
       : buildViewUrl(pathname)
     navigate(targetPath, {
       state: createNavigationVisitState(),
     })
-  }, [navigate, pageKind, pagePath, pathname])
+  }, [navigate, pageKind, pagePath, pathname, workspaceId])
 
   useScrollRestoration(getNavigationVisitKey(location), loading)
   useSetPageTitle({ page })
 
   useEffect(() => {
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
-    void loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind)
-  }, [pathname, loadPageData])
+    void loadPageData?.(
+      lookup.path,
+      lookup.fallbackPath,
+      lookup.kind,
+      workspaceId,
+    )
+  }, [pathname, loadPageData, workspaceId])
 
   useEffect(() => {
     if (!page?.id) return
-    openNode(page.id)
-  }, [openNode, page?.id])
+    openNode(page.id, workspaceId)
+  }, [openNode, page?.id, workspaceId])
 
   useEffect(() => {
     setToolbarButtons([
@@ -106,6 +113,7 @@ export default function PageHistoryPage() {
           <article className="page-history-page__content">
             <PageHistoryContent
               pageId={page.id}
+              workspaceId={workspaceId}
               pageTitle={page.title}
               pageSlug={page.slug}
               testidPrefix="page-history-page"

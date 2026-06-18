@@ -2,12 +2,14 @@ import Page404 from '@/components/Page404'
 import { getPermalinkTarget } from '@/lib/api/pages'
 import { isPageNotFoundError } from '@/lib/api/errors'
 import { useProgressbarStore } from '@/features/progressbar/progressbarStore'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 export default function PermalinkRedirect() {
   const location = useLocation()
+  const workspaceId = splitWorkspaceRoute(location.pathname).workspaceId
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const setLoading = useProgressbarStore((s) => s.setLoading)
@@ -28,13 +30,16 @@ export default function PermalinkRedirect() {
       setError(null)
 
       try {
-        const target = await getPermalinkTarget(id)
+        const target = await getPermalinkTarget(id, workspaceId)
         if (!active) return
 
-        navigate(browserRoutePathForWikiNode(target.path, target.kind), {
-          replace: true,
-          state: location.state,
-        })
+        navigate(
+          browserRoutePathForWikiNode(target.path, target.kind, workspaceId),
+          {
+            replace: true,
+            state: location.state,
+          },
+        )
       } catch (err) {
         if (!active) return
 
@@ -62,7 +67,7 @@ export default function PermalinkRedirect() {
       active = false
       setLoading(false)
     }
-  }, [id, location.state, navigate, setLoading])
+  }, [id, location.pathname, location.state, navigate, setLoading, workspaceId])
 
   if (notFound) {
     return <Page404 />

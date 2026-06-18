@@ -14,17 +14,21 @@ import Progressbar from '@/features/progressbar/Progressbar'
 import Sidebar from '@/features/sidebar/Sidebar'
 import { Toolbar } from '@/features/toolbar/Toolbar'
 import type { PresenceMode } from '@/lib/api/presence'
-import { buildViewUrl, withBasePath } from '@/lib/routePath'
+import { withBasePath } from '@/lib/routePath'
 import { useAppMode, type AppMode } from '@/lib/useAppMode'
 import { useAutoCloseSidebarOnMobile } from '@/lib/useAutoCloseSidebarOnMobile'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { usePresenceHeartbeat } from '@/lib/usePresenceHeartbeat'
+import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
+import { getWikiTargetRoutePath } from '@/lib/wikiPath'
 import { useBrandingStore } from '@/stores/branding'
+import { useTreeStore } from '@/stores/tree'
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
   useSidebarStore,
 } from '@/stores/sidebar'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { MenuIcon } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
@@ -34,6 +38,11 @@ export const MOBILE_SIDEBAR_WIDTH = 320
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const appMode = useAppMode()
   const location = useLocation()
+  const setActiveWorkspaceId = useWorkspacesStore((s) => s.setActiveWorkspaceId)
+  const ensureWorkspaceExpanded = useWorkspacesStore(
+    (s) => s.ensureWorkspaceExpanded,
+  )
+  const reloadTree = useTreeStore((s) => s.reloadTree)
   const [isEditor, setIsEditor] = useState(appMode === 'edit')
   const editorDirty = usePageEditorStore(isDirtyState)
 
@@ -53,12 +62,45 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile()
   const isPrintCycleRef = useRef(false)
   const sidebarVisibleBeforePrintRef = useRef<boolean | null>(null)
+  const routeWorkspace = splitWorkspaceRoute(location.pathname)
 
   useAutoCloseSidebarOnMobile()
+  useEffect(() => {
+    const workspaceId = routeWorkspace.workspaceId
+    let cancelled = false
+
+    setActiveWorkspaceId(workspaceId)
+
+    const loadRouteWorkspace = async () => {
+      try {
+        await ensureWorkspaceExpanded(workspaceId)
+        if (cancelled) return
+        const treeState = useTreeStore.getState().getWorkspaceState(workspaceId)
+        if (!treeState.tree && !treeState.loading) {
+          await reloadTree(workspaceId)
+        }
+      } catch (err) {
+        console.error('Failed to load route workspace', err)
+      }
+    }
+
+    void loadRouteWorkspace()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    ensureWorkspaceExpanded,
+    location.pathname,
+    reloadTree,
+    routeWorkspace.workspaceId,
+    setActiveWorkspaceId,
+  ])
   usePresenceHeartbeat({
     mode: presenceModeForAppMode(appMode),
     path: presencePathForAppMode(appMode, location.pathname),
     dirty: appMode === 'edit' && editorDirty,
+    workspaceId: routeWorkspace.workspaceId,
   })
 
   const { siteName, logoFile, logoVersion } = useBrandingStore()
@@ -312,6 +354,6 @@ function presencePathForAppMode(appMode: AppMode, pathname: string) {
   if (appMode !== 'view' && appMode !== 'edit' && appMode !== 'history') {
     return undefined
   }
-  const viewPath = buildViewUrl(pathname)
+  const viewPath = getWikiTargetRoutePath(pathname)
   return viewPath === '/' ? undefined : viewPath
 }

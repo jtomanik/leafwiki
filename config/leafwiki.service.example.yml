@@ -1,0 +1,118 @@
+# LeafWiki local service config.
+#
+# This file is meant to be copied to ~/.leafwiki/leafwiki.yml for
+# `leafwiki daemon`, Homebrew services, or launchd.
+#
+# The active defaults below are local-machine defaults: listen only on
+# loopback, disable auth, expose local HTTP MCP, and keep workspace sync on
+# for filesystem/MCP workflows. Before binding to a LAN, VPN, or public
+# address, set disable-auth: false and configure jwt-secret/admin-password.
+#
+# Service mode uses ~/.leafwiki as data-dir and ~/.leafwiki/root as root-dir
+# when those keys are omitted. Do not use ~ inside YAML values unless the
+# running LeafWiki version explicitly documents tilde expansion.
+
+# Host/IP address to bind the server to.
+host: 127.0.0.1
+
+# Port to run the server on.
+port: 8080
+
+# Disable authentication completely. Safe for this local loopback service
+# default; do not expose non-loopback without enabling auth.
+disable-auth: true
+
+# Allow plain HTTP. Required when using auth cookies over local HTTP, and
+# harmless for the default local-only disabled-auth setup.
+allow-insecure: true
+
+# MCP transports: none, http, stdio, http,stdio, or stdio,http.
+# `leafwiki daemon` supports HTTP MCP only; use `scripts/run.sh mcp` for STDIO.
+mcp: http
+
+# Enable workspace sync and Git-backed Markdown history. Mutually exclusive
+# with enable-revision.
+enable-workspace-sync: true
+
+# Log target: file, stderr, or stdout.
+log-target: file
+
+# Log file path when log-target=file. Relative paths resolve under data-dir,
+# so this becomes ~/.leafwiki/logs/leafwiki.log in service mode.
+log-file: logs/leafwiki.log
+
+# Path to data directory. Omit in service mode to use ~/.leafwiki.
+# data-dir: /Users/you/.leafwiki
+
+# Path to managed Markdown content directory. Omit in service mode to use
+# ~/.leafwiki/root.
+# root-dir: /Users/you/.leafwiki/root
+
+# Repository-root prefix for absolute Markdown hrefs, for example /docs.
+# markdown-link-root-prefix: ""
+
+# Secret for signing auth tokens. Required when disable-auth is false.
+# jwt-secret: "replace-with-a-long-random-secret"
+
+# Initial admin password, used only if no admin exists yet. Required when
+# disable-auth is false and password auth is used.
+# admin-password: "replace-with-a-password"
+
+# Allow unauthenticated read-only access while keeping writes authenticated.
+# Ignored when disable-auth is true.
+# public-access: false
+
+# URL prefix when LeafWiki is served behind a reverse proxy, for example /wiki.
+# base-path: ""
+
+# Access token timeout duration, for example 24h or 15m.
+# access-token-timeout: 15m
+
+# Refresh token timeout duration, for example 168h or 7d.
+# refresh-token-timeout: 168h
+
+# Maximum size for asset uploads, for example 50MiB, 50MB, or 52428800.
+# max-asset-upload-size: 50MiB
+
+# Path to a custom .css file inside data-dir, served publicly as /custom.css
+# or <base-path>/custom.css.
+# custom-stylesheet: ""
+
+# Raw HTML/JS injected into the page <head>. Use only trusted code.
+# inject-code-in-header: ""
+
+# Hide the backlinks and link status panel in the frontend UI.
+# hide-link-metadata-section: false
+
+# Enable revision/page history storage. Mutually exclusive with
+# enable-workspace-sync.
+# enable-revision: false
+
+# Enable the link refactoring dialog and rewrite flow.
+# enable-link-refactor: false
+
+# Native STDIO MCP API key convenience value. Prefer LEAFWIKI_MCP_API_KEY for
+# STDIO clients; service mode does not use this when mcp is http.
+# api-key: ""
+
+# Idle cleanup cadence for federated runtime session/presence records.
+# Service mode itself stays alive until stopped by launchd/Homebrew.
+# daemon-idle-timeout: 10m
+
+# Maximum revisions kept per page. 0 means unlimited.
+# max-revision-history: 100
+
+# Enable reverse-proxy authentication via an HTTP header.
+# enable-http-remote-user: false
+
+# HTTP header carrying the username from a trusted proxy.
+# http-remote-user-header-name: Remote-User
+
+# Comma-separated trusted proxy IPs/CIDRs for remote-user auth.
+# trusted-proxy-ips: ""
+
+# Logout redirect URL when reverse-proxy auth is active.
+# http-remote-user-logout-url: ""
+
+# Suppress per-request HTTP access log lines.
+# disable-request-log: false

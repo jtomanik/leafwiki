@@ -1,4 +1,10 @@
 import { BASE_PATH } from './config'
+import {
+  buildWorkspaceEditPath,
+  buildWorkspaceHistoryPath,
+  splitWorkspaceRoute,
+  workspaceRoutePrefix,
+} from './workspaceRoute'
 
 /**
  * Browser/router URL helpers.
@@ -83,6 +89,17 @@ export function safeOAuthAuthorizeReturnTo(
 export function buildEditUrl(pathname: string): string {
   let p = stripBasePath(pathname)
   if (p === null) return `/e${ensureLeadingSlash(pathname)}`
+  const workspace = splitWorkspaceRoute(p)
+  if (p.startsWith('/w/')) {
+    if (workspace.innerPath.startsWith('/e/')) return p
+    if (workspace.innerPath.startsWith('/history/')) {
+      return buildWorkspaceEditPath(
+        workspace.workspaceId,
+        workspace.innerPath.slice('/history'.length),
+      )
+    }
+    return buildWorkspaceEditPath(workspace.workspaceId, workspace.innerPath)
+  }
   if (p.startsWith('/e/')) return p
   if (p.startsWith('/')) {
     p = p.slice(1)
@@ -100,6 +117,23 @@ export function buildEditUrl(pathname: string): string {
 export function buildHistoryUrl(pathname: string): string {
   let p = stripBasePath(pathname)
   if (p === null) return `/history${ensureLeadingSlash(pathname)}`
+  const workspace = splitWorkspaceRoute(p)
+  if (p.startsWith('/w/')) {
+    if (
+      workspace.innerPath === '/history' ||
+      workspace.innerPath === '/history/'
+    ) {
+      return `${workspaceRoutePrefix(workspace.workspaceId)}/history/`
+    }
+    if (workspace.innerPath.startsWith('/history/')) return p
+    if (workspace.innerPath.startsWith('/e/')) {
+      return buildWorkspaceHistoryPath(
+        workspace.workspaceId,
+        workspace.innerPath.slice('/e'.length),
+      )
+    }
+    return buildWorkspaceHistoryPath(workspace.workspaceId, workspace.innerPath)
+  }
   if (p === '/history' || p === '/history/') return '/history/'
   if (p.startsWith('/history/')) return p
   if (p.startsWith('/')) {
@@ -145,9 +179,14 @@ export function buildBrowserEditUrl(pathname: string): string {
 export function buildViewUrl(pathname: string): string {
   const stripped = stripBasePath(pathname)
   pathname = stripped ?? ensureLeadingSlash(pathname)
+  const workspace = splitWorkspaceRoute(pathname)
+  if (pathname.startsWith('/w/')) {
+    pathname = workspace.innerPath
+  }
 
   if (pathname.startsWith('/e/')) return pathname.slice(3)
   if (pathname === '/history' || pathname === '/history/') return '/'
   if (pathname.startsWith('/history/')) return pathname.slice('/history'.length)
+  if (pathname.startsWith('/p/')) return '/'
   return pathname
 }

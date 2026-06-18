@@ -21,6 +21,7 @@ import { insertHeadingAtStart, insertWrappedText } from './editorCommands'
 import { uploadAsset, UploadAssetResponse } from '@/lib/api/assets'
 import { mapApiError } from '@/lib/api/errors'
 import { formatBytes, IMAGE_EXTENSIONS } from '@/lib/config'
+import { workspaceAssetPath } from '@/lib/workspaceAssets'
 import { useConfigStore } from '@/stores/config'
 import { useEditorStore } from '@/stores/editor'
 import { toast } from 'sonner'
@@ -46,10 +47,11 @@ type Props = {
   initialValue?: string
   onChange: (newValue: string) => void
   pageId: string
+  workspaceId: string
 }
 
 const MarkdownEditor = (
-  { initialValue = '', onChange, pageId }: Props,
+  { initialValue = '', onChange, pageId, workspaceId }: Props,
   ref: React.ForwardedRef<MarkdownEditorRef>,
 ) => {
   const findHeadingTarget = useCallback(
@@ -147,13 +149,17 @@ const MarkdownEditor = (
 
         // Upload each file
         try {
-          const res: UploadAssetResponse = await uploadAsset(pageId, file)
+          const res: UploadAssetResponse = await uploadAsset(
+            pageId,
+            file,
+            workspaceId,
+          )
 
           toast.success(`Uploaded ${file.name}`)
 
           // The result of uploadAsset looks like this:
           // {"file":"/assets/0NmpvSivg/preview-scrollbar.gif"}
-          const uploadedFile = res.file
+          const uploadedFile = workspaceAssetPath(res.file, workspaceId)
           const ext = file.name.split('.').pop()?.toLowerCase()
 
           const isImage =
@@ -182,7 +188,14 @@ const MarkdownEditor = (
         }
       }
     },
-    [editorViewRef, maxAssetUploadSizeBytes, onChange, pageId, setMarkdown],
+    [
+      editorViewRef,
+      maxAssetUploadSizeBytes,
+      onChange,
+      pageId,
+      setMarkdown,
+      workspaceId,
+    ],
   )
 
   // Set initial markdown value when component mounts
@@ -427,12 +440,20 @@ const MarkdownEditor = (
       <MarkdownToolbar
         editorRef={ref as React.RefObject<MarkdownEditorRef>}
         pageId={pageId}
+        workspaceId={workspaceId}
         onTogglePreview={togglePreview}
         previewVisible={showPreview}
         onAssetVersionChange={onAssetVersionChange}
       />
     )
-  }, [onAssetVersionChange, pageId, ref, showPreview, togglePreview])
+  }, [
+    onAssetVersionChange,
+    pageId,
+    ref,
+    showPreview,
+    togglePreview,
+    workspaceId,
+  ])
 
   const renderEditor = useCallback(
     (toolbar: boolean = true): JSX.Element => {
@@ -444,6 +465,7 @@ const MarkdownEditor = (
             onChange={handleEditorChange}
             onCursorLineChange={onCursorLineChange}
             editorViewRef={editorViewRef}
+            workspaceId={workspaceId}
             lineWrap={lineWrap}
           />
         </>
@@ -455,6 +477,7 @@ const MarkdownEditor = (
       lineWrap,
       onCursorLineChange,
       renderToolbar,
+      workspaceId,
     ],
   )
 
@@ -470,12 +493,20 @@ const MarkdownEditor = (
             content={debouncedPreview}
             path={path}
             pageKind={pageKind}
+            workspaceId={workspaceId}
             key={assetVersion}
           />
         </div>
       </div>
     )
-  }, [assetVersion, debouncedPreview, setPreviewRef, path, pageKind])
+  }, [
+    assetVersion,
+    debouncedPreview,
+    setPreviewRef,
+    path,
+    pageKind,
+    workspaceId,
+  ])
 
   // TODO: Known Issues:
   // * When we resize the window, the preview does not update immediately.

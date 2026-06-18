@@ -1,5 +1,6 @@
 import { fetchTags, TagCount } from '@/lib/api/tags'
 import { Input } from '@/components/ui/input'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { X } from 'lucide-react'
 import {
   memo,
@@ -91,6 +92,7 @@ function TagInputWithSuggestions({
   onArrowUp,
   onSubmitWithoutSuggestion,
 }: TagInputWithSuggestionsProps) {
+  const workspaceId = useWorkspacesStore((s) => s.activeWorkspaceId)
   const classes = variantClasses(variant)
   const allowCustomTags = allowsCustomTagCreation(variant)
   const useSelectedTagSuggestions = usesSelectedTagSuggestions(variant)
@@ -168,6 +170,7 @@ function TagInputWithSuggestions({
       let isCurrentRequest = true
       try {
         const data = await fetchTags(
+          workspaceId,
           query,
           20,
           useSelectedTagSuggestions ? normalizedTags : [],
@@ -189,7 +192,13 @@ function TagInputWithSuggestions({
     return () => {
       if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
     }
-  }, [draft, normalizedTags, isComposing, useSelectedTagSuggestions])
+  }, [
+    draft,
+    normalizedTags,
+    isComposing,
+    useSelectedTagSuggestions,
+    workspaceId,
+  ])
 
   useEffect(() => {
     if (!showSuggestions) {
