@@ -1271,7 +1271,7 @@ func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descripto
 	if strings.TrimSpace(cfg.APIKey) != "" {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.APIKey))
 	}
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: federatedWorkspaceEnsureTimeout}).Do(req)
 	if err != nil {
 		return err
 	}
@@ -2358,6 +2358,11 @@ type internalRuntimeRoleProcess struct {
 	waitErr  error
 }
 
+const (
+	federatedWorkspaceEnsureTimeout     = 30 * time.Second
+	internalRuntimeRoleReadinessTimeout = 30 * time.Second
+)
+
 type federatedWorkspaceManager struct {
 	mu               sync.Mutex
 	base             leafwikiRuntimeConfig
@@ -2849,7 +2854,7 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 		done:     done,
 		waitDone: make(chan struct{}),
 	}
-	ready, err := waitForInternalRuntimeRoleReady(readyPath, proc, 10*time.Second)
+	ready, err := waitForInternalRuntimeRoleReady(readyPath, proc, internalRuntimeRoleReadinessTimeout)
 	_ = os.Remove(readyPath)
 	if err != nil {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)

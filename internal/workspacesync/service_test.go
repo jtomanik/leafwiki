@@ -1,8 +1,10 @@
 package workspacesync
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1451,6 +1453,52 @@ func TestServiceSyncNowRecordsChangedMarkdownPaths(t *testing.T) {
 	}
 	if got := fakeTree.reconstructCount(); got != 1 {
 		t.Fatalf("reconstructs = %d, want 1", got)
+	}
+}
+
+func TestServiceSyncNowLogsStartupPhases(t *testing.T) {
+	var logs bytes.Buffer
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		RootDir: t.TempDir(),
+		Tree:    &fakeTreeReconstructor{},
+		Store: &fakeRevisionStore{
+			capture: &gitrevisions.Commit{
+				Hash:                 "startup-commit",
+				ChangedMarkdownPaths: []string{"docs/a.md"},
+			},
+		},
+		Log: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})),
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonStartup,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	}); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	logText := logs.String()
+	for _, phase := range []string{
+		`phase=capture_snapshot`,
+		`phase=reconstruct_tree`,
+		`phase=canonical_link_migration`,
+		`phase=capture_writebacks`,
+		`phase=validate_and_after_sync`,
+	} {
+		if !strings.Contains(logText, phase) {
+			t.Fatalf("startup sync logs missing %s:\n%s", phase, logText)
+		}
+	}
+	if !strings.Contains(logText, "workspace sync startup phase started") {
+		t.Fatalf("startup sync logs missing phase start message:\n%s", logText)
+	}
+	if !strings.Contains(logText, "workspace sync startup phase completed") {
+		t.Fatalf("startup sync logs missing phase completion message:\n%s", logText)
 	}
 }
 

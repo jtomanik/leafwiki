@@ -4235,6 +4235,18 @@ func testRuntimeRoleProcess(role projectdaemon.RoleName, pid int, done <-chan er
 	}
 }
 
+func TestInternalRuntimeRoleReadinessBudgetIsThirtySeconds(t *testing.T) {
+	if internalRuntimeRoleReadinessTimeout != 30*time.Second {
+		t.Fatalf("internal runtime role readiness timeout = %v, want 30s", internalRuntimeRoleReadinessTimeout)
+	}
+}
+
+func TestFederatedWorkspaceEnsureBudgetIsThirtySeconds(t *testing.T) {
+	if federatedWorkspaceEnsureTimeout != 30*time.Second {
+		t.Fatalf("federated workspace ensure timeout = %v, want 30s", federatedWorkspaceEnsureTimeout)
+	}
+}
+
 func TestStartInternalRuntimeRoleProcessStopsChildWhenReadyRoleMismatches(t *testing.T) {
 	pidPath := filepath.Join(t.TempDir(), "wrong-role.pid")
 	t.Setenv("GO_WANT_LEAFWIKI_HELPER_PROCESS", "1")

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -93,6 +94,7 @@ type ServiceOptions struct {
 	Store                  revisionStore
 	WatcherFactory         watcherFactory
 	AfterSync              func() error
+	Log                    *slog.Logger
 }
 
 type SyncRequest struct {
@@ -152,6 +154,7 @@ type Service struct {
 	store                  revisionStore
 	watcherFactory         watcherFactory
 	afterSync              func() error
+	log                    *slog.Logger
 
 	mu            sync.Mutex
 	storeMu       sync.Mutex
@@ -167,6 +170,10 @@ func PublicEditorActor() Actor {
 
 func NewService(options ServiceOptions) (*Service, error) {
 	status := SyncStatus{Enabled: options.Enabled}
+	logger := options.Log
+	if logger == nil {
+		logger = slog.Default().With("component", "WorkspaceSync")
+	}
 	service := &Service{
 		enabled:                options.Enabled,
 		rootDir:                strings.TrimSpace(options.RootDir),
@@ -174,6 +181,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		tree:                   options.Tree,
 		watcherFactory:         options.WatcherFactory,
 		afterSync:              options.AfterSync,
+		log:                    logger,
 		status:                 status,
 	}
 	if !options.Enabled {
@@ -401,6 +409,77 @@ func (s *Service) handleWatcherBatch(ctx context.Context, eventCount int, droppe
 	s.mu.Unlock()
 }
 
+func (s *Service) shouldLogStartupSync(req SyncRequest) bool {
+	return req.Reason == ReasonStartup && s.log != nil
+}
+
+func (s *Service) logStartupSyncStarted(enabled bool, req SyncRequest) time.Time {
+	if !enabled {
+		return time.Time{}
+	}
+	started := time.Now()
+	s.log.Info("workspace sync startup started",
+		"reason", string(req.Reason),
+		"source", string(req.Source),
+		"root_dir", s.rootDir,
+	)
+	return started
+}
+
+func (s *Service) logStartupSyncCompleted(enabled bool, started time.Time, status SyncStatus) {
+	if !enabled {
+		return
+	}
+	s.log.Info("workspace sync startup completed",
+		"duration", time.Since(started),
+		"last_commit_hash", status.LastCommitHash,
+		"last_error", status.LastError,
+		"validation_errors", len(status.ValidationErrors),
+	)
+}
+
+func (s *Service) logStartupSyncFailed(enabled bool, started time.Time, err error) {
+	if !enabled {
+		return
+	}
+	s.log.Error("workspace sync startup failed",
+		"duration", time.Since(started),
+		"error", err,
+	)
+}
+
+func (s *Service) logStartupPhaseStarted(enabled bool, phase string, attrs ...any) time.Time {
+	if !enabled {
+		return time.Time{}
+	}
+	started := time.Now()
+	args := append([]any{"phase", phase}, attrs...)
+	s.log.Info("workspace sync startup phase started", args...)
+	return started
+}
+
+func (s *Service) logStartupPhaseCompleted(enabled bool, phase string, started time.Time, attrs ...any) {
+	if !enabled {
+		return
+	}
+	args := append([]any{
+		"phase", phase,
+		"duration", time.Since(started),
+	}, attrs...)
+	s.log.Info("workspace sync startup phase completed", args...)
+}
+
+func (s *Service) logStartupPhaseFailed(enabled bool, phase string, started time.Time, err error) {
+	if !enabled {
+		return
+	}
+	s.log.Error("workspace sync startup phase failed",
+		"phase", phase,
+		"duration", time.Since(started),
+		"error", err,
+	)
+}
+
 func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, error) {
 	s.mu.Lock()
 	if !s.enabled {
@@ -410,21 +489,34 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 	store := s.store
 	s.mu.Unlock()
 
+	logStartup := s.shouldLogStartupSync(req)
+	startupStarted := s.logStartupSyncStarted(logStartup, req)
 	commitReq := gitrevisions.CommitRequest{
 		Reason:           req.Reason,
 		Source:           req.Source,
 		Actor:            req.Actor,
 		AdditionalActors: req.AdditionalActors,
 	}
+	phaseStarted := s.logStartupPhaseStarted(logStartup, "capture_snapshot")
 	s.storeMu.Lock()
 	commit, err := store.Capture(ctx, commitReq)
 	s.storeMu.Unlock()
+	if err != nil {
+		s.logStartupPhaseFailed(logStartup, "capture_snapshot", phaseStarted, err)
+	} else {
+		s.logStartupPhaseCompleted(logStartup, "capture_snapshot", phaseStarted,
+			"commit_hash", commit.Hash,
+			"changed_markdown_count", commit.ChangedMarkdownCount,
+			"changed_markdown_paths", len(commit.ChangedMarkdownPaths),
+		)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
 		s.status.LastError = err.Error()
 		s.status.LastSyncTime = time.Now().UTC()
+		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
 	s.status.LastCommitHash = commit.Hash
@@ -433,33 +525,63 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 	s.status.ValidationErrors = nil
 	s.recordChangedMarkdownPaths(commit.ChangedMarkdownPaths)
 
+	phaseStarted = s.logStartupPhaseStarted(logStartup, "reconstruct_tree")
 	if err := s.tree.ReconstructTreeFromFS(); err != nil {
 		s.status.LastError = err.Error()
 		s.status.ValidationErrors = s.validationErrorsFromError(err)
+		s.logStartupPhaseFailed(logStartup, "reconstruct_tree", phaseStarted, err)
+		s.logStartupSyncCompleted(logStartup, startupStarted, s.status)
 		return s.status, nil
 	}
+	s.logStartupPhaseCompleted(logStartup, "reconstruct_tree", phaseStarted)
+	phaseStarted = s.logStartupPhaseStarted(logStartup, "canonical_link_migration")
 	migratedCanonicalLinks, rollbackCanonicalLinks, err := s.migrateCanonicalMarkdownLinksLockedWithRollback()
 	if err != nil {
 		s.status.LastError = err.Error()
+		s.logStartupPhaseFailed(logStartup, "canonical_link_migration", phaseStarted, err)
+		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
+	s.logStartupPhaseCompleted(logStartup, "canonical_link_migration", phaseStarted,
+		"migrated", migratedCanonicalLinks,
+		"validation_errors", len(s.status.ValidationErrors),
+	)
 	if migratedCanonicalLinks {
+		phaseStarted = s.logStartupPhaseStarted(logStartup, "reconstruct_tree_after_canonical_link_migration")
 		if err := s.tree.ReconstructTreeFromFS(); err != nil {
 			s.status.LastError = err.Error()
 			s.status.ValidationErrors = s.validationErrorsFromError(err)
 			s.rollbackCanonicalMarkdownMigrationLocked(rollbackCanonicalLinks)
+			s.logStartupPhaseFailed(logStartup, "reconstruct_tree_after_canonical_link_migration", phaseStarted, err)
+			s.logStartupSyncCompleted(logStartup, startupStarted, s.status)
 			return s.status, nil
 		}
+		s.logStartupPhaseCompleted(logStartup, "reconstruct_tree_after_canonical_link_migration", phaseStarted)
 	}
+	phaseStarted = s.logStartupPhaseStarted(logStartup, "capture_writebacks")
 	if err := s.captureWritebacksLocked(ctx, commitReq, commit, !migratedCanonicalLinks); err != nil {
 		s.status.LastError = err.Error()
 		s.rollbackCanonicalMarkdownMigrationLocked(rollbackCanonicalLinks)
+		s.logStartupPhaseFailed(logStartup, "capture_writebacks", phaseStarted, err)
+		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
+	s.logStartupPhaseCompleted(logStartup, "capture_writebacks", phaseStarted,
+		"last_commit_hash", s.status.LastCommitHash,
+		"changed_markdown_paths", len(s.status.RecentChangedMarkdownPaths),
+	)
+	phaseStarted = s.logStartupPhaseStarted(logStartup, "validate_and_after_sync")
 	if err := s.validateAndRunAfterSyncLocked(); err != nil {
 		s.status.LastError = err.Error()
+		s.logStartupPhaseFailed(logStartup, "validate_and_after_sync", phaseStarted, err)
+		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
+	s.logStartupPhaseCompleted(logStartup, "validate_and_after_sync", phaseStarted,
+		"validation_errors", len(s.status.ValidationErrors),
+		"last_error", s.status.LastError,
+	)
+	s.logStartupSyncCompleted(logStartup, startupStarted, s.status)
 	return s.status, nil
 }
 

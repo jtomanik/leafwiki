@@ -283,16 +283,33 @@ func (w *Wiki) initCoreServices(options *WikiOptions) error {
 		RootDir: w.workspace.RootDir,
 	})
 	if options.EnableWorkspaceSync {
+		workspaceSyncLog := w.log.With("subsystem", "workspaceSync")
+		phaseStarted := time.Now()
+		workspaceSyncLog.Info("workspace sync startup phase started",
+			"phase", "open_service",
+			"data_dir", w.workspace.DataDir,
+			"root_dir", w.workspace.RootDir,
+		)
 		service, err := workspacesync.NewService(workspacesync.ServiceOptions{
 			Enabled:                true,
 			DataDir:                w.workspace.DataDir,
 			RootDir:                w.workspace.RootDir,
 			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 			Tree:                   w.tree,
+			Log:                    workspaceSyncLog,
 		})
 		if err != nil {
+			workspaceSyncLog.Error("workspace sync startup phase failed",
+				"phase", "open_service",
+				"duration", time.Since(phaseStarted),
+				"error", err,
+			)
 			return err
 		}
+		workspaceSyncLog.Info("workspace sync startup phase completed",
+			"phase", "open_service",
+			"duration", time.Since(phaseStarted),
+		)
 		w.workspaceSync = service
 		if _, err := w.workspaceSync.SyncNow(context.Background(), workspacesync.SyncRequest{
 			Reason: workspacesync.ReasonStartup,
