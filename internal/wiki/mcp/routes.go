@@ -203,7 +203,7 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 }
 
 func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
-	if !ctx.Opts.MCPEnabled || !httpinternal.IsLoopbackHost(ctx.Opts.MCPBindHost) {
+	if !ctx.Opts.MCPEnabled || strings.TrimSpace(ctx.Opts.MCPBindHost) == "" {
 		return
 	}
 	if !ctx.Opts.AuthDisabled && r.oauthService == nil {
@@ -211,7 +211,7 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 	}
 
 	httpHandler := r.NewHTTPHandler(ctx.Opts)
-	wrapped := gin.WrapH(httpHandler)
+	wrapped := gin.WrapH(httpinternal.LocalOnlyHandler(httpHandler))
 	ctx.Base.GET("/mcp", wrapped)
 	ctx.Base.POST("/mcp", wrapped)
 	ctx.Base.DELETE("/mcp", wrapped)

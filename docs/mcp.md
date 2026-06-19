@@ -52,7 +52,7 @@ The install-wide `wikid` control server tracks registered session handles and ac
 
 ## Security Model
 
-Public HTTP MCP only starts on a loopback host: `localhost`, `127.0.0.1`, or `::1`. Native STDIO may attach to an existing runtime bound to a non-loopback web host because STDIO traffic goes through the private loopback control server, not public `/mcp`. Do not expose public HTTP MCP through Docker port publishing, a public reverse proxy, or a public network.
+Public HTTP MCP accepts loopback clients only: `localhost`, `127.0.0.1`, `::1`, and other loopback addresses. The web server may bind to a non-loopback LAN or VPN/Tailnet host, but `/mcp` still returns 404 to non-loopback clients. Native STDIO may attach to an existing runtime bound to a non-loopback web host because STDIO traffic goes through the private loopback control server, not public `/mcp`. Do not expose public HTTP MCP through Docker port publishing, a public reverse proxy, or a public network.
 
 HTTP MCP accepts bearer tokens from OAuth or MCP-only API keys. Missing, invalid, expired, revoked, or insufficient-scope credentials are rejected before MCP requests reach tools. MCP requests do not use LeafWiki CSRF middleware, and MCP bearer credentials are separate from LeafWiki web JWT cookies.
 

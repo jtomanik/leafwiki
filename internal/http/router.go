@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -97,7 +98,7 @@ type RouterOptions struct {
 	EnableWorkspaceSync     bool                 // Whether workspace sync is enabled
 	EnableLinkRefactor      bool                 // Whether the link refactoring feature is enabled in the frontend
 	MCPEnabled              bool                 // Whether the local MCP endpoint is enabled
-	MCPBindHost             string               // Validated server bind host for local-only MCP
+	MCPBindHost             string               // Configured server bind host; empty means MCP was not fully configured
 	MCPToolListPageSize     int                  // MCP feature-list page size; 0 uses the production default
 	HTTPRemoteUser          HTTPRemoteUserConfig // Reverse-proxy authentication via HTTP header
 	DisableRequestLog       bool                 // Whether to suppress per-request access log lines
@@ -105,12 +106,33 @@ type RouterOptions struct {
 }
 
 func IsLoopbackHost(host string) bool {
-	switch strings.TrimSpace(strings.ToLower(host)) {
+	normalized := strings.Trim(strings.TrimSpace(strings.ToLower(host)), "[]")
+	switch normalized {
 	case "localhost", "127.0.0.1", "::1":
 		return true
-	default:
-		return false
 	}
+	if ip := net.ParseIP(normalized); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func IsLoopbackRemoteAddr(remoteAddr string) bool {
+	host := strings.TrimSpace(remoteAddr)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	return IsLoopbackHost(host)
+}
+
+func LocalOnlyHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !IsLoopbackRemoteAddr(req.RemoteAddr) {
+			http.NotFound(w, req)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 // FrontendConfig carries the minimal runtime data required to serve the embedded SPA.

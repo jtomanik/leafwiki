@@ -695,6 +695,7 @@ func TestLocalMCPOAuthExpiredBearerTokenRejected(t *testing.T) {
 	token := stringFromMap(t, exchangeCode(t, router, code, "http://localhost:49152/callback", verifier), "access_token")
 
 	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -809,6 +810,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	rec = performRequest(t, router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
 	rec.Result().Body.Close()
 	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Authorization", "Bearer invalid-token")
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -921,6 +923,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("delete user before MCP request: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Authorization", "Bearer "+deletedToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -1242,6 +1245,7 @@ func performRequestWithHeaders(t *testing.T, router http.Handler, method, target
 	t.Helper()
 
 	req := httptest.NewRequest(method, target, body)
+	markLoopbackMCPTestRequest(req)
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
@@ -1251,6 +1255,16 @@ func performRequestWithHeaders(t *testing.T, router http.Handler, method, target
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
+}
+
+func markLoopbackMCPTestRequest(req *http.Request) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	path := req.URL.Path
+	if path == "/mcp" || strings.HasSuffix(path, "/mcp") || strings.Contains(path, "/mcp/") {
+		req.RemoteAddr = "127.0.0.1:12345"
+	}
 }
 
 func performJSON(t *testing.T, router http.Handler, target, body string) *httptest.ResponseRecorder {

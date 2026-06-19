@@ -5,8 +5,10 @@
 #
 # The active defaults below are local-machine defaults: listen only on
 # loopback, disable auth, expose local HTTP MCP, and keep workspace sync on
-# for filesystem/MCP workflows. Before binding to a LAN, VPN, or public
-# address, set disable-auth: false and configure jwt-secret/admin-password.
+# for filesystem/MCP workflows. Before binding to a LAN, VPN/Tailnet, or
+# public address, set disable-auth: false and configure jwt-secret/admin-password.
+# Public HTTP MCP remains local-only by client address even when the web server
+# binds to a non-loopback host; use scripts/run.sh mcp for STDIO clients.
 #
 # Service mode uses ~/.leafwiki as data-dir and ~/.leafwiki/root as root-dir
 # when those keys are omitted. Do not use ~ inside YAML values unless the
@@ -27,7 +29,8 @@ disable-auth: true
 allow-insecure: true
 
 # MCP transports: none, http, stdio, http,stdio, or stdio,http.
-# `leafwiki daemon` supports HTTP MCP only; use `scripts/run.sh mcp` for STDIO.
+# `leafwiki daemon` supports HTTP MCP only. HTTP MCP accepts loopback clients
+# only; use `scripts/run.sh mcp` for STDIO.
 mcp: http
 
 # Enable workspace sync and Git-backed Markdown history. Mutually exclusive

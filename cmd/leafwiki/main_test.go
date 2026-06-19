@@ -433,6 +433,36 @@ func TestFrontdWorkspaceMCPRequiresBearerBeforeProxying(t *testing.T) {
 	}
 }
 
+func TestLocalOnlyHTTPMCPHandlerRejectsNonLoopbackRequests(t *testing.T) {
+	calls := 0
+	handler := localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	remoteReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	remoteReq.RemoteAddr = "100.64.0.10:12345"
+	remoteRec := httptest.NewRecorder()
+	handler.ServeHTTP(remoteRec, remoteReq)
+	if remoteRec.Code != http.StatusNotFound {
+		t.Fatalf("remote /mcp status = %d, want 404", remoteRec.Code)
+	}
+	if calls != 0 {
+		t.Fatalf("remote /mcp reached handler %d times, want 0", calls)
+	}
+
+	loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	loopbackReq.RemoteAddr = "127.0.0.1:12345"
+	loopbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(loopbackRec, loopbackReq)
+	if loopbackRec.Code != http.StatusNoContent {
+		t.Fatalf("loopback /mcp status = %d, want 204", loopbackRec.Code)
+	}
+	if calls != 1 {
+		t.Fatalf("loopback /mcp reached handler %d times, want 1", calls)
+	}
+}
+
 func TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore(t *testing.T) {
 	authDir := t.TempDir()
 	userStore, err := coreauth.NewUserStore(authDir)
@@ -1755,24 +1785,31 @@ func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
 	}
 }
 
-func TestMainProcess_PublicHTTPMCPRejectsNonLoopbackHost(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
+func TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP(t *testing.T) {
+	var ownerPID int
+	t.Cleanup(func() {
+		terminateProjectDaemonProcess(t, ownerPID)
+	})
+	baseDir := t.TempDir()
+	dataDir := filepath.Join(baseDir, "data")
+	rootDir := filepath.Join(baseDir, "content")
+	port := freeTCPPort(t)
+	proc := startLeafwikiHelper(t, []string{
 		"--mcp=http",
 		"--disable-auth",
 		"--host", "0.0.0.0",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
+		"--port", port,
+		"--data-dir", dataDir,
+		"--root-dir", rootDir,
 		"--log-target", "stderr",
 	}, nil)
 
-	if err == nil {
-		t.Fatalf("expected public HTTP MCP on a non-loopback host to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "MCP requires a loopback host") {
-		t.Fatalf("stderr = %q, want public MCP loopback host error", stderr)
-	}
+	waitForLeafwikiReady(t, proc, port)
+	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+	ownerPID = globalDesc.PID
+	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
+	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+	proc.stop(t)
 }
 
 func TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly(t *testing.T) {
@@ -6605,13 +6642,12 @@ func TestValidateMCPTransportOptions(t *testing.T) {
 		wantError string
 	}{
 		{
-			name: "HTTP requires loopback",
+			name: "HTTP allows non-loopback web host",
 			opts: mcpTransportOptions{
 				Transports: mcpTransports{HTTP: true},
 				Host:       "0.0.0.0",
 				LogTarget:  leaflogging.TargetStderr,
 			},
-			wantError: "MCP requires a loopback host",
 		},
 		{
 			name: "STDIO allows non-loopback web host",

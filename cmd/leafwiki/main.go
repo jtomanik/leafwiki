@@ -3184,13 +3184,13 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 			},
 		})
 		workspaceMCP = frontdMCPBearerAuthHandler(cfg, startup.WikidURL, startup.DaemonToken, workspaceMCP)
-		mcpProxy = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mcpProxy = localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Path == "/mcp" || strings.HasPrefix(req.URL.Path, "/mcp/workspaces/") {
 				workspaceMCP.ServeHTTP(w, req)
 				return
 			}
 			baseMCPProxy.ServeHTTP(w, req)
-		})
+		}))
 	}
 	handler := frontd.NewIngressHandler(publicRouter, frontd.IngressOptions{
 		BasePath:     cfg.BasePath,
@@ -3483,6 +3483,10 @@ func frontdMCPBearerAuthHandler(cfg leafwikiRuntimeConfig, wikidURL string, daem
 		})(next)
 		authenticated.ServeHTTP(rw, req)
 	})
+}
+
+func localOnlyHTTPMCPHandler(next http.Handler) http.Handler {
+	return httpinternal.LocalOnlyHandler(next)
 }
 
 func wikidActorResolver(wikidURL string, daemonToken string) func(*http.Request) (projectdaemon.ActorContext, error) {
@@ -4810,9 +4814,6 @@ type mcpTransportOptions struct {
 }
 
 func validateMCPTransportOptions(opts mcpTransportOptions) error {
-	if opts.Transports.HTTP && !httpinternal.IsLoopbackHost(opts.Host) {
-		return fmt.Errorf("MCP requires a loopback host (localhost, 127.0.0.1, or ::1)")
-	}
 	if !opts.Transports.Stdio {
 		return nil
 	}

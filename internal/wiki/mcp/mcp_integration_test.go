@@ -392,7 +392,9 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 	})
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		rec := httptest.NewRecorder()
-		authEnabledRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
+		req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		authEnabledRouter.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s /mcp with auth enabled = %d, want 401", method, rec.Code)
 		}
@@ -461,10 +463,19 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 	})
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		rec := httptest.NewRecorder()
-		nonLoopbackRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
+		req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
+		req.RemoteAddr = "100.64.0.10:12345"
+		nonLoopbackRouter.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /mcp with non-loopback host = %d, want 404", method, rec.Code)
+			t.Fatalf("%s /mcp from non-loopback client = %d, want 404", method, rec.Code)
 		}
+	}
+	loopbackRec := httptest.NewRecorder()
+	loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}"))
+	loopbackReq.RemoteAddr = "127.0.0.1:12345"
+	nonLoopbackRouter.ServeHTTP(loopbackRec, loopbackReq)
+	if loopbackRec.Code == http.StatusNotFound {
+		t.Fatalf("loopback /mcp with non-loopback bind returned 404, want registered local MCP route")
 	}
 
 	enabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -2761,7 +2772,9 @@ func TestLocalMCPRegistration_RespectsBasePath(t *testing.T) {
 
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(method, "/wiki/mcp", strings.NewReader("{}")))
+		req := httptest.NewRequest(method, "/wiki/mcp", strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		router.ServeHTTP(rec, req)
 		if rec.Code == http.StatusNotFound {
 			t.Fatalf("%s /wiki/mcp = 404, want route mounted", method)
 		}

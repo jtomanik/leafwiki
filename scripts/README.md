@@ -195,7 +195,7 @@ Wrapper behavior:
 - `--daemon-idle-timeout` controls how long the install-wide runtime remains alive after the last STDIO/server session or presence record exits. `wikid` supervises child workspace daemons and stops them during global runtime shutdown. Use `0` for immediate shutdown.
 - Wrapper diagnostics and foreground validation errors go to stderr. Detached `wikid`, `frontd`, and `workspaced` processes write startup and server logs to the LeafWiki log file by default.
 - When the wrapper attaches to an existing install-wide runtime, `frontd`'s host, public MCP, log target/file, and request-log settings remain authoritative.
-- Public HTTP MCP must use a loopback host, but this wrapper starts only a native STDIO frontend and may attach to an existing runtime bound to a non-loopback web host through private loopback control.
+- Public HTTP MCP accepts loopback clients only, but this wrapper starts only a native STDIO frontend and may attach to an existing runtime bound to a non-loopback web host through private loopback control.
 - `--log-target stdout` is not used because stdout is reserved for MCP protocol frames.
 - Repeated `--server-arg <arg>` values are appended to the `leafwiki` command.
 

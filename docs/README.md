@@ -272,7 +272,7 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--enable-revision`              | Enable revision history; mutually exclusive with workspace sync          | `false`       | v0.9.0  |
 | `--enable-workspace-sync`        | Enable workspace sync and Git-backed Markdown history; mutually exclusive with revision history | `false` | v0.11.0 |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
-| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP requires a loopback host | `none` | v0.11.0 |
+| `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP accepts loopback clients only | `none` | v0.11.0 |
 | `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
 | `--daemon-idle-timeout`          | Federated runtime idle timeout after the last session or presence record exits; `0` = immediate | `10m`       | v0.11.0 |
 | `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
@@ -321,7 +321,7 @@ leafwiki daemon
 
 Service mode runs the install-wide `wikid`/`frontd`/home-`workspaced` runtime in the foreground and keeps it alive until `SIGTERM`, `SIGINT`, or a runtime failure. It reads `~/.leafwiki/leafwiki.yml`; the file is required and uses the same public flat YAML keys described above. Do not pass hidden internal startup flags such as `--internal-project-daemon` or `--internal-runtime-role`.
 
-When `data-dir` is omitted from the service config, service mode uses `~/.leafwiki`; when `root-dir` is omitted, it uses `~/.leafwiki/root`. Other omitted keys use service defaults rather than `LEAFWIKI_*` environment variables. Put durable settings such as `host`, `port`, `jwt-secret`, `admin-password`, `mcp: http`, logging, auth, and feature flags in `~/.leafwiki/leafwiki.yml`.
+When `data-dir` is omitted from the service config, service mode uses `~/.leafwiki`; when `root-dir` is omitted, it uses `~/.leafwiki/root`. Other omitted keys use service defaults rather than `LEAFWIKI_*` environment variables. Put durable settings such as `host`, `port`, `jwt-secret`, `admin-password`, `mcp`, logging, auth, and feature flags in `~/.leafwiki/leafwiki.yml`. Public HTTP MCP accepts loopback clients only, so the web daemon can bind to `0.0.0.0`, a LAN address, or a VPN/Tailnet address without exposing MCP to that network.
 
 Homebrew service installs use the same config file. Edit it directly:
 
@@ -336,7 +336,7 @@ brew services restart jtomanik/leafwiki/leafwiki
 brew services list
 ```
 
-The bundled local service template is designed for a single-machine workflow: it binds to `127.0.0.1`, disables auth, enables local HTTP MCP, and writes logs to `~/.leafwiki/logs/leafwiki.log`. Before changing `host` to `0.0.0.0`, a LAN address, or a VPN/Tailscale address, enable auth and set appropriate secrets in `~/.leafwiki/leafwiki.yml`.
+The bundled local service template is designed for a single-machine workflow: it binds to `127.0.0.1`, disables auth, enables local HTTP MCP, and writes logs to `~/.leafwiki/logs/leafwiki.log`. Before changing `host` to `0.0.0.0`, a LAN address, or a VPN/Tailscale address, enable auth and set appropriate secrets in `~/.leafwiki/leafwiki.yml`. Native STDIO clients can still attach through private loopback control with `scripts/run.sh mcp`.
 
 For non-Homebrew service runs from a checkout, bootstrap the config once:
 
@@ -458,7 +458,7 @@ When using `run.sh mcp --config`, set `mcp: stdio` or `mcp: http,stdio` in the Y
 
 Native STDIO keeps stdout reserved for MCP JSON-RPC frames. It can run with disabled auth for isolated local workflows, or with a per-session MCP API key through `LEAFWIKI_MCP_API_KEY`. API keys are not stored in daemon descriptors and do not affect daemon config matching. A STDIO startup first reads `<data-dir>/.leafwiki/project-daemon.json` and bridges directly to that workspace daemon's private MCP endpoint when the descriptor is healthy. Missing, stale, or private-token-rejected descriptors fall back to the install-wide runtime to register or ensure the selected workspace, then retry descriptor attach. Missing workspace grants fail authorization rather than self-granting access.
 
-LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and only starts on a loopback host:
+LeafWiki can also expose a local-only MCP Streamable HTTP endpoint for agents and the web UI to work against the same live wiki state. It is disabled by default and accepts loopback clients only, even when the web server binds to a LAN or VPN/Tailnet address:
 
 ```bash
 ./leafwiki --mcp=http --host=127.0.0.1 --allow-insecure=true --jwt-secret=<secret> --admin-password=<password>
