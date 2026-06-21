@@ -18,7 +18,6 @@ import {
   buildWorkspaceViewPath,
   splitWorkspaceRoute,
 } from '@/lib/workspaceRoute'
-import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import {
@@ -65,7 +64,6 @@ export default function TreeView({
   const openNode = useTreeStore((s) => s.openNode)
   const expandAll = useTreeStore((s) => s.expandAll)
   const collapseAll = useTreeStore((s) => s.collapseAll)
-  const enableWorkspaceSync = useConfigStore((s) => s.enableWorkspaceSync)
   const workspaceSyncState = useWorkspaceSyncStore((s) =>
     selectWorkspaceSyncState(s, workspaceId),
   )
@@ -100,7 +98,6 @@ export default function TreeView({
     })) ?? []
 
   if (
-    enableWorkspaceSync &&
     workspaceSyncStatus?.lastError &&
     !workspaceSyncIssues.some(
       (item) => item.message === workspaceSyncStatus.lastError,
@@ -113,7 +110,7 @@ export default function TreeView({
     })
   }
 
-  if (enableWorkspaceSync && workspaceSyncStatusError && !workspaceSyncStatus) {
+  if (workspaceSyncStatusError && !workspaceSyncStatus) {
     workspaceSyncIssues.unshift({
       key: 'workspace-status-error',
       path: 'Workspace',
@@ -121,8 +118,7 @@ export default function TreeView({
     })
   }
 
-  const hasWorkspaceSyncIssues =
-    enableWorkspaceSync && workspaceSyncIssues.length > 0
+  const hasWorkspaceSyncIssues = workspaceSyncIssues.length > 0
 
   useEffect(() => {
     if (!tree || !routeMatchesWorkspace || !currentPath) return
@@ -181,7 +177,6 @@ export default function TreeView({
   }, [tree, reloadTree, workspaceId])
 
   useEffect(() => {
-    if (!enableWorkspaceSync) return
     let cancelled = false
 
     const refreshSyncedViews = async () => {
@@ -211,7 +206,7 @@ export default function TreeView({
       cancelled = true
       window.clearInterval(intervalID)
     }
-  }, [enableWorkspaceSync, loadWorkspaceSyncStatus, reloadTree, workspaceId])
+  }, [loadWorkspaceSyncStatus, reloadTree, workspaceId])
 
   const handleWorkspaceSyncRefresh = async () => {
     try {
@@ -361,7 +356,7 @@ export default function TreeView({
             onClick={() => collapseAll(workspaceId)}
           />
         </>
-        {!readOnlyMode && enableWorkspaceSync && (
+        {!readOnlyMode && (
           <TreeViewActionButton
             actionName="workspace-snapshots"
             icon={

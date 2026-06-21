@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	"github.com/perber/wiki/internal/core/assets"
-	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
@@ -19,10 +18,9 @@ type DeletePageInput struct {
 	Recursive bool
 }
 
-// DeletePageUseCase removes a page (and optionally its subtree) including assets, links, and revisions.
+// DeletePageUseCase removes a page (and optionally its subtree) including assets and links.
 type DeletePageUseCase struct {
 	tree         *tree.TreeService
-	revision     *revision.Service
 	assets       *assets.AssetService
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
@@ -31,15 +29,14 @@ type DeletePageUseCase struct {
 // NewDeletePageUseCase constructs a DeletePageUseCase.
 func NewDeletePageUseCase(
 	t *tree.TreeService,
-	r *revision.Service,
 	a *assets.AssetService,
 	o *pagesave.PageSaveOrchestrator,
 	log *slog.Logger,
 ) *DeletePageUseCase {
-	return &DeletePageUseCase{tree: t, revision: r, assets: a, orchestrator: o, log: log}
+	return &DeletePageUseCase{tree: t, assets: a, orchestrator: o, log: log}
 }
 
-// Execute deletes the page, cleaning up links (via orchestrator), assets, and revision data.
+// Execute deletes the page, cleaning up links (via orchestrator) and assets.
 func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) error {
 	if in.ID == "root" || in.ID == "" {
 		return newPageRootOperationError("delete")
@@ -99,7 +96,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 			}
 		}
 
-		return deleteRevisionData(uc.revision, subtreeIDs)
+		return nil
 	}
 
 	// Non-recursive delete.
@@ -124,5 +121,5 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 		uc.log.Warn("failed to delete assets for page", "pageID", page.ID, "error", err)
 	}
 
-	return deleteRevisionData(uc.revision, []string{in.ID})
+	return nil
 }

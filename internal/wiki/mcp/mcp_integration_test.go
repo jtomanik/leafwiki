@@ -40,6 +40,46 @@ import (
 
 var baseToolNames = wikimcp.BaseToolNames()
 
+func federatedToolNames(extra ...[]string) []string {
+	names := append([]string{}, baseToolNames...)
+	names = append(names, wikimcp.WorkspaceSyncToolNames()...)
+	names = append(names, wikimcp.RevisionToolNames()...)
+	for _, group := range extra {
+		names = append(names, group...)
+	}
+	return names
+}
+
+func federatedInputProperties(extra ...[]string) map[string][]string {
+	out := copyToolInputProperties(baseToolInputProperties)
+	for _, name := range federatedToolNames(extra...) {
+		if props, ok := featureToolInputProperties[name]; ok {
+			out[name] = props
+		}
+	}
+	return out
+}
+
+func federatedRequiredProperties(extra ...[]string) map[string][]string {
+	out := copyToolInputProperties(baseToolInputRequiredProperties)
+	for _, name := range federatedToolNames(extra...) {
+		if props, ok := featureToolInputRequiredProperties[name]; ok {
+			out[name] = props
+		}
+	}
+	return out
+}
+
+func federatedOutputProperties(extra ...[]string) map[string][]string {
+	out := copyToolInputProperties(baseToolOutputProperties)
+	for _, name := range federatedToolNames(extra...) {
+		if props, ok := featureToolOutputProperties[name]; ok {
+			out[name] = props
+		}
+	}
+	return out
+}
+
 var mcpOnlyToolNames = map[string]struct{}{
 	wikimcp.ToolGetContext:         {},
 	wikimcp.ToolRefresh:            {},
@@ -304,7 +344,7 @@ var baseToolOutputProperties = map[string][]string{
 	"wiki_validate_wiki":         {"ok", "summary", "issues"},
 	"wiki_update_page_metadata":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
 	"wiki_replace_page_section":  {"pageId", "path", "title", "version", "validation", "page", "linkStatus"},
-	"wiki_get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableRevision", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl", "markdownLinkRootPrefix"},
+	"wiki_get_config":            {"publicAccess", "hideLinkMetadataSection", "authDisabled", "basePath", "maxAssetUploadSizeBytes", "enableWorkspaceSync", "enableLinkRefactor", "httpRemoteUserEnabled", "httpRemoteUserLogoutUrl", "markdownLinkRootPrefix"},
 	"wiki_get_current_user":      {"user"},
 	"wiki_get_tree":              {"tree"},
 	"wiki_get_page":              {"linkStatus", "page"},
@@ -500,9 +540,9 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 	}
 
 	got := listAllToolNames(t, session)
-	assertToolNames(t, got, baseToolNames)
-	if contains(got, wikimcp.ToolRefresh) {
-		t.Fatalf("%s was registered without workspace sync enabled", wikimcp.ToolRefresh)
+	assertToolNames(t, got, federatedToolNames())
+	if !contains(got, wikimcp.ToolRefresh) {
+		t.Fatalf("%s was not registered in federated runtime", wikimcp.ToolRefresh)
 	}
 	for _, name := range got {
 		if !strings.HasPrefix(name, "wiki_") {
@@ -511,8 +551,8 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 	}
 
 	tools := listAllTools(t, session)
-	assertInputSchemasMatch(t, tools, baseToolInputProperties, baseToolInputRequiredProperties)
-	assertOutputSchemasMatch(t, tools, baseToolOutputProperties)
+	assertInputSchemasMatch(t, tools, federatedInputProperties(), federatedRequiredProperties())
+	assertOutputSchemasMatch(t, tools, federatedOutputProperties())
 
 	for _, legacyName := range []string{
 		strings.Join([]string{"get", "page"}, "_"),
@@ -562,63 +602,42 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 }
 
 func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
-	workspaceSyncTools := wikimcp.WorkspaceSyncToolNames()
-	revisionTools := wikimcp.RevisionToolNames()
 	refactorTools := wikimcp.LinkRefactorToolNames()
 
 	tests := []struct {
-		name                string
-		enableWorkspaceSync bool
-		enableRevision      bool
-		enableLinkRefactor  bool
-		wantFeatureTools    []string
+		name               string
+		enableLinkRefactor bool
+		extraTools         []string
 	}{
-		{name: "none"},
-		{name: "workspace sync only", enableWorkspaceSync: true, wantFeatureTools: append(append([]string{}, workspaceSyncTools...), revisionTools...)},
-		{name: "revision only", enableRevision: true, wantFeatureTools: revisionTools},
-		{name: "link refactor only", enableLinkRefactor: true, wantFeatureTools: refactorTools},
-		{name: "revision and link refactor", enableRevision: true, enableLinkRefactor: true, wantFeatureTools: append(append([]string{}, revisionTools...), refactorTools...)},
-		{name: "workspace sync and link refactor", enableWorkspaceSync: true, enableLinkRefactor: true, wantFeatureTools: append(append(append([]string{}, workspaceSyncTools...), revisionTools...), refactorTools...)},
+		{name: "federated runtime"},
+		{name: "link refactor", enableLinkRefactor: true, extraTools: refactorTools},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-				AuthDisabled:        true,
-				EnableRevision:      tt.enableRevision,
-				EnableWorkspaceSync: tt.enableWorkspaceSync,
+				AuthDisabled: true,
 			})
 			router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 				AuthDisabled:            true,
 				PublicAccess:            true,
 				AllowInsecure:           true,
 				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-				EnableWorkspaceSync:     tt.enableWorkspaceSync,
-				EnableRevision:          tt.enableRevision,
 				EnableLinkRefactor:      tt.enableLinkRefactor,
 				MCPEnabled:              true,
 				MCPToolListPageSize:     200,
 			})
 			session := connectLocalMCP(t, router, "/mcp")
 
-			want := append([]string{}, baseToolNames...)
-			want = append(want, tt.wantFeatureTools...)
+			want := federatedToolNames(tt.extraTools)
 			assertToolNames(t, listAllToolNames(t, session), want)
 			contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
 			server := nestedMap(t, contextOut, "server")
 			assertStringSet(t, "wiki_get_context server.tools", stringSliceField(t, server, "tools"), want)
 
 			tools := listAllTools(t, session)
-			expectedSchemas := copyToolInputProperties(baseToolInputProperties)
-			expectedRequired := copyToolInputProperties(baseToolInputRequiredProperties)
-			expectedOutputs := copyToolInputProperties(baseToolOutputProperties)
-			for _, name := range tt.wantFeatureTools {
-				expectedSchemas[name] = featureToolInputProperties[name]
-				expectedRequired[name] = featureToolInputRequiredProperties[name]
-				expectedOutputs[name] = featureToolOutputProperties[name]
-			}
-			assertInputSchemasMatch(t, tools, expectedSchemas, expectedRequired)
-			assertOutputSchemasMatch(t, tools, expectedOutputs)
+			assertInputSchemasMatch(t, tools, federatedInputProperties(tt.extraTools), federatedRequiredProperties(tt.extraTools))
+			assertOutputSchemasMatch(t, tools, federatedOutputProperties(tt.extraTools))
 		})
 	}
 }
@@ -626,8 +645,7 @@ func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
 // - MCP agent context returns canonical examples
 func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -721,7 +739,7 @@ func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 	}
 }
 
-func TestLocalMCPGetContext_DoesNotRecommendRefreshWhenWorkspaceSyncDisabled(t *testing.T) {
+func TestLocalMCPGetContext_RecommendsRefreshInFederatedRuntime(t *testing.T) {
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -735,19 +753,18 @@ func TestLocalMCPGetContext_DoesNotRecommendRefreshWhenWorkspaceSyncDisabled(t *
 
 	out := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
 	server := nestedMap(t, out, "server")
-	if arrayContainsString(server["tools"], "wiki_refresh") {
-		t.Fatalf("server.tools = %#v, did not expect wiki_refresh when workspace sync is disabled", server["tools"])
+	if !arrayContainsString(server["tools"], "wiki_refresh") {
+		t.Fatalf("server.tools = %#v, want wiki_refresh in federated runtime", server["tools"])
 	}
 	recommended := arrayField(t, out, "recommendedTools")
-	if arrayContainsString(recommended, "wiki_refresh") {
-		t.Fatalf("recommendedTools = %#v, did not expect wiki_refresh when workspace sync is disabled", recommended)
+	if !arrayContainsString(recommended, "wiki_refresh") {
+		t.Fatalf("recommendedTools = %#v, want wiki_refresh in federated runtime", recommended)
 	}
 }
 
 func TestLocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -794,8 +811,7 @@ func TestLocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly(t *testin
 
 func TestLocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousContext(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -837,8 +853,7 @@ func TestLocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousCo
 
 func TestLocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1119,9 +1134,8 @@ func TestPresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoni
 func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1186,9 +1200,8 @@ func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
 func TestLocalMCPValidateAndRefreshNormalizeWorkspaceRoutes(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1234,9 +1247,8 @@ func TestLocalMCPValidateAndRefreshNormalizeWorkspaceRoutes(t *testing.T) {
 func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1262,9 +1274,8 @@ func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
 func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1302,9 +1313,8 @@ func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t
 func TestLocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1471,9 +1481,8 @@ func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
 func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1516,9 +1525,8 @@ func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
 func TestLocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1744,8 +1752,7 @@ func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) 
 
 func TestLocalMCPPathToolsResolveCanonicalSameBasenameTwins(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1845,8 +1852,7 @@ leafwiki_title: MCP Section Only
 
 func TestLocalMCPPathToolsResolveReadmeFallbackMarkdownPath(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1975,8 +1981,7 @@ func TestLocalMCPPathToolsResolveReadmeFallbackMarkdownPath(t *testing.T) {
 
 func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2128,9 +2133,8 @@ func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 func TestLocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		Workspace:    wiki.Workspace{RootDir: rootDir},
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2308,8 +2312,7 @@ func TestLocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody(t *testin
 
 func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2495,8 +2498,7 @@ func TestLocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenEx
 
 func TestLocalMCPReplacePageSection_PreservesFrontmatter(t *testing.T) {
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
+		AuthDisabled: true,
 	})
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2781,7 +2783,7 @@ func TestLocalMCPRegistration_RespectsBasePath(t *testing.T) {
 	}
 
 	session := connectLocalMCP(t, router, "/wiki/mcp")
-	assertToolNames(t, listAllToolNames(t, session), baseToolNames)
+	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
 }
 
 func TestLocalMCPProtocol_PageMutationParity(t *testing.T) {
@@ -2789,7 +2791,7 @@ func TestLocalMCPProtocol_PageMutationParity(t *testing.T) {
 }
 
 func runLocalMCPProtocolPageMutationParity(t *testing.T) {
-	w, _ := newLocalMCPTestWikiWithStorage(t, false)
+	w, _ := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -3146,7 +3148,6 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 		"basePath",
 		"markdownLinkRootPrefix",
 		"maxAssetUploadSizeBytes",
-		"enableRevision",
 		"enableWorkspaceSync",
 		"enableLinkRefactor",
 		"httpRemoteUserEnabled",
@@ -3968,7 +3969,7 @@ func TestLocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload(t *tes
 }
 
 func TestLocalMCPProtocol_GetAssetUsesPageBoundaryValidation(t *testing.T) {
-	w, storageDir := newLocalMCPTestWikiWithStorage(t, false)
+	w, storageDir := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -3998,13 +3999,13 @@ func TestLocalMCPProtocol_FeatureGatedToolParity(t *testing.T) {
 }
 
 func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
-	w, storageDir := newLocalMCPTestWikiWithStorage(t, true)
+	w, _ := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
 		AllowInsecure:           true,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableRevision:          true,
+		EnableWorkspaceSync:     true,
 		EnableLinkRefactor:      true,
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
@@ -4012,8 +4013,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	session := connectLocalMCP(t, router, "/mcp")
 
 	missingLatestErr := callToolError(t, session, "wiki_get_latest_revision", map[string]any{"pageId": "missing-page"})
-	if !strings.Contains(missingLatestErr, "revision_not_found") && !strings.Contains(strings.ToLower(missingLatestErr), "revision") {
-		t.Fatalf("missing latest revision error = %q, want revision_not_found detail", missingLatestErr)
+	if !strings.Contains(missingLatestErr, wikirevisions.ErrCodeRevisionNotFound) && !strings.Contains(strings.ToLower(missingLatestErr), "page_not_found") && !strings.Contains(strings.ToLower(missingLatestErr), "revision") {
+		t.Fatalf("missing latest revision error = %q, want revision_not_found or page_not_found detail", missingLatestErr)
 	}
 	for _, tc := range []struct {
 		name string
@@ -4025,8 +4026,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	} {
 		errText := callToolError(t, session, tc.name, tc.args)
 		lowerErr := strings.ToLower(errText)
-		if !strings.Contains(errText, wikirevisions.ErrCodeRevisionNotFound) && !strings.Contains(lowerErr, "revision not found") && !strings.Contains(lowerErr, "revision asset not found") {
-			t.Fatalf("%s missing revision error = %q, want %s", tc.name, errText, wikirevisions.ErrCodeRevisionNotFound)
+		if !strings.Contains(errText, wikirevisions.ErrCodeRevisionNotFound) && !strings.Contains(lowerErr, "page_not_found") && !strings.Contains(lowerErr, "revision not found") && !strings.Contains(lowerErr, "revision asset not found") {
+			t.Fatalf("%s missing revision error = %q, want %s or page_not_found", tc.name, errText, wikirevisions.ErrCodeRevisionNotFound)
 		}
 		if strings.Contains(lowerErr, "file does not exist") || strings.Contains(lowerErr, "no such file") {
 			t.Fatalf("%s missing revision error = %q, want structured revision error instead of raw storage error", tc.name, errText)
@@ -4124,8 +4125,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	httpSnapshotAtLatest := getHTTPRevision(t, router, targetID, latestRevisionID)
 	assertJSONEqual(t, "wiki_get_revision", snapshot, httpSnapshotAtLatest)
 	recordHTTPMCPParity(t, "wiki_get_revision", "GET /api/pages/:id/revisions/:revisionId")
-	if snapshot["content"] != "Third content from HTTP" {
-		t.Fatalf("wiki_get_revision content = %v, want HTTP-updated content", snapshot["content"])
+	if !strings.Contains(stringField(t, snapshot, "content"), "Third content from HTTP") {
+		t.Fatalf("wiki_get_revision content = %v, want HTTP-updated content in Git-backed document", snapshot["content"])
 	}
 	snapshotRevision := nestedMap(t, snapshot, "revision")
 	if snapshotRevision["pageId"] != targetID {
@@ -4144,8 +4145,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	httpLatest := getHTTPLatestRevision(t, router, targetID)
 	httpLatestRevisionID := stringField(t, httpLatest, "id")
 	httpSnapshot := getHTTPRevision(t, router, targetID, httpLatestRevisionID)
-	if httpSnapshot["content"] != "Fourth content from MCP" {
-		t.Fatalf("HTTP revision content after MCP update = %v, want MCP-updated content", httpSnapshot["content"])
+	if !strings.Contains(stringField(t, httpSnapshot, "content"), "Fourth content from MCP") {
+		t.Fatalf("HTTP revision content after MCP update = %v, want MCP-updated content in Git-backed document", httpSnapshot["content"])
 	}
 
 	olderRevision := revisionItems[1].(map[string]any)
@@ -4161,50 +4162,22 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 		t.Fatalf("wiki_compare_revisions contentChanged = %v, want true", comparison["contentChanged"])
 	}
 
-	assetContent := []byte("body { color: green; }\n")
 	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
 		"pageId":        targetID,
 		"filename":      "style.css",
-		"contentBase64": base64.StdEncoding.EncodeToString(assetContent),
+		"contentBase64": base64.StdEncoding.EncodeToString([]byte("body { color: green; }\n")),
 	})
 	assetRevision := nestedMap(t, callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": targetID}), "revision")
 	assetRevisionID := stringField(t, assetRevision, "id")
-	stripRevisionAssetManifestMIME(t, storageDir, stringField(t, assetRevision, "assetManifestHash"), "style.css")
-	revisionAsset := callToolStructured(t, session, "wiki_get_revision_asset", map[string]any{
+	revisionAssetErr := callToolError(t, session, "wiki_get_revision_asset", map[string]any{
 		"pageId":     targetID,
 		"revisionId": assetRevisionID,
 		"assetName":  "style.css",
 	})
-	if revisionAsset["contentBase64"] != base64.StdEncoding.EncodeToString(assetContent) {
-		t.Fatalf("wiki_get_revision_asset content = %v, want uploaded asset", revisionAsset["contentBase64"])
-	}
-	httpRevisionAssetBody, httpRevisionAssetContentType := getHTTPRevisionAsset(t, router, targetID, assetRevisionID, "style.css")
-	if httpRevisionAssetBody != string(assetContent) {
-		t.Fatalf("HTTP revision asset body = %q, want uploaded asset", httpRevisionAssetBody)
-	}
-	if revisionAsset["mimeType"] != "text/css; charset=utf-8" {
-		t.Fatalf("wiki_get_revision_asset missing-manifest MIME = %v, want CSS extension fallback", revisionAsset["mimeType"])
-	}
-	if !strings.HasPrefix(httpRevisionAssetContentType, revisionAsset["mimeType"].(string)) {
-		t.Fatalf("HTTP revision asset content type = %q, want MCP mime type %q", httpRevisionAssetContentType, revisionAsset["mimeType"])
-	}
-	assetBlobPath := revisionAssetBlobPath(t, storageDir, stringField(t, assetRevision, "assetManifestHash"), "style.css")
-	if err := os.Chmod(assetBlobPath, 0); err != nil {
-		t.Fatalf("make revision asset blob unreadable: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(assetBlobPath, 0o644) })
-	unreadableAssetErr := callToolError(t, session, "wiki_get_revision_asset", map[string]any{
-		"pageId":     targetID,
-		"revisionId": assetRevisionID,
-		"assetName":  "style.css",
-	})
-	assertErrorContainsAny(t, "MCP unreadable revision asset blob", unreadableAssetErr, wikirevisions.ErrCodeRevisionPreviewAssetBlobUnavailable, "asset blob")
-	unreadableAssetHTTP := getHTTPStatus(t, router, "/api/pages/"+targetID+"/revisions/"+assetRevisionID+"/assets/style.css", http.StatusInternalServerError)
-	if !strings.Contains(unreadableAssetHTTP, wikirevisions.ErrCodeRevisionPreviewAssetBlobUnavailable) {
-		t.Fatalf("HTTP unreadable revision asset blob error = %q, want %s", unreadableAssetHTTP, wikirevisions.ErrCodeRevisionPreviewAssetBlobUnavailable)
-	}
-	if err := os.Chmod(assetBlobPath, 0o644); err != nil {
-		t.Fatalf("restore revision asset blob permissions: %v", err)
+	assertErrorContainsAny(t, "MCP Git-backed revision asset", revisionAssetErr, wikirevisions.ErrCodeRevisionNotFound, "workspace sync revisions do not track assets")
+	httpRevisionAssetErr := getHTTPStatus(t, router, "/api/pages/"+targetID+"/revisions/"+assetRevisionID+"/assets/style.css", http.StatusNotFound)
+	if !strings.Contains(httpRevisionAssetErr, wikirevisions.ErrCodeRevisionPreviewAssetNotFound) && !strings.Contains(httpRevisionAssetErr, "workspace sync revisions do not track assets") {
+		t.Fatalf("HTTP Git-backed revision asset error = %q, want unsupported revision asset detail", httpRevisionAssetErr)
 	}
 	recordHTTPMCPParity(t, "wiki_get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
 
@@ -4493,19 +4466,18 @@ func runHTTPMCPParityCoverage(t *testing.T) {
 	assertHTTPMCPParityRecorded(t)
 }
 
-func newLocalMCPTestWiki(t *testing.T, enableRevision bool) *wiki.Wiki {
+func newLocalMCPTestWiki(t *testing.T, _ bool) *wiki.Wiki {
 	t.Helper()
 
-	w, _ := newLocalMCPTestWikiWithStorage(t, enableRevision)
+	w, _ := newLocalMCPTestWikiWithStorage(t)
 	return w
 }
 
-func newLocalMCPTestWikiWithStorage(t *testing.T, enableRevision bool) (*wiki.Wiki, string) {
+func newLocalMCPTestWikiWithStorage(t *testing.T) (*wiki.Wiki, string) {
 	t.Helper()
 
 	return newLocalMCPTestWikiWithOptionsAndStorage(t, wiki.WikiOptions{
-		AuthDisabled:   true,
-		EnableRevision: enableRevision,
+		AuthDisabled: true,
 	})
 }
 
@@ -4549,8 +4521,6 @@ func newLocalMCPTestWikiWithOptionsAndStorage(t *testing.T, opts wiki.WikiOption
 		AccessTokenTimeout:  opts.AccessTokenTimeout,
 		RefreshTokenTimeout: opts.RefreshTokenTimeout,
 		AuthDisabled:        opts.AuthDisabled,
-		EnableRevision:      opts.EnableRevision,
-		EnableWorkspaceSync: opts.EnableWorkspaceSync,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
@@ -5213,84 +5183,6 @@ func getHTTPAssetWithContentType(t *testing.T, router http.Handler, pageID, file
 		t.Fatalf("GET asset %s/%s = %d: %s", pageID, filename, rec.Code, rec.Body.String())
 	}
 	return rec.Body.String(), rec.Header().Get("Content-Type")
-}
-
-func getHTTPRevisionAsset(t *testing.T, router http.Handler, pageID, revisionID, filename string) (string, string) {
-	t.Helper()
-
-	rec := httptest.NewRecorder()
-	path := "/api/pages/" + pageID + "/revisions/" + revisionID + "/assets/" + url.PathEscape(filename)
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET revision asset %s/%s/%s = %d: %s", pageID, revisionID, filename, rec.Code, rec.Body.String())
-	}
-	return rec.Body.String(), rec.Header().Get("Content-Type")
-}
-
-func stripRevisionAssetManifestMIME(t *testing.T, storageDir, manifestHash, assetName string) {
-	t.Helper()
-
-	manifestPath, manifest := readRevisionAssetManifest(t, storageDir, manifestHash)
-	found := false
-	for _, item := range manifest.Items {
-		if item["name"] == assetName {
-			delete(item, "mime_type")
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("asset manifest %s did not contain %q: %#v", manifestPath, assetName, manifest.Items)
-	}
-	updated, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatalf("marshal asset manifest %s: %v", manifestPath, err)
-	}
-	if err := os.WriteFile(manifestPath, updated, 0644); err != nil {
-		t.Fatalf("write asset manifest %s: %v", manifestPath, err)
-	}
-}
-
-func revisionAssetBlobPath(t *testing.T, storageDir, manifestHash, assetName string) string {
-	t.Helper()
-
-	_, manifest := readRevisionAssetManifest(t, storageDir, manifestHash)
-	for _, item := range manifest.Items {
-		if item["name"] != assetName {
-			continue
-		}
-		hash, ok := item["sha256"].(string)
-		if !ok || hash == "" {
-			t.Fatalf("asset manifest entry for %q missing sha256: %#v", assetName, item)
-		}
-		if len(hash) < 2 {
-			t.Fatalf("asset hash %q is too short", hash)
-		}
-		return filepath.Join(storageDir, ".leafwiki", "blobs", "assets", "sha256", hash[:2], hash)
-	}
-	t.Fatalf("asset manifest %q did not contain %q: %#v", manifestHash, assetName, manifest.Items)
-	return ""
-}
-
-func readRevisionAssetManifest(t *testing.T, storageDir, manifestHash string) (string, struct {
-	Items []map[string]any `json:"items"`
-}) {
-	t.Helper()
-
-	if len(manifestHash) < 2 {
-		t.Fatalf("asset manifest hash %q is too short", manifestHash)
-	}
-	manifestPath := filepath.Join(storageDir, ".leafwiki", "manifests", "assets", "sha256", manifestHash[:2], manifestHash+".json")
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatalf("read asset manifest %s: %v", manifestPath, err)
-	}
-	var manifest struct {
-		Items []map[string]any `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		t.Fatalf("decode asset manifest %s: %v", manifestPath, err)
-	}
-	return manifestPath, manifest
 }
 
 func getHTTPLatestRevision(t *testing.T, router http.Handler, pageID string) map[string]any {

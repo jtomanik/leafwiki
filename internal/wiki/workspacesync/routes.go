@@ -41,7 +41,7 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 }
 
 func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
-	if !ctx.Opts.EnableWorkspaceSync || r == nil || r.status == nil {
+	if r == nil || r.status == nil {
 		return
 	}
 	if ctx.Opts.PublicAccess {

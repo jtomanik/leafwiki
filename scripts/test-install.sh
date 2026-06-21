@@ -171,9 +171,9 @@ if ! grep -q "must be different" "$interactive_output"; then
   fail "interactive invalid root output was wrong: $(cat "$interactive_output")"
 fi
 
-revision_env="$tmp_dir/interactive-revision.env"
-revision_output="$tmp_dir/interactive-revision.out"
-revision_input="$(
+env_output_path="$tmp_dir/interactive-default.env"
+env_output_log="$tmp_dir/interactive-default.out"
+default_input="$(
   printf 'amd64\n'
   printf 'test-secret\n'
   printf 'test-password\n'
@@ -182,21 +182,19 @@ revision_input="$(
   printf 'n\n'
   printf '%s\n' "$tmp_dir/revision-data"
   printf '%s\n' "$tmp_dir/revision-pages"
-  printf 'y\n'
-  printf '\n'
 )"
-if ! printf '%s' "$revision_input" |
-  LEAFWIKI_ENV_FILE_PATH="$revision_env" LEAFWIKI_INSTALL_VALIDATE_ONLY=1 run_installer > "$revision_output" 2>&1; then
-  fail "interactive revision validation failed: $(cat "$revision_output")"
+if ! printf '%s' "$default_input" |
+  LEAFWIKI_ENV_FILE_PATH="$env_output_path" LEAFWIKI_INSTALL_VALIDATE_ONLY=1 run_installer > "$env_output_log" 2>&1; then
+  fail "interactive env validation failed: $(cat "$env_output_log")"
 fi
-if ! grep -q 'LEAFWIKI_ENABLE_REVISION="true"' "$revision_env"; then
-  fail "interactive revision env was wrong: $(cat "$revision_env")"
+if grep -q 'LEAFWIKI_ENABLE_REVISION\|LEAFWIKI_MAX_REVISION_HISTORY' "$env_output_path"; then
+  fail "interactive env included removed revision settings: $(cat "$env_output_path")"
 fi
-if ! grep -q 'LEAFWIKI_LOG_TARGET="file"' "$revision_env"; then
-  fail "interactive logging target env was wrong: $(cat "$revision_env")"
+if ! grep -q 'LEAFWIKI_LOG_TARGET="file"' "$env_output_path"; then
+  fail "interactive logging target env was wrong: $(cat "$env_output_path")"
 fi
-if ! grep -q 'LEAFWIKI_LOG_FILE=""' "$revision_env"; then
-  fail "interactive logging file env was wrong: $(cat "$revision_env")"
+if ! grep -q 'LEAFWIKI_LOG_FILE=""' "$env_output_path"; then
+  fail "interactive logging file env was wrong: $(cat "$env_output_path")"
 fi
 
 printf 'PASS: install.sh validation checks\n'

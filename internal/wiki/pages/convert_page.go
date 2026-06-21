@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
@@ -21,7 +20,6 @@ type ConvertPageInput struct {
 // ConvertPageUseCase converts a page to a different node kind (page ↔ section).
 type ConvertPageUseCase struct {
 	tree         *tree.TreeService
-	revision     *revision.Service
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
 }
@@ -29,11 +27,10 @@ type ConvertPageUseCase struct {
 // NewConvertPageUseCase constructs a ConvertPageUseCase.
 func NewConvertPageUseCase(
 	t *tree.TreeService,
-	r *revision.Service,
 	o *pagesave.PageSaveOrchestrator,
 	log *slog.Logger,
 ) *ConvertPageUseCase {
-	return &ConvertPageUseCase{tree: t, revision: r, orchestrator: o, log: log}
+	return &ConvertPageUseCase{tree: t, orchestrator: o, log: log}
 }
 
 // Execute converts the node kind and records a structure revision.
@@ -66,11 +63,6 @@ func (uc *ConvertPageUseCase) Execute(_ context.Context, in ConvertPageInput) er
 			Summary:       "page converted",
 		}); err != nil {
 			return err
-		}
-	}
-	if uc.revision != nil {
-		if _, _, err := uc.revision.RecordStructureChange(in.ID, in.UserID, ""); err != nil {
-			uc.log.Warn("failed to record structure revision", "pageID", in.ID, "error", err)
 		}
 	}
 	return nil

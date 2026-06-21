@@ -24,12 +24,10 @@ type LeafWikiRuntimeConfig struct {
 	RefreshTokenTimeout     time.Duration
 	BasePath                string
 	MaxAssetUploadSize      int64
-	EnableRevision          bool
 	EnableWorkspaceSync     bool
 	EnableLinkRefactor      bool
 	MCPTransports           MCPTransports
 	APIKey                  string
-	MaxRevisionHistory      int
 	EnableHTTPRemoteUser    bool
 	HTTPRemoteUserHeader    string
 	TrustedProxyIPsRaw      string

@@ -13,7 +13,6 @@ import { toAppPath } from '../pages/appPath';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
-const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
 const markdownLinkRootPrefix = process.env.E2E_MARKDOWN_LINK_ROOT_PREFIX || '';
 
@@ -200,8 +199,6 @@ async function runCleanupPreservingTestError(
 }
 
 test.describe('Workspace Sync', () => {
-  test.skip(!workspaceSyncEnabled, 'requires E2E_ENABLE_WORKSPACE_SYNC=1');
-
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page);
     await loginPage.goto();
@@ -228,6 +225,7 @@ test.describe('Workspace Sync', () => {
 Direct filesystem content`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     const treeView = new TreeView(page);
     await expect(await treeView.findPageByTitle('Workspace Sync Direct')).toBeVisible({
@@ -316,7 +314,9 @@ Direct filesystem content`,
     expect(snapshotsAfter.length).toBe(snapshotsBefore.length);
   });
 
-  test('root README renders at home and Explorer Home returns to slash', async ({ page }) => {
+  test('root README renders at home and Explorer Home returns to the home workspace', async ({
+    page,
+  }) => {
     const suffix = Date.now();
     const childSlug = `workspace-sync-home-child-${suffix}`;
     const originalReadme = readRootMarkdownIfExists('README.md');
@@ -352,7 +352,7 @@ Root README home content`,
         await page.goto(toAppPath(`/${childSlug}.md`));
         await expect(page.locator('article')).toContainText('Workspace Sync Home Child');
         await page.getByTestId('tree-view-action-button-home').click();
-        await expect(page).toHaveURL(/\/$/);
+        await expect(page).toHaveURL(/\/w\/home\/?$/);
         await expect(page.locator('article')).toContainText('Root README home content');
       },
       async () => {
@@ -397,6 +397,7 @@ Root README home content`,
 [Target](/${targetSlug})`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     const treeView = new TreeView(page);
     await expect(await treeView.findPageByTitle('Workspace Sync Canonical Source')).toBeVisible({
@@ -424,6 +425,7 @@ Root README home content`,
 [Target](/${targetSlug})`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId('workspace-sync-status')).toContainText(targetSlug);
@@ -436,6 +438,7 @@ Root README home content`,
         '# Workspace Sync Repair Target',
       ),
     );
+    await refreshWorkspaceSync(page);
 
     await expect
       .poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 })
@@ -498,6 +501,7 @@ Root README home content`,
 [Missing](/${missingSlug})`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     await runCleanupPreservingTestError(
       async () => {
@@ -551,6 +555,7 @@ Root README home content`,
 [Missing](/${missingSlug})`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     await runCleanupPreservingTestError(
       async () => {
@@ -600,7 +605,9 @@ Root README home content`,
   });
 
   // - Query and fragment survive migration
-  test('workspace-sync-preserves-query-fragment-and-leaves-assets-code-blocks-unchanged', async () => {
+  test('workspace-sync-preserves-query-fragment-and-leaves-assets-code-blocks-unchanged', async ({
+    page,
+  }) => {
     const suffix = Date.now();
     const sourceSlug = `workspace-sync-query-source-${suffix}`;
     const targetSlug = `workspace-sync-query-target-${suffix}`;
@@ -629,6 +636,7 @@ Root README home content`,
 \`\`\``,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     const rewritten = expect.poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 });
     await rewritten.toContain(`[Target](/${targetSlug}.md?mode=raw#part)`);
@@ -650,6 +658,7 @@ Root README home content`,
 Original snapshot content`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     const treeView = new TreeView(page);
     await expect(await treeView.findPageByTitle('Workspace Snapshot Restore')).toBeVisible({
@@ -672,6 +681,7 @@ Original snapshot content`,
 Updated snapshot content`,
       ),
     );
+    await refreshWorkspaceSync(page);
     await expect(page.locator('article')).toContainText('Updated snapshot content', {
       timeout: 15000,
     });
@@ -686,7 +696,7 @@ Updated snapshot content`,
   });
 
   test('workspace snapshot dialog loads additional snapshot pages', async ({ page }) => {
-    await page.route('**/api/workspace-sync/snapshots**', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?workspace-sync\/snapshots/, async (route) => {
       const url = new URL(route.request().url());
       const cursor = url.searchParams.get('cursor') ?? '';
       const payload =
@@ -748,6 +758,7 @@ Updated snapshot content`,
 Legacy metadata should be canonicalized exactly once.`,
       ),
     );
+    await refreshWorkspaceSync(page);
 
     const treeView = new TreeView(page);
     await expect(await treeView.findPageByTitle('Workspace Sync Metadata Migration')).toBeVisible({
@@ -792,6 +803,7 @@ Legacy metadata should be canonicalized exactly once.`,
     const secondPath = `workspace-sync-invalid-b-${Date.now()}.md`;
     writeRootMarkdown(firstPath, canonicalPageMarkdown(duplicateId, 'Invalid A', '# Invalid A'));
     writeRootMarkdown(secondPath, canonicalPageMarkdown(duplicateId, 'Invalid B', '# Invalid B'));
+    await refreshWorkspaceSync(page);
 
     await runCleanupPreservingTestError(
       async () => {

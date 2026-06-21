@@ -19,7 +19,6 @@ func (w *Wiki) newPageOrchestrator() *pagesave.PageSaveOrchestrator {
 	effects = append(effects,
 		pagesave.NewSearchIndexSideEffect(w.searchIndex, w.tree, w.log),
 		pagesave.NewLinkIndexSideEffect(w.links, w.log),
-		pagesave.NewRevisionSideEffect(w.revision, w.log),
 		pagesave.NewTagsSideEffect(w.tags, w.log),
 		pagesave.NewPropertiesSideEffect(w.props, w.log),
 	)
@@ -46,9 +45,9 @@ func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
 		TreeService:      w.tree,
 		CreatePage:       wikipages.NewCreatePageUseCase(w.tree, w.slug, o, w.log),
 		UpdatePage:       wikipages.NewUpdatePageUseCase(w.tree, w.slug, o, w.log),
-		DeletePage:       wikipages.NewDeletePageUseCase(w.tree, w.revision, w.asset, o, w.log),
+		DeletePage:       wikipages.NewDeletePageUseCase(w.tree, w.asset, o, w.log),
 		MovePage:         wikipages.NewMovePageUseCase(w.tree, o, w.log),
-		ConvertPage:      wikipages.NewConvertPageUseCase(w.tree, w.revision, o, w.log),
+		ConvertPage:      wikipages.NewConvertPageUseCase(w.tree, o, w.log),
 		CopyPage:         wikipages.NewCopyPageUseCase(w.tree, w.slug, o, w.asset, w.log),
 		GetPage:          wikipages.NewGetPageUseCase(w.tree),
 		FindByPath:       wikipages.NewFindByPathUseCase(w.tree),
@@ -60,7 +59,7 @@ func (w *Wiki) buildPagesRoutes() *wikipages.Routes {
 		PreviewRefactor: wikipages.NewPreviewPageRefactorUseCaseWithOptions(w.tree, w.slug, w.links, w.log, wikipages.RefactorUseCaseOptions{
 			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 		}),
-		ApplyRefactor: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.revision, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
+		ApplyRefactor: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
 			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 		}),
 		UserResolver: w.userResolver,
@@ -88,10 +87,10 @@ func (w *Wiki) buildAuthRoutes() *wikiauth.Routes {
 
 func (w *Wiki) buildAssetsRoutes() *wikiassets.Routes {
 	return wikiassets.NewRoutes(wikiassets.RoutesConfig{
-		Upload:      wikiassets.NewUploadAssetUseCase(w.tree, w.asset, w.revision, w.log),
+		Upload:      wikiassets.NewUploadAssetUseCase(w.tree, w.asset, w.log),
 		List:        wikiassets.NewListAssetsUseCase(w.tree, w.asset),
-		Rename:      wikiassets.NewRenameAssetUseCase(w.tree, w.asset, w.revision, w.log),
-		Delete:      wikiassets.NewDeleteAssetUseCase(w.tree, w.asset, w.revision, w.log),
+		Rename:      wikiassets.NewRenameAssetUseCase(w.tree, w.asset, w.log),
+		Delete:      wikiassets.NewDeleteAssetUseCase(w.tree, w.asset, w.log),
 		AuthService: w.auth,
 		AssetsDir:   w.asset.GetAssetsDir(),
 		Log:         w.log,
@@ -100,13 +99,6 @@ func (w *Wiki) buildAssetsRoutes() *wikiassets.Routes {
 
 func (w *Wiki) buildRevisionsRoutes() *wikirevisions.Routes {
 	return wikirevisions.NewRoutes(wikirevisions.RoutesConfig{
-		ListRevisions:            wikirevisions.NewListRevisionsUseCase(w.revision),
-		GetRevision:              wikirevisions.NewGetRevisionUseCase(w.revision),
-		CompareRevisions:         wikirevisions.NewCompareRevisionsUseCase(w.revision),
-		GetRevisionAsset:         wikirevisions.NewGetRevisionAssetUseCase(w.revision),
-		GetLatest:                wikirevisions.NewGetLatestRevisionUseCase(w.revision),
-		RestoreRevision:          wikirevisions.NewRestoreRevisionUseCase(w.revision, w.tree, w.newPageOrchestrator(), w.log),
-		CheckIntegrity:           wikirevisions.NewCheckIntegrityUseCase(w.revision),
 		ListWorkspaceRevisions:   w.WorkspaceSyncPageRevisions,
 		GetWorkspaceRevision:     w.WorkspaceSyncPageRevision,
 		RestoreWorkspaceRevision: w.WorkspaceSyncRestorePageRevision,

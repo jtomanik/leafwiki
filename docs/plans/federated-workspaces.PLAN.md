@@ -11,6 +11,9 @@ page:
 
 # Federated Workspaces Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement LeafWiki federated workspaces so one install-wide `wikid` and one `frontd` can coordinate multiple workspace-scoped `workspaced` daemons through one UI and stable MCP surfaces.

@@ -11,6 +11,8 @@ page:
 
 # Agent-Friendly LeafWiki MCP Surface Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Use TDD first. Split into subagents for MCP contract, validation/partial edits, presence/UI, and docs/E2E review.
 
 **Goal:** Make LeafWiki MCP a first-class agent collaboration surface with `wiki_*` tools, context-first discovery, safe direct-file recovery, safe partial edits, and human/agent presence parity with the web UI.

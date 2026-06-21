@@ -4,42 +4,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
-	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wikid"
 )
 
-func TestSeedMCPAPIKeysWritesLegacyAuthStoreWhenExplicitlyRequested(t *testing.T) {
-	dataDir := t.TempDir()
-
-	seeds, err := seedMCPAPIKeysForRuntime(dataDir, projectdaemon.RuntimeStackLegacy)
-	if err != nil {
-		t.Fatalf("seed MCP API keys: %v", err)
-	}
-
-	stores, err := openLegacyAuthStores(dataDir)
-	if err != nil {
-		t.Fatalf("open legacy auth stores: %v", err)
-	}
-	defer stores.Close()
-	users := coreauth.NewUserService(stores.Users)
-	apiKeys := coreauth.NewAPIKeyService(stores.APIKeys, users)
-	defer apiKeys.Close()
-
-	verified, err := apiKeys.VerifyAPIKey(seeds.Editor.APIKey)
-	if err != nil {
-		t.Fatalf("verify seeded editor API key from legacy auth store: %v", err)
-	}
-	if verified.User.Username != seeds.Editor.Username {
-		t.Fatalf("verified username = %q, want %q", verified.User.Username, seeds.Editor.Username)
-	}
-}
-
 func TestSeedMCPAPIKeysWritesWikidAuthStoreByDefault(t *testing.T) {
-	t.Setenv("LEAFWIKI_RUNTIME_STACK", "")
-	t.Setenv("LEAFWIKI_RUN_MCP_RUNTIME_STACK", "")
+	unsetEnvForTest(t, "LEAFWIKI_RUNTIME_STACK")
+	unsetEnvForTest(t, "LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 	dataDir := t.TempDir()
 
 	seeds, err := seedMCPAPIKeys(dataDir)
@@ -50,23 +24,31 @@ func TestSeedMCPAPIKeysWritesWikidAuthStoreByDefault(t *testing.T) {
 	assertWikidSeededAPIKey(t, dataDir, seeds)
 }
 
-func TestSeedMCPAPIKeysUsesRunMCPRuntimeStackPrecedence(t *testing.T) {
-	t.Setenv("LEAFWIKI_RUNTIME_STACK", projectdaemon.RuntimeStackLegacy)
-	t.Setenv("LEAFWIKI_RUN_MCP_RUNTIME_STACK", projectdaemon.RuntimeStackWikidFrontd)
-	dataDir := t.TempDir()
+func TestSeedMCPAPIKeysRejectsRemovedRuntimeStackEnvironment(t *testing.T) {
+	for _, name := range []string{
+		"LEAFWIKI_RUNTIME_STACK",
+		"LEAFWIKI_RUN_MCP_RUNTIME_STACK",
+	} {
+		t.Run(name, func(t *testing.T) {
+			unsetEnvForTest(t, "LEAFWIKI_RUNTIME_STACK")
+			unsetEnvForTest(t, "LEAFWIKI_RUN_MCP_RUNTIME_STACK")
+			t.Setenv(name, "legacy")
 
-	seeds, err := seedMCPAPIKeys(dataDir)
-	if err != nil {
-		t.Fatalf("seed MCP API keys: %v", err)
+			_, err := seedMCPAPIKeys(t.TempDir())
+			if err == nil {
+				t.Fatalf("seed MCP API keys succeeded with %s set, want error", name)
+			}
+			if !strings.Contains(err.Error(), "unknown environment variable: "+name) {
+				t.Fatalf("error = %q, want unknown environment variable for %s", err, name)
+			}
+		})
 	}
-
-	assertWikidSeededAPIKey(t, dataDir, seeds)
 }
 
 func TestSeedMCPAPIKeysWritesWikidAuthStore(t *testing.T) {
 	dataDir := t.TempDir()
 
-	seeds, err := seedMCPAPIKeysForRuntime(dataDir, projectdaemon.RuntimeStackWikidFrontd)
+	seeds, err := seedMCPAPIKeys(dataDir)
 	if err != nil {
 		t.Fatalf("seed MCP API keys: %v", err)
 	}
@@ -98,4 +80,19 @@ func assertWikidSeededAPIKey(t *testing.T, dataDir string, seeds seedOutput) {
 	if verified.User.Username != seeds.Editor.Username {
 		t.Fatalf("verified username = %q, want %q", verified.User.Username, seeds.Editor.Username)
 	}
+}
+
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	value, ok := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(name, value)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }

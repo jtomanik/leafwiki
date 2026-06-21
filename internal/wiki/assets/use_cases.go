@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	coreassets "github.com/perber/wiki/internal/core/assets"
-	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -31,14 +30,13 @@ type UploadAssetOutput struct {
 }
 
 type UploadAssetUseCase struct {
-	tree     *tree.TreeService
-	asset    *coreassets.AssetService
-	revision *revision.Service
-	log      *slog.Logger
+	tree  *tree.TreeService
+	asset *coreassets.AssetService
+	log   *slog.Logger
 }
 
-func NewUploadAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, r *revision.Service, log *slog.Logger) *UploadAssetUseCase {
-	return &UploadAssetUseCase{tree: t, asset: a, revision: r, log: log}
+func NewUploadAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, log *slog.Logger) *UploadAssetUseCase {
+	return &UploadAssetUseCase{tree: t, asset: a, log: log}
 }
 
 func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*UploadAssetOutput, error) {
@@ -53,7 +51,6 @@ func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*
 	if err != nil {
 		return nil, err
 	}
-	recordAssetRevision(uc.revision, in.PageID, in.UserID, uc.log)
 	return &UploadAssetOutput{URL: url}, nil
 }
 
@@ -154,14 +151,13 @@ type RenameAssetOutput struct {
 }
 
 type RenameAssetUseCase struct {
-	tree     *tree.TreeService
-	asset    *coreassets.AssetService
-	revision *revision.Service
-	log      *slog.Logger
+	tree  *tree.TreeService
+	asset *coreassets.AssetService
+	log   *slog.Logger
 }
 
-func NewRenameAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, r *revision.Service, log *slog.Logger) *RenameAssetUseCase {
-	return &RenameAssetUseCase{tree: t, asset: a, revision: r, log: log}
+func NewRenameAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, log *slog.Logger) *RenameAssetUseCase {
+	return &RenameAssetUseCase{tree: t, asset: a, log: log}
 }
 
 func (uc *RenameAssetUseCase) Execute(_ context.Context, in RenameAssetInput) (*RenameAssetOutput, error) {
@@ -176,7 +172,6 @@ func (uc *RenameAssetUseCase) Execute(_ context.Context, in RenameAssetInput) (*
 	if err != nil {
 		return nil, err
 	}
-	recordAssetRevision(uc.revision, in.PageID, in.UserID, uc.log)
 	return &RenameAssetOutput{URL: newPath}, nil
 }
 
@@ -189,14 +184,13 @@ type DeleteAssetInput struct {
 }
 
 type DeleteAssetUseCase struct {
-	tree     *tree.TreeService
-	asset    *coreassets.AssetService
-	revision *revision.Service
-	log      *slog.Logger
+	tree  *tree.TreeService
+	asset *coreassets.AssetService
+	log   *slog.Logger
 }
 
-func NewDeleteAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, r *revision.Service, log *slog.Logger) *DeleteAssetUseCase {
-	return &DeleteAssetUseCase{tree: t, asset: a, revision: r, log: log}
+func NewDeleteAssetUseCase(t *tree.TreeService, a *coreassets.AssetService, log *slog.Logger) *DeleteAssetUseCase {
+	return &DeleteAssetUseCase{tree: t, asset: a, log: log}
 }
 
 func (uc *DeleteAssetUseCase) Execute(_ context.Context, in DeleteAssetInput) error {
@@ -210,17 +204,5 @@ func (uc *DeleteAssetUseCase) Execute(_ context.Context, in DeleteAssetInput) er
 	if err := uc.asset.DeleteAsset(page, in.Filename); err != nil {
 		return err
 	}
-	recordAssetRevision(uc.revision, in.PageID, in.UserID, uc.log)
 	return nil
-}
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-func recordAssetRevision(svc *revision.Service, pageID, userID string, log *slog.Logger) {
-	if svc == nil {
-		return
-	}
-	if _, _, err := svc.RecordAssetChange(pageID, userID, ""); err != nil {
-		log.Warn("failed to record asset revision", "pageID", pageID, "error", err)
-	}
 }

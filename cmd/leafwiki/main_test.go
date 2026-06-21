@@ -58,7 +58,6 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		"--root-dir",
 		"--log-target",
 		"--log-file",
-		"--enable-workspace-sync",
 		"--mcp",
 		"--api-key",
 		"Federated runtime idle timeout",
@@ -68,7 +67,6 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		"LEAFWIKI_ROOT_DIR",
 		"LEAFWIKI_LOG_TARGET",
 		"LEAFWIKI_LOG_FILE",
-		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
 		"LEAFWIKI_MCP",
 		"LEAFWIKI_MCP_API_KEY",
 	} {
@@ -77,8 +75,15 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		}
 	}
 	for _, removed := range []string{
+		"--enable-revision",
+		"--enable-workspace-sync",
+		"--max-revision-history",
 		"--enable-mcp",
 		"--mcp-stdio",
+		"LEAFWIKI_ENABLE_REVISION",
+		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
+		"LEAFWIKI_MAX_REVISION_HISTORY",
+		"LEAFWIKI_RUNTIME_STACK",
 		"LEAFWIKI_ENABLE_MCP",
 		"LEAFWIKI_MCP_STDIO",
 	} {
@@ -88,29 +93,51 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 	}
 }
 
-func TestRegisterFlagsParsesEnableWorkspaceSync(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	flags := registerFlags(fs)
+func TestRegisterFlagsRejectsRemovedStartupFlags(t *testing.T) {
+	for _, arg := range []string{
+		"--enable-revision",
+		"--enable-workspace-sync",
+		"--enable-mcp",
+		"--mcp-stdio",
+		"--max-revision-history=0",
+	} {
+		t.Run(arg, func(t *testing.T) {
+			fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+			var errOut bytes.Buffer
+			fs.SetOutput(&errOut)
+			registerFlags(fs)
 
-	if err := fs.Parse([]string{"--enable-workspace-sync"}); err != nil {
-		t.Fatalf("parse --enable-workspace-sync: %v", err)
-	}
-
-	if !*flags.enableWorkspaceSync {
-		t.Fatalf("enableWorkspaceSync = false, want true")
+			err := fs.Parse([]string{arg})
+			if err == nil {
+				t.Fatalf("parse %s unexpectedly succeeded", arg)
+			}
+			if !strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("parse %s error = %v, stderr=%q, want unknown flag", arg, err, errOut.String())
+			}
+		})
 	}
 }
 
-func TestResolveRuntimeStackDefaultsToWikidFrontdAfterParityFlip(t *testing.T) {
-	t.Setenv("LEAFWIKI_RUNTIME_STACK", "")
+func TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv(t *testing.T) {
+	for _, name := range []string{
+		"LEAFWIKI_RUNTIME_STACK",
+		"LEAFWIKI_ENABLE_REVISION",
+		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
+		"LEAFWIKI_MAX_REVISION_HISTORY",
+		"LEAFWIKI_ENABLE_MCP",
+		"LEAFWIKI_MCP_STDIO",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "")
 
-	got, err := resolveRuntimeStack()
-	if err != nil {
-		t.Fatalf("resolveRuntimeStack failed: %v", err)
-	}
-	if got != projectdaemon.RuntimeStackWikidFrontd {
-		t.Fatalf("runtime stack = %q, want %q", got, projectdaemon.RuntimeStackWikidFrontd)
+			err := rejectRemovedLeafWikiEnv()
+			if err == nil {
+				t.Fatalf("rejectRemovedLeafWikiEnv with %s unexpectedly succeeded", name)
+			}
+			if !strings.Contains(err.Error(), "unknown environment variable: "+name) {
+				t.Fatalf("error = %v, want unknown env %s", err, name)
+			}
+		})
 	}
 }
 
@@ -980,9 +1007,7 @@ func TestMainProcess_DefaultServerLoggingUsesFileForStartupAndRequestLogsAndKeep
 		"--data-dir", dataDir,
 		"--host", "127.0.0.1",
 		"--port", port,
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	waitForLeafwikiReady(t, proc, port)
 	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
@@ -1135,14 +1160,12 @@ func TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars(t *testing.T
 	t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
 	t.Setenv("LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX", "/wiki-docs")
 	t.Setenv("LEAFWIKI_PUBLIC_ACCESS", "true")
-	t.Setenv("LEAFWIKI_MAX_REVISION_HISTORY", "100")
 
 	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
 	writeTestConfig(t, configPath, `port: 8088
 base-path: ""
 markdown-link-root-prefix: docs/
 public-access: false
-max-revision-history: 0
 `)
 	flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
 
@@ -1167,9 +1190,6 @@ max-revision-history: 0
 	}
 	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
 		t.Fatalf("public-access = true, want explicit YAML false to override env")
-	}
-	if got := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100); got != 0 {
-		t.Fatalf("max-revision-history = %d, want explicit YAML zero to override env", got)
 	}
 }
 
@@ -1226,7 +1246,6 @@ func TestServiceExampleConfigParsesActiveTemplate(t *testing.T) {
 	for _, expected := range []string{
 		"allow-insecure",
 		"disable-auth",
-		"enable-workspace-sync",
 		"host",
 		"log-file",
 		"log-target",
@@ -1266,7 +1285,6 @@ func TestApplyYAMLConfigFile_AcceptsQuotedScalarCoercions(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
 	writeTestConfig(t, configPath, `public-access: "false"
 allow-insecure: "true"
-max-revision-history: "0"
 access-token-timeout: "30m"
 `)
 
@@ -1277,9 +1295,6 @@ access-token-timeout: "30m"
 	}
 	if got := resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE"); !got {
 		t.Fatalf("allow-insecure = false, want quoted YAML true")
-	}
-	if got := resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100); got != 0 {
-		t.Fatalf("max-revision-history = %d, want quoted YAML zero", got)
 	}
 	if got := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT"); got != 30*time.Minute {
 		t.Fatalf("access-token-timeout = %s, want quoted YAML 30m", got)
@@ -1297,11 +1312,13 @@ func TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues(t *testing.T) {
 		{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", wantError: `requires a non-null scalar value`},
 		{name: "null value", yaml: "base-path: null\n", wantError: `requires a non-null scalar value`},
 		{name: "hidden compatibility key", yaml: "enable-mcp: true\n", wantError: `unknown --config key "enable-mcp"`},
+		{name: "removed revision key", yaml: "enable-revision: true\n", wantError: `unknown --config key "enable-revision"`},
+		{name: "removed workspace sync key", yaml: "enable-workspace-sync: true\n", wantError: `unknown --config key "enable-workspace-sync"`},
+		{name: "removed revision limit key", yaml: "max-revision-history: 0\n", wantError: `unknown --config key "max-revision-history"`},
 		{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", wantError: `unknown --config key "internal-project-daemon"`},
 		{name: "config key", yaml: "config: other.yml\n", wantError: `unknown --config key "config"`},
 		{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", wantError: `unknown --config key "mcp-stdio"`},
 		{name: "bad bool scalar", yaml: "public-access: maybe\n", wantError: `invalid --config value for "public-access"`},
-		{name: "bad int scalar", yaml: "max-revision-history: many\n", wantError: `invalid --config value for "max-revision-history"`},
 		{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", wantError: `invalid --config value for "access-token-timeout"`},
 	}
 	for _, tt := range tests {
@@ -1643,16 +1660,14 @@ log-target: stderr
 func TestMainProcess_ResetAdminPasswordUsesConfigDataDir(t *testing.T) {
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
-	initAdminUser(t, dataDir)
+	initWikidAdminUser(t, dataDir)
 	configPath := filepath.Join(baseDir, "leafwiki.yml")
 	writeTestConfig(t, configPath, fmt.Sprintf("data-dir: %s\n", dataDir))
 
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--config", configPath,
 		"reset-admin-password",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
 
 	if err != nil {
 		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
@@ -1787,10 +1802,10 @@ func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
 
 func TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP(t *testing.T) {
 	var ownerPID int
+	baseDir := t.TempDir()
 	t.Cleanup(func() {
 		terminateProjectDaemonProcess(t, ownerPID)
 	})
-	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
 	port := freeTCPPort(t)
@@ -1810,6 +1825,9 @@ func TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP(t *te
 	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
 	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
 	proc.stop(t)
+	terminateProjectDaemonProcess(t, ownerPID)
+	waitForLeafwikiUnavailable(t, port)
+	waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
 }
 
 func TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly(t *testing.T) {
@@ -2112,9 +2130,7 @@ func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(
 		"--admin-password", "owner-admin-password",
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 	waitForLeafwikiReady(t, first, port)
 	grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
 
@@ -2127,8 +2143,7 @@ func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(
 		"--allow-insecure",
 		"--log-target", "stderr",
 	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY":   apiKey.Secret,
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+		"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
 	}, 5*time.Second)
 
 	if err != nil {
@@ -2214,8 +2229,7 @@ func TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey(t *testing.T)
 		"--admin-password", "owner-admin-password",
 		"--log-target", "stderr",
 	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY":   apiKey,
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+		"LEAFWIKI_MCP_API_KEY": apiKey,
 	}, stdinReader)
 	waitForLeafwikiReady(t, proc, port)
 
@@ -2667,6 +2681,7 @@ func TestMainProcessAgentHookStartsDaemonAndRecordsPresence(t *testing.T) {
 
 func TestMainProcessAgentHookReplacesStaleDescriptorAndFailsOpen(t *testing.T) {
 	baseDir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(baseDir, "home"))
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -3196,9 +3211,7 @@ func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) 
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
 	waitForLeafwikiReady(t, first, port)
 
 	second := startLeafwikiHelper(t, []string{
@@ -3208,9 +3221,7 @@ func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) 
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
 	waitForLeafwikiReady(t, second, port)
 
 	waitForForegroundSignalHandler()
@@ -3293,9 +3304,7 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--admin-password", "owner-admin-password",
 		"--allow-insecure",
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 	waitForLeafwikiReady(t, first, port)
 	grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
 
@@ -3308,8 +3317,7 @@ func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *test
 		"--allow-insecure",
 		"--log-target", "stderr",
 	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY":   apiKey.Secret,
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
+		"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
 	}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
 
 	if err != nil {
@@ -3533,9 +3541,7 @@ func TestMainProcess_WikidFrontdRuntimeWritesRoleDescriptor(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	workspaceDesc := waitForProjectDaemonDescriptor(t, dataDir)
 	waitForLeafwikiReady(t, proc, port)
@@ -3606,9 +3612,7 @@ func TestMainProcess_WikidFrontdRuntimeListsHomeWorkspace(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	desc := waitForProjectDaemonDescriptor(t, dataDir)
 	ownerPID = desc.PID
@@ -3666,9 +3670,7 @@ func TestMainProcess_WikidFrontdRuntimeProxiesWorkspaceAPIByID(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	desc := waitForProjectDaemonDescriptor(t, dataDir)
 	ownerPID = desc.PID
@@ -3718,9 +3720,7 @@ func TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID(t *testing
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	_ = waitForProjectDaemonDescriptor(t, dataDir)
 	waitForLeafwikiReady(t, proc, port)
@@ -4331,9 +4331,7 @@ func TestMainProcess_WikidFrontdRuntimeRestartsWorkspacedAndUpdatesDescriptor(t 
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	desc := waitForProjectDaemonDescriptor(t, dataDir)
 	ownerPID = desc.PID
@@ -4383,9 +4381,7 @@ func TestMainProcess_WikidFrontdRuntimeUsesFreshWikidAuthStores(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
 	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
@@ -4437,7 +4433,6 @@ func TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag(t *testing
 	port := freeTCPPort(t)
 	proc := startLeafwikiHelper(t, []string{
 		"--disable-auth",
-		"--enable-workspace-sync",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
 		"--host", "127.0.0.1",
@@ -4454,29 +4449,32 @@ func TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag(t *testing
 	proc.stop(t)
 }
 
-func TestMainProcess_RejectsRevisionAndWorkspaceSyncTogether(t *testing.T) {
+func TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown(t *testing.T) {
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--disable-auth",
-		"--enable-revision",
-		"--enable-workspace-sync",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", freeTCPPort(t),
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
+	for _, removedFlag := range []string{"--enable-revision", "--enable-workspace-sync"} {
+		t.Run(removedFlag, func(t *testing.T) {
+			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+				"--disable-auth",
+				removedFlag,
+				"--data-dir", dataDir,
+				"--root-dir", rootDir,
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, 5*time.Second)
 
-	if err == nil {
-		t.Fatalf("combined revision/workspace-sync startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("combined revision/workspace-sync startup hung; expected immediate validation error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "enable-revision and enable-workspace-sync cannot be combined") {
-		t.Fatalf("stderr = %q, want mutual exclusion error", stderr)
+			if err == nil {
+				t.Fatalf("startup with removed flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("startup with removed flag hung; expected immediate unknown flag error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
+				t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
+			}
+		})
 	}
 }
 
@@ -4492,7 +4490,6 @@ func TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag(t *testing.T) {
 	proc := startLeafwikiHelper(t, []string{
 		"--disable-auth",
 		"--allow-insecure",
-		"--enable-workspace-sync",
 		"--data-dir", dataDir,
 		"--root-dir", rootDir,
 		"--host", "127.0.0.1",
@@ -4535,9 +4532,8 @@ func TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor(t *testi
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
+	defer owner.stop(t)
 	waitForLeafwikiReady(t, owner, port)
 	descriptorPath := projectdaemon.DescriptorPath(dataDir)
 	waitForFileContaining(t, descriptorPath, `"rootDir"`)
@@ -4549,21 +4545,18 @@ func TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor(t *testi
 		"--host", "127.0.0.1",
 		"--port", port,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	}, 12*time.Second)
+	}, map[string]string{}, 12*time.Second)
 
 	if err == nil {
 		t.Fatalf("different root-dir startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "root-dir") {
-		t.Fatalf("stderr = %q, want root-dir config mismatch", stderr)
+	if !strings.Contains(stderr, "project daemon config mismatch") && !strings.Contains(stderr, "data directory is already in use by workspace") {
+		t.Fatalf("stderr = %q, want root-dir config mismatch or workspace registry conflict", stderr)
 	}
 	if _, err := os.Stat(descriptorPath); err != nil {
 		t.Fatalf("live descriptor was removed after root-dir mismatch: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	waitForLeafwikiReady(t, owner, port)
-	owner.stop(t)
 }
 
 func TestMainProcess_FirstStartupWritesSecureProjectDaemonDescriptor(t *testing.T) {
@@ -4841,37 +4834,26 @@ func TestMainProcess_RepeatedCombinedNativeStdioHTTPStderrLoggingAttaches(t *tes
 	}
 }
 
-func TestMainProcess_LegacyMCPFlagsAreIgnored(t *testing.T) {
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--enable-mcp",
-		"--mcp-stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--root-dir", filepath.Join(t.TempDir(), "content"),
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
+func TestMainProcess_LegacyMCPFlagsFailUnknown(t *testing.T) {
+	for _, removedFlag := range []string{"--enable-mcp", "--mcp-stdio"} {
+		t.Run(removedFlag, func(t *testing.T) {
+			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+				removedFlag,
+				"--disable-auth",
+				"--data-dir", filepath.Join(t.TempDir(), "data"),
+				"--root-dir", filepath.Join(t.TempDir(), "content"),
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, 5*time.Second)
 
-	waitForLeafwikiReady(t, proc, port)
-	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
-	if err != nil {
-		t.Fatalf("GET /mcp: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
-	}
-	proc.stop(t)
-
-	stdout := readFileString(t, proc.stdoutPath)
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	stderr := readFileString(t, proc.stderrPath)
-	if strings.Contains(stderr, "LeafWiki HTTP listening") {
-		t.Fatalf("stderr = %q, want no native STDIO HTTP diagnostic", stderr)
+			if err == nil {
+				t.Fatalf("startup with removed MCP flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
+				t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
+			}
+		})
 	}
 }
 
@@ -5365,7 +5347,6 @@ func TestDaemonOwnerRuntimeConfigForWikidFrontdForcesWorkspaceSync(t *testing.T)
 		true,
 	)
 	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	cfg.EnableRevision = true
 	cfg.EnableWorkspaceSync = false
 
 	ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
@@ -5379,9 +5360,6 @@ func TestDaemonOwnerRuntimeConfigForWikidFrontdForcesWorkspaceSync(t *testing.T)
 
 	if !ownerCfg.EnableWorkspaceSync || !daemonCfg.EnableWorkspaceSync {
 		t.Fatalf("workspace sync = %v/%v, want true/true", ownerCfg.EnableWorkspaceSync, daemonCfg.EnableWorkspaceSync)
-	}
-	if ownerCfg.EnableRevision || daemonCfg.EnableRevision {
-		t.Fatalf("enable revision = %v/%v, want false/false", ownerCfg.EnableRevision, daemonCfg.EnableRevision)
 	}
 }
 
@@ -5410,9 +5388,7 @@ func TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields(t *testi
 		{name: "log file", field: "log-file", mut: func(cfg *projectdaemon.Config) { cfg.LogFile = "/tmp/leafwiki.log" }},
 		{name: "hide metadata", field: "hide-link-metadata-section", mut: func(cfg *projectdaemon.Config) { cfg.HideLinkMetadataSection = !cfg.HideLinkMetadataSection }},
 		{name: "upload size", field: "max-asset-upload-size-bytes", mut: func(cfg *projectdaemon.Config) { cfg.MaxAssetUploadSizeBytes = 99 }},
-		{name: "revision", field: "enable-revision", mut: func(cfg *projectdaemon.Config) { cfg.EnableRevision = !cfg.EnableRevision }},
 		{name: "link refactor", field: "enable-link-refactor", mut: func(cfg *projectdaemon.Config) { cfg.EnableLinkRefactor = !cfg.EnableLinkRefactor }},
-		{name: "revision history", field: "max-revision-history", mut: func(cfg *projectdaemon.Config) { cfg.MaxRevisionHistory = 7 }},
 		{name: "remote user enabled", field: "enable-http-remote-user", mut: func(cfg *projectdaemon.Config) { cfg.EnableHTTPRemoteUser = !cfg.EnableHTTPRemoteUser }},
 		{name: "remote user header", field: "http-remote-user-header", mut: func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserHeader = "X-User" }},
 		{name: "trusted proxies", field: "trusted-proxy-ips", mut: func(cfg *projectdaemon.Config) { cfg.TrustedProxyIPs = "127.0.0.1/32" }},
@@ -5793,9 +5769,7 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", firstPort,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
 	waitForLeafwikiReady(t, first, firstPort)
 
 	waitForForegroundSignalHandler()
@@ -5816,9 +5790,7 @@ func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", secondPort,
 		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	}, secondStdinReader)
+	}, map[string]string{}, secondStdinReader)
 	waitForLeafwikiReady(t, second, secondPort)
 
 	if err := secondStdinWriter.Close(); err != nil {
@@ -6070,7 +6042,6 @@ daemon-idle-timeout: 0
 
 	proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
 		"HOME":                         homeDir,
-		"LEAFWIKI_RUNTIME_STACK":       projectdaemon.RuntimeStackLegacy,
 		"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "0",
 	})
 
@@ -6119,11 +6090,7 @@ daemon-idle-timeout: 0
 	waitForLeafwikiUnavailable(t, port)
 }
 
-func TestMainProcess_DaemonIgnoresInvalidRuntimeStackEnvironment(t *testing.T) {
-	if !supportsGracefulProcessSignal() {
-		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
-	}
-
+func TestMainProcess_DaemonRejectsRuntimeStackEnvironment(t *testing.T) {
 	homeDir := t.TempDir()
 	serviceDir := filepath.Join(homeDir, ".leafwiki")
 	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
@@ -6137,23 +6104,17 @@ log-target: stderr
 daemon-idle-timeout: 0
 `, port))
 
-	proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
 		"HOME":                   homeDir,
 		"LEAFWIKI_RUNTIME_STACK": "bogus",
 	})
 
-	waitForLeafwikiReady(t, proc, port)
-	desc := waitForProjectDaemonDescriptor(t, serviceDir)
-	if desc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd {
-		t.Fatalf("runtime stack = %q, want %q", desc.RuntimeStack, projectdaemon.RuntimeStackWikidFrontd)
+	if err == nil {
+		t.Fatalf("daemon with removed runtime env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
-
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(proc.cmd.Process); err != nil {
-		t.Fatalf("send SIGTERM: %v", err)
+	if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_RUNTIME_STACK") {
+		t.Fatalf("stderr = %q, want removed runtime env error", stderr)
 	}
-	proc.waitForExit(t)
-	waitForLeafwikiUnavailable(t, port)
 }
 
 func TestMainProcess_DaemonRunsFromServiceExampleTemplate(t *testing.T) {
@@ -6272,7 +6233,7 @@ func TestMainProcess_UnknownCommandIgnoresDirtyServerOnlyEnvironment(t *testing.
 	}
 }
 
-func TestMainProcess_UnknownCommandIgnoresMCPStdioEnvironment(t *testing.T) {
+func TestMainProcess_UnknownCommandRejectsMCPStdioEnvironment(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--data-dir", dataDir,
@@ -6281,27 +6242,23 @@ func TestMainProcess_UnknownCommandIgnoresMCPStdioEnvironment(t *testing.T) {
 		"LEAFWIKI_MCP_STDIO": "true",
 	})
 
-	if err != nil {
-		t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
+	if err == nil {
+		t.Fatalf("unknown command with removed env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
-	if !strings.Contains(stdout, "Unknown command: unknown-command") {
-		t.Fatalf("stdout = %q, want unknown command handling", stdout)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
+	if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_MCP_STDIO") {
+		t.Fatalf("stderr = %q, want removed env error", stderr)
 	}
 }
 
 func TestMainProcess_ResetAdminPasswordIgnoresDirtyServerOnlyEnvironment(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
-	initAdminUser(t, dataDir)
+	initWikidAdminUser(t, dataDir)
 
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--data-dir", dataDir,
 		"reset-admin-password",
 	}, map[string]string{
 		"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
-		"LEAFWIKI_RUNTIME_STACK":         projectdaemon.RuntimeStackLegacy,
 	})
 
 	if err != nil {
@@ -6335,14 +6292,12 @@ func TestMainProcess_UnknownCommandStaysUserFacingAndDoesNotCreateLogFile(t *tes
 
 func TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
-	initAdminUser(t, dataDir)
+	initWikidAdminUser(t, dataDir)
 
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--data-dir", dataDir,
 		"reset-admin-password",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackLegacy,
-	})
+	}, map[string]string{})
 
 	if err != nil {
 		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
@@ -6365,9 +6320,7 @@ func TestMainProcess_WikidFrontdResetAdminPasswordUsesWikidAuthStore(t *testing.
 	stdout, stderr, err := runLeafwikiHelper(t, []string{
 		"--data-dir", dataDir,
 		"reset-admin-password",
-	}, map[string]string{
-		"LEAFWIKI_RUNTIME_STACK": projectdaemon.RuntimeStackWikidFrontd,
-	})
+	}, map[string]string{})
 
 	if err != nil {
 		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
@@ -6545,7 +6498,7 @@ func TestResolveStartupWorkspace_SkipsWorkspaceValidationForResetAdminPassword(t
 	}
 }
 
-func TestResolveMCPTransports_DefaultEnvCLIAndOldOptions(t *testing.T) {
+func TestResolveMCPTransports_DefaultEnvCLIAndSelector(t *testing.T) {
 	t.Run("default none", func(t *testing.T) {
 		got, err := resolveMCPTransportsForArgs(t, nil)
 		if err != nil {
@@ -6590,21 +6543,7 @@ func TestResolveMCPTransports_DefaultEnvCLIAndOldOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("old flags and env ignored", func(t *testing.T) {
-		t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
-		t.Setenv("LEAFWIKI_MCP_STDIO", "true")
-		got, err := resolveMCPTransportsForArgs(t, []string{"--enable-mcp", "--mcp-stdio", "--disable-auth"})
-		if err != nil {
-			t.Fatalf("resolveMCPTransports: %v", err)
-		}
-		if got.HTTP || got.Stdio {
-			t.Fatalf("old MCP options transports = %#v, want none", got)
-		}
-	})
-
-	t.Run("selector overrides legacy env", func(t *testing.T) {
-		t.Setenv("LEAFWIKI_ENABLE_MCP", "true")
-		t.Setenv("LEAFWIKI_MCP_STDIO", "true")
+	t.Run("selector ignores removed legacy envs after env validation", func(t *testing.T) {
 		got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=none"})
 		if err != nil {
 			t.Fatalf("resolveMCPTransports: %v", err)
@@ -6817,33 +6756,6 @@ func TestRegisterFlags_AcceptsDoubleDashLongFlags(t *testing.T) {
 	}
 	if !*flags.allowInsecure {
 		t.Fatalf("expected allow-insecure to be true")
-	}
-}
-
-func TestRegisterFlags_AcceptsEnableMCPFlag(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
-
-	err := fs.Parse([]string{"--enable-mcp=true"})
-	if err != nil {
-		t.Fatalf("expected enable-mcp flag to parse, got %v (%s)", err, errOut.String())
-	}
-
-	if flags.enableMCP == nil || !*flags.enableMCP {
-		t.Fatalf("expected enable-mcp to be true")
-	}
-}
-
-func TestRegisterFlags_AcceptsMCPStdioFlag(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	registerFlags(fs)
-
-	if err := fs.Parse([]string{"--mcp-stdio=true"}); err != nil {
-		t.Fatalf("expected mcp-stdio flag to parse, got %v (%s)", err, errOut.String())
 	}
 }
 
@@ -7357,9 +7269,8 @@ func completeDaemonCompareConfig() projectdaemon.Config {
 		LogFile:                 "",
 		HideLinkMetadataSection: false,
 		MaxAssetUploadSizeBytes: 50 << 20,
-		EnableRevision:          true,
+		EnableWorkspaceSync:     true,
 		EnableLinkRefactor:      true,
-		MaxRevisionHistory:      100,
 		EnableHTTPRemoteUser:    false,
 		HTTPRemoteUserHeader:    "X-Remote-User",
 		TrustedProxyIPs:         "",
@@ -7814,7 +7725,6 @@ func testRuntimeConfig(dataDir string, rootDir string, port string, transports m
 		RefreshTokenTimeout:  7 * 24 * time.Hour,
 		MaxAssetUploadSize:   50 * 1024 * 1024,
 		MCPTransports:        transports,
-		MaxRevisionHistory:   100,
 		HTTPRemoteUserHeader: "Remote-User",
 		DaemonIdleTimeout:    0,
 	}
@@ -7824,6 +7734,7 @@ func testRuntimeConfigWithHealthyControlDescriptor(t *testing.T, recordHandler h
 	t.Helper()
 
 	baseDir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(baseDir, "home"))
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {

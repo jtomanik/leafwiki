@@ -11,6 +11,9 @@ page:
 
 # Federated Workspaces Context
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 ## Problem Frame
 
 LeafWiki now has an extracted one-workspace runtime: `wikid` supervises, `frontd` owns stable public HTTP ingress, and `workspaced` owns workspace behavior. That landed cut removed the biggest architectural blocker, but the system still behaves as one workspace with one root/data pair and one page tree.

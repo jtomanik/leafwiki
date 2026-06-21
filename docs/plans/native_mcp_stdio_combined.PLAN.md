@@ -11,6 +11,9 @@ page:
 
 # Native Combined STDIO + HTTP MCP Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 **Goal:** Add a project-local `leafwiki` runtime where one process exposes MCP over STDIO for the agent and HTTP UI for the human.
 
 **Reference Thread:** `codex://threads/019e88d1-e02b-7b93-bea6-13473fb08200`

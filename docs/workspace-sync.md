@@ -15,23 +15,13 @@ Workspace sync lets LeafWiki treat the Markdown tree under `--root-dir` as the s
 
 Decision source: `codex://threads/019e9d96-e56b-7ed3-b3fa-52db45fc57e6`
 
-## Enablement
-
-Start LeafWiki with:
+## Startup
 
 ```bash
-leafwiki --enable-workspace-sync --root-dir ./wiki --data-dir ./.wiki
+leafwiki --root-dir ./wiki --data-dir ./.wiki
 ```
 
-Environment equivalent:
-
-```bash
-LEAFWIKI_ENABLE_WORKSPACE_SYNC=true
-```
-
-Workspace sync is mutually exclusive with legacy page-snapshot revisions. Starting with both `--enable-revision` and `--enable-workspace-sync` fails.
-
-`scripts/run.sh mcp` enables workspace sync by default for native STDIO MCP sessions. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit it.
+Workspace sync is part of the workspace runtime. Native STDIO MCP sessions started through `scripts/run.sh mcp` use the same Git-backed workspace history.
 
 ## Internal Git Layout
 

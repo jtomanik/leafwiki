@@ -61,9 +61,8 @@ docker run -p 8080:8080 -v ~/leafwiki-data:/app/data \
 - Branding: logo, favicon, site name
 - Dark mode and mobile-friendly UI
 
-**Opt-in via feature flags:**
-- Revision history (`--enable-revision`; mutually exclusive with `--enable-workspace-sync`)
-- Workspace sync and Git-backed Markdown history (`--enable-workspace-sync`; mutually exclusive with `--enable-revision`; see [workspace-sync.md](/workspace-sync.md))
+**Workspace history and optional tools:**
+- Workspace sync and Git-backed Markdown history are part of the default workspace runtime; see [workspace-sync.md](/workspace-sync.md)
 - Automatic link rewriting when pages are renamed or moved (`--enable-link-refactor`)
 
 **Markdown import:**
@@ -269,13 +268,10 @@ For plain HTTP: add `--allow-insecure=true` so login and CSRF cookies work.
 | `--log-file`                     | Log file path when `--log-target=file`; relative paths use data dir      | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `--inject-code-in-header`        | Raw HTML/JS injected into `<head>`                                      | `""`          | v0.6.0  |
 | `--hide-link-metadata-section`   | Hide backlinks and link status panel                                    | `false`       | –       |
-| `--enable-revision`              | Enable revision history; mutually exclusive with workspace sync          | `false`       | v0.9.0  |
-| `--enable-workspace-sync`        | Enable workspace sync and Git-backed Markdown history; mutually exclusive with revision history | `false` | v0.11.0 |
 | `--enable-link-refactor`         | Enable link rewriting on rename/move                                    | `false`       | v0.9.0  |
 | `--mcp`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http`; HTTP MCP accepts loopback clients only | `none` | v0.11.0 |
 | `--api-key`                      | Native STDIO MCP API key; prefer `LEAFWIKI_MCP_API_KEY`                 | `""`          | v0.11.0 |
 | `--daemon-idle-timeout`          | Federated runtime idle timeout after the last session or presence record exits; `0` = immediate | `10m`       | v0.11.0 |
-| `--max-revision-history`         | Max revisions per page; `0` = unlimited                                 | `100`         | v0.9.0  |
 | `--enable-http-remote-user`      | Enable reverse-proxy auth via HTTP header                               | `false`       | v0.10.0 |
 | `--http-remote-user-header-name` | Header name carrying the username from the proxy                        | `Remote-User` | v0.10.0 |
 | `--trusted-proxy-ips`            | Trusted proxy IPs/CIDRs for remote-user header                          | `""`          | v0.10.0 |
@@ -298,7 +294,6 @@ jwt-secret: change-me
 admin-password: change-me
 allow-insecure: true
 mcp: http
-enable-workspace-sync: true
 ```
 
 ```bash
@@ -370,13 +365,10 @@ leafwiki daemon
 | `LEAFWIKI_LOG_FILE`                     | File path when log target is `file`                  | `<data-dir>/.leafwiki/logs/leafwiki.log` | v0.11.0 |
 | `LEAFWIKI_INJECT_CODE_IN_HEADER`        | HTML/JS injected into `<head>`                       | `""`          | v0.6.0  |
 | `LEAFWIKI_HIDE_LINK_METADATA_SECTION`   | Hide backlinks and link status panel                 | `false`       | –       |
-| `LEAFWIKI_ENABLE_REVISION`              | Revision history                                     | `false`       | v0.9.0  |
-| `LEAFWIKI_ENABLE_WORKSPACE_SYNC`        | Workspace sync and Git-backed Markdown history       | `false`       | v0.11.0 |
 | `LEAFWIKI_ENABLE_LINK_REFACTOR`         | Link rewriting on rename/move                        | `false`       | v0.9.0  |
 | `LEAFWIKI_MCP`                          | MCP transports: `none`, `http`, `stdio`, `http,stdio`, or `stdio,http` | `none` | v0.11.0 |
 | `LEAFWIKI_MCP_API_KEY`                  | Native STDIO MCP API key                              | `""`          | v0.11.0 |
 | `LEAFWIKI_DAEMON_IDLE_TIMEOUT`          | Federated runtime idle timeout after last session or presence record exits | `10m`         | v0.11.0 |
-| `LEAFWIKI_MAX_REVISION_HISTORY`         | Max revisions per page; `0` = unlimited              | `100`         | v0.9.0  |
 | `LEAFWIKI_ENABLE_HTTP_REMOTE_USER`      | Reverse-proxy auth via header                        | `false`       | v0.10.0 |
 | `LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME` | Username header from proxy                           | `Remote-User` | v0.10.0 |
 | `LEAFWIKI_TRUSTED_PROXY_IPS`            | Trusted proxy IPs/CIDRs                              | `""`          | v0.10.0 |

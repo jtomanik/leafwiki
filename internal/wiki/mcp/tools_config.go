@@ -25,7 +25,6 @@ func configOutputForOptions(opts httpinternal.RouterOptions) configOutput {
 		BasePath:                opts.BasePath,
 		MarkdownLinkRootPrefix:  opts.MarkdownLinkRootPrefix,
 		MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
-		EnableRevision:          opts.EnableRevision,
 		EnableWorkspaceSync:     opts.EnableWorkspaceSync,
 		EnableLinkRefactor:      opts.EnableLinkRefactor,
 		HTTPRemoteUserEnabled:   opts.HTTPRemoteUser.Enabled,

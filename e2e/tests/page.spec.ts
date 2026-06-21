@@ -4797,7 +4797,7 @@ Outro paragraph`;
     await test.expect(article).not.toContainText('$$');
   });
 
-  test('revision-preview-renders-deleted-assets', async ({ page }) => {
+  test('revision-history-omits-legacy-asset-tab-for-deleted-assets', async ({ page }) => {
     const title = `Revision Asset Preview ${Date.now()}`;
 
     const treeView = new TreeView(page);
@@ -4843,14 +4843,12 @@ Outro paragraph`;
       .toBeGreaterThanOrEqual(2);
     await viewPage.openRevisionAt(1);
     await expect(page.getByTestId('page-history-page-content')).toBeVisible();
-    await page.getByTestId('page-history-page-assets-tab').click();
-    await expect(page.getByTestId('page-history-page-content')).toContainText('upload-test.png');
-    await expect(page.getByTestId('page-history-page-content')).not.toContainText('Removed');
-    await expect(page.getByTestId('history-asset-open-upload-test.png')).toBeVisible();
-    await expect(page.getByTestId('history-asset-download-upload-test.png')).toBeVisible();
+    await expect(page.getByTestId('page-history-page-assets-tab')).toHaveCount(0);
 
     await page.getByTestId('page-history-page-changes-tab').click();
-    await expect(page.getByTestId('page-history-page-content')).toContainText('Removed');
+    await expect(page.getByTestId('page-history-page-content')).toContainText(
+      'Lines removed since',
+    );
   });
 
   test('history-main-content-stays-visible-when-switching-sidebar-tabs', async ({ page }) => {

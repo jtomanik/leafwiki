@@ -11,6 +11,9 @@ page:
 
 # Local MCP Streamable HTTP Interface For LeafWiki
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 ## Summary
 
 Implement a local-only MCP interface for LeafWiki using the official Go MCP SDK and Streamable HTTP transport. MCP must run in the same process and share the same `*wiki.Wiki` instance as the UI, so humans using the web UI and agents using MCP collaborate against one live wiki state.

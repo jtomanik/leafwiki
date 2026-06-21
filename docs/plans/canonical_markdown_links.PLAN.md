@@ -11,6 +11,8 @@ page:
 
 # Canonical Filesystem Markdown Links Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
 Reference thread: `codex://threads/019eb2fd-c83c-7d52-ad25-180701842e35`
 Target plan file: `plans/canonical_markdown_links.PLAN.md`
 Planning methods used: `superpowers:writing-plans`, `compound-engineering:ce-plan`, plus two read-only subagents for link/refactor and workspace-sync surfaces.

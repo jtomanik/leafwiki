@@ -46,7 +46,7 @@ Every normal LeafWiki startup joins an install-wide local runtime rooted at `~/.
 
 Compatible server starts join the existing global runtime through the global runtime descriptor and control path without taking data/root ownership locks themselves. Native STDIO starts first try the selected workspace descriptor at `<data-dir>/.leafwiki/project-daemon.json` and attach directly to that `workspaced` private MCP endpoint when the descriptor is healthy; missing, stale, or private-token-rejected workspace descriptors fall back to `wikid` registration/ensure before descriptor attach is retried. Workspace-grant denial is handled later during actor-context resolution and is not repaired by descriptor retry. The home workspace compatibility descriptor is written under the selected data directory at `<data-dir>/.leafwiki/project-daemon.json`; lazily started non-home workspace daemon descriptors are also mirrored under `~/.leafwiki/runtime/workspaces/<workspace-id>.json`. Descriptor files use mode `0600`; stale descriptors are ignored when the private endpoint is unreachable and the workspace locks are free. Global runtime role health remains in `~/.leafwiki/runtime/wikid.json`.
 
-Daemon-relevant configuration must match for runtime- or workspace-affecting starts: auth mode, host, port, base path, Markdown link root prefix, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, revision/workspace-sync/link-refactor settings, max revision history, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change the public runtime settings, so they inherit the global runtime value for host, public HTTP MCP, log target/file, and request logging while still selecting their own workspace. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
+Daemon-relevant configuration must match for runtime- or workspace-affecting starts: auth mode, host, port, base path, Markdown link root prefix, public access, insecure-cookie setting, token timeouts, UI injection/style settings, hidden link-metadata setting, upload size, link-refactor setting, remote-user settings, request logging, and `--daemon-idle-timeout`. STDIO-only session frontends cannot change the public runtime settings, so they inherit the global runtime value for host, public HTTP MCP, log target/file, and request logging while still selecting their own workspace. Per-session STDIO settings are not part of daemon identity: `--mcp=stdio`, `--api-key`, `LEAFWIKI_MCP_API_KEY`, and MCP client name/version can differ per attaching client.
 
 The install-wide `wikid` control server tracks registered session handles and active in-memory agent presence for the federated runtime. Agent presence records expire on the `--daemon-idle-timeout` cadence. Session-oriented starts can shut down after the last handle or presence record is gone; child `workspaced` processes are supervised by that parent runtime and are stopped when it shuts down. The default is `10m`; `0` stops immediately after the last handle or presence record is gone. Service mode disables idle shutdown so launchd/Homebrew can track a stable foreground process.
 
@@ -109,7 +109,6 @@ mcp: stdio
 data-dir: ./.wiki
 root-dir: ./wiki
 disable-auth: true
-enable-workspace-sync: true
 ```
 
 ```bash
@@ -242,11 +241,11 @@ Always available:
 
 `wiki_get_page` and `wiki_get_page_by_path` return `{ page, linkStatus }`. The `linkStatus` field uses the same shape as `wiki_get_link_status.status` and includes backlinks, broken incoming links, outgoing links, broken outgoing links, and counts so page reads carry the document context shown in the web UI.
 
-Only available with `--enable-workspace-sync`:
+Workspace sync tools are available for workspace runtimes:
 
 - `wiki_refresh`
 
-Only available with `--enable-revision` or `--enable-workspace-sync`:
+Revision tools use Git-backed workspace history:
 
 - `wiki_list_revisions`
 - `wiki_get_latest_revision`
@@ -255,7 +254,7 @@ Only available with `--enable-revision` or `--enable-workspace-sync`:
 - `wiki_get_revision_asset`
 - `wiki_restore_revision`
 
-When revision tools are exposed through workspace sync, page revision content comes from Git workspace snapshots. Revision asset reads still require the revision service; workspace sync revisions do not track historical asset blobs.
+Page revision content comes from Git workspace snapshots. Revision asset reads are unsupported because workspace sync revisions do not track historical asset blobs.
 
 Only available with `--enable-link-refactor`:
 
@@ -290,7 +289,7 @@ Asset reads return:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Startup rejects HTTP MCP | Host is not loopback | Bind public HTTP MCP to `127.0.0.1`, `localhost`, or `::1`; native STDIO can attach through private loopback control |
+| Remote HTTP MCP returns 404 | Public `/mcp` is local-only even when the daemon binds a LAN or Tailnet host | Connect from the local machine, use native STDIO, or route through a local loopback client |
 | Native STDIO rejects logging | `--log-target stdout` is set | Use `file`; `stderr` is accepted for foreground STDIO diagnostics, while detached `wikid`, `frontd`, and `workspaced` logs are retained in the log file |
 | Native STDIO rejects API-key auth | Missing or invalid `LEAFWIKI_MCP_API_KEY` | Create a current MCP API key and pass it in the child environment |
 | Startup rejects with config mismatch | The install-wide runtime already exists with different daemon-relevant public settings, or the selected workspace daemon has incompatible workspace settings | Stop existing LeafWiki sessions or restart with the desired host/port/base-path/auth/MCP/workspace settings |
@@ -322,8 +321,8 @@ rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 E2E_MCP_CLIENT_TRANSP
 rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 ./e2e/run.sh tests/mcp-disable-auth.spec.ts
 rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_API_KEYS_LOCAL=1 ./e2e/run.sh tests/mcp-api-keys.spec.ts
 rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_OAUTH_LOCAL=1 ./e2e/run.sh tests/mcp-oauth.spec.ts
-rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh tests/mcp-agent-context.spec.ts
-rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh tests/mcp-safe-edits.spec.ts
-rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh tests/presence.spec.ts
+rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 ./e2e/run.sh tests/mcp-agent-context.spec.ts
+rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 ./e2e/run.sh tests/mcp-safe-edits.spec.ts
+rtk env E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 ./e2e/run.sh tests/presence.spec.ts
 rtk env E2E_RUN_MODE=local E2E_ENABLE_AGENT_HOOKS_LOCAL=1 E2E_ENABLE_MCP_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio ./e2e/run.sh tests/agent-hooks.spec.ts
 ```

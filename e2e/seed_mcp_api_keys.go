@@ -5,10 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
-	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wikid"
 )
 
@@ -33,13 +31,12 @@ type seedOutput struct {
 func main() {
 	dataDir := flag.String("data-dir", "", "LeafWiki data directory")
 	outputPath := flag.String("output", "", "JSON output path")
-	runtimeStack := flag.String("runtime-stack", runtimeStackFromEnv(), "LeafWiki runtime stack for auth-store layout")
 	flag.Parse()
 	if *dataDir == "" || *outputPath == "" {
 		fatalf("--data-dir and --output are required")
 	}
 
-	out, err := seedMCPAPIKeysForRuntime(*dataDir, *runtimeStack)
+	out, err := seedMCPAPIKeys(*dataDir)
 	if err != nil {
 		fatalf("seed MCP API keys: %v", err)
 	}
@@ -54,21 +51,11 @@ func main() {
 }
 
 func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
-	return seedMCPAPIKeysForRuntime(dataDir, runtimeStackFromEnv())
-}
-
-func runtimeStackFromEnv() string {
-	if stack := strings.TrimSpace(os.Getenv("LEAFWIKI_RUN_MCP_RUNTIME_STACK")); stack != "" {
-		return stack
+	if err := rejectRemovedRuntimeStackEnv(); err != nil {
+		return seedOutput{}, err
 	}
-	if stack := strings.TrimSpace(os.Getenv("LEAFWIKI_RUNTIME_STACK")); stack != "" {
-		return stack
-	}
-	return projectdaemon.RuntimeStackWikidFrontd
-}
 
-func seedMCPAPIKeysForRuntime(dataDir string, runtimeStack string) (seedOutput, error) {
-	stores, err := openAuthStoresForRuntime(dataDir, runtimeStack)
+	stores, err := wikid.OpenAuthStores(dataDir)
 	if err != nil {
 		return seedOutput{}, err
 	}
@@ -133,46 +120,16 @@ func seedMCPAPIKeysForRuntime(dataDir string, runtimeStack string) (seedOutput, 
 	return out, nil
 }
 
-func openAuthStoresForRuntime(dataDir string, runtimeStack string) (*wikid.AuthStores, error) {
-	switch strings.TrimSpace(runtimeStack) {
-	case projectdaemon.RuntimeStackLegacy:
-		stores, err := openLegacyAuthStores(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("open legacy auth stores: %w", err)
+func rejectRemovedRuntimeStackEnv() error {
+	for _, name := range []string{
+		"LEAFWIKI_RUNTIME_STACK",
+		"LEAFWIKI_RUN_MCP_RUNTIME_STACK",
+	} {
+		if _, ok := os.LookupEnv(name); ok {
+			return fmt.Errorf("unknown environment variable: %s", name)
 		}
-		return stores, nil
-	case "", projectdaemon.RuntimeStackWikidFrontd:
-		stores, err := wikid.OpenAuthStores(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("open wikid auth stores: %w", err)
-		}
-		return stores, nil
-	default:
-		return nil, fmt.Errorf("unsupported runtime stack %q", runtimeStack)
 	}
-}
-
-func openLegacyAuthStores(dataDir string) (*wikid.AuthStores, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create legacy auth dir: %w", err)
-	}
-	stores := &wikid.AuthStores{}
-	var err error
-	stores.Users, err = coreauth.NewUserStore(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("open legacy user store: %w", err)
-	}
-	stores.Sessions, err = coreauth.NewSessionStore(dataDir)
-	if err != nil {
-		_ = stores.Close()
-		return nil, fmt.Errorf("open legacy session store: %w", err)
-	}
-	stores.APIKeys, err = coreauth.NewAPIKeyStore(dataDir)
-	if err != nil {
-		_ = stores.Close()
-		return nil, fmt.Errorf("open legacy API key store: %w", err)
-	}
-	return stores, nil
+	return nil
 }
 
 func createUser(users *coreauth.UserService, username, email, role string) (*coreauth.User, error) {

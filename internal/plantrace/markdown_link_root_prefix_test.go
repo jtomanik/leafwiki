@@ -149,7 +149,7 @@ func TestMarkdownLinkRootPrefixPlanIncludesSeparateRootE2EEnv(t *testing.T) {
 	t.Fatal("plan lacks E2E_ENABLE_SEPARATE_ROOT_DIR=1 on the root-dir markdown link root prefix command")
 }
 
-func TestMarkdownLinkRootPrefixPlanIncludesMCPWorkspaceSyncE2EEnv(t *testing.T) {
+func TestMarkdownLinkRootPrefixPlanUsesDefaultWorkspaceSyncE2E(t *testing.T) {
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if err != nil {
@@ -161,11 +161,11 @@ func TestMarkdownLinkRootPrefixPlanIncludesMCPWorkspaceSyncE2EEnv(t *testing.T) 
 			strings.Contains(line, `--grep "markdown link root prefix"`) &&
 			strings.Contains(line, "E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs") &&
 			strings.Contains(line, "E2E_ENABLE_MCP_LOCAL=1") &&
-			strings.Contains(line, "E2E_ENABLE_WORKSPACE_SYNC=1") {
+			!strings.Contains(line, "E2E_ENABLE_WORKSPACE_SYNC=1") {
 			return
 		}
 	}
-	t.Fatal("plan lacks E2E_ENABLE_WORKSPACE_SYNC=1 on the MCP markdown link root prefix command")
+	t.Fatal("plan should run the MCP markdown link root prefix command with default workspace sync and without E2E_ENABLE_WORKSPACE_SYNC=1")
 }
 
 func TestMarkdownLinkRootPrefixMCPDocsKeepRoutePathsSeparateFromMarkdownHrefs(t *testing.T) {

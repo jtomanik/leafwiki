@@ -11,6 +11,9 @@ page:
 
 # YAML Configuration File Support Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Use TDD first. Suggested workers: CLI/config parser, wrapper/docs, Go process tests, E2E.
 
 **Goal:** Add explicit `leafwiki --config <path>` support for a flat YAML config file whose keys mirror public CLI flag names without `--`.

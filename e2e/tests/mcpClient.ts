@@ -86,12 +86,6 @@ function leafwikiStdioEnv(
   options: ConnectMCPClientOptions,
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const name of ['LEAFWIKI_RUNTIME_STACK', 'LEAFWIKI_RUN_MCP_RUNTIME_STACK']) {
-    const value = process.env[name];
-    if (value) {
-      env[name] = value;
-    }
-  }
   if (options.accessToken) {
     env.LEAFWIKI_MCP_API_KEY = options.accessToken;
   }

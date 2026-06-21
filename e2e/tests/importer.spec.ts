@@ -16,7 +16,6 @@ import ViewPage from '../pages/ViewPage';
 
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
-const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 const importZipPath = path.resolve(__dirname, '../../internal/importer/fixtures/fixture-1.zip');
 const importZipFileName = 'fixture-1.zip';
 const importMetadataZipPath = path.resolve(
@@ -215,10 +214,6 @@ async function cleanupCanonicalFixtureMissingTarget(
   page: import('@playwright/test').Page,
   fixture: { missingSlug: string },
 ) {
-  if (!workspaceSyncEnabled) {
-    return;
-  }
-
   writeRootMarkdown(
     `${fixture.missingSlug}.md`,
     canonicalPageMarkdown(
@@ -433,8 +428,6 @@ test.describe('Importer', () => {
   test('importer-ui-unresolved-extensionless-page-link-surfaces-validation-error', async ({
     page,
   }) => {
-    test.skip(!workspaceSyncEnabled, 'requires E2E_ENABLE_WORKSPACE_SYNC=1');
-
     const fixture = createCanonicalLinksZip();
     const importerPage = new ImporterPage(page);
     await importerPage.goto();

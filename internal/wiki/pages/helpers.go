@@ -1,9 +1,6 @@
 package pages
 
-import (
-	"github.com/perber/wiki/internal/core/revision"
-	"github.com/perber/wiki/internal/core/tree"
-)
+import "github.com/perber/wiki/internal/core/tree"
 
 // sanitizeClientVersion rejects the internal VersionUnchecked sentinel so
 // external callers cannot bypass optimistic locking by sending the sentinel value.
@@ -32,17 +29,4 @@ func collectSubtreeIDs(node *tree.PageNode) []string {
 	}
 	walk(node)
 	return ids
-}
-
-// deleteRevisionData removes all revision data for a list of page IDs.
-func deleteRevisionData(svc *revision.Service, pageIDs []string) error {
-	if svc == nil {
-		return nil
-	}
-	for _, id := range pageIDs {
-		if err := svc.DeletePageData(id); err != nil {
-			return err
-		}
-	}
-	return nil
 }

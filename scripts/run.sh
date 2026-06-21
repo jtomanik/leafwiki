@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for removed_env in \
+  LEAFWIKI_RUNTIME_STACK \
+  LEAFWIKI_RUN_MCP_RUNTIME_STACK \
+  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC \
+  LEAFWIKI_RUN_MCP_SERVER_LOG
+do
+  if [[ ${!removed_env+x} ]]; then
+    printf 'Error: unknown environment variable: %s\n' "$removed_env" >&2
+    exit 1
+  fi
+done
+
 leafwiki_bin="${LEAFWIKI_RUN_MCP_LEAFWIKI_BIN:-${LEAFWIKI_BIN:-leafwiki}}"
 scheme="${LEAFWIKI_RUN_MCP_SCHEME:-http}"
 host="${LEAFWIKI_RUN_MCP_HOST:-${LEAFWIKI_HOST:-127.0.0.1}}"
@@ -15,10 +27,7 @@ allow_insecure="${LEAFWIKI_RUN_MCP_ALLOW_INSECURE:-${LEAFWIKI_ALLOW_INSECURE:-1}
 disable_auth="${LEAFWIKI_RUN_MCP_DISABLE_AUTH:-${LEAFWIKI_DISABLE_AUTH:-}}"
 disable_request_log="${LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG:-${LEAFWIKI_DISABLE_REQUEST_LOG:-1}}"
 daemon_idle_timeout="${LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT:-${LEAFWIKI_DAEMON_IDLE_TIMEOUT:-10m}}"
-enable_workspace_sync="${LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC:-1}"
 api_key="${LEAFWIKI_RUN_MCP_API_KEY:-${LEAFWIKI_MCP_API_KEY:-}}"
-runtime_stack="${LEAFWIKI_RUN_MCP_RUNTIME_STACK:-${LEAFWIKI_RUNTIME_STACK:-}}"
-server_log="${LEAFWIKI_RUN_MCP_SERVER_LOG:-}"
 dry_run=0
 config_path=""
 config_conflict=""
@@ -52,16 +61,11 @@ Options:
   --request-log             Keep LeafWiki request logs enabled
   --disable-request-log     Pass --disable-request-log to LeafWiki (default)
   --daemon-idle-timeout <d> Federated runtime idle timeout after the last session or presence record exits (default: 10m)
-  --enable-workspace-sync   Pass --enable-workspace-sync to LeafWiki (default)
-  --disable-workspace-sync  Do not pass --enable-workspace-sync
   --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
   --config <path>           Pass a LeafWiki YAML config file without wrapper defaults
-  --server-log <path>       Accepted and ignored for compatibility; use --server-arg for logging overrides
   --server-arg <arg>        Extra argument passed to leafwiki; repeatable
   --dry-run                 Print the planned command without starting anything
   -h, --help                Show this help
-
-Some removed wrapper options are accepted and ignored for compatibility.
 
 Environment overrides use LEAFWIKI_RUN_MCP_* names matching the option names.
 Use LEAFWIKI_RUN_MCP_API_KEY or LEAFWIKI_MCP_API_KEY to provide the native
@@ -136,7 +140,7 @@ detect_config_mode_requested() {
 
 wrapper_flag_takes_value() {
   case "$1" in
-    --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg|--leafwiki-bin|--scheme|--host|--port|--base-path|--data-dir|--root-dir|--markdown-link-root-prefix|--jwt-secret|--admin-password|--daemon-idle-timeout|--api-key|--config|--server-log|--server-arg)
+    --leafwiki-bin|--scheme|--host|--port|--base-path|--data-dir|--root-dir|--markdown-link-root-prefix|--jwt-secret|--admin-password|--daemon-idle-timeout|--api-key|--config|--server-arg)
       return 0
       ;;
     *)
@@ -257,15 +261,6 @@ while [[ $# -gt 0 ]]; do
   fi
 
   case "$1" in
-    --mode=*|--endpoint=*|--health-url=*|--mcp-stdio-bin=*|--request-timeout=*|--shutdown-timeout=*|--max-frame-size=*|--stdio-arg=*)
-      record_config_conflict "${1%%=*}"
-      shift
-      ;;
-    --mode|--endpoint|--health-url|--mcp-stdio-bin|--request-timeout|--shutdown-timeout|--max-frame-size|--stdio-arg)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "$1" "$1 requires a value"
-      record_config_conflict "$1"
-      shift 2
-      ;;
     --leafwiki-bin=*)
       leafwiki_bin="${1#*=}"
       shift
@@ -410,16 +405,6 @@ while [[ $# -gt 0 ]]; do
       record_config_conflict "--daemon-idle-timeout"
       shift 2
       ;;
-    --enable-workspace-sync)
-      enable_workspace_sync=1
-      record_config_conflict "--enable-workspace-sync"
-      shift
-      ;;
-    --disable-workspace-sync)
-      enable_workspace_sync=0
-      record_config_conflict "--disable-workspace-sync"
-      shift
-      ;;
     --api-key=*)
       api_key="${1#*=}"
       record_config_conflict "--api-key"
@@ -439,17 +424,6 @@ while [[ $# -gt 0 ]]; do
     --config)
       [[ $# -ge 2 ]] && is_config_path_value "$2" || fail_config_argument_error "--config requires a path"
       config_path="$2"
-      shift 2
-      ;;
-    --server-log=*)
-      server_log="${1#*=}"
-      record_config_conflict "--server-log"
-      shift
-      ;;
-    --server-log)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--server-log" "--server-log requires a path"
-      server_log="$2"
-      record_config_conflict "--server-log"
       shift 2
       ;;
     --server-arg=*)
@@ -483,14 +457,6 @@ done
 if [[ "$config_mode_requested" == "1" && -n "$config_conflict" ]]; then
   fail_error "--config cannot be combined with $config_conflict"
 fi
-
-case "$runtime_stack" in
-  ""|legacy|wikid-frontd)
-    ;;
-  *)
-    fail "unsupported LEAFWIKI_RUNTIME_STACK: $runtime_stack"
-    ;;
-esac
 
 base_path="$(normalize_base_path "$base_path")"
 url_host_value="$(url_host "$host")"
@@ -553,9 +519,6 @@ if [[ -z "$config_path" ]]; then
   if truthy "$disable_request_log"; then
     leafwiki_cmd+=(--disable-request-log)
   fi
-  if truthy "$enable_workspace_sync"; then
-    leafwiki_cmd+=(--enable-workspace-sync)
-  fi
   if [[ "${#server_extra_args[@]}" -gt 0 ]]; then
     leafwiki_cmd+=("${server_extra_args[@]}")
   fi
@@ -563,10 +526,6 @@ fi
 
 child_env=()
 print_env=()
-if [[ -n "$runtime_stack" ]]; then
-  child_env+=(LEAFWIKI_RUNTIME_STACK="$runtime_stack")
-  print_env+=(LEAFWIKI_RUNTIME_STACK="$runtime_stack")
-fi
 if [[ -z "$config_path" && -n "$api_key" ]]; then
   child_env+=(LEAFWIKI_MCP_API_KEY="$api_key")
   print_env+=(LEAFWIKI_MCP_API_KEY=REDACTED)
@@ -595,9 +554,6 @@ if [[ "$dry_run" -eq 1 ]]; then
     log "HTTP UI: configured by $config_path"
   else
     log "HTTP UI: $http_url"
-  fi
-  if [[ -n "$server_log" ]]; then
-    log "Server log option ignored in native-only wrapper: $server_log"
   fi
   if [[ "${#print_env[@]}" -gt 0 ]]; then
     print_command_with_env "${#print_env[@]}" "${print_env[@]}" "${leafwiki_cmd[@]}"

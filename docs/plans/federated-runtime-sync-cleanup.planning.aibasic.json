@@ -1,0 +1,66 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "federated-runtime-sync-cleanup",
+  "createdAt": "2026-06-20T22:13:23Z",
+  "status": "plan-written",
+  "artifacts": {
+    "observe": "docs/plans/federated-runtime-sync-cleanup.OBSERVE.md",
+    "context": "docs/plans/federated-runtime-sync-cleanup.CONTEXT.md",
+    "decision": "docs/plans/federated-runtime-sync-cleanup.DECISION.md",
+    "plan": "docs/plans/federated-runtime-sync-cleanup.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/federated-workspaces.PLAN.md",
+    "docs/plans/wikid-frontd-extraction.PLAN.md",
+    "docs/plans/workspace-sync.PLAN.md",
+    "docs/plans/mcp_transport_unification.PLAN.md",
+    "docs/plans/remove.sidecar.PLAN.md",
+    "README.md",
+    "docs/README.md",
+    "docs/revisions.md",
+    "docs/workspace-sync.md",
+    "docs/mcp.md",
+    "scripts/run.sh",
+    "e2e/run.sh"
+  ],
+  "subagents": [
+    {
+      "id": "019ee714-719c-7151-a352-884e1177c8c8",
+      "role": "Explorer1",
+      "focus": "runtime stack, daemon startup, descriptor, and API-key seeding",
+      "status": "completed"
+    },
+    {
+      "id": "019ee714-8a7e-7982-b044-a33e382d1879",
+      "role": "Explorer2",
+      "focus": "workspace-sync default and legacy page-snapshot revision removal",
+      "status": "completed"
+    },
+    {
+      "id": "019ee714-a1cd-75f1-a96d-fb059a0dffd0",
+      "role": "Explorer3",
+      "focus": "frontend, API config, and docs impact",
+      "status": "completed"
+    },
+    {
+      "id": "019ee714-bbe8-73d0-ab9b-e6b5fd0886ba",
+      "role": "Explorer4",
+      "focus": "scripts, E2E harness, and compatibility flags",
+      "status": "completed"
+    }
+  ],
+  "decisions": [
+    "Federated wikid/frontd/workspaced runtime is the only runtime.",
+    "Git-backed workspace sync is mandatory for workspace runtimes.",
+    "Old flags and envs fail unknown rather than being accepted or ignored.",
+    "Legacy page-snapshot revision data is dropped or ignored, not migrated.",
+    "enableRevision is removed from API/config/UI contracts.",
+    "enableWorkspaceSync may remain only as a true compatibility capability signal.",
+    "Legacy auth DB cleanup remains.",
+    "Historical plan docs remain with warnings."
+  ],
+  "validation": {
+    "artifactWrite": "created plan artifacts; no implementation code changed"
+  }
+}

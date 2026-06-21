@@ -19,7 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
-	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -49,14 +48,13 @@ func createWikiTestInstance(t *testing.T) *wiki.Wiki {
 	return createWikiTestInstanceWithRevisionFlag(t, true)
 }
 
-func createWikiTestInstanceWithRevisionFlag(t *testing.T, enableRevision bool) *wiki.Wiki {
+func createWikiTestInstanceWithRevisionFlag(t *testing.T, _ bool) *wiki.Wiki {
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		StorageDir:          t.TempDir(),
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableRevision:      enableRevision,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
@@ -72,7 +70,6 @@ func createWikiTestInstanceWithWorkspace(t *testing.T, workspace wiki.Workspace)
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableRevision:      true,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
@@ -94,7 +91,7 @@ func createRouterTestInstanceWithRevision(w *wiki.Wiki, t *testing.T) *gin.Engin
 		RefreshTokenTimeout:     7 * 24 * time.Hour,
 		HideLinkMetadataSection: false,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableRevision:          true,
+		EnableWorkspaceSync:     true,
 	})
 }
 
@@ -1139,7 +1136,6 @@ func TestWorkspaceSyncStatusEndpoint_WhenEnabled(t *testing.T) {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1188,7 +1184,6 @@ func TestWorkspaceSyncRefreshEndpoint_SyncsDirectMarkdownCreate(t *testing.T) {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1253,7 +1248,6 @@ func TestWorkspaceSyncSnapshotsEndpoint_WhenEnabled(t *testing.T) {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1304,7 +1298,6 @@ func TestWorkspaceSyncSnapshotsEndpoint_RespectsLimit(t *testing.T) {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1388,7 +1381,6 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1487,7 +1479,6 @@ func TestWorkspaceSyncStatusEndpoint_PublicAccessAllowsUnauthenticatedRead(t *te
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1527,7 +1518,6 @@ func TestWorkspaceSyncSnapshotRestoreEndpoint_RestoresMarkdownOnly(t *testing.T)
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1606,7 +1596,6 @@ func TestWorkspaceSyncPageRevisionsEndpoint_UsesGitBackedHistory(t *testing.T) {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1690,7 +1679,6 @@ previous content`
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -1860,7 +1848,7 @@ func TestRefactorPreviewEndpoint_IsDisabledWhenFlagIsOff(t *testing.T) {
 	}
 }
 
-func TestRefactorApply_DoesNotPersistRevisionsWhenRevisionDisabled(t *testing.T) {
+func TestRefactorApply_UsesGitHistoryWithoutLegacyRevisionStorage(t *testing.T) {
 	w := createWikiTestInstanceWithRevisionFlag(t, false)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
 
@@ -1872,7 +1860,7 @@ func TestRefactorApply_DoesNotPersistRevisionsWhenRevisionDisabled(t *testing.T)
 		RefreshTokenTimeout:     7 * 24 * time.Hour,
 		HideLinkMetadataSection: false,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableRevision:          false,
+		EnableWorkspaceSync:     true,
 		EnableLinkRefactor:      true,
 	})
 
@@ -1906,8 +1894,8 @@ func TestRefactorApply_DoesNotPersistRevisionsWhenRevisionDisabled(t *testing.T)
 	}
 
 	revisionsRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+target.ID+"/revisions", strings.NewReader(""))
-	if revisionsRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected 404 on revisions endpoint when revision is disabled, got %d - %s", revisionsRec.Code, revisionsRec.Body.String())
+	if revisionsRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK on Git-backed revisions endpoint, got %d - %s", revisionsRec.Code, revisionsRec.Body.String())
 	}
 
 	revisionsDir := filepath.Join(w.GetStorageDir(), ".leafwiki", "revisions")
@@ -5179,148 +5167,6 @@ func TestAssetEndpoints(t *testing.T) {
 	}
 	if len(listResp2["files"]) != 0 {
 		t.Errorf("Expected asset to be deleted, got: %v", listResp2["files"])
-	}
-}
-
-func TestAssetMutationRevisionsUseAuthenticatedUser(t *testing.T) {
-	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstanceWithRevision(w, t)
-	adminUserID := getAdminUserIDViaAPI(t, router)
-
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-	}
-
-	loginRes := loginRec.Result()
-	defer test_utils.WrapCloseWithErrorCheck(loginRes.Body.Close, t)
-
-	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies after login, got none")
-	}
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
-		}
-	}
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
-
-	addCookies := func(req *http.Request) {
-		for _, c := range cookies {
-			req.AddCookie(c)
-		}
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
-			req.Header.Set("X-CSRF-Token", csrfToken)
-		}
-	}
-
-	writeAsset := func(t *testing.T, pageID, name string) {
-		t.Helper()
-
-		assetDir := filepath.Join(w.GetStorageDir(), "assets", pageID)
-		if err := os.MkdirAll(assetDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll(assetDir) failed: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(assetDir, name), []byte("payload"), 0o644); err != nil {
-			t.Fatalf("WriteFile(asset) failed: %v", err)
-		}
-	}
-
-	tests := []struct {
-		name    string
-		setup   func(t *testing.T, pageID string)
-		request func(t *testing.T, pageID string) *http.Request
-	}{
-		{
-			name: "upload",
-			request: func(t *testing.T, pageID string) *http.Request {
-				t.Helper()
-
-				body := &bytes.Buffer{}
-				writer := multipart.NewWriter(body)
-				part, err := writer.CreateFormFile("file", "upload.txt")
-				if err != nil {
-					t.Fatalf("CreateFormFile failed: %v", err)
-				}
-				if _, err := part.Write([]byte("payload")); err != nil {
-					t.Fatalf("Write(asset payload) failed: %v", err)
-				}
-				if err := writer.Close(); err != nil {
-					t.Fatalf("Close(writer) failed: %v", err)
-				}
-
-				req := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID+"/assets", body)
-				req.Header.Set("Content-Type", writer.FormDataContentType())
-				return req
-			},
-		},
-		{
-			name: "rename",
-			setup: func(t *testing.T, pageID string) {
-				t.Helper()
-				writeAsset(t, pageID, "old.txt")
-			},
-			request: func(t *testing.T, pageID string) *http.Request {
-				t.Helper()
-				req := httptest.NewRequest(http.MethodPut, "/api/pages/"+pageID+"/assets/rename", strings.NewReader(`{"old_filename":"old.txt","new_filename":"new.txt"}`))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			},
-		},
-		{
-			name: "delete",
-			setup: func(t *testing.T, pageID string) {
-				t.Helper()
-				// Upload through the HTTP API so the setup exercises the same path as production.
-				uploadAssetViaAPI(t, router, pageID, "delete.txt", "payload")
-			},
-			request: func(t *testing.T, pageID string) *http.Request {
-				t.Helper()
-				return httptest.NewRequest(http.MethodDelete, "/api/pages/"+pageID+"/assets/delete.txt", nil)
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			page := createPageViaAPI(t, router, "Assets "+tc.name, "assets-"+tc.name, nil, pageNodeKind())
-
-			if tc.setup != nil {
-				tc.setup(t, page.ID)
-			}
-
-			req := tc.request(t, page.ID)
-			addCookies(req)
-
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, req)
-
-			if rec.Code < http.StatusOK || rec.Code >= http.StatusMultipleChoices {
-				t.Fatalf("Expected 2xx response, got %d - %s", rec.Code, rec.Body.String())
-			}
-
-			latest := getLatestRevisionViaAPI(t, router, page.ID)
-			if latest["type"] != string(revision.RevisionTypeAssetUpdate) {
-				t.Fatalf("latest type = %v, want %q", latest["type"], revision.RevisionTypeAssetUpdate)
-			}
-			if latest["authorId"] != adminUserID {
-				t.Fatalf("latest author = %v, want %q", latest["authorId"], adminUserID)
-			}
-		})
 	}
 }
 

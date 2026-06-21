@@ -11,6 +11,8 @@ page:
 
 # Wikid And Frontd Extraction
 
+> **Historical note:** This discovery note predates the federated runtime cleanup. Runtime-switch examples in this artifact are historical and do not describe current startup; current LeafWiki uses the federated runtime with always-on Git-backed workspace sync.
+
 Working notes for a compatibility-preserving runtime extraction before implementing federated workspaces.
 
 This page is deliberately separate from [Federated Workspaces and Session Daemon](/discovery/federated-workspaces-session-daemon.md). The goal here is to reorganize the current one-workspace runtime into clearer daemon roles without adding multi-workspace product behavior yet.

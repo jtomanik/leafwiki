@@ -3,7 +3,6 @@
 import { NODE_KIND_PAGE, type Page } from '@/lib/api/pages'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
-import { useConfigStore } from '@/stores/config'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { Copy, History, Link2, Pencil, Printer, Trash2 } from 'lucide-react'
 import { useEffect } from 'react'
@@ -31,11 +30,6 @@ export function useToolbarActions({
   const setButtons = useToolbarStore((state) => state.setButtons)
   const appMode = useAppMode()
   const readOnlyMode = useIsReadOnly()
-  const enableRevision = useConfigStore((state) => state.enableRevision)
-  const enableWorkspaceSync = useConfigStore(
-    (state) => state.enableWorkspaceSync,
-  )
-  const enablePageHistory = enableRevision || enableWorkspaceSync
   const registerHotkey = useHotKeysStore((s) => s.registerHotkey)
   const unregisterHotkey = useHotKeysStore((s) => s.unregisterHotkey)
   const itemLabel = pageKind === NODE_KIND_PAGE ? 'Page' : 'Section'
@@ -89,16 +83,14 @@ export function useToolbarActions({
       },
     ]
 
-    if (enablePageHistory) {
-      toolbarButtons.splice(2, 0, {
-        id: 'page-history',
-        label: `${itemLabel} History`,
-        hotkey: 'Ctrl+H',
-        icon: <History size={18} />,
-        variant: 'outline',
-        action: showHistory,
-      })
-    }
+    toolbarButtons.splice(2, 0, {
+      id: 'page-history',
+      label: `${itemLabel} History`,
+      hotkey: 'Ctrl+H',
+      icon: <History size={18} />,
+      variant: 'outline',
+      action: showHistory,
+    })
 
     setButtons(toolbarButtons)
 
@@ -148,9 +140,7 @@ export function useToolbarActions({
     registerHotkey(permalinkHotkey)
     registerHotkey(copyHotkey)
     registerHotkey(printHotkey)
-    if (enablePageHistory) {
-      registerHotkey(historyHotkey)
-    }
+    registerHotkey(historyHotkey)
     registerHotkey(deleteHotkey)
 
     return () => {
@@ -158,17 +148,12 @@ export function useToolbarActions({
       unregisterHotkey(permalinkHotkey.keyCombo)
       unregisterHotkey(copyHotkey.keyCombo)
       unregisterHotkey(printHotkey.keyCombo)
-      if (enablePageHistory) {
-        unregisterHotkey(historyHotkey.keyCombo)
-      }
+      unregisterHotkey(historyHotkey.keyCombo)
       unregisterHotkey(deleteHotkey.keyCombo)
     }
   }, [
     appMode,
     readOnlyMode,
-    enableRevision,
-    enableWorkspaceSync,
-    enablePageHistory,
     setButtons,
     deletePage,
     copyPage,

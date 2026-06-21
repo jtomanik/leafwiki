@@ -49,9 +49,7 @@ Example MCP client command:
 /path/to/leafwiki/scripts/run.sh mcp --root-dir /path/to/wiki
 ```
 
-The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; `wikid`, `frontd`, and `workspaced` startup/server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly.
-
-`run.sh mcp` enables workspace sync by default, so markdown files under `--root-dir` are synchronized and recorded in LeafWiki's internal Git history. Pass `--disable-workspace-sync` or set `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` when you explicitly need the legacy no-sync behavior.
+The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-level diagnostics go to stderr; `wikid`, `frontd`, and `workspaced` startup/server logs use LeafWiki file logging by default. OAuth-capable MCP clients should connect to LeafWiki's Streamable HTTP MCP endpoint directly. Markdown files under `--root-dir` are synchronized and recorded in LeafWiki's internal Git history.
 
 ## Script Reference
 
@@ -126,7 +124,6 @@ leafwiki \
   --root-dir ./wiki \
   --daemon-idle-timeout 10m \
   --log-target file \
-  --enable-workspace-sync \
   --allow-insecure \
   --disable-request-log
 ```
@@ -144,7 +141,6 @@ leafwiki \
   --root-dir ./wiki \
   --daemon-idle-timeout 10m \
   --log-target file \
-  --enable-workspace-sync \
   --allow-insecure \
   --disable-request-log
 ```
@@ -171,7 +167,6 @@ Useful commands:
 ```bash
 ./scripts/run.sh --help
 ./scripts/run.sh mcp --dry-run
-./scripts/run.sh mcp --dry-run --disable-workspace-sync
 ./scripts/run.sh mcp --dry-run --config ./leafwiki.yml
 ./scripts/run.sh mcp --root-dir "$PWD/wiki" --data-dir "$PWD/.wiki"
 ./scripts/run.sh mcp --root-dir "$PWD/docs" --markdown-link-root-prefix /docs
@@ -184,9 +179,9 @@ Wrapper behavior:
 
 - `--config <path>` passes only `--config <path>` to `leafwiki` for MCP mode, or `--config <path> agent-hook <provider>` for hook mode.
 - MCP config mode does not infer STDIO; set `mcp: stdio` or `mcp: http,stdio` in YAML for spawned MCP clients.
-- Config mode rejects normal wrapper options such as `--root-dir`, `--data-dir`, `--disable-auth`, `--enable-workspace-sync`, `--api-key`, and `--server-arg`. Use YAML keys that mirror public LeafWiki CLI flags instead.
+- Config mode rejects normal wrapper options such as `--root-dir`, `--data-dir`, `--disable-auth`, `--api-key`, and `--server-arg`. Use YAML keys that mirror public LeafWiki CLI flags instead.
 - Config mode does not append wrapper defaults. YAML values override environment variables for present keys; omitted YAML keys still use LeafWiki environment/default behavior.
-- Workspace sync is enabled by default. Use `--disable-workspace-sync` or `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0` to omit `--enable-workspace-sync`.
+- Workspace sync is part of the workspace runtime.
 - `--markdown-link-root-prefix` and `LEAFWIKI_RUN_MCP_MARKDOWN_LINK_ROOT_PREFIX` pass through to LeafWiki outside config mode. Use YAML `markdown-link-root-prefix:` in config mode. This is separate from `--base-path`; it only controls authored/generated Markdown hrefs such as `/docs/page.md`.
 - Outside config mode, `--api-key` and `LEAFWIKI_RUN_MCP_API_KEY` are translated into `LEAFWIKI_MCP_API_KEY` for the child process. In config mode, wrapper env translation is skipped; put `api-key:` in YAML or set `LEAFWIKI_MCP_API_KEY` directly.
 - API-key attach mode does not need `LEAFWIKI_JWT_SECRET` or `LEAFWIKI_ADMIN_PASSWORD` when a compatible install-wide runtime is already running.
@@ -235,8 +230,6 @@ E2E_RUN_MODE=local E2E_ENABLE_MCP_LOCAL=1 E2E_MCP_CLIENT_TRANSPORT=stdio E2E_USE
 | --- | --- |
 | `install-all-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
 | `install-macos.sh` | `LEAFWIKI_INSTALL_DIR`, `LEAFWIKI_BUILD_DIR`, `LEAFWIKI_VERSION`, `LEAFWIKI_ARCH`, `GOARCH` |
-| `run.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY`, `LEAFWIKI_RUN_MCP_SERVER_LOG` |
-
-`LEAFWIKI_RUN_MCP_SERVER_LOG` is accepted only for compatibility with older wrapper configurations. The native wrapper ignores it and uses the LeafWiki log target configured in the child command.
+| `run.sh` | `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`, `LEAFWIKI_BIN`, `LEAFWIKI_RUN_MCP_HOST`, `LEAFWIKI_HOST`, `LEAFWIKI_RUN_MCP_PORT`, `LEAFWIKI_PORT`, `LEAFWIKI_RUN_MCP_BASE_PATH`, `LEAFWIKI_BASE_PATH`, `LEAFWIKI_RUN_MCP_DATA_DIR`, `LEAFWIKI_DATA_DIR`, `LEAFWIKI_RUN_MCP_ROOT_DIR`, `LEAFWIKI_ROOT_DIR`, `LEAFWIKI_RUN_MCP_JWT_SECRET`, `LEAFWIKI_JWT_SECRET`, `LEAFWIKI_RUN_MCP_ADMIN_PASSWORD`, `LEAFWIKI_ADMIN_PASSWORD`, `LEAFWIKI_RUN_MCP_ALLOW_INSECURE`, `LEAFWIKI_ALLOW_INSECURE`, `LEAFWIKI_RUN_MCP_DISABLE_AUTH`, `LEAFWIKI_DISABLE_AUTH`, `LEAFWIKI_RUN_MCP_DISABLE_REQUEST_LOG`, `LEAFWIKI_DISABLE_REQUEST_LOG`, `LEAFWIKI_RUN_MCP_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_DAEMON_IDLE_TIMEOUT`, `LEAFWIKI_RUN_MCP_API_KEY`, `LEAFWIKI_MCP_API_KEY` |
 
 In `--config` mode, `run.sh` still honors `LEAFWIKI_RUN_MCP_LEAFWIKI_BIN`/`LEAFWIKI_BIN` to select the binary. Other wrapper environment defaults are not translated into child arguments.

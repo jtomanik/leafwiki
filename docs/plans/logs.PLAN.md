@@ -11,6 +11,9 @@ page:
 
 # LeafWiki Logging Targets Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 **Thread:** [codex://threads/019e82ba-6a29-7502-a63c-c68792356356](codex://threads/019e82ba-6a29-7502-a63c-c68792356356)
 **Goal:** Decouple LeafWiki server logs from terminal output by defaulting logs to a file in the data directory, while supporting explicit `stderr`/`stdout` targets and preserving a future path for `system` targets.
 

@@ -14,7 +14,6 @@ import ViewPage from '../pages/ViewPage';
 const user = process.env.E2E_ADMIN_USER || 'admin';
 const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 const separateRootEnabled = process.env.E2E_ENABLE_SEPARATE_ROOT_DIR === '1';
-const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 const assertRootFiles = process.env.E2E_ASSERT_SEPARATE_ROOT_FILES === '1';
 const dataDir = process.env.E2E_DATA_DIR ?? '';
 const rootDir = process.env.E2E_ROOT_DIR ?? '';
@@ -259,7 +258,6 @@ test.describe('Separate root dir', () => {
 
   // - Separate root-dir mode migrates content in root dir only
   test('separate-root-workspace-sync-rewrites-links-only-inside-configured-root', async () => {
-    test.skip(!workspaceSyncEnabled, 'requires E2E_ENABLE_WORKSPACE_SYNC=1');
     expect(dataDir, 'E2E_DATA_DIR should be exported by the local E2E runner').not.toBe('');
     expect(rootDir, 'E2E_ROOT_DIR should be exported by the local E2E runner').not.toBe('');
 

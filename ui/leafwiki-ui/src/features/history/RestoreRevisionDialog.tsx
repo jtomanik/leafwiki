@@ -6,14 +6,12 @@ import { useRef } from 'react'
 export type RestoreRevisionDialogProps = {
   revision: Revision
   currentSlug: string
-  gitBackedWorkspace?: boolean
   onResolve: (confirmed: boolean | null) => void
 }
 
 export function RestoreRevisionDialog({
   revision,
   currentSlug,
-  gitBackedWorkspace = false,
   onResolve,
 }: RestoreRevisionDialogProps) {
   const resolvedRef = useRef(false)
@@ -31,13 +29,9 @@ export function RestoreRevisionDialog({
   return (
     <BaseDialog
       dialogType={DIALOG_RESTORE_REVISION_CONFIRMATION}
-      dialogTitle={
-        gitBackedWorkspace ? 'Restore document version?' : 'Restore revision?'
-      }
+      dialogTitle="Restore document version?"
       dialogDescription={
-        gitBackedWorkspace
-          ? 'This restores this document’s Markdown content from the selected version and records a new workspace commit.'
-          : 'This restores the revision content, title, and assets. The current slug and location stay unchanged.'
+        "This restores this document's Markdown content from the selected version and records a new workspace commit."
       }
       onClose={() => {
         resolveOnce(null)
@@ -59,7 +53,7 @@ export function RestoreRevisionDialog({
       }}
       buttons={[
         {
-          label: gitBackedWorkspace ? 'Restore document' : 'Restore revision',
+          label: 'Restore document',
           actionType: 'confirm',
           variant: 'default',
           autoFocus: false,

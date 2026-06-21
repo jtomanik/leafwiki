@@ -11,6 +11,9 @@ page:
 
 # Agent Presence Hooks Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **Superseded duplicate:** This visible copy is retained for migration/history only. Use [`agent_hooks.PLAN.md`](/plans/agent-hooks-plan.md) as the canonical plan page.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Use TDD first. Save this as `plans/agent_hooks.PLAN.md`. Thread context: `codex://threads/019ea3a5-4240-7b80-b5f0-76c459294370`.

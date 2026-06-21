@@ -12,7 +12,6 @@ const password = process.env.E2E_ADMIN_PASSWORD || 'admin';
 const rootDir =
   process.env.E2E_ROOT_DIR ||
   (process.env.E2E_DATA_DIR ? join(process.env.E2E_DATA_DIR, 'root') : '');
-const workspaceSyncEnabled = process.env.E2E_ENABLE_WORKSPACE_SYNC === '1';
 
 function readRootMarkdownIfAvailable(relativePath: string) {
   if (rootDir === '' || !existsSync(rootDir)) return null;
@@ -697,7 +696,7 @@ test.describe('History', () => {
 
   test('restore-legacy-workspace-sync-revision-writes-canonical-output', async ({ page }) => {
     test.skip(
-      !workspaceSyncEnabled || rootDir === '' || !existsSync(rootDir),
+      rootDir === '' || !existsSync(rootDir),
       'requires local workspace-sync runner with readable E2E_ROOT_DIR',
     );
 
@@ -749,6 +748,21 @@ Updated body ${Date.now()}.`;
     const restoredPage = await getPageByPath(page, slug);
     expect(restoredPage.content ?? '').not.toContain('leafwiki_id:');
     expect(restoredPage.content ?? '').not.toContain('---');
+
+    await expect
+      .poll(
+        () => {
+          const raw = readRootMarkdownIfAvailable(`${slug}.md`);
+          return (
+            raw !== null &&
+            raw.startsWith('<!-- leafwiki\n') &&
+            raw.includes('Original legacy body') &&
+            !raw.includes('leafwiki_id:')
+          );
+        },
+        { timeout: 15000 },
+      )
+      .toBe(true);
 
     const raw = readRootMarkdownIfAvailable(`${slug}.md`);
     if (raw === null) {

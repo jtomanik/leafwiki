@@ -791,7 +791,7 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 }
 
 func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{EnableWorkspaceSync: true})
+	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 	opts := oauthRouterOptions("")
 	opts.EnableLinkRefactor = true
 	opts.EnableWorkspaceSync = true
@@ -935,7 +935,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 }
 
 func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{EnableWorkspaceSync: true})
+	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 	opts := oauthRouterOptions("")
 	opts.EnableWorkspaceSync = true
 	router := newLocalMCPTestRouter(w, opts)
@@ -1039,8 +1039,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:           wiki.Workspace{RootDir: rootDir},
-		EnableWorkspaceSync: true,
+		Workspace: wiki.Workspace{RootDir: rootDir},
 	})
 	opts := oauthRouterOptions("")
 	opts.EnableWorkspaceSync = true
@@ -1150,7 +1149,7 @@ func TestLocalMCPRegistration_AuthEnabledBasePathOAuthSession(t *testing.T) {
 
 	config := callToolStructured(t, session, "wiki_get_config", nil)
 	assertStringField(t, config, "basePath", "/wiki")
-	assertToolNames(t, listAllToolNames(t, session), baseToolNames)
+	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
 }
 
 type staticOAuthHandler struct {
@@ -1181,9 +1180,6 @@ func newLocalMCPAuthTestWikiWithOptions(t *testing.T, overrides wiki.WikiOptions
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableRevision:      overrides.EnableRevision,
-		EnableWorkspaceSync: overrides.EnableWorkspaceSync,
-		MaxRevisionHistory:  overrides.MaxRevisionHistory,
 	}
 	if overrides.AccessTokenTimeout != 0 {
 		options.AccessTokenTimeout = overrides.AccessTokenTimeout

@@ -13,7 +13,7 @@ function appURL(path: string): string {
 }
 
 test('mcp disable auth seeds page and UI edit is readable through mcp', async ({ page }) => {
-  const mcp = await connectMCPClient(appURL('/mcp'));
+  const mcp = await connectMCPClient(appURL('/mcp/workspaces/home'));
   const slug = `mcp-e2e-${Date.now()}`;
   const title = 'MCP E2E Page';
 
@@ -35,7 +35,7 @@ test('mcp disable auth seeds page and UI edit is readable through mcp', async ({
     });
 
     const viewPage = new ViewPage(page);
-    await viewPage.goto(`/${slug}.md`);
+    await viewPage.goto(`/w/home/${slug}.md`);
     await expect(page.locator('article')).toContainText('Seeded through MCP');
 
     await viewPage.clickEditPageButton();

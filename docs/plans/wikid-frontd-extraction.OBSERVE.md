@@ -11,6 +11,9 @@ page:
 
 # Wikid Frontd Extraction Observations
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 ## Source
 
 - Workflow: `docs/plans/planning.aibasic.txt`

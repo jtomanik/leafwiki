@@ -16,8 +16,6 @@ function App() {
   const configError = useConfigStore((s) => s.error)
   const loadConfig = useConfigStore((s) => s.loadConfig)
   const authDisabled = useConfigStore((s) => s.authDisabled)
-  const enableRevision = useConfigStore((s) => s.enableRevision)
-  const enableWorkspaceSync = useConfigStore((s) => s.enableWorkspaceSync)
   const loadBranding = useBrandingStore((s) => s.loadBranding)
   const lastConfigErrorRef = useRef<string | null>(null)
 
@@ -56,10 +54,10 @@ function App() {
       createLeafWikiRouter(
         isReadOnlyViewer,
         authDisabled,
-        enableRevision || enableWorkspaceSync,
+        true,
         BASE_PATH || undefined,
       ),
-    [isReadOnlyViewer, authDisabled, enableRevision, enableWorkspaceSync],
+    [isReadOnlyViewer, authDisabled],
   )
 
   return (

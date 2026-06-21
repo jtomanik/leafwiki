@@ -106,14 +106,14 @@ run-e2e-local-fast:
 		if [ -n "$$non_workspace_grep" ]; then \
 			E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh --grep "$$non_workspace_grep"; \
 		fi; \
-		E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh --grep "Workspace Sync"; \
+			E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh --grep "Workspace Sync"; \
 	else \
 		E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh $(if $(GREP),--grep "$(GREP)",); \
 	fi
 
 run-e2e-workspace-sync:
 	@echo "🗂️ Starting workspace sync E2E smoke..."
-	@E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 E2E_ENABLE_WORKSPACE_SYNC=1 ./e2e/run.sh --grep "Workspace Sync"
+	@E2E_RUN_MODE=local E2E_SKIP_UI_BUILD=1 ./e2e/run.sh --grep "Workspace Sync"
 
 run-e2e-root-dir:
 	@echo "🗂️ Starting root-dir storage boundary E2E smoke..."

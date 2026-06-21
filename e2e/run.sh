@@ -30,22 +30,6 @@ mcp_stdio_config_file=""
 mcp_stdio_seed_dir=""
 mcp_stdio_seed_file=""
 
-revision_or_workspace_sync_args() {
-  if [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
-    printf '%s\n' "--enable-workspace-sync"
-    return
-  fi
-  printf '%s\n' "--enable-revision=true"
-}
-
-collect_revision_or_workspace_sync_args() {
-  local arg
-  sync_args=()
-  while IFS= read -r arg; do
-    sync_args+=("$arg")
-  done < <(revision_or_workspace_sync_args)
-}
-
 is_stdio_e2e() {
   [ "${E2E_MCP_CLIENT_TRANSPORT:-http}" = "stdio" ]
 }
@@ -88,11 +72,6 @@ write_leafwiki_e2e_config() {
     fi
     if [ -n "$app_base_path" ]; then
       printf 'base-path: %s\n' "$(yaml_quote "$app_base_path")"
-    fi
-    if [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
-      printf 'enable-workspace-sync: true\n'
-    else
-      printf 'enable-revision: true\n'
     fi
     if [ -n "$mcp_mode" ]; then
       printf 'mcp: %s\n' "$(yaml_quote "$mcp_mode")"
@@ -184,8 +163,6 @@ prepare_mcp_stdio_command() {
   fi
   echo "🔨 Building native LeafWiki STDIO binary for E2E..."
   build_leafwiki_binary "$leafwiki_bin"
-  local sync_args=()
-  collect_revision_or_workspace_sync_args
   if use_config_file_e2e; then
     mcp_stdio_config_file="$mcp_stdio_dir/leafwiki.yml"
     local auth_mode="disabled"
@@ -207,13 +184,6 @@ prepare_mcp_stdio_command() {
     else
       printf ' %q' --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log
       printf ' %q' --server-arg --enable-link-refactor=true
-      for arg in "${sync_args[@]}"; do
-        if [ "$arg" = "--enable-workspace-sync" ]; then
-          printf ' %q' --enable-workspace-sync
-        else
-          printf ' %q' --disable-workspace-sync --server-arg "$arg"
-        fi
-      done
       if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
         printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
       else
@@ -245,13 +215,6 @@ prepare_mcp_stdio_command() {
       printf ' %q' --config "$mcp_stdio_config_file"
     else
       printf ' %q' --host 127.0.0.1 --port "$app_port" --data-dir "$local_data_dir" --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-3s}" --allow-insecure --disable-request-log --server-arg --enable-link-refactor=true
-      for arg in "${sync_args[@]}"; do
-        if [ "$arg" = "--enable-workspace-sync" ]; then
-          printf ' %q' --enable-workspace-sync
-        else
-          printf ' %q' --disable-workspace-sync --server-arg "$arg"
-        fi
-      done
       if [ "${E2E_ENABLE_MCP_API_KEYS_LOCAL:-0}" = "1" ]; then
         printf ' %q' --jwt-secret=e2e-tests-secret --admin-password=admin
       else
@@ -333,14 +296,11 @@ start_docker() {
     --jwt-secret=e2e-tests-secret
     --admin-password=admin
   )
-  local sync_args=()
-  collect_revision_or_workspace_sync_args
-  server_args+=("${sync_args[@]}")
   if [ -n "$markdown_link_root_prefix" ]; then
     server_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
   fi
 
-  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ] || [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
+  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
     docker_root_volume="wiki-e2e-tests-root-${RANDOM}${RANDOM}"
     docker volume create "$docker_root_volume" >/dev/null
     docker_args+=(-v "$docker_root_volume":/app/root)
@@ -374,6 +334,14 @@ start_local() {
 
   local_data_dir="$(mktemp -d /tmp/leafwiki-e2e-data.XXXXXX)"
   local_home_dir="$(mktemp -d /tmp/leafwiki-e2e-home.XXXXXX)"
+  if is_stdio_e2e || [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
+    local_root_dir="$local_data_dir/root"
+  else
+    rm -rf "$local_data_dir"
+    local_data_dir="$local_home_dir/.leafwiki"
+    local_root_dir="$local_data_dir/root"
+  fi
+  mkdir -p "$local_root_dir"
   server_log="$(mktemp /tmp/leafwiki-e2e-server.XXXXXX)"
   rm -f "$server_log"
   server_log="${server_log}.log"
@@ -388,15 +356,13 @@ start_local() {
     --daemon-idle-timeout "${E2E_DAEMON_IDLE_TIMEOUT:-0}"
   )
 
-  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ] || [ "${E2E_ENABLE_WORKSPACE_SYNC:-0}" = "1" ]; then
+  if [ "${E2E_ENABLE_SEPARATE_ROOT_DIR:-0}" = "1" ]; then
     local_root_dir="$(mktemp -d /tmp/leafwiki-e2e-root.XXXXXX)"
     server_args+=(--root-dir "$local_root_dir")
   fi
   if [ -n "$app_base_path" ]; then
     server_args+=(--base-path "$app_base_path")
   fi
-  local sync_args=()
-  collect_revision_or_workspace_sync_args
   if [ -n "$markdown_link_root_prefix" ]; then
     server_args+=(--markdown-link-root-prefix "$markdown_link_root_prefix")
   fi
@@ -435,7 +401,6 @@ start_local() {
     --allow-insecure=true
     "${auth_args[@]}"
     --enable-link-refactor=true
-    "${sync_args[@]}"
   )
   if use_config_file_e2e; then
     local_config_file="$(mktemp /tmp/leafwiki-e2e-config.XXXXXX.yml)"

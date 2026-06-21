@@ -11,7 +11,6 @@ import (
 	"github.com/perber/wiki/internal/branding"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/auth"
-	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -72,7 +71,6 @@ type Wiki struct {
 	presenceRoutes      *wikipresence.Routes
 	mcpRoutes           *wikimcp.Routes
 	oauthRoutes         *wikioauth.Routes
-	revision            *revision.Service
 	links               *links.LinkService
 	tags                *tags.TagsService
 	props               *properties.PropertiesService
@@ -93,17 +91,11 @@ type WikiOptions struct {
 	AccessTokenTimeout      time.Duration // Access token timeout duration
 	RefreshTokenTimeout     time.Duration // Refresh token timeout duration
 	AuthDisabled            bool          // Whether authentication is disabled
-	EnableRevision          bool          // Whether revision recording/storage is enabled
-	EnableWorkspaceSync     bool          // Whether workspace sync is enabled
-	MaxRevisionHistory      int           // Max revisions kept per page; 0 = unlimited
 	MaxAssetUploadSizeBytes int64         // Maximum allowed size in bytes for asset/import uploads; 0 = default
 	MarkdownLinkRootPrefix  string        // Repository-root prefix for absolute Markdown links
 }
 
 func NewWiki(options *WikiOptions) (*Wiki, error) {
-	if options.EnableRevision && options.EnableWorkspaceSync {
-		return nil, fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined")
-	}
 	if options.WorkspaceOnly && options.ControlPlaneOnly {
 		return nil, fmt.Errorf("workspace-only and control-plane-only modes cannot be combined")
 	}
@@ -158,21 +150,15 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		}
 	}
 	w.webPresence = wikipresence.NewWebPresenceRegistry(wikipresence.DefaultWebPresenceTTL, nil)
-	// Welcome page must exist before the revision service starts recording.
-	if !options.EnableWorkspaceSync || w.tree.IsLoaded() {
+	if w.tree.IsLoaded() {
 		if err := w.EnsureWelcomePage(); err != nil {
 			return nil, err
 		}
 	} else {
 		w.log.Warn("skipping welcome page creation because workspace sync validation left the tree unloaded")
 	}
-	if options.EnableRevision {
-		w.revision = revision.NewService(w.storageDir, w.tree, w.log,
-			revision.ServiceOptions{MaxRevisions: options.MaxRevisionHistory})
-		w.ensureBaselineRevisions()
-	}
 	w.buildRoutes(options)
-	w.startWorkspaceSyncWatcher(options)
+	w.startWorkspaceSyncWatcher()
 	return w, nil
 }
 
@@ -191,40 +177,6 @@ func ensureWorkspaceDirs(workspace Workspace) error {
 		return fmt.Errorf("create root dir: %w", err)
 	}
 	return nil
-}
-
-func (w *Wiki) ensureBaselineRevisions() {
-	var ids []string
-	if err := w.tree.WalkNodes(func(id string) error {
-		ids = append(ids, id)
-		return nil
-	}); err != nil {
-		w.log.Warn("failed to enumerate pages for baseline revisions", "error", err)
-		return
-	}
-	if len(ids) == 0 {
-		return
-	}
-	pages, pageErrs := w.tree.GetPages(ids)
-	var valid []*tree.Page
-	for i, p := range pages {
-		if pageErrs[i] != nil {
-			w.log.Warn("failed to load page for baseline revision", "pageID", ids[i], "error", pageErrs[i])
-			continue
-		}
-		if p != nil {
-			valid = append(valid, p)
-		}
-	}
-	if len(valid) == 0 {
-		return
-	}
-	errs := w.revision.RecordContentUpdates(valid, SYSTEM_USER_ID, "baseline")
-	for i, err := range errs {
-		if err != nil {
-			w.log.Warn("baseline revision failed", "pageID", valid[i].ID, "error", err)
-		}
-	}
 }
 
 // ─── Subsystem initializers ───────────────────────────────────────────────────
@@ -277,51 +229,45 @@ func (w *Wiki) initOAuth(options *WikiOptions) error {
 	return nil
 }
 
-func (w *Wiki) initCoreServices(options *WikiOptions) error {
+func (w *Wiki) initCoreServices(_ *WikiOptions) error {
 	w.tree = tree.NewTreeServiceWithOptions(tree.TreeOptions{
 		DataDir: w.workspace.DataDir,
 		RootDir: w.workspace.RootDir,
 	})
-	if options.EnableWorkspaceSync {
-		workspaceSyncLog := w.log.With("subsystem", "workspaceSync")
-		phaseStarted := time.Now()
-		workspaceSyncLog.Info("workspace sync startup phase started",
-			"phase", "open_service",
-			"data_dir", w.workspace.DataDir,
-			"root_dir", w.workspace.RootDir,
-		)
-		service, err := workspacesync.NewService(workspacesync.ServiceOptions{
-			Enabled:                true,
-			DataDir:                w.workspace.DataDir,
-			RootDir:                w.workspace.RootDir,
-			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
-			Tree:                   w.tree,
-			Log:                    workspaceSyncLog,
-		})
-		if err != nil {
-			workspaceSyncLog.Error("workspace sync startup phase failed",
-				"phase", "open_service",
-				"duration", time.Since(phaseStarted),
-				"error", err,
-			)
-			return err
-		}
-		workspaceSyncLog.Info("workspace sync startup phase completed",
+	workspaceSyncLog := w.log.With("subsystem", "workspaceSync")
+	phaseStarted := time.Now()
+	workspaceSyncLog.Info("workspace sync startup phase started",
+		"phase", "open_service",
+		"data_dir", w.workspace.DataDir,
+		"root_dir", w.workspace.RootDir,
+	)
+	service, err := workspacesync.NewService(workspacesync.ServiceOptions{
+		Enabled:                true,
+		DataDir:                w.workspace.DataDir,
+		RootDir:                w.workspace.RootDir,
+		MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
+		Tree:                   w.tree,
+		Log:                    workspaceSyncLog,
+	})
+	if err != nil {
+		workspaceSyncLog.Error("workspace sync startup phase failed",
 			"phase", "open_service",
 			"duration", time.Since(phaseStarted),
+			"error", err,
 		)
-		w.workspaceSync = service
-		if _, err := w.workspaceSync.SyncNow(context.Background(), workspacesync.SyncRequest{
-			Reason: workspacesync.ReasonStartup,
-			Source: workspacesync.SourceFilesystem,
-			Actor:  workspacesync.PublicEditorActor(),
-		}); err != nil {
-			return err
-		}
-	} else {
-		if err := w.tree.LoadTree(); err != nil {
-			return err
-		}
+		return err
+	}
+	workspaceSyncLog.Info("workspace sync startup phase completed",
+		"phase", "open_service",
+		"duration", time.Since(phaseStarted),
+	)
+	w.workspaceSync = service
+	if _, err := w.workspaceSync.SyncNow(context.Background(), workspacesync.SyncRequest{
+		Reason: workspacesync.ReasonStartup,
+		Source: workspacesync.SourceFilesystem,
+		Actor:  workspacesync.PublicEditorActor(),
+	}); err != nil {
+		return err
 	}
 	w.slug = tree.NewSlugService()
 	w.asset = assets.NewAssetService(w.storageDir, w.slug)
@@ -451,8 +397,8 @@ func (w *Wiki) rebuildDerivedIndexes() error {
 	return nil
 }
 
-func (w *Wiki) startWorkspaceSyncWatcher(options *WikiOptions) {
-	if !options.EnableWorkspaceSync || w.workspaceSync == nil {
+func (w *Wiki) startWorkspaceSyncWatcher() {
+	if w.workspaceSync == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())

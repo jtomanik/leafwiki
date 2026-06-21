@@ -11,7 +11,6 @@ export type Config = {
   authDisabled: boolean
   markdownLinkRootPrefix: string
   maxAssetUploadSizeBytes: number
-  enableRevision: boolean
   enableWorkspaceSync: boolean
   enableLinkRefactor: boolean
   httpRemoteUserEnabled: boolean

@@ -11,6 +11,9 @@ page:
 
 # Workspace Sync + Git-Backed Markdown Revisions Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this task-by-task. Use a fresh subagent for backend sync/revision work, frontend/history UX, and test/docs review if available.
 
 **Goal:** Add `--enable-workspace-sync` as a core LeafWiki feature that watches `*.md` files, records Markdown history in an internal Git repository, syncs direct filesystem edits into the app, and exposes document/workspace restore UX.

@@ -12,7 +12,7 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
 
-export type HistoryTab = 'changes' | 'preview' | 'raw' | 'assets'
+export type HistoryTab = 'changes' | 'preview' | 'raw'
 
 type PageHistoryState = {
   workspaceId: string
@@ -192,7 +192,8 @@ export function usePageHistory(
     if (
       !pageId ||
       !selectedRevisionId ||
-      (activeTab !== 'preview' && activeTab !== 'raw' && activeTab !== 'assets')
+      activeTab !== 'preview' &&
+      activeTab !== 'raw'
     ) {
       return
     }

@@ -46,10 +46,8 @@ type Config struct {
 	LogFile                 string `json:"logFile"`
 	HideLinkMetadataSection bool   `json:"hideLinkMetadataSection"`
 	MaxAssetUploadSizeBytes int64  `json:"maxAssetUploadSizeBytes"`
-	EnableRevision          bool   `json:"enableRevision"`
 	EnableWorkspaceSync     bool   `json:"enableWorkspaceSync"`
 	EnableLinkRefactor      bool   `json:"enableLinkRefactor"`
-	MaxRevisionHistory      int    `json:"maxRevisionHistory"`
 	EnableHTTPRemoteUser    bool   `json:"enableHttpRemoteUser"`
 	HTTPRemoteUserHeader    string `json:"httpRemoteUserHeader"`
 	TrustedProxyIPs         string `json:"trustedProxyIps"`

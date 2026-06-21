@@ -11,6 +11,9 @@ page:
 
 # Wikid Frontd Extraction Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extract LeafWiki's current one-workspace runtime into `wikid`, `frontd`, and `workspaced` roles while preserving current user-visible behavior and the stable `scripts/run.sh` MCP/agent-hook surface.

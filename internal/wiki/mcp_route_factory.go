@@ -6,7 +6,6 @@ import (
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
-	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 )
@@ -23,16 +22,16 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		LookupPath:   wikipages.NewLookupPagePathUseCase(w.tree),
 		ResolveLink:  wikipages.NewResolvePermalinkUseCase(w.tree),
 		SuggestSlug:  wikipages.NewSuggestSlugUseCase(w.tree, w.slug),
-		DeletePage:   wikipages.NewDeletePageUseCase(w.tree, w.revision, w.asset, o, w.log),
+		DeletePage:   wikipages.NewDeletePageUseCase(w.tree, w.asset, o, w.log),
 		MovePage:     wikipages.NewMovePageUseCase(w.tree, o, w.log),
 		SortPages:    wikipages.NewSortPagesUseCase(w.tree),
 		EnsurePath:   wikipages.NewEnsurePathUseCase(w.tree, w.slug, o, w.log),
-		ConvertPage:  wikipages.NewConvertPageUseCase(w.tree, w.revision, o, w.log),
+		ConvertPage:  wikipages.NewConvertPageUseCase(w.tree, o, w.log),
 		CopyPage:     wikipages.NewCopyPageUseCase(w.tree, w.slug, o, w.asset, w.log),
 		PreviewRef: wikipages.NewPreviewPageRefactorUseCaseWithOptions(w.tree, w.slug, w.links, w.log, wikipages.RefactorUseCaseOptions{
 			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 		}),
-		ApplyRef: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.revision, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
+		ApplyRef: wikipages.NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(w.tree, w.slug, w.links, o, w.log, wikipages.RefactorUseCaseOptions{
 			MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 		}),
 		Search:       wikisearch.NewSearchUseCase(w.searchIndex, w.tags, w.tree),
@@ -42,17 +41,11 @@ func (w *Wiki) buildMCPRoutes() *wikimcp.Routes {
 		PropertyKeys: wikiproperties.NewGetPropertyKeysUseCase(w.props),
 		PagesByProp:  wikiproperties.NewGetPagesByPropertyUseCase(w.props, w.tree, w.userResolver),
 		LinkStatus:   wikilinks.NewGetLinkStatusUseCase(w.links, w.tree),
-		UploadAsset:  wikiassets.NewUploadAssetUseCase(w.tree, w.asset, w.revision, w.log),
+		UploadAsset:  wikiassets.NewUploadAssetUseCase(w.tree, w.asset, w.log),
 		GetAsset:     wikiassets.NewGetAssetUseCase(w.tree, w.asset),
 		GetAssets:    wikiassets.NewListAssetsUseCase(w.tree, w.asset),
-		RenameAsset:  wikiassets.NewRenameAssetUseCase(w.tree, w.asset, w.revision, w.log),
-		DeleteAsset:  wikiassets.NewDeleteAssetUseCase(w.tree, w.asset, w.revision, w.log),
-		ListRevs:     wikirevisions.NewListRevisionsUseCase(w.revision),
-		GetRev:       wikirevisions.NewGetRevisionUseCase(w.revision),
-		CompareRevs:  wikirevisions.NewCompareRevisionsUseCase(w.revision),
-		GetRevAsset:  wikirevisions.NewGetRevisionAssetUseCase(w.revision),
-		GetLatestRev: wikirevisions.NewGetLatestRevisionUseCase(w.revision),
-		RestoreRev:   wikirevisions.NewRestoreRevisionUseCase(w.revision, w.tree, w.newPageOrchestrator(), w.log),
+		RenameAsset:  wikiassets.NewRenameAssetUseCase(w.tree, w.asset, w.log),
+		DeleteAsset:  wikiassets.NewDeleteAssetUseCase(w.tree, w.asset, w.log),
 
 		ListWorkspaceRevisions:   w.WorkspaceSyncPageRevisions,
 		GetWorkspaceRevision:     w.WorkspaceSyncPageRevision,

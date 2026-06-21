@@ -52,3 +52,9 @@ ui.zip
 internal/http/dist/*
 !internal/http/dist/.gitkeep
 .cache
+
+# Local agent/editor configuration and research checkouts are user-specific.
+/.agents/
+/.codex/
+/.cursor/
+/references/

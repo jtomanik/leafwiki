@@ -36,8 +36,6 @@ assert_contains "$help_output" "agent-hook" "help"
 assert_contains "$help_output" "--leafwiki-bin" "help"
 assert_contains "$help_output" "--markdown-link-root-prefix" "help"
 assert_contains "$help_output" "--api-key" "help"
-assert_contains "$help_output" "--enable-workspace-sync" "help"
-assert_contains "$help_output" "--disable-workspace-sync" "help"
 assert_contains "$help_output" "--daemon-idle-timeout" "help"
 assert_contains "$help_output" "Federated runtime idle timeout" "help"
 assert_contains "$help_output" "--server-arg" "help"
@@ -46,6 +44,10 @@ assert_contains "$help_output" "--dry-run" "help"
 removed_binary="leafwiki""-mcp-stdio"
 legacy_bin_flag="--mcp""-stdio-bin"
 assert_not_contains "$help_output" "$removed_binary" "help"
+assert_not_contains "$help_output" "--enable-workspace-sync" "help"
+assert_not_contains "$help_output" "--disable-workspace-sync" "help"
+assert_not_contains "$help_output" "$legacy_bin_flag" "help"
+assert_not_contains "$help_output" "--server-log" "help"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -64,7 +66,7 @@ assert_contains "$native_default_output" "--data-dir ./.wiki" "native dry-run"
 assert_contains "$native_default_output" "--root-dir ./wiki" "native dry-run"
 assert_contains "$native_default_output" "--daemon-idle-timeout 10m" "native dry-run"
 assert_contains "$native_default_output" "--log-target file" "native dry-run"
-assert_contains "$native_default_output" "--enable-workspace-sync" "native dry-run"
+assert_not_contains "$native_default_output" "--enable-workspace-sync" "native dry-run"
 assert_not_contains "$native_default_output" "--log-target stderr" "native dry-run"
 assert_not_contains "$native_default_output" "$removed_binary" "native dry-run"
 
@@ -285,58 +287,35 @@ set -e
 assert_contains "$bad_hook_provider_config_runtime_output" "agent-hook requires a provider" "runtime hook config without provider error"
 assert_not_contains "$bad_hook_provider_config_runtime_output" "wrapper-config-provider-secret" "runtime hook config without provider error"
 
-native_disabled_workspace_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --disable-workspace-sync 2>&1)"
-assert_not_contains "$native_disabled_workspace_output" "--enable-workspace-sync" "native disable workspace dry-run"
+for removed_flag in \
+  --disable-workspace-sync \
+  --enable-workspace-sync \
+  --mode \
+  --endpoint \
+  "$legacy_bin_flag" \
+  --server-log
+do
+  set +e
+  removed_flag_output="$("$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki "$removed_flag" value 2>&1)"
+  removed_flag_status=$?
+  set -e
+  [[ "$removed_flag_status" -ne 0 ]] || fail "$removed_flag unexpectedly succeeded"
+  assert_contains "$removed_flag_output" "unknown option: $removed_flag" "$removed_flag error"
+done
 
-native_env_disabled_workspace_output="$(
-  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0 \
-  "$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki 2>&1
-)"
-assert_not_contains "$native_env_disabled_workspace_output" "--enable-workspace-sync" "native env disable workspace dry-run"
-
-native_env_enabled_workspace_output="$(
-  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC=0 \
-  "$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki --enable-workspace-sync 2>&1
-)"
-assert_contains "$native_env_enabled_workspace_output" "--enable-workspace-sync" "native env overridden workspace dry-run"
-
-extracted_runtime_output="$(
-  LEAFWIKI_RUNTIME_STACK=wikid-frontd \
-  "$script" \
-    mcp \
-    --dry-run \
-    --leafwiki-bin /tmp/fake-leafwiki \
-    --data-dir "$tmp_dir/nowatch-data" \
-    --root-dir "$tmp_dir/nowatch-root" \
-    --markdown-link-root-prefix /docs \
-    2>&1
-)"
-assert_contains "$extracted_runtime_output" "LEAFWIKI_RUNTIME_STACK=wikid-frontd" "extracted runtime dry-run"
-assert_contains "$extracted_runtime_output" "--mcp=stdio" "extracted runtime dry-run"
-assert_contains "$extracted_runtime_output" "--data-dir $tmp_dir/nowatch-data" "extracted runtime dry-run"
-assert_contains "$extracted_runtime_output" "--root-dir $tmp_dir/nowatch-root" "extracted runtime dry-run"
-assert_contains "$extracted_runtime_output" "--markdown-link-root-prefix /docs" "extracted runtime dry-run"
-assert_contains "$extracted_runtime_output" "--enable-workspace-sync" "extracted runtime dry-run"
-assert_not_contains "$extracted_runtime_output" "$removed_binary" "extracted runtime dry-run"
-
-legacy_output="$(
-  "$script" \
-    mcp \
-    --dry-run \
-    --mode legacy \
-    --endpoint http://127.0.0.1:8080/mcp \
-    "$legacy_bin_flag" /tmp/old \
-    --request-timeout 1s \
-    --shutdown-timeout 1s \
-    --max-frame-size 1MiB \
-    --stdio-arg ignored \
-    --leafwiki-bin /tmp/fake-leafwiki \
-    2>&1
-)"
-assert_contains "$legacy_output" "--mcp=stdio" "legacy dry-run"
-assert_not_contains "$legacy_output" "$removed_binary" "legacy dry-run"
-assert_not_contains "$legacy_output" "--endpoint" "legacy dry-run"
-assert_not_contains "$legacy_output" "/tmp/old" "legacy dry-run"
+for removed_env in \
+  LEAFWIKI_RUNTIME_STACK \
+  LEAFWIKI_RUN_MCP_RUNTIME_STACK \
+  LEAFWIKI_RUN_MCP_ENABLE_WORKSPACE_SYNC \
+  LEAFWIKI_RUN_MCP_SERVER_LOG
+do
+  set +e
+  removed_env_output="$(env "$removed_env=value" "$script" mcp --dry-run --leafwiki-bin /tmp/fake-leafwiki 2>&1)"
+  removed_env_status=$?
+  set -e
+  [[ "$removed_env_status" -ne 0 ]] || fail "$removed_env unexpectedly succeeded"
+  assert_contains "$removed_env_output" "unknown environment variable: $removed_env" "$removed_env error"
+done
 
 api_key_output="$(
   LEAFWIKI_RUN_MCP_API_KEY=lwk_secret \

@@ -28,7 +28,6 @@ func createWikiTestInstance(t *testing.T) *Wiki {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableRevision:      true,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
@@ -44,7 +43,6 @@ func createWikiTestInstanceWithWorkspace(t *testing.T, workspace Workspace) *Wik
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableRevision:      true,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
@@ -96,7 +94,7 @@ func deletePageForTest(t *testing.T, w *Wiki, userID, id string, recursive bool)
 		t.Fatalf("GetPage before delete failed: %v", err)
 	}
 
-	if err := wikipages.NewDeletePageUseCase(w.tree, w.revision, w.asset, w.newPageOrchestrator(), w.log).Execute(
+	if err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
 		wikipages.DeletePageInput{UserID: userID, ID: id, Version: current.Version(), Recursive: recursive},
 	); err != nil {
@@ -280,7 +278,6 @@ func TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores(t *testing.T) {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki control-plane-only failed: %v", err)
@@ -385,7 +382,6 @@ func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki with invalid workspace sync state returned error: %v", err)
@@ -442,7 +438,6 @@ leafwiki_title: Glossary
 		JWTSecret:              "secretkey",
 		AccessTokenTimeout:     15 * time.Minute,
 		RefreshTokenTimeout:    7 * 24 * time.Hour,
-		EnableWorkspaceSync:    true,
 		MarkdownLinkRootPrefix: "/docs",
 	})
 	if err != nil {
@@ -474,7 +469,6 @@ func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -513,7 +507,6 @@ func TestWiki_WorkspaceSyncCommitsImportedPages(t *testing.T) {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -574,7 +567,6 @@ func TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes(t *testing.T) {
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
@@ -795,7 +787,6 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
 	})
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
@@ -810,7 +801,6 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
 			PublicAccess:            true,
 			AuthDisabled:            true,
-			EnableWorkspaceSync:     true,
 			MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
 		}, serverTransport)
 	}()
@@ -975,7 +965,7 @@ func TestWiki_DeletePage_WithChildren(t *testing.T) {
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
 	createPageForTest(t, w, "system", &parent.ID, "Child", "child", pageNodeKind())
 
-	err := wikipages.NewDeletePageUseCase(w.tree, w.revision, w.asset, w.newPageOrchestrator(), w.log).Execute(
+	err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
 		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: parent.Version(), Recursive: false},
 	)
@@ -996,25 +986,6 @@ func TestWiki_DeletePage_Recursive(t *testing.T) {
 	}
 	if _, err := w.tree.GetPage(child.ID); err == nil {
 		t.Fatalf("expected deleted child to be gone")
-	}
-}
-
-func TestWiki_DeletePage_PurgesRevisionData(t *testing.T) {
-	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
-
-	page := createPageForTest(t, w, "system", nil, "Page", "page", pageNodeKind())
-	content := "updated"
-	updatePageForTest(t, w, "system", page.ID, page.Title, page.Slug, &content, pageNodeKind())
-
-	deletePageForTest(t, w, "system", page.ID, false)
-
-	revisions, err := w.revision.ListRevisions(page.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions failed: %v", err)
-	}
-	if len(revisions) != 0 {
-		t.Fatalf("expected revisions to be purged, got %#v", revisions)
 	}
 }
 
@@ -1158,42 +1129,4 @@ func TestWiki_AuthDisabled_CoreFunctionalityWorks(t *testing.T) {
 
 	// Test deleting a page
 	deletePageForTest(t, wikiInstance, "system", page.ID, false)
-}
-
-func TestWiki_EnsureBaselineRevisions_SkipsUnreadablePages(t *testing.T) {
-	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
-
-	okPage := createPageForTest(t, w, "system", nil, "Healthy", "healthy", pageNodeKind())
-	brokenPage := createPageForTest(t, w, "system", nil, "Broken", "broken", pageNodeKind())
-
-	if err := w.revision.DeletePageData(okPage.ID); err != nil {
-		t.Fatalf("DeletePageData(okPage) failed: %v", err)
-	}
-	if err := w.revision.DeletePageData(brokenPage.ID); err != nil {
-		t.Fatalf("DeletePageData(brokenPage) failed: %v", err)
-	}
-
-	brokenPath := filepath.Join(w.GetRootDir(), "broken.md")
-	if err := os.Remove(brokenPath); err != nil {
-		t.Fatalf("Remove(%s) failed: %v", brokenPath, err)
-	}
-
-	w.ensureBaselineRevisions()
-
-	okRevisions, err := w.revision.ListRevisions(okPage.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions(okPage) failed: %v", err)
-	}
-	if len(okRevisions) == 0 {
-		t.Fatalf("expected baseline revision for readable page")
-	}
-
-	brokenRevisions, err := w.revision.ListRevisions(brokenPage.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions(brokenPage) failed: %v", err)
-	}
-	if len(brokenRevisions) != 0 {
-		t.Fatalf("expected no baseline revision for unreadable page, got %d", len(brokenRevisions))
-	}
 }

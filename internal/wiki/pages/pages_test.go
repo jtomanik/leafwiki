@@ -3,24 +3,17 @@ package pages_test
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/perber/wiki/internal/core/assets"
-	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/test_utils"
-	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	"github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
-	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -31,7 +24,6 @@ type testDeps struct {
 	storageDir string
 	tree       *tree.TreeService
 	slug       *tree.SlugService
-	revision   *revision.Service
 	links      *links.LinkService
 	assets     *assets.AssetService
 }
@@ -54,16 +46,10 @@ func newTestDeps(t *testing.T) *testDeps {
 	}
 	linkService := links.NewLinkService(storageDir, treeService, linksStore)
 
-	revService := revision.NewService(
-		storageDir, treeService, slog.Default(),
-		revision.ServiceOptions{},
-	)
-
 	return &testDeps{
 		storageDir: storageDir,
 		tree:       treeService,
 		slug:       slugService,
-		revision:   revService,
 		links:      linkService,
 		assets:     assetService,
 	}
@@ -72,7 +58,6 @@ func newTestDeps(t *testing.T) *testDeps {
 func (d *testDeps) orchestrator() *pagesave.PageSaveOrchestrator {
 	return pagesave.NewPageSaveOrchestrator(
 		pagesave.NewLinkIndexSideEffect(d.links, slog.Default()),
-		pagesave.NewRevisionSideEffect(d.revision, slog.Default()),
 	)
 }
 
@@ -352,7 +337,7 @@ func TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
 func TestDeletePageUseCase_HappyPath(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "user1", Title: "To Delete", Slug: "to-delete", Kind: pageKind(),
@@ -375,7 +360,7 @@ func TestDeletePageUseCase_HappyPath(t *testing.T) {
 
 func TestDeletePageUseCase_Root_ReturnsError(t *testing.T) {
 	deps := newTestDeps(t)
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
 		UserID: "user1", ID: "root", Recursive: false,
@@ -388,7 +373,7 @@ func TestDeletePageUseCase_Root_ReturnsError(t *testing.T) {
 func TestDeletePageUseCase_WithChildren_Recursive(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
@@ -517,7 +502,7 @@ func TestConvertPageUseCase_UsesOrchestratorWithMutationSource(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	capture := &captureEffect{}
-	convertUC := pages.NewConvertPageUseCase(deps.tree, deps.revision, pagesave.NewPageSaveOrchestrator(capture), slog.Default())
+	convertUC := pages.NewConvertPageUseCase(deps.tree, pagesave.NewPageSaveOrchestrator(capture), slog.Default())
 
 	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "user1", Title: "Convert Me", Slug: "convert-me", Kind: pageKind(),
@@ -832,35 +817,6 @@ func TestCreatePageUseCase_RejectsCaseInsensitiveSlugConflict(t *testing.T) {
 	}
 }
 
-func TestCreatePageUseCase_RecordsPageCreatedRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	out, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "editor", Title: "My Page", Slug: "my-page", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	latest, err := deps.revision.GetLatestRevision(out.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision failed: %v", err)
-	}
-	if latest == nil {
-		t.Fatal("expected latest revision, got nil")
-	}
-	if latest.Type != revision.RevisionTypeContentUpdate {
-		t.Fatalf("revision type = %q, want %q", latest.Type, revision.RevisionTypeContentUpdate)
-	}
-	if latest.Summary != "page created" {
-		t.Fatalf("revision summary = %q, want %q", latest.Summary, "page created")
-	}
-	if latest.AuthorID != "editor" {
-		t.Fatalf("revision authorID = %q, want %q", latest.AuthorID, "editor")
-	}
-}
-
 func TestUpdatePageUseCase_AllowsUppercaseSlug(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -893,7 +849,7 @@ func TestUpdatePageUseCase_AllowsUppercaseSlug(t *testing.T) {
 
 func TestDeletePageUseCase_EmptyID_ReturnsError(t *testing.T) {
 	deps := newTestDeps(t)
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
 		UserID: "user1", ID: "", Recursive: false,
@@ -1148,51 +1104,6 @@ func TestCopyPageUseCase_WithAssets(t *testing.T) {
 	}
 }
 
-func TestCopyPageUseCase_RecordsContentRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
-
-	original, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	content := "original content"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: original.Page.ID, Version: original.Page.Version(), Title: original.Page.Title, Slug: original.Page.Slug, Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error updating page: %v", err)
-	}
-
-	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "editor", SourcePageID: original.Page.ID, Title: "Copy of Original", Slug: "copy-of-original",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error copying page: %v", err)
-	}
-
-	latest, err := deps.revision.GetLatestRevision(out.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision failed: %v", err)
-	}
-	if latest == nil {
-		t.Fatal("expected latest revision for copied page")
-	}
-	if latest.Type != revision.RevisionTypeContentUpdate {
-		t.Fatalf("latest revision type = %q, want %q", latest.Type, revision.RevisionTypeContentUpdate)
-	}
-	if latest.AuthorID != "editor" {
-		t.Fatalf("latest author = %q, want %q", latest.AuthorID, "editor")
-	}
-	if latest.Summary != "page copied" {
-		t.Fatalf("latest summary = %q, want %q", latest.Summary, "page copied")
-	}
-}
-
 func TestCopyPageUseCase_IndexesOutgoingLinksOnCreate(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1411,7 +1322,7 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	ref, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
@@ -1532,7 +1443,7 @@ func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealt
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	docs, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: sectionKind(),
@@ -1613,7 +1524,7 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
@@ -1626,11 +1537,6 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
-	}
-
-	beforeRefRevision, err := deps.revision.GetLatestRevision(ref.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(ref before refactor) failed: %v", err)
 	}
 
 	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
@@ -1674,19 +1580,6 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 		t.Fatalf("expected rewritten link to be healed")
 	}
 
-	afterRefRevision, err := deps.revision.GetLatestRevision(ref.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(ref after refactor) failed: %v", err)
-	}
-	if afterRefRevision == nil || beforeRefRevision == nil {
-		t.Fatalf("expected revisions before and after refactor")
-	}
-	if afterRefRevision.ID == beforeRefRevision.ID {
-		t.Fatalf("expected rewritten ref page to create a new revision")
-	}
-	if afterRefRevision.Type != revision.RevisionTypeContentUpdate {
-		t.Fatalf("expected rewritten ref page latest revision type %q, got %q", revision.RevisionTypeContentUpdate, afterRefRevision.Type)
-	}
 }
 
 func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *testing.T) {
@@ -1696,10 +1589,9 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	capture := &captureEffect{}
 	orchestrator := pagesave.NewPageSaveOrchestrator(
 		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
-		pagesave.NewRevisionSideEffect(deps.revision, slog.Default()),
 		capture,
 	)
-	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.revision, deps.links, orchestrator, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
 
 	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
@@ -1751,76 +1643,6 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	}
 }
 
-func TestUpdatePageUseCase_MetadataOnlyUpdateRecordsContentRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "creator",
-		Title:  "Metadata Revision",
-		Slug:   "metadata-revision",
-		Kind:   pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
-	body := "# Metadata Revision\n\nBody"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "creator",
-		ID:      created.Page.ID,
-		Version: created.Page.Version(),
-		Title:   created.Page.Title,
-		Slug:    created.Page.Slug,
-		Content: &body,
-		Kind:    pageKind(),
-	}); err != nil {
-		t.Fatalf("initial UpdatePage failed: %v", err)
-	}
-	firstRevision, err := deps.revision.GetLatestRevision(created.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision first: %v", err)
-	}
-
-	current, err := deps.tree.GetPage(created.Page.ID)
-	if err != nil {
-		t.Fatalf("GetPage current: %v", err)
-	}
-	rawWithMetadata, err := pages.BuildMarkdownWithPublicMetadata(created.Page.ID, current.Title, []string{"ready"}, map[string]string{"status": "ready"}, body)
-	if err != nil {
-		t.Fatalf("BuildMarkdownWithPublicMetadata: %v", err)
-	}
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:     "editor",
-		ID:         created.Page.ID,
-		Version:    current.Version(),
-		Title:      current.Title,
-		Slug:       current.Slug,
-		Content:    &rawWithMetadata,
-		Kind:       pageKind(),
-		FromImport: true,
-	}); err != nil {
-		t.Fatalf("metadata-only UpdatePage failed: %v", err)
-	}
-
-	secondRevision, err := deps.revision.GetLatestRevision(created.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision second: %v", err)
-	}
-	if secondRevision.ID == firstRevision.ID {
-		t.Fatalf("metadata-only update did not create a new revision")
-	}
-	if secondRevision.PageMetadata == nil {
-		t.Fatalf("metadata-only revision did not capture PageMetadata")
-	}
-	if len(secondRevision.PageMetadata.Tags) != 1 || secondRevision.PageMetadata.Tags[0] != "ready" {
-		t.Fatalf("metadata-only revision tags = %#v, want [ready]", secondRevision.PageMetadata.Tags)
-	}
-	if secondRevision.PageMetadata.Fields["status"] != "ready" {
-		t.Fatalf("metadata-only revision fields = %#v, want status=ready", secondRevision.PageMetadata.Fields)
-	}
-}
-
 func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *testing.T) {
 	deps := newTestDeps(t)
 	searchIndex, err := search.NewSQLiteIndex(t.TempDir())
@@ -1833,10 +1655,9 @@ func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *tes
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	orchestrator := pagesave.NewPageSaveOrchestrator(
 		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
-		pagesave.NewRevisionSideEffect(deps.revision, slog.Default()),
 		pagesave.NewSearchIndexSideEffect(searchIndex, deps.tree, slog.Default()),
 	)
-	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.revision, deps.links, orchestrator, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
 
 	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
@@ -1879,7 +1700,7 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
@@ -1931,7 +1752,7 @@ func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *t
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
@@ -2064,7 +1885,7 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default())
+	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
@@ -2084,11 +1905,6 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		UserID: "system", ID: pageA.Page.ID, Version: pageA.Page.Version(), Title: pageA.Page.Title, Slug: pageA.Page.Slug, Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(pageA) failed: %v", err)
-	}
-
-	beforeMovedRevision, err := deps.revision.GetLatestRevision(pageA.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(pageA before refactor) failed: %v", err)
 	}
 
 	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
@@ -2133,19 +1949,6 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		t.Fatalf("expected outgoing link to remain valid after move refactor")
 	}
 
-	afterMovedRevision, err := deps.revision.GetLatestRevision(pageA.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(pageA after refactor) failed: %v", err)
-	}
-	if afterMovedRevision == nil || beforeMovedRevision == nil {
-		t.Fatalf("expected revisions before and after move")
-	}
-	if afterMovedRevision.ID == beforeMovedRevision.ID {
-		t.Fatalf("expected moved page rewrite to create a new revision")
-	}
-	if afterMovedRevision.Type != revision.RevisionTypeContentUpdate {
-		t.Fatalf("expected moved page latest revision type %q, got %q", revision.RevisionTypeContentUpdate, afterMovedRevision.Type)
-	}
 }
 
 func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
@@ -2236,7 +2039,7 @@ func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	a, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
@@ -2298,7 +2101,7 @@ func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncoming
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.revision, deps.assets, deps.orchestrator(), slog.Default())
+	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
@@ -2682,348 +2485,5 @@ func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
 	}
 	if out2.Outgoings[0].ToPath != "/guide/shared" || out2.Outgoings[0].Broken || out2.Outgoings[0].ToPageID != guideShared.Page.ID {
 		t.Fatalf("unexpected outgoing after move: %#v", out2.Outgoings[0])
-	}
-}
-
-func TestAssetUseCases_RecordAssetRevisionForUser(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	uploadUC := wikiassets.NewUploadAssetUseCase(deps.tree, deps.assets, deps.revision, slog.Default())
-	renameUC := wikiassets.NewRenameAssetUseCase(deps.tree, deps.assets, deps.revision, slog.Default())
-	deleteUC := wikiassets.NewDeleteAssetUseCase(deps.tree, deps.assets, deps.revision, slog.Default())
-	listUC := wikiassets.NewListAssetsUseCase(deps.tree, deps.assets)
-
-	writeAsset := func(t *testing.T, pageID, name string, data []byte) {
-		t.Helper()
-		assetDir := filepath.Join(deps.assets.GetAssetsDir(), pageID)
-		if err := os.MkdirAll(assetDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll(assetDir) failed: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(assetDir, name), data, 0o644); err != nil {
-			t.Fatalf("WriteFile(asset) failed: %v", err)
-		}
-	}
-
-	tests := []struct {
-		name      string
-		setup     func(t *testing.T, pageID string)
-		operate   func(t *testing.T, pageID string)
-		wantAsset string
-	}{
-		{
-			name: "upload",
-			operate: func(t *testing.T, pageID string) {
-				t.Helper()
-				file, err := os.CreateTemp(t.TempDir(), "asset-upload-*")
-				if err != nil {
-					t.Fatalf("CreateTemp failed: %v", err)
-				}
-				t.Cleanup(func() {
-					if err := file.Close(); err != nil {
-						t.Fatalf("Close(file) failed: %v", err)
-					}
-				})
-				if _, err := file.WriteString("payload"); err != nil {
-					t.Fatalf("WriteString(file) failed: %v", err)
-				}
-				if _, err := file.Seek(0, io.SeekStart); err != nil {
-					t.Fatalf("Seek(file) failed: %v", err)
-				}
-				if _, err := uploadUC.Execute(context.Background(), wikiassets.UploadAssetInput{
-					UserID: "editor", PageID: pageID, File: file, Filename: "uploaded.txt", MaxBytes: 1024,
-				}); err != nil {
-					t.Fatalf("UploadAsset failed: %v", err)
-				}
-			},
-			wantAsset: "uploaded.txt",
-		},
-		{
-			name: "rename",
-			setup: func(t *testing.T, pageID string) {
-				t.Helper()
-				writeAsset(t, pageID, "old.txt", []byte("payload"))
-			},
-			operate: func(t *testing.T, pageID string) {
-				t.Helper()
-				if _, err := renameUC.Execute(context.Background(), wikiassets.RenameAssetInput{
-					UserID: "editor", PageID: pageID, OldFilename: "old.txt", NewFilename: "new.txt",
-				}); err != nil {
-					t.Fatalf("RenameAsset failed: %v", err)
-				}
-			},
-			wantAsset: "new.txt",
-		},
-		{
-			name: "delete",
-			setup: func(t *testing.T, pageID string) {
-				t.Helper()
-				writeAsset(t, pageID, "delete.txt", []byte("payload"))
-				if _, _, err := deps.revision.RecordAssetChange(pageID, "system", ""); err != nil {
-					t.Fatalf("RecordAssetChange failed: %v", err)
-				}
-			},
-			operate: func(t *testing.T, pageID string) {
-				t.Helper()
-				if err := deleteUC.Execute(context.Background(), wikiassets.DeleteAssetInput{
-					UserID: "editor", PageID: pageID, Filename: "delete.txt",
-				}); err != nil {
-					t.Fatalf("DeleteAsset failed: %v", err)
-				}
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-				UserID: "system", Title: "Asset Page " + tc.name, Slug: "asset-page-" + tc.name, Kind: pageKind(),
-			})
-			if err != nil {
-				t.Fatalf("CreatePage failed: %v", err)
-			}
-			if tc.setup != nil {
-				tc.setup(t, page.Page.ID)
-			}
-			tc.operate(t, page.Page.ID)
-
-			latest, err := deps.revision.GetLatestRevision(page.Page.ID)
-			if err != nil {
-				t.Fatalf("GetLatestRevision failed: %v", err)
-			}
-			if latest == nil || latest.Type != revision.RevisionTypeAssetUpdate {
-				t.Fatalf("latest revision = %#v", latest)
-			}
-			if latest.AuthorID != "editor" {
-				t.Fatalf("latest author = %q, want %q", latest.AuthorID, "editor")
-			}
-
-			assetsOut, err := listUC.Execute(context.Background(), wikiassets.ListAssetsInput{PageID: page.Page.ID})
-			if err != nil {
-				t.Fatalf("ListAssets failed: %v", err)
-			}
-			if tc.wantAsset == "" {
-				if len(assetsOut.Files) != 0 {
-					t.Fatalf("assets = %#v, want empty", assetsOut.Files)
-				}
-				return
-			}
-			if len(assetsOut.Files) != 1 || !strings.HasSuffix(assetsOut.Files[0], "/"+tc.wantAsset) {
-				t.Fatalf("assets = %#v, want suffix %q", assetsOut.Files, tc.wantAsset)
-			}
-		})
-	}
-}
-
-func TestCheckIntegrityUseCase_Passthrough(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	checkUC := wikirevisions.NewCheckIntegrityUseCase(deps.revision)
-
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page", Slug: "page", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
-	content := "hello"
-	pageOut, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), Title: page.Page.Title, Slug: page.Page.Slug, Content: &content, Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
-
-	rev, err := deps.revision.GetLatestRevision(pageOut.Page.ID)
-	if err != nil || rev == nil {
-		t.Fatalf("GetLatestRevision failed: %#v %v", rev, err)
-	}
-	contentBlobPath := filepath.Join(deps.storageDir, ".leafwiki", "blobs", "content", "sha256", rev.ContentHash[:2], rev.ContentHash)
-	if err := os.Remove(contentBlobPath); err != nil {
-		t.Fatalf("Remove content blob failed: %v", err)
-	}
-
-	out, err := checkUC.Execute(context.Background(), wikirevisions.CheckIntegrityInput{PageID: pageOut.Page.ID})
-	if err != nil {
-		t.Fatalf("CheckRevisionIntegrity failed: %v", err)
-	}
-	if len(out.Issues) != 1 {
-		t.Fatalf("expected 1 integrity issue, got %#v", out.Issues)
-	}
-	if out.Issues[0].Code != "missing_content_blob" {
-		t.Fatalf("unexpected integrity issue: %#v", out.Issues[0])
-	}
-}
-
-func TestEnsurePathUseCase_RecordsRevisionForEachCreatedSegment(t *testing.T) {
-	deps := newTestDeps(t)
-	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	out, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "system", TargetPath: "/x/y", TargetTitle: "X Y", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("EnsurePath failed: %v", err)
-	}
-
-	latestY, err := deps.revision.GetLatestRevision(out.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(y) failed: %v", err)
-	}
-	if latestY == nil || latestY.Summary != "page created via ensure path" {
-		t.Fatalf("unexpected y latest revision: %#v", latestY)
-	}
-
-	xPage, err := deps.tree.FindPageByRoutePath("x")
-	if err != nil {
-		t.Fatalf("FindByPath x failed: %v", err)
-	}
-	latestX, err := deps.revision.GetLatestRevision(xPage.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(x) failed: %v", err)
-	}
-	if latestX == nil || latestX.Summary != "page created via ensure path" {
-		t.Fatalf("unexpected x latest revision: %#v", latestX)
-	}
-}
-
-func TestMovePageUseCase_RecordsStructureRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	dest, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Dest", Slug: "dest", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage(dest) failed: %v", err)
-	}
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Move Me", Slug: "move-me", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage(page) failed: %v", err)
-	}
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), ParentID: dest.Page.ID,
-	}); err != nil {
-		t.Fatalf("MovePage failed: %v", err)
-	}
-
-	latest, err := deps.revision.GetLatestRevision(page.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision failed: %v", err)
-	}
-	if latest == nil || latest.Type != revision.RevisionTypeStructureUpdate {
-		t.Fatalf("latest revision = %#v", latest)
-	}
-	if latest.ParentID != dest.Page.ID {
-		t.Fatalf("latest parent id = %q, want %q", latest.ParentID, dest.Page.ID)
-	}
-}
-
-func TestUpdatePageUseCase_TitleOnlyCreatesStructureRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
-
-	content := "same content"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), Title: page.Page.Title, Slug: page.Page.Slug, Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(initial content) failed: %v", err)
-	}
-
-	beforeLatest, err := deps.revision.GetLatestRevision(page.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(before rename) failed: %v", err)
-	}
-	if beforeLatest == nil {
-		t.Fatal("expected initial content revision")
-	}
-
-	updatedPage, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), Title: "Renamed Title", Slug: page.Page.Slug, Content: nil, Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("UpdatePage(title only) failed: %v", err)
-	}
-	if updatedPage.Page.Title != "Renamed Title" {
-		t.Fatalf("updated title = %q", updatedPage.Page.Title)
-	}
-
-	afterLatest, err := deps.revision.GetLatestRevision(page.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(after rename) failed: %v", err)
-	}
-	if afterLatest == nil || afterLatest.ID == beforeLatest.ID {
-		t.Fatalf("expected new revision for title-only change, got before=%#v after=%#v", beforeLatest, afterLatest)
-	}
-	if afterLatest.Type != revision.RevisionTypeStructureUpdate {
-		t.Fatalf("latest revision type = %q", afterLatest.Type)
-	}
-
-	revisions, err := deps.revision.ListRevisions(page.Page.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions failed: %v", err)
-	}
-	if len(revisions) != 3 {
-		t.Fatalf("revision count = %d, want 3", len(revisions))
-	}
-}
-
-func TestUpdatePageUseCase_TitleOnlyWithUnchangedContentCreatesStructureRevision(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
-
-	content := "same content"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), Title: page.Page.Title, Slug: page.Page.Slug, Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(initial content) failed: %v", err)
-	}
-
-	beforeLatest, err := deps.revision.GetLatestRevision(page.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(before rename) failed: %v", err)
-	}
-	if beforeLatest == nil {
-		t.Fatal("expected initial content revision")
-	}
-
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: page.Page.ID, Version: page.Page.Version(), Title: "Renamed Title", Slug: page.Page.Slug, Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(title only with unchanged content) failed: %v", err)
-	}
-
-	afterLatest, err := deps.revision.GetLatestRevision(page.Page.ID)
-	if err != nil {
-		t.Fatalf("GetLatestRevision(after rename) failed: %v", err)
-	}
-	if afterLatest == nil || afterLatest.ID == beforeLatest.ID {
-		t.Fatalf("expected new revision for title-only change, got before=%#v after=%#v", beforeLatest, afterLatest)
-	}
-	if afterLatest.Type != revision.RevisionTypeStructureUpdate {
-		t.Fatalf("latest revision type = %q", afterLatest.Type)
-	}
-	if afterLatest.Title != "Renamed Title" {
-		t.Fatalf("latest revision title = %q", afterLatest.Title)
 	}
 }

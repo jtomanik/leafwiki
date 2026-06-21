@@ -11,6 +11,9 @@ page:
 
 # LeafWiki MCP Transport Unification and Sidecar Removal Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Suggested workers: CLI/config, native STDIO auth, sidecar/removal scripts, E2E, docs/release cleanup.
 
 **Goal:** Replace boolean MCP flags and the `leafwiki-mcp-stdio` sidecar with one native `--mcp` transport selector that supports HTTP MCP, STDIO MCP, and native STDIO API-key identity.

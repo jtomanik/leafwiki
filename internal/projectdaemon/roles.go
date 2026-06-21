@@ -3,7 +3,6 @@ package projectdaemon
 import "time"
 
 const (
-	RuntimeStackLegacy      = "legacy"
 	RuntimeStackWikidFrontd = "wikid-frontd"
 )
 

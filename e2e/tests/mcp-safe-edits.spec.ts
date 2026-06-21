@@ -8,10 +8,8 @@ import { connectMCPClient } from './mcpClient';
 // - MCP refactor preview and apply preserve canonical page and section syntax
 
 test.skip(
-  process.env.E2E_RUN_MODE !== 'local' ||
-    process.env.E2E_ENABLE_MCP_LOCAL !== '1' ||
-    process.env.E2E_ENABLE_WORKSPACE_SYNC !== '1',
-  'Set E2E_RUN_MODE=local, E2E_ENABLE_MCP_LOCAL=1, and E2E_ENABLE_WORKSPACE_SYNC=1 to run MCP safe edit E2E.',
+  process.env.E2E_RUN_MODE !== 'local' || process.env.E2E_ENABLE_MCP_LOCAL !== '1',
+  'Set E2E_RUN_MODE=local and E2E_ENABLE_MCP_LOCAL=1 to run MCP safe edit E2E.',
 );
 
 type MCPPage = {

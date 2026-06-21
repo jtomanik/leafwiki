@@ -94,8 +94,7 @@ type RouterOptions struct {
 	BasePath                string               // URL prefix when served behind a reverse proxy (e.g. "/wiki")
 	MarkdownLinkRootPrefix  string               // Repository-root prefix for absolute Markdown links
 	MaxAssetUploadSizeBytes int64                // Maximum allowed size in bytes for asset uploads
-	EnableRevision          bool                 // Whether the revision / page history feature is enabled
-	EnableWorkspaceSync     bool                 // Whether workspace sync is enabled
+	EnableWorkspaceSync     bool                 // Whether workspace sync capability is exposed to clients
 	EnableLinkRefactor      bool                 // Whether the link refactoring feature is enabled in the frontend
 	MCPEnabled              bool                 // Whether the local MCP endpoint is enabled
 	MCPBindHost             string               // Configured server bind host; empty means MCP was not fully configured

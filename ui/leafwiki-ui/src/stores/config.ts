@@ -8,7 +8,6 @@ type ConfigStore = {
   authDisabled: boolean
   markdownLinkRootPrefix: string
   maxAssetUploadSizeBytes: number
-  enableRevision: boolean
   enableWorkspaceSync: boolean
   enableLinkRefactor: boolean
   httpRemoteUserEnabled: boolean
@@ -25,8 +24,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   authDisabled: false,
   markdownLinkRootPrefix: '',
   maxAssetUploadSizeBytes: DEFAULT_MAX_ASSET_UPLOAD_SIZE_BYTES,
-  enableRevision: false,
-  enableWorkspaceSync: false,
+  enableWorkspaceSync: true,
   enableLinkRefactor: false,
   httpRemoteUserEnabled: false,
   httpRemoteUserLogoutUrl: '',
@@ -50,8 +48,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
         authDisabled: config.authDisabled,
         markdownLinkRootPrefix: config.markdownLinkRootPrefix ?? '',
         maxAssetUploadSizeBytes,
-        enableRevision: config.enableRevision ?? false,
-        enableWorkspaceSync: config.enableWorkspaceSync ?? false,
+        enableWorkspaceSync: config.enableWorkspaceSync ?? true,
         enableLinkRefactor: config.enableLinkRefactor ?? false,
         httpRemoteUserEnabled: config.httpRemoteUserEnabled ?? false,
         httpRemoteUserLogoutUrl: config.httpRemoteUserLogoutUrl ?? '',

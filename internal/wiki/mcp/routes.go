@@ -22,7 +22,6 @@ import (
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
-	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -66,12 +65,6 @@ type Routes struct {
 	getAssets    *wikiassets.ListAssetsUseCase
 	renameAsset  *wikiassets.RenameAssetUseCase
 	deleteAsset  *wikiassets.DeleteAssetUseCase
-	listRevs     *wikirevisions.ListRevisionsUseCase
-	getRev       *wikirevisions.GetRevisionUseCase
-	compareRevs  *wikirevisions.CompareRevisionsUseCase
-	getRevAsset  *wikirevisions.GetRevisionAssetUseCase
-	getLatestRev *wikirevisions.GetLatestRevisionUseCase
-	restoreRev   *wikirevisions.RestoreRevisionUseCase
 
 	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
 	getWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
@@ -124,12 +117,6 @@ type RoutesConfig struct {
 	GetAssets    *wikiassets.ListAssetsUseCase
 	RenameAsset  *wikiassets.RenameAssetUseCase
 	DeleteAsset  *wikiassets.DeleteAssetUseCase
-	ListRevs     *wikirevisions.ListRevisionsUseCase
-	GetRev       *wikirevisions.GetRevisionUseCase
-	CompareRevs  *wikirevisions.CompareRevisionsUseCase
-	GetRevAsset  *wikirevisions.GetRevisionAssetUseCase
-	GetLatestRev *wikirevisions.GetLatestRevisionUseCase
-	RestoreRev   *wikirevisions.RestoreRevisionUseCase
 
 	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
 	GetWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
@@ -179,12 +166,6 @@ func NewRoutes(cfg RoutesConfig) *Routes {
 		getAssets:    cfg.GetAssets,
 		renameAsset:  cfg.RenameAsset,
 		deleteAsset:  cfg.DeleteAsset,
-		listRevs:     cfg.ListRevs,
-		getRev:       cfg.GetRev,
-		compareRevs:  cfg.CompareRevs,
-		getRevAsset:  cfg.GetRevAsset,
-		getLatestRev: cfg.GetLatestRev,
-		restoreRev:   cfg.RestoreRev,
 
 		listWorkspaceRevisions:   cfg.ListWorkspaceRevisions,
 		getWorkspaceRevision:     cfg.GetWorkspaceRevision,
@@ -390,13 +371,7 @@ const (
 )
 
 func optionalToolGatesForOptions(opts httpinternal.RouterOptions) []optionalToolGate {
-	gates := []optionalToolGate{}
-	if opts.EnableWorkspaceSync {
-		gates = append(gates, optionalToolGateWorkspaceSync)
-	}
-	if opts.EnableRevision || opts.EnableWorkspaceSync {
-		gates = append(gates, optionalToolGateRevision)
-	}
+	gates := []optionalToolGate{optionalToolGateWorkspaceSync, optionalToolGateRevision}
 	if opts.EnableLinkRefactor {
 		gates = append(gates, optionalToolGateLinkRefactor)
 	}

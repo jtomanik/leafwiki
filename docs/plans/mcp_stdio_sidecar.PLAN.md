@@ -11,6 +11,9 @@ page:
 
 # LeafWiki MCP STDIO Sidecar Implementation Plan
 
+> **Historical note:** This plan predates the federated runtime cleanup. Runtime, MCP compatibility, revision-mode, or workspace-sync flag examples in this artifact are historical and do not describe current startup; current LeafWiki uses `--mcp` and always-on Git-backed workspace sync.
+
+
 > **For agentic workers:** Use `superpowers:subagent-driven-development` or equivalent task isolation. Suggested split: one worker for the Go transport bridge, one for TypeScript/Playwright E2E, one for docs/release wiring.
 
 **Goal:** Add a separate `leafwiki-mcp-stdio` CLI that transparently bridges MCP STDIO clients to LeafWiki’s existing Streamable HTTP `/mcp` endpoint without SSE, OAuth, or tool mirroring.

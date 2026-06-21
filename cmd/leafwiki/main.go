@@ -84,13 +84,10 @@ func writeUsage(w io.Writer) {
 	--hide-link-metadata-section  Hide link metadata section in the frontend UI (default: false)
 	--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: "")
 	--max-asset-upload-size       Maximum size for asset uploads (for example 50MiB, 50MB, 52428800) (default: 50MiB)
-	--enable-revision             Enable the revision / page history feature (default: false)
-	--enable-workspace-sync       Enable workspace sync and Git-backed Markdown history (default: false)
 	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
 	--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)
 	--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY
 	--daemon-idle-timeout         Federated runtime idle timeout after the last session or presence record exits; 0 stops immediately (default: 10m)
-	--max-revision-history        Maximum revisions kept per page; 0 = unlimited (default: 100)
 	--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)
 	--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)
 	--trusted-proxy-ips             Comma-separated trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)
@@ -119,13 +116,10 @@ func writeUsage(w io.Writer) {
 	LEAFWIKI_HIDE_LINK_METADATA_SECTION
 	LEAFWIKI_BASE_PATH
 	LEAFWIKI_MAX_ASSET_UPLOAD_SIZE
-	LEAFWIKI_ENABLE_REVISION
-	LEAFWIKI_ENABLE_WORKSPACE_SYNC
 	LEAFWIKI_ENABLE_LINK_REFACTOR
 	LEAFWIKI_MCP
 	LEAFWIKI_MCP_API_KEY
 	LEAFWIKI_DAEMON_IDLE_TIMEOUT
-	LEAFWIKI_MAX_REVISION_HISTORY
 	LEAFWIKI_ENABLE_HTTP_REMOTE_USER
 	LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME
 	LEAFWIKI_TRUSTED_PROXY_IPS
@@ -235,16 +229,11 @@ type cliFlags struct {
 	refreshTokenTimeout     *time.Duration
 	basePath                *string
 	maxAssetUploadSize      *string
-	enableRevision          *bool
-	enableWorkspaceSync     *bool
 	enableLinkRefactor      *bool
 	mcp                     *string
 	apiKey                  *string
 	daemonIdleTimeout       *time.Duration
 	internalProjectDaemon   *string
-	enableMCP               *bool
-	mcpStdio                *bool
-	maxRevisionHistory      *int
 	enableHTTPRemoteUser    *bool
 	httpRemoteUserHeader    *string
 	trustedProxyIPs         *string
@@ -277,16 +266,11 @@ func registerFlags(fs *flag.FlagSet) *cliFlags {
 		refreshTokenTimeout:     fs.Duration("refresh-token-timeout", 7*24*time.Hour, "refresh token timeout duration (e.g. 168h, 7d) (default: 7d)"),
 		basePath:                fs.String("base-path", "", "URL prefix when served behind a reverse proxy (e.g. /wiki)"),
 		maxAssetUploadSize:      fs.String("max-asset-upload-size", "", "maximum size for asset uploads (for example 50MiB, 50MB, 52428800)"),
-		enableRevision:          fs.Bool("enable-revision", false, "enable the revision / page history feature (default: false)"),
-		enableWorkspaceSync:     fs.Bool("enable-workspace-sync", false, "enable workspace sync and Git-backed Markdown history (default: false)"),
 		enableLinkRefactor:      fs.Bool("enable-link-refactor", false, "enable the link refactoring dialog and rewrite flow (default: false)"),
 		mcp:                     fs.String("mcp", "", "MCP transports: none, http, stdio, http,stdio, or stdio,http"),
 		apiKey:                  fs.String("api-key", "", "native STDIO MCP API key; prefer LEAFWIKI_MCP_API_KEY"),
 		daemonIdleTimeout:       fs.Duration("daemon-idle-timeout", projectdaemon.DefaultIdleTimeout, "federated runtime idle timeout after the last session or presence record exits; 0 stops immediately"),
 		internalProjectDaemon:   fs.String("internal-project-daemon", "", "internal project daemon startup config path"),
-		enableMCP:               fs.Bool("enable-mcp", false, "compatibility flag for local MCP Streamable HTTP endpoint"),
-		mcpStdio:                fs.Bool("mcp-stdio", false, "compatibility flag for native MCP STDIO"),
-		maxRevisionHistory:      fs.Int("max-revision-history", 100, "maximum revisions kept per page; 0 = unlimited (default: 100)"),
 		enableHTTPRemoteUser:    fs.Bool("enable-http-remote-user", false, "enable reverse-proxy authentication via HTTP header (default: false)"),
 		httpRemoteUserHeader:    fs.String("http-remote-user-header-name", "Remote-User", "HTTP header name carrying the username from a trusted proxy (default: Remote-User)"),
 		trustedProxyIPs:         fs.String("trusted-proxy-ips", "", "comma-separated list of trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)"),
@@ -301,6 +285,9 @@ func main() {
 	startup, ok := parseStartupCLI(os.Args[1:])
 	if !ok {
 		return
+	}
+	if err := rejectRemovedLeafWikiEnv(); err != nil {
+		fail("Invalid environment", "error", err)
 	}
 	if runInternalStartupCommand(startup.flags) {
 		return
@@ -477,15 +464,9 @@ func handleStartupPositionalCommand(args []string, agentHookRequested bool, data
 }
 
 func resetAdminPasswordCommand(dataDir string) {
-	runtimeStack, stackErr := resolveRuntimeStack()
-	if stackErr != nil {
-		fail("Invalid runtime stack", "error", stackErr)
-	}
-	resetDataDir := authStorageDirForRuntime(dataDir, runtimeStack)
-	if runtimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		if err := wikid.CleanupLegacyAuthDBs(dataDir); err != nil {
-			fail("Password reset failed", "error", err)
-		}
+	resetDataDir := authStorageDirForRuntime(dataDir)
+	if err := wikid.CleanupLegacyAuthDBs(dataDir); err != nil {
+		fail("Password reset failed", "error", err)
 	}
 	user, err := tools.ResetAdminPassword(resetDataDir)
 	if err != nil {
@@ -506,11 +487,6 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 	if err != nil {
 		fail("Invalid markdown link root prefix", "error", err)
 	}
-	enableRevision := resolveBool("enable-revision", *flags.enableRevision, visited, "LEAFWIKI_ENABLE_REVISION")
-	enableWorkspaceSync := resolveBool("enable-workspace-sync", *flags.enableWorkspaceSync, visited, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
-	if enableRevision && enableWorkspaceSync {
-		fail("Invalid revision configuration", "error", fmt.Errorf("enable-revision and enable-workspace-sync cannot be combined"))
-	}
 	apiKey := ""
 	if transports.Stdio {
 		apiKey = resolveString("api-key", *flags.apiKey, visited, "LEAFWIKI_MCP_API_KEY", "")
@@ -520,8 +496,6 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 	loggingConfig := resolveLoggingConfigForStartup(flags, visited, dataDir)
 	disableAuth := resolveBool("disable-auth", *flags.disableAuth, visited, "LEAFWIKI_DISABLE_AUTH")
 	validateMCPSettings(transports, disableAuth, loggingConfig.Target, host, apiKey)
-	runtimeStack := resolveRuntimeStackForStartup(serviceModeRequested)
-
 	return leafwikiRuntimeConfig{
 		Workspace:               workspace,
 		Host:                    host,
@@ -543,12 +517,10 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 			resolveString("max-asset-upload-size", *flags.maxAssetUploadSize, visited, "LEAFWIKI_MAX_ASSET_UPLOAD_SIZE", "50MiB"),
 			"max asset upload size",
 		),
-		EnableRevision:          enableRevision,
-		EnableWorkspaceSync:     enableWorkspaceSync,
+		EnableWorkspaceSync:     true,
 		EnableLinkRefactor:      resolveBool("enable-link-refactor", *flags.enableLinkRefactor, visited, "LEAFWIKI_ENABLE_LINK_REFACTOR"),
 		MCPTransports:           transports,
 		APIKey:                  apiKey,
-		MaxRevisionHistory:      resolveInt("max-revision-history", *flags.maxRevisionHistory, visited, "LEAFWIKI_MAX_REVISION_HISTORY", 100),
 		EnableHTTPRemoteUser:    resolveBool("enable-http-remote-user", *flags.enableHTTPRemoteUser, visited, "LEAFWIKI_ENABLE_HTTP_REMOTE_USER"),
 		HTTPRemoteUserHeader:    resolveString("http-remote-user-header-name", *flags.httpRemoteUserHeader, visited, "LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME", "Remote-User"),
 		TrustedProxyIPsRaw:      trustedProxyIPsRaw,
@@ -556,7 +528,7 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 		DisableRequestLog:       resolveBool("disable-request-log", *flags.disableRequestLog, visited, "LEAFWIKI_DISABLE_REQUEST_LOG"),
 		DaemonIdleTimeout:       resolveDuration("daemon-idle-timeout", *flags.daemonIdleTimeout, visited, "LEAFWIKI_DAEMON_IDLE_TIMEOUT"),
 		DisableIdleShutdown:     serviceModeRequested,
-		RuntimeStack:            runtimeStack,
+		RuntimeStack:            projectdaemon.RuntimeStackWikidFrontd,
 	}
 }
 
@@ -597,17 +569,6 @@ func validateMCPSettings(transports mcpTransports, disableAuth bool, logTarget l
 	}
 }
 
-func resolveRuntimeStackForStartup(serviceModeRequested bool) string {
-	if serviceModeRequested {
-		return projectdaemon.RuntimeStackWikidFrontd
-	}
-	runtimeStack, err := resolveRuntimeStack()
-	if err != nil {
-		fail("Invalid runtime stack", "error", err)
-	}
-	return runtimeStack
-}
-
 func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookRequested bool, cfg leafwikiRuntimeConfig) {
 	if serviceModeRequested {
 		if err := runDaemonService(context.Background(), cfg); err != nil {
@@ -640,17 +601,20 @@ func normalizeAgentHookRawArgs(args []string) []string {
 	return args
 }
 
-func resolveRuntimeStack() (string, error) {
-	stack := strings.TrimSpace(os.Getenv("LEAFWIKI_RUNTIME_STACK"))
-	if stack == "" {
-		return projectdaemon.RuntimeStackWikidFrontd, nil
+func rejectRemovedLeafWikiEnv() error {
+	for _, name := range []string{
+		"LEAFWIKI_RUNTIME_STACK",
+		"LEAFWIKI_ENABLE_REVISION",
+		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
+		"LEAFWIKI_MAX_REVISION_HISTORY",
+		"LEAFWIKI_ENABLE_MCP",
+		"LEAFWIKI_MCP_STDIO",
+	} {
+		if _, ok := os.LookupEnv(name); ok {
+			return fmt.Errorf("unknown environment variable: %s", name)
+		}
 	}
-	switch stack {
-	case projectdaemon.RuntimeStackLegacy, projectdaemon.RuntimeStackWikidFrontd:
-		return stack, nil
-	default:
-		return "", fmt.Errorf("unsupported LEAFWIKI_RUNTIME_STACK %q", stack)
-	}
+	return nil
 }
 
 func agentHookProviderFromArgs(args []string) (string, bool) {
@@ -1045,51 +1009,7 @@ func attachOrStartRuntimeDaemon(ctx context.Context, cfg leafwikiRuntimeConfig) 
 		return nil, err
 	}
 	descriptorPath := projectdaemon.DescriptorPath(requestCfg.DataDir)
-	if cfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		return attachOrStartFederatedProjectDaemon(ctx, cfg, requestCfg, descriptorPath)
-	}
-	return attachOrStartProjectDaemon(ctx, cfg, requestCfg, descriptorPath)
-}
-
-func attachOrStartProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config, descriptorPath string) (*projectdaemon.Descriptor, error) {
-	desc, healthy, err := readHealthyProjectDaemon(ctx, descriptorPath, ownerCfg)
-	if err != nil {
-		return nil, err
-	}
-	if healthy {
-		if mismatches := compareProjectDaemonDescriptorForRequest(desc, ownerCfg, cfg.MCPTransports); len(mismatches) > 0 {
-			return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
-		}
-		return desc, nil
-	}
-	if desc != nil {
-		_ = projectdaemon.RemoveDescriptor(descriptorPath)
-	}
-	if err := validateAuthStartupConfig(cfg); err != nil {
-		logStartupValidationFailure(cfg.Logging, err.Error())
-		return nil, err
-	}
-	if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
-		if err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(ownerCfg.DataDir, ownerCfg.RuntimeStack), cfg.APIKey); err != nil {
-			if errors.Is(err, coreauth.ErrInvalidToken) {
-				return nil, fmt.Errorf("invalid native STDIO API key")
-			}
-			return nil, fmt.Errorf("verify native STDIO API key: %w", err)
-		}
-	}
-	spawnCfg, err := daemonOwnerRuntimeConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	spawnOwnerCfg, err := daemonConfigForRuntime(spawnCfg)
-	if err != nil {
-		return nil, err
-	}
-	errorPath, err := spawnProjectDaemonOwner(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return waitForProjectDaemon(ctx, descriptorPath, errorPath, spawnOwnerCfg, cfg.MCPTransports)
+	return attachOrStartFederatedProjectDaemon(ctx, cfg, requestCfg, descriptorPath)
 }
 
 func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntimeConfig, requestCfg projectdaemon.Config, workspaceDescriptorPath string) (*projectdaemon.Descriptor, error) {
@@ -1134,7 +1054,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 			return nil, err
 		}
 		if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
-			if err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(globalCfg.DataDir, globalCfg.RuntimeStack), cfg.APIKey); err != nil {
+			if err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(globalCfg.DataDir), cfg.APIKey); err != nil {
 				if errors.Is(err, coreauth.ErrInvalidToken) {
 					return nil, fmt.Errorf("invalid native STDIO API key")
 				}
@@ -1234,7 +1154,7 @@ func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntime
 	if apiKey == "" {
 		return wikid.Grant{}, false, nil
 	}
-	user, err := stdioAPIKeyUserFromStorage(authStorageDirForRuntime(layout.HomeDir, cfg.RuntimeStack), apiKey)
+	user, err := stdioAPIKeyUserFromStorage(authStorageDirForRuntime(layout.HomeDir), apiKey)
 	if err != nil {
 		return wikid.Grant{}, false, fmt.Errorf("resolve native STDIO API-key grant user: %w", err)
 	}
@@ -1691,11 +1611,8 @@ func hasProjectDaemonMismatch(mismatches []projectdaemon.Mismatch, field string)
 	return false
 }
 
-func authStorageDirForRuntime(dataDir string, runtimeStack string) string {
-	if runtimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		return wikid.AuthStoragePaths(dataDir).AuthDir
-	}
-	return dataDir
+func authStorageDirForRuntime(dataDir string) string {
+	return wikid.AuthStoragePaths(dataDir).AuthDir
 }
 
 func verifyStdioAPIKeyFromStorage(dataDir string, apiKey string) error {
@@ -1770,10 +1687,8 @@ func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, er
 		LogFile:                 logFile,
 		HideLinkMetadataSection: cfg.HideLinkMetadataSection,
 		MaxAssetUploadSizeBytes: cfg.MaxAssetUploadSize,
-		EnableRevision:          cfg.EnableRevision,
-		EnableWorkspaceSync:     cfg.EnableWorkspaceSync,
+		EnableWorkspaceSync:     true,
 		EnableLinkRefactor:      cfg.EnableLinkRefactor,
-		MaxRevisionHistory:      cfg.MaxRevisionHistory,
 		EnableHTTPRemoteUser:    cfg.EnableHTTPRemoteUser,
 		HTTPRemoteUserHeader:    cfg.HTTPRemoteUserHeader,
 		TrustedProxyIPs:         cfg.TrustedProxyIPsRaw,
@@ -1802,10 +1717,8 @@ func daemonWorkspaceRequestConfigForRuntime(cfg leafwikiRuntimeConfig) (projectd
 func daemonWorkspaceRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig, error) {
 	ownerCfg := cfg
 	ownerCfg.APIKey = ""
-	if ownerCfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		ownerCfg.EnableWorkspaceSync = true
-		ownerCfg.EnableRevision = false
-	}
+	ownerCfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+	ownerCfg.EnableWorkspaceSync = true
 	if ownerCfg.MCPTransports.Stdio && ownerCfg.Logging.Target == leaflogging.TargetStderr {
 		fileLogging, err := leaflogging.Resolve(leaflogging.ConfigInput{
 			Target:    string(leaflogging.TargetFile),
@@ -1942,14 +1855,12 @@ func daemonOwnerRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeConfig,
 	if err != nil {
 		return leafwikiRuntimeConfig{}, err
 	}
-	if ownerCfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		workspace, err := globalRuntimeWorkspace()
-		if err != nil {
-			return leafwikiRuntimeConfig{}, err
-		}
-		ownerCfg.Workspace = workspace
-		ownerCfg.MarkdownLinkRootPrefix = ""
+	workspace, err := globalRuntimeWorkspace()
+	if err != nil {
+		return leafwikiRuntimeConfig{}, err
 	}
+	ownerCfg.Workspace = workspace
+	ownerCfg.MarkdownLinkRootPrefix = ""
 	return ownerCfg, nil
 }
 
@@ -2489,7 +2400,6 @@ func (m *federatedWorkspaceManager) workspaceRuntimeConfig(workspace wikid.Works
 	cfg.Host = "127.0.0.1"
 	cfg.Port = port
 	cfg.EnableWorkspaceSync = true
-	cfg.EnableRevision = false
 	return cfg
 }
 
@@ -3382,7 +3292,7 @@ const (
 func newRuntimeWiki(cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config, mode runtimeWikiMode) (*wiki.Wiki, error) {
 	authStorageDir := ""
 	if cfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		authStorageDir = authStorageDirForRuntime(ownerCfg.DataDir, cfg.RuntimeStack)
+		authStorageDir = authStorageDirForRuntime(ownerCfg.DataDir)
 	}
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		Workspace:              wiki.Workspace{ID: cfg.Workspace.ID, DataDir: ownerCfg.DataDir, RootDir: ownerCfg.RootDir},
@@ -3395,9 +3305,6 @@ func newRuntimeWiki(cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config, mo
 		AccessTokenTimeout:     cfg.AccessTokenTimeout,
 		RefreshTokenTimeout:    cfg.RefreshTokenTimeout,
 		AuthDisabled:           cfg.DisableAuth,
-		EnableRevision:         cfg.EnableRevision,
-		EnableWorkspaceSync:    cfg.EnableWorkspaceSync,
-		MaxRevisionHistory:     cfg.MaxRevisionHistory,
 		MarkdownLinkRootPrefix: cfg.MarkdownLinkRootPrefix,
 	})
 	if err != nil {
@@ -3431,8 +3338,7 @@ func routerOptionsForRuntimeWithUserService(cfg leafwikiRuntimeConfig, userServi
 		basePath:                basePath,
 		markdownLinkRootPrefix:  cfg.MarkdownLinkRootPrefix,
 		maxAssetUploadSize:      cfg.MaxAssetUploadSize,
-		enableRevision:          cfg.EnableRevision,
-		enableWorkspaceSync:     cfg.EnableWorkspaceSync,
+		enableWorkspaceSync:     true,
 		enableLinkRefactor:      cfg.EnableLinkRefactor,
 		enableMCP:               enableMCP,
 		host:                    mcpBindHost,
@@ -3934,7 +3840,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	privateMCP, err := frontd.NewMCPProxyWithActor(frontd.WorkspaceProxyOptions{
 		Upstream:    workspacedURL,
 		DaemonToken: controlToken,
-		Actor:       wikidControlMCPActorResolver(authStorageDirForRuntime(ownerCfg.DataDir, cfg.RuntimeStack), cfg),
+		Actor:       wikidControlMCPActorResolver(authStorageDirForRuntime(ownerCfg.DataDir), cfg),
 	})
 	if err != nil {
 		return err
@@ -4012,7 +3918,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 			ConfigHash:    hash,
 		},
 		VerifyAPIKey: func(key string) error {
-			err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(ownerCfg.DataDir, cfg.RuntimeStack), key)
+			err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(ownerCfg.DataDir), key)
 			if errors.Is(err, coreauth.ErrInvalidToken) {
 				return projectdaemon.ErrInvalidAPIKey
 			}
@@ -4266,206 +4172,17 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	}
 	defer rootLock.Release()
 
-	authStorageDir := ""
-	if cfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		if err := wikid.CleanupLegacyAuthDBs(ownerCfg.DataDir); err != nil {
-			return fmt.Errorf("cleanup legacy auth DBs: %w", err)
-		}
-		authPaths := wikid.AuthStoragePaths(ownerCfg.DataDir)
-		if err := os.MkdirAll(authPaths.AuthDir, 0o755); err != nil {
-			return fmt.Errorf("create wikid auth dir: %w", err)
-		}
-		if err := os.MkdirAll(authPaths.OAuthDir, 0o755); err != nil {
-			return fmt.Errorf("create wikid oauth dir: %w", err)
-		}
-		authStorageDir = authPaths.AuthDir
+	if err := wikid.CleanupLegacyAuthDBs(ownerCfg.DataDir); err != nil {
+		return fmt.Errorf("cleanup legacy auth DBs: %w", err)
 	}
-	if cfg.RuntimeStack == projectdaemon.RuntimeStackWikidFrontd {
-		return runWikidFrontdOwner(parent, cfg, ownerCfg)
+	authPaths := wikid.AuthStoragePaths(ownerCfg.DataDir)
+	if err := os.MkdirAll(authPaths.AuthDir, 0o755); err != nil {
+		return fmt.Errorf("create wikid auth dir: %w", err)
 	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:              wiki.Workspace{ID: cfg.Workspace.ID, DataDir: ownerCfg.DataDir, RootDir: ownerCfg.RootDir},
-		StorageDir:             ownerCfg.DataDir,
-		AuthStorageDir:         authStorageDir,
-		AdminPassword:          cfg.AdminPassword,
-		JWTSecret:              cfg.JWTSecret,
-		AccessTokenTimeout:     cfg.AccessTokenTimeout,
-		RefreshTokenTimeout:    cfg.RefreshTokenTimeout,
-		AuthDisabled:           cfg.DisableAuth,
-		EnableRevision:         cfg.EnableRevision,
-		EnableWorkspaceSync:    cfg.EnableWorkspaceSync,
-		MaxRevisionHistory:     cfg.MaxRevisionHistory,
-		MarkdownLinkRootPrefix: cfg.MarkdownLinkRootPrefix,
-	})
-	if err != nil {
-		return fmt.Errorf("initialize Wiki: %w", err)
+	if err := os.MkdirAll(authPaths.OAuthDir, 0o755); err != nil {
+		return fmt.Errorf("create wikid oauth dir: %w", err)
 	}
-	defer w.Close()
-
-	trustedProxies, err := authmw.ParseTrustedProxies(cfg.TrustedProxyIPsRaw)
-	if err != nil {
-		return fmt.Errorf("invalid trusted proxies: %w", err)
-	}
-	publicRouterOpts := buildHTTPRouterOptions(httpRouterOptionsInput{
-		publicAccess:            cfg.PublicAccess,
-		injectCodeInHeader:      cfg.InjectCodeInHeader,
-		customStylesheet:        cfg.CustomStylesheet,
-		allowInsecure:           cfg.AllowInsecure,
-		hideLinkMetadataSection: cfg.HideLinkMetadataSection,
-		accessTokenTimeout:      cfg.AccessTokenTimeout,
-		refreshTokenTimeout:     cfg.RefreshTokenTimeout,
-		authDisabled:            cfg.DisableAuth,
-		basePath:                cfg.BasePath,
-		markdownLinkRootPrefix:  cfg.MarkdownLinkRootPrefix,
-		maxAssetUploadSize:      cfg.MaxAssetUploadSize,
-		enableRevision:          cfg.EnableRevision,
-		enableWorkspaceSync:     cfg.EnableWorkspaceSync,
-		enableLinkRefactor:      cfg.EnableLinkRefactor,
-		enableMCP:               cfg.MCPTransports.HTTP,
-		host:                    cfg.Host,
-		httpRemoteUser: httpinternal.HTTPRemoteUserConfig{
-			Enabled:        cfg.EnableHTTPRemoteUser,
-			HeaderName:     cfg.HTTPRemoteUserHeader,
-			TrustedProxies: trustedProxies,
-			UserService:    w.UserService(),
-			LogoutURL:      cfg.HTTPRemoteUserLogoutURL,
-		},
-		disableRequestLog: cfg.DisableRequestLog,
-	})
-	publicRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), publicRouterOpts)
-	privateRouterOpts := publicRouterOpts
-	privateRouterOpts.MCPEnabled = true
-	privateMCP := w.PrivateMCPHTTPHandler(privateRouterOpts)
-
-	publicListener, err := net.Listen("tcp", buildListenAddress(cfg.Host, cfg.Port))
-	if err != nil {
-		return fmt.Errorf("start HTTP listener: %w", err)
-	}
-	controlListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_ = publicListener.Close()
-		return fmt.Errorf("start control listener: %w", err)
-	}
-	defer publicListener.Close()
-	defer controlListener.Close()
-
-	controlToken, err := projectdaemon.RandomToken()
-	if err != nil {
-		_ = publicListener.Close()
-		_ = controlListener.Close()
-		return err
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		_ = publicListener.Close()
-		_ = controlListener.Close()
-		return err
-	}
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	var roleShells *wikidFrontdRuntime
-	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopCancel()
-		if err := roleShells.stop(stopCtx); err != nil {
-			slog.Default().Warn("Runtime role shell shutdown failed", "error", err)
-		}
-	}()
-	var sessions *projectdaemon.SessionRegistry
-	var agentPresence *projectdaemon.AgentPresenceRegistry
-	activityChanged := idleShutdownCallback(ctx, cancel, cfg.DaemonIdleTimeout, func() int {
-		return projectDaemonActivityCount(sessions, agentPresence)
-	})
-	notifyActivityChanged := func(int) {
-		activityChanged(projectDaemonActivityCount(sessions, agentPresence))
-	}
-	sessions = projectdaemon.NewSessionRegistry(projectdaemon.DefaultHeartbeatTTL, notifyActivityChanged)
-	agentPresence = projectdaemon.NewAgentPresenceRegistry(cfg.DaemonIdleTimeout, notifyActivityChanged)
-	w.SetAgentPresenceRegistry(agentPresence)
-	go sessions.RunExpiryLoop(ctx, 0)
-	go agentPresence.RunExpiryLoop(ctx, 0)
-
-	publicServer := &http.Server{Addr: buildListenAddress(cfg.Host, cfg.Port), Handler: publicRouter}
-	controlServer := &http.Server{Addr: controlListener.Addr().String(), Handler: projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
-		Token:         controlToken,
-		Sessions:      sessions,
-		AgentPresence: agentPresence,
-		PrivateMCP:    privateMCP,
-		AuthDisabled:  cfg.DisableAuth,
-		Health: projectdaemon.DaemonHealth{
-			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
-			PID:           os.Getpid(),
-			DataDir:       ownerCfg.DataDir,
-			RootDir:       ownerCfg.RootDir,
-			ConfigHash:    hash,
-		},
-		VerifyAPIKey: func(key string) error {
-			_, err := w.APIKeyService().VerifyAPIKey(key)
-			if errors.Is(err, coreauth.ErrInvalidToken) {
-				return projectdaemon.ErrInvalidAPIKey
-			}
-			return err
-		},
-	})}
-	serverDone := make(chan error, 2)
-	go func() {
-		err := controlServer.Serve(controlListener)
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		serverDone <- err
-	}()
-
-	desc := &projectdaemon.Descriptor{
-		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-		RuntimeStack:     cfg.RuntimeStack,
-		Role:             projectDaemonDescriptorRole(cfg.RuntimeStack),
-		PID:              os.Getpid(),
-		StartedAt:        time.Now().UTC(),
-		DataDir:          ownerCfg.DataDir,
-		RootDir:          ownerCfg.RootDir,
-		PublicURL:        nativeStdioHTTPURL(cfg.Host, cfg.Port, cfg.BasePath),
-		PublicMCPEnabled: cfg.MCPTransports.HTTP,
-		BasePath:         cfg.BasePath,
-		ControlURL:       "http://" + controlListener.Addr().String(),
-		ConfigHash:       hash,
-		IdleTimeout:      cfg.DaemonIdleTimeout.String(),
-		ControlToken:     controlToken,
-		Config:           ownerCfg,
-		Roles:            projectDaemonDescriptorRoles(cfg.RuntimeStack, os.Getpid(), publicListener.Addr().String(), roleShells),
-	}
-	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
-		return err
-	}
-	defer projectdaemon.RemoveDescriptor(descriptorPath)
-	go func() {
-		if err := waitForFirstProjectDaemonActivity(ctx, sessions, agentPresence, 25*time.Millisecond); err != nil {
-			return
-		}
-		err := publicServer.Serve(publicListener)
-		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
-			err = nil
-		}
-		serverDone <- err
-	}()
-	go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, agentPresence, projectdaemon.DefaultHeartbeatTTL)
-
-	slog.Default().Info("Starting LeafWiki", "address", buildListenAddress(cfg.Host, cfg.Port), "data_dir", ownerCfg.DataDir)
-	select {
-	case <-ctx.Done():
-	case err := <-serverDone:
-		if err != nil {
-			return err
-		}
-	}
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	err = errors.Join(controlServer.Shutdown(shutdownCtx), publicServer.Shutdown(shutdownCtx))
-	if err != nil {
-		return err
-	}
-	return nil
+	return runWikidFrontdOwner(parent, cfg, ownerCfg)
 }
 
 func waitForFirstProjectDaemonSession(ctx context.Context, sessions *projectdaemon.SessionRegistry, interval time.Duration) error {
@@ -4893,7 +4610,6 @@ type httpRouterOptionsInput struct {
 	basePath                string
 	markdownLinkRootPrefix  string
 	maxAssetUploadSize      int64
-	enableRevision          bool
 	enableWorkspaceSync     bool
 	enableLinkRefactor      bool
 	enableMCP               bool
@@ -4916,7 +4632,6 @@ func buildHTTPRouterOptions(in httpRouterOptionsInput) httpinternal.RouterOption
 		BasePath:                in.basePath,
 		MarkdownLinkRootPrefix:  in.markdownLinkRootPrefix,
 		MaxAssetUploadSizeBytes: in.maxAssetUploadSize,
-		EnableRevision:          in.enableRevision,
 		EnableWorkspaceSync:     in.enableWorkspaceSync,
 		EnableLinkRefactor:      in.enableLinkRefactor,
 		MCPEnabled:              in.enableMCP,

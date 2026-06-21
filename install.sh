@@ -13,8 +13,6 @@ ADMIN_PASSWORD=""
 ENV_FILE=".env"
 ENV_FILE_PATH="${LEAFWIKI_ENV_FILE_PATH:-/etc/leafwiki/.env}"
 ENABLE_LINK_REFACTORING="false"
-ENABLE_REVISION="false"
-MAX_REVISION_HISTORY="100"
 LOG_TARGET="file"
 LOG_FILE=""
 RELEASE_LINK="https://github.com/perber/leafwiki/"
@@ -165,8 +163,6 @@ write_interactive_env_file(){
     echo "LEAFWIKI_ADMIN_PASSWORD=\"$ADMIN_PASSWORD\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_LOG_TARGET=\"$LOG_TARGET\"" >> "$ENV_FILE_PATH"
     echo "LEAFWIKI_LOG_FILE=\"$LOG_FILE\"" >> "$ENV_FILE_PATH"
-    echo "LEAFWIKI_ENABLE_REVISION=\"$ENABLE_REVISION\"" >> "$ENV_FILE_PATH"
-    echo "LEAFWIKI_MAX_REVISION_HISTORY=\"$MAX_REVISION_HISTORY\"" >> "$ENV_FILE_PATH"
 }
 
 validate_requirements_non_interactive(){
@@ -279,8 +275,6 @@ if [[ "$INTERACTIVE" == 0 ]]; then
     ADMIN_PASSWORD="${LEAFWIKI_ADMIN_PASSWORD:-$ADMIN_PASSWORD}"
     ALLOW_INSECURE=${LEAFWIKI_ALLOW_INSECURE:-false}
     DISABLE_AUTH=${LEAFWIKI_DISABLE_AUTH:-false}
-    ENABLE_REVISION=${LEAFWIKI_ENABLE_REVISION:-false}
-    MAX_REVISION_HISTORY=${LEAFWIKI_MAX_REVISION_HISTORY:-"100"}
     ENABLE_LINK_REFACTORING=${LEAFWIKI_ENABLE_LINK_REFACTOR:-false}
     LOG_TARGET=${LEAFWIKI_LOG_TARGET:-$LOG_TARGET}
     LOG_FILE=${LEAFWIKI_LOG_FILE:-$LOG_FILE}
@@ -336,30 +330,6 @@ else
     else
         ROOT_DIR="$DEFAULT_ROOT_DIR"
     fi
-
-    read -rp "Do you want to enable versioning? (default: n) y/N: " RESPONSE_REVISION
-    if [[ $RESPONSE_REVISION == "y" || $RESPONSE_REVISION == "Y" ]]; then
-
-        ENABLE_REVISION="true"
-
-        while true; do
-            read -p "Would you specify a max revison number ? (default: $MAX_REVISION_HISTORY) : " RESPONSE_MAX_REVISION
-            if [[ -z "$RESPONSE_MAX_REVISION" ]]; then
-                break
-            elif [[ "$RESPONSE_MAX_REVISION" =~ ^[0-9]+$ ]]; then
-                MAX_REVISION_HISTORY="$RESPONSE_MAX_REVISION"
-                break
-            else
-                echo "Invalid max revision number. Please
-                enter an integer greater than or equal to 0, or press Enter to
-                keep the default."
-            fi
-        done
-        
-    else
-        ENABLE_REVISION="false"
-    fi
-    
 
     validate_port
     validate_architecture

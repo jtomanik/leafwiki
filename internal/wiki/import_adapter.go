@@ -6,7 +6,6 @@ import (
 	"mime/multipart"
 
 	"github.com/perber/wiki/internal/core/assets"
-	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -18,7 +17,6 @@ import (
 type WikiImportAdapter struct {
 	tree      *tree.TreeService
 	slug      *tree.SlugService
-	revision  *revision.Service
 	asset     *assets.AssetService
 	pageSaves *pagesave.PageSaveOrchestrator
 	log       *slog.Logger
@@ -30,7 +28,6 @@ func NewWikiImportAdapter(w *Wiki) *WikiImportAdapter {
 	return &WikiImportAdapter{
 		tree:      w.tree,
 		slug:      w.slug,
-		revision:  w.revision,
 		asset:     w.asset,
 		pageSaves: w.newPageOrchestrator(),
 		log:       w.log,
@@ -92,7 +89,7 @@ func (a *WikiImportAdapter) UpdatePage(userID, id, title, slug string, content *
 }
 
 func (a *WikiImportAdapter) UploadAsset(userID, pageID string, file multipart.File, filename string, maxBytes int64) (string, error) {
-	out, err := wikiassets.NewUploadAssetUseCase(a.tree, a.asset, a.revision, a.log).Execute(
+	out, err := wikiassets.NewUploadAssetUseCase(a.tree, a.asset, a.log).Execute(
 		context.Background(),
 		wikiassets.UploadAssetInput{UserID: userID, PageID: pageID, File: file, Filename: filename, MaxBytes: maxBytes},
 	)

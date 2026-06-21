@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -260,7 +259,6 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 type ApplyPageRefactorUseCase struct {
 	tree                   *tree.TreeService
 	slug                   *tree.SlugService
-	revision               *revision.Service
 	links                  *links.LinkService
 	orchestrator           *pagesave.PageSaveOrchestrator
 	log                    *slog.Logger
@@ -272,17 +270,15 @@ type ApplyPageRefactorUseCase struct {
 func NewApplyPageRefactorUseCase(
 	t *tree.TreeService,
 	s *tree.SlugService,
-	r *revision.Service,
 	l *links.LinkService,
 	log *slog.Logger,
 ) *ApplyPageRefactorUseCase {
-	return NewApplyPageRefactorUseCaseWithOptions(t, s, r, l, log, RefactorUseCaseOptions{})
+	return NewApplyPageRefactorUseCaseWithOptions(t, s, l, log, RefactorUseCaseOptions{})
 }
 
 func NewApplyPageRefactorUseCaseWithOptions(
 	t *tree.TreeService,
 	s *tree.SlugService,
-	r *revision.Service,
 	l *links.LinkService,
 	log *slog.Logger,
 	opts RefactorUseCaseOptions,
@@ -290,7 +286,6 @@ func NewApplyPageRefactorUseCaseWithOptions(
 	uc := &ApplyPageRefactorUseCase{
 		tree:                   t,
 		slug:                   s,
-		revision:               r,
 		links:                  l,
 		log:                    log,
 		markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
@@ -305,12 +300,11 @@ func NewApplyPageRefactorUseCaseWithOptions(
 func NewApplyPageRefactorUseCaseWithOrchestrator(
 	t *tree.TreeService,
 	s *tree.SlugService,
-	r *revision.Service,
 	l *links.LinkService,
 	o *pagesave.PageSaveOrchestrator,
 	log *slog.Logger,
 ) *ApplyPageRefactorUseCase {
-	uc := NewApplyPageRefactorUseCase(t, s, r, l, log)
+	uc := NewApplyPageRefactorUseCase(t, s, l, log)
 	if o != nil {
 		uc.orchestrator = o
 	}
@@ -320,13 +314,12 @@ func NewApplyPageRefactorUseCaseWithOrchestrator(
 func NewApplyPageRefactorUseCaseWithOrchestratorAndOptions(
 	t *tree.TreeService,
 	s *tree.SlugService,
-	r *revision.Service,
 	l *links.LinkService,
 	o *pagesave.PageSaveOrchestrator,
 	log *slog.Logger,
 	opts RefactorUseCaseOptions,
 ) *ApplyPageRefactorUseCase {
-	uc := NewApplyPageRefactorUseCaseWithOptions(t, s, r, l, log, opts)
+	uc := NewApplyPageRefactorUseCaseWithOptions(t, s, l, log, opts)
 	if o != nil {
 		uc.orchestrator = o
 	}
@@ -411,7 +404,6 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 func (uc *ApplyPageRefactorUseCase) defaultOrchestrator() *pagesave.PageSaveOrchestrator {
 	return pagesave.NewPageSaveOrchestrator(
 		pagesave.NewLinkIndexSideEffect(uc.links, uc.log),
-		pagesave.NewRevisionSideEffect(uc.revision, uc.log),
 	)
 }
 

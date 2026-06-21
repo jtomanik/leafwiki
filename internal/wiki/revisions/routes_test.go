@@ -59,7 +59,6 @@ func TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor(t *testing
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
 	c.Params = gin.Params{{Key: "id", Value: *pageID}}
-	c.Set("leafwiki.enableRevision", false)
 
 	routes.handleListRevisions(c)
 
