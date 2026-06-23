@@ -25,6 +25,7 @@ import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useSessionStore } from '@/stores/session'
 import { useTreeStore } from '@/stores/tree'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import clsx from 'clsx'
 import { AnchorHTMLAttributes, ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -60,7 +61,12 @@ export function MarkdownLink({
     (s) => s.getWorkspaceState(workspaceId).byPathKind,
   )
   const user = useSessionStore((s) => s.user)
-  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
+  const globalMarkdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
+  const markdownLinkRootPrefix = useWorkspacesStore((s) =>
+    s.getMarkdownLinkRootPrefix(workspaceId, globalMarkdownLinkRootPrefix),
+  )
 
   const editMode = useAppMode() === 'edit'
   const getPageByPath = (path: string, kind?: WikiNodeKind) => {

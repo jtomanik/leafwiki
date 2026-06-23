@@ -10,6 +10,7 @@ import {
 } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
+import { useWorkspacesStore } from '@/stores/workspaces'
 
 const MAX_RESULTS = 20
 const SUPPRESSED_EXTERNAL_PREFIXES = ['http', 'https', 'mailto']
@@ -51,11 +52,20 @@ function getLinkTargetRange(context: CompletionContext) {
   }
 }
 
+function getMarkdownLinkRootPrefix(workspaceId?: string) {
+  return useWorkspacesStore
+    .getState()
+    .getMarkdownLinkRootPrefix(
+      workspaceId,
+      useConfigStore.getState().markdownLinkRootPrefix,
+    )
+}
+
 function buildCompletionOptions(
   items: FlatPageSearchItem[],
+  workspaceId?: string,
 ): InternalLinkCompletion[] {
-  const markdownLinkRootPrefix =
-    useConfigStore.getState().markdownLinkRootPrefix
+  const markdownLinkRootPrefix = getMarkdownLinkRootPrefix(workspaceId)
   return items.map((item) => ({
     label: item.title,
     displayLabel: item.title,
@@ -80,8 +90,7 @@ export function internalLinkCompletionSource(
   const items = useTreeStore.getState().getWorkspaceState(workspaceId).flatPages
   if (items.length === 0) return null
 
-  const markdownLinkRootPrefix =
-    useConfigStore.getState().markdownLinkRootPrefix
+  const markdownLinkRootPrefix = getMarkdownLinkRootPrefix(workspaceId)
   const strippedQuery = stripMarkdownLinkRootPrefix(
     range.query,
     markdownLinkRootPrefix,
@@ -99,7 +108,7 @@ export function internalLinkCompletionSource(
   return {
     from: range.from,
     to: range.to,
-    options: buildCompletionOptions(matches),
+    options: buildCompletionOptions(matches, workspaceId),
     filter: false,
   }
 }

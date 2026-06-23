@@ -14,12 +14,18 @@ export type WorkspaceStatus = {
 export type WorkspaceListItem = {
   id: string
   displayName: string
+  markdownLinkRootPrefix?: string
   role: 'viewer' | 'editor' | 'admin'
   status: WorkspaceStatus
 }
 
 export type WorkspaceListResponse = {
   workspaces: WorkspaceListItem[]
+}
+
+export type WorkspaceStatusResponse = {
+  workspace: WorkspaceListItem
+  status: WorkspaceStatus
 }
 
 export function workspaceApiPath(path: string, workspaceId: string): string {
@@ -41,10 +47,10 @@ export async function fetchWorkspaces(): Promise<WorkspaceListItem[]> {
 
 export async function ensureWorkspace(
   workspaceId: string,
-): Promise<WorkspaceStatus> {
+): Promise<WorkspaceStatusResponse> {
   const response = (await fetchWithAuth(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/ensure`,
     { method: 'POST' },
-  )) as { status: WorkspaceStatus }
-  return response.status
+  )) as WorkspaceStatusResponse
+  return response
 }

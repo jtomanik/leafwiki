@@ -3,10 +3,12 @@ import { withBasePath } from '@/lib/routePath'
 import { stripMarkdownLinkRootPrefix } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useMemo, useState } from 'react'
 
 type Props = React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
 type MarkdownImageProps = Omit<Props, 'node'> & {
+  workspaceId?: string
   resolveAssetUrl?: (src: string) => string
 }
 
@@ -37,12 +39,18 @@ export function MarkdownImage({
   style,
   alt,
   node,
+  workspaceId,
   resolveAssetUrl,
   ...rest
 }: MarkdownImageProps & { node?: unknown }) {
   void node
   const openDialog = useDialogsStore((s) => s.openDialog)
-  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
+  const globalMarkdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
+  const markdownLinkRootPrefix = useWorkspacesStore((s) =>
+    s.getMarkdownLinkRootPrefix(workspaceId, globalMarkdownLinkRootPrefix),
+  )
   const resolvedSrc = useMemo(
     () =>
       resolveAssetUrl?.(

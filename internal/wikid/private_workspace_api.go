@@ -16,12 +16,13 @@ const PrivateWorkspacesPrefix = "/__leafwiki/workspaces"
 const ErrCodeWorkspaceGrantDenied sharederrors.ErrorCode = "workspace_grant_denied"
 
 type WorkspaceListItem struct {
-	ID          workspaceid.WorkspaceID `json:"id"`
-	DisplayName string                  `json:"displayName"`
-	DataDir     string                  `json:"-"`
-	RootDir     string                  `json:"-"`
-	Role        GrantRole               `json:"role"`
-	Status      WorkspaceStatus         `json:"status"`
+	ID                     workspaceid.WorkspaceID `json:"id"`
+	DisplayName            string                  `json:"displayName"`
+	MarkdownLinkRootPrefix string                  `json:"markdownLinkRootPrefix,omitempty"`
+	DataDir                string                  `json:"-"`
+	RootDir                string                  `json:"-"`
+	Role                   GrantRole               `json:"role"`
+	Status                 WorkspaceStatus         `json:"status"`
 }
 
 type WorkspaceListResponse struct {
@@ -185,12 +186,13 @@ func (h *privateWorkspaceAPI) subject(req *http.Request) (WorkspaceSubject, erro
 
 func (h *privateWorkspaceAPI) item(workspace WorkspaceRecord, role GrantRole) WorkspaceListItem {
 	return WorkspaceListItem{
-		ID:          workspace.ID,
-		DisplayName: workspace.DisplayName,
-		DataDir:     workspace.DataDir,
-		RootDir:     workspace.RootDir,
-		Role:        role,
-		Status:      h.status(workspace.ID),
+		ID:                     workspace.ID,
+		DisplayName:            workspace.DisplayName,
+		MarkdownLinkRootPrefix: workspace.MarkdownLinkRootPrefix,
+		DataDir:                workspace.DataDir,
+		RootDir:                workspace.RootDir,
+		Role:                   role,
+		Status:                 h.status(workspace.ID),
 	}
 }
 

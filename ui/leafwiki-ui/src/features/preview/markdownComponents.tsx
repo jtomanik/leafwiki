@@ -177,7 +177,11 @@ export function useMarkdownComponents({
         HTMLAttributes<HTMLImageElement>) => {
         void node
         return (
-          <MarkdownImage resolveAssetUrl={resolvePreviewAssetUrl} {...props} />
+          <MarkdownImage
+            workspaceId={workspaceId}
+            resolveAssetUrl={resolvePreviewAssetUrl}
+            {...props}
+          />
         )
       },
       audio: ({

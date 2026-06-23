@@ -65,6 +65,50 @@ func TestPrivateWorkspaceAPIListsGrantedWorkspaces(t *testing.T) {
 	}
 }
 
+func TestPrivateWorkspaceAPIListsWorkspaceMarkdownLinkRootPrefix(t *testing.T) {
+	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
+	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
+	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
+		DisplayName:            "Alpha",
+		DataDir:                filepath.Join(t.TempDir(), "alpha-data"),
+		RootDir:                filepath.Join(t.TempDir(), "alpha-root"),
+		MarkdownLinkRootPrefix: "docs/",
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace failed: %v", err)
+	}
+	grants := NewGrantStore(layout.DBPath)
+	if err := grants.Upsert(Grant{Subject: "user:1", WorkspaceID: alpha.ID, Role: GrantRoleViewer}); err != nil {
+		t.Fatalf("grant alpha: %v", err)
+	}
+	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
+		Registry: registry,
+		Grants:   grants,
+		Subject: func(*http.Request) (WorkspaceSubject, error) {
+			return WorkspaceSubject{Subject: "user:1"}, nil
+		},
+		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out WorkspaceListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out.Workspaces) != 1 || out.Workspaces[0].ID != alpha.ID {
+		t.Fatalf("workspaces = %#v, want granted alpha", out.Workspaces)
+	}
+	if out.Workspaces[0].MarkdownLinkRootPrefix != "/docs" {
+		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspaces[0].MarkdownLinkRootPrefix)
+	}
+}
+
 func TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStoredGrants(t *testing.T) {
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
@@ -143,9 +187,10 @@ func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName: "Alpha",
-		DataDir:     filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:     filepath.Join(t.TempDir(), "alpha-root"),
+		DisplayName:            "Alpha",
+		DataDir:                filepath.Join(t.TempDir(), "alpha-data"),
+		RootDir:                filepath.Join(t.TempDir(), "alpha-root"),
+		MarkdownLinkRootPrefix: "docs/",
 	})
 	if err != nil {
 		t.Fatalf("RegisterWorkspace failed: %v", err)
@@ -192,6 +237,9 @@ func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
 	}
 	if out.Status.State != WorkspaceStateRunning || out.Status.URL == "" {
 		t.Fatalf("status response = %#v", out.Status)
+	}
+	if out.Workspace.MarkdownLinkRootPrefix != "/docs" {
+		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspace.MarkdownLinkRootPrefix)
 	}
 }
 

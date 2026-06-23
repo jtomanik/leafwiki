@@ -245,6 +245,7 @@ async function registerWorkspace(
   _id: string,
   displayName: string,
   sharedContent = `${displayName} workspace content.`,
+  markdownLinkRootPrefix = '',
 ) {
   const workspaceDirs = createWorkspaceDirs(displayName, sharedContent);
   return JSON.parse(
@@ -252,6 +253,7 @@ async function registerWorkspace(
       displayName,
       dataDir: workspaceDirs.dataDir,
       rootDir: workspaceDirs.rootDir,
+      markdownLinkRootPrefix,
     }),
   ) as RegistryDocument['workspaces'][number];
 }
@@ -1602,6 +1604,51 @@ test('workspace link suggestions use the current workspace tree context', async 
     timeout: 15000,
   });
   await expect(completionList.locator('li').filter({ hasText: homeTarget })).toHaveCount(0);
+});
+
+test('workspace preview uses the selected workspace markdown link root prefix', async ({
+  page,
+}) => {
+  test.skip(
+    process.env.E2E_RUN_MODE !== 'local' || process.env.E2E_MCP_CLIENT_TRANSPORT === 'stdio',
+    'requires local browser E2E runner',
+  );
+  const prefixed = await registerWorkspace(
+    'e2e-prefixed-docs',
+    `Prefixed Docs ${Date.now()}`,
+    'Prefixed docs workspace content.',
+    '/docs',
+  );
+  if (process.env.E2E_ENABLE_MCP_LOCAL === '1') {
+    await grantWorkspace(prefixed.id);
+  }
+  if (!authDisabledForLocalMCP()) {
+    await loginBrowserAdmin(page);
+  }
+
+  const stamp = Date.now();
+  const source = `prefix-source-${stamp}`;
+  const target = `prefix-target-${stamp}`;
+  await seedWorkspacePage(page, prefixed.id, target, target, `# ${target}\n`);
+  await seedWorkspacePage(
+    page,
+    prefixed.id,
+    source,
+    source,
+    `# ${source}\n\n[Target](/docs/${target}.md)\n`,
+  );
+
+  await page.goto(toAppPath(`/w/${prefixed.id}/${source}.md`));
+  await expect(page.locator('article > h1')).toHaveText(source, { timeout: 15000 });
+
+  const targetLink = page.locator('article').getByRole('link', { name: 'Target' });
+  await expect(targetLink).toHaveAttribute('href', new RegExp(`/w/${prefixed.id}/${target}\\.md$`));
+  await targetLink.click();
+
+  const expectedPath = new URL(toAppPath(`/w/${prefixed.id}/${target}.md`), 'http://localhost')
+    .pathname;
+  await expect.poll(() => new URL(page.url()).pathname, { timeout: 15000 }).toBe(expectedPath);
+  await expect(page.locator('article > h1')).toHaveText(target);
 });
 
 test('workspace link status clears the previous page while the next request loads', async ({

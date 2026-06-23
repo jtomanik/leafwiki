@@ -14,17 +14,33 @@ type WorkspacesStore = {
   error: string | null
   expandedWorkspaceIds: string[]
   setActiveWorkspaceId: (workspaceId: string) => void
+  getMarkdownLinkRootPrefix: (workspaceId?: string, fallback?: string) => string
   loadWorkspaces: () => Promise<void>
   ensureWorkspaceExpanded: (workspaceId: string) => Promise<void>
   toggleWorkspaceExpanded: (workspaceId: string) => Promise<void>
 }
 
-function normalizeWorkspaceId(workspaceId: string) {
-  return workspaceId.trim() || HOME_WORKSPACE_ID
+function normalizeWorkspaceId(workspaceId?: string) {
+  return workspaceId?.trim() || HOME_WORKSPACE_ID
 }
 
 function uniqueWorkspaceIds(ids: string[]) {
   return Array.from(new Set(ids.map(normalizeWorkspaceId)))
+}
+
+function mergeWorkspace(
+  workspaces: WorkspaceListItem[],
+  workspace: WorkspaceListItem,
+) {
+  const existingIndex = workspaces.findIndex(({ id }) => id === workspace.id)
+  if (existingIndex < 0) return [...workspaces, workspace]
+
+  const next = [...workspaces]
+  next[existingIndex] = {
+    ...next[existingIndex],
+    ...workspace,
+  }
+  return next
 }
 
 export const useWorkspacesStore = create<WorkspacesStore>()(
@@ -40,6 +56,11 @@ export const useWorkspacesStore = create<WorkspacesStore>()(
         if (get().activeWorkspaceId !== normalized) {
           set({ activeWorkspaceId: normalized })
         }
+      },
+      getMarkdownLinkRootPrefix: (workspaceId, fallback = '') => {
+        const normalized = normalizeWorkspaceId(workspaceId)
+        const workspace = get().workspaces.find(({ id }) => id === normalized)
+        return workspace ? (workspace.markdownLinkRootPrefix ?? '') : fallback
       },
       loadWorkspaces: async () => {
         set({ loading: true, error: null })
@@ -57,8 +78,12 @@ export const useWorkspacesStore = create<WorkspacesStore>()(
       },
       ensureWorkspaceExpanded: async (workspaceId: string) => {
         const normalized = normalizeWorkspaceId(workspaceId)
-        await ensureWorkspace(normalized)
+        const response = await ensureWorkspace(normalized)
         set({
+          workspaces: mergeWorkspace(get().workspaces, {
+            ...response.workspace,
+            status: response.status,
+          }),
           expandedWorkspaceIds: uniqueWorkspaceIds([
             ...get().expandedWorkspaceIds,
             normalized,

@@ -19,6 +19,7 @@ import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { useTreeStore } from '@/stores/tree'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import type { MarkdownEditorRef } from './MarkdownEditor'
 
@@ -50,7 +51,12 @@ export function LinkInsertDialog({
   const flatPages = useTreeStore(
     (s) => s.getWorkspaceState(workspaceId).flatPages,
   )
-  const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
+  const globalMarkdownLinkRootPrefix = useConfigStore(
+    (s) => s.markdownLinkRootPrefix,
+  )
+  const markdownLinkRootPrefix = useWorkspacesStore((s) =>
+    s.getMarkdownLinkRootPrefix(workspaceId, globalMarkdownLinkRootPrefix),
+  )
 
   const [text, setText] = useState(selectedText)
   const [url, setUrl] = useState('')
