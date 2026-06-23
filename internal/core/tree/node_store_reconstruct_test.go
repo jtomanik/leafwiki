@@ -22,7 +22,7 @@ import (
 func findChildBySlug(t *testing.T, parent *PageNode, slug string) *PageNode {
 	t.Helper()
 	for _, ch := range parent.Children {
-		if ch.Slug == slug {
+		if ch.Slug == NewSlugUnchecked(slug) {
 			return ch
 		}
 	}
@@ -33,7 +33,7 @@ func findChildBySlug(t *testing.T, parent *PageNode, slug string) *PageNode {
 func slugs(children []*PageNode) []string {
 	out := make([]string, 0, len(children))
 	for _, c := range children {
-		out = append(out, c.Slug)
+		out = append(out, c.Slug.String())
 	}
 	return out
 }
@@ -196,7 +196,7 @@ leafwiki_title: Introduction
 		t.Fatalf("expected docs.Title=Documentation, got %q", docs.Title)
 	}
 	for _, ch := range docs.Children {
-		if strings.EqualFold(ch.Slug, "index") {
+		if strings.EqualFold(ch.Slug.String(), "index") {
 			t.Fatalf("INDEX.MD must be skipped as page, but found slug %q", ch.Slug)
 		}
 	}
@@ -263,7 +263,7 @@ leafwiki_title: Documentation
 		t.Fatalf("expected docs.Title from README.md frontmatter, got %q", docs.Title)
 	}
 	for _, ch := range docs.Children {
-		if strings.EqualFold(ch.Slug, "readme") {
+		if strings.EqualFold(ch.Slug.String(), "readme") {
 			t.Fatalf("README.md fallback must not be reconstructed as a child page")
 		}
 	}
@@ -467,7 +467,7 @@ func TestNodeStore_ReconstructTreeFromFS_SectionWithoutIndex_UsesDirNameAsTitleA
 	if sec.Title != "emptysec" {
 		t.Fatalf("expected title=emptysec, got %q", sec.Title)
 	}
-	if strings.TrimSpace(sec.ID) == "" {
+	if strings.TrimSpace(sec.ID.String()) == "" {
 		t.Fatalf("expected some generated id, got empty")
 	}
 
@@ -483,7 +483,7 @@ func TestNodeStore_ReconstructTreeFromFS_SectionWithoutIndex_UsesDirNameAsTitleA
 	if !has {
 		t.Fatalf("expected frontmatter in materialized index")
 	}
-	if fm.LeafWikiID != sec.ID || fm.LeafWikiTitle != sec.Title {
+	if NewPageIDUnchecked(fm.LeafWikiID) != sec.ID || fm.LeafWikiTitle != sec.Title {
 		t.Fatalf("unexpected frontmatter in materialized index: %#v", fm)
 	}
 	if strings.TrimSpace(body) != "" {
@@ -512,7 +512,7 @@ func TestNodeStore_ReconstructTreeFromFS_PageWithoutFrontmatter_FallsBackToHeadl
 	if p.Title != "hello" {
 		t.Fatalf("expected title fallback to slug 'plain', got %q", p.Title)
 	}
-	if strings.TrimSpace(p.ID) == "" {
+	if strings.TrimSpace(p.ID.String()) == "" {
 		// should still have generated id (unless you later decide to keep empty)
 		t.Fatalf("expected generated id, got empty")
 	}
@@ -875,7 +875,7 @@ func TestNodeStore_ReconstructTreeFromFS_SkipsTopLevelStaticAssets(t *testing.T)
 
 	findChildBySlug(t, tree, "guide")
 	for _, child := range tree.Children {
-		if strings.EqualFold(child.Slug, "assets") || strings.EqualFold(child.Slug, "assets-1") {
+		if strings.EqualFold(child.Slug.String(), "assets") || strings.EqualFold(child.Slug.String(), "assets-1") {
 			t.Fatalf("top-level static assets directory became wiki child: %#v", child)
 		}
 	}
@@ -913,7 +913,7 @@ func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reload page: %v", err)
 	}
-	if pageMd.GetFrontmatter().LeafWikiID != page.ID {
+	if NewPageIDUnchecked(pageMd.GetFrontmatter().LeafWikiID) != page.ID {
 		t.Fatalf("expected page frontmatter ID=%q, got %q", page.ID, pageMd.GetFrontmatter().LeafWikiID)
 	}
 
@@ -921,7 +921,7 @@ func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reload section index: %v", err)
 	}
-	if sectionMd.GetFrontmatter().LeafWikiID != section.ID {
+	if NewPageIDUnchecked(sectionMd.GetFrontmatter().LeafWikiID) != section.ID {
 		t.Fatalf("expected section frontmatter ID=%q, got %q", section.ID, sectionMd.GetFrontmatter().LeafWikiID)
 	}
 
@@ -1109,7 +1109,7 @@ func TestNodeStore_ReconstructTreeFromFS_MissingMetadataFallsBackToMtimeAndSyste
 	}
 
 	page := findChildBySlug(t, tree, "page")
-	if strings.TrimSpace(page.ID) == "" {
+	if strings.TrimSpace(page.ID.String()) == "" {
 		t.Fatalf("expected generated ID")
 	}
 	if got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
@@ -1127,7 +1127,7 @@ func TestNodeStore_ReconstructTreeFromFS_MissingMetadataFallsBackToMtimeAndSyste
 		t.Fatalf("LoadMarkdownFile: %v", err)
 	}
 	fm := mdFile.GetFrontmatter()
-	if fm.LeafWikiID != page.ID {
+	if NewPageIDUnchecked(fm.LeafWikiID) != page.ID {
 		t.Fatalf("expected generated ID to be written back, got %q want %q", fm.LeafWikiID, page.ID)
 	}
 	if fm.LeafWikiCreatedAt != wantTime.Format(time.RFC3339) {

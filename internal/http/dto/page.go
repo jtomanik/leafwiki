@@ -5,7 +5,6 @@ package dto
 
 import (
 	pathpkg "path"
-	"strings"
 	"time"
 
 	"github.com/perber/wiki/internal/core/auth"
@@ -77,13 +76,7 @@ func ToAPIPageWithDepth(p *tree.Page, userResolver *auth.UserResolver, depth int
 
 // BuildPathFromNode builds the slash-separated path string from a node.
 func BuildPathFromNode(node *tree.PageNode) string {
-	var parts []string
-	current := node
-	for current != nil && current.Slug != "root" {
-		parts = append([]string{current.Slug}, parts...)
-		current = current.Parent
-	}
-	return strings.Join(parts, "/")
+	return node.CalculateRoutePath().FilesystemPath()
 }
 
 // ToAPINode recursively converts a tree.PageNode to its HTTP representation.
@@ -98,27 +91,21 @@ func ToAPINodeWithContentPaths(node *tree.PageNode, parentPath string, userResol
 }
 
 func toAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserResolver, contentPathResolver ContentPathResolver) *Node {
-	path := node.Slug
-	if node.Slug == "root" {
-		path = ""
-	}
-	if node.Slug != "root" && parentPath != "" {
-		path = parentPath + "/" + node.Slug
-	}
+	path := node.CalculateRoutePath().FilesystemPath()
 
 	var creator, lastAuthor *auth.UserLabel
 	if userResolver != nil {
-		creator, _ = userResolver.ResolveUserLabel(node.Metadata.CreatorID)
-		lastAuthor, _ = userResolver.ResolveUserLabel(node.Metadata.LastAuthorID)
+		creator, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.CreatorID.MetadataValue()))
+		lastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	contentPath := contentPathForNode(node, contentPathResolver)
 	apiNode := &Node{
-		ID:             node.ID,
+		ID:             node.ID.String(),
 		Title:          node.Title,
-		Slug:           node.Slug,
+		Slug:           node.Slug.String(),
 		Path:           path,
-		Version:        node.Version(),
+		Version:        node.Version().String(),
 		Position:       node.Position,
 		Kind:           node.Kind,
 		ContentPath:    contentPath,
@@ -126,8 +113,8 @@ func toAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserRe
 		Metadata: NodeMetadata{
 			CreatedAt:    node.Metadata.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:    node.Metadata.UpdatedAt.Format(time.RFC3339),
-			CreatorID:    node.Metadata.CreatorID,
-			LastAuthorID: node.Metadata.LastAuthorID,
+			CreatorID:    node.Metadata.CreatorID.String(),
+			LastAuthorID: node.Metadata.LastAuthorID.String(),
 			Creator:      creator,
 			LastAuthor:   lastAuthor,
 		},

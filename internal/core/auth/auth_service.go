@@ -76,8 +76,8 @@ func (a *AuthService) Login(identifier, password string) (*AuthToken, error) {
 
 	// store refresh token session
 	if err := a.sessionStore.CreateSession(
-		refreshJTI,
-		user.ID,
+		NewSessionIDUnchecked(refreshJTI),
+		NewUserIDUnchecked(user.ID),
 		"refresh",
 		time.Now().Add(a.refreshTokenLifetime),
 	); err != nil {
@@ -114,12 +114,13 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	}
 
 	// Check if the refresh token session is active
-	active, err := a.sessionStore.IsActive(jti, userID, "refresh", time.Now())
+	typedUserID := NewUserIDUnchecked(userID)
+	active, err := a.sessionStore.IsActive(NewSessionIDUnchecked(jti), typedUserID, "refresh", time.Now())
 	if err != nil || !active {
 		return nil, ErrInvalidToken
 	}
 
-	user, err := a.userService.GetUserByID(userID)
+	user, err := a.userService.GetUserByID(typedUserID)
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
@@ -137,8 +138,8 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	}
 
 	if err := a.sessionStore.CreateSession(
-		newRefreshJTI,
-		user.ID,
+		NewSessionIDUnchecked(newRefreshJTI),
+		NewUserIDUnchecked(user.ID),
 		"refresh",
 		time.Now().Add(a.refreshTokenLifetime),
 	); err != nil {
@@ -150,7 +151,7 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	// remains valid and the user can retry. If revocation fails, we log a warning but
 	// don't fail the refresh operation - the old token will expire naturally, and
 	// having two valid tokens temporarily is safer than logging the user out.
-	err = a.sessionStore.RevokeSession(jti)
+	err = a.sessionStore.RevokeSession(NewSessionIDUnchecked(jti))
 	if err != nil {
 		slog.Warn("failed to revoke used refresh token session", "error", err)
 	}
@@ -179,10 +180,10 @@ func (a *AuthService) RevokeRefreshToken(tokenString string) error {
 		return ErrInvalidToken
 	}
 
-	return a.sessionStore.RevokeSession(jti)
+	return a.sessionStore.RevokeSession(NewSessionIDUnchecked(jti))
 }
 
-func (a *AuthService) RevokeAllUserSessions(userID string) error {
+func (a *AuthService) RevokeAllUserSessions(userID UserID) error {
 	return a.sessionStore.RevokeAllSessionsForUser(userID)
 }
 
@@ -260,5 +261,5 @@ func (a *AuthService) ValidateToken(tokenString string) (*User, error) {
 		return nil, ErrInvalidToken
 	}
 
-	return a.userService.GetUserByID(userID)
+	return a.userService.GetUserByID(NewUserIDUnchecked(userID))
 }

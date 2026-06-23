@@ -372,6 +372,7 @@ func TestBrandingService_UpdateBranding_EmptySiteName_ReturnsValidationError(t *
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
+	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
 }
 
 func TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsValidationError(t *testing.T) {
@@ -389,6 +390,7 @@ func TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsValidation
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
+	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
 }
 
 func TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidationError(t *testing.T) {
@@ -409,6 +411,7 @@ func TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidationError(t
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
+	assertBrandingFieldErrorCode(t, ve, "branding_site_name_too_long", "validation.branding.site_name_too_long")
 	if !strings.Contains(ve.Errors[0].Message, "must not exceed") {
 		t.Fatalf("expected length validation error message, got %q", ve.Errors[0].Message)
 	}
@@ -452,8 +455,22 @@ func TestBrandingService_UpdateBranding_ControlCharacters_ReturnsValidationError
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
+	assertBrandingFieldErrorCode(t, ve, FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters)
 	if !strings.Contains(ve.Errors[0].Message, "control characters") {
 		t.Fatalf("expected control characters validation error message, got %q", ve.Errors[0].Message)
+	}
+}
+
+func assertBrandingFieldErrorCode(t *testing.T, ve *errors.ValidationErrors, code errors.FieldErrorCode, messageID errors.MessageID) {
+	t.Helper()
+	if len(ve.Errors) != 1 {
+		t.Fatalf("validation errors = %#v, want one error", ve.Errors)
+	}
+	if ve.Errors[0].Code != code {
+		t.Fatalf("code = %q, want %q", ve.Errors[0].Code, code)
+	}
+	if ve.Errors[0].MessageID != messageID {
+		t.Fatalf("messageId = %q, want %q", ve.Errors[0].MessageID, messageID)
 	}
 }
 

@@ -72,8 +72,8 @@ func (r *Routes) handleRegister(c *gin.Context) {
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":             "server_error",
-			"error_description": "failed to register client",
+			"error":                    oauthErrorServerError,
+			oauthErrorDescriptionField: "failed to register client",
 		})
 		return
 	}

@@ -616,7 +616,7 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 	deletedCode := authorizeCode(t, router, deletedCookies, redirectURI, "refresh-deleted-state", verifier+"2", resource)
 	deletedToken := exchangeCode(t, router, deletedCode, redirectURI, verifier+"2")
 	deletedRefresh := stringFromMap(t, deletedToken, "refresh_token")
-	if err := w.UserService().DeleteUser(deleted.ID); err != nil {
+	if err := w.UserService().DeleteUser(coreauth.NewUserIDUnchecked(deleted.ID)); err != nil {
 		t.Fatalf("delete refresh-deleted user: %v", err)
 	}
 	deletedRefreshForm := url.Values{
@@ -885,10 +885,8 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	}
 	for _, tt := range editorOnlyTools {
 		t.Run("viewer denied "+tt.name, func(t *testing.T) {
-			errText := callToolError(t, viewerSession, tt.name, tt.args)
-			if !strings.Contains(strings.ToLower(errText), "editor") && !strings.Contains(strings.ToLower(errText), "admin") {
-				t.Fatalf("viewer %s error = %q, want editor/admin permission detail", tt.name, errText)
-			}
+			errResult := callToolStructuredError(t, viewerSession, tt.name, tt.args)
+			assertMCPStructuredError(t, "viewer "+tt.name+" denied", errResult, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
 		})
 	}
 	afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
@@ -902,7 +900,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("create editor user: %v", err)
 	}
 	editorToken := oauthAccessTokenForUser(t, router, "editor", "editorpass", "editor-state")
-	if _, err := w.UserService().UpdateUser(editor.ID, editor.Username, editor.Email, "", coreauth.RoleViewer); err != nil {
+	if _, err := w.UserService().UpdateUser(coreauth.NewUserIDUnchecked(editor.ID), editor.Username, editor.Email, "", coreauth.RoleViewer); err != nil {
 		t.Fatalf("downgrade editor user: %v", err)
 	}
 	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
@@ -919,7 +917,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("create deleted user: %v", err)
 	}
 	deletedToken := oauthAccessTokenForUser(t, router, "deleted", "deletedpass", "deleted-state")
-	if err := w.UserService().DeleteUser(deleted.ID); err != nil {
+	if err := w.UserService().DeleteUser(coreauth.NewUserIDUnchecked(deleted.ID)); err != nil {
 		t.Fatalf("delete user before MCP request: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
@@ -944,7 +942,8 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create api editor user: %v", err)
 	}
-	editorKey, err := w.APIKeyService().CreateAPIKey(editor.ID, "Editor MCP", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorKey, err := w.APIKeyService().CreateAPIKey(editorID, "Editor MCP", editorID)
 	if err != nil {
 		t.Fatalf("create editor api key: %v", err)
 	}
@@ -971,7 +970,8 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create api viewer user: %v", err)
 	}
-	viewerKey, err := w.APIKeyService().CreateAPIKey(viewer.ID, "Viewer MCP", viewer.ID)
+	viewerID := coreauth.NewUserIDUnchecked(viewer.ID)
+	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer MCP", viewerID)
 	if err != nil {
 		t.Fatalf("create viewer api key: %v", err)
 	}
@@ -986,17 +986,15 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 		{name: "wiki_update_page_metadata", args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
 		{name: "wiki_replace_page_section", args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
 	} {
-		viewerErr := callToolError(t, viewerSession, tt.name, tt.args)
-		if !strings.Contains(strings.ToLower(viewerErr), "editor") && !strings.Contains(strings.ToLower(viewerErr), "admin") {
-			t.Fatalf("viewer api key %s error = %q, want editor/admin permission detail", tt.name, viewerErr)
-		}
+		viewerErr := callToolStructuredError(t, viewerSession, tt.name, tt.args)
+		assertMCPStructuredError(t, "viewer api key "+tt.name+" denied", viewerErr, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
 	}
 	afterViewerDenied := nestedMap(t, callToolStructured(t, editorSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
 	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != "updated through api key" {
 		t.Fatalf("page after viewer api key denied tools = %#v, want version %q and unchanged content", afterViewerDenied, currentVersion)
 	}
 
-	if err := w.APIKeyService().RevokeAPIKey(editor.ID, editorKey.Key.ID); err != nil {
+	if err := w.APIKeyService().RevokeAPIKey(editorID, editorKey.Key.ID); err != nil {
 		t.Fatalf("revoke editor api key: %v", err)
 	}
 	assertMCPBearerUnauthorized(t, router, "/mcp", editorKey.Secret)
@@ -1005,11 +1003,12 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create role-change user: %v", err)
 	}
-	roleKey, err := w.APIKeyService().CreateAPIKey(roleUser.ID, "Role MCP", roleUser.ID)
+	roleUserID := coreauth.NewUserIDUnchecked(roleUser.ID)
+	roleKey, err := w.APIKeyService().CreateAPIKey(roleUserID, "Role MCP", roleUserID)
 	if err != nil {
 		t.Fatalf("create role-change api key: %v", err)
 	}
-	if _, err := w.UserService().UpdateUser(roleUser.ID, roleUser.Username, roleUser.Email, "", coreauth.RoleViewer); err != nil {
+	if _, err := w.UserService().UpdateUser(roleUserID, roleUser.Username, roleUser.Email, "", coreauth.RoleViewer); err != nil {
 		t.Fatalf("downgrade api key user: %v", err)
 	}
 	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", roleKey.Secret)
@@ -1025,15 +1024,16 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create deleted api key user: %v", err)
 	}
-	deletedKey, err := w.APIKeyService().CreateAPIKey(deleted.ID, "Deleted MCP", deleted.ID)
+	deletedID := coreauth.NewUserIDUnchecked(deleted.ID)
+	deletedKey, err := w.APIKeyService().CreateAPIKey(deletedID, "Deleted MCP", deletedID)
 	if err != nil {
 		t.Fatalf("create deleted-user api key: %v", err)
 	}
-	if err := w.UserService().DeleteUser(deleted.ID); err != nil {
+	if err := w.UserService().DeleteUser(deletedID); err != nil {
 		t.Fatalf("delete api key user: %v", err)
 	}
 	assertMCPBearerUnauthorized(t, router, "/mcp", deletedKey.Secret)
-	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID+"_wrongsecret")
+	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID.String()+"_wrongsecret")
 }
 
 func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
@@ -1049,7 +1049,8 @@ func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create context viewer: %v", err)
 	}
-	viewerKey, err := w.APIKeyService().CreateAPIKey(viewer.ID, "Viewer Context MCP", viewer.ID)
+	viewerID := coreauth.NewUserIDUnchecked(viewer.ID)
+	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer Context MCP", viewerID)
 	if err != nil {
 		t.Fatalf("create viewer context api key: %v", err)
 	}
@@ -1083,7 +1084,8 @@ func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testin
 	if err != nil {
 		t.Fatalf("create private stdio editor user: %v", err)
 	}
-	apiKey, err := w.APIKeyService().CreateAPIKey(editor.ID, "Private STDIO MCP", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	apiKey, err := w.APIKeyService().CreateAPIKey(editorID, "Private STDIO MCP", editorID)
 	if err != nil {
 		t.Fatalf("create private stdio api key: %v", err)
 	}
@@ -1091,7 +1093,7 @@ func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testin
 	session := connectLocalMCPWithToken(t, w.PrivateMCPHTTPHandler(oauthRouterOptions("")), "/mcp", apiKey.Secret)
 	_ = callToolStructured(t, session, "wiki_get_tree", nil)
 
-	if err := w.APIKeyService().RevokeAPIKey(editor.ID, apiKey.Key.ID); err != nil {
+	if err := w.APIKeyService().RevokeAPIKey(editorID, apiKey.Key.ID); err != nil {
 		t.Fatalf("revoke private stdio api key: %v", err)
 	}
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
@@ -1110,7 +1112,8 @@ func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get admin user: %v", err)
 	}
-	apiKey, err := w.APIKeyService().CreateAPIKey(admin.ID, "Base Path MCP", admin.ID)
+	adminID := coreauth.NewUserIDUnchecked(admin.ID)
+	apiKey, err := w.APIKeyService().CreateAPIKey(adminID, "Base Path MCP", adminID)
 	if err != nil {
 		t.Fatalf("create base-path api key: %v", err)
 	}

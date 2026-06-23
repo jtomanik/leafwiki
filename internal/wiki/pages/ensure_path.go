@@ -13,9 +13,9 @@ import (
 
 // EnsurePathInput is the input for EnsurePathUseCase.
 type EnsurePathInput struct {
-	UserID      string
+	UserID      tree.UserID
 	Source      string
-	TargetPath  string
+	TargetPath  tree.RoutePath
 	TargetTitle string
 	Kind        *tree.NodeKind
 }
@@ -47,21 +47,27 @@ func NewEnsurePathUseCase(
 func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*EnsurePathOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 
-	cleanPath := strings.Trim(strings.TrimSpace(in.TargetPath), "/")
-	if cleanPath == "" {
-		ve.Add("path", "Path must not be empty")
+	routePath, routePathErr := ValidateRoutePathValue(in.TargetPath)
+	if routePathErr != nil {
+		if routeValidation, ok := routePathErr.(*sharederrors.ValidationErrors); ok {
+			for _, fieldErr := range routeValidation.Errors {
+				ve.Errors = append(ve.Errors, fieldErr)
+			}
+		} else {
+			ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, routePathErr.Error())
+		}
 	}
 
 	cleanTitle := strings.TrimSpace(in.TargetTitle)
 	if cleanTitle == "" {
-		ve.Add("title", "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
 	}
 
 	if ve.HasErrors() {
 		return nil, ve
 	}
 
-	lookup, err := uc.tree.LookupPagePath(cleanPath)
+	lookup, err := uc.tree.LookupPagePath(routePath)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +87,8 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 
 	for _, segment := range lookup.Segments {
 		if !segment.Exists {
-			if err := uc.slug.IsValidSlug(segment.Slug); err != nil {
-				ve.Add("path", fmt.Sprintf("Invalid slug '%s': %s", segment.Slug, err.Error()))
+			if err := uc.slug.IsValidSlug(segment.Slug.FilesystemPath()); err != nil {
+				ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, fmt.Sprintf("Invalid slug '%s': %s", segment.Slug, err.Error()))
 			}
 		}
 	}
@@ -90,14 +96,14 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 		return nil, ve
 	}
 
-	result, err := uc.tree.EnsurePagePath(in.UserID, cleanPath, cleanTitle, in.Kind)
+	result, err := uc.tree.EnsurePagePath(in.UserID, routePath, cleanTitle, in.Kind)
 	if err != nil {
 		return nil, err
 	}
 
-	ids := make([]string, 0, len(result.Created)+1)
-	seen := make(map[string]struct{}, len(result.Created)+1)
-	appendUnique := func(id string) {
+	ids := make([]tree.PageID, 0, len(result.Created)+1)
+	seen := make(map[tree.PageID]struct{}, len(result.Created)+1)
+	appendUnique := func(id tree.PageID) {
 		if _, ok := seen[id]; ok {
 			return
 		}
@@ -111,13 +117,13 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 	}
 
 	pages, errs := uc.tree.GetPages(ids)
-	pageByID := make(map[string]*tree.Page, len(ids))
+	pageByID := make(map[tree.PageID]*tree.Page, len(ids))
 	for i, p := range pages {
 		if errs[i] != nil {
 			if ids[i] == result.Page.ID {
 				return nil, errs[i]
 			}
-			uc.log.Warn("failed to get page for post-create processing", "pageID", ids[i], "error", errs[i])
+			uc.log.Warn("failed to get page for post-create processing", "pageID", ids[i].String(), "error", errs[i])
 			continue
 		}
 		pageByID[ids[i]] = p

@@ -1,0 +1,69 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "semantic-hygiene-checker",
+  "createdAt": "2026-06-22T13:23:32Z",
+  "status": "plan-written",
+  "artifacts": {
+    "observe": "docs/plans/semantic-hygiene-checker.OBSERVE.md",
+    "context": "docs/plans/semantic-hygiene-checker.CONTEXT.md",
+    "decision": "docs/plans/semantic-hygiene-checker.DECISION.md",
+    "plan": "docs/plans/semantic-hygiene-checker.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/semantic-types-and-ids.OBSERVE.md",
+    "docs/plans/semantic-types-and-ids.CONTEXT.md",
+    "docs/plans/semantic-types-and-ids.DECISION.md",
+    "docs/plans/semantic-types-and-ids.PLAN.md",
+    "docs/plans/semantic-types-and-ids.SCAN.md",
+    "docs/typed-ids.md",
+    "scripts/check-typed-id-oracles.sh",
+    "scripts/README.md",
+    "go.mod",
+    "cmd/leafwiki/main.go",
+    "cmd/leafwiki/main_test.go",
+    "internal/core/tree/semantic_types.go",
+    "internal/core/tree/tree_service.go",
+    "internal/wiki/assets/use_cases.go"
+  ],
+  "subagents": [
+    {
+      "id": "019eef7a-88cb-7813-b7d0-3fb7e1f699e6",
+      "role": "tooling-pattern-review",
+      "focus": "Go module, command, script, and test-fixture placement",
+      "status": "completed"
+    },
+    {
+      "id": "019eef7a-9e4a-7dc1-8ce5-7fb2c82d0e96",
+      "role": "semantic-leak-taxonomy",
+      "focus": "Current semantic implementation leak categories and checker targets",
+      "status": "completed"
+    },
+    {
+      "id": "019eef7a-b1a9-7b81-b423-be1c0a198406",
+      "role": "docs-workflow-review",
+      "focus": "Planning artifact conventions and required OODA outputs",
+      "status": "completed"
+    },
+    {
+      "id": "019eef7a-d486-7342-a536-f65690dc6908",
+      "role": "go-analysis-design",
+      "focus": "go/analysis structure, analysistest fixtures, and runner options",
+      "status": "completed"
+    }
+  ],
+  "decisions": [
+    "Use a repo-local go/analysis analyzer rather than expanding regex-only checks.",
+    "Place analyzer code under internal/analysis/semantichygiene.",
+    "Expose the analyzer through cmd/leafwiki-vet.",
+    "Use Go policy tables rather than YAML in the first version.",
+    "Run repo-wide with no baseline or changed-file-only mode.",
+    "Keep policy reviewer-owned through review instructions and explicit policy diff review.",
+    "Move Go semantic-boundary policy out of the shell oracle over time while keeping non-Go text assertion checks."
+  ],
+  "validation": {
+    "artifactWrite": "created observe, context, decision, plan, and workflow-state artifacts",
+    "reviewerPolicy": "plan requires policy diffs to be reviewed before trusting green checker output",
+    "verification": "documentation-only plan artifacts; validate JSON and whitespace after write"
+  }
+}

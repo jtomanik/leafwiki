@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
@@ -109,7 +110,11 @@ func (r *Routes) handleUpload(maxUploadSize int64) gin.HandlerFunc {
 		}
 
 		out, err := r.upload.Execute(c.Request.Context(), UploadAssetInput{
-			UserID: user.ID, PageID: pageID, File: file, Filename: header.Filename, MaxBytes: maxUploadSize,
+			UserID:   tree.NewUserIDUnchecked(user.ID),
+			PageID:   tree.NewPageIDUnchecked(pageID),
+			File:     file,
+			Filename: tree.NewAssetNameUnchecked(header.Filename),
+			MaxBytes: maxUploadSize,
 		})
 		if err != nil {
 			respondWithAssetError(c, err)
@@ -121,7 +126,7 @@ func (r *Routes) handleUpload(maxUploadSize int64) gin.HandlerFunc {
 
 func (r *Routes) handleList(c *gin.Context) {
 	pageID := c.Param("id")
-	out, err := r.list.Execute(c.Request.Context(), ListAssetsInput{PageID: pageID})
+	out, err := r.list.Execute(c.Request.Context(), ListAssetsInput{PageID: tree.NewPageIDUnchecked(pageID)})
 	if err != nil {
 		respondWithAssetError(c, err)
 		return
@@ -144,7 +149,10 @@ func (r *Routes) handleRename(c *gin.Context) {
 		return
 	}
 	out, err := r.rename.Execute(c.Request.Context(), RenameAssetInput{
-		UserID: user.ID, PageID: pageID, OldFilename: req.OldFilename, NewFilename: req.NewFilename,
+		UserID:      tree.NewUserIDUnchecked(user.ID),
+		PageID:      tree.NewPageIDUnchecked(pageID),
+		OldFilename: tree.NewAssetNameUnchecked(req.OldFilename),
+		NewFilename: tree.NewAssetNameUnchecked(req.NewFilename),
 	})
 	if err != nil {
 		respondWithAssetError(c, err)
@@ -165,10 +173,12 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		return
 	}
 	if err := r.delete.Execute(c.Request.Context(), DeleteAssetInput{
-		UserID: user.ID, PageID: pageID, Filename: filename,
+		UserID:   tree.NewUserIDUnchecked(user.ID),
+		PageID:   tree.NewPageIDUnchecked(pageID),
+		Filename: tree.NewAssetNameUnchecked(filename),
 	}); err != nil {
 		respondWithAssetError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "asset deleted"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAssetDeleteSuccess, "message": "asset deleted"})
 }

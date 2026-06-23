@@ -333,7 +333,7 @@ func (r *Routes) handleGetUsers(c *gin.Context) {
 }
 
 func (r *Routes) handleUpdateUser(c *gin.Context) {
-	id := c.Param("id")
+	id := coreauth.NewUserIDUnchecked(c.Param("id"))
 	requester := authmw.MustGetUser(c)
 	if requester == nil {
 		return
@@ -360,7 +360,7 @@ func (r *Routes) handleUpdateUser(c *gin.Context) {
 }
 
 func (r *Routes) handleDeleteUser(c *gin.Context) {
-	id := c.Param("id")
+	id := coreauth.NewUserIDUnchecked(c.Param("id"))
 	if err := r.deleteUser.Execute(c.Request.Context(), DeleteUserInput{ID: id}); err != nil {
 		respondWithAuthError(c, err)
 		return
@@ -382,7 +382,7 @@ func (r *Routes) handleChangeOwnPassword(c *gin.Context) {
 		return
 	}
 	if err := r.changeOwnPassword.Execute(c.Request.Context(), ChangeOwnPasswordInput{
-		UserID: user.ID, OldPassword: req.OldPassword, NewPassword: req.NewPassword,
+		UserID: coreauth.NewUserIDUnchecked(user.ID), OldPassword: req.OldPassword, NewPassword: req.NewPassword,
 	}); err != nil {
 		respondWithAuthError(c, err)
 		return
@@ -391,7 +391,7 @@ func (r *Routes) handleChangeOwnPassword(c *gin.Context) {
 }
 
 func (r *Routes) handleListUserAPIKeys(c *gin.Context) {
-	out, err := r.listAPIKeys.Execute(c.Request.Context(), ListAPIKeysInput{UserID: c.Param("id")})
+	out, err := r.listAPIKeys.Execute(c.Request.Context(), ListAPIKeysInput{UserID: coreauth.NewUserIDUnchecked(c.Param("id"))})
 	if err != nil {
 		respondWithAuthError(c, err)
 		return
@@ -412,9 +412,9 @@ func (r *Routes) handleCreateUserAPIKey(c *gin.Context) {
 		return
 	}
 	out, err := r.createAPIKey.Execute(c.Request.Context(), CreateAPIKeyInput{
-		UserID:          c.Param("id"),
+		UserID:          coreauth.NewUserIDUnchecked(c.Param("id")),
 		Name:            req.Name,
-		CreatedByUserID: user.ID,
+		CreatedByUserID: coreauth.NewUserIDUnchecked(user.ID),
 	})
 	if err != nil {
 		respondWithAuthError(c, err)
@@ -425,7 +425,10 @@ func (r *Routes) handleCreateUserAPIKey(c *gin.Context) {
 }
 
 func (r *Routes) handleRevokeUserAPIKey(c *gin.Context) {
-	if err := r.revokeAPIKey.Execute(c.Request.Context(), RevokeAPIKeyInput{UserID: c.Param("id"), KeyID: c.Param("keyId")}); err != nil {
+	if err := r.revokeAPIKey.Execute(c.Request.Context(), RevokeAPIKeyInput{
+		UserID: coreauth.NewUserIDUnchecked(c.Param("id")),
+		KeyID:  coreauth.NewAPIKeyIDUnchecked(c.Param("keyId")),
+	}); err != nil {
 		respondWithAuthError(c, err)
 		return
 	}
@@ -437,7 +440,7 @@ func (r *Routes) handleListOwnAPIKeys(c *gin.Context) {
 	if user == nil {
 		return
 	}
-	out, err := r.listAPIKeys.Execute(c.Request.Context(), ListAPIKeysInput{UserID: user.ID})
+	out, err := r.listAPIKeys.Execute(c.Request.Context(), ListAPIKeysInput{UserID: coreauth.NewUserIDUnchecked(user.ID)})
 	if err != nil {
 		respondWithAuthError(c, err)
 		return
@@ -463,9 +466,9 @@ func (r *Routes) handleCreateOwnAPIKey(c *gin.Context) {
 		return
 	}
 	out, err := r.createAPIKey.Execute(c.Request.Context(), CreateAPIKeyInput{
-		UserID:                 user.ID,
+		UserID:                 coreauth.NewUserIDUnchecked(user.ID),
 		Name:                   req.Name,
-		CreatedByUserID:        user.ID,
+		CreatedByUserID:        coreauth.NewUserIDUnchecked(user.ID),
 		CurrentPassword:        req.CurrentPassword,
 		RequireCurrentPassword: true,
 	})
@@ -482,7 +485,10 @@ func (r *Routes) handleRevokeOwnAPIKey(c *gin.Context) {
 	if user == nil {
 		return
 	}
-	if err := r.revokeAPIKey.Execute(c.Request.Context(), RevokeAPIKeyInput{UserID: user.ID, KeyID: c.Param("keyId")}); err != nil {
+	if err := r.revokeAPIKey.Execute(c.Request.Context(), RevokeAPIKeyInput{
+		UserID: coreauth.NewUserIDUnchecked(user.ID),
+		KeyID:  coreauth.NewAPIKeyIDUnchecked(c.Param("keyId")),
+	}); err != nil {
 		respondWithAuthError(c, err)
 		return
 	}

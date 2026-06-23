@@ -1,12 +1,13 @@
 import BaseDialog from '@/components/BaseDialog'
 import { mapApiError } from '@/lib/api/errors'
 import { DIALOG_DELETE_USER_CONFIRMATION } from '@/lib/registries'
+import type { UserID } from '@/lib/semanticTypes'
 import { useUserStore } from '@/stores/users'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
 type DeleteUserDialogProps = {
-  userId: string
+  userId: UserID
   username: string
 }
 

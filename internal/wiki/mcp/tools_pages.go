@@ -58,7 +58,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			}
 			kind = validKind
 		}
-		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: normalizeToolRoutePath(in.Path), Kind: kind})
+		routePath, err := wikipages.ValidateSemanticRoutePath(normalizeToolRoutePath(in.Path))
+		if err != nil {
+			return lookupPathOutput{}, err
+		}
+		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: routePath, Kind: kind})
 		if err != nil {
 			return lookupPathOutput{}, err
 		}
@@ -83,14 +87,14 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return suggestSlugOutput{}, err
 		}
 		out, err := r.suggestSlug.Execute(ctx, wikipages.SuggestSlugInput{
-			ParentID:  strings.TrimSpace(in.ParentID),
-			CurrentID: strings.TrimSpace(in.CurrentID),
+			ParentID:  tree.NewPageIDUnchecked(strings.TrimSpace(in.ParentID)),
+			CurrentID: tree.NewPageIDUnchecked(strings.TrimSpace(in.CurrentID)),
 			Title:     title,
 		})
 		if err != nil {
 			return suggestSlugOutput{}, err
 		}
-		return suggestSlugOutput{Slug: out.Slug}, nil
+		return suggestSlugOutput{Slug: out.Slug.FilesystemPath()}, nil
 	})
 
 	addEditorTool[createPageInput, pageOutput](r, server, toolCreatePage, func(ctx context.Context, actor toolActor, in createPageInput) (pageOutput, error) {
@@ -99,11 +103,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		out, err := r.createPage.Execute(ctx, wikipages.CreatePageInput{
-			UserID:   actor.ID,
+			UserID:   tree.NewUserIDUnchecked(actor.ID),
 			Source:   pagesave.PageMutationSourceMCP,
-			ParentID: in.ParentID,
+			ParentID: mcpPageIDPtr(in.ParentID),
 			Title:    in.Title,
-			Slug:     in.Slug,
+			Slug:     tree.NewSlugUnchecked(in.Slug),
 			Kind:     &kind,
 		})
 		if err != nil {
@@ -127,7 +131,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		contentToSave := in.Content
 		fromImport := false
 		if in.Content != nil || in.TagsPresent || in.PropertiesPresent {
-			pageID := strings.TrimSpace(in.ID)
+			pageID := tree.NewPageIDUnchecked(strings.TrimSpace(in.ID))
 			currentRaw, err := r.treeService.ReadPageRaw(pageID)
 			if err != nil {
 				return pageOutput{}, err
@@ -156,12 +160,12 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		kind := tree.NodeKindPage
 		out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
-			UserID:     actor.ID,
+			UserID:     tree.NewUserIDUnchecked(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
-			ID:         strings.TrimSpace(in.ID),
-			Version:    strings.TrimSpace(in.Version),
+			ID:         tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			Title:      in.Title,
-			Slug:       in.Slug,
+			Slug:       tree.NewSlugUnchecked(in.Slug),
 			Content:    contentToSave,
 			Kind:       &kind,
 			FromImport: fromImport,
@@ -174,15 +178,15 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[deletePageInput, messageOutput](r, server, toolDeletePage, func(ctx context.Context, actor toolActor, in deletePageInput) (messageOutput, error) {
 		if err := r.deletePage.Execute(ctx, wikipages.DeletePageInput{
-			UserID:    actor.ID,
+			UserID:    tree.NewUserIDUnchecked(actor.ID),
 			Source:    pagesave.PageMutationSourceMCP,
-			ID:        strings.TrimSpace(in.ID),
-			Version:   strings.TrimSpace(in.Version),
+			ID:        tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			Version:   tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			Recursive: in.Recursive,
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return messageOutput{Message: "Page deleted"}, nil
+		return newMessageOutput(ToolMessageDeletePageSuccess, "Page deleted"), nil
 	})
 
 	addEditorTool[movePageInput, messageOutput](r, server, toolMovePage, func(ctx context.Context, actor toolActor, in movePageInput) (messageOutput, error) {
@@ -191,25 +195,25 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			parentID = *in.ParentID
 		}
 		if err := r.movePage.Execute(ctx, wikipages.MovePageInput{
-			UserID:   actor.ID,
+			UserID:   tree.NewUserIDUnchecked(actor.ID),
 			Source:   pagesave.PageMutationSourceMCP,
-			ID:       strings.TrimSpace(in.ID),
-			Version:  strings.TrimSpace(in.Version),
-			ParentID: parentID,
+			ID:       tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			Version:  tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
+			ParentID: tree.NewPageIDUnchecked(parentID),
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return messageOutput{Message: "Page moved"}, nil
+		return newMessageOutput(ToolMessageMovePageSuccess, "Page moved"), nil
 	})
 
 	addEditorTool[sortPagesInput, messageOutput](r, server, toolSortPages, func(ctx context.Context, _ toolActor, in sortPagesInput) (messageOutput, error) {
 		if err := r.sortPages.Execute(ctx, wikipages.SortPagesInput{
-			ParentID:   strings.TrimSpace(in.ParentID),
-			OrderedIDs: in.OrderedIDs,
+			ParentID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.ParentID)),
+			OrderedIDs: mcpPageIDs(in.OrderedIDs),
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return messageOutput{Message: "Pages sorted successfully"}, nil
+		return newMessageOutput(ToolMessageSortPagesSuccess, "Pages sorted successfully"), nil
 	})
 
 	addEditorTool[ensurePageInput, pageOutput](r, server, toolEnsurePage, func(ctx context.Context, actor toolActor, in ensurePageInput) (pageOutput, error) {
@@ -217,10 +221,14 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		if err != nil {
 			return pageOutput{}, err
 		}
+		targetPath, err := wikipages.ValidateSemanticRoutePath(in.Path)
+		if err != nil {
+			return pageOutput{}, err
+		}
 		out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
-			UserID:      actor.ID,
+			UserID:      tree.NewUserIDUnchecked(actor.ID),
 			Source:      pagesave.PageMutationSourceMCP,
-			TargetPath:  strings.TrimSpace(in.Path),
+			TargetPath:  targetPath,
 			TargetTitle: in.Title,
 			Kind:        &kind,
 		})
@@ -236,25 +244,25 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return messageOutput{}, err
 		}
 		if err := r.convertPage.Execute(ctx, wikipages.ConvertPageInput{
-			UserID:     actor.ID,
+			UserID:     tree.NewUserIDUnchecked(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
-			ID:         strings.TrimSpace(in.ID),
-			Version:    strings.TrimSpace(in.Version),
+			ID:         tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			TargetKind: targetKind,
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return messageOutput{Message: "Page converted"}, nil
+		return newMessageOutput(ToolMessageConvertPageSuccess, "Page converted"), nil
 	})
 
 	addEditorTool[copyPageInput, pageOutput](r, server, toolCopyPage, func(ctx context.Context, actor toolActor, in copyPageInput) (pageOutput, error) {
 		out, err := r.copyPage.Execute(ctx, wikipages.CopyPageInput{
-			UserID:         actor.ID,
+			UserID:         tree.NewUserIDUnchecked(actor.ID),
 			Source:         pagesave.PageMutationSourceMCP,
-			SourcePageID:   strings.TrimSpace(in.ID),
-			TargetParentID: in.TargetParentID,
+			SourcePageID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			TargetParentID: mcpPageIDPtr(in.TargetParentID),
 			Title:          in.Title,
-			Slug:           in.Slug,
+			Slug:           tree.NewSlugUnchecked(in.Slug),
 		})
 		if err != nil {
 			return pageOutput{}, err
@@ -270,7 +278,7 @@ func (r *Routes) findToolPageByInputPath(ctx context.Context, rawPath string, ra
 			return r.findByPath.Execute(ctx, input)
 		},
 		RootPage: func() (*tree.Page, error) {
-			return r.treeService.GetPage("root")
+			return r.treeService.GetPage(tree.RootPageID)
 		},
 	}); err != nil || handled {
 		return out, err
@@ -282,7 +290,7 @@ func (r *Routes) findToolPageByInputPath(ctx context.Context, rawPath string, ra
 	return r.findToolPageByPath(ctx, routePath, kind)
 }
 
-func (r *Routes) findToolPageByPath(ctx context.Context, routePath string, kind tree.NodeKind) (*wikipages.FindByPathOutput, error) {
+func (r *Routes) findToolPageByPath(ctx context.Context, routePath tree.RoutePath, kind tree.NodeKind) (*wikipages.FindByPathOutput, error) {
 	if kind != "" {
 		return r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath, Kind: kind})
 	}
@@ -290,6 +298,22 @@ func (r *Routes) findToolPageByPath(ctx context.Context, routePath string, kind 
 		return out, nil
 	}
 	return r.findByPath.Execute(ctx, wikipages.FindByPathInput{RoutePath: routePath})
+}
+
+func mcpPageIDPtr(id *string) *tree.PageID {
+	if id == nil {
+		return nil
+	}
+	typed := tree.NewPageIDUnchecked(*id)
+	return &typed
+}
+
+func mcpPageIDs(ids []string) []tree.PageID {
+	out := make([]tree.PageID, len(ids))
+	for i, id := range ids {
+		out[i] = tree.NewPageIDUnchecked(id)
+	}
+	return out
 }
 
 func (r *Routes) pageOutputWithLinkStatus(ctx context.Context, page *tree.Page, depth int) (pageOutput, error) {

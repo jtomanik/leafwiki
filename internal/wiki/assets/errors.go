@@ -8,20 +8,22 @@ import (
 )
 
 const (
-	ErrCodeAssetFileTooLarge     = "asset_file_too_large"
-	ErrCodeAssetMissingFile      = "asset_missing_file"
-	ErrCodeAssetMissingName      = "asset_missing_name"
-	ErrCodeAssetPageNotFound     = "asset_page_not_found"
-	ErrCodeAssetNotFound         = "asset_not_found"
-	ErrCodeAssetAlreadyExists    = "asset_already_exists"
-	ErrCodeAssetInvalidExtension = "asset_invalid_extension"
-	ErrCodeAssetInvalidName      = "asset_invalid_name"
-	ErrCodeAssetInvalidPayload   = "asset_invalid_payload"
-	ErrCodeAssetUploadFailed     = "asset_upload_failed"
-	ErrCodeAssetDeleteFailed     = "asset_delete_failed"
-	ErrCodeAssetRenameFailed     = "asset_rename_failed"
-	ErrCodeAssetInternalError    = "asset_internal_error"
+	ErrCodeAssetFileTooLarge     sharederrors.ErrorCode = "asset_file_too_large"
+	ErrCodeAssetMissingFile      sharederrors.ErrorCode = "asset_missing_file"
+	ErrCodeAssetMissingName      sharederrors.ErrorCode = "asset_missing_name"
+	ErrCodeAssetPageNotFound     sharederrors.ErrorCode = "asset_page_not_found"
+	ErrCodeAssetNotFound         sharederrors.ErrorCode = "asset_not_found"
+	ErrCodeAssetAlreadyExists    sharederrors.ErrorCode = "asset_already_exists"
+	ErrCodeAssetInvalidExtension sharederrors.ErrorCode = "asset_invalid_extension"
+	ErrCodeAssetInvalidName      sharederrors.ErrorCode = "asset_invalid_name"
+	ErrCodeAssetInvalidPayload   sharederrors.ErrorCode = "asset_invalid_payload"
+	ErrCodeAssetUploadFailed     sharederrors.ErrorCode = "asset_upload_failed"
+	ErrCodeAssetDeleteFailed     sharederrors.ErrorCode = "asset_delete_failed"
+	ErrCodeAssetRenameFailed     sharederrors.ErrorCode = "asset_rename_failed"
+	ErrCodeAssetInternalError    sharederrors.ErrorCode = "asset_internal_error"
 )
+
+const MessageIDAssetDeleteSuccess sharederrors.MessageID = "api.assets.delete.success"
 
 // AssetErrorResponse is the structured JSON error body returned by asset endpoints.
 type AssetErrorResponse struct {
@@ -29,21 +31,11 @@ type AssetErrorResponse struct {
 }
 
 // AssetErrorDetail carries the localization-ready error data.
-type AssetErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type AssetErrorDetail = sharederrors.LocalizedErrorDetail
 
-func respondWithAssetStatusError(c *gin.Context, status int, code, message, template string, args ...string) {
+func respondWithAssetStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, AssetErrorResponse{
-		Error: AssetErrorDetail{
-			Code:     code,
-			Message:  message,
-			Template: template,
-			Args:     append([]string(nil), args...),
-		},
+		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
 	})
 }
 
@@ -58,14 +50,14 @@ func NewAssetInvalidPayloadError(err error) *sharederrors.LocalizedError {
 // respondWithAssetError maps errors to JSON responses for asset endpoints.
 func respondWithAssetError(c *gin.Context, err error) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
-		respondWithAssetStatusError(c, assetErrorStatus(loc.Code), loc.Code, loc.Message, loc.Template, loc.Args...)
+		c.JSON(assetErrorStatus(loc.Code), AssetErrorResponse{Error: sharederrors.LocalizedErrorDetailFromError(loc)})
 		return
 	}
 
 	respondWithAssetStatusError(c, http.StatusInternalServerError, ErrCodeAssetInternalError, "Asset request failed", "asset request failed")
 }
 
-func assetErrorStatus(code string) int {
+func assetErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodeAssetFileTooLarge:
 		return http.StatusRequestEntityTooLarge

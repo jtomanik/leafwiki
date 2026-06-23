@@ -1,11 +1,18 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type {
+  CommitHash,
+  MarkdownPath,
+  WorkspaceID,
+  WorkspaceSyncIssueCode,
+  WorkspaceSyncIssueSeverity,
+} from '../semanticTypes'
 
 export type WorkspaceSyncValidationError = {
-  code?: string
-  path?: string
+  code?: WorkspaceSyncIssueCode
+  path?: MarkdownPath
   message: string
-  severity?: string
+  severity?: WorkspaceSyncIssueSeverity
 }
 
 export type WorkspaceSyncStatus = {
@@ -15,8 +22,8 @@ export type WorkspaceSyncStatus = {
   pendingEventCount?: number
   lastSyncTime?: string
   lastError?: string
-  recentChangedMarkdownPaths?: string[]
-  lastCommitHash?: string
+  recentChangedMarkdownPaths?: MarkdownPath[]
+  lastCommitHash?: CommitHash
   validationErrors: WorkspaceSyncValidationError[]
 }
 
@@ -28,9 +35,9 @@ export type WorkspaceSnapshotAuthor = {
 }
 
 export type WorkspaceSnapshot = {
-  id: string
-  hash?: string
-  commit?: string
+  id: CommitHash
+  hash?: CommitHash
+  commit?: CommitHash
   message?: string
   summary?: string
   author?: string | WorkspaceSnapshotAuthor
@@ -41,12 +48,12 @@ export type WorkspaceSnapshot = {
   source?: string
   reason?: string
   changedMarkdownCount?: number
-  changedMarkdownPaths?: string[]
+  changedMarkdownPaths?: MarkdownPath[]
 }
 
 export type WorkspaceSnapshotsResponse = {
   snapshots: WorkspaceSnapshot[]
-  nextCursor?: string
+  nextCursor?: CommitHash
 }
 
 function normalizeStatus(value: unknown): WorkspaceSyncStatus {
@@ -73,7 +80,7 @@ function normalizeStatus(value: unknown): WorkspaceSyncStatus {
 }
 
 export async function getWorkspaceSyncStatus(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
   return normalizeStatus(
     await fetchWithAuth(
@@ -83,7 +90,7 @@ export async function getWorkspaceSyncStatus(
 }
 
 export async function refreshWorkspaceSync(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
   return normalizeStatus(
     await fetchWithAuth(
@@ -96,8 +103,8 @@ export async function refreshWorkspaceSync(
 }
 
 export async function listWorkspaceSnapshots(
-  workspaceId: string,
-  cursor = '',
+  workspaceId: WorkspaceID,
+  cursor: CommitHash | '' = '',
   limit = 50,
 ): Promise<WorkspaceSnapshotsResponse> {
   const params = new URLSearchParams()
@@ -113,8 +120,8 @@ export async function listWorkspaceSnapshots(
 }
 
 export async function restoreWorkspaceSnapshot(
-  commitId: string,
-  workspaceId: string,
+  commitId: CommitHash,
+  workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
   return normalizeStatus(
     await fetchWithAuth(

@@ -6,9 +6,15 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 const trustedPrivateChannelKey = "leafwiki.trustedPrivateChannel"
+
+const (
+	errCodeCSRFTokenMissing sharederrors.ErrorCode = "csrf_token_missing"
+	errCodeCSRFTokenInvalid sharederrors.ErrorCode = "csrf_token_invalid"
+)
 
 func TrustPrivateChannel(c *gin.Context) {
 	c.Set(trustedPrivateChannelKey, true)
@@ -38,9 +44,7 @@ func CSRFMiddleware(csrf *CSRFCookie) gin.HandlerFunc {
 		cookieToken, err := csrf.Read(c)
 		if err != nil || cookieToken == "" {
 			slog.Default().Warn("CSRF token missing or error reading token", "error", err)
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "CSRF token missing",
-			})
+			abortCSRFError(c, errCodeCSRFTokenMissing, "CSRF token missing")
 			return
 		}
 
@@ -53,12 +57,16 @@ func CSRFMiddleware(csrf *CSRFCookie) gin.HandlerFunc {
 		// No token in header/form or no match
 		if headerToken == "" || subtle.ConstantTimeCompare([]byte(headerToken), []byte(cookieToken)) != 1 {
 			slog.Default().Warn("CSRF token invalid or does not match cookie")
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "Invalid CSRF token",
-			})
+			abortCSRFError(c, errCodeCSRFTokenInvalid, "Invalid CSRF token")
 			return
 		}
 
 		c.Next()
 	}
+}
+
+func abortCSRFError(c *gin.Context, code sharederrors.ErrorCode, message string) {
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	})
 }

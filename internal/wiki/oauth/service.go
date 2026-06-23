@@ -93,7 +93,7 @@ func (s *Service) VerifyBearerToken(ctx context.Context, token string, req *http
 		return nil, fmt.Errorf("%w: oauth bearer must be an access token", sdkauth.ErrInvalidToken)
 	}
 
-	user, err := s.users.GetUserByID(requester.GetSession().GetSubject())
+	user, err := s.users.GetUserByID(coreauth.NewUserIDUnchecked(requester.GetSession().GetSubject()))
 	if err != nil {
 		return nil, fmt.Errorf("%w: user not found", sdkauth.ErrInvalidToken)
 	}

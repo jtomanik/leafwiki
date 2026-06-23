@@ -252,7 +252,7 @@ func TestResolveCanonicalLink_ClassifiesPageSectionAssetExternalInvalidAndUnreso
 		name string
 		href string
 		kind TargetKind
-		code string
+		code IssueCode
 	}{
 		{name: "page", href: "/docs/b.md", kind: TargetKindPage},
 		{name: "section", href: "/docs/sync", kind: TargetKindSection},
@@ -261,9 +261,9 @@ func TestResolveCanonicalLink_ClassifiesPageSectionAssetExternalInvalidAndUnreso
 		{name: "external", href: "https://example.com", kind: TargetKindExternal},
 		{name: "mailto", href: "mailto:a@example.com", kind: TargetKindExternal},
 		{name: "hash", href: "#heading", kind: TargetKindExternal},
-		{name: "invalid percent", href: "/docs/%zz", kind: TargetKindInvalid, code: "invalid_percent_encoding"},
-		{name: "escape", href: "../../../outside.md", kind: TargetKindInvalid, code: "workspace_escape"},
-		{name: "unresolved", href: "/docs/missing.md", kind: TargetKindUnresolved, code: "broken_page"},
+		{name: "invalid percent", href: "/docs/%zz", kind: TargetKindInvalid, code: IssueCodeInvalidPercentEncoding},
+		{name: "escape", href: "../../../outside.md", kind: TargetKindInvalid, code: IssueCodeWorkspaceEscape},
+		{name: "unresolved", href: "/docs/missing.md", kind: TargetKindUnresolved, code: IssueCodeBrokenPage},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

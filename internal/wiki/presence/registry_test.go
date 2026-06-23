@@ -1,10 +1,16 @@
 package presence
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 func TestWebPresenceRegistryListGatesEmailAndExpires(t *testing.T) {
@@ -38,6 +44,18 @@ func TestWebPresenceRegistryListGatesEmailAndExpires(t *testing.T) {
 	if editorView[0].State != "active" || editorView[0].Dirty != true || editorView[0].Page == nil || editorView[0].Page.Title != "API" {
 		t.Fatalf("editor-visible session = %#v, want active dirty page session", editorView[0])
 	}
+	if editorView[0].Type != SessionTypeWeb || editorView[0].Mode != SessionModeEdit || editorView[0].State != SessionStateActive {
+		t.Fatalf("typed session fields = %#v", editorView[0])
+	}
+	raw, err := json.Marshal(editorView[0])
+	if err != nil {
+		t.Fatalf("marshal web session: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"web"`) ||
+		!strings.Contains(string(raw), `"mode":"edit"`) ||
+		!strings.Contains(string(raw), `"state":"active"`) {
+		t.Fatalf("web session JSON = %s, want string compatibility fields", raw)
+	}
 
 	adminView := registry.List(&coreauth.User{Role: coreauth.RoleAdmin})
 	if len(adminView) != 1 || adminView[0].User.Email != "editor@example.test" {
@@ -66,6 +84,79 @@ func TestWebPresenceRegistryRejectsInvalidHeartbeatWithoutDroppingExistingSessio
 	}
 	if sessions := registry.List(&coreauth.User{Role: coreauth.RoleAdmin}); len(sessions) != 1 || sessions[0].SessionID != "tab-1" {
 		t.Fatalf("sessions after invalid heartbeats = %#v, want original tab only", sessions)
+	}
+}
+
+func TestWebPresenceRegistryInvalidHeartbeatReturnsStableCodes(t *testing.T) {
+	registry := NewWebPresenceRegistry(time.Minute, nil)
+	user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
+
+	tests := []struct {
+		name      string
+		heartbeat Heartbeat
+		code      sharederrors.ErrorCode
+		messageID sharederrors.MessageID
+	}{
+		{
+			name:      "missing session",
+			heartbeat: Heartbeat{SessionID: "", Mode: "view"},
+			code:      "presence_session_id_required",
+			messageID: "errors.presence.session_id_required",
+		},
+		{
+			name:      "invalid mode",
+			heartbeat: Heartbeat{SessionID: "tab-1", Mode: "invalid"},
+			code:      "presence_mode_invalid",
+			messageID: "errors.presence.mode_invalid",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := registry.Record(tc.heartbeat, user, nil)
+			localized, ok := sharederrors.AsLocalizedError(err)
+			if !ok {
+				t.Fatalf("Record error = %T %v, want LocalizedError", err, err)
+			}
+			if localized.Code != tc.code {
+				t.Fatalf("code = %q, want %q", localized.Code, tc.code)
+			}
+			if localized.MessageID != tc.messageID {
+				t.Fatalf("messageId = %q, want %q", localized.MessageID, tc.messageID)
+			}
+		})
+	}
+}
+
+func TestPresenceHeartbeatRouteReturnsStableErrorDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := NewWebPresenceRegistry(time.Minute, nil)
+	routes := NewRoutes(RoutesConfig{Registry: registry})
+	router := gin.New()
+	router.POST("/heartbeat", func(c *gin.Context) {
+		c.Set("user", &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor})
+		routes.handleHeartbeat(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/heartbeat", strings.NewReader(`{"sessionId":"","mode":"view"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var body struct {
+		Error sharederrors.LocalizedErrorDetail `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != ErrCodePresenceSessionIDRequired {
+		t.Fatalf("error.code = %q, want %q; body=%s", body.Error.Code, ErrCodePresenceSessionIDRequired, rec.Body.String())
+	}
+	if body.Error.MessageID != "errors.presence.session_id_required" {
+		t.Fatalf("error.messageId = %q, want errors.presence.session_id_required", body.Error.MessageID)
 	}
 }
 

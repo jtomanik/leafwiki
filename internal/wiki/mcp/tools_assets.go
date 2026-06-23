@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 )
@@ -22,10 +23,10 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 		}
 		file := &memoryMultipartFile{Reader: bytes.NewReader(content)}
 		out, err := r.uploadAsset.Execute(ctx, wikiassets.UploadAssetInput{
-			UserID:   actor.ID,
-			PageID:   strings.TrimSpace(in.PageID),
+			UserID:   tree.NewUserIDUnchecked(actor.ID),
+			PageID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.PageID)),
 			File:     file,
-			Filename: in.Filename,
+			Filename: tree.NewAssetNameUnchecked(in.Filename),
 			MaxBytes: opts.MaxAssetUploadSizeBytes,
 		})
 		if err != nil {
@@ -36,14 +37,14 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 
 	addTypedTool[assetInput, assetOutput](server, toolGetAsset, func(ctx context.Context, in assetInput) (assetOutput, error) {
 		out, err := r.getAsset.Execute(ctx, wikiassets.GetAssetInput{
-			PageID:   strings.TrimSpace(in.PageID),
-			Filename: strings.TrimSpace(in.Filename),
+			PageID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.PageID)),
+			Filename: tree.NewAssetNameUnchecked(strings.TrimSpace(in.Filename)),
 		})
 		if err != nil {
 			return assetOutput{}, err
 		}
 		return assetOutput{
-			Filename:      out.Filename,
+			Filename:      out.Filename.Filename(),
 			MimeType:      out.MIMEType,
 			ContentBase64: base64.StdEncoding.EncodeToString(out.Content),
 		}, nil
@@ -63,10 +64,10 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 
 	addEditorTool[renameAssetInput, renameAssetOutput](r, server, toolRenameAsset, func(ctx context.Context, actor toolActor, in renameAssetInput) (renameAssetOutput, error) {
 		out, err := r.renameAsset.Execute(ctx, wikiassets.RenameAssetInput{
-			UserID:      actor.ID,
-			PageID:      strings.TrimSpace(in.PageID),
-			OldFilename: in.OldFilename,
-			NewFilename: in.NewFilename,
+			UserID:      tree.NewUserIDUnchecked(actor.ID),
+			PageID:      tree.NewPageIDUnchecked(strings.TrimSpace(in.PageID)),
+			OldFilename: tree.NewAssetNameUnchecked(in.OldFilename),
+			NewFilename: tree.NewAssetNameUnchecked(in.NewFilename),
 		})
 		if err != nil {
 			return renameAssetOutput{}, err
@@ -76,12 +77,12 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 
 	addEditorTool[deleteAssetInput, messageOutput](r, server, toolDeleteAsset, func(ctx context.Context, actor toolActor, in deleteAssetInput) (messageOutput, error) {
 		if err := r.deleteAsset.Execute(ctx, wikiassets.DeleteAssetInput{
-			UserID:   actor.ID,
-			PageID:   strings.TrimSpace(in.PageID),
-			Filename: in.Filename,
+			UserID:   tree.NewUserIDUnchecked(actor.ID),
+			PageID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.PageID)),
+			Filename: tree.NewAssetNameUnchecked(in.Filename),
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return messageOutput{Message: "asset deleted"}, nil
+		return newMessageOutput(ToolMessageDeleteAssetSuccess, "asset deleted"), nil
 	})
 }

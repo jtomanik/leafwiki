@@ -157,7 +157,7 @@ func TestAuthService_RevokeAllUserSessions(t *testing.T) {
 	}
 
 	// Revoke all sessions for the user
-	err = authService.RevokeAllUserSessions(user.ID)
+	err = authService.RevokeAllUserSessions(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		t.Fatalf("RevokeAllUserSessions failed: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestAuthService_RevokeAllUserSessions_MultipleUsers(t *testing.T) {
 	}
 
 	// Revoke all sessions for first user only
-	err = authService.RevokeAllUserSessions(user1.ID)
+	err = authService.RevokeAllUserSessions(NewUserIDUnchecked(user1.ID))
 	if err != nil {
 		t.Fatalf("RevokeAllUserSessions failed: %v", err)
 	}

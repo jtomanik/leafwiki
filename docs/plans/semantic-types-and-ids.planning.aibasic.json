@@ -1,0 +1,72 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "semantic-types-and-ids",
+  "createdAt": "2026-06-21T22:19:24Z",
+  "status": "implemented",
+  "artifacts": {
+    "observe": "docs/plans/semantic-types-and-ids.OBSERVE.md",
+    "context": "docs/plans/semantic-types-and-ids.CONTEXT.md",
+    "decision": "docs/plans/semantic-types-and-ids.DECISION.md",
+    "plan": "docs/plans/semantic-types-and-ids.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/semantic-ids.PLAN.md",
+    "docs/plans/federated-runtime-sync-cleanup.PLAN.md",
+    "docs/plans/federated-runtime-sync-cleanup.DECISION.md",
+    "docs/plans/federated-workspaces.PLAN.md",
+    "docs/plans/wikid-frontd-extraction.PLAN.md",
+    "docs/plans/mcp-tools.PLAN.md",
+    "docs/plans/page-metadata-v1.PLAN.md",
+    "internal/core/shared/errors/localized_error.go",
+    "internal/core/shared/errors/field_error.go",
+    "internal/workspaceid/validate.go",
+    "internal/wiki/mcp/tool_descriptors.go",
+    "internal/wiki/mcp/types.go",
+    "ui/leafwiki-ui/src/lib/api/errors.ts",
+    "ui/leafwiki-ui/src/lib/handleFieldErrors.ts"
+  ],
+  "subagents": [
+    {
+      "id": "019eec3c-16e6-7da3-bee7-a9f62c177d6d",
+      "role": "Explorer1",
+      "focus": "backend/core/API semantic stable IDs and primitive type candidates",
+      "status": "completed"
+    },
+    {
+      "id": "019eec3c-3fa7-7af1-a3b7-cfbee0bf1620",
+      "role": "Explorer2",
+      "focus": "MCP, agent, presence, workspace routing, and federated runtime surfaces",
+      "status": "completed"
+    },
+    {
+      "id": "019eec3c-5719-7a62-a659-8d5f710e7fb7",
+      "role": "Explorer3",
+      "focus": "frontend, TypeScript branded type candidates, and E2E string dependency risks",
+      "status": "completed"
+    },
+    {
+      "id": "019eec3c-7fc8-7543-b845-af8bbcf085f1",
+      "role": "Explorer4",
+      "focus": "historical plan, original conversation context, recent commits, and workflow posture",
+      "status": "completed"
+    }
+  ],
+  "decisions": [
+    "Create semantic-types-and-ids as a superseding plan rather than patching semantic-ids.PLAN.md in place.",
+    "Keep contract IDs, message IDs, and rendered text as separate concepts.",
+    "Do not add go-i18n in this implementation slice.",
+    "Use Go defined types for high-risk semantic values; aliases are only temporary compatibility bridges.",
+    "Prefer domain-owned type definitions over a global IDs package.",
+    "Allow raw primitives at I/O boundaries and parse into semantic values internally.",
+    "Keep existing English messages and compatibility JSON fields while adding messageId.",
+    "Treat MCP as an agent-facing contract that needs typed tool IDs and message IDs.",
+    "Keep existing frontend data-testid locators and add semantic data attributes selectively.",
+    "Use scans to triage fragile English assertions rather than automatically deleting all text assertions."
+  ],
+  "validation": {
+    "artifactWrite": "planning artifacts were created first, then this implementation slice added semantic types, stable message IDs, frontend semantic attributes, MCP structured errors, docs, scans, and tests",
+    "implementation": "implemented in the local checkout as the semantic-types-and-ids plan slice",
+    "dirtyTreeNote": "docs/plans/planning.aibasic.txt was already modified before this planning task and remains outside the semantic-types implementation scope"
+  }
+}

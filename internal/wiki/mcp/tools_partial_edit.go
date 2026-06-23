@@ -8,6 +8,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/markdown"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
@@ -19,7 +20,7 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		if err := partialEditVersionPreflight(strings.TrimSpace(in.Version), page); err != nil {
+		if err := partialEditVersionPreflight(tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)), page); err != nil {
 			return partialEditOutput{}, err
 		}
 		raw, err := r.treeService.ReadPageRaw(page.ID)
@@ -52,10 +53,10 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		}
 		kind := tree.NodeKindPage
 		out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-			UserID:     actor.ID,
+			UserID:     tree.NewUserIDUnchecked(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
 			ID:         page.ID,
-			Version:    strings.TrimSpace(in.Version),
+			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			Title:      page.Title,
 			Slug:       page.Slug,
 			Content:    &combined,
@@ -73,7 +74,7 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		if err := partialEditVersionPreflight(strings.TrimSpace(in.Version), page); err != nil {
+		if err := partialEditVersionPreflight(tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)), page); err != nil {
 			return partialEditOutput{}, err
 		}
 		content, err := pages.ReplaceMarkdownSection(page.Content, in.HeadingPath, in.Occurrence, in.Content)
@@ -82,10 +83,10 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 		}
 		kind := tree.NodeKindPage
 		out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-			UserID:     actor.ID,
+			UserID:     tree.NewUserIDUnchecked(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
 			ID:         page.ID,
-			Version:    strings.TrimSpace(in.Version),
+			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			Title:      page.Title,
 			Slug:       page.Slug,
 			Content:    &content,
@@ -99,7 +100,7 @@ func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 	})
 }
 
-func partialEditVersionPreflight(version string, page *tree.Page) error {
+func partialEditVersionPreflight(requested tree.PageVersion, page *tree.Page) error {
 	if page == nil {
 		return nil
 	}
@@ -107,10 +108,10 @@ func partialEditVersionPreflight(version string, page *tree.Page) error {
 	if current == "" {
 		return nil
 	}
-	if version == "" || version == tree.VersionUnchecked {
+	if requested == "" || requested.IsUnchecked() {
 		return partialEditWriteError(tree.ErrVersionRequired, page)
 	}
-	if version != current {
+	if requested != current {
 		return partialEditWriteError(tree.ErrVersionConflict, page)
 	}
 	return nil
@@ -120,7 +121,7 @@ func partialEditWriteError(err error, page *tree.Page) error {
 	if page == nil {
 		return err
 	}
-	code := ""
+	var code sharederrors.ErrorCode
 	message := ""
 	switch {
 	case errors.Is(err, tree.ErrVersionConflict):
@@ -132,13 +133,17 @@ func partialEditWriteError(err error, page *tree.Page) error {
 	default:
 		return err
 	}
-	return fmt.Errorf("%s: %s (currentPageId=%s currentPath=%s currentTitle=%s currentVersion=%s)",
+	return sharederrors.NewLocalizedError(
 		code,
 		message,
-		page.ID,
-		strings.Trim(page.CalculatePath(), "/"),
-		page.Title,
-		page.Version(),
+		strings.ToLower(message),
+		fmt.Errorf(
+			"currentPageId=%s currentPath=%s currentTitle=%s currentVersion=%s",
+			page.ID,
+			strings.Trim(page.CalculatePath(), "/"),
+			page.Title,
+			page.Version(),
+		),
 	)
 }
 
@@ -151,11 +156,12 @@ func (r *Routes) partialEditOutput(ctx context.Context, page *tree.Page, include
 		Version: updatedPage.Version,
 	}
 	if includeValidation(includeValidationValue) {
-		raw, err := r.treeService.ReadPageRaw(updatedPage.ID)
+		raw, err := r.treeService.ReadPageRaw(tree.NewPageIDUnchecked(updatedPage.ID))
 		if err != nil {
 			return partialEditOutput{}, err
 		}
-		validation := validationOutputFromResult(r.validateMarkdownContent(ctx, updatedPage.Path, raw, updatedPage.ID, page.Kind))
+		validationRoutePath := tree.NewRoutePathUnchecked(strings.Trim(updatedPage.Path, "/"))
+		validation := validationOutputFromResult(r.validateMarkdownContent(ctx, validationRoutePath, raw, tree.NewPageIDUnchecked(updatedPage.ID), page.Kind))
 		result.Validation = &validation
 	}
 	if includePage {

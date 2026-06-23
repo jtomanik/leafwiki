@@ -3,6 +3,7 @@ package pages_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -79,6 +80,27 @@ func sectionKind() *tree.NodeKind {
 	return &k
 }
 
+func semanticUserID(id string) tree.UserID {
+	return tree.UserID(id)
+}
+
+func pageID[T ~string](id T) tree.PageID {
+	return tree.NewPageIDUnchecked(id)
+}
+
+func pageIDPtr[T ~string](id T) *tree.PageID {
+	typed := pageID(id)
+	return &typed
+}
+
+func pageVersion[T ~string](version T) tree.PageVersion {
+	return tree.NewPageVersionUnchecked(version)
+}
+
+func slug[T ~string](value T) tree.Slug {
+	return tree.NewSlugUnchecked(value)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CreatePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +142,7 @@ func TestCreatePageUseCase_HappyPath_WithParent(t *testing.T) {
 
 	child, err := uc.Execute(context.Background(), pages.CreatePageInput{
 		UserID:   "user1",
-		ParentID: &parent.Page.ID,
+		ParentID: pageIDPtr(parent.Page.ID),
 		Title:    "Reference",
 		Slug:     "reference",
 		Kind:     pageKind(),
@@ -150,6 +172,7 @@ func TestCreatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
+	assertFieldErrorCode(t, ve, "title", "page_title_required", "validation.page.title_required")
 }
 
 func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
@@ -169,6 +192,73 @@ func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
+	assertFieldErrorCode(t, ve, "slug", "page_slug_invalid", "validation.page.slug_invalid")
+}
+
+func TestPageUseCaseInputsUseSemanticTypesAtBoundary(t *testing.T) {
+	t.Parallel()
+
+	pageID := tree.NewPageIDUnchecked("page-1")
+	parentID := tree.NewPageIDUnchecked("parent-1")
+	version := tree.NewPageVersionUnchecked("version-1")
+	slug := tree.NewSlugUnchecked("page-slug")
+	routePath := tree.RoutePath("docs/page")
+
+	_ = pages.GetPageInput{ID: pageID}
+	_ = pages.ResolvePermalinkInput{ID: pageID}
+	_ = pages.FindByPathInput{RoutePath: routePath}
+	_ = pages.LookupPagePathInput{Path: routePath}
+	_ = pages.CreatePageInput{ParentID: &parentID, Slug: slug}
+	_ = pages.UpdatePageInput{ID: pageID, Version: version, Slug: slug}
+	_ = pages.DeletePageInput{ID: pageID, Version: version}
+	_ = pages.MovePageInput{UserID: tree.UserID("user-1"), ID: pageID, Version: version, ParentID: parentID}
+	_ = pages.ConvertPageInput{UserID: tree.UserID("user-1"), ID: pageID, Version: version}
+	_ = pages.CopyPageInput{UserID: tree.UserID("user-1"), SourcePageID: pageID, TargetParentID: &parentID, Slug: slug}
+	_ = pages.EnsurePathInput{UserID: tree.UserID("user-1"), TargetPath: routePath}
+	_ = pages.SortPagesInput{ParentID: parentID, OrderedIDs: []tree.PageID{pageID}}
+	_ = pages.SuggestSlugInput{ParentID: parentID, CurrentID: pageID}
+	_ = pages.RefactorPreviewInput{PageID: pageID, Slug: slug, NewParentID: &parentID}
+	_ = pages.RefactorApplyInput{UserID: tree.UserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
+}
+
+func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
+	t.Parallel()
+
+	err := pages.ValidatePageMetadataInput(
+		[]string{" tag ", "unique", "UNIQUE"},
+		map[string]string{
+			" leafwiki_custom": "reserved",
+			"tags":             "reserved",
+			"":                 "empty",
+		},
+	)
+
+	var ve *sharederrors.ValidationErrors
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
+	}
+	assertFieldErrorCode(t, ve, "tags[0]", "page_tag_whitespace", "validation.page.tag_whitespace")
+	assertFieldErrorCode(t, ve, "tags[2]", "page_tag_duplicate", "validation.page.tag_duplicate")
+	assertFieldErrorCode(t, ve, "properties. leafwiki_custom", "page_property_key_whitespace", "validation.page.property_key_whitespace")
+	assertFieldErrorCode(t, ve, "properties.tags", "page_property_key_reserved", "validation.page.property_key_reserved")
+	assertFieldErrorCode(t, ve, "properties.", "page_property_key_required", "validation.page.property_key_required")
+}
+
+func assertFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
+	t.Helper()
+
+	for _, err := range ve.Errors {
+		if err.Field == field {
+			if fmt.Sprintf("%s", err.Code) != code {
+				t.Fatalf("%s code = %q, want %q", field, err.Code, code)
+			}
+			if fmt.Sprintf("%s", err.MessageID) != messageID {
+				t.Fatalf("%s messageId = %q, want %q", field, err.MessageID, messageID)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing field error for %s in %#v", field, ve.Errors)
 }
 
 func TestCreatePageUseCase_NilKind_ReturnsValidationError(t *testing.T) {
@@ -223,8 +313,8 @@ func TestUpdatePageUseCase_HappyPath(t *testing.T) {
 	content := "updated content"
 	out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user1",
-		ID:      created.Page.ID,
-		Version: created.Page.Version(),
+		ID:      pageID(created.Page.ID),
+		Version: pageVersion(created.Page.Version()),
 		Title:   "New Title",
 		Slug:    "new-title",
 		Content: &content,
@@ -257,8 +347,8 @@ func TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testin
 	firstContent := "first update"
 	updated, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user1",
-		ID:      created.Page.ID,
-		Version: staleVersion,
+		ID:      pageID(created.Page.ID),
+		Version: pageVersion(staleVersion),
 		Title:   "New Title",
 		Slug:    "new-title",
 		Content: &firstContent,
@@ -271,10 +361,10 @@ func TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testin
 	secondContent := "second update"
 	_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user2",
-		ID:      created.Page.ID,
-		Version: staleVersion,
+		ID:      pageID(created.Page.ID),
+		Version: pageVersion(staleVersion),
 		Title:   updated.Page.Title,
-		Slug:    updated.Page.Slug,
+		Slug:    slug(updated.Page.Slug),
 		Content: &secondContent,
 		Kind:    pageKind(),
 	})
@@ -301,15 +391,15 @@ func TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired(t *
 	content := "new content"
 	_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user1",
-		ID:      created.Page.ID,
-		Version: tree.VersionUnchecked,
+		ID:      pageID(created.Page.ID),
+		Version: tree.NewPageVersionUnchecked("\x00"),
 		Title:   "Page",
 		Slug:    "page",
 		Content: &content,
 		Kind:    pageKind(),
 	})
 	if !errors.Is(err, tree.ErrVersionRequired) {
-		t.Fatalf("expected ErrVersionRequired when sending VersionUnchecked sentinel, got %v", err)
+		t.Fatalf("expected ErrVersionRequired when sending reserved version bypass value, got %v", err)
 	}
 }
 
@@ -323,7 +413,7 @@ func TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
 	})
 
 	_, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: created.Page.ID, Version: created.Page.Version(), Title: "", Slug: "page", Kind: pageKind(),
+		UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "", Slug: "page", Kind: pageKind(),
 	})
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
@@ -345,15 +435,15 @@ func TestDeletePageUseCase_HappyPath(t *testing.T) {
 
 	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
 		UserID:    "user1",
-		ID:        created.Page.ID,
-		Version:   created.Page.Version(),
+		ID:        pageID(created.Page.ID),
+		Version:   pageVersion(created.Page.Version()),
 		Recursive: false,
 	}); err != nil {
 		t.Fatalf("unexpected error deleting page: %v", err)
 	}
 
 	// Verify it is gone
-	if _, err := deps.tree.GetPage(created.Page.ID); !errors.Is(err, tree.ErrPageNotFound) {
+	if _, err := deps.tree.GetPage(tree.NewPageIDUnchecked(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
 		t.Errorf("expected page-not-found after delete, got %v", err)
 	}
 }
@@ -379,11 +469,11 @@ func TestDeletePageUseCase_WithChildren_Recursive(t *testing.T) {
 		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
 	})
 	createUC.Execute(context.Background(), pages.CreatePageInput{ //nolint:errcheck
-		UserID: "user1", ParentID: &parent.Page.ID, Title: "Child", Slug: "child", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
 	})
 
 	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "user1", ID: parent.Page.ID, Version: parent.Page.Version(), Recursive: true,
+		UserID: "user1", ID: pageID(parent.Page.ID), Version: pageVersion(parent.Page.Version()), Recursive: true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error on recursive delete: %v", err)
@@ -408,14 +498,14 @@ func TestMovePageUseCase_HappyPath(t *testing.T) {
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
 		UserID:   "user1",
-		ID:       child.Page.ID,
-		Version:  child.Page.Version(),
-		ParentID: parent.Page.ID,
+		ID:       pageID(child.Page.ID),
+		Version:  pageVersion(child.Page.Version()),
+		ParentID: pageID(parent.Page.ID),
 	}); err != nil {
 		t.Fatalf("unexpected error moving page: %v", err)
 	}
 
-	moved, err := deps.tree.GetPage(child.Page.ID)
+	moved, err := deps.tree.GetPage(tree.NewPageIDUnchecked(child.Page.ID))
 	if err != nil {
 		t.Fatalf("could not get moved page: %v", err)
 	}
@@ -449,7 +539,7 @@ func TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testing.
 	}
 	child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID:   "user1",
-		ParentID: &parentA.Page.ID,
+		ParentID: pageIDPtr(parentA.Page.ID),
 		Title:    "Child",
 		Slug:     "child",
 		Kind:     pageKind(),
@@ -461,18 +551,18 @@ func TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testing.
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
 		UserID:   "user1",
-		ID:       child.Page.ID,
-		Version:  staleVersion,
-		ParentID: parentB.Page.ID,
+		ID:       pageID(child.Page.ID),
+		Version:  pageVersion(staleVersion),
+		ParentID: pageID(parentB.Page.ID),
 	}); err != nil {
 		t.Fatalf("unexpected error applying first move: %v", err)
 	}
 
 	err = moveUC.Execute(context.Background(), pages.MovePageInput{
 		UserID:   "user2",
-		ID:       child.Page.ID,
-		Version:  staleVersion,
-		ParentID: parentC.Page.ID,
+		ID:       pageID(child.Page.ID),
+		Version:  pageVersion(staleVersion),
+		ParentID: pageID(parentC.Page.ID),
 	})
 	if err == nil {
 		t.Fatal("expected version conflict, got nil")
@@ -514,8 +604,8 @@ func TestConvertPageUseCase_UsesOrchestratorWithMutationSource(t *testing.T) {
 	if err := convertUC.Execute(context.Background(), pages.ConvertPageInput{
 		UserID:     "mcp-user",
 		Source:     pagesave.PageMutationSourceMCP,
-		ID:         page.Page.ID,
-		Version:    page.Page.Version(),
+		ID:         pageID(page.Page.ID),
+		Version:    pageVersion(page.Page.Version()),
 		TargetKind: tree.NodeKindSection,
 	}); err != nil {
 		t.Fatalf("ConvertPage failed: %v", err)
@@ -721,6 +811,23 @@ func TestEnsurePathUseCase_EmptyPath_ReturnsValidationError(t *testing.T) {
 	}
 }
 
+func TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testing.T) {
+	deps := newTestDeps(t)
+	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+	_, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+		UserID: "user1", TargetPath: tree.RoutePath("docs//guide"), TargetTitle: "Guide", Kind: pageKind(),
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid path, got nil")
+	}
+	var ve *sharederrors.ValidationErrors
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
+	}
+	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GetPageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
@@ -734,7 +841,7 @@ func TestGetPageUseCase_HappyPath(t *testing.T) {
 		UserID: "user1", Title: "Home", Slug: "home", Kind: pageKind(),
 	})
 
-	out, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: created.Page.ID})
+	out, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: pageID(created.Page.ID)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -792,7 +899,7 @@ func TestCreatePageUseCase_InvalidParent_ReturnsError(t *testing.T) {
 	invalidID := "not-real"
 
 	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &invalidID, Title: "Broken", Slug: "broken", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(invalidID), Title: "Broken", Slug: "broken", Kind: pageKind(),
 	})
 	if err == nil {
 		t.Fatal("expected invalid parent error, got nil")
@@ -832,8 +939,8 @@ func TestUpdatePageUseCase_AllowsUppercaseSlug(t *testing.T) {
 	content := "# Updated"
 	out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user1",
-		ID:      created.Page.ID,
-		Version: created.Page.Version(),
+		ID:      pageID(created.Page.ID),
+		Version: pageVersion(created.Page.Version()),
 		Title:   "Original",
 		Slug:    "ABCD-efg",
 		Content: &content,
@@ -889,6 +996,23 @@ func TestFindByPathUseCase_NotFound_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testing.T) {
+	deps := newTestDeps(t)
+	lookupUC := pages.NewLookupPagePathUseCase(deps.tree)
+
+	_, err := lookupUC.Execute(context.Background(), pages.LookupPagePathInput{
+		Path: tree.RoutePath("docs//guide"),
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid route path, got nil")
+	}
+	var ve *sharederrors.ValidationErrors
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
+	}
+	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
+}
+
 func TestSortPagesUseCase_HappyPath(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -898,19 +1022,19 @@ func TestSortPagesUseCase_HappyPath(t *testing.T) {
 		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
 	})
 	child1, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &parent.Page.ID, Title: "Child1", Slug: "child1", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child1", Slug: "child1", Kind: pageKind(),
 	})
 	child2, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &parent.Page.ID, Title: "Child2", Slug: "child2", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child2", Slug: "child2", Kind: pageKind(),
 	})
 
 	if err := sortUC.Execute(context.Background(), pages.SortPagesInput{
-		ParentID: parent.Page.ID, OrderedIDs: []string{child2.Page.ID, child1.Page.ID},
+		ParentID: pageID(parent.Page.ID), OrderedIDs: []tree.PageID{pageID(child2.Page.ID), pageID(child1.Page.ID)},
 	}); err != nil {
 		t.Fatalf("unexpected error sorting pages: %v", err)
 	}
 
-	sortedParent, err := deps.tree.GetPage(parent.Page.ID)
+	sortedParent, err := deps.tree.GetPage(tree.NewPageIDUnchecked(parent.Page.ID))
 	if err != nil {
 		t.Fatalf("failed to reload parent: %v", err)
 	}
@@ -950,7 +1074,7 @@ func TestSuggestSlugUseCase_Conflict(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: deps.tree.GetTree().ID,
+		ParentID: pageID(deps.tree.GetTree().ID),
 		Title:    "My Page",
 	})
 	if err != nil {
@@ -973,14 +1097,14 @@ func TestSuggestSlugUseCase_DeepHierarchy(t *testing.T) {
 		t.Fatalf("unexpected error creating architecture: %v", err)
 	}
 	backend, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &arch.Page.ID, Title: "Backend", Slug: "backend", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(arch.Page.ID), Title: "Backend", Slug: "backend", Kind: pageKind(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error creating backend: %v", err)
 	}
 
 	out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: backend.Page.ID,
+		ParentID: pageID(backend.Page.ID),
 		Title:    "Data Layer",
 	})
 	if err != nil {
@@ -991,13 +1115,13 @@ func TestSuggestSlugUseCase_DeepHierarchy(t *testing.T) {
 	}
 
 	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &backend.Page.ID, Title: "Data Layer", Slug: "data-layer", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(backend.Page.ID), Title: "Data Layer", Slug: "data-layer", Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("unexpected error creating duplicate title page: %v", err)
 	}
 
 	out2, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: backend.Page.ID,
+		ParentID: pageID(backend.Page.ID),
 		Title:    "Data Layer",
 	})
 	if err != nil {
@@ -1018,7 +1142,7 @@ func TestCopyPageUseCase_HappyPath(t *testing.T) {
 	})
 
 	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: original.Page.ID, Title: "Copy of Original", Slug: "copy-of-original",
+		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error copying page: %v", err)
@@ -1047,7 +1171,7 @@ func TestCopyPageUseCase_WithParent(t *testing.T) {
 	})
 
 	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: original.Page.ID, TargetParentID: &parent.Page.ID, Title: "Copy of Original", Slug: "copy-of-original",
+		UserID: "user1", SourcePageID: pageID(original.Page.ID), TargetParentID: pageIDPtr(parent.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error copying page: %v", err)
@@ -1084,12 +1208,12 @@ func TestCopyPageUseCase_WithAssets(t *testing.T) {
 	}
 	defer test_utils.WrapCloseWithErrorCheck(file.Close, t)
 
-	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, "image.png", 1024); err != nil {
+	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.NewAssetNameUnchecked("image.png"), 1024); err != nil {
 		t.Fatalf("Failed to save asset for original page: %v", err)
 	}
 
 	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: original.Page.ID, Title: "Copy of Original", Slug: "copy-of-original",
+		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error copying page: %v", err)
@@ -1126,13 +1250,13 @@ func TestCopyPageUseCase_IndexesOutgoingLinksOnCreate(t *testing.T) {
 
 	content := "Links: [Target](/target.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: original.Page.ID, Version: original.Page.Version(), Title: original.Page.Title, Slug: original.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "user1", ID: pageID(original.Page.ID), Version: pageVersion(original.Page.Version()), Title: original.Page.Title, Slug: slug(original.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("unexpected error updating source page: %v", err)
 	}
 
 	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: original.Page.ID, Title: "Copy", Slug: "copy",
+		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy", Slug: "copy",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error copying page: %v", err)
@@ -1166,7 +1290,7 @@ func TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 
 	content := "updated"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: created.Page.ID, Version: created.Page.Version(), Title: "New", Slug: "new", Content: &content, Kind: pageKind(),
+		UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "New", Slug: "new", Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("unexpected error updating page: %v", err)
 	}
@@ -1206,14 +1330,14 @@ func TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 		t.Fatalf("unexpected error creating parent B: %v", err)
 	}
 	child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: &parentA.Page.ID, Title: "Child", Slug: "child", Kind: pageKind(),
+		UserID: "user1", ParentID: pageIDPtr(parentA.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error creating child: %v", err)
 	}
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "user1", ID: child.Page.ID, Version: child.Page.Version(), ParentID: parentB.Page.ID,
+		UserID: "user1", ID: pageID(child.Page.ID), Version: pageVersion(child.Page.Version()), ParentID: pageID(parentB.Page.ID),
 	}); err != nil {
 		t.Fatalf("unexpected error moving page: %v", err)
 	}
@@ -1247,13 +1371,13 @@ func TestPreviewPageRefactorUseCase_RenameListsAffectedPages(t *testing.T) {
 	})
 	content := "[Target](/target.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
 
 	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: target.Page.ID,
+		PageID: pageID(target.Page.ID),
 		Kind:   pages.RefactorKindRename,
 		Title:  target.Page.Title,
 		Slug:   "target-renamed",
@@ -1292,7 +1416,7 @@ func TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPa
 	}
 	content := "[Target](/target)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
@@ -1305,7 +1429,7 @@ func TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPa
 	}
 
 	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: target.Page.ID,
+		PageID: pageID(target.Page.ID),
 		Kind:   pages.RefactorKindRename,
 		Title:  target.Page.Title,
 		Slug:   "target-renamed",
@@ -1332,7 +1456,7 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 	}
 	content := "[Target](/target)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
@@ -1346,9 +1470,9 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 
 	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: target.Page.Version(),
+		Version: pageVersion(target.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  target.Page.ID,
+			PageID:  pageID(target.Page.ID),
 			Kind:    pages.RefactorKindRename,
 			Title:   "Target Renamed",
 			Slug:    "target-renamed",
@@ -1359,7 +1483,7 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 		t.Fatalf("ApplyPageRefactor failed: %v", err)
 	}
 
-	refPage, err := deps.tree.GetPage(ref.Page.ID)
+	refPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1381,19 +1505,19 @@ func TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants(t *t
 		t.Fatalf("create docs failed: %v", err)
 	}
 	syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Sync Page", Slug: "sync", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
 	})
 	if err != nil {
 		t.Fatalf("create sync page failed: %v", err)
 	}
 	syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
 	})
 	if err != nil {
 		t.Fatalf("create sync section failed: %v", err)
 	}
 	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &syncSection.Page.ID, Title: "Child", Slug: "child", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("create sync section child failed: %v", err)
 	}
@@ -1411,19 +1535,19 @@ func TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants(t *t
 	}
 	pageRefContent := "[Sync page](/docs/sync.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageRef.Page.ID, Version: pageRef.Page.Version(), Title: pageRef.Page.Title, Slug: pageRef.Page.Slug, Content: &pageRefContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("update page ref failed: %v", err)
 	}
 	sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: sectionDescendantRef.Page.ID, Version: sectionDescendantRef.Page.Version(), Title: sectionDescendantRef.Page.Title, Slug: sectionDescendantRef.Page.Slug, Content: &sectionDescendantRefContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("update section descendant ref failed: %v", err)
 	}
 
 	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: syncPage.Page.ID,
+		PageID: pageID(syncPage.Page.ID),
 		Kind:   pages.RefactorKindRename,
 		Title:  syncPage.Page.Title,
 		Slug:   "sync-page",
@@ -1452,19 +1576,19 @@ func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealt
 		t.Fatalf("create docs failed: %v", err)
 	}
 	syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Sync Page", Slug: "sync", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
 	})
 	if err != nil {
 		t.Fatalf("create sync page failed: %v", err)
 	}
 	syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
 	})
 	if err != nil {
 		t.Fatalf("create sync section failed: %v", err)
 	}
 	syncChild, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &syncSection.Page.ID, Title: "Child", Slug: "child", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
 	})
 	if err != nil {
 		t.Fatalf("create sync section child failed: %v", err)
@@ -1483,22 +1607,22 @@ func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealt
 	}
 	pageRefContent := "[Sync page](/docs/sync.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageRef.Page.ID, Version: pageRef.Page.Version(), Title: pageRef.Page.Title, Slug: pageRef.Page.Slug, Content: &pageRefContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("update page ref failed: %v", err)
 	}
 	sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: sectionDescendantRef.Page.ID, Version: sectionDescendantRef.Page.Version(), Title: sectionDescendantRef.Page.Title, Slug: sectionDescendantRef.Page.Slug, Content: &sectionDescendantRefContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("update section descendant ref failed: %v", err)
 	}
 
 	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: syncPage.Page.Version(),
+		Version: pageVersion(syncPage.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID: syncPage.Page.ID,
+			PageID: pageID(syncPage.Page.ID),
 			Kind:   pages.RefactorKindRename,
 			Title:  syncPage.Page.Title,
 			Slug:   "sync-page",
@@ -1534,16 +1658,16 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 	})
 	content := "[Target](/target.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
 
 	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: target.Page.Version(),
+		Version: pageVersion(target.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  target.Page.ID,
+			PageID:  pageID(target.Page.ID),
 			Kind:    pages.RefactorKindRename,
 			Title:   "Target Renamed",
 			Slug:    "target-renamed",
@@ -1558,7 +1682,7 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 		t.Fatalf("updated path mismatch: %q", updated.CalculatePath())
 	}
 
-	refPage, err := deps.tree.GetPage(ref.Page.ID)
+	refPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1601,7 +1725,7 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	})
 	content := "[Target](/target.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
@@ -1609,9 +1733,9 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "mcp-user",
 		Source:  pagesave.PageMutationSourceMCP,
-		Version: target.Page.Version(),
+		Version: pageVersion(target.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  target.Page.ID,
+			PageID:  pageID(target.Page.ID),
 			Kind:    pages.RefactorKindRename,
 			Title:   "Target Renamed",
 			Slug:    "target-renamed",
@@ -1667,16 +1791,16 @@ func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *tes
 	})
 	content := "refactorsearchtoken [Target](/target.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &content, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
 	}
 
 	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: target.Page.Version(),
+		Version: pageVersion(target.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  target.Page.ID,
+			PageID:  pageID(target.Page.ID),
 			Kind:    pages.RefactorKindRename,
 			Title:   "Target Renamed",
 			Slug:    "target-renamed",
@@ -1710,7 +1834,7 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 	})
 	refContent := "[Target](/target)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &refContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(ref) failed: %v", err)
 	}
@@ -1718,16 +1842,16 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 	staleVersion := target.Page.Version()
 	newerTargetContent := "newer target content"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: target.Page.ID, Version: staleVersion, Title: target.Page.Title, Slug: target.Page.Slug, Content: &newerTargetContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(target.Page.ID), Version: pageVersion(staleVersion), Title: target.Page.Title, Slug: slug(target.Page.Slug), Content: &newerTargetContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(target) failed: %v", err)
 	}
 
 	_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: staleVersion,
+		Version: pageVersion(staleVersion),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID: target.Page.ID,
+			PageID: pageID(target.Page.ID),
 			Kind:   pages.RefactorKindRename,
 			Title:  "Target Renamed",
 			Slug:   "target-renamed",
@@ -1738,7 +1862,7 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 		t.Fatalf("ApplyPageRefactor stale version error = %v, want ErrVersionConflict", err)
 	}
 
-	refAfter, err := deps.tree.GetPage(ref.Page.ID)
+	refAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1767,16 +1891,16 @@ func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *t
 	})
 	refContent := "[Target](/target)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: ref.Page.ID, Version: ref.Page.Version(), Title: ref.Page.Title, Slug: ref.Page.Slug, Content: &refContent, Kind: pageKind(),
+		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(ref) failed: %v", err)
 	}
 
 	_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: target.Page.Version(),
+		Version: pageVersion(target.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID: target.Page.ID,
+			PageID: pageID(target.Page.ID),
 			Kind:   pages.RefactorKindRename,
 			Title:  "Target",
 			Slug:   "existing",
@@ -1787,14 +1911,14 @@ func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *t
 		t.Fatalf("ApplyPageRefactor conflict error = %v, want ErrPageAlreadyExists", err)
 	}
 
-	refAfter, err := deps.tree.GetPage(ref.Page.ID)
+	refAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
 	if refAfter.Content != refContent {
 		t.Fatalf("conflicting refactor rewrote incoming link content = %q, want %q", refAfter.Content, refContent)
 	}
-	targetAfter, err := deps.tree.GetPage(target.Page.ID)
+	targetAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(target.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(target) failed: %v", err)
 	}
@@ -1813,7 +1937,7 @@ func TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays(t *testing.T) {
 	})
 
 	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: page.Page.ID,
+		PageID: pageID(page.Page.ID),
 		Kind:   pages.RefactorKindRename,
 		Title:  page.Page.Title,
 		Slug:   "target-renamed",
@@ -1847,10 +1971,10 @@ func TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffecte
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Page A", Slug: "page-a", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
 	})
 	pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Page B", Slug: "page-b", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
 	})
 	archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
@@ -1858,15 +1982,15 @@ func TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffecte
 
 	contentA := "[To B](./page-b.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageA.Page.ID, Version: pageA.Page.Version(), Title: pageA.Page.Title, Slug: pageA.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(pageA) failed: %v", err)
 	}
 
 	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID:      pageA.Page.ID,
+		PageID:      pageID(pageA.Page.ID),
 		Kind:        pages.RefactorKindMove,
-		NewParentID: &archive.Page.ID,
+		NewParentID: pageIDPtr(archive.Page.ID),
 	})
 	if err != nil {
 		t.Fatalf("PreviewPageRefactor failed: %v", err)
@@ -1891,10 +2015,10 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Page A", Slug: "page-a", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
 	})
 	pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Page B", Slug: "page-b", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
 	})
 	archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
@@ -1902,18 +2026,18 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 
 	contentA := "[To B](./page-b.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageA.Page.ID, Version: pageA.Page.Version(), Title: pageA.Page.Title, Slug: pageA.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage(pageA) failed: %v", err)
 	}
 
 	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
 		UserID:  "system",
-		Version: pageA.Page.Version(),
+		Version: pageVersion(pageA.Page.Version()),
 		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:      pageA.Page.ID,
+			PageID:      pageID(pageA.Page.ID),
 			Kind:        pages.RefactorKindMove,
-			NewParentID: &archive.Page.ID,
+			NewParentID: pageIDPtr(archive.Page.ID),
 		},
 		RewriteLinks: false,
 	})
@@ -1924,7 +2048,7 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		t.Fatalf("updated path = %q, want %q", updated.CalculatePath(), "/archive/page-a")
 	}
 
-	movedPage, err := deps.tree.GetPage(pageA.Page.ID)
+	movedPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(pageA.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(pageA) failed: %v", err)
 	}
@@ -1966,7 +2090,7 @@ func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
 
 	contentA := "Links: [X](/x) and [XY](/x/y.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageA.Page.ID, Version: pageA.Page.Version(), Title: pageA.Page.Title, Slug: pageA.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2010,19 +2134,19 @@ func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
 
 	var gotX, gotXY *struct {
 		broken bool
-		toPage string
+		toPage tree.PageID
 	}
 	for _, it := range out2.Outgoings {
 		if it.ToPath == "/x" {
 			gotX = &struct {
 				broken bool
-				toPage string
+				toPage tree.PageID
 			}{it.Broken, it.ToPageID}
 		}
 		if it.ToPath == "/x/y" {
 			gotXY = &struct {
 				broken bool
-				toPage string
+				toPage tree.PageID
 			}{it.Broken, it.ToPageID}
 		}
 	}
@@ -2049,7 +2173,7 @@ func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
 	}
 	contentA := "Link to B: [Go](/b)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2062,7 +2186,7 @@ func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
 	}
 	contentB := "# Page B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage B failed: %v", err)
 	}
@@ -2071,7 +2195,7 @@ func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Recursive: false,
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Recursive: false,
 	}); err != nil {
 		t.Fatalf("DeletePage failed: %v", err)
 	}
@@ -2107,21 +2231,21 @@ func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncoming
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "A", Slug: "a", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
 	})
 	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "B", Slug: "b", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
 	})
 
 	contentA := "Link to B: [B](/docs/b)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage a failed: %v", err)
 	}
 	contentB := "# B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage b failed: %v", err)
 	}
@@ -2131,7 +2255,7 @@ func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncoming
 	})
 	contentC := "Incoming link: [B](/docs/b)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: c.Page.ID, Version: c.Page.Version(), Title: c.Page.Title, Slug: c.Page.Slug, Content: &contentC, Kind: pageKind(),
+		UserID: "system", ID: pageID(c.Page.ID), Version: pageVersion(c.Page.Version()), Title: c.Page.Title, Slug: slug(c.Page.Slug), Content: &contentC, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage c failed: %v", err)
 	}
@@ -2145,7 +2269,7 @@ func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncoming
 	}
 
 	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "system", ID: docs.Page.ID, Version: docs.Page.Version(), Recursive: true,
+		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Recursive: true,
 	}); err != nil {
 		t.Fatalf("DeletePage(docs, recursive) failed: %v", err)
 	}
@@ -2181,7 +2305,7 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 	})
 	contentA := "Links: [B](/b) and [B2](/b2.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2191,7 +2315,7 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 	})
 	contentB := "# B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage B failed: %v", err)
 	}
@@ -2206,7 +2330,7 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 
 	contentB2 := "# B (renamed)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: "b2", Content: &contentB2, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: "b2", Content: &contentB2, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("Rename B failed: %v", err)
 	}
@@ -2217,12 +2341,12 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 	}
 	byPath := map[string]struct {
 		broken bool
-		toID   string
+		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
 		byPath[it.ToPath] = struct {
 			broken bool
-			toID   string
+			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
 	}
 	if got, ok := byPath["/b"]; !ok || !got.broken || got.toID != "" {
@@ -2242,11 +2366,11 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "B", Slug: "b", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
 	})
 	contentB := "# B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage B failed: %v", err)
 	}
@@ -2256,7 +2380,7 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 	})
 	contentA := "Links: [Old](/docs/b) and [New](/docs2/b.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2268,7 +2392,7 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 	contentDocs2 := "# Docs"
 	nodeSection := tree.NodeKindSection
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: docs.Page.ID, Version: docs.Page.Version(), Title: docs.Page.Title, Slug: "docs2", Content: &contentDocs2, Kind: &nodeSection,
+		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Title: docs.Page.Title, Slug: "docs2", Content: &contentDocs2, Kind: &nodeSection,
 	}); err != nil {
 		t.Fatalf("Rename docs failed: %v", err)
 	}
@@ -2279,12 +2403,12 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 	}
 	byPath := map[string]struct {
 		broken bool
-		toID   string
+		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
 		byPath[it.ToPath] = struct {
 			broken bool
-			toID   string
+			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
 	}
 	if got, ok := byPath["/docs/b"]; !ok || !got.broken || got.toID != "" {
@@ -2306,7 +2430,7 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 	})
 	contentA := "Links: [B](/b) and [B2](/projects/b.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2316,7 +2440,7 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 	})
 	contentB := "# B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage B failed: %v", err)
 	}
@@ -2329,7 +2453,7 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 	}
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), ParentID: projects.Page.ID,
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), ParentID: pageID(projects.Page.ID),
 	}); err != nil {
 		t.Fatalf("MovePage failed: %v", err)
 	}
@@ -2340,12 +2464,12 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 	}
 	state := map[string]struct {
 		broken bool
-		toID   string
+		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
 		state[it.ToPath] = struct {
 			broken bool
-			toID   string
+			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
 	}
 	if got := state["/b"]; !got.broken || got.toID != "" {
@@ -2366,11 +2490,11 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "B", Slug: "b", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
 	})
 	contentB := "# B"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: b.Page.ID, Version: b.Page.Version(), Title: b.Page.Title, Slug: b.Page.Slug, Content: &contentB, Kind: pageKind(),
+		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage B failed: %v", err)
 	}
@@ -2383,7 +2507,7 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 	})
 	contentA := "Links: [Old](/docs/b) and [New](/archive/docs/b.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage A failed: %v", err)
 	}
@@ -2392,7 +2516,7 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 	}
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: docs.Page.ID, Version: docs.Page.Version(), ParentID: archive.Page.ID,
+		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), ParentID: pageID(archive.Page.ID),
 	}); err != nil {
 		t.Fatalf("MovePage(docs -> archive) failed: %v", err)
 	}
@@ -2403,12 +2527,12 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 	}
 	state := map[string]struct {
 		broken bool
-		toID   string
+		toID   tree.PageID
 	}{}
 	for _, it := range out.Outgoings {
 		state[it.ToPath] = struct {
 			broken bool
-			toID   string
+			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
 	}
 	if got := state["/docs/b"]; !got.broken || got.toID != "" {
@@ -2429,21 +2553,21 @@ func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
 		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
 	})
 	docsShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "Shared", Slug: "shared", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
 	})
 	contentDocsShared := "# Docs Shared"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: docsShared.Page.ID, Version: docsShared.Page.Version(), Title: docsShared.Page.Title, Slug: docsShared.Page.Slug, Content: &contentDocsShared, Kind: pageKind(),
+		UserID: "system", ID: pageID(docsShared.Page.ID), Version: pageVersion(docsShared.Page.Version()), Title: docsShared.Page.Title, Slug: slug(docsShared.Page.Slug), Content: &contentDocsShared, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage /docs/shared failed: %v", err)
 	}
 
 	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &docs.Page.ID, Title: "A", Slug: "a", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
 	})
 	contentA := "Relative: [S](./shared.md)"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), Title: a.Page.Title, Slug: a.Page.Slug, Content: &contentA, Kind: pageKind(),
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage /docs/a failed: %v", err)
 	}
@@ -2452,11 +2576,11 @@ func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
 		UserID: "system", Title: "Guide", Slug: "guide", Kind: pageKind(),
 	})
 	guideShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: &guide.Page.ID, Title: "Shared", Slug: "shared", Kind: pageKind(),
+		UserID: "system", ParentID: pageIDPtr(guide.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
 	})
 	contentGuideShared := "# Guide Shared"
 	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: guideShared.Page.ID, Version: guideShared.Page.Version(), Title: guideShared.Page.Title, Slug: guideShared.Page.Slug, Content: &contentGuideShared, Kind: pageKind(),
+		UserID: "system", ID: pageID(guideShared.Page.ID), Version: pageVersion(guideShared.Page.Version()), Title: guideShared.Page.Title, Slug: slug(guideShared.Page.Slug), Content: &contentGuideShared, Kind: pageKind(),
 	}); err != nil {
 		t.Fatalf("UpdatePage /guide/shared failed: %v", err)
 	}
@@ -2474,7 +2598,7 @@ func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
 	}
 
 	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: a.Page.ID, Version: a.Page.Version(), ParentID: guide.Page.ID,
+		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), ParentID: pageID(guide.Page.ID),
 	}); err != nil {
 		t.Fatalf("MovePage(a -> guide) failed: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -59,6 +60,10 @@ func (r *Routes) handleHeartbeat(c *gin.Context) {
 	}
 	page := r.resolvePage(heartbeat.PageID, heartbeat.Path)
 	if err := r.registry.Record(heartbeat, user, page); err != nil {
+		if loc, ok := sharederrors.AsLocalizedError(err); ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": sharederrors.LocalizedErrorDetailFromError(loc)})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -75,17 +80,21 @@ func (r *Routes) handleDeleteSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (r *Routes) resolvePage(pageID string, path string) *PageRef {
+func (r *Routes) resolvePage(pageID tree.PageID, path string) *PageRef {
 	if r == nil || r.treeService == nil {
 		return nil
 	}
-	if trimmed := strings.TrimSpace(pageID); trimmed != "" {
-		if page, err := r.treeService.GetPage(trimmed); err == nil {
+	if pageID != "" {
+		if page, err := r.treeService.GetPage(pageID); err == nil {
 			return pageRefForPage(page)
 		}
 	}
-	routePath := strings.Trim(strings.TrimSpace(path), "/")
-	if routePath == "" {
+	routePathValue := strings.Trim(strings.TrimSpace(path), "/")
+	if routePathValue == "" {
+		return nil
+	}
+	routePath, err := tree.ParseRoutePath(routePathValue)
+	if err != nil {
 		return nil
 	}
 	page, err := r.treeService.FindPageByRoutePath(routePath)

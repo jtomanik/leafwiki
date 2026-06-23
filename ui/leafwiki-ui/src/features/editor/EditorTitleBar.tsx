@@ -1,5 +1,6 @@
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
 import { lookupPath } from '@/lib/api/pages'
+import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import { getParentWikiRoutePath, toWikiLookupPath } from '@/lib/wikiPath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsMobile } from '@/lib/useIsMobile'
@@ -31,7 +32,11 @@ export function EditorTitleBar() {
       if (!parentPath) return ''
       const p = getPageByPath(parentPath, 'section', workspaceId)
       if (p) return p.id
-      const lookup = await lookupPath(parentPath, workspaceId, 'section')
+      const lookup = await lookupPath(
+        asRoutePath(parentPath),
+        asWorkspaceID(workspaceId),
+        'section',
+      )
       if (!lookup.exists) return ''
       const lastSegment = lookup.segments[lookup.segments.length - 1]
       return lastSegment?.id || ''

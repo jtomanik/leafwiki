@@ -40,6 +40,12 @@ Run validation before final response:
 - `wiki_validate_content` for proposed Markdown before writing; include `existingPageId` when validating an edit to an existing page
 - `wiki_validate_wiki` after direct filesystem work or broad changes
 
+When checking tool outcomes, prefer stable contract fields over English text:
+assert `messageId`, `_meta.error.code`, `_meta.error.messageId`, and semantic
+DOM attributes such as `data-page-id`, `data-page-kind`, `data-error-code`, and
+`data-l10n-id` where available. Use visible `message` text only for user-copy or
+backward-compatibility checks.
+
 Partial-edit rules:
 
 - Use `wiki_update_page_metadata` for tags and properties without changing body content.

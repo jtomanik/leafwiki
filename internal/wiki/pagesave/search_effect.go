@@ -61,8 +61,8 @@ func (e *SearchIndexSideEffect) IndexAllPages() error {
 		return err
 	}
 
-	var ids []string
-	if err := e.tree.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := e.tree.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -72,7 +72,7 @@ func (e *SearchIndexSideEffect) IndexAllPages() error {
 	pages, errs := e.tree.GetPages(ids)
 	for i, page := range pages {
 		if errs[i] != nil {
-			e.log.Warn("skipping page during search bootstrap", "pageID", ids[i], "error", errs[i])
+			e.log.Warn("skipping page during search bootstrap", "pageID", ids[i].String(), "error", errs[i])
 			continue
 		}
 		e.writeToIndex(page, page.RawContent)

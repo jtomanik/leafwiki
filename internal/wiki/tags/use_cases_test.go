@@ -31,11 +31,11 @@ func setupUseCases(t *testing.T) (*GetPagesByTagsUseCase, *coretags.TagsService,
 	return uc, svc, ts
 }
 
-func createAndIndexPage(t *testing.T, ts *tree.TreeService, svc *coretags.TagsService, title, slug string, tags []string, body string) string {
+func createAndIndexPage(t *testing.T, ts *tree.TreeService, svc *coretags.TagsService, title, slug string, tags []string, body string) tree.PageID {
 	t.Helper()
 
 	kind := tree.NodeKindPage
-	idPtr, err := ts.CreateNode("system", nil, title, slug, &kind)
+	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), &kind)
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
@@ -46,16 +46,16 @@ func createAndIndexPage(t *testing.T, ts *tree.TreeService, svc *coretags.TagsSe
 	}
 	fm += "---\n\n" + body
 
-	if err := ts.UpdateNode("system", *idPtr, title, slug, &fm, tree.VersionUnchecked, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &fm, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 
 	raw, err := ts.ReadPageRaw(*idPtr)
 	if err != nil {
-		t.Fatalf("ReadPageRaw %q: %v", *idPtr, err)
+		t.Fatalf("ReadPageRaw %q: %v", idPtr.String(), err)
 	}
 	if err := svc.IndexPageContent(*idPtr, raw); err != nil {
-		t.Fatalf("IndexPageContent %q: %v", *idPtr, err)
+		t.Fatalf("IndexPageContent %q: %v", idPtr.String(), err)
 	}
 
 	return *idPtr
@@ -76,7 +76,7 @@ func TestGetPagesByTagsUseCase_ReturnsMatchingPages(t *testing.T) {
 	if len(out.Pages) != 1 {
 		t.Fatalf("expected 1 page, got %d", len(out.Pages))
 	}
-	if out.Pages[0].ID != id1 {
+	if tree.NewPageIDUnchecked(out.Pages[0].ID) != id1 {
 		t.Errorf("page ID = %q, want %q", out.Pages[0].ID, id1)
 	}
 }
@@ -111,7 +111,7 @@ func TestGetPagesByTagsUseCase_ANDLogic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(out.Pages) != 1 || out.Pages[0].ID != id1 {
+	if len(out.Pages) != 1 || tree.NewPageIDUnchecked(out.Pages[0].ID) != id1 {
 		t.Errorf("expected only %q, got %v", id1, out.Pages)
 	}
 }

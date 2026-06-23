@@ -1,29 +1,36 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type {
+  PageID,
+  RevisionID,
+  Slug,
+  UserID,
+  WorkspaceID,
+} from '../semanticTypes'
 
 export type RevisionUserLabel = {
-  id: string
+  id: UserID
   username: string
 }
 
 export type Revision = {
-  id: string
-  pageId: string
-  parentId?: string
+  id: RevisionID
+  pageId: PageID
+  parentId?: PageID
   type: string
-  authorId: string
+  authorId: UserID
   author?: RevisionUserLabel
   createdAt: string
   title: string
-  slug: string
+  slug: Slug
   kind: string
   path: string
   contentHash: string
   assetManifestHash: string
   pageCreatedAt?: string
   pageUpdatedAt?: string
-  creatorId?: string
-  lastAuthorId?: string
+  creatorId?: UserID
+  lastAuthorId?: UserID
   summary?: string
 }
 
@@ -58,8 +65,8 @@ export type RevisionListResponse = {
 }
 
 export async function listRevisions(
-  pageId: string,
-  workspaceId: string,
+  pageId: PageID,
+  workspaceId: WorkspaceID,
   cursor = '',
   limit = 50,
 ): Promise<RevisionListResponse> {
@@ -76,8 +83,8 @@ export async function listRevisions(
 }
 
 export async function getLatestRevision(
-  pageId: string,
-  workspaceId: string,
+  pageId: PageID,
+  workspaceId: WorkspaceID,
 ): Promise<Revision> {
   return (await fetchWithAuth(
     workspaceApiPath(`/api/pages/${pageId}/revisions/latest`, workspaceId),
@@ -85,9 +92,9 @@ export async function getLatestRevision(
 }
 
 export async function getRevisionSnapshot(
-  pageId: string,
-  revisionId: string,
-  workspaceId: string,
+  pageId: PageID,
+  revisionId: RevisionID,
+  workspaceId: WorkspaceID,
 ): Promise<RevisionSnapshot> {
   return (await fetchWithAuth(
     workspaceApiPath(
@@ -98,10 +105,10 @@ export async function getRevisionSnapshot(
 }
 
 export async function compareRevisions(
-  pageId: string,
-  baseRevisionId: string,
-  targetRevisionId: string,
-  workspaceId: string,
+  pageId: PageID,
+  baseRevisionId: RevisionID,
+  targetRevisionId: RevisionID,
+  workspaceId: WorkspaceID,
 ): Promise<RevisionComparison> {
   const params = new URLSearchParams({
     base: baseRevisionId,
@@ -116,9 +123,9 @@ export async function compareRevisions(
 }
 
 export async function restoreRevision(
-  pageId: string,
-  revisionId: string,
-  workspaceId: string,
+  pageId: PageID,
+  revisionId: RevisionID,
+  workspaceId: WorkspaceID,
 ) {
   return await fetchWithAuth(
     workspaceApiPath(
@@ -140,10 +147,10 @@ function encodeAssetName(name: string): string {
 }
 
 export function buildRevisionAssetUrl(
-  pageId: string,
-  revisionId: string,
+  pageId: PageID,
+  revisionId: RevisionID,
   assetName: string,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): string {
   const normalizedAssetName = assetName.replace(/^\/+/, '')
   return workspaceApiPath(

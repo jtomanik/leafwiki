@@ -44,7 +44,7 @@ func TestPageIDsForMarkdownPathsResolvesRootIndex(t *testing.T) {
 
 	got := routes.pageIDsForMarkdownPaths([]string{"index.md"})
 
-	if len(got) != 1 || got[0] != "root" {
+	if len(got) != 1 || got[0] != tree.RootPageID {
 		t.Fatalf("pageIDsForMarkdownPaths(index.md) = %v, want [root]", got)
 	}
 }
@@ -63,12 +63,12 @@ func TestPageIDsForMarkdownPathsUsesMarkdownFileKindForSameBasenameTwins(t *test
 
 	pageIDs := routes.pageIDsForMarkdownPaths([]string{"sync.md"})
 	if len(pageIDs) != 1 || pageIDs[0] != *pageID {
-		t.Fatalf("pageIDsForMarkdownPaths(sync.md) = %v, want [%s]", pageIDs, *pageID)
+		t.Fatalf("pageIDsForMarkdownPaths(sync.md) = %v, want [%s]", pageIDs, pageID.String())
 	}
 
 	sectionIDs := routes.pageIDsForMarkdownPaths([]string{"sync/index.md"})
 	if len(sectionIDs) != 1 || sectionIDs[0] != *sectionID {
-		t.Fatalf("pageIDsForMarkdownPaths(sync/index.md) = %v, want [%s]", sectionIDs, *sectionID)
+		t.Fatalf("pageIDsForMarkdownPaths(sync/index.md) = %v, want [%s]", sectionIDs, sectionID.String())
 	}
 }
 
@@ -82,7 +82,7 @@ func TestPageIDsForMarkdownPathsResolvesReadmeFallbackSection(t *testing.T) {
 
 	pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/README.md"})
 	if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
-		t.Fatalf("pageIDsForMarkdownPaths(guide/README.md) = %v, want [%s]", pageIDs, *sectionID)
+		t.Fatalf("pageIDsForMarkdownPaths(guide/README.md) = %v, want [%s]", pageIDs, sectionID.String())
 	}
 }
 
@@ -103,7 +103,7 @@ func TestPageIDsForMarkdownPathsUsesWorkspaceRouteNormalizationForReadmeSection(
 
 	pageIDs := routes.pageIDsForMarkdownPaths([]string{"User Guides/README.md"})
 	if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
-		t.Fatalf("pageIDsForMarkdownPaths(User Guides/README.md) = %v, want [%s]", pageIDs, *sectionID)
+		t.Fatalf("pageIDsForMarkdownPaths(User Guides/README.md) = %v, want [%s]", pageIDs, sectionID.String())
 	}
 }
 
@@ -133,7 +133,7 @@ func TestPageIDsForMarkdownPathsUsesWorkspaceRouteNormalization(t *testing.T) {
 
 	pageIDs := routes.pageIDsForMarkdownPaths([]string{"plans/agent_hooks.PLAN.md"})
 	if len(pageIDs) != 1 || pageIDs[0] != *pageID {
-		t.Fatalf("pageIDsForMarkdownPaths(plans/agent_hooks.PLAN.md) = %v, want [%s]", pageIDs, *pageID)
+		t.Fatalf("pageIDsForMarkdownPaths(plans/agent_hooks.PLAN.md) = %v, want [%s]", pageIDs, pageID.String())
 	}
 }
 
@@ -141,7 +141,7 @@ func TestRecentChangesResolveRootIndexPageID(t *testing.T) {
 	routes := newContextToolTestRoutes(t)
 	ctx := context.Background()
 	createdAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
-	routes.listWorkspaceSnapshots = func(context.Context, string, int) (workspacesync.SnapshotList, error) {
+	routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error) {
 		return workspacesync.SnapshotList{
 			Snapshots: []workspacesync.Snapshot{{
 				ID:                   "root-index-commit",
@@ -157,7 +157,7 @@ func TestRecentChangesResolveRootIndexPageID(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("recentChanges length = %d, want 1", len(changes))
 	}
-	if len(changes[0].PageIDs) != 1 || changes[0].PageIDs[0] != "root" {
+	if len(changes[0].PageIDs) != 1 || changes[0].PageIDs[0] != tree.RootPageID {
 		t.Fatalf("recentChanges[0].PageIDs = %v, want [root]", changes[0].PageIDs)
 	}
 }

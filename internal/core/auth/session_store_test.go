@@ -18,11 +18,13 @@ func TestSessionStore_CreateAndValidateSession(t *testing.T) {
 	defer test_utils.WrapCloseWithErrorCheck(store.Close, t)
 
 	expiresAt := time.Now().Add(time.Hour)
-	if err := store.CreateSession("s1", "u1", "refresh", expiresAt); err != nil {
+	userID := NewUserIDUnchecked("u1")
+	sessionID := NewSessionIDUnchecked("s1")
+	if err := store.CreateSession(sessionID, userID, "refresh", expiresAt); err != nil {
 		t.Fatalf("CreateSession err: %v", err)
 	}
 
-	active, err := store.IsActive("s1", "u1", "refresh", time.Now())
+	active, err := store.IsActive(sessionID, userID, "refresh", time.Now())
 	if err != nil {
 		t.Fatalf("IsActive err: %v", err)
 	}

@@ -9,6 +9,7 @@ import {
 } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_MOVE_PAGE } from '@/lib/registries'
+import { asPageID, asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import { useMemo, useState } from 'react'
@@ -67,11 +68,13 @@ export function MovePageDialog({
 
     return {
       kind: 'move',
-      pageId,
+      pageId: asPageID(pageId),
       oldPath: page.path,
-      newPath: normalizedParentPath
-        ? `${normalizedParentPath}/${page.slug}`
-        : `/${page.slug}`,
+      newPath: asRoutePath(
+        normalizedParentPath
+          ? `${normalizedParentPath}/${page.slug}`
+          : `/${page.slug}`,
+      ),
       affectedPages: [],
       counts: {
         affectedPages: 0,
@@ -90,12 +93,12 @@ export function MovePageDialog({
 
       if (enableLinkRefactor) {
         preview = await previewPageRefactor(
-          pageId,
+          asPageID(pageId),
           {
             kind: 'move',
-            parentId: newParentId,
+            parentId: asPageID(newParentId),
           },
-          workspaceId,
+          asWorkspaceID(workspaceId),
         )
         const rewriteLinks = await confirmPageRefactor(preview)
         if (rewriteLinks === null) {
@@ -103,17 +106,22 @@ export function MovePageDialog({
         }
 
         await applyPageRefactor(
-          pageId,
+          asPageID(pageId),
           {
             kind: 'move',
             version: page.version,
-            parentId: newParentId,
+            parentId: asPageID(newParentId),
             rewriteLinks,
           },
-          workspaceId,
+          asWorkspaceID(workspaceId),
         )
       } else {
-        await movePage(pageId, page.version, newParentId, workspaceId)
+        await movePage(
+          asPageID(pageId),
+          page.version,
+          asPageID(newParentId),
+          asWorkspaceID(workspaceId),
+        )
         preview = getSyntheticMovePreview()
       }
 

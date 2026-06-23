@@ -10,25 +10,25 @@ import (
 )
 
 const (
-	ErrCodeRevisionNotFound                    = "revision_not_found"
-	ErrCodeRevisionInvalidPageID               = "revision_invalid_page_id"
-	ErrCodeRevisionInvalidRevisionID           = "revision_invalid_revision_id"
-	ErrCodeRevisionInvalidLimit                = "revision_invalid_limit"
-	ErrCodeRevisionCompareInvalidRequest       = "revision_compare_invalid_request"
-	ErrCodeRevisionRestoreInvalidPageID        = "revision_restore_invalid_page_id"
-	ErrCodeRevisionRestoreInvalidRevision      = "revision_restore_invalid_revision"
-	ErrCodeRevisionRestoreRevisionNotFound     = "revision_restore_revision_not_found"
-	ErrCodeRevisionRestorePageNotFound         = "revision_restore_page_not_found"
-	ErrCodeRevisionRestoreFailed               = "revision_restore_failed"
-	ErrCodeRevisionRestoreContentMissing       = "revision_restore_content_missing"
-	ErrCodeRevisionRestoreAssetsMissing        = "revision_restore_assets_missing"
-	ErrCodeRevisionServiceUnavailable          = "revision_service_unavailable"
-	ErrCodeRevisionPreviewContentUnavailable   = "revision_preview_content_unavailable"
-	ErrCodeRevisionPreviewAssetsUnavailable    = "revision_preview_assets_unavailable"
-	ErrCodeRevisionPreviewAssetNotFound        = "revision_preview_asset_not_found"
-	ErrCodeRevisionPreviewAssetInvalidName     = "revision_preview_asset_invalid_name"
-	ErrCodeRevisionPreviewAssetBlobUnavailable = "revision_preview_asset_blob_unavailable"
-	ErrCodeRevisionInternalError               = "revision_internal_error"
+	ErrCodeRevisionNotFound                    sharederrors.ErrorCode = "revision_not_found"
+	ErrCodeRevisionInvalidPageID               sharederrors.ErrorCode = "revision_invalid_page_id"
+	ErrCodeRevisionInvalidRevisionID           sharederrors.ErrorCode = "revision_invalid_revision_id"
+	ErrCodeRevisionInvalidLimit                sharederrors.ErrorCode = "revision_invalid_limit"
+	ErrCodeRevisionCompareInvalidRequest       sharederrors.ErrorCode = "revision_compare_invalid_request"
+	ErrCodeRevisionRestoreInvalidPageID        sharederrors.ErrorCode = "revision_restore_invalid_page_id"
+	ErrCodeRevisionRestoreInvalidRevision      sharederrors.ErrorCode = "revision_restore_invalid_revision"
+	ErrCodeRevisionRestoreRevisionNotFound     sharederrors.ErrorCode = "revision_restore_revision_not_found"
+	ErrCodeRevisionRestorePageNotFound         sharederrors.ErrorCode = "revision_restore_page_not_found"
+	ErrCodeRevisionRestoreFailed               sharederrors.ErrorCode = "revision_restore_failed"
+	ErrCodeRevisionRestoreContentMissing       sharederrors.ErrorCode = "revision_restore_content_missing"
+	ErrCodeRevisionRestoreAssetsMissing        sharederrors.ErrorCode = "revision_restore_assets_missing"
+	ErrCodeRevisionServiceUnavailable          sharederrors.ErrorCode = "revision_service_unavailable"
+	ErrCodeRevisionPreviewContentUnavailable   sharederrors.ErrorCode = "revision_preview_content_unavailable"
+	ErrCodeRevisionPreviewAssetsUnavailable    sharederrors.ErrorCode = "revision_preview_assets_unavailable"
+	ErrCodeRevisionPreviewAssetNotFound        sharederrors.ErrorCode = "revision_preview_asset_not_found"
+	ErrCodeRevisionPreviewAssetInvalidName     sharederrors.ErrorCode = "revision_preview_asset_invalid_name"
+	ErrCodeRevisionPreviewAssetBlobUnavailable sharederrors.ErrorCode = "revision_preview_asset_blob_unavailable"
+	ErrCodeRevisionInternalError               sharederrors.ErrorCode = "revision_internal_error"
 )
 
 // RevisionErrorResponse is the structured JSON error body returned by revision endpoints.
@@ -37,21 +37,11 @@ type RevisionErrorResponse struct {
 }
 
 // RevisionErrorDetail carries the localization-ready error data.
-type RevisionErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type RevisionErrorDetail = sharederrors.LocalizedErrorDetail
 
-func respondWithRevisionStatusError(c *gin.Context, status int, code, message, template string, args ...string) {
+func respondWithRevisionStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, RevisionErrorResponse{
-		Error: RevisionErrorDetail{
-			Code:     code,
-			Message:  message,
-			Template: template,
-			Args:     append([]string(nil), args...),
-		},
+		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
 	})
 }
 
@@ -84,7 +74,7 @@ func mapRevisionNotFoundError(err error, message, template string, args ...strin
 // respondWithRevisionError is the central error handler for revision endpoints.
 func respondWithRevisionError(c *gin.Context, err error) {
 	if localized, ok := sharederrors.AsLocalizedError(err); ok {
-		respondWithRevisionStatusError(c, revisionErrorStatus(localized.Code), localized.Code, localized.Message, localized.Template, localized.Args...)
+		c.JSON(revisionErrorStatus(localized.Code), RevisionErrorResponse{Error: sharederrors.LocalizedErrorDetailFromError(localized)})
 		return
 	}
 
@@ -96,7 +86,7 @@ func respondWithRevisionError(c *gin.Context, err error) {
 	}
 }
 
-func revisionErrorStatus(code string) int {
+func revisionErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodeRevisionNotFound, ErrCodeRevisionRestoreRevisionNotFound, ErrCodeRevisionRestorePageNotFound, ErrCodeRevisionPreviewAssetNotFound:
 		return http.StatusNotFound

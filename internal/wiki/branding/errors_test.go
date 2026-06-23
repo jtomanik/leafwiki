@@ -26,7 +26,7 @@ func TestRespondWithBrandingError_ValidationErrors(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 
-	if got, want := rec.Body.String(), `{"error":"validation_error","fields":[{"field":"siteName","message":"site name is required"}]}`; got != want {
+	if got, want := rec.Body.String(), `{"error":"validation_error","fields":[{"field":"siteName","code":"field_validation_error","messageId":"validation.field.validation_error","message":"site name is required"}]}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }
@@ -53,7 +53,7 @@ func TestRespondWithBrandingError_LocalizedError(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"branding_logo_invalid_type","message":"Invalid logo file type","template":"invalid logo file type %s (allowed: %s)","args":[".exe",".png, .svg"]}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"branding_logo_invalid_type","messageId":"errors.branding.logo_invalid_type","message":"Invalid logo file type","template":"invalid logo file type %s (allowed: %s)","args":[".exe",".png, .svg"]}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }
@@ -71,7 +71,7 @@ func TestRespondWithBrandingError_InternalErrorIsSanitized(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"branding_internal_error","message":"Branding request failed","template":"branding request failed"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"branding_internal_error","messageId":"errors.branding.internal_error","message":"Branding request failed","template":"branding request failed"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }

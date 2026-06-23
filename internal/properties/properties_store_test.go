@@ -6,6 +6,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
 )
 
@@ -17,6 +18,20 @@ func newTestStore(t *testing.T) *PropertiesStore {
 	}
 	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
 	return store
+}
+
+func testPageIDs(ids ...string) []tree.PageID {
+	pageIDs := make([]tree.PageID, 0, len(ids))
+	for _, id := range ids {
+		pageIDs = append(pageIDs, tree.NewPageIDUnchecked(id))
+	}
+	return pageIDs
+}
+
+func sortTestPageIDs(ids []tree.PageID) {
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
 }
 
 func props(kv ...string) map[string]PropertyEntry {
@@ -65,7 +80,7 @@ func TestPropertiesStore_SetPropertiesForPage_StoresEntries(t *testing.T) {
 		t.Fatalf("SetPropertiesForPage: %v", err)
 	}
 
-	got, err := store.GetPropertiesForPages([]string{"page-1"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -88,7 +103,7 @@ func TestPropertiesStore_SetPropertiesForPage_ReplacesOnSecondCall(t *testing.T)
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "author", "alice"))
 	_ = store.SetPropertiesForPage("page-1", props("status", "published"))
 
-	got, err := store.GetPropertiesForPages([]string{"page-1"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -109,7 +124,7 @@ func TestPropertiesStore_SetPropertiesForPage_EmptyMapClearsExisting(t *testing.
 		t.Fatalf("SetPropertiesForPage (clear): %v", err)
 	}
 
-	got, err := store.GetPropertiesForPages([]string{"page-1"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -126,7 +141,7 @@ func TestPropertiesStore_SetPropertiesForPage_NilMapClearsExisting(t *testing.T)
 		t.Fatalf("SetPropertiesForPage (nil): %v", err)
 	}
 
-	got, err := store.GetPropertiesForPages([]string{"page-1"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -145,7 +160,7 @@ func TestPropertiesStore_DeletePropertiesForPage_RemovesEntries(t *testing.T) {
 		t.Fatalf("DeletePropertiesForPage: %v", err)
 	}
 
-	got, err := store.GetPropertiesForPages([]string{"page-1"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -169,7 +184,7 @@ func TestPropertiesStore_DeletePropertiesForPage_DoesNotAffectOtherPages(t *test
 
 	_ = store.DeletePropertiesForPage("page-1")
 
-	got, err := store.GetPropertiesForPages([]string{"page-2"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-2"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -331,13 +346,13 @@ func TestPropertiesStore_GetPageIDsByProperty_ExactMatch(t *testing.T) {
 		t.Fatalf("GetPageIDsByProperty: %v", err)
 	}
 
-	sort.Strings(ids)
+	sortTestPageIDs(ids)
 	want := []string{"page-1", "page-3"}
 	if len(ids) != len(want) {
 		t.Fatalf("expected %v, got %v", want, ids)
 	}
 	for i, w := range want {
-		if ids[i] != w {
+		if ids[i] != tree.NewPageIDUnchecked(w) {
 			t.Errorf("[%d] = %q, want %q", i, ids[i], w)
 		}
 	}
@@ -395,7 +410,7 @@ func TestPropertiesStore_GetPropertiesForPages_MultiplePages(t *testing.T) {
 	_ = store.SetPropertiesForPage("page-2", props("author", "alice"))
 	_ = store.SetPropertiesForPage("page-3", props("status", "published"))
 
-	got, err := store.GetPropertiesForPages([]string{"page-1", "page-3"})
+	got, err := store.GetPropertiesForPages(testPageIDs("page-1", "page-3"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -414,7 +429,7 @@ func TestPropertiesStore_GetPropertiesForPages_MultiplePages(t *testing.T) {
 func TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetPropertiesForPages([]string{})
+	got, err := store.GetPropertiesForPages(testPageIDs())
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
@@ -429,7 +444,7 @@ func TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap(t *test
 func TestPropertiesStore_GetPropertiesForPages_UnknownIDReturnsNoEntry(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetPropertiesForPages([]string{"does-not-exist"})
+	got, err := store.GetPropertiesForPages(testPageIDs("does-not-exist"))
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}

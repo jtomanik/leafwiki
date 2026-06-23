@@ -85,8 +85,27 @@ async function expectWorkspaceStatusNotToMention(
     .toEqual([]);
 
   const status = page.getByTestId('workspace-sync-status');
-  if ((await status.count()) === 0) return;
-  await expect(status).not.toContainText(text);
+  await expect
+    .poll(
+      async () => {
+        if ((await status.count()) === 0) return true;
+        return !((await status.textContent()) ?? '').includes(text);
+      },
+      { timeout: 15000 },
+    )
+    .toBe(true);
+}
+
+async function expectWorkspaceStatusClean(page: import('@playwright/test').Page) {
+  await expect
+    .poll(
+      async () => {
+        const syncStatus = await getWorkspaceSyncStatus(page);
+        return syncStatus.validationErrors ?? [];
+      },
+      { timeout: 15000 },
+    )
+    .toEqual([]);
 }
 
 async function getWorkspaceSyncStatus(
@@ -406,7 +425,9 @@ Root README home content`,
     await expect
       .poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 })
       .toContain(`[Target](/${targetSlug}.md)`);
-    await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+    await expectWorkspaceStatusNotToMention(page, sourceSlug);
+    await expectWorkspaceStatusNotToMention(page, targetSlug);
+    await expectWorkspaceStatusClean(page);
   });
 
   // - Workspace sync UI shows both automatic repairs and remaining errors
@@ -443,7 +464,9 @@ Root README home content`,
     await expect
       .poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 })
       .toContain(`[Target](/${targetSlug}.md)`);
-    await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+    await expectWorkspaceStatusNotToMention(page, sourceSlug);
+    await expectWorkspaceStatusNotToMention(page, targetSlug);
+    await expectWorkspaceStatusClean(page);
     await expect
       .poll(
         async () => {
@@ -521,7 +544,9 @@ Root README home content`,
           ),
         );
         await refreshWorkspaceSync(page);
-        await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+        await expectWorkspaceStatusNotToMention(page, sourceSlug);
+        await expectWorkspaceStatusNotToMention(page, missingSlug);
+        await expectWorkspaceStatusClean(page);
       },
     );
   });
@@ -599,7 +624,9 @@ Root README home content`,
           ),
         );
         await refreshWorkspaceSync(page);
-        await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+        await expectWorkspaceStatusNotToMention(page, sourceSlug);
+        await expectWorkspaceStatusNotToMention(page, missingSlug);
+        await expectWorkspaceStatusClean(page);
       },
     );
   });
@@ -807,12 +834,14 @@ Legacy metadata should be canonicalized exactly once.`,
 
     await runCleanupPreservingTestError(
       async () => {
-        await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
+        const workspaceSyncStatus = page.getByTestId('workspace-sync-status');
+        await expect(workspaceSyncStatus).toBeVisible({ timeout: 15000 });
+        await workspaceSyncStatus.locator('summary').click();
         await expect(
-          page.getByText('Workspace synced, but some Markdown files could not be loaded.'),
+          workspaceSyncStatus.locator('[data-validation-code="duplicate_leafwiki_id"]'),
         ).toBeVisible();
-        await expect(page.getByTestId('workspace-sync-status')).toContainText(duplicateId);
-        await expect(page.getByTestId('workspace-sync-status')).toContainText('.md');
+        await expect(workspaceSyncStatus).toContainText(duplicateId);
+        await expect(workspaceSyncStatus).toContainText('.md');
       },
       async () => {
         writeRootMarkdown(
@@ -820,7 +849,9 @@ Legacy metadata should be canonicalized exactly once.`,
           canonicalPageMarkdown(duplicateId + '-fixed', 'Invalid B Fixed', '# Invalid B Fixed'),
         );
         await refreshWorkspaceSync(page);
-        await expect(page.getByTestId('workspace-sync-status')).toHaveCount(0);
+        await expectWorkspaceStatusNotToMention(page, duplicateId);
+        await expectWorkspaceStatusNotToMention(page, secondPath);
+        await expectWorkspaceStatusClean(page);
       },
     );
   });
@@ -867,6 +898,7 @@ Legacy metadata should be canonicalized exactly once.`,
         const viewPage = new ViewPage(page);
         await viewPage.expectUserLoggedIn();
         await expectWorkspaceStatusNotToMention(page, conflictDir);
+        await expectWorkspaceStatusClean(page);
       },
     );
   });

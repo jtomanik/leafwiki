@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/perber/wiki/internal/projectdaemon"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute(t *testing.T) {
@@ -36,7 +37,7 @@ func TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil)
 	req.Header.Set("Authorization", "Bearer public-token")
 
-	route, err := resolve(req, "docs")
+	route, err := resolve(req, workspaceid.WorkspaceID("docs"))
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute(t *testing.T) {
 	if seen.token != "daemon-token" || seen.auth != "Bearer public-token" || seen.originalPath != "/api/workspaces/docs/tree" {
 		t.Fatalf("forwarded headers = token %q auth %q originalPath %q", seen.token, seen.auth, seen.originalPath)
 	}
-	if route.WorkspaceID != "docs" || route.Upstream != "http://127.0.0.1:49152" || route.PrivateMCPURL != "http://127.0.0.1:49152/mcp" {
+	if route.WorkspaceID != workspaceid.WorkspaceID("docs") || route.Upstream != "http://127.0.0.1:49152" || route.PrivateMCPURL != "http://127.0.0.1:49152/mcp" {
 		t.Fatalf("route = %#v", route)
 	}
 }
@@ -63,7 +64,7 @@ func TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure(t *testing.
 		t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
 	}
 
-	_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), " docs")
+	_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), workspaceid.WorkspaceID(" docs"))
 	if !errors.Is(err, ErrWorkspaceNotFound) {
 		t.Fatalf("resolve error = %v, want ErrWorkspaceNotFound", err)
 	}
@@ -93,7 +94,7 @@ func TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath(t *testing.T) {
 		t.Fatalf("resolve failed: %v", err)
 	}
 
-	if workspaceID != "home" {
+	if workspaceID != workspaceid.WorkspaceID("home") {
 		t.Fatalf("workspaceID = %q, want home", workspaceID)
 	}
 	if seen.path != "/__leafwiki/workspaces" || seen.originalPath != "/mcp" {
@@ -138,7 +139,7 @@ func TestWikidWorkspaceResolverMapsAccessErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
 			}
-			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), "docs")
+			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
 			if err != tt.want {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}

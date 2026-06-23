@@ -1,6 +1,8 @@
 package frontd
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,26 @@ import (
 
 	"github.com/perber/wiki/internal/projectdaemon"
 )
+
+func assertFrontdProxyError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+	t.Helper()
+	if rec.Code != wantStatus {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body is not structured JSON: %v body=%q", err, rec.Body.String())
+	}
+	if body.Error.Code != wantCode || body.Error.MessageID != wantMessageID || body.Error.Message == "" {
+		t.Fatalf("error = %#v, want code=%q messageId=%q", body.Error, wantCode, wantMessageID)
+	}
+}
 
 func TestWorkspaceProxyStripsPublicCredentialsAndInjectsPrivateActorContext(t *testing.T) {
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
@@ -180,12 +202,33 @@ func TestWorkspaceProxyReturnsRetryableUnavailableWhenUpstreamIsDown(t *testing.
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
-	}
+	assertFrontdProxyError(t, rec, http.StatusServiceUnavailable, "workspaced_unavailable", "errors.workspaced.unavailable")
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("Retry-After header missing")
 	}
+}
+
+func TestWorkspaceProxyReturnsStructuredActorResolutionError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		t.Fatalf("upstream should not be called")
+	}))
+	defer upstream.Close()
+
+	proxy, err := NewWorkspaceProxy(WorkspaceProxyOptions{
+		Upstream:    upstream.URL,
+		DaemonToken: "private-token",
+		Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
+			return projectdaemon.ActorContext{}, errors.New("no actor")
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewWorkspaceProxy failed: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
+
+	assertFrontdProxyError(t, rec, http.StatusUnauthorized, "workspace_actor_context_failed", "errors.workspace.actor_context_failed")
 }
 
 func TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken(t *testing.T) {

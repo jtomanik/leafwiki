@@ -21,6 +21,14 @@ import (
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
 )
 
+func gitRevisionActorIDStrings(ids []gitrevisions.ActorID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
+
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Relative link cannot escape the workspace root
 // - Old extensionless page link migrates to .md
@@ -202,11 +210,11 @@ section content`)
 	if result.Revisions[1].Path != "docs" {
 		t.Fatalf("raw revision path = %q, want docs", result.Revisions[1].Path)
 	}
-	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[0].ID)
+	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(result.Revisions[0].ID))
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot latest: %v", err)
 	}
-	older, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[1].ID)
+	older, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(result.Revisions[1].ID))
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot older: %v", err)
 	}
@@ -512,7 +520,7 @@ leafwiki_title: Page B Duplicate Syntax
 	if linkStatus.Counts.Outgoings != 1 || linkStatus.Counts.BrokenOutgoings != 0 {
 		t.Fatalf("link status counts = %#v, want one healthy outgoing target", linkStatus.Counts)
 	}
-	if got := linkStatus.Outgoings[0].ToPageID; got != "page-b-duplicate-syntax" {
+	if got := linkStatus.Outgoings[0].ToPageID; got != tree.NewPageIDUnchecked("page-b-duplicate-syntax") {
 		t.Fatalf("ToPageID = %q, want page-b-duplicate-syntax", got)
 	}
 }
@@ -572,7 +580,7 @@ leafwiki_title: Page B
 
 	var sawRaw, sawCanonical bool
 	for _, rev := range revisions.Revisions {
-		snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, rev.ID)
+		snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(rev.ID))
 		if err != nil {
 			t.Fatalf("GetPageRevisionSnapshot %s: %v", rev.ID, err)
 		}
@@ -662,11 +670,11 @@ Fully populated legacy metadata.
 	if len(revisions.Revisions) != 2 {
 		t.Fatalf("revision count = %d, want raw incoming content plus canonical writeback", len(revisions.Revisions))
 	}
-	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, revisions.Revisions[0].ID)
+	latest, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(revisions.Revisions[0].ID))
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot latest: %v", err)
 	}
-	older, err := service.GetPageRevisionSnapshot(context.Background(), page, revisions.Revisions[1].ID)
+	older, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(revisions.Revisions[1].ID))
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot older: %v", err)
 	}
@@ -1517,7 +1525,7 @@ func TestServiceListSnapshotPagePropagatesChangedMarkdownPathErrors(t *testing.T
 		t.Fatalf("NewService: %v", err)
 	}
 
-	_, err = service.ListSnapshotPage(context.Background(), "", 10)
+	_, err = service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 10)
 	if err == nil || !strings.Contains(err.Error(), "path trailer read failed") {
 		t.Fatalf("ListSnapshotPage error = %v, want changed path error", err)
 	}
@@ -1544,7 +1552,7 @@ func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *test
 		t.Fatalf("NewService: %v", err)
 	}
 
-	page, err := service.ListSnapshotPage(context.Background(), "", 1)
+	page, err := service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 1)
 	if err != nil {
 		t.Fatalf("ListSnapshotPage returned sentinel error: %v", err)
 	}
@@ -1579,7 +1587,7 @@ func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChan
 
 	listDone := make(chan error, 1)
 	go func() {
-		_, err := service.ListSnapshotPage(context.Background(), "", 1)
+		_, err := service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 1)
 		listDone <- err
 	}()
 	<-store.changedPathsStarted
@@ -1701,6 +1709,65 @@ func TestServiceSyncNowRecordsValidationErrorsWithMarkdownPaths(t *testing.T) {
 	}
 }
 
+func TestServiceSyncNowReportsDuplicateCanonicalPageIDAsTypedValidationError(t *testing.T) {
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
+	writeMarkdown(t, filepath.Join(rootDir, "duplicate-a.md"), `<!-- leafwiki
+version: 1
+page:
+  id: duplicate-page-id
+  title: Duplicate A
+-->
+
+# Duplicate A
+`)
+	writeMarkdown(t, filepath.Join(rootDir, "duplicate-b.md"), `<!-- leafwiki
+version: 1
+page:
+  id: duplicate-page-id
+  title: Duplicate B
+-->
+
+# Duplicate B
+`)
+	service, err := NewService(ServiceOptions{
+		Enabled: true,
+		DataDir: dataDir,
+		RootDir: rootDir,
+		Tree:    treeService,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	status, err := service.SyncNow(context.Background(), SyncRequest{
+		Reason: ReasonExplicit,
+		Source: SourceFilesystem,
+		Actor:  PublicEditorActor(),
+	})
+	if err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	for _, validationError := range status.ValidationErrors {
+		if validationError.Code != "duplicate_leafwiki_id" {
+			continue
+		}
+		if validationError.Path != "duplicate-b.md" {
+			t.Fatalf("duplicate error path = %q, want duplicate-b.md", validationError.Path)
+		}
+		if validationError.Severity != "error" {
+			t.Fatalf("duplicate error severity = %q, want error", validationError.Severity)
+		}
+		if !strings.Contains(validationError.Message, "page.id") {
+			t.Fatalf("duplicate error message = %q, want canonical page.id wording", validationError.Message)
+		}
+		return
+	}
+	t.Fatalf("ValidationErrors = %#v, want duplicate_leafwiki_id", status.ValidationErrors)
+}
+
 func TestServiceSyncNowRecordsAdditionalBatchActors(t *testing.T) {
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
@@ -1733,14 +1800,14 @@ func TestServiceSyncNowRecordsAdditionalBatchActors(t *testing.T) {
 		t.Fatalf("SyncNow: %v", err)
 	}
 
-	commit, err := store.GetCommit(context.Background(), status.LastCommitHash)
+	commit, err := store.GetCommit(context.Background(), status.LastCommitHash.String())
 	if err != nil {
 		t.Fatalf("GetCommit: %v", err)
 	}
 	if commit.AuthorID != "alice" {
 		t.Fatalf("AuthorID = %q, want alice", commit.AuthorID)
 	}
-	if strings.Join(commit.ActorIDs, ",") != "alice,bob" {
+	if strings.Join(gitRevisionActorIDStrings(commit.ActorIDs), ",") != "alice,bob" {
 		t.Fatalf("ActorIDs = %#v, want alice,bob", commit.ActorIDs)
 	}
 }
@@ -2066,7 +2133,7 @@ func TestServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata(t *test
 	if result.Revisions[0].Path != "plans/agent-hooks-plan" {
 		t.Fatalf("revision path = %q, want plans/agent-hooks-plan", result.Revisions[0].Path)
 	}
-	snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, result.Revisions[0].ID)
+	snapshot, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHashFromRevisionID(result.Revisions[0].ID))
 	if err != nil {
 		t.Fatalf("GetPageRevisionSnapshot: %v", err)
 	}
@@ -2673,7 +2740,7 @@ func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, "page-b-change"); err == nil {
+	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("page-b-change")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot returned unrelated commit, want error")
 	}
 }
@@ -2709,7 +2776,7 @@ func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *te
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := service.GetPageRevisionSnapshot(context.Background(), page, "page-a-change")
+		_, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("page-a-change"))
 		done <- err
 	}()
 	<-store.changedContentsStarted
@@ -2772,7 +2839,7 @@ func TestServiceRestoreDocumentRestoresPreRenameContentToCurrentPath(t *testing.
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, oldCommit.Hash, PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from pre-rename commit: %v", err)
 	}
 
@@ -2822,7 +2889,7 @@ func TestServiceRestoreDocumentPreservesExistingUppercaseMarkdownPath(t *testing
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, oldCommit.Hash, PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from uppercase path: %v", err)
 	}
 
@@ -2878,7 +2945,7 @@ func TestServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath(t *testi
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), section, oldCommit.Hash, PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), section, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from section commit: %v", err)
 	}
 
@@ -2929,7 +2996,7 @@ func TestServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath(t *test
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), section, oldCommit.Hash, PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), section, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from README section commit: %v", err)
 	}
 
@@ -2973,7 +3040,7 @@ func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, "page-b-change", PublicEditorActor()); err == nil {
+	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-b-change"), PublicEditorActor()); err == nil {
 		t.Fatalf("RestoreDocument restored unrelated commit, want error")
 	}
 	if store.restoreDocumentToPathCalls != 0 {
@@ -3008,7 +3075,7 @@ func TestServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree(t *testi
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, "page-a-change", PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-a-change"), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument: %v", err)
 	}
 
@@ -3052,7 +3119,7 @@ func TestServiceRestoreDocumentReturnsReconstructionError(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreDocument(context.Background(), page, "page-a-change", PublicEditorActor())
+	status, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-a-change"), PublicEditorActor())
 	if !errors.Is(err, reconstructErr) {
 		t.Fatalf("RestoreDocument error = %v, want %v", err, reconstructErr)
 	}
@@ -3092,12 +3159,12 @@ func TestServiceRestoreWorkspaceCapturesMetadataWriteback(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreWorkspace(context.Background(), rawCommit.Hash, PublicEditorActor())
+	status, err := service.RestoreWorkspace(context.Background(), NewCommitHashUnchecked(rawCommit.Hash), PublicEditorActor())
 	if err != nil {
 		t.Fatalf("RestoreWorkspace: %v", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), status.LastCommitHash)
+	files, err := store.FilesAt(context.Background(), status.LastCommitHash.String())
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
@@ -3152,12 +3219,12 @@ current body`)
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreDocument(context.Background(), page, rawCommit.Hash, PublicEditorActor())
+	status, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(rawCommit.Hash), PublicEditorActor())
 	if err != nil {
 		t.Fatalf("RestoreDocument: %v", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), status.LastCommitHash)
+	files, err := store.FilesAt(context.Background(), status.LastCommitHash.String())
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
@@ -3193,7 +3260,7 @@ func TestServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID(t
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, "path-reuse"); err == nil {
+	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("path-reuse")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot accepted reused path with different leafwiki_id, want error")
 	}
 }
@@ -3234,7 +3301,7 @@ func TestServiceSyncNowCreatesNewCommitForWritebackOnlySync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncNow: %v", err)
 	}
-	if status.LastCommitHash == firstCommit.Hash {
+	if status.LastCommitHash == NewCommitHashUnchecked(firstCommit.Hash) {
 		t.Fatalf("writeback-only sync amended previous commit %s, want new commit", firstCommit.Hash)
 	}
 	snapshots, err := service.ListSnapshots(context.Background(), 10)
@@ -3574,7 +3641,7 @@ func readFileString(t *testing.T, path string) string {
 	return string(raw)
 }
 
-func mustGetPage(t *testing.T, treeService *tree.TreeService, id string) *tree.Page {
+func mustGetPage(t *testing.T, treeService *tree.TreeService, id tree.PageID) *tree.Page {
 	t.Helper()
 	page, err := treeService.GetPage(id)
 	if err != nil {
@@ -3585,8 +3652,8 @@ func mustGetPage(t *testing.T, treeService *tree.TreeService, id string) *tree.P
 
 func mustGetOnlyPage(t *testing.T, treeService *tree.TreeService) *tree.Page {
 	t.Helper()
-	var ids []string
-	if err := treeService.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := treeService.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -3605,7 +3672,7 @@ func revisionIDs(revisions []*revision.Revision) []string {
 			ids = append(ids, "")
 			continue
 		}
-		ids = append(ids, rev.ID)
+		ids = append(ids, rev.ID.CommitID())
 	}
 	return ids
 }

@@ -40,7 +40,7 @@ func InjectRemoteUser(cfg RemoteUserConfig) gin.HandlerFunc {
 
 		if cfg.TrustedProxies == nil || cfg.UserService == nil {
 			slog.Default().Error("reverse proxy auth: misconfigured, TrustedProxies or UserService is nil")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Reverse proxy authentication misconfigured"})
+			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthReverseProxyMisconfigured, "Reverse proxy authentication misconfigured")
 			return
 		}
 
@@ -62,7 +62,7 @@ func InjectRemoteUser(cfg RemoteUserConfig) gin.HandlerFunc {
 		user, err := cfg.UserService.GetUserByUsername(username)
 		if err != nil {
 			slog.Default().Warn("reverse proxy auth: user not found", "username", username, "remote_addr", c.Request.RemoteAddr)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "reverse proxy auth: user not found"})
+			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthRemoteUserNotFound, "reverse proxy auth: user not found")
 			return
 		}
 

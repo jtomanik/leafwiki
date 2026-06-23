@@ -19,6 +19,25 @@ import (
 
 const publicEditorID = "public-editor"
 
+const (
+	errCodeMCPAuthenticatedUserServiceUnavailable sharederrors.ErrorCode = "mcp_authenticated_user_service_unavailable"
+	errCodeMCPAuthenticatedUserLookupFailed       sharederrors.ErrorCode = "mcp_authenticated_user_lookup_failed"
+	errCodeMCPAuthenticatedUserNotFound           sharederrors.ErrorCode = "mcp_authenticated_user_not_found"
+	errCodeMCPActorContextMissing                 sharederrors.ErrorCode = "mcp_actor_context_missing"
+	errCodeMCPActorContextInvalid                 sharederrors.ErrorCode = "mcp_actor_context_invalid"
+	errCodeMCPTokenInfoMissing                    sharederrors.ErrorCode = "mcp_token_info_missing"
+	errCodeMCPEditorRoleRequired                  sharederrors.ErrorCode = "mcp_editor_role_required"
+	errCodeMCPToolError                           sharederrors.ErrorCode = "mcp_tool_error"
+	errCodeMCPPageIdentifierAmbiguous             sharederrors.ErrorCode = "mcp_page_identifier_ambiguous"
+	errCodeMCPPageIdentifierRequired              sharederrors.ErrorCode = "mcp_page_identifier_required"
+	errCodeMCPPageTargetAmbiguous                 sharederrors.ErrorCode = "mcp_page_target_ambiguous"
+	errCodeMCPPageTargetRequired                  sharederrors.ErrorCode = "mcp_page_target_required"
+)
+
+func newMCPHelperError(code sharederrors.ErrorCode, message string, cause error) *sharederrors.LocalizedError {
+	return sharederrors.NewLocalizedError(code, message, message, cause)
+}
+
 func (r *Routes) apiPage(page *tree.Page, depth int) *dto.Page {
 	var apiPage *dto.Page
 	if depth == 0 {
@@ -54,14 +73,14 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 		return r.actorForMissingTokenInfo()
 	}
 	if r.userService == nil {
-		return nil, fmt.Errorf("authenticated MCP user service is unavailable")
+		return nil, newMCPHelperError(errCodeMCPAuthenticatedUserServiceUnavailable, "authenticated MCP user service is unavailable", nil)
 	}
-	user, err := r.userService.GetUserByID(tokenInfo.UserID)
+	user, err := r.userService.GetUserByID(coreauth.NewUserIDUnchecked(tokenInfo.UserID))
 	if err != nil {
 		if !errors.Is(err, coreauth.ErrUserNotFound) {
-			return nil, fmt.Errorf("authenticated MCP user lookup failed: %w", err)
+			return nil, newMCPHelperError(errCodeMCPAuthenticatedUserLookupFailed, "authenticated MCP user lookup failed", err)
 		}
-		return nil, fmt.Errorf("authenticated MCP user not found")
+		return nil, newMCPHelperError(errCodeMCPAuthenticatedUserNotFound, "authenticated MCP user not found", nil)
 	}
 	return user, nil
 }
@@ -73,7 +92,7 @@ func (r *Routes) actorFromPrivateContextHeader(header http.Header) (*coreauth.Us
 	encoded := strings.TrimSpace(header.Get(projectdaemon.ActorContextHeader))
 	if encoded == "" {
 		if r.actorContextRequired {
-			return nil, true, fmt.Errorf("private MCP actor context missing")
+			return nil, true, newMCPHelperError(errCodeMCPActorContextMissing, "private MCP actor context missing", nil)
 		}
 		return nil, false, nil
 	}
@@ -86,7 +105,7 @@ func (r *Routes) actorFromPrivateContextHeader(header http.Header) (*coreauth.Us
 		WorkspaceID: r.workspaceID,
 	})
 	if err != nil {
-		return nil, true, fmt.Errorf("private MCP actor context invalid: %w", err)
+		return nil, true, newMCPHelperError(errCodeMCPActorContextInvalid, "private MCP actor context invalid", err)
 	}
 	return &coreauth.User{
 		ID:       actor.SubjectID(),
@@ -102,18 +121,18 @@ func (r *Routes) actorForMissingTokenInfo() (*coreauth.User, error) {
 	}
 	if strings.TrimSpace(r.stdioAPIKey) != "" {
 		if r.apiKeys == nil {
-			return nil, fmt.Errorf("authenticated MCP user service is unavailable")
+			return nil, newMCPHelperError(errCodeMCPAuthenticatedUserServiceUnavailable, "authenticated MCP user service is unavailable", nil)
 		}
 		verified, err := r.apiKeys.VerifyAPIKey(r.stdioAPIKey)
 		if err != nil {
 			if !errors.Is(err, coreauth.ErrInvalidToken) {
-				return nil, fmt.Errorf("authenticated MCP user lookup failed: %w", err)
+				return nil, newMCPHelperError(errCodeMCPAuthenticatedUserLookupFailed, "authenticated MCP user lookup failed", err)
 			}
-			return nil, fmt.Errorf("authenticated MCP user not found")
+			return nil, newMCPHelperError(errCodeMCPAuthenticatedUserNotFound, "authenticated MCP user not found", nil)
 		}
 		return verified.User, nil
 	}
-	return nil, fmt.Errorf("authenticated MCP token info missing")
+	return nil, newMCPHelperError(errCodeMCPTokenInfoMissing, "authenticated MCP token info missing", nil)
 }
 
 func (r *Routes) editorActorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, error) {
@@ -122,41 +141,88 @@ func (r *Routes) editorActorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.U
 		return nil, err
 	}
 	if user.Role != coreauth.RoleEditor && user.Role != coreauth.RoleAdmin {
-		return nil, fmt.Errorf("editor or admin role required")
+		return nil, newMCPHelperError(errCodeMCPEditorRoleRequired, "editor or admin role required", nil)
 	}
 	return user, nil
 }
 
-func mcpToolError(err error) error {
+func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
-		return fmt.Errorf("%s: %s", loc.Code, loc.Message)
+		detail := sharederrors.LocalizedErrorDetailFromError(loc)
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{
+				&sdkmcp.TextContent{Text: fmt.Sprintf("%s: %s", detail.Code, detail.Message)},
+			},
+			Meta:    mcpToolErrorMeta(detail),
+			IsError: true,
+		}, true
 	}
 	if detail, _, ok := wikipages.PageErrorDetailForError(err); ok {
-		return fmt.Errorf("%s: %s", detail.Code, detail.Message)
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{
+				&sdkmcp.TextContent{Text: fmt.Sprintf("%s: %s", detail.Code, detail.Message)},
+			},
+			Meta:    mcpToolErrorMeta(detail),
+			IsError: true,
+		}, true
 	}
-	return err
+	detail := sharederrors.NewLocalizedErrorDetail(
+		errCodeMCPToolError,
+		err.Error(),
+		"mcp tool error",
+	)
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{
+			&sdkmcp.TextContent{Text: fmt.Sprintf("%s: %s", detail.Code, detail.Message)},
+		},
+		Meta:    mcpToolErrorMeta(detail),
+		IsError: true,
+	}, true
 }
 
-func exactlyOneIDOrPageID(id string, pageID string) (string, error) {
+func mcpToolErrorMeta(detail sharederrors.LocalizedErrorDetail) sdkmcp.Meta {
+	errorMeta := map[string]any{
+		"code":      detail.Code,
+		"messageId": detail.MessageID,
+		"message":   detail.Message,
+		"template":  detail.Template,
+	}
+	if len(detail.Args) > 0 {
+		errorMeta["args"] = append([]string(nil), detail.Args...)
+	}
+	return sdkmcp.Meta{"error": errorMeta}
+}
+
+func exactlyOneIDOrPageID(id string, pageID string) (tree.PageID, error) {
 	id = strings.TrimSpace(id)
 	pageID = strings.TrimSpace(pageID)
 	if id != "" && pageID != "" {
-		return "", fmt.Errorf("id and pageId cannot both be supplied")
+		return "", sharederrors.NewLocalizedError(
+			errCodeMCPPageIdentifierAmbiguous,
+			"id and pageId cannot both be supplied",
+			"id and pageId cannot both be supplied",
+			nil,
+		)
 	}
 	if id == "" && pageID == "" {
-		return "", fmt.Errorf("id or pageId is required")
+		return "", sharederrors.NewLocalizedError(
+			errCodeMCPPageIdentifierRequired,
+			"id or pageId is required",
+			"id or pageId is required",
+			nil,
+		)
 	}
 	if pageID != "" {
-		return pageID, nil
+		return tree.NewPageIDUnchecked(pageID), nil
 	}
-	return id, nil
+	return tree.NewPageIDUnchecked(id), nil
 }
 
 func normalizeToolRoutePath(path string) string {
 	return strings.Trim(strings.TrimSpace(path), "/")
 }
 
-func normalizeToolPagePathInput(rawPath string, rawKind string) (string, tree.NodeKind, error) {
+func normalizeToolPagePathInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
 	return wikipages.NormalizePagePathInput(rawPath, rawKind)
 }
 

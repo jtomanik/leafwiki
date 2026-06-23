@@ -24,6 +24,7 @@ import {
   browserRoutePathForWikiNode,
   getDeleteRedirectRoutePath,
 } from '@/lib/wikiPath'
+import { asWorkspaceID } from '@/lib/semanticTypes'
 import {
   buildWorkspaceViewPath,
   splitWorkspaceRoute,
@@ -74,7 +75,7 @@ export default function TreeNodeActionsMenu({
       nodeId,
       nodeKind === NODE_KIND_PAGE ? NODE_KIND_SECTION : NODE_KIND_PAGE,
       nodeVersion,
-      workspaceId,
+      asWorkspaceID(workspaceId),
     )
       .then(() => {
         toast.success('Page converted successfully')

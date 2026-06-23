@@ -3,10 +3,12 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 func setupUpdateUserUseCase(t *testing.T) (*UpdateUserUseCase, *coreauth.UserService) {
@@ -29,8 +31,6 @@ func setupUpdateUserUseCase(t *testing.T) (*UpdateUserUseCase, *coreauth.UserSer
 	return NewUpdateUserUseCase(userSvc, resolver, slog.Default()), userSvc
 }
 
-// TestUpdateUser_AdminCanChangeRole verifies that an admin requester can promote
-// or demote another user's role.
 func TestUpdateUser_AdminCanChangeRole(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -40,7 +40,7 @@ func TestUpdateUser_AdminCanChangeRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               viewer.ID,
+		ID:               coreauth.NewUserIDUnchecked(viewer.ID),
 		Username:         viewer.Username,
 		Email:            viewer.Email,
 		Role:             coreauth.RoleAdmin,
@@ -54,8 +54,6 @@ func TestUpdateUser_AdminCanChangeRole(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_AdminCanUpdateProfileWithoutRole verifies that an admin can
-// update username/email without sending a role and the existing role is kept.
 func TestUpdateUser_AdminCanUpdateProfileWithoutRole(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -65,7 +63,7 @@ func TestUpdateUser_AdminCanUpdateProfileWithoutRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               editor.ID,
+		ID:               coreauth.NewUserIDUnchecked(editor.ID),
 		Username:         "ed-admin-updated",
 		Email:            "ed-admin-updated@example.com",
 		Role:             "",
@@ -85,9 +83,6 @@ func TestUpdateUser_AdminCanUpdateProfileWithoutRole(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_NonAdminCannotEscalateRole is the regression test for
-// GHSA-jj4r-587p-r5h5: a viewer calling PUT /api/users/:id on their own account
-// must not be able to promote themselves to admin.
 func TestUpdateUser_NonAdminCannotEscalateRole(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -97,10 +92,10 @@ func TestUpdateUser_NonAdminCannotEscalateRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               viewer.ID,
+		ID:               coreauth.NewUserIDUnchecked(viewer.ID),
 		Username:         viewer.Username,
 		Email:            viewer.Email,
-		Role:             coreauth.RoleAdmin, // attacker sends "admin"
+		Role:             coreauth.RoleAdmin,
 		RequesterIsAdmin: false,
 	})
 	if err != nil {
@@ -111,8 +106,6 @@ func TestUpdateUser_NonAdminCannotEscalateRole(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_NonAdminCanUpdateOwnProfile verifies that non-admin users can
-// still change their username and email while their role stays unchanged.
 func TestUpdateUser_NonAdminCanUpdateOwnProfile(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -122,10 +115,10 @@ func TestUpdateUser_NonAdminCanUpdateOwnProfile(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               editor.ID,
+		ID:               coreauth.NewUserIDUnchecked(editor.ID),
 		Username:         "ed-updated",
 		Email:            "ed-updated@example.com",
-		Role:             coreauth.RoleAdmin, // should be silently ignored
+		Role:             coreauth.RoleAdmin,
 		RequesterIsAdmin: false,
 	})
 	if err != nil {
@@ -142,8 +135,6 @@ func TestUpdateUser_NonAdminCanUpdateOwnProfile(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_LastAdminCannotSelfDemote verifies that the last admin cannot
-// demote themselves, which would leave the system with no admins.
 func TestUpdateUser_LastAdminCannotSelfDemote(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -153,7 +144,7 @@ func TestUpdateUser_LastAdminCannotSelfDemote(t *testing.T) {
 	}
 
 	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               admin.ID,
+		ID:               coreauth.NewUserIDUnchecked(admin.ID),
 		Username:         admin.Username,
 		Email:            admin.Email,
 		Role:             coreauth.RoleViewer,
@@ -164,16 +155,19 @@ func TestUpdateUser_LastAdminCannotSelfDemote(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_AdminCanBeDemotedWhenAnotherExists verifies that an admin can
-// lose their role as long as at least one other admin remains.
 func TestUpdateUser_AdminCanBeDemotedWhenAnotherExists(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
-	admin1, _ := svc.CreateUser("admin1", "admin1@example.com", "pass", coreauth.RoleAdmin)
-	_, _ = svc.CreateUser("admin2", "admin2@example.com", "pass", coreauth.RoleAdmin)
+	admin1, err := svc.CreateUser("admin1", "admin1@example.com", "pass", coreauth.RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreateUser admin1: %v", err)
+	}
+	if _, err := svc.CreateUser("admin2", "admin2@example.com", "pass", coreauth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUser admin2: %v", err)
+	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               admin1.ID,
+		ID:               coreauth.NewUserIDUnchecked(admin1.ID),
 		Username:         admin1.Username,
 		Email:            admin1.Email,
 		Role:             coreauth.RoleViewer,
@@ -187,8 +181,6 @@ func TestUpdateUser_AdminCanBeDemotedWhenAnotherExists(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_AdminInvalidRole checks that an admin supplying an unknown role
-// gets a validation error rather than storing garbage.
 func TestUpdateUser_AdminInvalidRole(t *testing.T) {
 	uc, svc := setupUpdateUserUseCase(t)
 
@@ -198,13 +190,71 @@ func TestUpdateUser_AdminInvalidRole(t *testing.T) {
 	}
 
 	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               user.ID,
+		ID:               coreauth.NewUserIDUnchecked(user.ID),
 		Username:         user.Username,
 		Email:            user.Email,
-		Role:             "superuser", // not a valid role
+		Role:             "superuser",
 		RequesterIsAdmin: true,
 	})
 	if err == nil {
 		t.Fatal("expected validation error for invalid role, got nil")
 	}
+}
+
+func TestCreateUserUseCaseValidationReturnsStableFieldCodes(t *testing.T) {
+	uc := NewCreateUserUseCase(nil, nil, slog.Default())
+
+	_, err := uc.Execute(context.Background(), CreateUserInput{
+		Email:    "not-an-email",
+		Password: "short",
+		Role:     "invalid",
+	})
+
+	var ve *sharederrors.ValidationErrors
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %T %v, want ValidationErrors", err, err)
+	}
+	assertAuthFieldErrorCode(t, ve, "username", "auth_username_required", "validation.auth.username_required")
+	assertAuthFieldErrorCode(t, ve, "email", "auth_email_invalid", "validation.auth.email_invalid")
+	assertAuthFieldErrorCode(t, ve, "password", "auth_password_too_short", "validation.auth.password_too_short")
+	assertAuthFieldErrorCode(t, ve, "role", "auth_role_invalid", "validation.auth.role_invalid")
+}
+
+func TestCreateAPIKeyUseCaseValidationReturnsStableFieldCodes(t *testing.T) {
+	uc := NewCreateAPIKeyUseCase(nil, nil)
+
+	_, err := uc.Execute(context.Background(), CreateAPIKeyInput{Name: ""})
+
+	var ve *sharederrors.ValidationErrors
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %T %v, want ValidationErrors", err, err)
+	}
+	assertAuthFieldErrorCode(t, ve, "name", "auth_api_key_name_required", "validation.auth.api_key_name_required")
+}
+
+func TestAPIKeyUseCaseInputsUseSemanticIDs(t *testing.T) {
+	_ = GetUserByIDInput{ID: coreauth.NewUserIDUnchecked("user-1")}
+	_ = CreateAPIKeyInput{
+		UserID:          coreauth.NewUserIDUnchecked("user-1"),
+		CreatedByUserID: coreauth.NewUserIDUnchecked("admin-1"),
+	}
+	_ = ListAPIKeysInput{UserID: coreauth.NewUserIDUnchecked("user-1")}
+	_ = RevokeAPIKeyInput{UserID: coreauth.NewUserIDUnchecked("user-1"), KeyID: coreauth.NewAPIKeyIDUnchecked("key-1")}
+}
+
+func assertAuthFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
+	t.Helper()
+	for _, got := range ve.Errors {
+		if got.Field != field {
+			continue
+		}
+		if fmt.Sprintf("%s", got.Code) != code {
+			t.Fatalf("%s code = %q, want %q", field, got.Code, code)
+		}
+		if fmt.Sprintf("%s", got.MessageID) != messageID {
+			t.Fatalf("%s messageId = %q, want %q", field, got.MessageID, messageID)
+		}
+		return
+	}
+	t.Fatalf("field %q not found in %#v", field, ve.Errors)
 }

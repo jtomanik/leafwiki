@@ -1,8 +1,8 @@
 package wiki
 
 import (
-	"strings"
-
+	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/tree"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikiauth "github.com/perber/wiki/internal/wiki/auth"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -25,12 +25,13 @@ func (w *Wiki) newPageOrchestrator() *pagesave.PageSaveOrchestrator {
 	return pagesave.NewPageSaveOrchestrator(effects...)
 }
 
-func (w *Wiki) workspaceSyncActorForUser(userID string) workspacesync.Actor {
-	actor := workspacesync.Actor{ID: userID}
-	if w.user == nil || strings.TrimSpace(userID) == "" {
+func (w *Wiki) workspaceSyncActorForUser(userID tree.UserID) workspacesync.Actor {
+	actorID := workspacesync.NewActorIDUnchecked(userID.ActorID())
+	actor := workspacesync.Actor{ID: actorID}
+	if w.user == nil || actorID.Trimmed() == "" {
 		return actor
 	}
-	user, err := w.user.GetUserByID(userID)
+	user, err := w.user.GetUserByID(coreauth.NewUserIDUnchecked(actorID.String()))
 	if err != nil || user == nil {
 		return actor
 	}

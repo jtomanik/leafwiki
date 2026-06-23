@@ -8,9 +8,9 @@ import (
 
 type ImporterWiki interface {
 	TreeHash() string
-	LookupPagePath(path string) (*tree.PathLookup, error)
-	LookupPagePathForKind(path string, kind tree.NodeKind) (*tree.PathLookup, error)
-	EnsurePath(userID string, targetPath string, title string, kind *tree.NodeKind) (*tree.Page, error)
-	UpdatePage(userID string, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error)
-	UploadAsset(userID, pageID string, file multipart.File, filename string, maxBytes int64) (string, error)
+	LookupPagePath(path tree.RoutePath) (*tree.PathLookup, error)
+	LookupPagePathForKind(path tree.RoutePath, kind tree.NodeKind) (*tree.PathLookup, error)
+	EnsurePath(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error)
+	UpdatePage(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error)
+	UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, maxBytes int64) (string, error)
 }

@@ -11,6 +11,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/auth"
+	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
@@ -159,12 +160,12 @@ func (r *Routes) activeSessionsForContext(viewer *auth.User) ([]wikipresence.Ses
 			status.AgentHooks = "enabled"
 			for _, agentSession := range agentSessions {
 				sessions = append(sessions, wikipresence.Session{
-					Type:            "agent",
+					Type:            wikipresence.SessionTypeAgent,
 					SessionID:       agentSession.SessionIDHash,
 					Provider:        agentSession.Provider,
 					Model:           agentSession.Model,
-					Mode:            "unknown",
-					State:           "active",
+					Mode:            wikipresence.SessionModeUnknown,
+					State:           wikipresence.SessionStateActive,
 					Source:          agentSession.Source,
 					LastEvent:       agentSession.LastEvent,
 					ActiveSubagents: agentSession.ActiveSubagents,
@@ -252,7 +253,7 @@ func (r *Routes) recentChanges(ctx context.Context, status workspacesync.SyncSta
 	}
 	changes := []recentChangeOutput{}
 	if r.listWorkspaceSnapshots != nil {
-		snapshots, err := r.listWorkspaceSnapshots(ctx, "", limit)
+		snapshots, err := r.listWorkspaceSnapshots(ctx, workspacesync.NewCommitHashUnchecked(""), limit)
 		if err == nil {
 			for _, snapshot := range snapshots.Snapshots {
 				changes = append(changes, r.recentChangeFromSnapshot(status, snapshot))
@@ -262,7 +263,7 @@ func (r *Routes) recentChanges(ctx context.Context, status workspacesync.SyncSta
 	if len(changes) == 0 && len(status.RecentChangedMarkdownPaths) > 0 {
 		paths := cappedChangedPaths(status.RecentChangedMarkdownPaths)
 		changes = append(changes, recentChangeOutput{
-			CommitID:     status.LastCommitHash,
+			CommitID:     status.LastCommitHash.String(),
 			Timestamp:    formatContextTime(status.LastSyncTime),
 			Source:       string(workspacesync.SourceMCP),
 			Reason:       string(workspacesync.ReasonExplicit),
@@ -277,15 +278,15 @@ func (r *Routes) recentChanges(ctx context.Context, status workspacesync.SyncSta
 	return changes
 }
 
-func (r *Routes) changesSinceCommit(ctx context.Context, status workspacesync.SyncStatus, commitHash string) ([]recentChangeOutput, bool) {
-	if strings.TrimSpace(commitHash) == "" {
+func (r *Routes) changesSinceCommit(ctx context.Context, status workspacesync.SyncStatus, commitHash workspacesync.CommitHash) ([]recentChangeOutput, bool) {
+	if strings.TrimSpace(commitHash.String()) == "" {
 		return r.recentChanges(ctx, status, maxContextDeltaSnapshots), true
 	}
 	if r.listWorkspaceSnapshots == nil {
 		return nil, false
 	}
 	changes := []recentChangeOutput{}
-	cursor := ""
+	cursor := workspacesync.NewCommitHashUnchecked("")
 	for len(changes) < maxContextDeltaSnapshots {
 		remaining := maxContextDeltaSnapshots - len(changes)
 		pageSize := 50
@@ -320,7 +321,7 @@ func (r *Routes) recentChangeFromSnapshot(status workspacesync.SyncStatus, snaps
 	}
 	paths = cappedChangedPaths(paths)
 	return recentChangeOutput{
-		CommitID:     snapshot.ID,
+		CommitID:     snapshot.ID.String(),
 		Timestamp:    formatContextTime(snapshot.CreatedAt),
 		Actor:        snapshot.AuthorName,
 		Source:       snapshot.Source,
@@ -338,12 +339,12 @@ func cappedChangedPaths(paths []string) []string {
 	return append([]string{}, paths...)
 }
 
-func (r *Routes) pageIDsForMarkdownPaths(paths []string) []string {
+func (r *Routes) pageIDsForMarkdownPaths(paths []string) []tree.PageID {
 	if r == nil || r.treeService == nil || len(paths) == 0 {
 		return nil
 	}
-	pageIDs := []string{}
-	seen := map[string]struct{}{}
+	pageIDs := []tree.PageID{}
+	seen := map[tree.PageID]struct{}{}
 	for _, markdownPath := range paths {
 		pageID := r.pageIDForMarkdownPath(markdownPath)
 		if pageID == "" {
@@ -358,7 +359,7 @@ func (r *Routes) pageIDsForMarkdownPaths(paths []string) []string {
 	return pageIDs
 }
 
-func (r *Routes) pageIDForMarkdownPath(markdownPath string) string {
+func (r *Routes) pageIDForMarkdownPath(markdownPath string) tree.PageID {
 	trimmed := strings.Trim(strings.TrimSpace(filepath.ToSlash(markdownPath)), "/")
 	if route, err := tree.MapWorkspaceMarkdownRoute(r.workspaceRootDir, trimmed, false); err == nil && !route.Skip {
 		if pageID := r.pageIDForRecentChangeRoute(route.RoutePath, route.Kind); pageID != "" {
@@ -366,20 +367,33 @@ func (r *Routes) pageIDForMarkdownPath(markdownPath string) string {
 		}
 	}
 	if path.Base(trimmed) == "README.md" {
-		if page, err := r.treeService.FindPageByRoutePathAndKind(tree.MarkdownPathToRoutePath(trimmed), tree.NodeKindPage); err == nil && page != nil {
-			return page.ID
+		if readmeRoutePath, err := tree.CleanMarkdownPath(trimmed).RoutePath().Validate(); err == nil {
+			if page, err := r.treeService.FindPageByRoutePathAndKind(readmeRoutePath, tree.NodeKindPage); err == nil && page != nil {
+				return page.ID
+			}
 		}
-		sectionRoute := strings.Trim(path.Dir(trimmed), ".")
+		sectionRouteRaw := strings.Trim(path.Dir(trimmed), ".")
+		var sectionRoute tree.RoutePath
+		if sectionRouteRaw != "" {
+			parsedSectionRoute, err := tree.ParseRoutePath(sectionRouteRaw)
+			if err != nil {
+				return ""
+			}
+			sectionRoute = parsedSectionRoute
+		}
 		return r.pageIDForRecentChangeRoute(sectionRoute, tree.NodeKindSection)
 	}
-	routePath := tree.MarkdownPathToRoutePath(trimmed)
+	routePath, err := tree.CleanMarkdownPath(trimmed).RoutePath().Validate()
+	if err != nil {
+		return ""
+	}
 	kind := wikipages.MarkdownPathInputKind(trimmed)
 	return r.pageIDForRecentChangeRoute(routePath, kind)
 }
 
-func (r *Routes) pageIDForRecentChangeRoute(routePath string, kind tree.NodeKind) string {
+func (r *Routes) pageIDForRecentChangeRoute(routePath tree.RoutePath, kind tree.NodeKind) tree.PageID {
 	if routePath == "" && kind == tree.NodeKindSection {
-		page, err := r.treeService.FindPageByID("root")
+		page, err := r.treeService.FindPageByID(tree.RootPageID)
 		if err != nil || page == nil {
 			return ""
 		}
@@ -414,11 +428,8 @@ func validationFromSyncStatusWithRedactor(status workspacesync.SyncStatus, redac
 	issues := make([]validationIssueOutput, 0, len(status.ValidationErrors))
 	summary := validationSummaryOutput{}
 	for _, err := range status.ValidationErrors {
-		severity := strings.TrimSpace(err.Severity)
-		if severity == "" {
-			severity = "error"
-		}
-		if severity == "warning" {
+		severity := err.Severity.Normalize(wikivalidation.IssueSeverityError)
+		if severity == wikivalidation.IssueSeverityWarning {
 			summary.Warnings++
 		} else {
 			summary.Errors++
@@ -429,10 +440,7 @@ func validationFromSyncStatusWithRedactor(status workspacesync.SyncStatus, redac
 			path = redact(path)
 			message = redact(message)
 		}
-		code := strings.TrimSpace(err.Code)
-		if code == "" {
-			code = "workspace_sync_validation"
-		}
+		code := err.Code.Normalize(wikivalidation.IssueCodeWorkspaceSyncValidation)
 		issues = append(issues, validationIssueOutput{
 			Severity: severity,
 			Code:     code,
@@ -463,7 +471,7 @@ func workspaceActorForToolActor(actor toolActor) workspacesync.Actor {
 		return workspacesync.PublicEditorActor()
 	}
 	return workspacesync.Actor{
-		ID:    actor.User.ID,
+		ID:    workspacesync.NewActorIDUnchecked(actor.User.ID),
 		Name:  actor.User.Username,
 		Email: actor.User.Email,
 	}
@@ -477,11 +485,11 @@ func serverToolNamesForOptions(opts httpinternal.RouterOptions) []string {
 	return tools
 }
 
-func recommendedToolsForContext(user *auth.User, validation validationOutput, workspaceSyncEnabled bool) []string {
-	tools := []string{}
-	add := func(names ...string) {
+func recommendedToolsForContext(user *auth.User, validation validationOutput, workspaceSyncEnabled bool) []ToolID {
+	tools := []ToolID{}
+	add := func(names ...ToolID) {
 		for _, name := range names {
-			if !containsString(tools, name) {
+			if !containsToolID(tools, name) {
 				tools = append(tools, name)
 			}
 		}
@@ -499,7 +507,7 @@ func recommendedToolsForContext(user *auth.User, validation validationOutput, wo
 	return tools
 }
 
-func containsString(values []string, needle string) bool {
+func containsToolID(values []ToolID, needle ToolID) bool {
 	for _, value := range values {
 		if value == needle {
 			return true
@@ -516,7 +524,7 @@ func (r *Routes) syncStatusOutput(status workspacesync.SyncStatus) map[string]an
 		"pendingEventCount":          status.PendingEventCount,
 		"lastSyncTime":               status.LastSyncTime,
 		"lastError":                  r.redactWorkspacePaths(status.LastError),
-		"lastCommitHash":             status.LastCommitHash,
+		"lastCommitHash":             status.LastCommitHash.String(),
 		"recentChangedMarkdownPaths": append([]string{}, status.RecentChangedMarkdownPaths...),
 		"validationErrors":           r.redactedValidationErrors(status.ValidationErrors),
 	}

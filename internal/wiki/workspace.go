@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type Workspace struct {
-	ID      string
+	ID      workspaceid.WorkspaceID
 	DataDir string
 	RootDir string
 }
@@ -37,7 +39,7 @@ func DefaultWorkspace(dataDir string) Workspace {
 }
 
 func NormalizeWorkspace(workspace Workspace) Workspace {
-	id := strings.TrimSpace(workspace.ID)
+	id := workspace.ID
 	if id == "" {
 		id = "default"
 	}
@@ -63,6 +65,9 @@ func cleanWorkspacePath(path string) string {
 
 func ValidateWorkspace(workspace Workspace) error {
 	workspace = NormalizeWorkspace(workspace)
+	if err := workspace.ID.Validate(); err != nil {
+		return fmt.Errorf("workspace id: %w", err)
+	}
 	if strings.TrimSpace(workspace.DataDir) == "" {
 		return fmt.Errorf("data dir must not be empty")
 	}

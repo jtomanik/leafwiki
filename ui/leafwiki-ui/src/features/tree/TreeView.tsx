@@ -9,6 +9,7 @@ import {
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
+import type { WorkspaceSyncIssueCode } from '@/lib/semanticTypes'
 import {
   getWikiTargetRoutePath,
   markdownRouteLookupKind,
@@ -95,6 +96,8 @@ export default function TreeView({
       key: `${item.path ?? 'workspace'}-${index}`,
       path: item.path || 'Workspace',
       message: item.message || 'Unable to load Markdown file',
+      code: item.code,
+      severity: item.severity,
     })) ?? []
 
   if (
@@ -107,6 +110,8 @@ export default function TreeView({
       key: 'workspace-last-error',
       path: 'Workspace',
       message: workspaceSyncStatus.lastError,
+      code: 'workspace_sync_error' as WorkspaceSyncIssueCode,
+      severity: 'error',
     })
   }
 
@@ -115,6 +120,8 @@ export default function TreeView({
       key: 'workspace-status-error',
       path: 'Workspace',
       message: workspaceSyncStatusError,
+      code: 'workspace_sync_status_error' as WorkspaceSyncIssueCode,
+      severity: 'error',
     })
   }
 
@@ -251,7 +258,12 @@ export default function TreeView({
               </summary>
               <ul className="workspace-sync-status__list">
                 {workspaceSyncIssues.map((item) => (
-                  <li key={item.key} className="workspace-sync-status__item">
+                  <li
+                    key={item.key}
+                    className="workspace-sync-status__item"
+                    data-validation-code={item.code}
+                    data-validation-severity={item.severity}
+                  >
                     <span className="workspace-sync-status__path">
                       {item.path}
                     </span>

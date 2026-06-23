@@ -17,16 +17,16 @@ import (
 type Routes struct {
 	status           func() workspacesync.SyncStatus
 	refresh          func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	listSnapshots    func(context.Context, string, int) (workspacesync.SnapshotList, error)
-	restoreWorkspace func(context.Context, string, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
+	listSnapshots    func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	restoreWorkspace func(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
 	authService      *coreauth.AuthService
 }
 
 type RoutesConfig struct {
 	Status           func() workspacesync.SyncStatus
 	Refresh          func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	ListSnapshots    func(context.Context, string, int) (workspacesync.SnapshotList, error)
-	RestoreWorkspace func(context.Context, string, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
+	ListSnapshots    func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	RestoreWorkspace func(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
 	AuthService      *coreauth.AuthService
 }
 
@@ -72,9 +72,10 @@ func (r *Routes) handleSnapshots(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace sync is not enabled"})
 		return
 	}
-	cursor := strings.TrimSpace(c.Query("cursor"))
-	if cursor != "" {
-		if len(cursor) > 256 || strings.ContainsAny(cursor, " \t\r\n") {
+	rawCursor := strings.TrimSpace(c.Query("cursor"))
+	cursor := workspacesync.NewCommitHashUnchecked(rawCursor)
+	if cursor.String() != "" {
+		if len(cursor.String()) > 256 || strings.ContainsAny(cursor.String(), " \t\r\n") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot cursor"})
 			return
 		}
@@ -107,8 +108,8 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 	}
 	status, err := r.restoreWorkspace(
 		c.Request.Context(),
-		c.Param("commit"),
-		workspacesync.Actor{ID: user.ID, Name: user.Username, Email: user.Email},
+		workspacesync.NewCommitHashUnchecked(strings.TrimSpace(c.Param("commit"))),
+		workspacesync.Actor{ID: workspacesync.NewActorIDUnchecked(user.ID), Name: user.Username, Email: user.Email},
 		workspacesync.SourceWeb,
 	)
 	if err != nil {

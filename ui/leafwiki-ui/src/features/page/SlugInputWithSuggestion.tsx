@@ -1,6 +1,7 @@
 import { FormInput } from '@/components/FormInput'
 import { mapApiError } from '@/lib/api/errors'
 import { suggestSlug } from '@/lib/api/pages'
+import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
 import { useDebounce } from '@/lib/useDebounce'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useState } from 'react'
@@ -51,10 +52,10 @@ export function SlugInputWithSuggestion({
       try {
         onSlugLoadingChange?.(true)
         const suggestion = await suggestSlug(
-          parentId,
+          parentId ? asPageID(parentId) : '',
           debouncedTitle,
-          workspaceId,
-          currentId,
+          asWorkspaceID(workspaceId),
+          currentId ? asPageID(currentId) : '',
         )
         onSlugChange(suggestion)
         onLastSlugTitleChange?.(debouncedTitle)

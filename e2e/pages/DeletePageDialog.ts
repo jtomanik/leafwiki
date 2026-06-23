@@ -51,7 +51,9 @@ export default class DeletePageDialog {
     await deleteButton.waitFor({ state: 'visible' });
     await Promise.all([
       this.page.waitForResponse(
-        (r) => r.url().includes('/api/pages/') && r.request().method() === 'DELETE',
+        (r) =>
+          /\/api\/(?:workspaces\/[^/]+\/)?pages\//.test(new URL(r.url()).pathname) &&
+          r.request().method() === 'DELETE',
       ),
       deleteButton.click(),
     ]);

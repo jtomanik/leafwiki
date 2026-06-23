@@ -6,6 +6,7 @@ import (
 
 	corebanding "github.com/perber/wiki/internal/branding"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 // ─── GetBrandingUseCase ──────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ func (uc *UpdateBrandingUseCase) Execute(_ context.Context, in UpdateBrandingInp
 
 type UploadLogoInput struct {
 	File     multipart.File
-	Filename string
+	Filename tree.AssetName
 }
 
 type UploadLogoOutput struct {
@@ -86,7 +87,7 @@ func NewUploadLogoUseCase(b *corebanding.BrandingService) *UploadLogoUseCase {
 }
 
 func (uc *UploadLogoUseCase) Execute(_ context.Context, in UploadLogoInput) (*UploadLogoOutput, error) {
-	path, err := uc.branding.UploadLogo(in.File, in.Filename)
+	path, err := uc.branding.UploadLogo(in.File, in.Filename.Filename())
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +133,7 @@ func (uc *DeleteLogoUseCase) Execute(_ context.Context) (*GetBrandingOutput, err
 
 type UploadFaviconInput struct {
 	File     multipart.File
-	Filename string
+	Filename tree.AssetName
 }
 
 type UploadFaviconOutput struct {
@@ -149,7 +150,7 @@ func NewUploadFaviconUseCase(b *corebanding.BrandingService) *UploadFaviconUseCa
 }
 
 func (uc *UploadFaviconUseCase) Execute(_ context.Context, in UploadFaviconInput) (*UploadFaviconOutput, error) {
-	path, err := uc.branding.UploadFavicon(in.File, in.Filename)
+	path, err := uc.branding.UploadFavicon(in.File, in.Filename.Filename())
 	if err != nil {
 		return nil, err
 	}

@@ -19,7 +19,7 @@ type fositeStore struct {
 	requestIDsToAccess  map[string]string
 	refreshTokens       map[string]storedRefreshToken
 	requestIDsToRefresh map[string]string
-	revokedRequestIDs   map[string]bool
+	revokedRequestKeys  map[string]bool
 	clientAssertionJTIs map[string]time.Time
 }
 
@@ -43,7 +43,7 @@ func newFositeStore() *fositeStore {
 		requestIDsToAccess:  map[string]string{},
 		refreshTokens:       map[string]storedRefreshToken{},
 		requestIDsToRefresh: map[string]string{},
-		revokedRequestIDs:   map[string]bool{},
+		revokedRequestKeys:  map[string]bool{},
 		clientAssertionJTIs: map[string]time.Time{},
 	}
 }
@@ -293,7 +293,7 @@ func (s *fositeStore) RevokeRefreshToken(_ context.Context, requestID string) er
 	}
 	stored.active = false
 	s.refreshTokens[signature] = stored
-	s.revokedRequestIDs[requestID] = true
+	s.revokedRequestKeys[requestID] = true
 	return nil
 }
 
@@ -308,7 +308,7 @@ func (s *fositeStore) RevokeAccessToken(_ context.Context, requestID string) err
 		return nil
 	}
 	delete(s.accessTokens, signature)
-	s.revokedRequestIDs[requestID] = true
+	s.revokedRequestKeys[requestID] = true
 	return nil
 }
 
@@ -341,7 +341,7 @@ func (s *fositeStore) RotateRefreshToken(_ context.Context, requestID string, si
 			delete(s.requestIDsToAccess, requestID)
 		}
 	}
-	s.revokedRequestIDs[requestID] = true
+	s.revokedRequestKeys[requestID] = true
 	return nil
 }
 

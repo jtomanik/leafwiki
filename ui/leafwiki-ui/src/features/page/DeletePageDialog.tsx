@@ -5,6 +5,7 @@ import { asApiLocalizedError } from '@/lib/api/errors'
 import { deletePage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
+import { asPageID, asPageVersion, asWorkspaceID } from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useViewerStore } from '../viewer/viewer'
 import { DIALOG_DELETE_PAGE_CONFIRMATION } from '@/lib/registries'
@@ -86,10 +87,10 @@ export function DeletePageDialog({
     setLoading(true)
     try {
       await deletePage(
-        pageId,
+        asPageID(pageId),
         deleteRecursive,
-        page?.version ?? '',
-        workspaceId,
+        asPageVersion(page?.version ?? ''),
+        asWorkspaceID(workspaceId),
       )
       toast.success(`${itemLabelCapitalized} deleted successfully`)
       navigate(redirectTo, { state: createNavigationVisitState() })

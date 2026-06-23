@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 )
 
@@ -13,7 +14,7 @@ var reservedPropertyKeys = map[string]struct{}{
 }
 
 // EnrichPageMetadata fills API page metadata from stored page metadata.
-func EnrichPageMetadata(page *dto.Page, readPageRaw func(string) (string, error)) {
+func EnrichPageMetadata(page *dto.Page, readPageRaw func(tree.PageID) (string, error)) {
 	if page == nil {
 		return
 	}
@@ -21,7 +22,7 @@ func EnrichPageMetadata(page *dto.Page, readPageRaw func(string) (string, error)
 	page.Tags = []string{}
 	page.Properties = map[string]string{}
 
-	raw, err := readPageRaw(page.ID)
+	raw, err := readPageRaw(tree.NewPageIDUnchecked(page.ID))
 	if err != nil {
 		return
 	}
@@ -45,7 +46,7 @@ type PublicMetadataPatch struct {
 	PropertiesPresent bool
 }
 
-func BuildMarkdownWithPublicMetadataPatch(currentRaw string, pageID string, title string, patch PublicMetadataPatch, body string) (string, error) {
+func BuildMarkdownWithPublicMetadataPatch(currentRaw string, pageID tree.PageID, title string, patch PublicMetadataPatch, body string) (string, error) {
 	doc, _, err := markdown.ParsePageDocument(currentRaw)
 	if err != nil {
 		return "", err
@@ -63,7 +64,7 @@ func BuildMarkdownWithPublicMetadataPatch(currentRaw string, pageID string, titl
 
 	meta := ApplyPublicMetadata(doc.Metadata, currentProperties, tags, properties)
 	meta.Version = 1
-	meta.Page.ID = strings.TrimSpace(pageID)
+	meta.Page.ID = pageID.MetadataValue()
 	meta.Page.Title = strings.TrimSpace(title)
 
 	return markdown.RenderPageDocument(markdown.PageDocument{

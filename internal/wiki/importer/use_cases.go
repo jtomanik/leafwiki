@@ -6,6 +6,7 @@ import (
 	"io"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	coreimporter "github.com/perber/wiki/internal/importer"
 )
 
@@ -57,7 +58,7 @@ func (uc *GetImportPlanUseCase) Execute(_ context.Context) (*GetImportPlanOutput
 	plan, err := uc.svc.GetCurrentPlan()
 	if err != nil {
 		if errors.Is(err, coreimporter.ErrNoPlan) {
-			return nil, sharederrors.NewLocalizedError("importer_no_plan", "No import plan available", "no import plan available", err)
+			return nil, sharederrors.NewLocalizedError(ErrCodeImporterNoPlan, "No import plan available", "no import plan available", err)
 		}
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (uc *GetImportPlanUseCase) Execute(_ context.Context) (*GetImportPlanOutput
 // ─── ExecuteImportUseCase ────────────────────────────────────────────────────
 
 type ExecuteImportInput struct {
-	UserID string
+	UserID tree.UserID
 }
 
 type ExecuteImportOutput struct {
@@ -87,13 +88,13 @@ func (uc *ExecuteImportUseCase) Execute(_ context.Context, in ExecuteImportInput
 	state, started, err := uc.svc.StartCurrentPlanExecution(in.UserID)
 	if err != nil {
 		if errors.Is(err, coreimporter.ErrImportExecutionRunning) {
-			return nil, sharederrors.NewLocalizedError("importer_execution_running", "Import is already running", "import is already running", err)
+			return nil, sharederrors.NewLocalizedError(ErrCodeImporterExecutionRunning, "Import is already running", "import is already running", err)
 		}
 		if errors.Is(err, coreimporter.ErrNoPlan) {
-			return nil, sharederrors.NewLocalizedError("importer_no_plan", "No import plan available", "no import plan available", err)
+			return nil, sharederrors.NewLocalizedError(ErrCodeImporterNoPlan, "No import plan available", "no import plan available", err)
 		}
 		if errors.Is(err, coreimporter.ErrImportStateUnavailable) {
-			return nil, sharederrors.NewLocalizedError("importer_state_unavailable", "Import state is unavailable", "import state is unavailable", err)
+			return nil, sharederrors.NewLocalizedError(ErrCodeImporterStateUnavailable, "Import state is unavailable", "import state is unavailable", err)
 		}
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (uc *ClearImportPlanUseCase) Execute(_ context.Context) (*coreimporter.Curr
 	}
 	if err != nil && !errors.Is(err, coreimporter.ErrNoPlan) {
 		if errors.Is(err, coreimporter.ErrImportStateUnavailable) {
-			return nil, sharederrors.NewLocalizedError("importer_state_unavailable", "Import state is unavailable", "import state is unavailable", err)
+			return nil, sharederrors.NewLocalizedError(ErrCodeImporterStateUnavailable, "Import state is unavailable", "import state is unavailable", err)
 		}
 		return nil, err
 	}

@@ -11,11 +11,11 @@ import (
 
 // CreatePageInput is the input for CreatePageUseCase.
 type CreatePageInput struct {
-	UserID   string
+	UserID   tree.UserID
 	Source   string
-	ParentID *string
+	ParentID *tree.PageID
 	Title    string
-	Slug     string
+	Slug     tree.Slug
 	Kind     *tree.NodeKind
 }
 
@@ -47,28 +47,28 @@ func (uc *CreatePageUseCase) Execute(_ context.Context, in CreatePageInput) (*Cr
 	ve := sharederrors.NewValidationErrors()
 
 	if in.Title == "" {
-		ve.Add("title", "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
 	}
 	if in.Kind == nil {
-		ve.Add("kind", "Kind must be specified")
+		ve.AddWithCode("kind", FieldCodePageKindRequired, MessageIDPageKindRequired, "Kind must be specified")
 	}
 	if in.Kind != nil && *in.Kind != tree.NodeKindPage && *in.Kind != tree.NodeKindSection {
-		ve.Add("kind", "Kind must be either 'page' or 'section'")
+		ve.AddWithCode("kind", FieldCodePageKindInvalid, MessageIDPageKindInvalid, "Kind must be either 'page' or 'section'")
 	}
-	if err := uc.slug.IsValidSlug(in.Slug); err != nil {
-		ve.Add("slug", err.Error())
+	if err := in.Slug.Validate(); err != nil {
+		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
 	}
 	if ve.HasErrors() {
 		return nil, ve
 	}
 
-	parentID, err := ValidateOptionalParentID(in.ParentID)
+	parentID, err := ValidateOptionalSemanticParentID(in.ParentID)
 	if err != nil {
 		return nil, err
 	}
 	in.ParentID = parentID
 
-	if in.ParentID != nil && *in.ParentID != "" {
+	if in.ParentID != nil && in.ParentID.String() != "" {
 		if _, err := uc.tree.FindPageByID(*in.ParentID); err != nil {
 			return nil, err
 		}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
@@ -12,8 +13,8 @@ import (
 
 // Routes is the RouteRegistrar for the links domain.
 type Routes struct {
-	getLinkStatus  *GetLinkStatusUseCase
-	authService    *coreauth.AuthService
+	getLinkStatus *GetLinkStatusUseCase
+	authService   *coreauth.AuthService
 }
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
@@ -55,7 +56,7 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 
 func (r *Routes) handleGetLinkStatus(c *gin.Context) {
 	pageID := c.Param("id")
-	out, err := r.getLinkStatus.Execute(c.Request.Context(), GetLinkStatusInput{PageID: pageID})
+	out, err := r.getLinkStatus.Execute(c.Request.Context(), GetLinkStatusInput{PageID: tree.NewPageIDUnchecked(pageID)})
 	if err != nil {
 		respondWithLinkError(c, err)
 		return

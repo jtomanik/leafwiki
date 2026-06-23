@@ -49,7 +49,7 @@ func (s *APIKeyService) Close() error {
 	return s.store.Close()
 }
 
-func (s *APIKeyService) CreateAPIKey(userID, name, createdByUserID string) (*APIKeyCreateResult, error) {
+func (s *APIKeyService) CreateAPIKey(userID UserID, name string, createdByUserID UserID) (*APIKeyCreateResult, error) {
 	if s == nil || s.store == nil || s.users == nil {
 		return nil, ErrAPIKeyNotFound
 	}
@@ -74,7 +74,7 @@ func (s *APIKeyService) CreateAPIKey(userID, name, createdByUserID string) (*API
 	}
 	raw := APIKeyPrefix + id + "_" + secretPart
 	key := &APIKey{
-		ID:              id,
+		ID:              NewAPIKeyIDUnchecked(id),
 		UserID:          userID,
 		Name:            name,
 		Prefix:          APIKeyPrefix + id,
@@ -89,7 +89,7 @@ func (s *APIKeyService) CreateAPIKey(userID, name, createdByUserID string) (*API
 	return &APIKeyCreateResult{Key: key, Secret: raw}, nil
 }
 
-func (s *APIKeyService) ListAPIKeys(userID string) ([]*APIKey, error) {
+func (s *APIKeyService) ListAPIKeys(userID UserID) ([]*APIKey, error) {
 	if s == nil || s.store == nil || s.users == nil {
 		return nil, ErrAPIKeyNotFound
 	}
@@ -99,7 +99,7 @@ func (s *APIKeyService) ListAPIKeys(userID string) ([]*APIKey, error) {
 	return s.store.ListActiveAPIKeys(userID)
 }
 
-func (s *APIKeyService) RevokeAPIKey(userID, keyID string) error {
+func (s *APIKeyService) RevokeAPIKey(userID UserID, keyID APIKeyID) error {
 	if s == nil || s.store == nil || s.users == nil {
 		return ErrAPIKeyNotFound
 	}
@@ -152,7 +152,7 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 	return &APIKeyVerification{Key: stored.key, User: user}, nil
 }
 
-func (s *APIKeyService) markAPIKeyUsedWithRetry(keyID string, usedAt time.Time) error {
+func (s *APIKeyService) markAPIKeyUsedWithRetry(keyID APIKeyID, usedAt time.Time) error {
 	_, err := retryAPIKeyTransientLocks(func() (struct{}, error) {
 		return struct{}{}, s.store.MarkAPIKeyUsed(keyID, usedAt)
 	})
@@ -184,7 +184,7 @@ func IsAPIKeyBearer(token string) bool {
 	return strings.HasPrefix(token, APIKeyPrefix)
 }
 
-func parseAPIKeyID(raw string) (string, error) {
+func parseAPIKeyID(raw string) (APIKeyID, error) {
 	if !strings.HasPrefix(raw, APIKeyPrefix) {
 		return "", fmt.Errorf("missing api key prefix")
 	}
@@ -193,7 +193,7 @@ func parseAPIKeyID(raw string) (string, error) {
 	if !ok || id == "" || secret == "" {
 		return "", fmt.Errorf("malformed api key")
 	}
-	return id, nil
+	return NewAPIKeyIDUnchecked(id), nil
 }
 
 func hashAPIKey(raw string) string {

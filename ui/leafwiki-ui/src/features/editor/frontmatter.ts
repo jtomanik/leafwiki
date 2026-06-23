@@ -1,3 +1,10 @@
+import {
+  asApiErrorCode,
+  asMessageID,
+  type ApiErrorCode,
+  type MessageID,
+} from '@/lib/semanticTypes'
+
 const INTERNAL_FIELD_PREFIX = 'leafwiki_'
 
 export type EditorFrontmatterFieldType = 'text' | 'number' | 'boolean' | 'list'
@@ -9,7 +16,28 @@ export type EditorFrontmatterField = {
   internal?: boolean
 }
 
-export type EditorFrontmatterValidationErrors = Record<string, string>
+export type EditorFrontmatterValidationError = {
+  code: ApiErrorCode
+  messageId: MessageID
+  message: string
+}
+
+export type EditorFrontmatterValidationErrors = Record<
+  string,
+  EditorFrontmatterValidationError
+>
+
+function validationError(
+  code: string,
+  messageId: string,
+  message: string,
+): EditorFrontmatterValidationError {
+  return {
+    code: asApiErrorCode(code),
+    messageId: asMessageID(messageId),
+    message,
+  }
+}
 
 function normalizeTag(tag: string) {
   return tag.trim().toLocaleLowerCase()
@@ -93,18 +121,30 @@ export function validateEditorFrontmatterMetadata(
 
   for (const tag of tags) {
     if (tag.trim() !== tag) {
-      errors.tags = 'Tags must not contain leading or trailing whitespace.'
+      errors.tags = validationError(
+        'frontmatter_tags_whitespace',
+        'validation.frontmatter.tags.whitespace',
+        'Tags must not contain leading or trailing whitespace.',
+      )
       break
     }
 
     if (tag.trim() === '') {
-      errors.tags = 'Tags must not be empty.'
+      errors.tags = validationError(
+        'frontmatter_tags_empty',
+        'validation.frontmatter.tags.empty',
+        'Tags must not be empty.',
+      )
       break
     }
 
     const key = tag.toLocaleLowerCase()
     if (seenTags.has(key)) {
-      errors.tags = 'Tags must be unique.'
+      errors.tags = validationError(
+        'frontmatter_tags_duplicate',
+        'validation.frontmatter.tags.duplicate',
+        'Tags must be unique.',
+      )
       break
     }
     seenTags.add(key)
@@ -118,34 +158,53 @@ export function validateEditorFrontmatterMetadata(
     const trimmedKey = field.key.trim()
 
     if (trimmedKey === '') {
-      errors[keyField] = 'Property key must not be empty.'
+      errors[keyField] = validationError(
+        'frontmatter_property_key_empty',
+        'validation.frontmatter.property_key.empty',
+        'Property key must not be empty.',
+      )
       return
     }
 
     if (trimmedKey !== field.key) {
-      errors[keyField] =
-        'Property key must not contain leading or trailing whitespace.'
+      errors[keyField] = validationError(
+        'frontmatter_property_key_whitespace',
+        'validation.frontmatter.property_key.whitespace',
+        'Property key must not contain leading or trailing whitespace.',
+      )
       return
     }
 
     if (trimmedKey.toLocaleLowerCase().startsWith(INTERNAL_FIELD_PREFIX)) {
-      errors[keyField] = 'Property key uses a reserved prefix.'
+      errors[keyField] = validationError(
+        'frontmatter_property_key_reserved_prefix',
+        'validation.frontmatter.property_key.reserved_prefix',
+        'Property key uses a reserved prefix.',
+      )
       return
     }
 
     const lowerKey = trimmedKey.toLocaleLowerCase()
     if (lowerKey === 'tags' || lowerKey === 'title') {
-      errors[keyField] = 'Property key is reserved.'
+      errors[keyField] = validationError(
+        'frontmatter_property_key_reserved',
+        'validation.frontmatter.property_key.reserved',
+        'Property key is reserved.',
+      )
       return
     }
 
     const dedupeKey = trimmedKey.toLocaleLowerCase()
     const existingIndex = seenKeys.get(dedupeKey)
     if (existingIndex !== undefined) {
-      errors[keyField] = 'Property key must be unique.'
+      const duplicateError = validationError(
+        'frontmatter_property_key_duplicate',
+        'validation.frontmatter.property_key.duplicate',
+        'Property key must be unique.',
+      )
+      errors[keyField] = duplicateError
       if (!errors[`properties.${existingIndex}.key`]) {
-        errors[`properties.${existingIndex}.key`] =
-          'Property key must be unique.'
+        errors[`properties.${existingIndex}.key`] = duplicateError
       }
       return
     }
@@ -156,8 +215,11 @@ export function validateEditorFrontmatterMetadata(
     }
 
     if (typeof field.value !== 'string') {
-      errors[valueField] =
-        'Property value must be a string, number, boolean, or flat list.'
+      errors[valueField] = validationError(
+        'frontmatter_property_value_type',
+        'validation.frontmatter.property_value.type',
+        'Property value must be a string, number, boolean, or flat list.',
+      )
     }
   })
 

@@ -38,12 +38,18 @@ const (
 )
 
 type ExecutionItemResult struct {
-	SourcePath string          `json:"source_path"`
-	TargetPath string          `json:"target_path"`
-	Action     ExecutionAction `json:"action"`
-	Error      *string         `json:"error,omitempty"`
-	Notes      []string        `json:"notes,omitempty"`
+	SourcePath tree.WorkspaceSourcePath `json:"source_path"`
+	TargetPath tree.RoutePath           `json:"target_path"`
+	Action     ExecutionAction          `json:"action"`
+	Error      *string                  `json:"error,omitempty"`
+	Notes      []string                 `json:"notes,omitempty"`
 }
+
+const (
+	importerLogFieldTargetPath = "target_path"
+	importerLogFieldSourcePath = "source_path"
+	importerLogFieldPageID     = "page_id"
+)
 
 type Executor struct {
 	plan                   *PlanResult
@@ -102,7 +108,7 @@ func buildImportedContent(mdFile *markdown.MarkdownFile, page *tree.Page, body s
 		meta.Version = 1
 	}
 	meta.Page = markdown.PageMetadataPage{
-		ID:    strings.TrimSpace(page.ID),
+		ID:    page.ID.MetadataValue(),
 		Title: strings.TrimSpace(page.Title),
 	}
 	return markdown.RenderPageDocument(markdown.PageDocument{
@@ -112,7 +118,7 @@ func buildImportedContent(mdFile *markdown.MarkdownFile, page *tree.Page, body s
 }
 
 // Execute runs the import based on the provided plan
-func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
+func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 	beforeExecution := e.wiki.TreeHash()
 	expectedTreeHash := e.plan.TreeHash
 	if e.startIndex > 0 {
@@ -152,7 +158,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 		}
 
 		item := e.plan.Items[index]
-		currentItemSourcePath := item.SourcePath
+		currentItemSourcePath := item.SourcePath.FilesystemPath()
 		e.reportProgress(ExecutionProgress{
 			ProcessedItems:        index,
 			TotalItems:            len(e.plan.Items),
@@ -177,7 +183,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to ensure path", "target_path", item.TargetPath, "error", err)
+				e.logger.Error("Failed to ensure path", importerLogFieldTargetPath, item.TargetPath, "error", err)
 				continue
 			}
 			// Read the content from the source path
@@ -188,10 +194,10 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Could not create page", "target_path", item.TargetPath, "error", errMsg)
+				e.logger.Error("Could not create page", importerLogFieldTargetPath, item.TargetPath, "error", errMsg)
 				continue
 			}
-			sourceAbs := filepath.Join(e.planOptions.SourceBasePath, filepath.FromSlash(item.SourcePath))
+			sourceAbs := filepath.Join(e.planOptions.SourceBasePath, filepath.FromSlash(item.SourcePath.FilesystemPath()))
 			mdFile, err := markdown.LoadMarkdownFile(sourceAbs)
 			if err != nil {
 				errMsg := err.Error()
@@ -199,7 +205,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to load source file", "source_path", sourceAbs, "error", err)
+				e.logger.Error("Failed to load source file", importerLogFieldSourcePath, sourceAbs, "error", err)
 				continue
 			}
 			importedBody, err := transformer.TransformContent(userID, item.SourcePath, page, mdFile.GetContent(), e.wiki)
@@ -209,7 +215,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to transform imported content", "source_path", sourceAbs, "error", err)
+				e.logger.Error("Failed to transform imported content", importerLogFieldSourcePath, sourceAbs, "error", err)
 				continue
 			}
 			importedContent, err := buildImportedContent(mdFile, page, importedBody)
@@ -219,7 +225,7 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to prepare imported content", "source_path", sourceAbs, "error", err)
+				e.logger.Error("Failed to prepare imported content", importerLogFieldSourcePath, sourceAbs, "error", err)
 				continue
 			}
 			if _, err := e.wiki.UpdatePage(userID, page.ID, page.Title, page.Slug, &importedContent, &page.Kind); err != nil {
@@ -228,21 +234,21 @@ func (e *Executor) Execute(userID string) (*ExecutionResult, error) {
 				execItem.Error = &errMsg
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
-				e.logger.Error("Failed to update page content", "page_id", page.ID, "error", err)
+				e.logger.Error("Failed to update page content", importerLogFieldPageID, page.ID, "error", err)
 				continue
 			}
 			execItem.Action = ExecutionActionCreated
 			result.ImportedCount++
-			e.logger.Info("Imported page", "source_path", item.SourcePath, "target_path", item.TargetPath, "page_id", page.ID)
+			e.logger.Info("Imported page", importerLogFieldSourcePath, item.SourcePath, importerLogFieldTargetPath, item.TargetPath, importerLogFieldPageID, page.ID)
 		case PlanActionSkip:
 			execItem.Action = ExecutionActionSkipped
-			e.logger.Info("Skipped page", "source_path", item.SourcePath, "target_path", item.TargetPath)
+			e.logger.Info("Skipped page", importerLogFieldSourcePath, item.SourcePath, importerLogFieldTargetPath, item.TargetPath)
 			result.SkippedCount++
 		default:
 			errMsg := "unknown action"
 			execItem.Action = ExecutionActionSkipped
 			execItem.Error = &errMsg
-			e.logger.Info("Skipped page with unknown action", "source_path", item.SourcePath, "target_path", item.TargetPath)
+			e.logger.Info("Skipped page with unknown action", importerLogFieldSourcePath, item.SourcePath, importerLogFieldTargetPath, item.TargetPath)
 			result.SkippedCount++
 		}
 

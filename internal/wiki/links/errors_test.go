@@ -28,7 +28,7 @@ func TestRespondWithLinkError_PageNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_page_not_found","message":"Page not found","template":"page not found"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"link_page_not_found","messageId":"errors.link.page_not_found","message":"Page not found","template":"page not found"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }
@@ -46,7 +46,7 @@ func TestRespondWithLinkError_ServiceUnavailable(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_service_unavailable","message":"Link service is unavailable","template":"link service is unavailable"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"link_service_unavailable","messageId":"errors.link.service_unavailable","message":"Link service is unavailable","template":"link service is unavailable"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }
@@ -64,7 +64,7 @@ func TestRespondWithLinkError_InternalErrorIsSanitized(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_internal_error","message":"Failed to load link status","template":"failed to load link status"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"failed to load link status"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }

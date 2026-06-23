@@ -1,16 +1,18 @@
 package links
 
+import "github.com/perber/wiki/internal/core/tree"
+
 type RefactorLinkMatch struct {
-	FromPageID string
+	FromPageID tree.PageID
 	FromTitle  string
-	ToPath     string
+	ToPath     tree.RoutePath
 	ToKind     string
 	Broken     bool
 }
 
 type RewriteRule struct {
-	OldPath    string
-	NewPath    string
+	OldPath    tree.RoutePath
+	NewPath    tree.RoutePath
 	Kind       string
 	OutputKind string
 }

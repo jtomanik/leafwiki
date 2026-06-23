@@ -10,6 +10,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/shared/sqliteutil"
+	"github.com/perber/wiki/internal/core/tree"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,7 +73,7 @@ func (s *TagsStore) ensureSchema() error {
 // SetTagsForPage replaces all tags for the given page atomically.
 // Tags are stored as-is — normalization (lowercase, dedup, trim) is the caller's responsibility.
 // All write paths go through TagsService.SetTagsForPage or ExtractTagsFromContent, which enforce this.
-func (s *TagsStore) SetTagsForPage(pageID string, tags []string) error {
+func (s *TagsStore) SetTagsForPage(pageID tree.PageID, tags []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -105,7 +106,7 @@ func (s *TagsStore) SetTagsForPage(pageID string, tags []string) error {
 	return tx.Commit()
 }
 
-func (s *TagsStore) DeleteTagsForPage(pageID string) error {
+func (s *TagsStore) DeleteTagsForPage(pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,7 +116,7 @@ func (s *TagsStore) DeleteTagsForPage(pageID string) error {
 
 // SetPageIndex atomically replaces tags and excerpt for a page.
 // Tags must already be normalized (lowercase, trimmed, deduped) by the caller.
-func (s *TagsStore) SetPageIndex(pageID string, tags []string, excerpt string) error {
+func (s *TagsStore) SetPageIndex(pageID tree.PageID, tags []string, excerpt string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -158,7 +159,7 @@ func (s *TagsStore) SetPageIndex(pageID string, tags []string, excerpt string) e
 }
 
 // DeletePageIndex removes tags and meta for a page atomically.
-func (s *TagsStore) DeletePageIndex(pageID string) error {
+func (s *TagsStore) DeletePageIndex(pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -179,12 +180,12 @@ func (s *TagsStore) DeletePageIndex(pageID string) error {
 }
 
 // GetExcerptsForPages returns a map of pageID → excerpt for the given page IDs.
-func (s *TagsStore) GetExcerptsForPages(pageIDs []string) (map[string]string, error) {
+func (s *TagsStore) GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(pageIDs) == 0 {
-		return map[string]string{}, nil
+		return map[tree.PageID]string{}, nil
 	}
 
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(pageIDs)), ",")
@@ -202,9 +203,10 @@ func (s *TagsStore) GetExcerptsForPages(pageIDs []string) (map[string]string, er
 	}
 	defer shared.LogClose(rows.Close, "could not close rows")
 
-	result := make(map[string]string)
+	result := make(map[tree.PageID]string)
 	for rows.Next() {
-		var pageID, excerpt string
+		var pageID tree.PageID
+		var excerpt string
 		if err := rows.Scan(&pageID, &excerpt); err != nil {
 			return nil, err
 		}
@@ -325,7 +327,7 @@ func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, lim
 }
 
 // GetPageIDsByTags returns page IDs that have ALL of the given tags (AND logic).
-func (s *TagsStore) GetPageIDsByTags(tags []string) ([]string, error) {
+func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -352,9 +354,9 @@ func (s *TagsStore) GetPageIDsByTags(tags []string) ([]string, error) {
 	}
 	defer shared.LogClose(rows.Close, "could not close rows")
 
-	var pageIDs []string
+	var pageIDs []tree.PageID
 	for rows.Next() {
-		var id string
+		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -393,12 +395,12 @@ func (s *TagsStore) getAllTagsLocked(filter string, limit int) ([]TagCount, erro
 }
 
 // GetTagsForPages returns a map of pageID → tags for the given page IDs.
-func (s *TagsStore) GetTagsForPages(pageIDs []string) (map[string][]string, error) {
+func (s *TagsStore) GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(pageIDs) == 0 {
-		return map[string][]string{}, nil
+		return map[tree.PageID][]string{}, nil
 	}
 
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(pageIDs)), ",")
@@ -417,9 +419,10 @@ func (s *TagsStore) GetTagsForPages(pageIDs []string) (map[string][]string, erro
 	}
 	defer shared.LogClose(rows.Close, "could not close rows")
 
-	result := make(map[string][]string)
+	result := make(map[tree.PageID][]string)
 	for rows.Next() {
-		var pageID, tag string
+		var pageID tree.PageID
+		var tag string
 		if err := rows.Scan(&pageID, &tag); err != nil {
 			return nil, err
 		}

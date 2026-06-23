@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestPrivateWorkspaceAPIListsGrantedWorkspaces(t *testing.T) {
@@ -80,7 +82,7 @@ func TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStore
 	}
 	grants := NewGrantStore(layout.DBPath)
 	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
-	var ensured string
+	var ensured workspaceid.WorkspaceID
 	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 		Registry:   registry,
 		Grants:     grants,
@@ -118,7 +120,7 @@ func TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStore
 		}
 	}
 
-	ensureReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID+"/ensure", nil)
+	ensureReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID.String()+"/ensure", nil)
 	ensureRec := httptest.NewRecorder()
 	api.ServeHTTP(ensureRec, ensureReq)
 
@@ -153,7 +155,7 @@ func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
 		t.Fatalf("grant alpha: %v", err)
 	}
 	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
-	var ensured string
+	var ensured workspaceid.WorkspaceID
 	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 		Registry:   registry,
 		Grants:     grants,
@@ -168,7 +170,7 @@ func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID+"/ensure", nil)
+	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID.String()+"/ensure", nil)
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
 
@@ -213,12 +215,28 @@ func TestPrivateWorkspaceAPIRejectsUngrantedWorkspace(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces/"+alpha.ID+"/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces/"+alpha.ID.String()+"/status", nil)
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode structured grant denial: %v; body=%q", err, rec.Body.String())
+	}
+	if body.Error.Code != "workspace_grant_denied" || body.Error.MessageID != "errors.workspace.grant_denied" {
+		t.Fatalf("structured error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", body.Error)
+	}
+	if !strings.Contains(body.Error.Message, "workspace access denied") {
+		t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
 	}
 }
 

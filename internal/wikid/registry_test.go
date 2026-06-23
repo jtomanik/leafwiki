@@ -2,6 +2,7 @@ package wikid
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/perber/wiki/internal/workspaceid"
 	_ "modernc.org/sqlite"
 )
 
@@ -65,10 +67,10 @@ func TestRegistryServiceRegistersStableNonHomeWorkspaceIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterWorkspace failed: %v", err)
 	}
-	if first.ID == "" || strings.ContainsAny(first.ID, " /_") {
+	if first.ID == "" || strings.ContainsAny(first.ID.String(), " /_") {
 		t.Fatalf("workspace ID = %q, want URL-safe slug", first.ID)
 	}
-	if !strings.HasPrefix(first.ID, "docs-") {
+	if !strings.HasPrefix(first.ID.String(), "docs-") {
 		t.Fatalf("workspace ID = %q, want display-name slug prefix", first.ID)
 	}
 
@@ -170,10 +172,12 @@ func TestRegistryDocumentWorkspaceDoesNotTrimLookupID(t *testing.T) {
 		UpdatedAt:   time.Now().UTC(),
 	})
 
-	if _, ok := doc.Workspace(" " + HomeWorkspaceID); ok {
+	leadingWhitespaceID := decodeWorkspaceIDForTest(t, " "+HomeWorkspaceID.StorageKey())
+	if _, ok := doc.Workspace(leadingWhitespaceID); ok {
 		t.Fatalf("workspace lookup with leading whitespace resolved %q", HomeWorkspaceID)
 	}
-	if _, ok := doc.Workspace(HomeWorkspaceID + " "); ok {
+	trailingWhitespaceID := decodeWorkspaceIDForTest(t, HomeWorkspaceID.StorageKey()+" ")
+	if _, ok := doc.Workspace(trailingWhitespaceID); ok {
 		t.Fatalf("workspace lookup with trailing whitespace resolved %q", HomeWorkspaceID)
 	}
 	if _, ok := doc.Workspace(HomeWorkspaceID); !ok {
@@ -367,14 +371,31 @@ func TestRegistryServiceConcurrentRegistrationAcrossProcessesUsesSQLiteAuthority
 
 func testWorkspaceRecord(id string) WorkspaceRecord {
 	now := time.Now().UTC()
+	workspaceID, err := workspaceid.ParseWorkspaceID(id)
+	if err != nil {
+		panic(err)
+	}
 	return WorkspaceRecord{
-		ID:          id,
+		ID:          workspaceID,
 		DisplayName: id,
 		DataDir:     filepath.Join(os.TempDir(), id+"-data"),
 		RootDir:     filepath.Join(os.TempDir(), id+"-root"),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+}
+
+func decodeWorkspaceIDForTest(t *testing.T, raw string) workspaceid.WorkspaceID {
+	t.Helper()
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal workspace ID fixture: %v", err)
+	}
+	var id workspaceid.WorkspaceID
+	if err := json.Unmarshal(payload, &id); err != nil {
+		t.Fatalf("Unmarshal workspace ID fixture: %v", err)
+	}
+	return id
 }
 
 func TestRegistryServiceListsWorkspacesInStableOrder(t *testing.T) {
@@ -404,7 +425,7 @@ func TestRegistryServiceListsWorkspacesInStableOrder(t *testing.T) {
 	}
 	got := []string{}
 	for _, workspace := range workspaces {
-		got = append(got, workspace.ID)
+		got = append(got, workspace.ID.String())
 	}
 	if len(got) != 3 || got[0] != "home" || !strings.HasPrefix(got[1], "alpha-") || !strings.HasPrefix(got[2], "zulu-") {
 		t.Fatalf("workspace order = %#v", got)
@@ -442,9 +463,13 @@ func TestWikidStoreHelperProcess(t *testing.T) {
 		}
 	case "grant":
 		store := NewGrantStore(layout.DBPath)
+		workspaceID, err := workspaceid.ParseWorkspaceID(os.Getenv("WIKID_HELPER_WORKSPACE_ID"))
+		if err != nil {
+			t.Fatalf("ParseWorkspaceID failed: %v", err)
+		}
 		if err := store.Upsert(Grant{
 			Subject:     os.Getenv("WIKID_HELPER_SUBJECT"),
-			WorkspaceID: os.Getenv("WIKID_HELPER_WORKSPACE_ID"),
+			WorkspaceID: workspaceID,
 			Role:        GrantRole(os.Getenv("WIKID_HELPER_ROLE")),
 		}); err != nil {
 			t.Fatalf("GrantStore.Upsert failed: %v", err)

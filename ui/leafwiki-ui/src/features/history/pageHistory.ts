@@ -8,6 +8,7 @@ import {
   type RevisionComparison,
   type RevisionSnapshot,
 } from '@/lib/api/revisions'
+import { asPageID, asRevisionID, asWorkspaceID } from '@/lib/semanticTypes'
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
@@ -86,7 +87,10 @@ async function loadPageHistoryState(
   })
 
   try {
-    const historyData = await listRevisions(pageId, workspaceId)
+    const historyData = await listRevisions(
+      asPageID(pageId),
+      asWorkspaceID(workspaceId),
+    )
 
     if (historyData.revisions.length === 0) {
       update({
@@ -98,7 +102,10 @@ async function loadPageHistoryState(
       return
     }
 
-    const latestRevision = await getLatestRevision(pageId, workspaceId)
+    const latestRevision = await getLatestRevision(
+      asPageID(pageId),
+      asWorkspaceID(workspaceId),
+    )
     const revisions = historyData.revisions
     const firstHistoricalRevision =
       revisions.find((revision) => revision.id !== latestRevision.id) ?? null
@@ -208,9 +215,9 @@ export function usePageHistory(
       })
       try {
         const data = await getRevisionSnapshot(
-          pageId,
-          selectedRevisionId,
-          workspaceId,
+          asPageID(pageId),
+          asRevisionID(selectedRevisionId),
+          asWorkspaceID(workspaceId),
         )
         if (cancelled) return
         update({ snapshot: data })
@@ -255,10 +262,10 @@ export function usePageHistory(
       })
       try {
         const data = await compareRevisions(
-          pageId,
-          selectedRevisionId,
-          latestRevisionId,
-          workspaceId,
+          asPageID(pageId),
+          asRevisionID(selectedRevisionId),
+          asRevisionID(latestRevisionId),
+          asWorkspaceID(workspaceId),
         )
         if (cancelled) return
         update({ comparison: data })
@@ -319,7 +326,11 @@ export async function loadMorePageHistory() {
   })
 
   try {
-    const data = await listRevisions(pageId, workspaceId, nextCursor)
+    const data = await listRevisions(
+      asPageID(pageId),
+      asWorkspaceID(workspaceId),
+      nextCursor,
+    )
     if (!isCurrentRequest()) return
     const currentRevisions = usePageHistoryStore.getState().revisions
     usePageHistoryStore.getState().update({

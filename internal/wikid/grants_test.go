@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestGrantStoreRejectsUnknownRole(t *testing.T) {
@@ -33,6 +35,18 @@ func TestGrantStoreRejectsNonURLSafeWorkspaceID(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "workspace ID") {
 		t.Fatalf("Upsert error = %v, want workspace ID validation", err)
+	}
+}
+
+func TestGrantStoreRejectsWorkspaceIDWhitespaceBeforeNormalization(t *testing.T) {
+	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
+	err := NewGrantStore(layout.DBPath).Upsert(Grant{
+		Subject:     "user:1",
+		WorkspaceID: workspaceid.WorkspaceID(" docs "),
+		Role:        GrantRoleViewer,
+	})
+	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDWhitespace {
+		t.Fatalf("Upsert error code = %q, want %q (err=%v)", code, workspaceid.ErrCodeWorkspaceIDWhitespace, err)
 	}
 }
 
@@ -162,7 +176,7 @@ func TestGrantStoreConcurrentUpsertsAcrossProcessesUseSQLiteAuthorityStore(t *te
 				"WIKID_HELPER_OP":           "grant",
 				"WIKID_HELPER_HOME":         layout.HomeDir,
 				"WIKID_HELPER_SUBJECT":      fmt.Sprintf("user:%02d", i),
-				"WIKID_HELPER_WORKSPACE_ID": home.ID,
+				"WIKID_HELPER_WORKSPACE_ID": home.ID.StorageKey(),
 				"WIKID_HELPER_ROLE":         string(GrantRoleEditor),
 			})
 		}()

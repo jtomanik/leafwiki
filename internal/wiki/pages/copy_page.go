@@ -13,12 +13,12 @@ import (
 
 // CopyPageInput is the input for CopyPageUseCase.
 type CopyPageInput struct {
-	UserID         string
+	UserID         tree.UserID
 	Source         string
-	SourcePageID   string
-	TargetParentID *string
+	SourcePageID   tree.PageID
+	TargetParentID *tree.PageID
 	Title          string
-	Slug           string
+	Slug           tree.Slug
 }
 
 // CopyPageOutput is the output of CopyPageUseCase.
@@ -50,16 +50,16 @@ func NewCopyPageUseCase(
 func (uc *CopyPageUseCase) Execute(_ context.Context, in CopyPageInput) (*CopyPageOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Title == "" {
-		ve.Add("title", "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
 	}
-	if err := uc.slug.IsValidSlug(in.Slug); err != nil {
-		ve.Add("slug", err.Error())
+	if err := uc.slug.IsValidSlug(in.Slug.FilesystemPath()); err != nil {
+		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
 	}
 	if ve.HasErrors() {
 		return nil, ve
 	}
 
-	targetParentID, err := ValidateOptionalParentID(in.TargetParentID)
+	targetParentID, err := ValidateOptionalSemanticParentID(in.TargetParentID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (uc *CopyPageUseCase) Execute(_ context.Context, in CopyPageInput) (*CopyPa
 	if err != nil {
 		return nil, err
 	}
-	cleanup := func() { _ = uc.tree.DeleteNode(in.UserID, *copyID, false, tree.VersionUnchecked) }
+	cleanup := func() { _ = uc.tree.DeleteNodeUncheckedVersion(in.UserID, *copyID, false) }
 
 	copyPage, err := uc.tree.GetPage(*copyID)
 	if err != nil {
@@ -88,8 +88,8 @@ func (uc *CopyPageUseCase) Execute(_ context.Context, in CopyPageInput) (*CopyPa
 		return nil, err
 	}
 
-	updatedContent := strings.ReplaceAll(page.Content, "/assets/"+page.ID+"/", "/assets/"+copyPage.ID+"/")
-	if err := uc.tree.UpdateNode(in.UserID, copyPage.ID, copyPage.Title, copyPage.Slug, &updatedContent, tree.VersionUnchecked, false); err != nil {
+	updatedContent := strings.ReplaceAll(page.Content, pageAssetURLPrefix(page.ID), pageAssetURLPrefix(copyPage.ID))
+	if err := uc.tree.UpdateNodeUncheckedVersion(in.UserID, copyPage.ID, copyPage.Title, copyPage.Slug, &updatedContent, false); err != nil {
 		cleanup()
 		_ = uc.assets.DeleteAllAssetsForPage(copyPage.PageNode)
 		return nil, err

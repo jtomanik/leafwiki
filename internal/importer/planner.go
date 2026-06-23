@@ -24,18 +24,18 @@ const (
 
 // ImportMDFile represents a markdown file to be imported
 type ImportMDFile struct {
-	SourcePath string // relative path to the markdown file in the zip directory
+	SourcePath tree.WorkspaceSourcePath // relative path to the markdown file in the zip directory
 }
 
 // PlanItem represents a single item in the import plan
 type PlanItem struct {
-	SourcePath  string        `json:"source_path"`
-	TargetPath  string        `json:"target_path"`
-	Title       string        `json:"title"`
-	DesiredSlug string        `json:"desired_slug"`
-	Kind        tree.NodeKind `json:"kind"`
-	Exists      bool          `json:"exists"`
-	ExistingID  *string       `json:"existing_id"`
+	SourcePath  tree.WorkspaceSourcePath `json:"source_path"`
+	TargetPath  tree.RoutePath           `json:"target_path"`
+	Title       string                   `json:"title"`
+	DesiredSlug tree.Slug                `json:"desired_slug"`
+	Kind        tree.NodeKind            `json:"kind"`
+	Exists      bool                     `json:"exists"`
+	ExistingID  *tree.PageID             `json:"existing_id"`
 
 	Action    PlanAction `json:"action"`
 	Conflicts []string   `json:"conflicts"`
@@ -101,7 +101,7 @@ func (p *Planner) CreatePlan(entries []ImportMDFile, options PlanOptions) (*Plan
 // analyzeEntry analyzes a entry (directory or file) to be imported
 func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanItem, error) {
 	// FS path for reading
-	sourcePath := filepath.Join(options.SourceBasePath, filepath.FromSlash(mdFile.SourcePath))
+	sourcePath := filepath.Join(options.SourceBasePath, filepath.FromSlash(mdFile.SourcePath.FilesystemPath()))
 
 	// Validate if sourcePath exists and is a file
 	info, err := os.Stat(sourcePath)
@@ -109,11 +109,11 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 		return nil, err
 	}
 	if info.IsDir() {
-		return nil, errors.New("source path is a directory, expected a file: " + mdFile.SourcePath)
+		return nil, errors.New("source path is a directory, expected a file: " + mdFile.SourcePath.FilesystemPath())
 	}
 
 	// normalize source path (zip-ish)
-	rel := filepath.ToSlash(strings.TrimSpace(mdFile.SourcePath))
+	rel := filepath.ToSlash(strings.TrimSpace(mdFile.SourcePath.FilesystemPath()))
 	rel = strings.TrimPrefix(rel, "/")
 
 	sourceFilename := path.Base(rel)
@@ -135,12 +135,12 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	targetBase := strings.Trim(strings.TrimSpace(options.TargetBasePath), "/")
 
 	kind := tree.NodeKindPage
-	var wikiPath string
+	var wikiPath tree.RoutePath
 
 	readmeFallback := sourceFilename == "README.md" && !p.sourceDirHasIndex(options.SourceBasePath, sourceDir)
 	if filenameLower == "index.md" || readmeFallback {
 		kind = tree.NodeKindSection
-		wikiPath = strings.Trim(path.Join(targetBase, normalizedSourceDir), "/")
+		wikiPath = tree.NewRoutePathUnchecked(strings.Trim(path.Join(targetBase, normalizedSourceDir), "/"))
 	} else {
 		// File names map to page slugs, so we normalize the basename but preserve the extension.
 		normalizedFilename, err := p.slugger.NormalizeFilenameToValidSlug(filenameLower) // e.g. "my-page.md"
@@ -151,7 +151,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 		if sourceFilename == "README.md" {
 			baseSlug = "README"
 		}
-		wikiPath = strings.Trim(path.Join(targetBase, normalizedSourceDir, baseSlug), "/")
+		wikiPath = tree.NewRoutePathUnchecked(strings.Trim(path.Join(targetBase, normalizedSourceDir, baseSlug), "/"))
 	}
 
 	// lookup existing
@@ -167,7 +167,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	}
 
 	// Determine fallback title
-	title := path.Base(wikiPath) // fallback to last segment of wiki path
+	title := wikiPath.LeafSlug().FilesystemPath() // fallback to last segment of wiki path
 	if wikiPath == "" {
 		// For root-level index.md or empty paths, use filename without extension
 		title = strings.TrimSuffix(filenameLower, path.Ext(filenameLower))
@@ -187,10 +187,9 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 
 	if !result.Exists {
 		// slug = last segment
-		slug := ""
+		var slug tree.Slug
 		if wikiPath != "" {
-			segs := strings.Split(wikiPath, "/")
-			slug = segs[len(segs)-1]
+			slug = wikiPath.LeafSlug()
 		}
 
 		return &PlanItem{
@@ -210,13 +209,17 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	}
 
 	last := result.Segments[len(result.Segments)-1]
+	var existingID *tree.PageID
+	if last.ID != nil {
+		existingID = last.ID
+	}
 	return &PlanItem{
 		SourcePath:  mdFile.SourcePath,
 		TargetPath:  wikiPath,
 		Title:       title,
 		DesiredSlug: last.Slug,
 		Exists:      true,
-		ExistingID:  last.ID,
+		ExistingID:  existingID,
 		Kind:        kind,
 		Action:      PlanActionSkip,
 		Notes:       notes,

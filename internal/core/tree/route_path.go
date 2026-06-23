@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func ValidateRoutePath(routePath string) (string, error) {
+func ValidateRoutePath(routePath string) (RoutePath, error) {
 	routePath = strings.TrimSpace(routePath)
 	if routePath == "" {
 		return "", fmt.Errorf("missing path")
@@ -20,7 +20,7 @@ func ValidateRoutePath(routePath string) (string, error) {
 			return "", fmt.Errorf("invalid path %s", routePath)
 		}
 	}
-	return routePath, nil
+	return RoutePath(routePath), nil
 }
 
 func MarkdownPathToRoutePath(markdownPath string) string {

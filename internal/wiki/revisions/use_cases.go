@@ -6,6 +6,7 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 // ─── DTO types ───────────────────────────────────────────────────────────────
@@ -76,18 +77,18 @@ func ToRevisionResponse(rev *revision.Revision, userResolver *coreauth.UserResol
 	}
 	var author *coreauth.UserLabel
 	if userResolver != nil {
-		author, _ = userResolver.ResolveUserLabel(rev.AuthorID)
+		author, _ = userResolver.ResolveUserLabel(coreauth.NewUserIDUnchecked(rev.AuthorID))
 	}
 	return &RevisionResponse{
-		ID:                rev.ID,
-		PageID:            rev.PageID,
-		ParentID:          rev.ParentID,
+		ID:                rev.ID.CommitID(),
+		PageID:            rev.PageID.MetadataValue(),
+		ParentID:          rev.ParentID.MetadataValue(),
 		Type:              string(rev.Type),
 		AuthorID:          rev.AuthorID,
 		Author:            author,
 		CreatedAt:         formatTime(rev.CreatedAt),
 		Title:             rev.Title,
-		Slug:              rev.Slug,
+		Slug:              rev.Slug.FilesystemPath(),
 		Kind:              rev.Kind,
 		Path:              rev.Path,
 		ContentHash:       rev.ContentHash,
@@ -136,7 +137,7 @@ const (
 	MaxRevisionListLimit     = 200
 )
 
-func NormalizeRevisionListLimit(limit *int, pageID string) (int, error) {
+func NormalizeRevisionListLimit(limit *int, pageID tree.PageID) (int, error) {
 	if limit == nil {
 		return DefaultRevisionListLimit, nil
 	}
@@ -146,7 +147,7 @@ func NormalizeRevisionListLimit(limit *int, pageID string) (int, error) {
 			"Revision list limit is invalid",
 			"revision list limit for page %s is invalid",
 			nil,
-			pageID,
+			pageID.MetadataValue(),
 		)
 	}
 	return *limit, nil

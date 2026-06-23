@@ -57,7 +57,8 @@ test('web heartbeat presence is visible to MCP context while viewing and editing
 }) => {
   const mcp = await connectMCPClient(appURL('/mcp'));
   const slug = `presence-e2e-${Date.now()}`;
-  const routePath = `/${slug}`;
+  const routePath = `/w/home/${slug}.md`;
+  const presencePath = `/${slug}`;
   const title = 'Presence E2E Page';
 
   try {
@@ -89,7 +90,7 @@ test('web heartbeat presence is visible to MCP context while viewing and editing
             syncMode: 'none',
           })) as WikiContext;
           expect(context.presenceStatus?.web).toBe('enabled');
-          viewSession = findWebSession(context, routePath);
+          viewSession = findWebSession(context, presencePath);
           return Boolean(viewSession);
         },
         { timeout: 15000 },
@@ -99,7 +100,7 @@ test('web heartbeat presence is visible to MCP context while viewing and editing
       dirty: false,
       mode: 'view',
       page: {
-        path: routePath,
+        path: presencePath,
         title,
       },
       type: 'web',
@@ -119,7 +120,7 @@ test('web heartbeat presence is visible to MCP context while viewing and editing
           const context = (await mcp.callTool('wiki_get_context', {
             syncMode: 'none',
           })) as WikiContext;
-          return findWebSession(context, routePath);
+          return findWebSession(context, presencePath);
         },
         { timeout: 15000 },
       )
@@ -127,7 +128,7 @@ test('web heartbeat presence is visible to MCP context while viewing and editing
         dirty: true,
         mode: 'edit',
         page: {
-          path: routePath,
+          path: presencePath,
           title,
         },
         type: 'web',

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -15,14 +16,14 @@ type workspaceSyncer interface {
 type WorkspaceSyncSideEffect struct {
 	svc          workspaceSyncer
 	log          *slog.Logger
-	actorForUser func(string) workspacesync.Actor
+	actorForUser func(tree.UserID) workspacesync.Actor
 }
 
 func NewWorkspaceSyncSideEffect(svc workspaceSyncer, log *slog.Logger) *WorkspaceSyncSideEffect {
 	return NewWorkspaceSyncSideEffectWithActorLookup(svc, log, nil)
 }
 
-func NewWorkspaceSyncSideEffectWithActorLookup(svc workspaceSyncer, log *slog.Logger, actorForUser func(string) workspacesync.Actor) *WorkspaceSyncSideEffect {
+func NewWorkspaceSyncSideEffectWithActorLookup(svc workspaceSyncer, log *slog.Logger, actorForUser func(tree.UserID) workspacesync.Actor) *WorkspaceSyncSideEffect {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -39,14 +40,14 @@ func (e *WorkspaceSyncSideEffect) ApplyRequired(event PageSaveEvent) error {
 	if e.svc == nil {
 		return nil
 	}
-	actorID := strings.TrimSpace(event.UserID)
+	actorID := workspacesync.NewActorIDUnchecked(event.UserID.ActorID())
 	if actorID == "" {
 		actorID = workspacesync.PublicEditorActor().ID
 	}
 	actor := workspacesync.Actor{ID: actorID}
 	if e.actorForUser != nil {
-		resolved := e.actorForUser(actorID)
-		if strings.TrimSpace(resolved.ID) == "" {
+		resolved := e.actorForUser(event.UserID)
+		if resolved.ID.Trimmed() == "" {
 			resolved.ID = actorID
 		}
 		actor = resolved

@@ -24,6 +24,7 @@ import (
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
+	"github.com/perber/wiki/internal/workspaceid"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -67,18 +68,18 @@ type Routes struct {
 	deleteAsset  *wikiassets.DeleteAssetUseCase
 
 	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
-	getWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
-	restoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	getWorkspaceRevision     func(context.Context, *tree.Page, tree.RevisionID) (*corerevision.RevisionSnapshot, error)
+	restoreWorkspaceRevision func(context.Context, *tree.Page, tree.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	workspaceSyncStatus      func() workspacesync.SyncStatus
 	workspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	listWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
+	listWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
 	workspaceRootDir         string
 	workspaceDataDir         string
 	markdownLinkRootPrefix   string
 	webPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	agentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
 	contextStore             *contextCheckpointStore
-	workspaceID              string
+	workspaceID              workspaceid.WorkspaceID
 	now                      func() time.Time
 	actorContextAllowed      bool
 	actorContextRequired     bool
@@ -119,17 +120,17 @@ type RoutesConfig struct {
 	DeleteAsset  *wikiassets.DeleteAssetUseCase
 
 	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
-	GetWorkspaceRevision     func(context.Context, *tree.Page, string) (*corerevision.RevisionSnapshot, error)
-	RestoreWorkspaceRevision func(context.Context, *tree.Page, string, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
+	GetWorkspaceRevision     func(context.Context, *tree.Page, tree.RevisionID) (*corerevision.RevisionSnapshot, error)
+	RestoreWorkspaceRevision func(context.Context, *tree.Page, tree.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	WorkspaceSyncStatus      func() workspacesync.SyncStatus
 	WorkspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	ListWorkspaceSnapshots   func(context.Context, string, int) (workspacesync.SnapshotList, error)
+	ListWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
 	WorkspaceRootDir         string
 	WorkspaceDataDir         string
 	MarkdownLinkRootPrefix   string
 	WebPresenceProvider      func(*coreauth.User) ([]wikipresence.Session, error)
 	AgentPresenceProvider    func() ([]projectdaemon.AgentPresenceSession, error)
-	WorkspaceID              string
+	WorkspaceID              workspaceid.WorkspaceID
 }
 
 func NewRoutes(cfg RoutesConfig) *Routes {

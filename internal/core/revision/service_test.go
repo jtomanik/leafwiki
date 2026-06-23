@@ -35,27 +35,35 @@ func assertCanonicalRevisionRawStorage(t *testing.T, raw string) {
 	}
 }
 
-func createRevisionTestPage(t *testing.T, treeService *tree.TreeService, title, slug, content string) string {
+func createRevisionTestPage(t *testing.T, treeService *tree.TreeService, title, slug, content string) tree.PageID {
 	t.Helper()
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode("tester", nil, title, slug, &kind)
+	id, err := treeService.CreateNode("tester", nil, title, tree.NewSlugUnchecked(slug), &kind)
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
-	if err := treeService.UpdateNode("tester", *id, title, slug, &content, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), *id, title, tree.NewSlugUnchecked(slug), &content, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 	return *id
 }
 
-func renderRevisionTestMarkdown(t *testing.T, pageID, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
+func revisionTestPageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(string(raw))
+}
+
+func revisionTestUserID(raw string) tree.UserID {
+	return tree.NewUserIDUnchecked(raw)
+}
+
+func renderRevisionTestMarkdown[T ~string](t *testing.T, pageID T, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
 	t.Helper()
 	raw, err := markdown.RenderPageDocument(markdown.PageDocument{
 		Body: body,
 		Metadata: markdown.PageMetadata{
 			Version: 1,
 			Page: markdown.PageMetadataPage{
-				ID:    pageID,
+				ID:    string(pageID),
 				Title: title,
 			},
 			Fields: fields,
@@ -68,9 +76,14 @@ func renderRevisionTestMarkdown(t *testing.T, pageID, title string, fields map[s
 	return raw
 }
 
-func writeLiveAsset(t *testing.T, storageDir, pageID, name, content string) {
+func revisionAssetPath[T ~string](storageDir string, pageID T, parts ...string) string {
+	elems := append([]string{storageDir, "assets", string(pageID)}, parts...)
+	return filepath.Join(elems...)
+}
+
+func writeLiveAsset[T ~string](t *testing.T, storageDir string, pageID T, name, content string) {
 	t.Helper()
-	dir := filepath.Join(storageDir, "assets", pageID)
+	dir := revisionAssetPath(storageDir, pageID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll asset dir failed: %v", err)
 	}
@@ -82,9 +95,10 @@ func writeLiveAsset(t *testing.T, storageDir, pageID, name, content string) {
 func TestRecordContentUpdateHappyPathAndNoop(t *testing.T) {
 	service, treeService, storageDir := newRevisionTestService(t)
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
+	authorID := revisionTestUserID("tester")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
 
-	rev, created, err := service.RecordContentUpdate(pageID, "tester", "first")
+	rev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), authorID, "first")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate failed: %v", err)
 	}
@@ -101,7 +115,7 @@ func TestRecordContentUpdateHappyPathAndNoop(t *testing.T) {
 		t.Fatalf("expected page metadata timestamps on revision")
 	}
 
-	rev2, created2, err := service.RecordContentUpdate(pageID, "tester", "second")
+	rev2, created2, err := service.RecordContentUpdate(revisionTestPageID(pageID), authorID, "second")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate second call failed: %v", err)
 	}
@@ -120,11 +134,11 @@ func TestRecordContentUpdatesHappyPathAndNoop(t *testing.T) {
 	writeLiveAsset(t, storageDir, pageID1, "a.txt", "asset-a")
 	writeLiveAsset(t, storageDir, pageID2, "b.txt", "asset-b")
 
-	page1, err := treeService.GetPage(pageID1)
+	page1, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID1))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
-	page2, err := treeService.GetPage(pageID2)
+	page2, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID2))
 	if err != nil {
 		t.Fatalf("GetPage(page2) failed: %v", err)
 	}
@@ -139,7 +153,7 @@ func TestRecordContentUpdatesHappyPathAndNoop(t *testing.T) {
 		}
 	}
 
-	revisions1, err := service.ListRevisions(pageID1)
+	revisions1, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID1))
 	if err != nil {
 		t.Fatalf("ListRevisions(page1) failed: %v", err)
 	}
@@ -147,7 +161,7 @@ func TestRecordContentUpdatesHappyPathAndNoop(t *testing.T) {
 		t.Fatalf("unexpected revisions for page1: %#v", revisions1)
 	}
 
-	revisions2, err := service.ListRevisions(pageID2)
+	revisions2, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID2))
 	if err != nil {
 		t.Fatalf("ListRevisions(page2) failed: %v", err)
 	}
@@ -165,7 +179,7 @@ func TestRecordContentUpdatesHappyPathAndNoop(t *testing.T) {
 		}
 	}
 
-	revisions1After, err := service.ListRevisions(pageID1)
+	revisions1After, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID1))
 	if err != nil {
 		t.Fatalf("ListRevisions(page1 after noop) failed: %v", err)
 	}
@@ -173,7 +187,7 @@ func TestRecordContentUpdatesHappyPathAndNoop(t *testing.T) {
 		t.Fatalf("expected page1 noop to keep 1 revision, got %d", len(revisions1After))
 	}
 
-	revisions2After, err := service.ListRevisions(pageID2)
+	revisions2After, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID2))
 	if err != nil {
 		t.Fatalf("ListRevisions(page2 after noop) failed: %v", err)
 	}
@@ -189,11 +203,11 @@ func TestRecordContentUpdates_PreservesPerInputErrors(t *testing.T) {
 	writeLiveAsset(t, storageDir, pageID1, "a.txt", "asset-a")
 	writeLiveAsset(t, storageDir, pageID2, "b.txt", "asset-b")
 
-	page1, err := treeService.GetPage(pageID1)
+	page1, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID1))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
-	page2, err := treeService.GetPage(pageID2)
+	page2, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID2))
 	if err != nil {
 		t.Fatalf("GetPage(page2) failed: %v", err)
 	}
@@ -212,7 +226,7 @@ func TestRecordContentUpdates_PreservesPerInputErrors(t *testing.T) {
 		t.Fatalf("unexpected error for page2: %v", errs[2])
 	}
 
-	revisions1, err := service.ListRevisions(pageID1)
+	revisions1, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID1))
 	if err != nil {
 		t.Fatalf("ListRevisions(page1) failed: %v", err)
 	}
@@ -220,7 +234,7 @@ func TestRecordContentUpdates_PreservesPerInputErrors(t *testing.T) {
 		t.Fatalf("expected 1 revision for page1, got %d", len(revisions1))
 	}
 
-	revisions2, err := service.ListRevisions(pageID2)
+	revisions2, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID2))
 	if err != nil {
 		t.Fatalf("ListRevisions(page2) failed: %v", err)
 	}
@@ -234,7 +248,7 @@ func TestRecordContentUpdates_DuplicatePageIDsStayDeterministic(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage(page) failed: %v", err)
 	}
@@ -249,7 +263,7 @@ func TestRecordContentUpdates_DuplicatePageIDsStayDeterministic(t *testing.T) {
 		}
 	}
 
-	revisions, err := service.ListRevisions(pageID)
+	revisions, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ListRevisions(page) failed: %v", err)
 	}
@@ -281,26 +295,27 @@ func TestServiceWrappersAndHelpers(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
 
-	state, err := service.CapturePageState(pageID)
+	typedPageID := revisionTestPageID(pageID)
+	state, err := service.CapturePageState(typedPageID)
 	if err != nil {
 		t.Fatalf("CapturePageState failed: %v", err)
 	}
-	if state.PageID != pageID || len(state.Assets) != 1 {
+	if state.PageID != typedPageID || len(state.Assets) != 1 {
 		t.Fatalf("state = %#v", state)
 	}
 
-	if _, _, err := service.RecordContentUpdate(pageID, "tester", "content"); err != nil {
+	if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content"); err != nil {
 		t.Fatalf("RecordContentUpdate failed: %v", err)
 	}
 
-	revisions, err := service.ListRevisions(pageID)
+	revisions, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ListRevisions failed: %v", err)
 	}
 	if len(revisions) < 1 {
 		t.Fatalf("expected revisions, got %#v", revisions)
 	}
-	paged, _, err := service.ListRevisionsPage(pageID, "", 1)
+	paged, _, err := service.ListRevisionsPage(tree.NewPageIDUnchecked(pageID), "", 1)
 	if err != nil {
 		t.Fatalf("ListRevisionsPage failed: %v", err)
 	}
@@ -308,10 +323,10 @@ func TestServiceWrappersAndHelpers(t *testing.T) {
 		t.Fatalf("expected one paged revision, got %d", len(paged))
 	}
 
-	if err := service.DeletePageData(pageID); err != nil {
+	if err := service.DeletePageData(typedPageID); err != nil {
 		t.Fatalf("DeletePageData failed: %v", err)
 	}
-	revisions, err = service.ListRevisions(pageID)
+	revisions, err = service.ListRevisions(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ListRevisions after delete failed: %v", err)
 	}
@@ -319,10 +334,10 @@ func TestServiceWrappersAndHelpers(t *testing.T) {
 		t.Fatalf("expected revisions to be deleted, got %#v", revisions)
 	}
 
-	if err := service.persistLiveAssets(pageID, nil); err != nil {
+	if err := service.persistLiveAssets(typedPageID, nil); err != nil {
 		t.Fatalf("persistLiveAssets(nil) failed: %v", err)
 	}
-	if _, err := service.scanLiveAssets("missing"); err != nil {
+	if _, err := service.scanLiveAssets(revisionTestPageID("missing")); err != nil {
 		t.Fatalf("scanLiveAssets(missing) failed: %v", err)
 	}
 }
@@ -332,14 +347,14 @@ func TestRecordAssetAndStructureBranches(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
 
-	rev1, created1, err := service.RecordAssetChange(pageID, "tester", "asset")
+	rev1, created1, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange failed: %v", err)
 	}
 	if !created1 {
 		t.Fatalf("expected first asset change to create revision")
 	}
-	rev2, created2, err := service.RecordAssetChange(pageID, "tester", "asset")
+	rev2, created2, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange second call failed: %v", err)
 	}
@@ -352,10 +367,10 @@ func TestRecordAssetAndStructureBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode(parent) failed: %v", err)
 	}
-	if err := treeService.MoveNode("tester", pageID, *parentID, tree.VersionUnchecked); err != nil {
+	if err := treeService.MoveNodeUncheckedVersion("tester", tree.NewPageIDUnchecked(pageID), *parentID); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
-	structureRev, created3, err := service.RecordStructureChange(pageID, "tester", "structure")
+	structureRev, created3, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
 	if err != nil {
 		t.Fatalf("RecordStructureChange failed: %v", err)
 	}
@@ -368,10 +383,11 @@ func TestRestoreAssetsHelpers(t *testing.T) {
 	service, treeService, storageDir := newRevisionTestService(t)
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 
-	if err := service.restoreAssets(pageID, []AssetRef{{Name: "dup.txt", SHA256: "abc", SizeBytes: 1}, {Name: "dup.txt", SHA256: "def", SizeBytes: 1}}); err == nil {
+	typedPageID := revisionTestPageID(pageID)
+	if err := service.restoreAssets(typedPageID, []AssetRef{{Name: "dup.txt", SHA256: "abc", SizeBytes: 1}, {Name: "dup.txt", SHA256: "def", SizeBytes: 1}}); err == nil {
 		t.Fatalf("expected duplicate asset names to fail")
 	}
-	if err := service.restoreAssets(pageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}}); err == nil {
+	if err := service.restoreAssets(typedPageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}}); err == nil {
 		t.Fatalf("expected missing asset blob to fail")
 	}
 
@@ -401,10 +417,11 @@ func TestRecordRestoreRevisionHelper(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
 
-	if err := service.recordRestoreRevision(pageID, "tester"); err != nil {
+	typedPageID := revisionTestPageID(pageID)
+	if err := service.recordRestoreRevision(typedPageID, revisionTestUserID("tester")); err != nil {
 		t.Fatalf("recordRestoreRevision failed: %v", err)
 	}
-	latest, err := service.GetLatestRevision(pageID)
+	latest, err := service.GetLatestRevision(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetLatestRevision failed: %v", err)
 	}
@@ -412,10 +429,10 @@ func TestRecordRestoreRevisionHelper(t *testing.T) {
 		t.Fatalf("latest restore revision = %#v", latest)
 	}
 
-	if err := os.RemoveAll(filepath.Join(storageDir, "assets", pageID)); err != nil {
+	if err := os.RemoveAll(revisionAssetPath(storageDir, pageID)); err != nil {
 		t.Fatalf("RemoveAll assets failed: %v", err)
 	}
-	if err := service.recordRestoreRevision(pageID, "tester"); err != nil {
+	if err := service.recordRestoreRevision(typedPageID, revisionTestUserID("tester")); err != nil {
 		t.Fatalf("recordRestoreRevision without live assets failed: %v", err)
 	}
 }
@@ -424,11 +441,12 @@ func TestPersistAndScanAssetHelperBranches(t *testing.T) {
 	service, treeService, storageDir := newRevisionTestService(t)
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
-	if err := os.MkdirAll(filepath.Join(storageDir, "assets", pageID, "subdir"), 0o755); err != nil {
+	if err := os.MkdirAll(revisionAssetPath(storageDir, pageID, "subdir"), 0o755); err != nil {
 		t.Fatalf("MkdirAll subdir failed: %v", err)
 	}
 
-	refs, err := service.scanLiveAssets(pageID)
+	typedPageID := revisionTestPageID(pageID)
+	refs, err := service.scanLiveAssets(typedPageID)
 	if err != nil {
 		t.Fatalf("scanLiveAssets failed: %v", err)
 	}
@@ -436,15 +454,15 @@ func TestPersistAndScanAssetHelperBranches(t *testing.T) {
 		t.Fatalf("unexpected refs: %#v", refs)
 	}
 
-	if err := service.persistLiveAssets(pageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}}); err == nil {
+	if err := service.persistLiveAssets(typedPageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}}); err == nil {
 		t.Fatalf("expected hash mismatch")
 	}
-	goodRef, err := buildAssetRef(filepath.Join(storageDir, "assets", pageID, "a.txt"), "a.txt")
+	goodRef, err := buildAssetRef(revisionAssetPath(storageDir, pageID, "a.txt"), "a.txt")
 	if err != nil {
 		t.Fatalf("buildAssetRef failed: %v", err)
 	}
 	goodRef.SizeBytes++
-	if err := service.persistLiveAssets(pageID, []AssetRef{goodRef}); err == nil {
+	if err := service.persistLiveAssets(typedPageID, []AssetRef{goodRef}); err == nil {
 		t.Fatalf("expected size mismatch")
 	}
 
@@ -456,7 +474,7 @@ func TestPersistAndScanAssetHelperBranches(t *testing.T) {
 	if err := os.WriteFile(badDir, []byte("not a dir"), 0o644); err != nil {
 		t.Fatalf("WriteFile bad asset dir failed: %v", err)
 	}
-	if _, err := service.scanLiveAssets(badPageID); err == nil {
+	if _, err := service.scanLiveAssets(revisionTestPageID(badPageID)); err == nil {
 		t.Fatalf("expected scanLiveAssets to fail when path is a file")
 	}
 }
@@ -496,7 +514,7 @@ func TestRecordOperationsWithoutAssets(t *testing.T) {
 	service, treeService, _ := newRevisionTestService(t)
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 
-	structureRev, created, err := service.RecordStructureChange(pageID, "tester", "structure")
+	structureRev, created, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
 	if err != nil {
 		t.Fatalf("RecordStructureChange failed: %v", err)
 	}
@@ -510,11 +528,12 @@ func TestCapturePageStateAndNewRevisionHelpers(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
 
-	state, err := service.capturePageState(pageID, true)
+	typedPageID := revisionTestPageID(pageID)
+	state, err := service.capturePageState(typedPageID, true)
 	if err != nil {
 		t.Fatalf("capturePageState with assets failed: %v", err)
 	}
-	if state.PageID != pageID || state.ParentID != "" || state.AssetManifestHash == "" {
+	if state.PageID != typedPageID || state.ParentID != "" || state.AssetManifestHash == "" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
 	if len(state.Assets) != 1 || state.Assets[0].Name != "a.txt" {
@@ -525,7 +544,7 @@ func TestCapturePageStateAndNewRevisionHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRevision failed: %v", err)
 	}
-	if rev.PageID != pageID || rev.AuthorID != "tester" || rev.AssetManifestHash != state.AssetManifestHash {
+	if rev.PageID != typedPageID || rev.AuthorID != "tester" || rev.AssetManifestHash != state.AssetManifestHash {
 		t.Fatalf("unexpected revision: %#v", rev)
 	}
 	if rev.PageCreatedAt.IsZero() || rev.PageUpdatedAt.IsZero() {
@@ -537,14 +556,14 @@ func TestRecordContentAndAssetUpdatesWithoutAssets(t *testing.T) {
 	service, treeService, _ := newRevisionTestService(t)
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 
-	assetRev1, created, err := service.RecordAssetChange(pageID, "tester", "asset")
+	assetRev1, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange first failed: %v", err)
 	}
 	if !created || assetRev1.AssetManifestHash == "" {
 		t.Fatalf("unexpected first asset revision: %#v created=%v", assetRev1, created)
 	}
-	assetRev2, created, err := service.RecordAssetChange(pageID, "tester", "asset")
+	assetRev2, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange second failed: %v", err)
 	}
@@ -553,10 +572,10 @@ func TestRecordContentAndAssetUpdatesWithoutAssets(t *testing.T) {
 	}
 
 	content := "hello-2"
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &content, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &content, false); err != nil {
 		t.Fatalf("UpdateNode content failed: %v", err)
 	}
-	assetRev3, created, err := service.RecordAssetChange(pageID, "tester", "asset after content")
+	assetRev3, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset after content")
 	if err != nil {
 		t.Fatalf("RecordAssetChange after content failed: %v", err)
 	}
@@ -565,10 +584,10 @@ func TestRecordContentAndAssetUpdatesWithoutAssets(t *testing.T) {
 	}
 
 	content = "hello-3"
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &content, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &content, false); err != nil {
 		t.Fatalf("UpdateNode second content failed: %v", err)
 	}
-	contentRev, created, err := service.RecordContentUpdate(pageID, "tester", "content")
+	contentRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate failed: %v", err)
 	}
@@ -598,11 +617,11 @@ func TestRestoreRevisionRehydratesLivePageState(t *testing.T) {
 	pageID := *pageIDPtr
 
 	originalContent := "first version"
-	if err := treeService.UpdateNode("tester", pageID, "Original", "original", &originalContent, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Original", tree.NewSlugUnchecked("original"), &originalContent, false); err != nil {
 		t.Fatalf("UpdateNode(original) failed: %v", err)
 	}
 	writeLiveAsset(t, storageDir, pageID, "old.txt", "old-asset")
-	originalRev, created, err := service.RecordAssetChange(pageID, "tester", "original state")
+	originalRev, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "original state")
 	if err != nil {
 		t.Fatalf("RecordAssetChange(original) failed: %v", err)
 	}
@@ -611,22 +630,22 @@ func TestRestoreRevisionRehydratesLivePageState(t *testing.T) {
 	}
 
 	changedContent := "second version"
-	if err := treeService.UpdateNode("tester", pageID, "Changed", "changed", &changedContent, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Changed", tree.NewSlugUnchecked("changed"), &changedContent, false); err != nil {
 		t.Fatalf("UpdateNode(changed) failed: %v", err)
 	}
-	if err := treeService.MoveNode("tester", pageID, *archiveID, tree.VersionUnchecked); err != nil {
+	if err := treeService.MoveNodeUncheckedVersion("tester", tree.NewPageIDUnchecked(pageID), *archiveID); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
-	if err := os.Remove(filepath.Join(storageDir, "assets", pageID, "old.txt")); err != nil {
+	if err := os.Remove(revisionAssetPath(storageDir, pageID, "old.txt")); err != nil {
 		t.Fatalf("Remove(old asset) failed: %v", err)
 	}
 	writeLiveAsset(t, storageDir, pageID, "new.txt", "new-asset")
 
-	if err := service.RestoreRevision(pageID, originalRev.ID, "tester"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(originalRev.ID), tree.UserID("tester")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -641,18 +660,18 @@ func TestRestoreRevisionRehydratesLivePageState(t *testing.T) {
 		t.Fatalf("restored path = %q", got)
 	}
 
-	oldAsset, err := os.ReadFile(filepath.Join(storageDir, "assets", pageID, "old.txt"))
+	oldAsset, err := os.ReadFile(revisionAssetPath(storageDir, pageID, "old.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(old asset) failed: %v", err)
 	}
 	if string(oldAsset) != "old-asset" {
 		t.Fatalf("old asset = %q", string(oldAsset))
 	}
-	if _, err := os.Stat(filepath.Join(storageDir, "assets", pageID, "new.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(revisionAssetPath(storageDir, pageID, "new.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected new asset to be removed, got %v", err)
 	}
 
-	latest, err := service.GetLatestRevision(pageID)
+	latest, err := service.GetLatestRevision(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetLatestRevision failed: %v", err)
 	}
@@ -676,11 +695,11 @@ func TestRecordContentUpdate_CapturesCanonicalPageMetadataWithoutLegacyExtraFron
 		map[string]interface{}{"aliases": []interface{}{"one"}},
 		"Body",
 	)
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &firstRaw, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
 
-	firstRev, created, err := service.RecordContentUpdate(pageID, "tester", "first")
+	firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "first")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
 	}
@@ -702,11 +721,11 @@ func TestRecordContentUpdate_CapturesCanonicalPageMetadataWithoutLegacyExtraFron
 		map[string]interface{}{"aliases": []interface{}{"two"}},
 		"Body",
 	)
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &secondRaw, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
 
-	secondRev, created, err := service.RecordContentUpdate(pageID, "tester", "second")
+	secondRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "second")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
 	}
@@ -746,10 +765,10 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 		map[string]interface{}{"aliases": []interface{}{"one"}},
 		"Body",
 	)
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &firstRaw, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
-	firstRev, created, err := service.RecordContentUpdate(pageID, "creator", "first")
+	firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "first")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
 	}
@@ -762,14 +781,14 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 		map[string]interface{}{"aliases": []interface{}{"two"}},
 		"Body changed",
 	)
-	if err := treeService.UpdateNode("editor", pageID, "Changed", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("editor"), tree.NewPageIDUnchecked(pageID), "Changed", tree.NewSlugUnchecked("page"), &secondRaw, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
-	if _, _, err := service.RecordContentUpdate(pageID, "editor", "second"); err != nil {
+	if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"); err != nil {
 		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
 	}
 
-	beforeRestore, err := treeService.GetPage(pageID)
+	beforeRestore, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage(before restore) failed: %v", err)
 	}
@@ -778,11 +797,11 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 	managedCreatorID := beforeRestore.Metadata.CreatorID
 	beforeUpdatedAt := beforeRestore.Metadata.UpdatedAt
 
-	if err := service.RestoreRevision(pageID, firstRev.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(firstRev.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage(after restore) failed: %v", err)
 	}
@@ -805,7 +824,7 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 		t.Fatalf("expected updated_at to advance on restore, before=%s after=%s", beforeUpdatedAt, page.Metadata.UpdatedAt)
 	}
 
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -817,13 +836,13 @@ func TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedField
 	if !has {
 		t.Fatalf("expected restored page to have frontmatter")
 	}
-	if fm.LeafWikiID != managedID {
+	if tree.NewPageIDUnchecked(fm.LeafWikiID) != managedID {
 		t.Fatalf("expected leafwiki_id to remain stable, got %q want %q", fm.LeafWikiID, managedID)
 	}
 	if fm.LeafWikiTitle != page.Title {
 		t.Fatalf("expected leafwiki_title to stay managed by the restored page title, got %q want %q", fm.LeafWikiTitle, page.Title)
 	}
-	if fm.LeafWikiCreatorID != managedCreatorID {
+	if tree.NewUserIDUnchecked(fm.LeafWikiCreatorID) != managedCreatorID {
 		t.Fatalf("expected leafwiki_creator_id to remain stable, got %q want %q", fm.LeafWikiCreatorID, managedCreatorID)
 	}
 	if fm.LeafWikiLastAuthorID != "restorer" {
@@ -858,7 +877,7 @@ func TestRestoreRevision_PreservesCanonicalFieldsAndExtraBoundaries(t *testing.T
 		Body: "First body",
 		Metadata: markdown.PageMetadata{
 			Version: 1,
-			Page:    markdown.PageMetadataPage{ID: pageID, Title: "Page"},
+			Page:    markdown.PageMetadataPage{ID: pageID.MetadataValue(), Title: "Page"},
 			Fields:  map[string]interface{}{"status": "draft", "priority": 2},
 			Extra:   map[string]interface{}{"source": "imported"},
 		},
@@ -866,10 +885,10 @@ func TestRestoreRevision_PreservesCanonicalFieldsAndExtraBoundaries(t *testing.T
 	if err != nil {
 		t.Fatalf("RenderPageDocument(first) failed: %v", err)
 	}
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), pageID, "Page", tree.NewSlugUnchecked("page"), &firstRaw, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
-	firstRev, created, err := service.RecordContentUpdate(pageID, "creator", "first")
+	firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "first")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
 	}
@@ -881,24 +900,24 @@ func TestRestoreRevision_PreservesCanonicalFieldsAndExtraBoundaries(t *testing.T
 		Body: "Second body",
 		Metadata: markdown.PageMetadata{
 			Version: 1,
-			Page:    markdown.PageMetadataPage{ID: pageID, Title: "Page"},
+			Page:    markdown.PageMetadataPage{ID: pageID.MetadataValue(), Title: "Page"},
 			Fields:  map[string]interface{}{"status": "ready"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("RenderPageDocument(second) failed: %v", err)
 	}
-	if err := treeService.UpdateNode("editor", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("editor"), pageID, "Page", tree.NewSlugUnchecked("page"), &secondRaw, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
-	if _, _, err := service.RecordContentUpdate(pageID, "editor", "second"); err != nil {
+	if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"); err != nil {
 		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
 	}
 
-	if err := service.RestoreRevision(pageID, firstRev.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(firstRev.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -932,10 +951,10 @@ func TestRestoreRevision_RestoresExplicitEmptyMetadataSnapshot(t *testing.T) {
 	pageID := *pageIDPtr
 
 	firstRaw := renderRevisionTestMarkdown(t, pageID, "Page", nil, nil, "Empty metadata body")
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &firstRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &firstRaw, true); err != nil {
 		t.Fatalf("UpdateNode(first raw) failed: %v", err)
 	}
-	firstRev, created, err := service.RecordContentUpdate(pageID, "creator", "empty metadata")
+	firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "empty metadata")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate(first) failed: %v", err)
 	}
@@ -951,17 +970,17 @@ func TestRestoreRevision_RestoresExplicitEmptyMetadataSnapshot(t *testing.T) {
 		map[string]interface{}{"source": "imported"},
 		"Non-empty metadata body",
 	)
-	if err := treeService.UpdateNode("editor", pageID, "Page", "page", &secondRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("editor"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &secondRaw, true); err != nil {
 		t.Fatalf("UpdateNode(second raw) failed: %v", err)
 	}
-	if _, _, err := service.RecordContentUpdate(pageID, "editor", "non-empty metadata"); err != nil {
+	if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "non-empty metadata"); err != nil {
 		t.Fatalf("RecordContentUpdate(second) failed: %v", err)
 	}
 
-	if err := service.RestoreRevision(pageID, firstRev.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(firstRev.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -993,11 +1012,11 @@ func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *test
 		nil,
 		"Current body",
 	)
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &initialRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &initialRaw, true); err != nil {
 		t.Fatalf("UpdateNode(initial raw) failed: %v", err)
 	}
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -1018,11 +1037,11 @@ func TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter(t *test
 		t.Fatalf("SaveRevision failed: %v", err)
 	}
 
-	if err := service.RestoreRevision(pageID, legacyRevision.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(legacyRevision.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
 
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -1053,11 +1072,11 @@ func TestRestoreRevision_LegacyRevisionWithExtraFrontmatterWritesCanonicalMetada
 	pageID := *pageIDPtr
 
 	initialContent := "Current body"
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &initialContent, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &initialContent, false); err != nil {
 		t.Fatalf("UpdateNode(initial content) failed: %v", err)
 	}
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -1086,11 +1105,11 @@ func TestRestoreRevision_LegacyRevisionWithExtraFrontmatterWritesCanonicalMetada
 		t.Fatalf("SaveRevision failed: %v", err)
 	}
 
-	if err := service.RestoreRevision(pageID, legacyRevision.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(legacyRevision.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
 
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -1122,11 +1141,11 @@ func TestRestoreRevision_LegacyBodyThatLooksLikeFrontmatterStaysBody(t *testing.
 	pageID := *pageIDPtr
 
 	initialContent := "Current body"
-	if err := treeService.UpdateNode("creator", pageID, "Page", "page", &initialContent, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("creator"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &initialContent, false); err != nil {
 		t.Fatalf("UpdateNode(initial content) failed: %v", err)
 	}
 
-	page, err := treeService.GetPage(pageID)
+	page, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -1148,11 +1167,11 @@ func TestRestoreRevision_LegacyBodyThatLooksLikeFrontmatterStaysBody(t *testing.
 		t.Fatalf("SaveRevision failed: %v", err)
 	}
 
-	if err := service.RestoreRevision(pageID, legacyRevision.ID, "restorer"); err != nil {
+	if err := service.RestoreRevision(tree.NewPageIDUnchecked(pageID), tree.RevisionID(legacyRevision.ID), tree.UserID("restorer")); err != nil {
 		t.Fatalf("RestoreRevision failed: %v", err)
 	}
 
-	restoredPage, err := treeService.GetPage(pageID)
+	restoredPage, err := treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("GetPage(after restore) failed: %v", err)
 	}
@@ -1160,7 +1179,7 @@ func TestRestoreRevision_LegacyBodyThatLooksLikeFrontmatterStaysBody(t *testing.
 		t.Fatalf("expected YAML-looking content to stay body, got %q", restoredPage.Content)
 	}
 
-	raw, err := treeService.ReadPageRaw(pageID)
+	raw, err := treeService.ReadPageRaw(tree.NewPageIDUnchecked(pageID))
 	if err != nil {
 		t.Fatalf("ReadPageRaw failed: %v", err)
 	}
@@ -1182,7 +1201,7 @@ func TestRecordContentAndStructureRebuildMissingPreviousManifest(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
 
-	firstRev, created, err := service.RecordAssetChange(pageID, "tester", "asset")
+	firstRev, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange failed: %v", err)
 	}
@@ -1195,10 +1214,10 @@ func TestRecordContentAndStructureRebuildMissingPreviousManifest(t *testing.T) {
 	}
 
 	content := "hello-updated"
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &content, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &content, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
-	contentRev, created, err := service.RecordContentUpdate(pageID, "tester", "content")
+	contentRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate failed: %v", err)
 	}
@@ -1215,7 +1234,7 @@ func TestRecordContentAndStructureRebuildMissingPreviousManifest(t *testing.T) {
 	if err := os.Remove(service.store.assetManifestPath(contentRev.AssetManifestHash)); err != nil {
 		t.Fatalf("Remove rebuilt manifest failed: %v", err)
 	}
-	structureRev, created, err := service.RecordStructureChange(pageID, "tester", "structure")
+	structureRev, created, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
 	if err != nil {
 		t.Fatalf("RecordStructureChange failed: %v", err)
 	}
@@ -1231,18 +1250,18 @@ func TestCheckRevisionIntegrityReportsBrokenArtifacts(t *testing.T) {
 	service, treeService, storageDir := newRevisionTestService(t)
 
 	pageID1 := createRevisionTestPage(t, treeService, "Page1", "page1", "hello")
-	_, _, err := service.RecordContentUpdate(pageID1, "tester", "content")
+	_, _, err := service.RecordContentUpdate(revisionTestPageID(pageID1), "tester", "content")
 	if err != nil {
 		t.Fatalf("RecordContentUpdate page1 failed: %v", err)
 	}
-	revs1, err := service.ListRevisions(pageID1)
+	revs1, err := service.ListRevisions(tree.NewPageIDUnchecked(pageID1))
 	if err != nil || len(revs1) == 0 {
 		t.Fatalf("ListRevisions page1 failed: %#v %v", revs1, err)
 	}
 	if err := os.Remove(service.store.contentBlobPath(revs1[0].ContentHash)); err != nil {
 		t.Fatalf("Remove content blob failed: %v", err)
 	}
-	issues1, err := service.CheckRevisionIntegrity(pageID1)
+	issues1, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID1))
 	if err != nil {
 		t.Fatalf("CheckRevisionIntegrity page1 failed: %v", err)
 	}
@@ -1252,14 +1271,14 @@ func TestCheckRevisionIntegrityReportsBrokenArtifacts(t *testing.T) {
 
 	pageID2 := createRevisionTestPage(t, treeService, "Page2", "page2", "hello")
 	writeLiveAsset(t, storageDir, pageID2, "a.txt", "asset-a")
-	assetRev, _, err := service.RecordAssetChange(pageID2, "tester", "asset")
+	assetRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID2), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange page2 failed: %v", err)
 	}
 	if err := os.Remove(service.store.assetManifestPath(assetRev.AssetManifestHash)); err != nil {
 		t.Fatalf("Remove asset manifest failed: %v", err)
 	}
-	issues2, err := service.CheckRevisionIntegrity(pageID2)
+	issues2, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID2))
 	if err != nil {
 		t.Fatalf("CheckRevisionIntegrity page2 failed: %v", err)
 	}
@@ -1269,7 +1288,7 @@ func TestCheckRevisionIntegrityReportsBrokenArtifacts(t *testing.T) {
 
 	pageID3 := createRevisionTestPage(t, treeService, "Page3", "page3", "hello")
 	writeLiveAsset(t, storageDir, pageID3, "a.txt", "asset-a")
-	assetRev3, _, err := service.RecordAssetChange(pageID3, "tester", "asset")
+	assetRev3, _, err := service.RecordAssetChange(revisionTestPageID(pageID3), "tester", "asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange page3 failed: %v", err)
 	}
@@ -1280,7 +1299,7 @@ func TestCheckRevisionIntegrityReportsBrokenArtifacts(t *testing.T) {
 	if err := os.WriteFile(service.store.AssetBlobPath(refs[0].SHA256), []byte("tampered"), 0o644); err != nil {
 		t.Fatalf("WriteFile tampered asset blob failed: %v", err)
 	}
-	issues3, err := service.CheckRevisionIntegrity(pageID3)
+	issues3, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID3))
 	if err != nil {
 		t.Fatalf("CheckRevisionIntegrity page3 failed: %v", err)
 	}
@@ -1294,22 +1313,22 @@ func TestCompareRevisionSnapshots(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
 	writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
 
-	baseRev, _, err := service.RecordAssetChange(pageID, "tester", "base")
+	baseRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "base")
 	if err != nil {
 		t.Fatalf("RecordAssetChange base failed: %v", err)
 	}
 
 	content := "two"
-	if err := treeService.UpdateNode("tester", pageID, "Page", "page", &content, tree.VersionUnchecked, false); err != nil {
+	if err := treeService.UpdateNodeUncheckedVersion(tree.UserID("tester"), tree.NewPageIDUnchecked(pageID), "Page", tree.NewSlugUnchecked("page"), &content, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 	writeLiveAsset(t, storageDir, pageID, "b.txt", "asset-b")
-	targetRev, _, err := service.RecordAssetChange(pageID, "tester", "target")
+	targetRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "target")
 	if err != nil {
 		t.Fatalf("RecordAssetChange target failed: %v", err)
 	}
 
-	comparison, err := service.CompareRevisionSnapshots(pageID, baseRev.ID, targetRev.ID)
+	comparison, err := service.CompareRevisionSnapshots(tree.NewPageIDUnchecked(pageID), tree.RevisionID(baseRev.ID), tree.RevisionID(targetRev.ID))
 	if err != nil {
 		t.Fatalf("CompareRevisionSnapshots failed: %v", err)
 	}
@@ -1329,16 +1348,16 @@ func TestGetRevisionAssetReturnsBlobForDeletedLiveAsset(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
 	writeLiveAsset(t, storageDir, pageID, "image.png", "asset-image")
 
-	rev, _, err := service.RecordAssetChange(pageID, "tester", "with asset")
+	rev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "with asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange failed: %v", err)
 	}
 
-	if err := os.Remove(filepath.Join(storageDir, "assets", pageID, "image.png")); err != nil {
+	if err := os.Remove(revisionAssetPath(storageDir, pageID, "image.png")); err != nil {
 		t.Fatalf("Remove live asset failed: %v", err)
 	}
 
-	asset, err := service.GetRevisionAsset(pageID, rev.ID, "image.png")
+	asset, err := service.GetRevisionAsset(tree.NewPageIDUnchecked(pageID), tree.RevisionID(rev.ID), tree.AssetName("image.png"))
 	if err != nil {
 		t.Fatalf("GetRevisionAsset failed: %v", err)
 	}
@@ -1362,12 +1381,12 @@ func TestGetRevisionAssetReturnsNotFoundForMissingManifestEntry(t *testing.T) {
 	pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
 	writeLiveAsset(t, storageDir, pageID, "image.png", "asset-image")
 
-	rev, _, err := service.RecordAssetChange(pageID, "tester", "with asset")
+	rev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "with asset")
 	if err != nil {
 		t.Fatalf("RecordAssetChange failed: %v", err)
 	}
 
-	_, err = service.GetRevisionAsset(pageID, rev.ID, "missing.png")
+	_, err = service.GetRevisionAsset(tree.NewPageIDUnchecked(pageID), tree.RevisionID(rev.ID), tree.AssetName("missing.png"))
 	localized, ok := sharederrors.AsLocalizedError(err)
 	if !ok {
 		t.Fatalf("expected localized error, got %T", err)

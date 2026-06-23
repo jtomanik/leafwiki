@@ -19,7 +19,7 @@ func (n *migrationNodeAdapter) ID() string {
 	if n == nil || n.node == nil {
 		return ""
 	}
-	return n.node.ID
+	return n.node.ID.String()
 }
 
 func (n *migrationNodeAdapter) Title() string {
@@ -33,7 +33,7 @@ func (n *migrationNodeAdapter) Slug() string {
 	if n == nil || n.node == nil {
 		return ""
 	}
-	return n.node.Slug
+	return n.node.Slug.FilesystemPath()
 }
 
 func (n *migrationNodeAdapter) Kind() string {
@@ -57,8 +57,8 @@ func (n *migrationNodeAdapter) Metadata() treemigration.Metadata {
 	return treemigration.Metadata{
 		CreatedAt:    n.node.Metadata.CreatedAt,
 		UpdatedAt:    n.node.Metadata.UpdatedAt,
-		CreatorID:    n.node.Metadata.CreatorID,
-		LastAuthorID: n.node.Metadata.LastAuthorID,
+		CreatorID:    n.node.Metadata.CreatorID.String(),
+		LastAuthorID: n.node.Metadata.LastAuthorID.String(),
 	}
 }
 
@@ -69,8 +69,8 @@ func (n *migrationNodeAdapter) SetMetadata(metadata treemigration.Metadata) {
 	n.node.Metadata = PageMetadata{
 		CreatedAt:    metadata.CreatedAt,
 		UpdatedAt:    metadata.UpdatedAt,
-		CreatorID:    metadata.CreatorID,
-		LastAuthorID: metadata.LastAuthorID,
+		CreatorID:    UserID(metadata.CreatorID),
+		LastAuthorID: UserID(metadata.LastAuthorID),
 	}
 }
 

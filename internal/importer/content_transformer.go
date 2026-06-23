@@ -19,8 +19,13 @@ import (
 )
 
 type importTarget struct {
-	targetPath string
+	targetPath tree.RoutePath
 	kind       tree.NodeKind
+}
+
+type assetUploadKey struct {
+	pageID    tree.PageID
+	assetPath string
 }
 
 type contentTransformer struct {
@@ -31,7 +36,7 @@ type contentTransformer struct {
 	pagesBySource          map[string]importTarget
 	pagesByBasename        map[string][]importTarget
 	pagesBySuffix          map[string][]importTarget
-	assetUploads           map[string]string
+	assetUploads           map[assetUploadKey]string
 }
 
 type ContentTransformerOptions struct {
@@ -51,7 +56,7 @@ func newContentTransformerWithOptions(plan *PlanResult, sourceBasePath string, a
 	pagesByBasename := make(map[string][]importTarget, len(plan.Items))
 	pagesBySuffix := make(map[string][]importTarget, len(plan.Items))
 	for _, item := range plan.Items {
-		normalizedSource := normalizePlanSourcePath(item.SourcePath)
+		normalizedSource := normalizePlanSourcePath(item.SourcePath.FilesystemPath())
 		target := importTarget{
 			targetPath: item.TargetPath,
 			kind:       item.Kind,
@@ -75,15 +80,15 @@ func newContentTransformerWithOptions(plan *PlanResult, sourceBasePath string, a
 		pagesBySource:          pagesBySource,
 		pagesByBasename:        pagesByBasename,
 		pagesBySuffix:          pagesBySuffix,
-		assetUploads:           map[string]string{},
+		assetUploads:           map[assetUploadKey]string{},
 	}
 }
 
 // TransformContent rewrites Markdown links, wiki links, and asset references for one imported page.
 // Rewrites only happen outside inline code, fenced blocks, and indented code so examples remain untouched.
 func (t *contentTransformer) TransformContent(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	content string,
 	wiki ImporterWiki,
@@ -101,8 +106,8 @@ func (t *contentTransformer) TransformContent(
 
 // rewriteMarkdownLinks rewrites regular Markdown links and images in non-code segments only.
 func (t *contentTransformer) rewriteMarkdownLinks(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	content string,
 	wiki ImporterWiki,
@@ -129,8 +134,8 @@ func (t *contentTransformer) rewriteMarkdownLinks(
 }
 
 func (t *contentTransformer) rewriteMarkdownReferenceDefinitions(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	content string,
 	wiki ImporterWiki,
@@ -269,8 +274,8 @@ func parseMarkdownReferenceDestination(content string, lineStart int, lineEnd in
 
 // rewriteWikiLinks handles Obsidian-style wiki links and converts them to plain Markdown links.
 func (t *contentTransformer) rewriteWikiLinks(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	content string,
 	wiki ImporterWiki,
@@ -354,8 +359,8 @@ type rewriteDestinationOptions struct {
 }
 
 func (t *contentTransformer) rewriteDestination(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	destination string,
 	wiki ImporterWiki,
@@ -386,8 +391,8 @@ func (t *contentTransformer) rewriteDestination(
 }
 
 func (t *contentTransformer) resolveAssetDestination(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	href string,
 	wiki ImporterWiki,
@@ -411,8 +416,8 @@ func (t *contentTransformer) resolveAssetDestination(
 // resolveDestination first tries to map the href to another imported page.
 // If that fails, it falls back to importing a local asset from the source package.
 func (t *contentTransformer) resolveDestination(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	href string,
 	wiki ImporterWiki,
@@ -441,9 +446,9 @@ func (t *contentTransformer) resolveDestination(
 func formatResolvedTargetPath(target importTarget) string {
 	switch target.kind {
 	case tree.NodeKindSection:
-		return strings.Trim(target.targetPath, "/")
+		return target.targetPath.Clean().FilesystemPath()
 	default:
-		trimmed := strings.Trim(target.targetPath, "/")
+		trimmed := target.targetPath.Clean().FilesystemPath()
 		if strings.EqualFold(path.Ext(trimmed), ".md") {
 			return trimmed
 		}
@@ -468,7 +473,7 @@ func (t *contentTransformer) formatResolvedHref(target importTarget) string {
 
 // resolvePageTarget resolves links only against files that are part of the current import plan.
 // This avoids guessing against unrelated existing wiki pages and keeps imports predictable.
-func (t *contentTransformer) resolvePageTarget(sourcePath string, href string) (importTarget, bool) {
+func (t *contentTransformer) resolvePageTarget(sourcePath tree.WorkspaceSourcePath, href string) (importTarget, bool) {
 	candidates := buildSourceCandidates(t.sourceBasePath, sourcePath, href)
 	if !strings.HasPrefix(href, "/") && !strings.HasPrefix(href, ".") {
 		candidates = append(candidates, buildSourceCandidates(t.sourceBasePath, sourcePath, "/"+href)...)
@@ -557,8 +562,8 @@ func impliedImportTargetKind(href string) (tree.NodeKind, bool) {
 // resolveAndUploadAsset imports local non-Markdown files into the target page's asset folder
 // and caches the public path so repeated references on the same page reuse the upload result.
 func (t *contentTransformer) resolveAndUploadAsset(
-	userID string,
-	sourcePath string,
+	userID tree.UserID,
+	sourcePath tree.WorkspaceSourcePath,
 	page *tree.Page,
 	href string,
 	wiki ImporterWiki,
@@ -568,7 +573,7 @@ func (t *contentTransformer) resolveAndUploadAsset(
 		return "", nil
 	}
 
-	cacheKey := page.ID + "::" + assetAbs
+	cacheKey := assetUploadKey{pageID: page.ID, assetPath: assetAbs}
 	if uploaded, ok := t.assetUploads[cacheKey]; ok {
 		return uploaded, nil
 	}
@@ -581,7 +586,7 @@ func (t *contentTransformer) resolveAndUploadAsset(
 		_ = file.Close()
 	}()
 
-	publicPath, err := wiki.UploadAsset(userID, page.ID, multipart.File(file), filepath.Base(assetAbs), t.assetMaxBytes)
+	publicPath, err := wiki.UploadAsset(userID, page.ID, multipart.File(file), tree.NewAssetNameUnchecked(filepath.Base(assetAbs)), t.assetMaxBytes)
 	if err != nil {
 		return "", fmt.Errorf("upload asset %q: %w", assetAbs, err)
 	}
@@ -625,7 +630,7 @@ func decodeImportTarget(value string) string {
 	return decoded
 }
 
-func buildSourceCandidates(sourceBasePath string, sourcePath string, href string) []string {
+func buildSourceCandidates(sourceBasePath string, sourcePath tree.WorkspaceSourcePath, href string) []string {
 	raw := filepath.ToSlash(strings.TrimSpace(href))
 	if raw == "" {
 		return nil
@@ -635,7 +640,7 @@ func buildSourceCandidates(sourceBasePath string, sourcePath string, href string
 	if strings.HasPrefix(raw, "/") {
 		base = path.Clean(strings.TrimPrefix(raw, "/"))
 	} else {
-		currentDir := path.Dir(filepath.ToSlash(sourcePath))
+		currentDir := path.Dir(filepath.ToSlash(sourcePath.FilesystemPath()))
 		if currentDir == "." {
 			currentDir = ""
 		}
@@ -705,7 +710,7 @@ func sourceDirReadmeFallbackFile(sourceBasePath string, sourceDir string) (strin
 	return "", false
 }
 
-func (t *contentTransformer) fallbackWikiPageHref(sourcePath string, href string) (string, bool) {
+func (t *contentTransformer) fallbackWikiPageHref(sourcePath tree.WorkspaceSourcePath, href string) (string, bool) {
 	rawTarget, suffix := splitURLSuffix(href)
 	if rawTarget == "" || isExternalHref(rawTarget) || strings.HasPrefix(rawTarget, "#") {
 		return "", false
@@ -891,7 +896,7 @@ func normalizeSourcePathSuffixLookupKey(href string) (string, bool) {
 
 // resolveAssetPath keeps asset resolution inside the extracted import workspace.
 // This prevents uploaded archives from referencing files outside the package on disk.
-func resolveAssetPath(sourceBasePath string, sourcePath string, href string) (string, bool) {
+func resolveAssetPath(sourceBasePath string, sourcePath tree.WorkspaceSourcePath, href string) (string, bool) {
 	raw := filepath.ToSlash(strings.TrimSpace(href))
 	if raw == "" {
 		return "", false
@@ -904,7 +909,7 @@ func resolveAssetPath(sourceBasePath string, sourcePath string, href string) (st
 	if strings.HasPrefix(raw, "/") {
 		rel = path.Clean(strings.TrimPrefix(raw, "/"))
 	} else {
-		currentDir := path.Dir(filepath.ToSlash(sourcePath))
+		currentDir := path.Dir(filepath.ToSlash(sourcePath.FilesystemPath()))
 		if currentDir == "." {
 			currentDir = ""
 		}
@@ -1112,13 +1117,17 @@ func uniqueStrings(values []string) []string {
 }
 
 func uniqueImportTargets(values []importTarget) []importTarget {
-	seen := make(map[string]struct{}, len(values))
+	type importTargetKey struct {
+		targetPath tree.RoutePath
+		kind       tree.NodeKind
+	}
+	seen := make(map[importTargetKey]struct{}, len(values))
 	out := make([]importTarget, 0, len(values))
 	for _, value := range values {
 		if value.targetPath == "" {
 			continue
 		}
-		key := value.targetPath + "\x00" + string(value.kind)
+		key := importTargetKey{targetPath: value.targetPath, kind: value.kind}
 		if _, ok := seen[key]; ok {
 			continue
 		}

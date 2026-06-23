@@ -201,6 +201,20 @@ Tool names use the canonical `wiki_*` prefix. LeafWiki is pre-release, so the
 old unprefixed names were removed rather than kept as aliases; clients must
 migrate legacy unprefixed calls to their canonical prefixed names.
 
+Tool names are stable semantic IDs. Message-only success payloads include both
+`messageId` and `message`, for example
+`{"messageId":"mcp.tools.wiki_move_page.success","message":"Page moved"}`.
+Agents and tests should assert `messageId` when they need result semantics and
+reserve `message` assertions for visible-copy or backward-compatibility checks.
+Tool errors keep readable text content and include stable details under
+`_meta.error`, including `code`, `messageId`, and `message`. This applies to
+errors returned by LeafWiki tool handlers. Domain errors, target helper
+validation, and auth/role failures use specific codes. Some low-level
+tool-specific guardrails still use the stable generic `mcp_tool_error` fallback
+until promoted to domain-specific codes. Protocol-level failures such as an
+unknown tool name or JSON schema decode failure may still be returned by the MCP
+SDK as protocol errors.
+
 Always available:
 
 - `wiki_get_context`

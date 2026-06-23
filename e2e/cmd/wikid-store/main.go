@@ -8,12 +8,13 @@ import (
 	"os"
 
 	"github.com/perber/wiki/internal/wikid"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type grantInput struct {
-	Subject     string `json:"subject"`
-	WorkspaceID string `json:"workspaceId"`
-	Role        string `json:"role"`
+	Subject     string                  `json:"subject"`
+	WorkspaceID workspaceid.WorkspaceID `json:"workspaceId"`
+	Role        string                  `json:"role"`
 }
 
 type registerWorkspaceInput struct {

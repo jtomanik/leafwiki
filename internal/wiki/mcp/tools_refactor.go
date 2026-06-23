@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/perber/wiki/internal/core/tree"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
@@ -19,9 +20,9 @@ func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
 			PageID:      pageID,
 			Kind:        in.Kind,
 			Title:       in.Title,
-			Slug:        in.Slug,
+			Slug:        tree.NewSlugUnchecked(in.Slug),
 			Content:     in.Content,
-			NewParentID: in.ParentID,
+			NewParentID: mcpPageIDPtr(in.ParentID),
 		})
 		if err != nil {
 			return nil, err
@@ -35,17 +36,17 @@ func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		page, err := r.applyRef.Execute(ctx, wikipages.RefactorApplyInput{
-			UserID:       actor.ID,
+			UserID:       tree.NewUserIDUnchecked(actor.ID),
 			Source:       pagesave.PageMutationSourceMCP,
-			Version:      strings.TrimSpace(in.Version),
+			Version:      tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
 			RewriteLinks: in.RewriteLinks,
 			RefactorPreviewInput: wikipages.RefactorPreviewInput{
 				PageID:      pageID,
 				Kind:        in.Kind,
 				Title:       in.Title,
-				Slug:        in.Slug,
+				Slug:        tree.NewSlugUnchecked(in.Slug),
 				Content:     in.Content,
-				NewParentID: in.ParentID,
+				NewParentID: mcpPageIDPtr(in.ParentID),
 			},
 		})
 		if err != nil {

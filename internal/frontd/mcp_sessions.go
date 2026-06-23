@@ -6,33 +6,37 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type MCPSessionBindings struct {
 	mu       sync.Mutex
-	sessions map[string]string
+	sessions map[string]workspaceid.WorkspaceID
 }
 
 func NewMCPSessionBindings() *MCPSessionBindings {
-	return &MCPSessionBindings{sessions: map[string]string{}}
+	return &MCPSessionBindings{sessions: map[string]workspaceid.WorkspaceID{}}
 }
 
-func (b *MCPSessionBindings) Bind(sessionID string, workspaceID string) error {
+func (b *MCPSessionBindings) Bind(sessionID string, workspaceID workspaceid.WorkspaceID) error {
 	sessionID = strings.TrimSpace(sessionID)
-	workspaceID = strings.TrimSpace(workspaceID)
 	if sessionID == "" || workspaceID == "" {
 		return nil
+	}
+	if err := workspaceID.Validate(); err != nil {
+		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if existing := b.sessions[sessionID]; existing != "" && existing != workspaceID {
-		return fmt.Errorf("mcp session %q is bound to workspace %q", sessionID, existing)
+		return fmt.Errorf("mcp session %q is bound to workspace %q", sessionID, existing.String())
 	}
 	b.sessions[sessionID] = workspaceID
 	return nil
 }
 
-func (b *MCPSessionBindings) Workspace(sessionID string) (string, bool) {
+func (b *MCPSessionBindings) Workspace(sessionID string) (workspaceid.WorkspaceID, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	workspaceID, ok := b.sessions[strings.TrimSpace(sessionID)]
@@ -51,8 +55,8 @@ func (b *MCPSessionBindings) Unbind(sessionID string) {
 
 type WorkspaceMCPHandlerOptions struct {
 	Sessions    *MCPSessionBindings
-	Resolve     func(*http.Request, string) (WorkspaceRoute, error)
-	ResolveRoot func(*http.Request) (string, error)
+	Resolve     func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error)
+	ResolveRoot func(*http.Request) (workspaceid.WorkspaceID, error)
 	Proxy       func(WorkspaceRoute) http.Handler
 }
 
@@ -77,7 +81,7 @@ func (h *workspaceMCPHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 				workspaceID = boundWorkspaceID
 			}
 		}
-		if strings.TrimSpace(workspaceID) == "" {
+		if workspaceID == "" {
 			var err error
 			workspaceID, err = h.opts.ResolveRoot(req)
 			if err != nil {
@@ -87,7 +91,7 @@ func (h *workspaceMCPHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		}
 	}
 	if h.opts.Resolve == nil || h.opts.Proxy == nil {
-		http.Error(w, "mcp workspace router unavailable", http.StatusServiceUnavailable)
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeMCPWorkspaceRouterUnavailable, "mcp workspace router unavailable")
 		return
 	}
 	route, err := h.opts.Resolve(req, workspaceID)
@@ -95,18 +99,18 @@ func (h *workspaceMCPHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		writeWorkspaceMCPError(w, err)
 		return
 	}
-	if strings.TrimSpace(route.WorkspaceID) == "" {
+	if route.WorkspaceID == "" {
 		route.WorkspaceID = workspaceID
 	}
 	if h.opts.Sessions != nil {
 		if err := h.opts.Sessions.Bind(req.Header.Get("Mcp-Session-Id"), route.WorkspaceID); err != nil {
-			http.Error(w, "mcp session workspace mismatch", http.StatusConflict)
+			writeFrontdError(w, http.StatusConflict, errCodeMCPSessionWorkspaceMismatch, "mcp session workspace mismatch")
 			return
 		}
 	}
 	proxy := h.opts.Proxy(route)
 	if proxy == nil {
-		http.Error(w, "workspace mcp unavailable", http.StatusServiceUnavailable)
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeMCPWorkspaceUnavailable, "workspace mcp unavailable")
 		return
 	}
 	clone := req.Clone(req.Context())
@@ -156,17 +160,17 @@ func (w *mcpSessionResponseWriter) Unwrap() http.ResponseWriter {
 func writeWorkspaceMCPError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrWorkspaceNotFound):
-		http.Error(w, "workspace not found", http.StatusNotFound)
+		writeFrontdError(w, http.StatusNotFound, errCodeWorkspaceNotFound, "workspace not found")
 	case errors.Is(err, ErrWorkspaceForbidden):
-		http.Error(w, "workspace forbidden", http.StatusForbidden)
+		writeFrontdError(w, http.StatusForbidden, errCodeWorkspaceForbidden, "workspace forbidden")
 	case errors.Is(err, ErrWorkspaceAmbiguous):
-		http.Error(w, "workspace selection is ambiguous", http.StatusConflict)
+		writeFrontdError(w, http.StatusConflict, errCodeWorkspaceAmbiguous, "workspace selection is ambiguous")
 	default:
-		http.Error(w, "workspace unavailable", http.StatusServiceUnavailable)
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceUnavailable, "workspace unavailable")
 	}
 }
 
-func parseWorkspaceMCPPath(path string) (string, bool) {
+func parseWorkspaceMCPPath(path string) (workspaceid.WorkspaceID, bool) {
 	rest := strings.TrimPrefix(path, "/mcp/workspaces/")
 	if rest == path {
 		return "", false
@@ -175,5 +179,9 @@ func parseWorkspaceMCPPath(path string) (string, bool) {
 	if workspaceID == "" {
 		return "", false
 	}
-	return workspaceID, true
+	typedWorkspaceID, err := workspaceid.ParseWorkspaceID(workspaceID)
+	if err != nil {
+		return "", false
+	}
+	return typedWorkspaceID, true
 }

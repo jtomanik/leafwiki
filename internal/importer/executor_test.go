@@ -22,11 +22,11 @@ type fakeExecWiki struct {
 	ensureCalls int
 	updateCalls int
 
-	ensureFn func(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error)
-	updateFn func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error)
+	ensureFn func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error)
+	updateFn func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error)
 
 	lastUpdatedContent *string
-	ensureTargets      []string
+	ensureTargets      []tree.RoutePath
 	ensureKinds        []tree.NodeKind
 	updateTitles       []string
 	uploadCalls        int
@@ -36,15 +36,15 @@ type fakeExecWiki struct {
 
 func (f *fakeExecWiki) TreeHash() string { return f.hash }
 
-func (f *fakeExecWiki) LookupPagePath(path string) (*tree.PathLookup, error) {
+func (f *fakeExecWiki) LookupPagePath(path tree.RoutePath) (*tree.PathLookup, error) {
 	panic("not used by Executor")
 }
 
-func (f *fakeExecWiki) LookupPagePathForKind(path string, kind tree.NodeKind) (*tree.PathLookup, error) {
+func (f *fakeExecWiki) LookupPagePathForKind(path tree.RoutePath, kind tree.NodeKind) (*tree.PathLookup, error) {
 	panic("not used by Executor")
 }
 
-func (f *fakeExecWiki) EnsurePath(userID string, targetPath string, title string, kind *tree.NodeKind) (*tree.Page, error) {
+func (f *fakeExecWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 	f.ensureCalls++
 	f.ensureTargets = append(f.ensureTargets, targetPath)
 	if kind != nil {
@@ -53,10 +53,10 @@ func (f *fakeExecWiki) EnsurePath(userID string, targetPath string, title string
 	if f.ensureFn != nil {
 		return f.ensureFn(userID, targetPath, title, kind)
 	}
-	return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+	return &tree.Page{PageNode: &tree.PageNode{ID: tree.NewPageIDUnchecked("p1"), Title: title, Slug: "slug", Kind: *kind}}, nil
 }
 
-func (f *fakeExecWiki) UpdatePage(userID string, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+func (f *fakeExecWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 	f.updateCalls++
 	f.lastUpdatedContent = content
 	f.updateTitles = append(f.updateTitles, title)
@@ -68,11 +68,11 @@ func (f *fakeExecWiki) UpdatePage(userID string, id, title, slug string, content
 	return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
 }
 
-func (f *fakeExecWiki) UploadAsset(userID, pageID string, file multipart.File, filename string, maxBytes int64) (string, error) {
+func (f *fakeExecWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, maxBytes int64) (string, error) {
 	f.uploadCalls++
-	f.uploadedAssets = append(f.uploadedAssets, filename)
+	f.uploadedAssets = append(f.uploadedAssets, filename.Filename())
 	f.lastUploadMaxBytes = maxBytes
-	return "/assets/" + pageID + "/" + filename, nil
+	return "/assets/" + pageID.MetadataValue() + "/" + filename.Filename(), nil
 }
 
 func writeTmp(t *testing.T, dir, rel, content string) {
@@ -92,7 +92,7 @@ func TestExecutor_StalePlan(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: t.TempDir()}
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
-	got, err := ex.Execute("user1")
+	got, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err == nil {
 		t.Fatalf("expected stale plan error")
 	}
@@ -107,7 +107,7 @@ func TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter(t *testing.T)
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		w.updateTitles = append(w.updateTitles, title)
 		if content != nil {
@@ -126,7 +126,7 @@ func TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter(t *testing.T)
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
-	res, err := ex.Execute("user1")
+	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestExecutor_Create_HappyPath_PreservesDistinctExtraFieldValues(t *testing.
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		w.updateTitles = append(w.updateTitles, title)
 		if content != nil {
@@ -207,7 +207,7 @@ func TestExecutor_Create_HappyPath_PreservesDistinctExtraFieldValues(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -246,7 +246,7 @@ func TestExecutor_Skip_DoesNotCallWiki(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute("user1")
+	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestExecutor_Create_EnsurePathError_SkipsItem(t *testing.T) {
 
 	w := &fakeExecWiki{
 		hash: "h1",
-		ensureFn: func(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error) {
+		ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			return nil, errors.New("boom")
 		},
 	}
@@ -278,7 +278,7 @@ func TestExecutor_Create_EnsurePathError_SkipsItem(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute("user1")
+	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestExecutor_UnknownAction_SkipsItem(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute("user1")
+	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -337,7 +337,7 @@ title: Ordner
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute("user1")
+	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		w.updateTitles = append(w.updateTitles, title)
 		if content != nil {
@@ -395,7 +395,7 @@ func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -434,7 +434,7 @@ func TestExecutor_Create_RewritesBodyLinksWithoutTouchingMetadataValues(t *testi
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		w.updateTitles = append(w.updateTitles, title)
 		if content != nil {
@@ -453,7 +453,7 @@ func TestExecutor_Create_RewritesBodyLinksWithoutTouchingMetadataValues(t *testi
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 	setupContent, ok := updatedContentByTitle["Setup"]
@@ -501,7 +501,7 @@ func TestExecutor_Create_UploadsRelativeAndRootAssets(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 1234, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -545,7 +545,7 @@ func TestExecutor_Create_WikiLinkToNonImageAssetStaysNormalLink(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -574,7 +574,7 @@ func TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBasenameOnly(t *testing.
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		if content != nil {
 			updatedContentByTitle[title] = *content
@@ -595,7 +595,7 @@ func TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBasenameOnly(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -619,7 +619,7 @@ func TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix(t *testing.T) {
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		if content != nil {
 			updatedContentByTitle[title] = *content
@@ -638,7 +638,7 @@ func TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -658,7 +658,7 @@ func TestExecutor_Create_UnresolvedWikiLinkFallsBackToDeadMarkdownLink(t *testin
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		if content != nil {
 			updatedContentByTitle[title] = *content
@@ -676,7 +676,7 @@ func TestExecutor_Create_UnresolvedWikiLinkFallsBackToDeadMarkdownLink(t *testin
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -705,7 +705,7 @@ func TestExecutor_Create_DoesNotRewriteLinksInsideCode(t *testing.T) {
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		if content != nil {
 			updatedContentByTitle[title] = *content
@@ -724,7 +724,7 @@ func TestExecutor_Create_DoesNotRewriteLinksInsideCode(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -755,7 +755,7 @@ func TestExecutor_Create_RewritesWindowsStyleMarkdownAndAssetPaths(t *testing.T)
 
 	w := &fakeExecWiki{hash: "h1"}
 	updatedContentByTitle := map[string]string{}
-	w.updateFn = func(userID, id, title, slug string, content *string, kind *tree.NodeKind) (*tree.Page, error) {
+	w.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 		w.lastUpdatedContent = content
 		if content != nil {
 			updatedContentByTitle[title] = *content
@@ -774,7 +774,7 @@ func TestExecutor_Create_RewritesWindowsStyleMarkdownAndAssetPaths(t *testing.T)
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -808,7 +808,7 @@ func TestExecutor_Create_LeavesWindowsDriveLetterPathsUntouched(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute("user1"); err != nil {
+	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 

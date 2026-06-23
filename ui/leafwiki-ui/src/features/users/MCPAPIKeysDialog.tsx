@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/users'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_MCP_API_KEYS } from '@/lib/registries'
+import { asUserID, type MCPAPIKeyID } from '@/lib/semanticTypes'
 import { useSessionStore } from '@/stores/session'
 import copy from 'copy-to-clipboard'
 import { Copy, KeyRound, Trash2 } from 'lucide-react'
@@ -40,7 +41,7 @@ export function MCPAPIKeysDialog({
   const [loadingKeys, setLoadingKeys] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [creating, setCreating] = useState(false)
-  const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null)
+  const [revokingKeyId, setRevokingKeyId] = useState<MCPAPIKeyID | null>(null)
   const [name, setName] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -58,7 +59,7 @@ export function MCPAPIKeysDialog({
     try {
       const loaded = isSelf
         ? await getOwnMCPAPIKeys()
-        : await getUserMCPAPIKeys(owner.id)
+        : await getUserMCPAPIKeys(asUserID(owner.id))
       setKeys(loaded)
     } catch (err) {
       console.warn(err)
@@ -89,7 +90,7 @@ export function MCPAPIKeysDialog({
     try {
       const created = isSelf
         ? await createOwnMCPAPIKey(name, currentPassword)
-        : await createUserMCPAPIKey(owner.id, name)
+        : await createUserMCPAPIKey(asUserID(owner.id), name)
       setKeys((prev) => [created.key, ...prev])
       setSecret(created.secret)
       setName('')
@@ -106,13 +107,13 @@ export function MCPAPIKeysDialog({
     }
   }
 
-  const handleRevoke = async (keyId: string) => {
+  const handleRevoke = async (keyId: MCPAPIKeyID) => {
     setRevokingKeyId(keyId)
     try {
       if (isSelf) {
         await revokeOwnMCPAPIKey(keyId)
       } else {
-        await revokeUserMCPAPIKey(owner.id, keyId)
+        await revokeUserMCPAPIKey(asUserID(owner.id), keyId)
       }
       setKeys((prev) => prev.filter((key) => key.id !== keyId))
       toast.success('API key revoked')
@@ -233,13 +234,19 @@ export function MCPAPIKeysDialog({
         <div className="space-y-2">
           {loadingKeys && <p className="text-muted text-sm">Loading keys...</p>}
           {!loadingKeys && loadError && (
-            <div className="border-surface-border flex items-center justify-between gap-3 border-t py-3 first:border-t-0">
+            <div
+              className="border-surface-border flex items-center justify-between gap-3 border-t py-3 first:border-t-0"
+              data-testid="mcp-api-keys-dialog-load-error"
+              data-error-code="mcp_api_keys_load_failed"
+              data-l10n-id="errors.mcp_api_keys.load_failed"
+            >
               <p className="text-muted text-sm">{loadError}</p>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => void loadKeys()}
+                data-testid="mcp-api-keys-dialog-retry"
               >
                 Retry
               </Button>
@@ -255,6 +262,8 @@ export function MCPAPIKeysDialog({
                 key={key.id}
                 className="border-surface-border flex items-center justify-between gap-3 border-t py-3 first:border-t-0"
                 data-testid={`mcp-api-key-row-${key.id}`}
+                data-mcp-api-key-id={key.id}
+                data-user-id={key.userId}
               >
                 <div className="min-w-0">
                   <div className="text-interface-text flex items-center gap-2 text-sm font-medium">

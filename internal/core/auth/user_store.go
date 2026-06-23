@@ -13,7 +13,7 @@ import (
 type UserStore struct {
 	mu         sync.Mutex
 	storageDir string
-	filename   string
+	dbFilename string
 	db         *sql.DB
 }
 
@@ -25,7 +25,7 @@ func databasePath(storageDir string, filename string) string {
 func NewUserStore(storageDir string) (*UserStore, error) {
 	u := &UserStore{
 		storageDir: storageDir,
-		filename:   "users.db",
+		dbFilename: "users.db",
 	}
 
 	err := u.Connect()
@@ -43,7 +43,7 @@ func (f *UserStore) Connect() error {
 	if f.db != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", databasePath(f.storageDir, f.filename))
+	db, err := sql.Open("sqlite", databasePath(f.storageDir, f.dbFilename))
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func (f *UserStore) CreateUser(user *User) error {
 	return nil
 }
 
-func (f *UserStore) GetUserByID(id string) (*User, error) {
+func (f *UserStore) GetUserByID(id UserID) (*User, error) {
 	// Ensure the database is connected
 	err := f.Connect()
 	if err != nil {
@@ -183,7 +183,7 @@ func (f *UserStore) UpdateUser(user *User) error {
 	}
 
 	// Check if a user with the given ID exists
-	existingUser, err := f.GetUserByID(user.ID)
+	existingUser, err := f.GetUserByID(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		if err == ErrUserNotFound {
 			return ErrUserNotFound
@@ -215,7 +215,7 @@ func (f *UserStore) UpdateUser(user *User) error {
 	return nil
 }
 
-func (f *UserStore) DeleteUser(id string) error {
+func (f *UserStore) DeleteUser(id UserID) error {
 	// Ensure the database is connected
 	err := f.Connect()
 	if err != nil {
@@ -348,7 +348,7 @@ func (f *UserStore) mapConstraintViolationToError(err error) error {
 	return err
 }
 
-func (f *UserStore) UpdatePassword(userID string, newPassword string) error {
+func (f *UserStore) UpdatePassword(userID UserID, newPassword string) error {
 	// Ensure the database is connected
 	err := f.Connect()
 	if err != nil {

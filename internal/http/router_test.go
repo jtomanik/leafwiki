@@ -1459,7 +1459,7 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 	if secondPageID == firstPageID {
 		t.Fatalf("second page duplicated first page snapshot %s after newer commit", firstPageID)
 	}
-	if secondPageID != initialCommit {
+	if secondPageID != initialCommit.String() {
 		t.Fatalf("second page snapshot = %s, want original older commit %s", secondPageID, initialCommit)
 	}
 }
@@ -1550,7 +1550,7 @@ func TestWorkspaceSyncSnapshotRestoreEndpoint_RestoresMarkdownOnly(t *testing.T)
 	configRec := httptest.NewRecorder()
 	router.ServeHTTP(configRec, configReq)
 	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/snapshots/"+status.LastCommitHash+"/restore", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/snapshots/"+status.LastCommitHash.String()+"/restore", nil)
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	for _, cookie := range configRec.Result().Cookies() {
 		req.AddCookie(cookie)
@@ -4147,6 +4147,9 @@ func TestSortPagesEndpoint(t *testing.T) {
 	if resp["message"] != "Pages sorted successfully" {
 		t.Errorf("Expected success message, got: %v", resp["message"])
 	}
+	if resp["messageId"] != "api.pages.sort.success" {
+		t.Errorf("Expected API-scoped success messageId, got: %v", resp["messageId"])
+	}
 
 	root := getTreeViaAPI(t, router)
 	if len(root.Children) != 3 {
@@ -5148,6 +5151,13 @@ func TestAssetEndpoints(t *testing.T) {
 
 	if delRec.Code != http.StatusOK {
 		t.Errorf("Expected 200 OK on delete, got %d - %s", delRec.Code, delRec.Body.String())
+	}
+	var deleteResp map[string]interface{}
+	if err := json.Unmarshal(delRec.Body.Bytes(), &deleteResp); err != nil {
+		t.Fatalf("Invalid delete JSON: %v", err)
+	}
+	if deleteResp["messageId"] != "api.assets.delete.success" {
+		t.Errorf("Expected API-scoped asset delete messageId, got: %v", deleteResp["messageId"])
 	}
 
 	// Step 5: Verify asset is gone

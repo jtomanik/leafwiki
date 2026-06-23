@@ -147,7 +147,7 @@ func (r *Routes) handleGetTree(c *gin.Context) {
 
 func (r *Routes) handleGetPage(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
-	out, err := r.getPage.Execute(c.Request.Context(), GetPageInput{ID: id})
+	out, err := r.getPage.Execute(c.Request.Context(), GetPageInput{ID: tree.NewPageIDUnchecked(id)})
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -222,7 +222,12 @@ func (r *Routes) handleLookupPath(c *gin.Context) {
 		}
 		kind = validKind
 	}
-	out, err := r.lookupPath.Execute(c.Request.Context(), LookupPagePathInput{Path: path, Kind: kind})
+	routePath, err := ValidateSemanticRoutePath(path)
+	if err != nil {
+		respondWithPageError(c, err)
+		return
+	}
+	out, err := r.lookupPath.Execute(c.Request.Context(), LookupPagePathInput{Path: routePath, Kind: kind})
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -236,7 +241,7 @@ func (r *Routes) handleResolvePermalink(c *gin.Context) {
 		respondWithPageStatusError(c, http.StatusBadRequest, ErrCodePageMissingID, "Page ID is required", "page id is required")
 		return
 	}
-	out, err := r.resolvePermalink.Execute(c.Request.Context(), ResolvePermalinkInput{ID: id})
+	out, err := r.resolvePermalink.Execute(c.Request.Context(), ResolvePermalinkInput{ID: tree.NewPageIDUnchecked(id)})
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -251,8 +256,8 @@ func (r *Routes) handleSuggestSlug(c *gin.Context) {
 		return
 	}
 	out, err := r.suggestSlug.Execute(c.Request.Context(), SuggestSlugInput{
-		ParentID:  strings.TrimSpace(c.Query("parentId")),
-		CurrentID: strings.TrimSpace(c.Query("currentId")),
+		ParentID:  tree.NewPageIDUnchecked(strings.TrimSpace(c.Query("parentId"))),
+		CurrentID: tree.NewPageIDUnchecked(strings.TrimSpace(c.Query("currentId"))),
 		Title:     title,
 	})
 	if err != nil {
@@ -304,7 +309,7 @@ func (r *Routes) handleCreate(c *gin.Context) {
 		return
 	}
 	out, err := r.createPage.Execute(c.Request.Context(), CreatePageInput{
-		UserID: user.ID, ParentID: req.ParentID, Title: req.Title, Slug: req.Slug, Kind: &kind,
+		UserID: tree.NewUserIDUnchecked(user.ID), ParentID: semanticPageIDPtr(req.ParentID), Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug), Kind: &kind,
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -347,7 +352,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 	contentToSave := req.Content
 	fromImport := false
 	if req.Content != nil || req.Tags != nil || req.Properties != nil {
-		currentRaw, err := r.treeService.ReadPageRaw(id)
+		currentRaw, err := r.treeService.ReadPageRaw(tree.NewPageIDUnchecked(id))
 		if err != nil {
 			respondWithPageError(c, err)
 			return
@@ -363,7 +368,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 			}
 			body = doc.Body
 		}
-		combined, err := BuildMarkdownWithPublicMetadataPatch(currentRaw, id, req.Title, PublicMetadataPatch{
+		combined, err := BuildMarkdownWithPublicMetadataPatch(currentRaw, tree.NewPageIDUnchecked(id), req.Title, PublicMetadataPatch{
 			Tags:              tagsForValidation,
 			TagsPresent:       req.Tags != nil,
 			Properties:        propertiesForValidation,
@@ -379,7 +384,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 
 	kind := tree.NodeKindPage
 	out, err := r.updatePage.Execute(c.Request.Context(), UpdatePageInput{
-		UserID: user.ID, ID: id, Version: req.Version, Title: req.Title, Slug: req.Slug,
+		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
 		Content: contentToSave, Kind: &kind, FromImport: fromImport,
 	})
 	if err != nil {
@@ -420,12 +425,12 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		return
 	}
 	if err := r.deletePage.Execute(c.Request.Context(), DeletePageInput{
-		UserID: user.ID, ID: id, Version: version, Recursive: recursive,
+		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(version), Recursive: recursive,
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Page deleted"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesDeleteSuccess, "message": "Page deleted"})
 }
 
 func (r *Routes) handleMove(c *gin.Context) {
@@ -443,12 +448,12 @@ func (r *Routes) handleMove(c *gin.Context) {
 		return
 	}
 	if err := r.movePage.Execute(c.Request.Context(), MovePageInput{
-		UserID: user.ID, ID: id, Version: req.Version, ParentID: req.ParentID,
+		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), ParentID: tree.NewPageIDUnchecked(req.ParentID),
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Page moved"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesMoveSuccess, "message": "Page moved"})
 }
 
 func (r *Routes) handleSort(c *gin.Context) {
@@ -461,12 +466,12 @@ func (r *Routes) handleSort(c *gin.Context) {
 		return
 	}
 	if err := r.sortPages.Execute(c.Request.Context(), SortPagesInput{
-		ParentID: parentID, OrderedIDs: req.OrderedIDs,
+		ParentID: tree.NewPageIDUnchecked(parentID), OrderedIDs: semanticPageIDs(req.OrderedIDs),
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Pages sorted successfully"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesSortSuccess, "message": "Pages sorted successfully"})
 }
 
 func (r *Routes) handleEnsurePath(c *gin.Context) {
@@ -488,8 +493,13 @@ func (r *Routes) handleEnsurePath(c *gin.Context) {
 		respondWithPageError(c, err)
 		return
 	}
+	targetPath, err := ValidateSemanticRoutePath(req.Path)
+	if err != nil {
+		respondWithPageError(c, err)
+		return
+	}
 	out, err := r.ensurePath.Execute(c.Request.Context(), EnsurePathInput{
-		UserID: user.ID, TargetPath: req.Path, TargetTitle: req.Title, Kind: &kind,
+		UserID: tree.NewUserIDUnchecked(user.ID), TargetPath: targetPath, TargetTitle: req.Title, Kind: &kind,
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -518,7 +528,7 @@ func (r *Routes) handleConvert(c *gin.Context) {
 		return
 	}
 	if err := r.convertPage.Execute(c.Request.Context(), ConvertPageInput{
-		UserID: user.ID, Source: pagesave.PageMutationSourceWeb, ID: id, Version: req.Version, TargetKind: targetKind,
+		UserID: tree.NewUserIDUnchecked(user.ID), Source: pagesave.PageMutationSourceWeb, ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), TargetKind: targetKind,
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -554,8 +564,8 @@ func (r *Routes) handleCopy(c *gin.Context) {
 		return
 	}
 	out, err := r.copyPage.Execute(c.Request.Context(), CopyPageInput{
-		UserID: user.ID, SourcePageID: sourceID, TargetParentID: req.ParentID,
-		Title: req.Title, Slug: req.Slug,
+		UserID: tree.NewUserIDUnchecked(user.ID), SourcePageID: tree.NewPageIDUnchecked(sourceID), TargetParentID: semanticPageIDPtr(req.ParentID),
+		Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -578,8 +588,8 @@ func (r *Routes) handleRefactorPreview(c *gin.Context) {
 		return
 	}
 	out, err := r.previewRefactor.Execute(c.Request.Context(), RefactorPreviewInput{
-		PageID: id, Kind: req.Kind, Title: req.Title, Slug: req.Slug,
-		Content: req.Content, NewParentID: req.NewParentID,
+		PageID: tree.NewPageIDUnchecked(id), Kind: req.Kind, Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+		Content: req.Content, NewParentID: semanticPageIDPtr(req.NewParentID),
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -608,12 +618,12 @@ func (r *Routes) handleRefactorApply(c *gin.Context) {
 		return
 	}
 	page, err := r.applyRefactor.Execute(c.Request.Context(), RefactorApplyInput{
-		Version: req.Version,
-		UserID:  user.ID,
+		Version: tree.NewPageVersionUnchecked(req.Version),
+		UserID:  tree.NewUserIDUnchecked(user.ID),
 		Source:  pagesave.PageMutationSourceWeb,
 		RefactorPreviewInput: RefactorPreviewInput{
-			PageID: id, Kind: req.Kind, Title: req.Title, Slug: req.Slug,
-			Content: req.Content, NewParentID: req.NewParentID,
+			PageID: tree.NewPageIDUnchecked(id), Kind: req.Kind, Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+			Content: req.Content, NewParentID: semanticPageIDPtr(req.NewParentID),
 		},
 		RewriteLinks: req.RewriteLinks,
 	})
@@ -636,6 +646,22 @@ func (r *Routes) respondPageWithDepth(c *gin.Context, status int, page *tree.Pag
 	c.JSON(status, apiPage)
 }
 
+func semanticPageIDPtr(id *string) *tree.PageID {
+	if id == nil {
+		return nil
+	}
+	typed := tree.NewPageIDUnchecked(*id)
+	return &typed
+}
+
+func semanticPageIDs(ids []string) []tree.PageID {
+	out := make([]tree.PageID, len(ids))
+	for i, id := range ids {
+		out[i] = tree.NewPageIDUnchecked(id)
+	}
+	return out
+}
+
 func (r *Routes) enrichPageMetadata(page *dto.Page) {
 	EnrichPageMetadata(page, r.treeService.ReadPageRaw)
 }
@@ -648,16 +674,16 @@ func ValidatePageMetadataInput(tags []string, properties map[string]string) erro
 		trimmed := strings.TrimSpace(tag)
 		field := "tags[" + strconv.Itoa(index) + "]"
 		if trimmed == "" {
-			ve.Add(field, "Tag must not be empty")
+			ve.AddWithCode(field, FieldCodePageTagRequired, MessageIDPageTagRequired, "Tag must not be empty")
 			continue
 		}
 		if trimmed != tag {
-			ve.Add(field, "Tag must not contain leading or trailing whitespace")
+			ve.AddWithCode(field, FieldCodePageTagWhitespace, MessageIDPageTagWhitespace, "Tag must not contain leading or trailing whitespace")
 			continue
 		}
 		key := strings.ToLower(trimmed)
 		if _, exists := seenTags[key]; exists {
-			ve.Add(field, "Tag must be unique")
+			ve.AddWithCode(field, FieldCodePageTagDuplicate, MessageIDPageTagDuplicate, "Tag must be unique")
 			continue
 		}
 		seenTags[key] = struct{}{}
@@ -668,13 +694,13 @@ func ValidatePageMetadataInput(tags []string, properties map[string]string) erro
 		field := "properties." + rawKey
 		switch {
 		case key == "":
-			ve.Add(field, "Property key must not be empty")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyRequired, MessageIDPagePropertyKeyRequired, "Property key must not be empty")
 		case key != rawKey:
-			ve.Add(field, "Property key must not contain leading or trailing whitespace")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace, "Property key must not contain leading or trailing whitespace")
 		case markdown.IsReservedMetadataKey(key):
-			ve.Add(field, "Property key uses a reserved prefix")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key uses a reserved prefix")
 		case strings.ToLower(key) == "tags" || strings.ToLower(key) == "title":
-			ve.Add(field, "Property key is reserved")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key is reserved")
 		}
 	}
 

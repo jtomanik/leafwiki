@@ -19,7 +19,7 @@ var ErrLinkServiceUnavailable = sharederrors.NewLocalizedError(
 // ─── GetLinkStatusUseCase ────────────────────────────────────────────────────
 
 type GetLinkStatusInput struct {
-	PageID string
+	PageID tree.PageID
 }
 
 type GetLinkStatusOutput struct {
@@ -61,7 +61,7 @@ func (uc *GetLinkStatusUseCase) Execute(_ context.Context, in GetLinkStatusInput
 // ─── GetBacklinksUseCase ─────────────────────────────────────────────────────
 
 type GetBacklinksInput struct {
-	PageID string
+	PageID tree.PageID
 }
 
 type GetBacklinksOutput struct {
@@ -90,7 +90,7 @@ func (uc *GetBacklinksUseCase) Execute(_ context.Context, in GetBacklinksInput) 
 // ─── GetOutgoingLinksUseCase ─────────────────────────────────────────────────
 
 type GetOutgoingLinksInput struct {
-	PageID string
+	PageID tree.PageID
 }
 
 type GetOutgoingLinksOutput struct {

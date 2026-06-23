@@ -2,6 +2,7 @@ import Page404 from '@/components/Page404'
 import { getPermalinkTarget } from '@/lib/api/pages'
 import { isPageNotFoundError } from '@/lib/api/errors'
 import { useProgressbarStore } from '@/features/progressbar/progressbarStore'
+import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
 import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useEffect, useState } from 'react'
@@ -30,7 +31,10 @@ export default function PermalinkRedirect() {
       setError(null)
 
       try {
-        const target = await getPermalinkTarget(id, workspaceId)
+        const target = await getPermalinkTarget(
+          asPageID(id),
+          asWorkspaceID(workspaceId),
+        )
         if (!active) return
 
         navigate(

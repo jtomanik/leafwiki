@@ -642,11 +642,14 @@ test.describe('Editor', () => {
 
     await page.locator('button[data-testid="save-page-button"]').click();
 
-    // The version-conflict toast must appear (identified by its error-code test ID)
+    // The version-conflict toast must expose stable semantic identifiers.
     await page.getByTestId('page-save-version-conflict-toast').waitFor({ state: 'visible' });
+    const conflictAction = page.getByTestId('page-save-version-conflict-action');
+    await expect(conflictAction).toHaveAttribute('data-error-code', 'page_version_conflict');
+    await expect(conflictAction).toHaveAttribute('data-l10n-id', 'errors.page.version_conflict');
 
     // Accepting the conflict resolves successfully
-    await page.getByTestId('page-save-version-conflict-action').click();
+    await conflictAction.click();
     await page.getByText('Page saved successfully').last().waitFor({ state: 'visible' });
   });
 
@@ -674,7 +677,11 @@ test.describe('Editor', () => {
     // The per-field error must be visible and the page must not be saved
     const keyError = page.locator('[data-testid="page-frontmatter-field-key-error-0"]');
     await keyError.waitFor({ state: 'visible' });
-    await expect(keyError).toContainText('reserved');
+    await expect(keyError).toHaveAttribute('data-error-code', 'frontmatter_property_key_reserved');
+    await expect(keyError).toHaveAttribute(
+      'data-l10n-id',
+      'validation.frontmatter.property_key.reserved',
+    );
 
     // No success toast
     await expect(page.getByText('Page saved successfully')).not.toBeVisible();

@@ -55,7 +55,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		}
 		out, err := r.listWorkspaceRevisions(ctx, page, "", 1)
 		if err != nil || len(out.Revisions) == 0 {
-			return revisionOutput{}, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision for page %s not found", pageID)
+			return revisionOutput{}, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision for page %s not found", pageID.MetadataValue())
 		}
 		return revisionOutput{Revision: wikirevisions.ToRevisionResponse(out.Revisions[0], r.userResolver)}, nil
 	})
@@ -68,7 +68,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		if err != nil {
 			return nil, err
 		}
-		pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(rawPageID, in.RevisionID)
+		pageID, revisionID, err := wikirevisions.ValidateRevisionLookup(rawPageID, in.RevisionID)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +78,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		}
 		snapshot, err := r.getWorkspaceRevision(ctx, page, revisionID)
 		if err != nil {
-			return nil, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision %s for page %s not found", revisionID, pageID)
+			return nil, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision %s for page %s not found", revisionID.CommitID(), pageID.MetadataValue())
 		}
 		return wikirevisions.ToSnapshotResponse(snapshot, r.userResolver), nil
 	})
@@ -91,7 +91,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		if err != nil {
 			return nil, err
 		}
-		pageID, baseRevisionID, targetRevisionID, err := wikirevisions.ValidateRevisionCompareInput(rawPageID, in.BaseRevisionID, in.TargetRevisionID)
+		pageID, baseRevisionID, targetRevisionID, err := wikirevisions.ValidateRevisionCompare(rawPageID, in.BaseRevisionID, in.TargetRevisionID)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +102,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		base, baseErr := r.getWorkspaceRevision(ctx, page, baseRevisionID)
 		target, targetErr := r.getWorkspaceRevision(ctx, page, targetRevisionID)
 		if baseErr != nil || targetErr != nil {
-			return nil, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision compare resource for page %s not found", pageID)
+			return nil, wikirevisions.NewRevisionNotFoundError("Revision not found", "revision compare resource for page %s not found", pageID.MetadataValue())
 		}
 		return wikirevisions.ToComparisonResponse(&corerevision.RevisionComparison{
 			Base:           base,
@@ -117,11 +117,17 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		if err != nil {
 			return assetOutput{}, err
 		}
-		pageID, revisionID, assetName, err := wikirevisions.ValidateRevisionAssetInput(rawPageID, in.RevisionID, in.AssetName)
+		pageID, revisionID, assetName, err := wikirevisions.ValidateRevisionAsset(rawPageID, in.RevisionID, in.AssetName)
 		if err != nil {
 			return assetOutput{}, err
 		}
-		return assetOutput{}, wikirevisions.NewRevisionNotFoundError("Revision asset not found", "workspace sync revisions do not track assets for %s at %s in %s", assetName, pageID, revisionID)
+		return assetOutput{}, wikirevisions.NewRevisionNotFoundError(
+			"Revision asset not found",
+			"workspace sync revisions do not track assets for %s at %s in %s",
+			assetName.Filename(),
+			pageID.MetadataValue(),
+			revisionID.CommitID(),
+		)
 	})
 
 	addEditorTool[revisionIDInput, pageOutput](r, server, toolRestoreRevision, func(ctx context.Context, actor toolActor, in revisionIDInput) (pageOutput, error) {
@@ -132,7 +138,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		if err != nil {
 			return pageOutput{}, err
 		}
-		pageID, revisionID, err := wikirevisions.ValidateRevisionLookupInput(rawPageID, in.RevisionID)
+		pageID, revisionID, err := wikirevisions.ValidateRevisionLookup(rawPageID, in.RevisionID)
 		if err != nil {
 			return pageOutput{}, err
 		}
@@ -141,7 +147,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 			return pageOutput{}, err
 		}
 		restored, err := r.restoreWorkspaceRevision(ctx, page, revisionID, workspacesync.Actor{
-			ID:    actor.ID,
+			ID:    workspacesync.NewActorIDUnchecked(actor.ID),
 			Name:  actor.User.Username,
 			Email: actor.User.Email,
 		}, workspacesync.SourceMCP)
@@ -152,8 +158,8 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 	})
 }
 
-func (r *Routes) workspaceRevisionPage(ctx context.Context, pageID string) (*tree.Page, error) {
-	out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: strings.TrimSpace(pageID)})
+func (r *Routes) workspaceRevisionPage(ctx context.Context, pageID tree.PageID) (*tree.Page, error) {
+	out, err := r.getPage.Execute(ctx, wikipages.GetPageInput{ID: pageID})
 	if err != nil {
 		return nil, err
 	}

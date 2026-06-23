@@ -9,6 +9,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/markdownlinks"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -25,11 +26,12 @@ func (r *Routes) registerValidationTools(server *sdkmcp.Server) {
 		if err != nil {
 			return validationOutput{}, err
 		}
-		return validationOutputFromResult(r.validateMarkdownContent(ctx, strings.Trim(page.PageNode.CalculatePath(), "/"), raw, page.PageNode.ID, page.PageNode.Kind)), nil
+		routePath := tree.NewRoutePathUnchecked(strings.Trim(page.PageNode.CalculatePath(), "/"))
+		return validationOutputFromResult(r.validateMarkdownContent(ctx, routePath, raw, page.PageNode.ID, page.PageNode.Kind)), nil
 	})
 
 	addTypedTool[validateContentInput, validationOutput](server, toolValidateContent, func(ctx context.Context, in validateContentInput) (validationOutput, error) {
-		existingPageID := strings.TrimSpace(in.ExistingPageID)
+		existingPageID := tree.NewPageIDUnchecked(strings.TrimSpace(in.ExistingPageID))
 		routePath, inputKind, err := r.normalizeValidationContentPathInput(in.Path, in.Kind)
 		if err != nil {
 			return validationOutput{}, err
@@ -43,7 +45,7 @@ func (r *Routes) registerValidationTools(server *sdkmcp.Server) {
 		if existingPageID == "" {
 			if pageID, ok := r.resolveValidationPageIDForKind(routePath, sourceKind); ok {
 				declaredID := validationContentLeafWikiID(in.Content)
-				if declaredID == "" || declaredID == pageID {
+				if declaredID == "" || tree.NewPageIDUnchecked(declaredID) == pageID {
 					existingPageID = pageID
 				}
 			}
@@ -70,7 +72,7 @@ func (r *Routes) registerValidationTools(server *sdkmcp.Server) {
 }
 
 func (r *Routes) validateWorkspaceMarkdownFiles(ctx context.Context, includeWarnings bool) wikivalidation.Result {
-	assetExists := cachedValidationAssetExists(func(pageID string) func(string) bool {
+	assetExists := cachedValidationAssetExists(func(pageID tree.PageID) func(string) bool {
 		return r.validationAssetExists(ctx, pageID)
 	})
 	return wikivalidation.ValidateWorkspaceMarkdownFiles(wikivalidation.WorkspaceMarkdownValidationOptions{
@@ -82,20 +84,22 @@ func (r *Routes) validateWorkspaceMarkdownFiles(ctx context.Context, includeWarn
 	})
 }
 
-func cachedValidationAssetExists(factory func(pageID string) func(destination string) bool) func(pageID string, destination string) bool {
-	cache := map[string]func(string) bool{}
-	return func(pageID string, destination string) bool {
+func cachedValidationAssetExists(factory func(pageID tree.PageID) func(destination string) bool) func(pageID tree.PageID, destination string) bool {
+	cache := map[tree.PageID]func(string) bool{}
+	return func(pageID tree.PageID, destination string) bool {
 		if factory == nil {
 			return false
 		}
-		normalizedPageID := strings.TrimSpace(pageID)
-		predicate, ok := cache[normalizedPageID]
+		if pageID == "" {
+			return false
+		}
+		predicate, ok := cache[pageID]
 		if !ok {
-			predicate = factory(normalizedPageID)
+			predicate = factory(pageID)
 			if predicate == nil {
 				predicate = func(string) bool { return false }
 			}
-			cache[normalizedPageID] = predicate
+			cache[pageID] = predicate
 		}
 		return predicate(destination)
 	}
@@ -106,12 +110,13 @@ func (r *Routes) validateLoadedTree(ctx context.Context) wikivalidation.Result {
 	if r.treeService == nil {
 		return result
 	}
-	_ = r.treeService.WalkNodes(func(id string) error {
+	_ = r.treeService.WalkNodes(func(id tree.PageID) error {
 		page, err := r.treeService.GetPage(id)
 		if err != nil {
 			return nil
 		}
-		result = wikivalidation.Combine(result, r.validateMarkdownContent(ctx, strings.Trim(page.CalculatePath(), "/"), page.RawContent, page.ID, page.Kind))
+		routePath := tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/"))
+		result = wikivalidation.Combine(result, r.validateMarkdownContent(ctx, routePath, page.RawContent, page.ID, page.Kind))
 		return nil
 	})
 	return result
@@ -152,9 +157,17 @@ func dedupeValidationIssues(issues []wikivalidation.Issue) []wikivalidation.Issu
 		return issues
 	}
 	out := make([]wikivalidation.Issue, 0, len(issues))
-	seen := map[string]struct{}{}
+	seen := map[validationIssueDedupeKey]struct{}{}
 	for _, issue := range issues {
-		key := strings.Join([]string{issue.Severity, issue.Code, issue.Path, issue.PageID, issue.Message}, "\x00")
+		key := validationIssueDedupeKey{
+			Severity:     issue.Severity,
+			Code:         issue.Code,
+			RoutePath:    issue.RoutePath,
+			SourcePath:   issue.SourcePath,
+			PageID:       issue.PageID,
+			TargetPageID: issue.TargetPageID,
+			Message:      issue.Message,
+		}
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -164,17 +177,37 @@ func dedupeValidationIssues(issues []wikivalidation.Issue) []wikivalidation.Issu
 	return out
 }
 
+type validationIssueDedupeKey struct {
+	Severity     wikivalidation.IssueSeverity
+	Code         wikivalidation.IssueCode
+	RoutePath    tree.RoutePath
+	SourcePath   tree.MarkdownPath
+	PageID       tree.PageID
+	TargetPageID tree.PageID
+	Message      string
+}
+
 func (r *Routes) resolveValidationPage(ctx context.Context, in validatePageInput) (*tree.Page, error) {
 	pageID := strings.TrimSpace(in.PageID)
 	routePath := normalizeToolRoutePath(in.Path)
 	if pageID != "" && routePath != "" {
-		return nil, fmt.Errorf("pageId and path cannot both be supplied")
+		return nil, sharederrors.NewLocalizedError(
+			errCodeMCPPageTargetAmbiguous,
+			"pageId and path cannot both be supplied",
+			"pageId and path cannot both be supplied",
+			nil,
+		)
 	}
 	if pageID == "" && routePath == "" {
-		return nil, fmt.Errorf("pageId or path is required")
+		return nil, sharederrors.NewLocalizedError(
+			errCodeMCPPageTargetRequired,
+			"pageId or path is required",
+			"pageId or path is required",
+			nil,
+		)
 	}
 	if pageID != "" {
-		return r.treeService.GetPage(pageID)
+		return r.treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 	}
 	out, err := r.findToolPageByInputPath(ctx, in.Path, in.Kind)
 	if err != nil {
@@ -183,12 +216,12 @@ func (r *Routes) resolveValidationPage(ctx context.Context, in validatePageInput
 	return out.Page, nil
 }
 
-func (r *Routes) validateMarkdownContent(ctx context.Context, routePath string, content string, existingPageID string, sourceKind tree.NodeKind) wikivalidation.Result {
-	normalizedRoutePath := strings.Trim(routePath, "/")
+func (r *Routes) validateMarkdownContent(ctx context.Context, routePath tree.RoutePath, content string, existingPageID tree.PageID, sourceKind tree.NodeKind) wikivalidation.Result {
+	normalizedRoutePath := routePath.Clean()
 	return wikivalidation.ValidateMarkdownContentWithOptions(routePath, content, wikivalidation.ContentValidationOptions{
 		ExistingPageID: existingPageID,
-		ResolvePageID: func(candidateRoutePath string) (string, bool) {
-			if strings.Trim(candidateRoutePath, "/") == normalizedRoutePath {
+		ResolvePageID: func(candidateRoutePath tree.RoutePath) (tree.PageID, bool) {
+			if candidateRoutePath.Clean() == normalizedRoutePath {
 				if existingPageID != "" {
 					return existingPageID, true
 				}
@@ -196,7 +229,7 @@ func (r *Routes) validateMarkdownContent(ctx context.Context, routePath string, 
 			}
 			return r.resolveValidationPageID(candidateRoutePath)
 		},
-		ResolveMarkdownLink: func(destination string) (string, tree.NodeKind, bool, string) {
+		ResolveMarkdownLink: func(destination string) (tree.PageID, tree.NodeKind, bool, wikivalidation.IssueCode) {
 			return r.resolveValidationMarkdownLink(routePath, sourceKind, destination)
 		},
 		PageIDExists:           r.validationPageIDExists,
@@ -205,9 +238,9 @@ func (r *Routes) validateMarkdownContent(ctx context.Context, routePath string, 
 	})
 }
 
-func (r *Routes) resolveValidationMarkdownLink(sourceRoutePath string, sourceKind tree.NodeKind, destination string) (string, tree.NodeKind, bool, string) {
+func (r *Routes) resolveValidationMarkdownLink(sourceRoutePath tree.RoutePath, sourceKind tree.NodeKind, destination string) (tree.PageID, tree.NodeKind, bool, wikivalidation.IssueCode) {
 	if r == nil || r.treeService == nil {
-		return "", "", false, "broken_link"
+		return "", "", false, wikivalidation.IssueCodeBrokenLink
 	}
 	index := r.validationMarkdownLinkIndex()
 	sourceFile := wikipages.MarkdownContentPathForRoute(sourceRoutePath, validationSourceKindOrDefault(sourceKind))
@@ -216,28 +249,28 @@ func (r *Routes) resolveValidationMarkdownLink(sourceRoutePath string, sourceKin
 	case markdownlinks.TargetKindExternal, markdownlinks.TargetKindAsset:
 		return "", "", true, ""
 	case markdownlinks.TargetKindInvalid:
-		return resolved.RoutePath, "", false, "invalid_link"
+		return "", "", false, wikivalidation.IssueCodeInvalidLink
 	case markdownlinks.TargetKindUnresolved:
-		if resolved.Code == "workspace_escape" || resolved.Code == "invalid_percent_encoding" {
-			return resolved.RoutePath, "", false, "invalid_link"
+		if resolved.Code == markdownlinks.IssueCodeWorkspaceEscape || resolved.Code == markdownlinks.IssueCodeInvalidPercentEncoding {
+			return "", "", false, wikivalidation.IssueCodeInvalidLink
 		}
-		if resolved.Code == "ambiguous_legacy_link" {
-			return resolved.RoutePath, "", false, resolved.Code
+		if resolved.Code == markdownlinks.IssueCodeAmbiguousLegacyLink {
+			return "", "", false, wikivalidation.IssueCodeAmbiguousLegacyLink
 		}
-		return resolved.RoutePath, "", false, "broken_link"
+		return "", "", false, wikivalidation.IssueCodeBrokenLink
 	case markdownlinks.TargetKindPage, markdownlinks.TargetKindSection:
 	default:
-		return "", "", false, "broken_link"
+		return "", "", false, wikivalidation.IssueCodeBrokenLink
 	}
-	targetRoutePath := strings.Trim(resolved.RoutePath, "/")
+	targetRoutePath := resolved.RoutePath
 	if targetRoutePath == "" && resolved.Kind == markdownlinks.TargetKindSection {
 		return "", tree.NodeKindSection, true, ""
 	}
 	page, err := r.treeService.FindPageByRoutePathAndKind(targetRoutePath, markdownTargetNodeKind(resolved.Kind))
 	if err != nil || page == nil || page.PageNode == nil {
-		return targetRoutePath, "", false, "broken_link"
+		return "", "", false, wikivalidation.IssueCodeBrokenLink
 	}
-	return targetRoutePath, page.PageNode.Kind, true, ""
+	return page.PageNode.ID, page.PageNode.Kind, true, ""
 }
 
 func markdownTargetNodeKind(kind markdownlinks.TargetKind) tree.NodeKind {
@@ -253,7 +286,7 @@ func (r *Routes) validationMarkdownLinkIndex() *markdownlinks.Index {
 			return index
 		}
 	}
-	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, Path: "", ContentPath: "index.md"}}
+	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, ContentPath: "index.md"}}
 	if r.treeService == nil {
 		return markdownlinks.NewIndex(entries)
 	}
@@ -263,19 +296,19 @@ func (r *Routes) validationMarkdownLinkIndex() *markdownlinks.Index {
 		if node == nil {
 			return
 		}
-		routePath := strings.Trim(node.CalculatePath(), "/")
+		routePath := tree.NewRoutePathUnchecked(strings.Trim(node.CalculatePath(), "/"))
 		switch node.Kind {
 		case tree.NodeKindSection:
 			entries = append(entries, markdownlinks.Entry{
 				Kind:        markdownlinks.EntryKindSection,
-				Path:        routePath,
+				RoutePath:   routePath,
 				ContentPath: wikipages.MarkdownContentPathForRoute(routePath, tree.NodeKindSection),
 			})
 		case tree.NodeKindPage:
 			if routePath != "" {
 				entries = append(entries, markdownlinks.Entry{
-					Kind: markdownlinks.EntryKindPage,
-					Path: routePath + ".md",
+					Kind:      markdownlinks.EntryKindPage,
+					RoutePath: routePath,
 				})
 			}
 		}
@@ -294,27 +327,26 @@ func validationSourceKindOrDefault(kind tree.NodeKind) tree.NodeKind {
 	return tree.NodeKindPage
 }
 
-func (r *Routes) validationSourceKind(existingPageID string) tree.NodeKind {
+func (r *Routes) validationSourceKind(existingPageID tree.PageID) tree.NodeKind {
 	if r == nil || r.treeService == nil {
 		return tree.NodeKindPage
 	}
-	pageID := strings.TrimSpace(existingPageID)
-	if pageID == "" {
+	if existingPageID == "" {
 		return tree.NodeKindPage
 	}
-	page, err := r.treeService.FindPageByID(pageID)
+	page, err := r.treeService.FindPageByID(existingPageID)
 	if err != nil || page == nil {
 		return tree.NodeKindPage
 	}
 	return page.Kind
 }
 
-func (r *Routes) validationSourceKindForRoute(routePath string) tree.NodeKind {
+func (r *Routes) validationSourceKindForRoute(routePath tree.RoutePath) tree.NodeKind {
 	if r == nil || r.treeService == nil {
 		return tree.NodeKindPage
 	}
-	normalized := strings.Trim(strings.TrimSpace(routePath), "/")
-	if normalized == "" {
+	normalized := routePath.Clean()
+	if normalized.IsRoot() {
 		return tree.NodeKindPage
 	}
 	page, err := r.treeService.FindPageByRoutePath(normalized)
@@ -324,18 +356,33 @@ func (r *Routes) validationSourceKindForRoute(routePath string) tree.NodeKind {
 	return page.Kind
 }
 
-func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind string) (string, tree.NodeKind, error) {
+func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
 	routePath := normalizeToolRoutePath(rawPath)
 	rawKind = strings.TrimSpace(rawKind)
+	parseRoutePath := func(raw string) (tree.RoutePath, error) {
+		trimmed := strings.Trim(strings.TrimSpace(raw), "/")
+		if trimmed == "" {
+			return "", nil
+		}
+		return tree.ParseRoutePath(trimmed)
+	}
 	if pageRoute, sectionRoute, ok := wikipages.ReadmeMarkdownPathFallbackRoutes(rawPath); ok {
 		if rawKind == "" {
-			if _, ok := r.resolveValidationPageIDForKind(pageRoute, tree.NodeKindPage); ok {
-				return pageRoute, tree.NodeKindPage, nil
+			semanticPageRoute, err := parseRoutePath(pageRoute)
+			if err != nil {
+				return "", "", err
+			}
+			semanticSectionRoute, err := parseRoutePath(sectionRoute)
+			if err != nil {
+				return "", "", err
+			}
+			if _, ok := r.resolveValidationPageIDForKind(semanticPageRoute, tree.NodeKindPage); ok {
+				return semanticPageRoute, tree.NodeKindPage, nil
 			}
 			if r != nil && r.treeService != nil && wikipages.ReadmeFallbackSectionIsActive(r.treeService.RootDir(), sectionRoute) {
-				return sectionRoute, tree.NodeKindSection, nil
+				return semanticSectionRoute, tree.NodeKindSection, nil
 			}
-			return pageRoute, tree.NodeKindPage, nil
+			return semanticPageRoute, tree.NodeKindPage, nil
 		}
 		kind, err := wikipages.ValidatePageKindString(rawKind)
 		if err != nil {
@@ -343,17 +390,33 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 		}
 		if kind == tree.NodeKindSection {
 			if r != nil && r.treeService != nil && wikipages.ReadmeFallbackSectionIsActive(r.treeService.RootDir(), sectionRoute) {
-				return sectionRoute, tree.NodeKindSection, nil
+				semanticSectionRoute, err := parseRoutePath(sectionRoute)
+				if err != nil {
+					return "", "", err
+				}
+				return semanticSectionRoute, tree.NodeKindSection, nil
 			}
 			return "", "", fmt.Errorf("kind does not match markdown path")
 		}
-		return pageRoute, tree.NodeKindPage, nil
+		semanticPageRoute, err := parseRoutePath(pageRoute)
+		if err != nil {
+			return "", "", err
+		}
+		return semanticPageRoute, tree.NodeKindPage, nil
 	}
 	if rawKind == "" {
 		if derivedKind := wikipages.MarkdownPathInputKind(routePath); derivedKind != "" {
-			return tree.MarkdownPathToRoutePath(routePath), derivedKind, nil
+			semanticRoutePath, err := parseRoutePath(tree.MarkdownPathToRoutePath(routePath))
+			if err != nil {
+				return "", "", err
+			}
+			return semanticRoutePath, derivedKind, nil
 		}
-		return routePath, "", nil
+		semanticRoutePath, err := parseRoutePath(routePath)
+		if err != nil {
+			return "", "", err
+		}
+		return semanticRoutePath, "", nil
 	}
 	kind, err := wikipages.ValidatePageKindString(rawKind)
 	if err != nil {
@@ -363,9 +426,17 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 		if kind != derivedKind {
 			return "", "", fmt.Errorf("kind does not match markdown path")
 		}
-		return tree.MarkdownPathToRoutePath(routePath), kind, nil
+		semanticRoutePath, err := parseRoutePath(tree.MarkdownPathToRoutePath(routePath))
+		if err != nil {
+			return "", "", err
+		}
+		return semanticRoutePath, kind, nil
 	}
-	return routePath, kind, nil
+	semanticRoutePath, err := parseRoutePath(routePath)
+	if err != nil {
+		return "", "", err
+	}
+	return semanticRoutePath, kind, nil
 }
 
 func validationContentLeafWikiID(content string) string {
@@ -376,22 +447,22 @@ func validationContentLeafWikiID(content string) string {
 	return strings.TrimSpace(doc.Metadata.Page.ID)
 }
 
-func (r *Routes) validationSourceMarkdownFile(sourceRoutePath string) string {
-	routePath := strings.Trim(strings.TrimSpace(sourceRoutePath), "/")
+func (r *Routes) validationSourceMarkdownFile(sourceRoutePath tree.RoutePath) tree.MarkdownPath {
 	if r != nil && r.treeService != nil {
+		routePath := sourceRoutePath.Clean()
 		if page, err := r.treeService.FindPageByRoutePath(routePath); err == nil && page != nil && page.PageNode != nil {
 			return wikipages.MarkdownContentPathForRoute(routePath, page.PageNode.Kind)
 		}
 	}
-	return wikipages.MarkdownContentPathForRoute(routePath, tree.NodeKindPage)
+	return wikipages.MarkdownContentPathForRoute(sourceRoutePath, tree.NodeKindPage)
 }
 
-func (r *Routes) resolveValidationPageID(routePath string) (string, bool) {
+func (r *Routes) resolveValidationPageID(routePath tree.RoutePath) (tree.PageID, bool) {
 	if r == nil || r.treeService == nil {
 		return "", false
 	}
-	normalized := strings.Trim(strings.TrimSpace(routePath), "/")
-	if normalized == "" {
+	normalized := routePath.Clean()
+	if normalized.IsRoot() {
 		return "", false
 	}
 	page, err := r.treeService.FindPageByRoutePath(normalized)
@@ -401,12 +472,12 @@ func (r *Routes) resolveValidationPageID(routePath string) (string, bool) {
 	return page.ID, true
 }
 
-func (r *Routes) resolveValidationPageIDForKind(routePath string, kind tree.NodeKind) (string, bool) {
+func (r *Routes) resolveValidationPageIDForKind(routePath tree.RoutePath, kind tree.NodeKind) (tree.PageID, bool) {
 	if r == nil || r.treeService == nil {
 		return "", false
 	}
-	normalized := strings.Trim(strings.TrimSpace(routePath), "/")
-	if normalized == "" {
+	normalized := routePath.Clean()
+	if normalized.IsRoot() {
 		return "", false
 	}
 	page, err := r.treeService.FindPageByRoutePathAndKind(normalized, validationSourceKindOrDefault(kind))
@@ -416,16 +487,15 @@ func (r *Routes) resolveValidationPageIDForKind(routePath string, kind tree.Node
 	return page.ID, true
 }
 
-func (r *Routes) validationPageIDExists(pageID string) bool {
+func (r *Routes) validationPageIDExists(pageID tree.PageID) bool {
 	if r == nil || r.treeService == nil {
 		return false
 	}
-	_, err := r.treeService.FindPageByID(strings.TrimSpace(pageID))
+	_, err := r.treeService.GetPage(pageID)
 	return err == nil
 }
 
-func (r *Routes) validationAssetExists(ctx context.Context, pageID string) func(destination string) bool {
-	pageID = strings.TrimSpace(pageID)
+func (r *Routes) validationAssetExists(ctx context.Context, pageID tree.PageID) func(destination string) bool {
 	if r == nil || r.getAssets == nil || pageID == "" {
 		return func(string) bool { return false }
 	}
@@ -453,10 +523,11 @@ func (r *Routes) validationAssetExists(ctx context.Context, pageID string) func(
 		if strings.Contains(clean, "/") {
 			return false
 		}
-		if _, ok := known["/assets/"+pageID+"/"+clean]; ok {
+		pageIDPath := pageID.MetadataValue()
+		if _, ok := known["/assets/"+pageIDPath+"/"+clean]; ok {
 			return true
 		}
-		if _, ok := known["assets/"+pageID+"/"+clean]; ok {
+		if _, ok := known["assets/"+pageIDPath+"/"+clean]; ok {
 			return true
 		}
 		return false
@@ -482,7 +553,7 @@ func validationOutputFromResult(result wikivalidation.Result) validationOutput {
 		issues = append(issues, validationIssueOutput{
 			Severity: issue.Severity,
 			Code:     issue.Code,
-			Path:     issue.Path,
+			Path:     markdownValidationIssuePath(issue),
 			PageID:   issue.PageID,
 			Message:  issue.Message,
 		})
@@ -495,4 +566,11 @@ func validationOutputFromResult(result wikivalidation.Result) validationOutput {
 		},
 		Issues: issues,
 	}
+}
+
+func markdownValidationIssuePath(issue wikivalidation.Issue) string {
+	if issue.SourcePath != "" {
+		return issue.SourcePath.FilesystemPath()
+	}
+	return issue.RoutePath.FilesystemPath()
 }

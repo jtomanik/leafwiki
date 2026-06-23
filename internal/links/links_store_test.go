@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
 )
 
@@ -39,13 +40,13 @@ func TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInputs(t *testing.T) {
 	}
 	defer test_utils.WrapCloseWithErrorCheck(store.Close, t)
 
-	pageIDs := make([]string, 0, maxOutgoingLinksQueryArgs+5)
+	pageIDs := make([]tree.PageID, 0, maxOutgoingLinksQueryArgs+5)
 	for i := 0; i < maxOutgoingLinksQueryArgs+5; i++ {
-		pageID := fmt.Sprintf("page-%d", i)
+		pageID := tree.NewPageIDUnchecked(fmt.Sprintf("page-%d", i))
 		pageIDs = append(pageIDs, pageID)
-		if err := store.AddLinks(pageID, "Title "+pageID, []TargetLink{{
-			TargetPageID:   "target-" + pageID,
-			TargetPagePath: "target/" + pageID,
+		if err := store.AddLinks(pageID, fmt.Sprintf("Title %s", pageID), []TargetLink{{
+			TargetPageID:   tree.NewPageIDUnchecked(fmt.Sprintf("target-%s", pageID)),
+			TargetPagePath: fmt.Sprintf("target/%s", pageID),
 		}}); err != nil {
 			t.Fatalf("AddLinks(%s) failed: %v", pageID, err)
 		}
@@ -67,8 +68,8 @@ func TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInputs(t *testing.T) {
 		if outgoings[0].FromPageID != pageID {
 			t.Fatalf("expected outgoing from %s, got %s", pageID, outgoings[0].FromPageID)
 		}
-		if outgoings[0].ToPath != "target/"+pageID {
-			t.Fatalf("expected target path %q, got %q", "target/"+pageID, outgoings[0].ToPath)
+		if wantPath := fmt.Sprintf("target/%s", pageID); outgoings[0].ToPath != wantPath {
+			t.Fatalf("expected target path %q, got %q", wantPath, outgoings[0].ToPath)
 		}
 	}
 }

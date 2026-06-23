@@ -37,6 +37,21 @@ func TestSessionRegistryNotifiesOnlyOnCountTransitions(t *testing.T) {
 	}
 }
 
+func TestSessionRegistryUsesSemanticSessionIDs(t *testing.T) {
+	registry := NewSessionRegistry(time.Second, nil)
+
+	id, err := registry.Register()
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	var typed SessionID = id
+
+	if !registry.Heartbeat(typed) {
+		t.Fatalf("Heartbeat returned false for registered session")
+	}
+	registry.Release(typed)
+}
+
 func TestSessionRegistryRunExpiryLoopPrunesExpiredSessions(t *testing.T) {
 	var counts []int
 	var countsMu sync.Mutex

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 var (
@@ -14,6 +15,22 @@ var (
 	ErrMissingAccessToken      = errors.New("missing or invalid access token")
 	ErrAuthServiceUnavailable  = errors.New("authentication service unavailable")
 	ErrInvalidOrExpiredToken   = errors.New("invalid or expired token")
+)
+
+const (
+	errCodeAuthInvalidUserContext        sharederrors.ErrorCode = "auth_invalid_user_context"
+	errCodeAuthReverseProxyMisconfigured sharederrors.ErrorCode = "auth_reverse_proxy_misconfigured"
+	errCodeAuthRemoteUserNotFound        sharederrors.ErrorCode = "auth_remote_user_not_found"
+	errCodeAuthDisabledMissingUser       sharederrors.ErrorCode = "auth_disabled_missing_user"
+	errCodeAuthAccessTokenMissing        sharederrors.ErrorCode = "auth_access_token_missing"
+	errCodeAuthServiceUnavailable        sharederrors.ErrorCode = "auth_service_unavailable"
+	errCodeAuthTokenInvalid              sharederrors.ErrorCode = "auth_token_invalid"
+	errCodeAuthAdminDisabled             sharederrors.ErrorCode = "auth_admin_disabled"
+	errCodeAuthUserNotAuthenticated      sharederrors.ErrorCode = "auth_user_not_authenticated"
+	errCodeAuthAdminPrivilegesRequired   sharederrors.ErrorCode = "auth_admin_privileges_required"
+	errCodeAuthInvalidUser               sharederrors.ErrorCode = "auth_invalid_user"
+	errCodeAuthEditorPrivilegesRequired  sharederrors.ErrorCode = "auth_editor_privileges_required"
+	errCodeAuthSelfRequired              sharederrors.ErrorCode = "auth_self_required"
 )
 
 func ResolveRequestUser(c *gin.Context, authService *coreauth.AuthService, authCookies *AuthCookies, authDisabled bool) (*coreauth.User, error) {
@@ -57,17 +74,17 @@ func RequireAuth(authService *coreauth.AuthService, authCookies *AuthCookies, au
 
 		switch {
 		case errors.Is(err, ErrInvalidUserContext):
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Invalid user context"})
+			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthInvalidUserContext, "Invalid user context")
 		case errors.Is(err, ErrAuthDisabledMissingUser):
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated and auth is disabled"})
+			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthDisabledMissingUser, "User not authenticated and auth is disabled")
 		case errors.Is(err, ErrMissingAccessToken):
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid access token"})
+			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthAccessTokenMissing, "Missing or invalid access token")
 		case errors.Is(err, ErrAuthServiceUnavailable):
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Authentication service unavailable"})
+			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthServiceUnavailable, "Authentication service unavailable")
 		case errors.Is(err, ErrInvalidOrExpiredToken):
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthTokenInvalid, "Invalid or expired token")
 		default:
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Authentication failed"})
+			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthTokenInvalid, "Authentication failed")
 		}
 	}
 }
@@ -76,19 +93,19 @@ func RequireAdmin(authDisabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Explicitly block admin operations when authentication is disabled
 		if authDisabled {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Admin operations are not available when authentication is disabled"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthAdminDisabled, "Admin operations are not available when authentication is disabled")
 			return
 		}
 
 		userValue, exists := c.Get("user")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 			return
 		}
 
 		user, ok := userValue.(*coreauth.User)
 		if !ok || !user.HasRole(coreauth.RoleAdmin) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Admin privileges required"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthAdminPrivilegesRequired, "Admin privileges required")
 			return
 		}
 
@@ -100,19 +117,19 @@ func RequireSelfOrAdmin(authDisabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Block all user management operations when authentication is disabled
 		if authDisabled {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User management is not available when authentication is disabled"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthAdminDisabled, "User management is not available when authentication is disabled")
 			return
 		}
 
 		userValue, exists := c.Get("user")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 			return
 		}
 
 		user, ok := userValue.(*coreauth.User)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Invalid user"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthInvalidUser, "Invalid user")
 			return
 		}
 
@@ -127,7 +144,7 @@ func RequireSelfOrAdmin(authDisabled bool) gin.HandlerFunc {
 
 		// Check if user has admin privileges for accessing other users
 		if !user.HasRole(coreauth.RoleAdmin) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Admin privileges required"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthAdminPrivilegesRequired, "Admin privileges required")
 			return
 		}
 
@@ -151,7 +168,7 @@ func OptionalAuth(authService *coreauth.AuthService, authCookies *AuthCookies) g
 			return
 		}
 		if authService == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Authentication service unavailable"})
+			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthServiceUnavailable, "Authentication service unavailable")
 			return
 		}
 		if user, err := authService.ValidateToken(token); err == nil {
@@ -165,13 +182,13 @@ func RequireEditorOrAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userValue, exists := c.Get("user")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 			return
 		}
 
 		user, ok := userValue.(*coreauth.User)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 			return
 		}
 
@@ -180,7 +197,7 @@ func RequireEditorOrAdmin() gin.HandlerFunc {
 			return
 		}
 
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Editor or Admin role required"})
+		abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthEditorPrivilegesRequired, "Editor or Admin role required")
 	}
 }
 
@@ -188,16 +205,22 @@ func RequireSelf() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userValue, exists := c.Get("user")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 			return
 		}
 
 		user, ok := userValue.(*coreauth.User)
 		if !ok || user.ID != c.Param("id") {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You can only access your own account"})
+			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthSelfRequired, "You can only access your own account")
 			return
 		}
 
 		c.Next()
 	}
+}
+
+func abortAuthMiddlewareError(c *gin.Context, status int, code sharederrors.ErrorCode, message string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	})
 }

@@ -12,7 +12,7 @@ import (
 )
 
 type TargetLink struct {
-	TargetPageID   string
+	TargetPageID   tree.PageID
 	TargetPagePath string
 	TargetKind     string
 	Broken         bool
@@ -132,16 +132,11 @@ func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownl
 		if resolved.Kind != markdownlinks.TargetKindPage && resolved.Kind != markdownlinks.TargetKindSection && resolved.Kind != markdownlinks.TargetKindUnresolved {
 			continue
 		}
-		resolvedPath := normalizeWikiPath(resolved.RoutePath)
+		resolvedPath := resolved.RoutePath.WikiPath()
 		if resolvedPath == "" || resolvedPath == "/" {
 			continue
 		}
 
-		// normalize for lookup (by stripping leading "/")
-		normalizedForLookup := strings.TrimPrefix(resolvedPath, "/")
-		if normalizedForLookup == "" {
-			continue
-		}
 		if resolved.Kind == markdownlinks.TargetKindUnresolved {
 			targetKind := unresolvedStoredTargetKind(resolved, link)
 			targetLinks = append(targetLinks, TargetLink{
@@ -163,8 +158,9 @@ func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownl
 			})
 			continue
 		}
+
 		// find page by route path
-		page, err := treeService.FindPageByRoutePathAndKind(normalizedForLookup, targetKind)
+		page, err := treeService.FindPageByRoutePathAndKind(resolved.RoutePath, targetKind)
 		if err == nil && page != nil {
 			// found page
 			targetLinks = append(targetLinks, TargetLink{
@@ -262,25 +258,25 @@ func markdownLinkIndexFromLoadedTree(root *tree.PageNode) *markdownlinks.Index {
 }
 
 func markdownLinkIndexFromLoadedTreeWithOptions(root *tree.PageNode, opts markdownlinks.Options) *markdownlinks.Index {
-	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, Path: "", ContentPath: "index.md"}}
+	entries := []markdownlinks.Entry{{Kind: markdownlinks.EntryKindSection, ContentPath: "index.md"}}
 	var walk func(node *tree.PageNode)
 	walk = func(node *tree.PageNode) {
 		if node == nil {
 			return
 		}
-		routePath := strings.Trim(node.CalculatePath(), "/")
+		routePath := node.CalculateRoutePath()
 		switch node.Kind {
 		case tree.NodeKindSection:
 			entries = append(entries, markdownlinks.Entry{
 				Kind:        markdownlinks.EntryKindSection,
-				Path:        routePath,
+				RoutePath:   routePath,
 				ContentPath: markdownContentPathForRoute(routePath, tree.NodeKindSection),
 			})
 		case tree.NodeKindPage:
 			if routePath != "" {
 				entries = append(entries, markdownlinks.Entry{
-					Kind: markdownlinks.EntryKindPage,
-					Path: routePath + ".md",
+					Kind:      markdownlinks.EntryKindPage,
+					RoutePath: routePath,
 				})
 			}
 		}
@@ -292,29 +288,28 @@ func markdownLinkIndexFromLoadedTreeWithOptions(root *tree.PageNode, opts markdo
 	return markdownlinks.NewIndexWithOptions(entries, opts)
 }
 
-func markdownSourceFileForRoute(routePath string, kind tree.NodeKind) string {
+func markdownSourceFileForRoute(routePath string, kind tree.NodeKind) tree.MarkdownPath {
 	normalized := strings.Trim(normalizeWikiPath(routePath), "/")
-	return markdownContentPathForRoute(normalized, kind)
+	if normalized == "" {
+		var rootRoutePath tree.RoutePath
+		return markdownContentPathForRoute(rootRoutePath, kind)
+	}
+	semanticRoutePath, err := tree.ParseRoutePath(normalized)
+	if err != nil {
+		var empty tree.MarkdownPath
+		return empty
+	}
+	return markdownContentPathForRoute(semanticRoutePath, kind)
 }
 
-func markdownContentPathForRoute(routePath string, kind tree.NodeKind) string {
-	routePath = strings.Trim(routePath, "/")
-	if kind == tree.NodeKindSection {
-		if routePath == "" {
-			return "index.md"
-		}
-		return routePath + "/index.md"
-	}
-	if routePath == "" {
-		return "index.md"
-	}
-	return routePath + ".md"
+func markdownContentPathForRoute(routePath tree.RoutePath, kind tree.NodeKind) tree.MarkdownPath {
+	return routePath.MarkdownContentPath(kind)
 }
 
-func toBacklinkResult(tree *tree.TreeService, backlinks []Backlink) *BacklinkResult {
+func toBacklinkResult(treeService *tree.TreeService, backlinks []Backlink) *BacklinkResult {
 	var items []BacklinkResultItem
 	for _, backlink := range backlinks {
-		item := toBacklinkResultItem(tree, backlink)
+		item := toBacklinkResultItem(treeService, backlink)
 		items = append(items, item)
 	}
 	return &BacklinkResult{
@@ -323,12 +318,12 @@ func toBacklinkResult(tree *tree.TreeService, backlinks []Backlink) *BacklinkRes
 	}
 }
 
-func toBacklinkResultItem(tree *tree.TreeService, backlink Backlink) BacklinkResultItem {
-	if !tree.IsLoaded() {
+func toBacklinkResultItem(treeService *tree.TreeService, backlink Backlink) BacklinkResultItem {
+	if !treeService.IsLoaded() {
 		return BacklinkResultItem{}
 	}
 
-	page, err := tree.FindPageByID(backlink.FromPageID)
+	page, err := treeService.FindPageByID(backlink.FromPageID)
 	if err != nil {
 		return BacklinkResultItem{}
 	}
@@ -343,10 +338,10 @@ func toBacklinkResultItem(tree *tree.TreeService, backlink Backlink) BacklinkRes
 	}
 }
 
-func toOutgoingLinkResult(tree *tree.TreeService, outgoings []Outgoing) *OutgoingResult {
+func toOutgoingLinkResult(treeService *tree.TreeService, outgoings []Outgoing) *OutgoingResult {
 	var items []OutgoingResultItem
 	for _, outgoing := range outgoings {
-		item := toOutgoingResultItem(tree, outgoing)
+		item := toOutgoingResultItem(treeService, outgoing)
 		items = append(items, item)
 	}
 	return &OutgoingResult{
@@ -355,7 +350,7 @@ func toOutgoingLinkResult(tree *tree.TreeService, outgoings []Outgoing) *Outgoin
 	}
 }
 
-func toOutgoingResultItem(tree *tree.TreeService, outgoing Outgoing) OutgoingResultItem {
+func toOutgoingResultItem(treeService *tree.TreeService, outgoing Outgoing) OutgoingResultItem {
 	toKind := outgoing.ToKind
 	if toKind == nonCanonicalPageStoredTarget {
 		toKind = defaultStoredTargetKind
@@ -372,11 +367,11 @@ func toOutgoingResultItem(tree *tree.TreeService, outgoing Outgoing) OutgoingRes
 		return item
 	}
 
-	if !tree.IsLoaded() {
+	if !treeService.IsLoaded() {
 		return item
 	}
 
-	toPage, err := tree.FindPageByID(outgoing.ToPageID)
+	toPage, err := treeService.FindPageByID(outgoing.ToPageID)
 	if err != nil || toPage == nil {
 		return item
 	}

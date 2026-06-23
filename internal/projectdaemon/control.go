@@ -12,10 +12,11 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/agenthooks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 type SessionHandle struct {
-	ID string `json:"id"`
+	ID SessionID `json:"id"`
 }
 
 type DaemonHealth struct {
@@ -35,6 +36,8 @@ type Client struct {
 
 type ControlHTTPError struct {
 	StatusCode int
+	Code       sharederrors.ErrorCode
+	MessageID  sharederrors.MessageID
 	Message    string
 }
 
@@ -84,18 +87,18 @@ func (c *Client) RegisterSession(ctx context.Context) (*SessionHandle, error) {
 	if err := c.doJSON(ctx, http.MethodPost, "/sessions", map[string]string{}, &out); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(out.ID) == "" {
+	if strings.TrimSpace(out.ID.String()) == "" {
 		return nil, fmt.Errorf("daemon returned empty session id")
 	}
 	return &out, nil
 }
 
-func (c *Client) HeartbeatSession(ctx context.Context, id string) error {
-	return c.doJSON(ctx, http.MethodPost, "/sessions/"+id+"/heartbeat", map[string]string{}, nil)
+func (c *Client) HeartbeatSession(ctx context.Context, id SessionID) error {
+	return c.doJSON(ctx, http.MethodPost, "/sessions/"+id.String()+"/heartbeat", map[string]string{}, nil)
 }
 
-func (c *Client) ReleaseSession(ctx context.Context, id string) error {
-	return c.doJSON(ctx, http.MethodDelete, "/sessions/"+id, nil, nil)
+func (c *Client) ReleaseSession(ctx context.Context, id SessionID) error {
+	return c.doJSON(ctx, http.MethodDelete, "/sessions/"+id.String(), nil, nil)
 }
 
 func (c *Client) VerifyStdioAuth(ctx context.Context, apiKey string) error {
@@ -138,11 +141,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in any, out an
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(raw))
+		code, messageID, msg := parseControlErrorBody(raw)
 		if msg == "" {
 			msg = resp.Status
 		}
-		return &ControlHTTPError{StatusCode: resp.StatusCode, Message: msg}
+		return &ControlHTTPError{StatusCode: resp.StatusCode, Code: code, MessageID: messageID, Message: msg}
 	}
 	if out == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -152,6 +155,20 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in any, out an
 		return err
 	}
 	return nil
+}
+
+func parseControlErrorBody(raw []byte) (sharederrors.ErrorCode, sharederrors.MessageID, string) {
+	var body struct {
+		Error struct {
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &body); err == nil && body.Error.Message != "" {
+		return body.Error.Code, body.Error.MessageID, strings.TrimSpace(body.Error.Message)
+	}
+	return "", "", strings.TrimSpace(string(raw))
 }
 
 type AuthRoundTripper struct {

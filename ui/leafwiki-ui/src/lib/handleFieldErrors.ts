@@ -1,8 +1,11 @@
 import { mapApiError } from './api/errors'
+import type { FieldErrorCode, MessageID } from './semanticTypes'
 import { toast } from 'sonner'
 
 type FieldError = {
   field: string
+  code?: FieldErrorCode
+  messageId?: MessageID
   message: string
 }
 

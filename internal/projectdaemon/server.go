@@ -3,14 +3,27 @@ package projectdaemon
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/perber/wiki/internal/agenthooks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 var ErrInvalidAPIKey = errors.New("invalid api key")
+
+const (
+	errCodeDaemonControlUnauthorized          sharederrors.ErrorCode = "daemon_control_unauthorized"
+	errCodeDaemonSessionRegisterFailed        sharederrors.ErrorCode = "daemon_session_register_failed"
+	errCodeDaemonSessionNotFound              sharederrors.ErrorCode = "daemon_session_not_found"
+	errCodeDaemonAgentPresenceInvalidRequest  sharederrors.ErrorCode = "daemon_agent_presence_invalid_request"
+	errCodeStdioAuthInvalidRequest            sharederrors.ErrorCode = "stdio_auth_invalid_request"
+	errCodeStdioAuthAPIKeyRejected            sharederrors.ErrorCode = "stdio_auth_api_key_rejected"
+	errCodeStdioAuthAPIKeyRequired            sharederrors.ErrorCode = "stdio_auth_api_key_required"
+	errCodeStdioAuthAPIKeyVerifierUnavailable sharederrors.ErrorCode = "stdio_auth_api_key_verifier_unavailable"
+	errCodeStdioAuthAPIKeyInvalid             sharederrors.ErrorCode = "stdio_auth_api_key_invalid"
+	errCodeStdioAuthAPIKeyVerifierFailed      sharederrors.ErrorCode = "stdio_auth_api_key_verifier_failed"
+)
 
 type ControlServerOptions struct {
 	Token         string
@@ -48,7 +61,7 @@ func NewControlServer(opts ControlServerOptions) http.Handler {
 
 func (s *ControlServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Header.Get(ControlTokenHeader) != s.token {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeControlError(w, http.StatusUnauthorized, errCodeDaemonControlUnauthorized, "unauthorized")
 		return
 	}
 	path := strings.TrimRight(req.URL.Path, "/")
@@ -58,20 +71,20 @@ func (s *ControlServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case req.Method == http.MethodPost && path == "/sessions":
 		id, err := s.sessions.Register()
 		if err != nil {
-			http.Error(w, "register session", http.StatusInternalServerError)
+			writeControlError(w, http.StatusInternalServerError, errCodeDaemonSessionRegisterFailed, "register session")
 			return
 		}
 		writeJSON(w, SessionHandle{ID: id})
 	case req.Method == http.MethodPost && strings.HasPrefix(path, "/sessions/") && strings.HasSuffix(path, "/heartbeat"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/sessions/"), "/heartbeat")
-		if !s.sessions.Heartbeat(id) {
-			http.Error(w, "session not found", http.StatusNotFound)
+		if !s.sessions.Heartbeat(SessionID(id)) {
+			writeControlError(w, http.StatusNotFound, errCodeDaemonSessionNotFound, "session not found")
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	case req.Method == http.MethodDelete && strings.HasPrefix(path, "/sessions/"):
 		id := strings.TrimPrefix(path, "/sessions/")
-		s.sessions.Release(id)
+		s.sessions.Release(SessionID(id))
 		writeJSON(w, map[string]any{"ok": true})
 	case req.Method == http.MethodPost && path == "/agent-presence/events" && s.agentPresence != nil:
 		s.recordAgentPresence(w, req)
@@ -89,7 +102,7 @@ func (s *ControlServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (s *ControlServer) recordAgentPresence(w http.ResponseWriter, req *http.Request) {
 	var event agenthooks.Event
 	if err := json.NewDecoder(req.Body).Decode(&event); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		writeControlError(w, http.StatusBadRequest, errCodeDaemonAgentPresenceInvalidRequest, "invalid request")
 		return
 	}
 	s.agentPresence.Record(event)
@@ -101,34 +114,42 @@ func (s *ControlServer) verifyStdioAuth(w http.ResponseWriter, req *http.Request
 		APIKey string `json:"apiKey"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		writeControlError(w, http.StatusBadRequest, errCodeStdioAuthInvalidRequest, "invalid request")
 		return
 	}
 	if s.authDisabled {
 		if strings.TrimSpace(body.APIKey) != "" {
-			http.Error(w, "disabled-auth daemon rejects API-key STDIO attach", http.StatusConflict)
+			writeControlError(w, http.StatusConflict, errCodeStdioAuthAPIKeyRejected, "disabled-auth daemon rejects API-key STDIO attach")
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
 		return
 	}
 	if strings.TrimSpace(body.APIKey) == "" {
-		http.Error(w, "native STDIO requires an API key", http.StatusUnauthorized)
+		writeControlError(w, http.StatusUnauthorized, errCodeStdioAuthAPIKeyRequired, "native STDIO requires an API key")
 		return
 	}
 	if s.verifyAPIKey == nil {
-		http.Error(w, "api key verifier unavailable", http.StatusInternalServerError)
+		writeControlError(w, http.StatusInternalServerError, errCodeStdioAuthAPIKeyVerifierUnavailable, "api key verifier unavailable")
 		return
 	}
 	if err := s.verifyAPIKey(body.APIKey); err != nil {
 		if errors.Is(err, ErrInvalidAPIKey) {
-			http.Error(w, fmt.Sprintf("invalid api key: %v", err), http.StatusUnauthorized)
+			writeControlError(w, http.StatusUnauthorized, errCodeStdioAuthAPIKeyInvalid, "invalid api key")
 			return
 		}
-		http.Error(w, fmt.Sprintf("api key verifier failed: %v", err), http.StatusServiceUnavailable)
+		writeControlError(w, http.StatusServiceUnavailable, errCodeStdioAuthAPIKeyVerifierFailed, "api key verifier failed")
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func writeControlError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	writeJSON(w, map[string]any{
+		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

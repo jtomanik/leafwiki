@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
@@ -55,11 +56,11 @@ type validationSummaryOutput struct {
 }
 
 type validationIssueOutput struct {
-	Severity string `json:"severity"`
-	Code     string `json:"code"`
-	Path     string `json:"path,omitempty"`
-	PageID   string `json:"pageId,omitempty"`
-	Message  string `json:"message"`
+	Severity wikivalidation.IssueSeverity `json:"severity"`
+	Code     wikivalidation.IssueCode     `json:"code"`
+	Path     string                       `json:"path,omitempty"`
+	PageID   tree.PageID                  `json:"pageId,omitempty"`
+	Message  string                       `json:"message"`
 }
 
 type validationOutput struct {
@@ -69,14 +70,14 @@ type validationOutput struct {
 }
 
 type recentChangeOutput struct {
-	CommitID     string   `json:"commitId,omitempty"`
-	Timestamp    string   `json:"timestamp,omitempty"`
-	Actor        string   `json:"actor,omitempty"`
-	Source       string   `json:"source,omitempty"`
-	Reason       string   `json:"reason,omitempty"`
-	ChangedCount int      `json:"changedCount"`
-	ChangedPaths []string `json:"changedPaths"`
-	PageIDs      []string `json:"pageIds,omitempty"`
+	CommitID     string        `json:"commitId,omitempty"`
+	Timestamp    string        `json:"timestamp,omitempty"`
+	Actor        string        `json:"actor,omitempty"`
+	Source       string        `json:"source,omitempty"`
+	Reason       string        `json:"reason,omitempty"`
+	ChangedCount int           `json:"changedCount"`
+	ChangedPaths []string      `json:"changedPaths"`
+	PageIDs      []tree.PageID `json:"pageIds,omitempty"`
 }
 
 type presenceStatusOutput struct {
@@ -98,7 +99,7 @@ type contextOutput struct {
 	ActiveSessions              []wikipresence.Session    `json:"activeSessions"`
 	PresenceStatus              presenceStatusOutput      `json:"presenceStatus"`
 	Tree                        *dto.Node                 `json:"tree"`
-	RecommendedTools            []string                  `json:"recommendedTools"`
+	RecommendedTools            []ToolID                  `json:"recommendedTools"`
 	CanonicalLinkExamples       []string                  `json:"canonicalLinkExamples"`
 	Warnings                    []string                  `json:"warnings,omitempty"`
 }
@@ -337,7 +338,26 @@ type copyPageInput struct {
 }
 
 type messageOutput struct {
-	Message string `json:"message"`
+	MessageID ToolMessageID `json:"messageId"`
+	Message   string        `json:"message"`
+}
+
+type ToolMessageID string
+
+func (id ToolMessageID) String() string {
+	return string(id)
+}
+
+const (
+	ToolMessageDeletePageSuccess  ToolMessageID = "mcp.tools.wiki_delete_page.success"
+	ToolMessageMovePageSuccess    ToolMessageID = "mcp.tools.wiki_move_page.success"
+	ToolMessageSortPagesSuccess   ToolMessageID = "mcp.tools.wiki_sort_pages.success"
+	ToolMessageConvertPageSuccess ToolMessageID = "mcp.tools.wiki_convert_page.success"
+	ToolMessageDeleteAssetSuccess ToolMessageID = "mcp.tools.wiki_delete_asset.success"
+)
+
+func newMessageOutput(messageID ToolMessageID, message string) messageOutput {
+	return messageOutput{MessageID: messageID, Message: message}
 }
 
 type searchPagesInput struct {

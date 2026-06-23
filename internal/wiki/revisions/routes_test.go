@@ -34,7 +34,7 @@ func TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor(t *testing
 		TreeService: treeService,
 		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
 			if page.ID != *pageID {
-				t.Fatalf("workspace page id = %q, want %q", page.ID, *pageID)
+				t.Fatalf("workspace page id = %q, want %q", page.ID, pageID.String())
 			}
 			seenCursor = cursor
 			seenLimit = limit
@@ -54,11 +54,12 @@ func TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor(t *testing
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/pages/"+*pageID+"/revisions?cursor=rev-5&limit=1", nil)
+	pageIDValue := pageID.MetadataValue()
+	req := httptest.NewRequest(http.MethodGet, "/api/pages/"+pageIDValue+"/revisions?cursor=rev-5&limit=1", nil)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
-	c.Params = gin.Params{{Key: "id", Value: *pageID}}
+	c.Params = gin.Params{{Key: "id", Value: pageIDValue}}
 
 	routes.handleListRevisions(c)
 

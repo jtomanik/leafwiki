@@ -41,12 +41,12 @@ func ToPropertyPage(node *tree.PageNode, props map[string]coreprop.PropertyEntry
 	}
 
 	p := &PropertyPage{
-		ID:           node.ID,
+		ID:           node.ID.String(),
 		Title:        node.Title,
 		Path:         BuildPathFromNode(node),
 		Properties:   apiProps,
-		CreatorID:    node.Metadata.CreatorID,
-		LastAuthorID: node.Metadata.LastAuthorID,
+		CreatorID:    node.Metadata.CreatorID.String(),
+		LastAuthorID: node.Metadata.LastAuthorID.String(),
 	}
 
 	if !node.Metadata.CreatedAt.IsZero() {
@@ -57,7 +57,7 @@ func ToPropertyPage(node *tree.PageNode, props map[string]coreprop.PropertyEntry
 	}
 
 	if userResolver != nil {
-		p.LastAuthor, _ = userResolver.ResolveUserLabel(node.Metadata.LastAuthorID)
+		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	return p

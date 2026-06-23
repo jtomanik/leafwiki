@@ -51,8 +51,8 @@ func (b *LinkService) IndexAllPages() error {
 		return err
 	}
 
-	var ids []string
-	if err := b.treeService.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := b.treeService.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -79,30 +79,30 @@ func (b *LinkService) ClearLinks() error {
 	return b.store.Clear()
 }
 
-func (b *LinkService) GetBacklinksForPage(pageID string) (*BacklinkResult, error) {
+func (b *LinkService) GetBacklinksForPage(pageID tree.PageID) (*BacklinkResult, error) {
 	backlinks, err := b.store.GetBacklinksForPage(pageID)
 	return toBacklinkResult(b.treeService, backlinks), err
 }
 
-func (b *LinkService) GetOutgoingLinksForPage(pageID string) (*OutgoingResult, error) {
+func (b *LinkService) GetOutgoingLinksForPage(pageID tree.PageID) (*OutgoingResult, error) {
 	outgoingLinks, err := b.store.GetOutgoingLinksForPage(pageID)
 	return toOutgoingLinkResult(b.treeService, outgoingLinks), err
 }
 
-func (b *LinkService) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLinkMatch, error) {
+func (b *LinkService) GetRefactorMatchesForPrefix(oldPrefix tree.RoutePath) ([]RefactorLinkMatch, error) {
 	return b.store.GetRefactorMatchesForPrefix(oldPrefix)
 }
 
-func (b *LinkService) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKind tree.NodeKind) ([]RefactorLinkMatch, error) {
-	return b.store.GetRefactorMatchesForPrefixAndKind(oldPrefix, string(rootKind))
+func (b *LinkService) GetRefactorMatchesForPrefixAndKind(oldPrefix tree.RoutePath, rootKind tree.NodeKind) ([]RefactorLinkMatch, error) {
+	return b.store.GetRefactorMatchesForPrefixAndKind(oldPrefix, rootKind)
 }
 
-func (b *LinkService) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]string, error) {
+func (b *LinkService) GetRefactorSourcePageIDsForPrefix(oldPrefix tree.RoutePath) ([]tree.PageID, error) {
 	return b.store.GetRefactorSourcePageIDsForPrefix(oldPrefix)
 }
 
-func (b *LinkService) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix string, rootKind tree.NodeKind) ([]string, error) {
-	return b.store.GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix, string(rootKind))
+func (b *LinkService) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix tree.RoutePath, rootKind tree.NodeKind) ([]tree.PageID, error) {
+	return b.store.GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix, rootKind)
 }
 
 func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, rules []RewriteRule) error {
@@ -120,12 +120,12 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 		if markdownIndex == nil {
 			markdownIndex = b.markdownLinkIndexForTree()
 		}
-		pagePath := normalizeWikiPath(page.CalculatePath())
-		targets := rewriteResolvedTargets(pagePath, page.Kind, outgoingByPageID[page.ID], rules, b.treeService, markdownIndex)
+		pageRoutePath := page.CalculateRoutePath()
+		targets := rewriteResolvedTargets(pageRoutePath, page.Kind, outgoingByPageID[page.ID], rules, b.treeService, markdownIndex)
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
-			ToPath:     pagePath,
+			ToPath:     pageRoutePath.WikiPath(),
 			ToKind:     string(page.Kind),
 			Targets:    targets,
 		})
@@ -138,7 +138,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 	return b.store.ReplaceLinksAndHeal(updates)
 }
 
-func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*LinkStatusResult, error) {
+func (b *LinkService) GetLinkStatusForPage(pageID tree.PageID, pagePath string) (*LinkStatusResult, error) {
 	pagePath = normalizeWikiPath(pagePath)
 	pageKind := tree.NodeKindPage
 	if b.treeService != nil {
@@ -236,12 +236,12 @@ func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 }
 
 // DeleteOutgoingLinksForPage removes all outgoing link records for a page.
-func (b *LinkService) DeleteOutgoingLinksForPage(pageID string) error {
+func (b *LinkService) DeleteOutgoingLinksForPage(pageID tree.PageID) error {
 	return b.store.DeleteOutgoingLinks(pageID)
 }
 
 // MarkIncomingLinksBrokenForPage marks all incoming links pointing to pageID as broken.
-func (b *LinkService) MarkIncomingLinksBrokenForPage(pageID string) error {
+func (b *LinkService) MarkIncomingLinksBrokenForPage(pageID tree.PageID) error {
 	return b.store.MarkIncomingLinksBroken(pageID)
 }
 
@@ -281,8 +281,8 @@ func (b *LinkService) Close() error {
 	return b.store.Close()
 }
 
-func pageIDsForPages(pages []*tree.Page) []string {
-	ids := make([]string, 0, len(pages))
+func pageIDsForPages(pages []*tree.Page) []tree.PageID {
+	ids := make([]tree.PageID, 0, len(pages))
 	for _, page := range pages {
 		if page == nil {
 			continue
@@ -292,30 +292,30 @@ func pageIDsForPages(pages []*tree.Page) []string {
 	return ids
 }
 
-func rewriteResolvedTargets(currentPath string, sourceKind tree.NodeKind, outgoings []Outgoing, rules []RewriteRule, treeService *tree.TreeService, markdownIndex *markdownlinks.Index) []TargetLink {
+func rewriteResolvedTargets(currentPath tree.RoutePath, sourceKind tree.NodeKind, outgoings []Outgoing, rules []RewriteRule, treeService *tree.TreeService, markdownIndex *markdownlinks.Index) []TargetLink {
 	if len(outgoings) == 0 {
 		return nil
 	}
 
 	paths := make([]string, 0, len(outgoings))
 	for _, outgoing := range outgoings {
-		targetPath := normalizeWikiPath(outgoing.ToPath)
+		targetPath := tree.NewRoutePathUnchecked(outgoing.ToPath).Clean()
 		if rewritten, ok := applyRewriteRulesForKind(targetPath, outgoing.ToKind, rules); ok {
 			targetPath = rewritten
 		}
 		paths = append(paths, storedTargetMarkdownHref(targetPath, outgoing.ToKind))
 	}
 
-	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath, sourceKind, paths)
+	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath.WikiPath(), sourceKind, paths)
 }
 
-func storedTargetMarkdownHref(targetPath string, targetKind string) string {
-	targetPath = normalizeWikiPath(targetPath)
-	if storedTargetKind(targetKind) != "page" || targetPath == "/" {
-		return targetPath
+func storedTargetMarkdownHref(targetPath tree.RoutePath, targetKind string) string {
+	wikiPath := targetPath.WikiPath()
+	if storedTargetKind(targetKind) != "page" || wikiPath == "/" {
+		return wikiPath
 	}
-	if strings.EqualFold(path.Ext(targetPath), ".md") {
-		return targetPath
+	if strings.EqualFold(path.Ext(wikiPath), ".md") {
+		return wikiPath
 	}
-	return targetPath + ".md"
+	return wikiPath + ".md"
 }

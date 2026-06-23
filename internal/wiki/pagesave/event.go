@@ -21,7 +21,7 @@ const (
 // PageSaveEvent carries all context a side effect needs to react to a page mutation.
 type PageSaveEvent struct {
 	Operation PageOperationType
-	UserID    string
+	UserID    tree.UserID
 	Source    string
 
 	// Before is the page state prior to the operation; nil for Create.

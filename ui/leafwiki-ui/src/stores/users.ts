@@ -1,5 +1,6 @@
 import * as authAPI from '@/lib/api/auth'
 import * as userAPI from '@/lib/api/users'
+import type { UserID } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 import { useSessionStore } from './session'
 
@@ -9,7 +10,7 @@ type UserStore = {
   loadUsers: () => Promise<void>
   createUser: (data: Parameters<typeof userAPI.createUser>[0]) => Promise<void>
   updateUser: (data: Parameters<typeof userAPI.updateUser>[0]) => Promise<void>
-  deleteUser: (id: string) => Promise<void>
+  deleteUser: (id: UserID) => Promise<void>
   changeOwnPassword: (oldPassword: string, newPassword: string) => Promise<void>
 }
 

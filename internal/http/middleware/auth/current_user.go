@@ -11,13 +11,13 @@ import (
 func MustGetUser(c *gin.Context) *auth.User {
 	v, exists := c.Get("user")
 	if !exists {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User not authenticated"})
+		abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthUserNotAuthenticated, "User not authenticated")
 		return nil
 	}
 
 	user, ok := v.(*auth.User)
 	if !ok || user == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Invalid user context"})
+		abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthInvalidUserContext, "Invalid user context")
 		return nil
 	}
 

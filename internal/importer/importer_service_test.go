@@ -169,7 +169,7 @@ func TestImporterService_StartCurrentPlanExecution_RunsInBackgroundAndStoresResu
 	w := &fakeWiki{
 		treeHash: "h1",
 		lookups:  map[string]*tree.PathLookup{},
-		ensureFn: func(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error) {
+		ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			<-allowEnsure
 			return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 		},
@@ -233,7 +233,7 @@ func TestImporterService_ClearCurrentPlan_WhileRunning_ReturnsError(t *testing.T
 	w := &fakeWiki{
 		treeHash: "h1",
 		lookups:  map[string]*tree.PathLookup{},
-		ensureFn: func(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error) {
+		ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			<-allowEnsure
 			return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 		},
@@ -266,7 +266,7 @@ func TestImporterService_CancelCurrentPlan_StopsBeforeNextItem(t *testing.T) {
 	w := &fakeWiki{
 		treeHash: "h1",
 		lookups:  map[string]*tree.PathLookup{},
-		ensureFn: func(userID, targetPath, title string, kind *tree.NodeKind) (*tree.Page, error) {
+		ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			if targetPath == "a" {
 				enterFirstEnsure <- struct{}{}
 				<-allowFirstEnsure
@@ -524,9 +524,10 @@ func TestFindMarkdownEntries_FindsMdRecursively_AndNormalizesSlashes(t *testing.
 	// collect paths in a set for stable assertion (WalkDir order is OS-dependent)
 	set := map[string]bool{}
 	for _, e := range got {
-		set[e.SourcePath] = true
+		sourcePath := e.SourcePath.FilesystemPath()
+		set[sourcePath] = true
 		// should be slash-normalized
-		if strings.Contains(e.SourcePath, `\`) {
+		if strings.Contains(sourcePath, `\`) {
 			t.Fatalf("SourcePath should be slash-normalized: %q", e.SourcePath)
 		}
 	}
@@ -590,7 +591,7 @@ func TestFindMarkdownEntries_FindsMixedCaseMdExtensions(t *testing.T) {
 
 	set := map[string]bool{}
 	for _, e := range got {
-		set[e.SourcePath] = true
+		set[e.SourcePath.FilesystemPath()] = true
 	}
 
 	if !set["a.MD"] || !set["b.mD"] || !set["c.Md"] {

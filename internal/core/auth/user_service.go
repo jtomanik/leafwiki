@@ -82,7 +82,7 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 	return user, nil
 }
 
-func (s *UserService) GetUserByID(id string) (*User, error) {
+func (s *UserService) GetUserByID(id UserID) (*User, error) {
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
 		if !errors.Is(err, ErrUserNotFound) {
@@ -94,7 +94,7 @@ func (s *UserService) GetUserByID(id string) (*User, error) {
 	return user, nil
 }
 
-func (s *UserService) UpdateUser(id, username, email, password, role string) (*User, error) {
+func (s *UserService) UpdateUser(id UserID, username, email, password, role string) (*User, error) {
 	// Check if user exists
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
@@ -103,13 +103,13 @@ func (s *UserService) UpdateUser(id, username, email, password, role string) (*U
 
 	// Check if username already exists (but if it's the same user, ignore)
 	existingUser, err := s.store.GetUserByUsername(username)
-	if err == nil && existingUser.ID != id {
+	if err == nil && NewUserIDUnchecked(existingUser.ID) != id {
 		return nil, ErrUserAlreadyExists
 	}
 
 	// Check if email already exists (but if it's the same user, ignore)
 	existingUser, err = s.store.GetUserByEmail(email)
-	if err == nil && existingUser.ID != id {
+	if err == nil && NewUserIDUnchecked(existingUser.ID) != id {
 		return nil, ErrUserAlreadyExists
 	}
 
@@ -155,7 +155,7 @@ func (s *UserService) UpdateUser(id, username, email, password, role string) (*U
 	return user, nil
 }
 
-func (s *UserService) UpdatePassword(id string, newpassword string) error {
+func (s *UserService) UpdatePassword(id UserID, newpassword string) error {
 	// Check if user exists
 	_, err := s.store.GetUserByID(id)
 	if err != nil {
@@ -177,7 +177,7 @@ func (s *UserService) UpdatePassword(id string, newpassword string) error {
 	return nil
 }
 
-func (s *UserService) DoesIDAndPasswordMatch(id, password string) (bool, error) {
+func (s *UserService) DoesIDAndPasswordMatch(id UserID, password string) (bool, error) {
 	// Check if user exists
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
@@ -193,7 +193,7 @@ func (s *UserService) DoesIDAndPasswordMatch(id, password string) (bool, error) 
 	return true, nil
 }
 
-func (s *UserService) DeleteUser(id string) error {
+func (s *UserService) DeleteUser(id UserID) error {
 	// Check if user exists
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
@@ -255,7 +255,7 @@ func (s *UserService) GetUserByEmailOrUsernameAndPassword(identifier, password s
 	return user, nil
 }
 
-func (s *UserService) ChangeOwnPassword(id, oldPassword, newPassword string) error {
+func (s *UserService) ChangeOwnPassword(id UserID, oldPassword, newPassword string) error {
 	// Check if user exists
 	user, err := s.store.GetUserByID(id)
 	if err != nil {
@@ -305,7 +305,7 @@ func (s *UserService) ResetAdminUserPassword() (*User, error) {
 	}
 
 	// Update the password for the admin user
-	err = s.UpdatePassword(adminUser.ID, password)
+	err = s.UpdatePassword(NewUserIDUnchecked(adminUser.ID), password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update admin password: %w", err)
 	}

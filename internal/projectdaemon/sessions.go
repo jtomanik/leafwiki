@@ -8,9 +8,15 @@ import (
 	"time"
 )
 
+type SessionID string
+
+func (id SessionID) String() string {
+	return string(id)
+}
+
 type SessionRegistry struct {
 	mu       sync.Mutex
-	handles  map[string]time.Time
+	handles  map[SessionID]time.Time
 	seen     bool
 	now      func() time.Time
 	ttl      time.Duration
@@ -22,28 +28,29 @@ func NewSessionRegistry(ttl time.Duration, onChange func(count int)) *SessionReg
 		ttl = DefaultHeartbeatTTL
 	}
 	return &SessionRegistry{
-		handles:  map[string]time.Time{},
+		handles:  map[SessionID]time.Time{},
 		now:      time.Now,
 		ttl:      ttl,
 		onChange: onChange,
 	}
 }
 
-func (r *SessionRegistry) Register() (string, error) {
+func (r *SessionRegistry) Register() (SessionID, error) {
 	id, err := randomID()
 	if err != nil {
 		return "", err
 	}
+	sessionID := SessionID(id)
 	r.mu.Lock()
 	r.seen = true
-	r.handles[id] = r.now().Add(r.ttl)
+	r.handles[sessionID] = r.now().Add(r.ttl)
 	count := len(r.handles)
 	r.mu.Unlock()
 	r.notify(count)
-	return id, nil
+	return sessionID, nil
 }
 
-func (r *SessionRegistry) Heartbeat(id string) bool {
+func (r *SessionRegistry) Heartbeat(id SessionID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.handles[id]; !ok {
@@ -53,7 +60,7 @@ func (r *SessionRegistry) Heartbeat(id string) bool {
 	return true
 }
 
-func (r *SessionRegistry) Release(id string) {
+func (r *SessionRegistry) Release(id SessionID) {
 	r.mu.Lock()
 	before := len(r.handles)
 	if _, ok := r.handles[id]; ok {

@@ -45,8 +45,22 @@ const (
 	SourceUnknown    Source = "unknown"
 )
 
+type ActorID string
+
+func NewActorIDUnchecked(raw string) ActorID {
+	return ActorID(raw)
+}
+
+func (id ActorID) String() string {
+	return string(id)
+}
+
+func (id ActorID) Trimmed() ActorID {
+	return ActorID(strings.TrimSpace(id.String()))
+}
+
 type Actor struct {
-	ID    string
+	ID    ActorID
 	Name  string
 	Email string
 }
@@ -68,10 +82,10 @@ type CommitRequest struct {
 type Commit struct {
 	Hash                 string
 	Message              string
-	AuthorID             string
+	AuthorID             ActorID
 	AuthorName           string
 	AuthorEmail          string
-	ActorIDs             []string
+	ActorIDs             []ActorID
 	CreatedAt            time.Time
 	Created              bool
 	Source               Source
@@ -502,15 +516,15 @@ func commitMessage(req CommitRequest, batchID string, changedMarkdownPaths []str
 	return b.String()
 }
 
-func commitActorIDs(req CommitRequest) []string {
-	primaryID := strings.TrimSpace(req.Actor.ID)
+func commitActorIDs(req CommitRequest) []ActorID {
+	primaryID := req.Actor.ID.Trimmed()
 	if primaryID == "" {
 		primaryID = PublicEditorActor().ID
 	}
-	actorIDs := []string{primaryID}
-	seen := map[string]struct{}{primaryID: {}}
+	actorIDs := []ActorID{primaryID}
+	seen := map[ActorID]struct{}{primaryID: {}}
 	for _, actor := range req.AdditionalActors {
-		actorID := strings.TrimSpace(actor.ID)
+		actorID := actor.ID.Trimmed()
 		if actorID == "" {
 			continue
 		}
@@ -532,16 +546,16 @@ func newBatchID() string {
 }
 
 func signature(actor Actor) *object.Signature {
-	if strings.TrimSpace(actor.ID) == "" {
+	if actor.ID.Trimmed() == "" {
 		actor = PublicEditorActor()
 	}
 	name := strings.TrimSpace(actor.Name)
 	if name == "" {
-		name = actor.ID
+		name = actor.ID.String()
 	}
 	email := strings.TrimSpace(actor.Email)
 	if email == "" {
-		email = actor.ID + "@leafwiki.local"
+		email = actor.ID.String() + "@leafwiki.local"
 	}
 	return &object.Signature{Name: name, Email: email, When: time.Now().UTC()}
 }
@@ -722,7 +736,7 @@ func sortedKeys(values map[string]struct{}) []string {
 func commitFromObject(commit *object.Commit) Commit {
 	title, trailers, actorIDs := parseCommitMessage(commit.Message)
 	changed, _ := strconv.Atoi(trailers["LeafWiki-Changed-Markdown"])
-	authorID := ""
+	authorID := ActorID("")
 	if len(actorIDs) > 0 {
 		authorID = actorIDs[0]
 	}
@@ -741,14 +755,14 @@ func commitFromObject(commit *object.Commit) Commit {
 	}
 }
 
-func parseCommitMessage(message string) (string, map[string]string, []string) {
+func parseCommitMessage(message string) (string, map[string]string, []ActorID) {
 	lines := strings.Split(message, "\n")
 	title := ""
 	if len(lines) > 0 {
 		title = strings.TrimSpace(lines[0])
 	}
 	trailers := make(map[string]string)
-	var actorIDs []string
+	var actorIDs []ActorID
 	for _, line := range lines[1:] {
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
@@ -760,7 +774,7 @@ func parseCommitMessage(message string) (string, map[string]string, []string) {
 		}
 		value = strings.TrimSpace(value)
 		if key == "LeafWiki-Actor" {
-			actorIDs = append(actorIDs, value)
+			actorIDs = append(actorIDs, ActorID(value))
 			if _, exists := trailers[key]; !exists {
 				trailers[key] = value
 			}

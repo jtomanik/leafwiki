@@ -55,12 +55,16 @@ func pageNodeKind() *tree.NodeKind {
 	return &kind
 }
 
-func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *string, title, slug string, kind *tree.NodeKind) *tree.Page {
+func pageIDPtr(id tree.PageID) *tree.PageID {
+	return &id
+}
+
+func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
 	t.Helper()
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.CreatePageInput{UserID: userID, ParentID: parentID, Title: title, Slug: slug, Kind: kind},
+		wikipages.CreatePageInput{UserID: tree.UserID(userID), ParentID: parentID, Title: title, Slug: tree.NewSlugUnchecked(slug), Kind: kind},
 	)
 	if err != nil {
 		t.Fatalf("CreatePage failed: %v", err)
@@ -68,7 +72,7 @@ func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *string, t
 	return out.Page
 }
 
-func updatePageForTest(t *testing.T, w *Wiki, userID, id, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
+func updatePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
 	t.Helper()
 
 	current, err := w.tree.GetPage(id)
@@ -78,7 +82,7 @@ func updatePageForTest(t *testing.T, w *Wiki, userID, id, title, slug string, co
 
 	out, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.UpdatePageInput{UserID: userID, ID: id, Version: current.Version(), Title: title, Slug: slug, Content: content, Kind: kind},
+		wikipages.UpdatePageInput{UserID: tree.UserID(userID), ID: id, Version: tree.NewPageVersionUnchecked(current.Version()), Title: title, Slug: tree.NewSlugUnchecked(slug), Content: content, Kind: kind},
 	)
 	if err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
@@ -86,7 +90,7 @@ func updatePageForTest(t *testing.T, w *Wiki, userID, id, title, slug string, co
 	return out.Page
 }
 
-func deletePageForTest(t *testing.T, w *Wiki, userID, id string, recursive bool) {
+func deletePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, recursive bool) {
 	t.Helper()
 
 	current, err := w.tree.GetPage(id)
@@ -96,7 +100,7 @@ func deletePageForTest(t *testing.T, w *Wiki, userID, id string, recursive bool)
 
 	if err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: userID, ID: id, Version: current.Version(), Recursive: recursive},
+		wikipages.DeletePageInput{UserID: tree.UserID(userID), ID: id, Version: tree.NewPageVersionUnchecked(current.Version()), Recursive: recursive},
 	); err != nil {
 		t.Fatalf("DeletePage failed: %v", err)
 	}
@@ -610,11 +614,11 @@ workspace-sync-search-token`
 	if len(tagged) != 1 || tagged[0] != "indexed-page" {
 		t.Fatalf("tagged pages = %#v, want indexed-page", tagged)
 	}
-	props, err := w.props.GetPropertiesForPages([]string{"indexed-page"})
+	props, err := w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
-	if props["indexed-page"]["status"].Value != "draft" {
+	if props[tree.NewPageIDUnchecked("indexed-page")]["status"].Value != "draft" {
 		t.Fatalf("properties = %#v, want status draft", props)
 	}
 	result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -660,11 +664,11 @@ workspace-sync-updated-token`
 	if len(tagged) != 1 || tagged[0] != "indexed-page" {
 		t.Fatalf("resynced tagged pages = %#v, want indexed-page", tagged)
 	}
-	props, err = w.props.GetPropertiesForPages([]string{"indexed-page"})
+	props, err = w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages after update: %v", err)
 	}
-	if props["indexed-page"]["status"].Value != "published" {
+	if props[tree.NewPageIDUnchecked("indexed-page")]["status"].Value != "published" {
 		t.Fatalf("properties after update = %#v, want status published", props)
 	}
 	result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -963,11 +967,11 @@ func TestWiki_DeletePage_WithChildren(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
-	createPageForTest(t, w, "system", &parent.ID, "Child", "child", pageNodeKind())
+	createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
 	err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: parent.Version(), Recursive: false},
+		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: tree.NewPageVersionUnchecked(parent.Version()), Recursive: false},
 	)
 	if err == nil {
 		t.Error("Expected error when deleting parent with children")
@@ -978,7 +982,7 @@ func TestWiki_DeletePage_Recursive(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
-	child := createPageForTest(t, w, "system", &parent.ID, "Child", "child", pageNodeKind())
+	child := createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
 	deletePageForTest(t, w, "system", parent.ID, true)
 	if _, err := w.tree.GetPage(parent.ID); err == nil {

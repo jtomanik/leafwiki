@@ -126,10 +126,10 @@ func pageKind() *tree.NodeKind {
 	return &k
 }
 
-func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, tags []string) string {
+func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
 	t.Helper()
 
-	idPtr, err := ts.CreateNode("system", nil, title, slug, pageKind())
+	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), pageKind())
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
@@ -140,7 +140,7 @@ func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, 
 	}
 	fm += "---\n\n# " + title
 
-	if err := ts.UpdateNode("system", *idPtr, title, slug, &fm, tree.VersionUnchecked, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &fm, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 
@@ -149,8 +149,8 @@ func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, 
 
 func indexAllPages(t *testing.T, svc *TagsService, ts *tree.TreeService) {
 	t.Helper()
-	var ids []string
-	if err := ts.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := ts.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -220,7 +220,7 @@ func TestTagsService_IndexAllPages_PagesWithoutTagsAreSkipped(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	content := "# No Tags Page\n\nNo frontmatter."
-	if err := ts.UpdateNode("system", *idPtr, "No Tags Page", "no-tags", &content, tree.VersionUnchecked, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, "No Tags Page", tree.NewSlugUnchecked("no-tags"), &content, false); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestTagsService_GetTagsForPages_ReturnsCorrectTags(t *testing.T) {
 	_ = svc.SetTagsForPage("p1", []string{"go", "testing"})
 	_ = svc.SetTagsForPage("p2", []string{"typescript"})
 
-	got, err := svc.GetTagsForPages([]string{"p1", "p2"})
+	got, err := svc.GetTagsForPages(testPageIDs("p1", "p2"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestTagsService_IndexPageContent_StoresTagsAndExcerpt(t *testing.T) {
 		t.Fatalf("expected 2 tags, got %v", tags)
 	}
 
-	exc, err := svc.GetExcerptsForPages([]string{"page-1"})
+	exc, err := svc.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestTagsService_IndexPageContent_NoFrontmatterStoresEmptyTags(t *testing.T)
 		t.Errorf("expected no tags, got %v", tags)
 	}
 
-	exc, err := svc.GetExcerptsForPages([]string{"page-1"})
+	exc, err := svc.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestTagsService_IndexAllPages_StoresExcerpts(t *testing.T) {
 
 	indexAllPages(t, svc, ts)
 
-	exc, err := svc.GetExcerptsForPages([]string{pageID})
+	exc, err := svc.GetExcerptsForPages(testPageIDs(pageID))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}

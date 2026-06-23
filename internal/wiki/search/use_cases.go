@@ -59,9 +59,9 @@ func (uc *SearchUseCase) Execute(_ context.Context, in SearchInput) (*SearchOutp
 		return nil, ErrSearchUnavailable
 	}
 
-	var pageIDs []string
+	var pageIDs []tree.PageID
 	if len(in.Tags) > 0 {
-		pageIDs = []string{}
+		pageIDs = []tree.PageID{}
 		if uc.tags != nil {
 			var err error
 			pageIDs, err = uc.tags.GetPageIDsByTags(normalizeTags(in.Tags))
@@ -90,7 +90,7 @@ func (uc *SearchUseCase) Execute(_ context.Context, in SearchInput) (*SearchOutp
 	return &SearchOutput{Result: result}, nil
 }
 
-func (uc *SearchUseCase) searchByTags(pageIDs []string, offset, limit int) (*SearchOutput, error) {
+func (uc *SearchUseCase) searchByTags(pageIDs []tree.PageID, offset, limit int) (*SearchOutput, error) {
 	if uc.tags == nil || uc.tree == nil {
 		return &SearchOutput{
 			Result: &coresearch.SearchResult{
@@ -166,7 +166,7 @@ func (uc *SearchUseCase) attachTags(items []coresearch.SearchResultItem) {
 		return
 	}
 
-	pageIDs := make([]string, 0, len(items))
+	pageIDs := make([]tree.PageID, 0, len(items))
 	for _, item := range items {
 		if item.PageID != "" {
 			pageIDs = append(pageIDs, item.PageID)
@@ -207,7 +207,7 @@ func normalizeTags(tags []string) []string {
 	return result
 }
 
-func (uc *SearchUseCase) buildTagFacets(pageIDs []string) []coresearch.SearchTagFacet {
+func (uc *SearchUseCase) buildTagFacets(pageIDs []tree.PageID) []coresearch.SearchTagFacet {
 	if uc.tags == nil || len(pageIDs) == 0 {
 		return []coresearch.SearchTagFacet{}
 	}

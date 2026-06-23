@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
@@ -21,7 +22,12 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 	pageID := strings.TrimSpace(in.PageID)
 	routePath := normalizeToolRoutePath(in.Path)
 	if pageID != "" && routePath != "" {
-		return subtreeOutput{}, fmt.Errorf("pageId and path cannot both be supplied")
+		return subtreeOutput{}, sharederrors.NewLocalizedError(
+			errCodeMCPPageTargetAmbiguous,
+			"pageId and path cannot both be supplied",
+			"pageId and path cannot both be supplied",
+			nil,
+		)
 	}
 	depth, err := boundedSubtreeDepth(in.Depth)
 	if err != nil {
@@ -39,7 +45,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 	var node *tree.PageNode
 	switch {
 	case pageID != "":
-		page, err := r.treeService.GetPage(pageID)
+		page, err := r.treeService.GetPage(tree.NewPageIDUnchecked(pageID))
 		if err != nil {
 			return subtreeOutput{}, err
 		}
@@ -123,7 +129,7 @@ func (r *Routes) subtreeLinkCounts(ctx context.Context, node *tree.PageNode) any
 	return out.Status.Counts
 }
 
-func (r *Routes) subtreeContentPreview(pageID string) string {
+func (r *Routes) subtreeContentPreview(pageID tree.PageID) string {
 	if r == nil || r.treeService == nil {
 		return ""
 	}

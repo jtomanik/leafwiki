@@ -418,7 +418,7 @@ test.describe('History', () => {
 
     const currentBadge = page.locator('[data-testid^="history-sidebar-revision-current-badge-"]');
     await expect(currentBadge).toHaveCount(1);
-    await expect(currentBadge).toHaveText('Active version');
+    await expect(currentBadge).toHaveAttribute('data-revision-badge', 'current');
 
     const currentRevision = currentBadge.locator('xpath=ancestor::button[1]');
     await currentRevision.click();
@@ -529,10 +529,10 @@ test.describe('History', () => {
     await page.locator('[data-testid="page-history-page-changes-tab"]').click();
 
     const structureChanges = page.getByTestId('page-history-page-structure-changes');
-    await expect(structureChanges).toContainText('Title');
+    await expect(structureChanges.locator('[data-history-change="title"]')).toBeVisible();
     await expect(structureChanges).toContainText(originalTitle);
     await expect(structureChanges).toContainText(renamedTitle);
-    await expect(structureChanges).toContainText('Slug');
+    await expect(structureChanges.locator('[data-history-change="slug"]')).toBeVisible();
     await expect(structureChanges).toContainText(`history-structure-${suffix}`);
     await expect(structureChanges).toContainText(renamedSlug);
   });

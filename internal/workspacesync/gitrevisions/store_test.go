@@ -12,6 +12,14 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 )
 
+func actorIDStrings(ids []ActorID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
+
 func TestStoreInitialSnapshotTracksMarkdownOnly(t *testing.T) {
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
@@ -336,7 +344,7 @@ func TestStoreCaptureRecordsAdditionalActorTrailers(t *testing.T) {
 	if commits[0].AuthorID != "alice" {
 		t.Fatalf("AuthorID = %q, want primary actor alice", commits[0].AuthorID)
 	}
-	if strings.Join(commits[0].ActorIDs, ",") != "alice,bob" {
+	if strings.Join(actorIDStrings(commits[0].ActorIDs), ",") != "alice,bob" {
 		t.Fatalf("ActorIDs = %#v, want alice,bob", commits[0].ActorIDs)
 	}
 }

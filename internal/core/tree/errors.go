@@ -20,20 +20,20 @@ var ErrConvertNotAllowed = errors.New("convert not allowed")
 var ErrVersionConflict = errors.New("version conflict")
 var ErrVersionRequired = errors.New("version required")
 
-// VersionUnchecked bypasses optimistic locking for internal system operations
+// versionUnchecked bypasses optimistic locking for internal system operations
 // that have no client-supplied version (e.g. revision restore, copy cleanup).
-const VersionUnchecked = "\x00"
+const versionUnchecked = "\x00"
 
 // DriftError represents a drift error with detailed information.
 type DriftError struct {
-	NodeID string
+	NodeID PageID
 	Kind   NodeKind
 	Path   string
 	Reason string
 }
 
 func (e *DriftError) Error() string {
-	return "drift detected: nodeID=" + e.NodeID + ", kind=" + string(e.Kind) + ", path=" + e.Path + ", reason=" + e.Reason
+	return fmt.Sprintf("drift detected: nodeID=%s, kind=%s, path=%s, reason=%s", e.NodeID, e.Kind, e.Path, e.Reason)
 }
 
 func (e *DriftError) Unwrap() error {
@@ -60,7 +60,7 @@ func (e *PageAlreadyExistsError) Unwrap() error { return ErrPageAlreadyExists }
 // NotFoundError represents a not found error with details.
 type NotFoundError struct {
 	Resource string
-	ID       string
+	ID       PageID
 	Path     string
 }
 

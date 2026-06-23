@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	corebanding "github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
@@ -133,7 +134,7 @@ func (r *Routes) handleUploadLogo(c *gin.Context) {
 			r.log.Error("could not close logo file", "error", err)
 		}
 	}()
-	out, err := r.uploadLogo.Execute(c.Request.Context(), UploadLogoInput{File: file, Filename: header.Filename})
+	out, err := r.uploadLogo.Execute(c.Request.Context(), UploadLogoInput{File: file, Filename: tree.NewAssetNameUnchecked(header.Filename)})
 	if err != nil {
 		respondWithBrandingError(c, err)
 		return
@@ -172,7 +173,7 @@ func (r *Routes) handleUploadFavicon(c *gin.Context) {
 			r.log.Error("could not close favicon file", "error", err)
 		}
 	}()
-	out, err := r.uploadFavicon.Execute(c.Request.Context(), UploadFaviconInput{File: file, Filename: header.Filename})
+	out, err := r.uploadFavicon.Execute(c.Request.Context(), UploadFaviconInput{File: file, Filename: tree.NewAssetNameUnchecked(header.Filename)})
 	if err != nil {
 		respondWithBrandingError(c, err)
 		return
@@ -197,7 +198,7 @@ func (r *Routes) handleServeBrandingAsset(c *gin.Context) {
 		return
 	}
 
-	cleanPath, status := r.resolveBrandingAssetPath(c.Param("filename"), cfg)
+	cleanPath, status := r.resolveBrandingAssetPath(tree.NewAssetNameUnchecked(c.Param("filename")), cfg)
 	if status != http.StatusOK {
 		c.Status(status)
 		return
@@ -216,7 +217,7 @@ func (r *Routes) handleServeCurrentFavicon(c *gin.Context) {
 	}
 
 	if cfg.FaviconFile != "" {
-		cleanPath, status := r.resolveBrandingAssetPath(cfg.FaviconFile, cfg)
+		cleanPath, status := r.resolveBrandingAssetPath(tree.NewAssetNameUnchecked(cfg.FaviconFile), cfg)
 		if status == http.StatusOK {
 			disableClientCache(c)
 			c.File(cleanPath)
@@ -232,12 +233,13 @@ func (r *Routes) handleServeCurrentFavicon(c *gin.Context) {
 	c.Data(http.StatusOK, "image/svg+xml", []byte(httpinternal.DefaultFaviconSVG))
 }
 
-func (r *Routes) resolveBrandingAssetPath(filename string, cfg *corebanding.BrandingConfigResponse) (string, int) {
+func (r *Routes) resolveBrandingAssetPath(filename tree.AssetName, cfg *corebanding.BrandingConfigResponse) (string, int) {
+	rawFilename := filename.Filename()
 	// Prevent path traversal or poisoned config values.
-	if strings.Contains(filename, "..") ||
-		strings.Contains(filename, "/") ||
-		strings.Contains(filename, "\\") ||
-		strings.Contains(filename, "\x00") {
+	if strings.Contains(rawFilename, "..") ||
+		strings.Contains(rawFilename, "/") ||
+		strings.Contains(rawFilename, "\\") ||
+		strings.Contains(rawFilename, "\x00") {
 		return "", http.StatusForbidden
 	}
 
@@ -249,13 +251,13 @@ func (r *Routes) resolveBrandingAssetPath(filename string, cfg *corebanding.Bran
 		allowedExts[ext] = true
 	}
 
-	ext := strings.ToLower(filepath.Ext(filename))
+	ext := strings.ToLower(filepath.Ext(rawFilename))
 	if !allowedExts[ext] {
 		return "", http.StatusForbidden
 	}
 
 	brandingDir := r.brandingService.GetBrandingAssetsDir()
-	filePath := filepath.Join(brandingDir, filename)
+	filePath := filepath.Join(brandingDir, rawFilename)
 	cleanPath := filepath.Clean(filePath)
 	cleanBrandingDir := filepath.Clean(brandingDir)
 

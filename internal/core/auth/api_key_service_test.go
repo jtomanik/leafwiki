@@ -3,6 +3,7 @@ package auth
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,22 +39,24 @@ func setupTestAPIKeyService(t *testing.T) (string, *UserService, *APIKeyStore, *
 
 func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 	_, _, store, service, user := setupTestAPIKeyService(t)
+	userID := NewUserIDUnchecked(user.ID)
 
-	created, err := service.CreateAPIKey(user.ID, "  Local Codex  ", user.ID)
+	created, err := service.CreateAPIKey(userID, "  Local Codex  ", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
 
-	if created.Secret == "" || !strings.HasPrefix(created.Secret, "lwk_"+created.Key.ID+"_") {
+	if created.Secret == "" || !strings.HasPrefix(created.Secret, "lwk_"+created.Key.ID.String()+"_") {
 		t.Fatalf("secret = %q, want lwk_<id>_<secret>", created.Secret)
 	}
+	var _ APIKeyID = created.Key.ID
 	if created.Key.Name != "Local Codex" {
 		t.Fatalf("key name = %q, want trimmed name", created.Key.Name)
 	}
-	if got, want := created.Key.UserID, user.ID; got != want {
+	if got, want := created.Key.UserID, userID; got != want {
 		t.Fatalf("key user id = %q, want %q", got, want)
 	}
-	if got, want := created.Key.CreatedByUserID, user.ID; got != want {
+	if got, want := created.Key.CreatedByUserID, userID; got != want {
 		t.Fatalf("createdBy = %q, want %q", got, want)
 	}
 	if got, want := created.Key.Scopes, []string{MCPAPIKeyScope}; len(got) != len(want) || got[0] != want[0] {
@@ -77,7 +80,7 @@ func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 		t.Fatalf("database contains raw secret")
 	}
 
-	listed, err := service.ListAPIKeys(user.ID)
+	listed, err := service.ListAPIKeys(userID)
 	if err != nil {
 		t.Fatalf("ListAPIKeys failed: %v", err)
 	}
@@ -91,8 +94,9 @@ func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *testing.T) {
 	_, userService, _, service, user := setupTestAPIKeyService(t)
+	userID := NewUserIDUnchecked(user.ID)
 
-	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -112,7 +116,7 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 		"",
 		"not-an-api-key",
 		"lwk_missing_parts",
-		"lwk_" + created.Key.ID + "_wrongsecret",
+		fmt.Sprintf("lwk_%s_wrongsecret", created.Key.ID),
 	}
 	for _, input := range badInputs {
 		if _, err := service.VerifyAPIKey(input); !errors.Is(err, ErrInvalidToken) {
@@ -120,13 +124,13 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 		}
 	}
 
-	if err := service.RevokeAPIKey(user.ID, created.Key.ID); err != nil {
+	if err := service.RevokeAPIKey(userID, created.Key.ID); err != nil {
 		t.Fatalf("RevokeAPIKey failed: %v", err)
 	}
 	if _, err := service.VerifyAPIKey(created.Secret); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("revoked VerifyAPIKey err = %v, want ErrInvalidToken", err)
 	}
-	listed, err := service.ListAPIKeys(user.ID)
+	listed, err := service.ListAPIKeys(userID)
 	if err != nil {
 		t.Fatalf("ListAPIKeys failed: %v", err)
 	}
@@ -134,11 +138,11 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 		t.Fatalf("revoked key listed as active: %#v", listed)
 	}
 
-	second, err := service.CreateAPIKey(user.ID, "After revoke", user.ID)
+	second, err := service.CreateAPIKey(userID, "After revoke", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey second failed: %v", err)
 	}
-	if _, err := userService.UpdateUser(user.ID, user.Username, user.Email, "", RoleViewer); err != nil {
+	if _, err := userService.UpdateUser(userID, user.Username, user.Email, "", RoleViewer); err != nil {
 		t.Fatalf("UpdateUser role failed: %v", err)
 	}
 	verified, err = service.VerifyAPIKey(second.Secret)
@@ -148,7 +152,7 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 	if verified.User.Role != RoleViewer {
 		t.Fatalf("verified role = %q, want current viewer role", verified.User.Role)
 	}
-	if err := userService.DeleteUser(user.ID); err != nil {
+	if err := userService.DeleteUser(userID); err != nil {
 		t.Fatalf("DeleteUser failed: %v", err)
 	}
 	if _, err := service.VerifyAPIKey(second.Secret); !errors.Is(err, ErrInvalidToken) {
@@ -158,7 +162,8 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 
 func TestAPIKeyServiceVerifyRetriesTransientLastUsedLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	userID := NewUserIDUnchecked(user.ID)
+	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -203,7 +208,8 @@ func TestAPIKeyServiceVerifyRetriesTransientLastUsedLock(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	userID := NewUserIDUnchecked(user.ID)
+	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -238,7 +244,8 @@ func TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRetriesTransientUserLookupLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	created, err := service.CreateAPIKey(user.ID, "MCP client", user.ID)
+	userID := NewUserIDUnchecked(user.ID)
+	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -273,17 +280,18 @@ func TestAPIKeyServiceVerifyRetriesTransientUserLookupLock(t *testing.T) {
 
 func TestAPIKeyStoreRevocationIsScopedToUser(t *testing.T) {
 	_, userService, _, service, user := setupTestAPIKeyService(t)
+	userID := NewUserIDUnchecked(user.ID)
 	other, err := userService.CreateUser("other", "other@example.com", "password123", RoleEditor)
 	if err != nil {
 		t.Fatalf("CreateUser other failed: %v", err)
 	}
 
-	created, err := service.CreateAPIKey(other.ID, "Other key", user.ID)
+	created, err := service.CreateAPIKey(NewUserIDUnchecked(other.ID), "Other key", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
 
-	if err := service.RevokeAPIKey(user.ID, created.Key.ID); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrAPIKeyNotFound) {
+	if err := service.RevokeAPIKey(userID, created.Key.ID); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrAPIKeyNotFound) {
 		t.Fatalf("wrong-user RevokeAPIKey err = %v, want not found", err)
 	}
 	if _, err := service.VerifyAPIKey(created.Secret); err != nil {
@@ -320,12 +328,13 @@ func (b sqliteExclusiveBlocker) rollback(t *testing.T) {
 
 func TestAPIKeyStoreMarkUsedRejectsRevokedKey(t *testing.T) {
 	_, _, store, service, user := setupTestAPIKeyService(t)
+	userID := NewUserIDUnchecked(user.ID)
 
-	created, err := service.CreateAPIKey(user.ID, "Race key", user.ID)
+	created, err := service.CreateAPIKey(userID, "Race key", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
-	if err := service.RevokeAPIKey(user.ID, created.Key.ID); err != nil {
+	if err := service.RevokeAPIKey(userID, created.Key.ID); err != nil {
 		t.Fatalf("RevokeAPIKey failed: %v", err)
 	}
 

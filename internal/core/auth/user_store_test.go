@@ -59,7 +59,7 @@ func TestUserStore_CreateUser(t *testing.T) {
 	}
 
 	// Verify the user was created
-	retrievedUser, err := store.GetUserByID(user.ID)
+	retrievedUser, err := store.GetUserByID(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		t.Fatalf("Failed to retrieve user: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestUserStore_GetUserByID_NotExisting(t *testing.T) {
 	}
 
 	// Attempt to retrieve a non-existing user
-	_, err = store.GetUserByID("non-existing-id")
+	_, err = store.GetUserByID(NewUserIDUnchecked("non-existing-id"))
 	if err == nil {
 		t.Fatalf("Expected error for non-existing user, got nil")
 	}
@@ -171,7 +171,7 @@ func TestUserStore_GetUserByID_NotExisting(t *testing.T) {
 	}
 
 	// Attempt to retrieve an existing user
-	retrievedUser, err := store.GetUserByID(user.ID)
+	retrievedUser, err := store.GetUserByID(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		t.Fatalf("Failed to retrieve user: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestUserStore_UpdateUser(t *testing.T) {
 	}
 
 	// Verify the user was updated
-	retrievedUser, err := store.GetUserByID(user.ID)
+	retrievedUser, err := store.GetUserByID(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		t.Fatalf("Failed to retrieve user: %v", err)
 	}
@@ -372,13 +372,13 @@ func TestUserStore_DeleteUser(t *testing.T) {
 	}
 	initialCount := len(users)
 	// Delete the user
-	err = store.DeleteUser(user.ID)
+	err = store.DeleteUser(NewUserIDUnchecked(user.ID))
 	if err != nil {
 		t.Fatalf("Failed to delete user: %v", err)
 	}
 
 	// Verify the user was deleted
-	_, err = store.GetUserByID(user.ID)
+	_, err = store.GetUserByID(NewUserIDUnchecked(user.ID))
 	if err == nil {
 		t.Fatalf("Expected error for deleted user, got nil")
 	}
@@ -404,7 +404,7 @@ func TestUserStore_DeleteUser_NotExisting(t *testing.T) {
 	defer test_utils.WrapCloseWithErrorCheck(store.Close, t)
 
 	// Attempt to delete a non-existing user
-	err := store.DeleteUser("non-existing-id")
+	err := store.DeleteUser(NewUserIDUnchecked("non-existing-id"))
 	if err == nil {
 		t.Fatalf("Expected error for non-existing user, got nil")
 	}
@@ -634,13 +634,13 @@ func TestUserStoreUpdatePassword(t *testing.T) {
 	}
 
 	// Update the user's password
-	err = store.UpdatePassword(user1.ID, "newpassword")
+	err = store.UpdatePassword(NewUserIDUnchecked(user1.ID), "newpassword")
 	if err != nil {
 		t.Fatalf("Failed to update password: %v", err)
 	}
 
 	// Verify the password was updated
-	retrievedUser, err := store.GetUserByID(user1.ID)
+	retrievedUser, err := store.GetUserByID(NewUserIDUnchecked(user1.ID))
 	if err != nil {
 		t.Fatalf("Failed to retrieve user: %v", err)
 	}

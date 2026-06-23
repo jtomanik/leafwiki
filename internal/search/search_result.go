@@ -1,5 +1,7 @@
 package search
 
+import "github.com/perber/wiki/internal/core/tree"
+
 type SearchResult struct {
 	Limit     int                `json:"limit"`
 	Offset    int                `json:"offset"`
@@ -9,13 +11,13 @@ type SearchResult struct {
 }
 
 type SearchResultItem struct {
-	PageID  string   `json:"page_id"`
-	Title   string   `json:"title"`
-	Path    string   `json:"path"`
-	Kind    string   `json:"kind"`
-	Rank    float64  `json:"rank"`
-	Excerpt string   `json:"excerpt"`
-	Tags    []string `json:"tags,omitempty"`
+	PageID  tree.PageID `json:"page_id"`
+	Title   string      `json:"title"`
+	Path    string      `json:"path"`
+	Kind    string      `json:"kind"`
+	Rank    float64     `json:"rank"`
+	Excerpt string      `json:"excerpt"`
+	Tags    []string    `json:"tags,omitempty"`
 }
 
 type SearchTagFacet struct {

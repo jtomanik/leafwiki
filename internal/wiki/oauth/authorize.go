@@ -47,19 +47,20 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrInvalidRequest)
 			return
 		}
+		userID := coreauth.NewUserIDUnchecked(user.ID)
 		switch c.PostForm("decision") {
 		case "approve":
-			if !r.service.consumeApproval(c.PostForm("approval_token"), user.ID, approvalKey) {
+			if !r.service.consumeApproval(c.PostForm("approval_token"), userID, approvalKey) {
 				writeOAuthBadRequest(c, fosite.ErrInvalidRequest)
 				return
 			}
 		case "deny":
-			_ = r.service.consumeApproval(c.PostForm("approval_token"), user.ID, approvalKey)
+			_ = r.service.consumeApproval(c.PostForm("approval_token"), userID, approvalKey)
 			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrAccessDenied)
 			return
 		default:
 			details := r.service.approvalPageData(c.Request, req, ctx.Opts.BasePath)
-			token, err := r.service.issueApproval(user.ID, approvalKey, details)
+			token, err := r.service.issueApproval(userID, approvalKey, details)
 			if err != nil {
 				writeOAuthBadRequest(c, err)
 				return

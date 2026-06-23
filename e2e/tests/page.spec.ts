@@ -405,10 +405,10 @@ async function updatePageByPath(
 
 async function createChildPagesByPath(
   page: import('@playwright/test').Page,
-  input: { parentPath: string; titles: string[] },
+  input: { parentPath: string; titles: string[]; parentKind?: 'page' | 'section' },
 ) {
   await page.evaluate(
-    async ({ apiBasePath, parentPath, titles }) => {
+    async ({ apiBasePath, parentPath, parentKind, titles }) => {
       const normalizedParentPath = parentPath.replace(/^\/+/, '');
 
       function getCsrfTokenFromCookie(): string | null {
@@ -431,7 +431,7 @@ async function createChildPagesByPath(
       }
 
       const parentResponse = await fetch(
-        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}&kind=page`,
+        `${apiBasePath}/api/pages/by-path?path=${encodeURIComponent(normalizedParentPath)}&kind=${parentKind ?? 'page'}`,
         {
           credentials: 'include',
           headers: {
@@ -1025,7 +1025,9 @@ async function expectMarkdownLinkAutocompleteWorks(page: import('@playwright/tes
   await editPage.savePage();
   await editPage.closeEditor();
 
-  const welcomeLink = page.locator(`article a[href="${toAppPath('/welcome-to-leafwiki.md')}"]`);
+  const welcomeLink = page.locator(
+    `article a[href="${toAppPath('/w/home/welcome-to-leafwiki.md')}"]`,
+  );
   await welcomeLink.getByText('Welcome').waitFor({ state: 'visible' });
   await expect
     .poll(() => getPageContentByPath(page, slug))
@@ -1300,7 +1302,7 @@ test.describe('Authenticated', () => {
     await page.goto(permalinkUrl);
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(toAppPath(`/${targetParentTitle}/${renamedChildTitle}.md`));
+      .toBe(toAppPath(`/w/home/${targetParentTitle}/${renamedChildTitle}.md`));
     await page.locator('article').waitFor({ state: 'visible' });
     await expect(page.locator('.breadcrumbs-nav__current')).toHaveText(renamedChildTitle);
   });
@@ -1330,6 +1332,7 @@ test.describe('Authenticated', () => {
     // not the repeated create-dialog flow.
     await createChildPagesByPath(page, {
       parentPath: parentSlug,
+      parentKind: 'section',
       titles: childPages,
     });
     await page.reload();
@@ -1450,7 +1453,10 @@ for the page edited at ${new Date().toISOString()}
       state: 'visible',
     });
 
-    await page.getByTestId('page-save-version-conflict-action').click();
+    const conflictAction = page.getByTestId('page-save-version-conflict-action');
+    await expect(conflictAction).toHaveAttribute('data-error-code', 'page_version_conflict');
+    await expect(conflictAction).toHaveAttribute('data-l10n-id', 'errors.page.version_conflict');
+    await conflictAction.click();
     await page.getByText('Page saved successfully').last().waitFor({
       state: 'visible',
     });
@@ -1822,6 +1828,7 @@ for the page edited at ${new Date().toISOString()}
     });
     await createChildPagesByPath(page, {
       parentPath: parentSlug,
+      parentKind: 'section',
       titles: [sourceTitle, targetTitle],
     });
     await updatePageByPath(page, {
@@ -1849,6 +1856,7 @@ for the page edited at ${new Date().toISOString()}
     });
     await createChildPagesByPath(page, {
       parentPath: sectionSlug,
+      parentKind: 'section',
       titles: [childTitle],
     });
     await updatePageByPath(page, {
@@ -1969,6 +1977,7 @@ for the page edited at ${new Date().toISOString()}
     });
     await createChildPagesByPath(page, {
       parentPath: sectionSlug,
+      parentKind: 'section',
       titles: [sourceTitle],
     });
     await updatePageByPath(page, {
@@ -2067,7 +2076,7 @@ for the page edited at ${new Date().toISOString()}
     let observedPath: string | null = null;
     let observedKind: string | null = null;
 
-    await page.route('**/api/pages/by-path**', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/by-path/, async (route) => {
       const url = new URL(route.request().url());
       if (url.searchParams.get('path') !== 'docs/sync') {
         await route.continue();
@@ -2133,7 +2142,7 @@ for the page edited at ${new Date().toISOString()}
       content: `[Missing Canonical](/${missingSlug}.md)`,
     });
     let observedEnsureBody: { path?: string; kind?: string } | null = null;
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -2215,7 +2224,7 @@ for the page edited at ${new Date().toISOString()}
       slug: sourceSlug,
       content: `[Missing Page](/${missingSlug}.md)`,
     });
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -2252,7 +2261,7 @@ for the page edited at ${new Date().toISOString()}
       content: `[Missing Section](/${missingSlug})`,
     });
     let observedEnsureBody: { path?: string; kind?: string } | null = null;
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -2412,7 +2421,7 @@ Target content`;
       .poll(async () => page.evaluate(() => window.location.hash), {
         timeout: 5000,
       })
-      .toBe('#intro');
+      .toBe('#leafwiki-user-content-intro');
   });
 
   test('headline anchor supports non-ascii headings', async ({ page }) => {
@@ -2438,7 +2447,7 @@ Target content`;
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#привет-мир');
+      .toBe('#leafwiki-user-content-привет-мир');
 
     const latinHeading = page.locator('article h2').getByText('Café Überblick');
     await latinHeading.waitFor({ state: 'visible' });
@@ -2448,7 +2457,7 @@ Target content`;
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#cafe-uberblick');
+      .toBe('#leafwiki-user-content-cafe-uberblick');
 
     const hanHeading = page.locator('article h3').getByText('你好 世界');
     await hanHeading.waitFor({ state: 'visible' });
@@ -2458,7 +2467,7 @@ Target content`;
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#你好-世界');
+      .toBe('#leafwiki-user-content-你好-世界');
   });
 
   test('headline hash navigation keeps target below sticky toc', async ({ page }) => {
@@ -2588,26 +2597,30 @@ This paragraph creates a footnote reference.[^leafwiki]
     const footnoteReference = page.locator('article sup a[data-footnote-ref]');
     await footnoteReference.waitFor({ state: 'visible' });
     await test.expect(footnoteReference).not.toHaveAttribute('node', /.+/);
-    await test.expect(footnoteReference).toHaveAttribute('href', /#user-content-fn-leafwiki$/);
+    await test
+      .expect(footnoteReference)
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fn-leafwiki$/);
     await footnoteReference.click();
 
     await test.expect
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#user-content-fn-leafwiki');
+      .toBe('#leafwiki-user-content-user-content-fn-leafwiki');
 
     const footnoteBacklink = page.locator('article a[data-footnote-backref]');
     await footnoteBacklink.waitFor({ state: 'visible' });
     await test.expect(footnoteBacklink).not.toHaveAttribute('node', /.+/);
-    await test.expect(footnoteBacklink).toHaveAttribute('href', /#user-content-fnref-leafwiki$/);
+    await test
+      .expect(footnoteBacklink)
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fnref-leafwiki$/);
     await footnoteBacklink.click();
 
     await test.expect
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#user-content-fnref-leafwiki');
+      .toBe('#leafwiki-user-content-user-content-fnref-leafwiki');
 
     await test.expect(page.locator('article .footnotes')).not.toHaveAttribute('node', /.+/);
 
@@ -2714,6 +2727,7 @@ This paragraph creates a footnote reference.[^leafwiki]
       .toBeGreaterThan(0);
 
     await treeView.clickPageByTitle(targetTitle);
+    await expect(page.locator('article > h1')).toHaveText(targetTitle);
 
     await scrollContainer.evaluate((element) => {
       if (!(element instanceof HTMLElement)) {
@@ -2846,7 +2860,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     await expect(deleteDialog).toContainText(referrerTitle);
     await deleteDialog.getByRole('link', { name: referrerTitle }).click();
 
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${referrerSlug}.md`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/w/home/${referrerSlug}.md`);
     await expectMainScrollTop(page, 0);
   });
 
@@ -2873,7 +2887,7 @@ This paragraph creates a footnote reference.[^leafwiki]
     const editPage = new EditPage(page);
     await editPage.closeEditor();
 
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${slug}.md`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(toAppPath(`/w/home/${slug}.md`));
     await expectMainScrollTop(page, 0);
   });
 
@@ -2900,19 +2914,19 @@ First reference[^leafwiki] and second reference[^leafwiki]
     await test.expect(footnoteReferences.nth(1)).not.toHaveAttribute('node', /.+/);
     await test
       .expect(footnoteReferences.nth(0))
-      .toHaveAttribute('href', /#user-content-fn-leafwiki$/);
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fn-leafwiki$/);
     await test
       .expect(footnoteReferences.nth(1))
-      .toHaveAttribute('href', /#user-content-fn-leafwiki$/);
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fn-leafwiki$/);
 
     const footnoteBacklinks = page.locator('article a[data-footnote-backref]');
     await test.expect(footnoteBacklinks).toHaveCount(2);
     await test
       .expect(footnoteBacklinks.nth(0))
-      .toHaveAttribute('href', /#user-content-fnref-leafwiki$/);
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fnref-leafwiki$/);
     await test
       .expect(footnoteBacklinks.nth(1))
-      .toHaveAttribute('href', /#user-content-fnref-leafwiki-2$/);
+      .toHaveAttribute('href', /#leafwiki-user-content-user-content-fnref-leafwiki-2$/);
     await test.expect(footnoteBacklinks.nth(1)).not.toHaveAttribute('node', /.+/);
 
     await footnoteBacklinks.nth(1).click();
@@ -2921,7 +2935,7 @@ First reference[^leafwiki] and second reference[^leafwiki]
       .poll(async () => page.evaluate(() => decodeURIComponent(window.location.hash)), {
         timeout: 5000,
       })
-      .toBe('#user-content-fnref-leafwiki-2');
+      .toBe('#leafwiki-user-content-user-content-fnref-leafwiki-2');
   });
 
   test('navigating away from markdown-it sample stays responsive', async ({ page }) => {
@@ -3004,7 +3018,7 @@ First reference[^leafwiki] and second reference[^leafwiki]
     await expect(
       page.locator('button[data-testid^="history-sidebar-revision-"]').first(),
     ).toBeVisible();
-    await expect(page.getByTestId('page-history-page-list')).toContainText('Revision History');
+    await expect(page.getByTestId('page-history-page-list')).toContainText('Document History');
   });
 
   test('unsaved changes-warning', async ({ page }) => {
@@ -3380,7 +3394,7 @@ Paragraph outside the list.
     const slug = `page-from-not-found-${Date.now()}`;
     const pagePath = `/${slug}.md`;
     let observedEnsureBody: { path?: string; kind?: string } | null = null;
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -3420,7 +3434,7 @@ Paragraph outside the list.
     const slug = `section-from-not-found-${Date.now()}`;
     const pagePath = `/${slug}`;
     let observedEnsureBody: { path?: string; kind?: string } | null = null;
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -3471,7 +3485,7 @@ Paragraph outside the list.
       content: `# Existing Page Twin ${slug}`,
       kind: 'page',
     });
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -3480,7 +3494,7 @@ Paragraph outside the list.
     });
     page.on('request', (request) => {
       const url = new URL(request.url());
-      if (url.pathname === '/api/pages/lookup') {
+      if (/^\/api\/(?:workspaces\/[^/]+\/)?pages\/lookup$/.test(url.pathname)) {
         lookupKinds.push(url.searchParams.get('kind') ?? '');
       }
     });
@@ -3531,7 +3545,7 @@ Paragraph outside the list.
       content: `# Existing Section Twin ${slug}`,
       kind: 'section',
     });
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -3540,7 +3554,7 @@ Paragraph outside the list.
     });
     page.on('request', (request) => {
       const url = new URL(request.url());
-      if (url.pathname === '/api/pages/lookup') {
+      if (/^\/api\/(?:workspaces\/[^/]+\/)?pages\/lookup$/.test(url.pathname)) {
         lookupKinds.push(url.searchParams.get('kind') ?? '');
       }
     });
@@ -3592,7 +3606,7 @@ Paragraph outside the list.
       content: `# Existing Index Section ${slug}`,
       kind: 'section',
     });
-    await page.route('**/api/pages/ensure', async (route) => {
+    await page.route(/\/api\/(?:workspaces\/[^/]+\/)?pages\/ensure/, async (route) => {
       observedEnsureBody = route.request().postDataJSON() as {
         path?: string;
         kind?: string;
@@ -3710,7 +3724,7 @@ Paragraph outside the list.
       targetParentPath: '',
     });
     await page.goto(toAppPath(`/${childTitle}.md`));
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${childTitle}.md`);
+    await expect.poll(() => new URL(page.url()).pathname).toBe(toAppPath(`/${childTitle}.md`));
     await expect
       .poll(
         () =>
@@ -3778,7 +3792,7 @@ Paragraph outside the list.
     await page.goto(toAppPath(`/${targetParentTitle}/${childTitle}.md`));
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(`/${targetParentTitle}/${childTitle}.md`);
+      .toBe(toAppPath(`/${targetParentTitle}/${childTitle}.md`));
     await expect(page.locator('article > h1')).toHaveText(childTitle);
   });
 
@@ -3818,7 +3832,7 @@ Paragraph outside the list.
     await page.goto(toAppPath(`/e/${targetParentTitle}/${childTitle}.md`));
     await expect
       .poll(() => new URL(page.url()).pathname)
-      .toBe(`/e/${targetParentTitle}/${childTitle}.md`);
+      .toBe(toAppPath(`/e/${targetParentTitle}/${childTitle}.md`));
     await expect(page.locator('.cm-editor')).toBeVisible();
   });
 
@@ -3921,7 +3935,7 @@ Paragraph outside the list.
 
               return preview.counts?.affectedPages ?? 0;
             },
-            { parentTitle, targetTitle },
+            { apiBasePath: e2eBasePath, parentTitle, targetTitle },
           ),
         { timeout: 15000 },
       )
@@ -3935,11 +3949,13 @@ Paragraph outside the list.
     await page.goto(toAppPath(`/${referrerTitle}.md`));
     await expect(page.locator('article').getByRole('link', { name: targetTitle })).toHaveAttribute(
       'href',
-      toAppPath(`/${targetTitle}.md`),
+      toAppPath(`/w/home/${targetTitle}.md`),
     );
 
     await page.locator('article').getByRole('link', { name: targetTitle }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${targetTitle}.md`);
+    await expect
+      .poll(() => new URL(page.url()).pathname)
+      .toBe(toAppPath(`/w/home/${targetTitle}.md`));
     await expect(page.locator('article > h1')).toHaveText(targetTitle);
   });
 

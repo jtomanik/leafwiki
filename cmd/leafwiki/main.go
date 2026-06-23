@@ -31,6 +31,7 @@ import (
 	corebranding "github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tools"
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -43,7 +44,16 @@ import (
 	wikioauth "github.com/perber/wiki/internal/wiki/oauth"
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaced"
+	"github.com/perber/wiki/internal/workspaceid"
 	"golang.org/x/sync/singleflight"
+)
+
+const (
+	runtimeErrorCodeWorkspaceGrantDenied          sharederrors.ErrorCode = "workspace_grant_denied"
+	runtimeErrorCodeMCPWorkspaceUnavailable       sharederrors.ErrorCode = "mcp_workspace_unavailable"
+	runtimeErrorCodePrivateMCPControlTokenInvalid sharederrors.ErrorCode = "private_mcp_control_token_invalid"
+	errCodeStdioAuthAPIKeyInvalid                 sharederrors.ErrorCode = "stdio_auth_api_key_invalid"
+	errCodeMCPActorContextInvalid                 sharederrors.ErrorCode = "mcp_actor_context_invalid"
 )
 
 func writeUsage(w io.Writer) {
@@ -579,7 +589,7 @@ func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookR
 	if agentHookRequested {
 		provider := agenthooks.ProviderUnknown
 		if len(args) >= 2 {
-			provider = args[1]
+			provider = agenthooks.ProviderID(args[1])
 		}
 		if err := runAgentHookCommand(context.Background(), cfg, provider, os.Stdin, os.Stdout); err != nil {
 			slog.Default().Warn("Agent hook failed open", "provider", provider, "error", err)
@@ -625,7 +635,7 @@ func agentHookProviderFromArgs(args []string) (string, bool) {
 		if len(args) > i+1 {
 			return args[i+1], true
 		}
-		return agenthooks.ProviderUnknown, true
+		return string(agenthooks.ProviderUnknown), true
 	}
 	return "", false
 }
@@ -649,7 +659,7 @@ func agentHookProviderFromRawArgs(args []string) (string, bool) {
 		if len(args) > i+1 {
 			return args[i+1], true
 		}
-		return agenthooks.ProviderUnknown, true
+		return string(agenthooks.ProviderUnknown), true
 	}
 	return "", false
 }
@@ -894,8 +904,8 @@ func runDaemonService(parent context.Context, cfg leafwikiRuntimeConfig) error {
 	return runProjectDaemonOwner(ctx, cfg)
 }
 
-func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, provider string, stdin io.Reader, stdout io.Writer) (err error) {
-	allowResponse := agenthooks.AllowResponse(provider)
+func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, provider agenthooks.ProviderID, stdin io.Reader, stdout io.Writer) (err error) {
+	allowResponse := agenthooks.AllowResponse(string(provider))
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("agent hook panic: %v", recovered)
@@ -945,7 +955,7 @@ func daemonStdioBridgeConfig(desc *projectdaemon.Descriptor, cfg leafwikiRuntime
 		ControlToken:     controlToken,
 		AuthControlURL:   strings.TrimSpace(desc.ControlURL),
 		AuthControlToken: strings.TrimSpace(desc.ControlToken),
-		WorkspaceID:      strings.TrimSpace(desc.WorkspaceID),
+		WorkspaceID:      desc.WorkspaceID,
 		APIKey:           cfg.APIKey,
 		Stdin:            os.Stdin,
 		Stdout:           os.Stdout,
@@ -962,13 +972,16 @@ func daemonStdioActorContext(ctx context.Context, desc *projectdaemon.Descriptor
 	if strings.TrimSpace(cfg.APIKey) != "" {
 		source.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.APIKey))
 	}
-	if strings.TrimSpace(desc.WorkspaceID) != "" {
-		source.Header.Set(projectdaemon.WorkspaceIDHeader, strings.TrimSpace(desc.WorkspaceID))
+	if desc.WorkspaceID != "" {
+		source.Header.Set(projectdaemon.WorkspaceIDHeader, desc.WorkspaceID.HTTPHeaderValue())
 	}
 	out := struct {
 		Actor projectdaemon.ActorContext `json:"actor"`
 	}{}
 	if err := callWikidPrivateEndpoint(ctx, desc.ControlURL, desc.ControlToken, "/__leafwiki/actor-context", source, &out); err != nil {
+		if isWikidPrivateAuthFailure(err) {
+			return "", fmt.Errorf("unauthorized native STDIO API key: %w", err)
+		}
 		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
 	}
 	encoded, err := projectdaemon.EncodeActorContext(out.Actor)
@@ -1149,7 +1162,7 @@ func registerFederatedFirstContact(layout wikid.Layout, requestCfg projectdaemon
 	return registration.Workspace, false, nil
 }
 
-func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntimeConfig, workspaceID string) (wikid.Grant, bool, error) {
+func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntimeConfig, workspaceID workspaceid.WorkspaceID) (wikid.Grant, bool, error) {
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		return wikid.Grant{}, false, nil
@@ -1176,11 +1189,12 @@ func federatedWorkspaceDisplayName(cfg projectdaemon.Config) string {
 	return "Workspace"
 }
 
-func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descriptor, workspaceID string, cfg leafwikiRuntimeConfig) error {
+func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descriptor, workspaceID workspaceid.WorkspaceID, cfg leafwikiRuntimeConfig) error {
 	if desc == nil {
 		return fmt.Errorf("global wikid descriptor is unavailable")
 	}
-	endpoint := strings.TrimRight(desc.ControlURL, "/") + "/__leafwiki/workspaces/" + url.PathEscape(workspaceID) + "/ensure"
+	path := "/__leafwiki/workspaces/" + workspaceID.URLPathSegment() + "/ensure"
+	endpoint := strings.TrimRight(desc.ControlURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return err
@@ -1198,11 +1212,7 @@ func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descripto
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(raw))
-		if msg == "" {
-			msg = resp.Status
-		}
-		return fmt.Errorf("ensure workspace %q: %s", workspaceID, msg)
+		return fmt.Errorf("ensure workspace %q: %w", workspaceID.String(), newWikidPrivateEndpointError(path, resp.StatusCode, raw))
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
@@ -1590,13 +1600,13 @@ func compareProjectDaemonDescriptorForRequest(desc *projectdaemon.Descriptor, re
 		normalized.DisableRequestLog = desc.Config.DisableRequestLog
 	}
 	mismatches := compareProjectDaemonConfigForRequest(desc.Config, normalized, requestTransports)
-	requestedWorkspaceID := strings.TrimSpace(normalized.WorkspaceID)
-	descriptorWorkspaceID := strings.TrimSpace(desc.WorkspaceID)
+	requestedWorkspaceID := normalized.WorkspaceID
+	descriptorWorkspaceID := desc.WorkspaceID
 	if requestedWorkspaceID != "" && descriptorWorkspaceID != "" && requestedWorkspaceID != descriptorWorkspaceID && !hasProjectDaemonMismatch(mismatches, "workspace-id") {
 		mismatches = append(mismatches, projectdaemon.Mismatch{
 			Field: "workspace-id",
-			Want:  descriptorWorkspaceID,
-			Got:   requestedWorkspaceID,
+			Want:  fmt.Sprint(descriptorWorkspaceID),
+			Got:   fmt.Sprint(requestedWorkspaceID),
 		})
 	}
 	return mismatches
@@ -1668,7 +1678,7 @@ func daemonConfigForRuntime(cfg leafwikiRuntimeConfig) (projectdaemon.Config, er
 	logFile := daemonLogFileForConfig(cfg, dataDir)
 	return projectdaemon.Config{
 		RuntimeStack:            cfg.RuntimeStack,
-		WorkspaceID:             runtimeWorkspaceID(cfg.Workspace),
+		WorkspaceID:             runtimeWorkspaceSemanticID(cfg.Workspace),
 		DataDir:                 dataDir,
 		RootDir:                 rootDir,
 		AuthDisabled:            cfg.DisableAuth,
@@ -1956,7 +1966,7 @@ func daemonOwnerEnv() []string {
 	return env
 }
 
-func runDaemonHeartbeat(ctx context.Context, client *projectdaemon.Client, sessionID string, interval time.Duration) error {
+func runDaemonHeartbeat(ctx context.Context, client *projectdaemon.Client, sessionID projectdaemon.SessionID, interval time.Duration) error {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
@@ -1979,7 +1989,7 @@ type daemonStdioBridge struct {
 	ControlToken     string
 	AuthControlURL   string
 	AuthControlToken string
-	WorkspaceID      string
+	WorkspaceID      workspaceid.WorkspaceID
 	APIKey           string
 	ActorContext     string
 	Stdin            io.ReadCloser
@@ -2085,7 +2095,7 @@ type stdioActorContextRoundTripper struct {
 	Base             http.RoundTripper
 	AuthControlURL   string
 	AuthControlToken string
-	WorkspaceID      string
+	WorkspaceID      workspaceid.WorkspaceID
 	APIKey           string
 }
 
@@ -2115,14 +2125,14 @@ func (rt stdioActorContextRoundTripper) actorContext(req *http.Request) (string,
 		source.Header = req.Header.Clone()
 	}
 	source.Header.Set("Authorization", "Bearer "+strings.TrimSpace(rt.APIKey))
-	if strings.TrimSpace(rt.WorkspaceID) != "" {
-		source.Header.Set(projectdaemon.WorkspaceIDHeader, strings.TrimSpace(rt.WorkspaceID))
+	if rt.WorkspaceID != "" {
+		source.Header.Set(projectdaemon.WorkspaceIDHeader, rt.WorkspaceID.HTTPHeaderValue())
 	}
 	out := struct {
 		Actor projectdaemon.ActorContext `json:"actor"`
 	}{}
 	if err := callWikidPrivateEndpoint(source.Context(), rt.AuthControlURL, rt.AuthControlToken, "/__leafwiki/actor-context", source, &out); err != nil {
-		if strings.Contains(err.Error(), "unauthorized") || strings.Contains(err.Error(), "invalid") {
+		if isWikidPrivateAuthFailure(err) {
 			return "", fmt.Errorf("unauthorized native STDIO API key: %w", err)
 		}
 		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
@@ -2281,9 +2291,9 @@ type federatedWorkspaceManager struct {
 	wikidURL         string
 	layout           wikid.Layout
 	supervisor       *wikid.WorkspaceSupervisor
-	processes        map[string]*internalRuntimeRoleProcess
-	descriptors      map[string][]string
-	workspaces       map[string]wikid.WorkspaceRecord
+	processes        map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess
+	descriptors      map[workspaceid.WorkspaceID][]string
+	workspaces       map[workspaceid.WorkspaceID]wikid.WorkspaceRecord
 	ensureGroup      singleflight.Group
 	stopped          bool
 	startRole        func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error)
@@ -2298,15 +2308,15 @@ func newFederatedWorkspaceManager(base leafwikiRuntimeConfig, daemonToken string
 		wikidURL:         wikidURL,
 		layout:           layout,
 		supervisor:       supervisor,
-		processes:        map[string]*internalRuntimeRoleProcess{},
-		descriptors:      map[string][]string{},
-		workspaces:       map[string]wikid.WorkspaceRecord{},
+		processes:        map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{},
+		descriptors:      map[workspaceid.WorkspaceID][]string{},
+		workspaces:       map[workspaceid.WorkspaceID]wikid.WorkspaceRecord{},
 		startRole:        startInternalRuntimeRoleProcess,
 		removeDescriptor: projectdaemon.RemoveDescriptor,
 	}
 }
 
-func (m *federatedWorkspaceManager) MarkReady(workspaceID string, pid int, url string) {
+func (m *federatedWorkspaceManager) MarkReady(workspaceID workspaceid.WorkspaceID, pid int, url string) {
 	if m == nil || m.supervisor == nil {
 		return
 	}
@@ -2317,7 +2327,7 @@ func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.
 	if m == nil || m.supervisor == nil {
 		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace manager is unavailable")
 	}
-	workspaceID := strings.TrimSpace(workspace.ID)
+	workspaceID := workspace.ID
 	if workspaceID == "" {
 		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace ID is required")
 	}
@@ -2330,7 +2340,7 @@ func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.
 	}
 	m.mu.Unlock()
 
-	resultCh := m.ensureGroup.DoChan(workspaceID, func() (any, error) {
+	resultCh := m.ensureGroup.DoChan(workspaceID.StorageKey(), func() (any, error) {
 		return m.ensureWorkspace(workspaceID, workspace)
 	})
 	select {
@@ -2339,13 +2349,13 @@ func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.
 	case result := <-resultCh:
 		status, ok := result.Val.(wikid.WorkspaceStatus)
 		if !ok && result.Err == nil {
-			return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID, result.Val)
+			return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID.String(), result.Val)
 		}
 		return status, result.Err
 	}
 }
 
-func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID string, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
+func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID workspaceid.WorkspaceID, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
 	m.mu.Lock()
 	if current := m.supervisor.Status(workspaceID); current.State == wikid.WorkspaceStateRunning {
 		if proc := m.processes[workspaceID]; proc == nil || !proc.isDone() {
@@ -2392,7 +2402,7 @@ func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID string, workspac
 func (m *federatedWorkspaceManager) workspaceRuntimeConfig(workspace wikid.WorkspaceRecord, port string) leafwikiRuntimeConfig {
 	cfg := m.base
 	cfg.Workspace = wiki.Workspace{
-		ID:      strings.TrimSpace(workspace.ID),
+		ID:      workspace.ID,
 		DataDir: strings.TrimSpace(workspace.DataDir),
 		RootDir: strings.TrimSpace(workspace.RootDir),
 	}
@@ -2469,7 +2479,7 @@ func removeNonRegularDescriptor(path string) error {
 	return nil
 }
 
-func (m *federatedWorkspaceManager) monitorWorkspaceProcess(workspaceID string, proc *internalRuntimeRoleProcess) {
+func (m *federatedWorkspaceManager) monitorWorkspaceProcess(workspaceID workspaceid.WorkspaceID, proc *internalRuntimeRoleProcess) {
 	err := proc.wait()
 	m.mu.Lock()
 	current := m.processes[workspaceID]
@@ -2489,7 +2499,7 @@ func (m *federatedWorkspaceManager) monitorWorkspaceProcess(workspaceID string, 
 	restartAt, restart := m.supervisor.RecordCrash(workspaceID, message)
 	m.mu.Unlock()
 	m.removeDescriptors(descriptorPaths)
-	if restart && !stopped && strings.TrimSpace(workspace.ID) != "" {
+	if restart && !stopped && workspace.ID != "" {
 		go m.restartWorkspaceAfter(workspace, restartAt)
 	}
 }
@@ -2531,7 +2541,7 @@ func (m *federatedWorkspaceManager) stop(ctx context.Context) error {
 	for _, paths := range m.descriptors {
 		descriptors = append(descriptors, paths...)
 	}
-	m.processes = map[string]*internalRuntimeRoleProcess{}
+	m.processes = map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{}
 	m.mu.Unlock()
 	var errs []error
 	for _, proc := range processes {
@@ -2547,8 +2557,8 @@ func (m *federatedWorkspaceManager) stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func workspaceRuntimeDescriptorPath(runtimeDir string, workspaceID string) string {
-	return filepath.Join(runtimeDir, "workspaces", strings.TrimSpace(workspaceID)+".json")
+func workspaceRuntimeDescriptorPath(runtimeDir string, workspaceID workspaceid.WorkspaceID) string {
+	return filepath.Join(runtimeDir, "workspaces", workspaceID.StorageKey()+".json")
 }
 
 func startWikidFrontdRuntime(parent context.Context, cfg leafwikiRuntimeConfig, daemonToken string, wikidURL string) (*wikidFrontdRuntime, error) {
@@ -3045,10 +3055,10 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	actorResolver := wikidActorResolver(startup.WikidURL, startup.DaemonToken)
 	workspaceRouterProxy := frontd.NewWorkspaceRouterProxy(frontd.WorkspaceRouterProxyOptions{
 		Resolve: workspaceResolver,
-		Actor: func(req *http.Request, workspaceID string) (projectdaemon.ActorContext, error) {
+		Actor: func(req *http.Request, workspaceID workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 			clone := req.Clone(req.Context())
 			clone.Header = req.Header.Clone()
-			clone.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceID)
+			clone.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceID.HTTPHeaderValue())
 			return actorResolver(clone)
 		},
 	})
@@ -3081,14 +3091,12 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 					Actor: func(req *http.Request) (projectdaemon.ActorContext, error) {
 						clone := req.Clone(req.Context())
 						clone.Header = req.Header.Clone()
-						clone.Header.Set(projectdaemon.WorkspaceIDHeader, route.WorkspaceID)
+						clone.Header.Set(projectdaemon.WorkspaceIDHeader, route.WorkspaceID.HTTPHeaderValue())
 						return actorResolver(clone)
 					},
 				})
 				if err != nil {
-					return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-						http.Error(w, "workspace mcp unavailable", http.StatusServiceUnavailable)
-					})
+					return workspaceMCPUnavailableHandler()
 				}
 				return proxy
 			},
@@ -3171,16 +3179,17 @@ func runWorkspacedRole(parent context.Context, startup internalRuntimeRoleStartu
 	opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{}
 	router := workspaced.NewAuthenticatedRouter(w, opts, workspaced.PrivateAuthOptions{
 		DaemonToken: startup.DaemonToken,
-		WorkspaceID: runtimeWorkspaceID(cfg.Workspace),
+		WorkspaceID: runtimeWorkspaceSemanticID(cfg.Workspace),
 	})
 	mcpOpts := opts
+	mcpOpts.BasePath = cfg.BasePath
 	mcpOpts.MCPEnabled = true
 	mcpOpts.MCPBindHost = "127.0.0.1"
 	privateMCP := w.ActorContextMCPHTTPHandler(mcpOpts)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/mcp" {
 			if req.Header.Get(projectdaemon.ControlTokenHeader) != startup.DaemonToken {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writePrivateMCPUnauthorized(w)
 				return
 			}
 			privateMCP.ServeHTTP(w, req)
@@ -3428,6 +3437,62 @@ func wikidMCPTokenVerifier(wikidURL string, daemonToken string) sdkauth.TokenVer
 	}
 }
 
+type wikidPrivateEndpointError struct {
+	Path       string
+	StatusCode int
+	Code       sharederrors.ErrorCode
+	MessageID  sharederrors.MessageID
+	Message    string
+}
+
+func (e *wikidPrivateEndpointError) Error() string {
+	if e == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(e.Message)
+	if msg == "" {
+		msg = http.StatusText(e.StatusCode)
+	}
+	if e.Code != "" {
+		return fmt.Sprintf("wikid private endpoint %s failed: status %d code %s: %s", e.Path, e.StatusCode, e.Code, msg)
+	}
+	return fmt.Sprintf("wikid private endpoint %s failed: status %d: %s", e.Path, e.StatusCode, msg)
+}
+
+func newWikidPrivateEndpointError(path string, statusCode int, raw []byte) *wikidPrivateEndpointError {
+	msg := strings.TrimSpace(string(raw))
+	if msg == "" {
+		msg = http.StatusText(statusCode)
+	}
+	detail := struct {
+		Error struct {
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
+		} `json:"error"`
+	}{}
+	if err := json.Unmarshal(raw, &detail); err == nil && (detail.Error.Code != "" || detail.Error.Message != "") {
+		msg = detail.Error.Message
+	}
+	return &wikidPrivateEndpointError{
+		Path:       path,
+		StatusCode: statusCode,
+		Code:       detail.Error.Code,
+		MessageID:  detail.Error.MessageID,
+		Message:    msg,
+	}
+}
+
+func isWikidPrivateAuthFailure(err error) bool {
+	var endpointErr *wikidPrivateEndpointError
+	if !errors.As(err, &endpointErr) {
+		return false
+	}
+	return endpointErr.StatusCode == http.StatusUnauthorized ||
+		endpointErr.Code == errCodeStdioAuthAPIKeyInvalid ||
+		endpointErr.Code == errCodeMCPActorContextInvalid
+}
+
 func callWikidPrivateEndpoint(ctx context.Context, wikidURL string, daemonToken string, path string, source *http.Request, out any) error {
 	endpoint := strings.TrimRight(wikidURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
@@ -3449,11 +3514,7 @@ func callWikidPrivateEndpoint(ctx context.Context, wikidURL string, daemonToken 
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(raw))
-		if msg == "" {
-			msg = resp.Status
-		}
-		return fmt.Errorf("wikid private endpoint %s failed: %s", path, msg)
+		return newWikidPrivateEndpointError(path, resp.StatusCode, raw)
 	}
 	if out == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -3500,7 +3561,7 @@ func frontdMCPActorResolver(w *wiki.Wiki, cfg leafwikiRuntimeConfig) func(*http.
 		if w.UserService() == nil {
 			return projectdaemon.ActorContext{}, fmt.Errorf("authenticated MCP user service is unavailable")
 		}
-		user, err := w.UserService().GetUserByID(tokenInfo.UserID)
+		user, err := w.UserService().GetUserByID(coreauth.NewUserIDUnchecked(tokenInfo.UserID))
 		if err != nil {
 			return projectdaemon.ActorContext{}, err
 		}
@@ -3534,7 +3595,7 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 		if err != nil {
 			return nil, "", err
 		}
-		user, err := w.UserService().GetUserByID(info.UserID)
+		user, err := w.UserService().GetUserByID(coreauth.NewUserIDUnchecked(info.UserID))
 		if err != nil {
 			return nil, "", err
 		}
@@ -3566,19 +3627,19 @@ func actorContextForUser(user *coreauth.User, method string, cfg leafwikiRuntime
 		Email:       user.Email,
 		Role:        user.Role,
 		Scopes:      []string{"leafwiki:workspace:read", "leafwiki:workspace:write", "leafwiki:mcp"},
-		WorkspaceID: runtimeWorkspaceID(cfg.Workspace),
+		WorkspaceID: runtimeWorkspaceSemanticID(cfg.Workspace),
 		AuthMethod:  method,
 		IssuedAt:    now,
 		ExpiresAt:   now.Add(5 * time.Minute),
 	}, nil
 }
 
-func actorContextForWorkspaceGrant(user *coreauth.User, method string, cfg leafwikiRuntimeConfig, workspaceID string, role wikid.GrantRole) (projectdaemon.ActorContext, error) {
+func actorContextForWorkspaceGrant(user *coreauth.User, method string, cfg leafwikiRuntimeConfig, workspaceID workspaceid.WorkspaceID, role wikid.GrantRole) (projectdaemon.ActorContext, error) {
 	actor, err := actorContextForUser(user, method, cfg)
 	if err != nil {
 		return projectdaemon.ActorContext{}, err
 	}
-	actor.WorkspaceID = strings.TrimSpace(workspaceID)
+	actor.WorkspaceID = workspaceID
 	actor.Role = string(role)
 	actor.Scopes = scopesForGrantRole(role)
 	return actor, nil
@@ -3656,9 +3717,9 @@ func accessTokenFromHTTPRequest(req *http.Request) string {
 	return ""
 }
 
-func runtimeWorkspaceID(workspace wiki.Workspace) string {
-	if strings.TrimSpace(workspace.ID) != "" {
-		return strings.TrimSpace(workspace.ID)
+func runtimeWorkspaceSemanticID(workspace wiki.Workspace) workspaceid.WorkspaceID {
+	if workspace.ID != "" {
+		return workspace.ID
 	}
 	return "current"
 }
@@ -3715,9 +3776,14 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 		http.Error(w, "resolve actor context", http.StatusUnauthorized)
 		return
 	}
-	workspaceID := strings.TrimSpace(req.Header.Get(projectdaemon.WorkspaceIDHeader))
-	if workspaceID == "" {
-		workspaceID = runtimeWorkspaceID(cfg.Workspace)
+	workspaceID := runtimeWorkspaceSemanticID(cfg.Workspace)
+	if rawWorkspaceID := req.Header.Get(projectdaemon.WorkspaceIDHeader); rawWorkspaceID != "" {
+		parsedWorkspaceID, err := workspaceid.ParseWorkspaceID(rawWorkspaceID)
+		if err != nil {
+			http.Error(w, "workspace not found", http.StatusNotFound)
+			return
+		}
+		workspaceID = parsedWorkspaceID
 	}
 	if registry != nil {
 		if _, ok, err := registry.Workspace(workspaceID); err != nil {
@@ -3752,7 +3818,7 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 				}
 			}
 			if role == "" {
-				http.Error(w, "workspace access denied", http.StatusForbidden)
+				writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
 				return
 			}
 		}
@@ -3788,6 +3854,40 @@ func writeRuntimeJSON(w http.ResponseWriter, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, "encode response", http.StatusInternalServerError)
 	}
+}
+
+func writeRuntimeError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(runtimeErrorResponse{
+		Error: runtimeError{
+			Code:      code,
+			MessageID: sharederrors.MessageIDForCode(code),
+			Message:   message,
+		},
+	}); err != nil {
+		http.Error(w, "encode response", http.StatusInternalServerError)
+	}
+}
+
+func workspaceMCPUnavailableHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeRuntimeError(w, http.StatusServiceUnavailable, runtimeErrorCodeMCPWorkspaceUnavailable, "workspace mcp unavailable")
+	})
+}
+
+func writePrivateMCPUnauthorized(w http.ResponseWriter) {
+	writeRuntimeError(w, http.StatusUnauthorized, runtimeErrorCodePrivateMCPControlTokenInvalid, "unauthorized")
+}
+
+type runtimeErrorResponse struct {
+	Error runtimeError `json:"error"`
+}
+
+type runtimeError struct {
+	Code      sharederrors.ErrorCode `json:"code"`
+	MessageID sharederrors.MessageID `json:"messageId"`
+	Message   string                 `json:"message"`
 }
 
 func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config) error {
@@ -3951,7 +4051,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
 		RuntimeStack:     cfg.RuntimeStack,
 		Role:             projectDaemonDescriptorRole(cfg.RuntimeStack),
-		WorkspaceID:      runtimeWorkspaceID(cfg.Workspace),
+		WorkspaceID:      runtimeWorkspaceSemanticID(cfg.Workspace),
 		PID:              os.Getpid(),
 		StartedAt:        time.Now().UTC(),
 		DataDir:          ownerCfg.DataDir,

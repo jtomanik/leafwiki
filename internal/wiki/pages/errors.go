@@ -12,29 +12,67 @@ import (
 
 // Error codes for the pages domain.
 const (
-	ErrCodePageNotFound            = "page_not_found"
-	ErrCodePageParentNotFound      = "page_parent_not_found"
-	ErrCodePageSlugConflict        = "page_slug_conflict"
-	ErrCodePageHasChildren         = "page_has_children"
-	ErrCodePageCircularMove        = "page_circular_move"
-	ErrCodePageCannotMoveToSelf    = "page_cannot_move_to_self"
-	ErrCodePageRootOperation       = "page_root_operation"
-	ErrCodePageConvertNotAllowed   = "page_convert_not_allowed"
-	ErrCodePageInternalError       = "page_internal_error"
-	ErrCodePageMissingPath         = "page_missing_path"
-	ErrCodePageInvalidPath         = "page_invalid_path"
-	ErrCodePageMissingID           = "page_missing_id"
-	ErrCodePageMissingTitle        = "page_missing_title"
-	ErrCodePageInvalidTitle        = "page_invalid_title"
-	ErrCodePageVersionRequired     = "page_version_required"
-	ErrCodePageVersionConflict     = "page_version_conflict"
-	ErrCodePageInvalidRequest      = "page_invalid_request"
-	ErrCodePageInvalidPayload      = "page_invalid_payload"
-	ErrCodePageInvalidKind         = "page_invalid_kind"
-	ErrCodePageInvalidParentID     = "page_invalid_parent_id"
-	ErrCodePageInvalidTargetKind   = "page_invalid_target_kind"
-	ErrCodePageInvalidRefactorKind = "page_invalid_refactor_kind"
+	ErrCodePageNotFound            sharederrors.ErrorCode = "page_not_found"
+	ErrCodePageParentNotFound      sharederrors.ErrorCode = "page_parent_not_found"
+	ErrCodePageSlugConflict        sharederrors.ErrorCode = "page_slug_conflict"
+	ErrCodePageHasChildren         sharederrors.ErrorCode = "page_has_children"
+	ErrCodePageCircularMove        sharederrors.ErrorCode = "page_circular_move"
+	ErrCodePageCannotMoveToSelf    sharederrors.ErrorCode = "page_cannot_move_to_self"
+	ErrCodePageRootOperation       sharederrors.ErrorCode = "page_root_operation"
+	ErrCodePageConvertNotAllowed   sharederrors.ErrorCode = "page_convert_not_allowed"
+	ErrCodePageInternalError       sharederrors.ErrorCode = "page_internal_error"
+	ErrCodePageMissingPath         sharederrors.ErrorCode = "page_missing_path"
+	ErrCodePageInvalidPath         sharederrors.ErrorCode = "page_invalid_path"
+	ErrCodePageMissingID           sharederrors.ErrorCode = "page_missing_id"
+	ErrCodePageMissingTitle        sharederrors.ErrorCode = "page_missing_title"
+	ErrCodePageInvalidTitle        sharederrors.ErrorCode = "page_invalid_title"
+	ErrCodePageVersionRequired     sharederrors.ErrorCode = "page_version_required"
+	ErrCodePageVersionConflict     sharederrors.ErrorCode = "page_version_conflict"
+	ErrCodePageInvalidRequest      sharederrors.ErrorCode = "page_invalid_request"
+	ErrCodePageInvalidPayload      sharederrors.ErrorCode = "page_invalid_payload"
+	ErrCodePageInvalidKind         sharederrors.ErrorCode = "page_invalid_kind"
+	ErrCodePageInvalidParentID     sharederrors.ErrorCode = "page_invalid_parent_id"
+	ErrCodePageInvalidTargetKind   sharederrors.ErrorCode = "page_invalid_target_kind"
+	ErrCodePageInvalidRefactorKind sharederrors.ErrorCode = "page_invalid_refactor_kind"
 )
+
+const (
+	FieldCodePageTitleRequired         sharederrors.FieldErrorCode = "page_title_required"
+	FieldCodePageKindRequired          sharederrors.FieldErrorCode = "page_kind_required"
+	FieldCodePageKindInvalid           sharederrors.FieldErrorCode = "page_kind_invalid"
+	FieldCodePageSlugInvalid           sharederrors.FieldErrorCode = "page_slug_invalid"
+	FieldCodePagePathRequired          sharederrors.FieldErrorCode = "page_path_required"
+	FieldCodePagePathInvalid           sharederrors.FieldErrorCode = "page_path_invalid"
+	FieldCodePageTagRequired           sharederrors.FieldErrorCode = "page_tag_required"
+	FieldCodePageTagWhitespace         sharederrors.FieldErrorCode = "page_tag_whitespace"
+	FieldCodePageTagDuplicate          sharederrors.FieldErrorCode = "page_tag_duplicate"
+	FieldCodePagePropertyKeyRequired   sharederrors.FieldErrorCode = "page_property_key_required"
+	FieldCodePagePropertyKeyWhitespace sharederrors.FieldErrorCode = "page_property_key_whitespace"
+	FieldCodePagePropertyKeyReserved   sharederrors.FieldErrorCode = "page_property_key_reserved"
+)
+
+const (
+	MessageIDPageTitleRequired         sharederrors.MessageID = "validation.page.title_required"
+	MessageIDPageKindRequired          sharederrors.MessageID = "validation.page.kind_required"
+	MessageIDPageKindInvalid           sharederrors.MessageID = "validation.page.kind_invalid"
+	MessageIDPageSlugInvalid           sharederrors.MessageID = "validation.page.slug_invalid"
+	MessageIDPagePathRequired          sharederrors.MessageID = "validation.page.path_required"
+	MessageIDPagePathInvalid           sharederrors.MessageID = "validation.page.path_invalid"
+	MessageIDPageTagRequired           sharederrors.MessageID = "validation.page.tag_required"
+	MessageIDPageTagWhitespace         sharederrors.MessageID = "validation.page.tag_whitespace"
+	MessageIDPageTagDuplicate          sharederrors.MessageID = "validation.page.tag_duplicate"
+	MessageIDPagePropertyKeyRequired   sharederrors.MessageID = "validation.page.property_key_required"
+	MessageIDPagePropertyKeyWhitespace sharederrors.MessageID = "validation.page.property_key_whitespace"
+	MessageIDPagePropertyKeyReserved   sharederrors.MessageID = "validation.page.property_key_reserved"
+)
+
+const (
+	MessageIDAPIPagesDeleteSuccess sharederrors.MessageID = "api.pages.delete.success"
+	MessageIDAPIPagesMoveSuccess   sharederrors.MessageID = "api.pages.move.success"
+	MessageIDAPIPagesSortSuccess   sharederrors.MessageID = "api.pages.sort.success"
+)
+
+const pageValidationErrorCode = "validation_error"
 
 func newPageRootOperationError(operation string) *sharederrors.LocalizedError {
 	return sharederrors.NewLocalizedError(
@@ -51,20 +89,10 @@ type PageErrorResponse struct {
 }
 
 // PageErrorDetail carries the localization-ready error data.
-type PageErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type PageErrorDetail = sharederrors.LocalizedErrorDetail
 
-func newPageErrorDetail(code, message, template string, args ...string) PageErrorDetail {
-	return PageErrorDetail{
-		Code:     code,
-		Message:  message,
-		Template: template,
-		Args:     append([]string(nil), args...),
-	}
+func newPageErrorDetail(code sharederrors.ErrorCode, message, template string, args ...string) PageErrorDetail {
+	return sharederrors.NewLocalizedErrorDetail(code, message, template, args...)
 }
 
 // PageErrorDetailForError maps page-domain errors to the same localization-ready
@@ -72,7 +100,7 @@ func newPageErrorDetail(code, message, template string, args ...string) PageErro
 // the page domain and callers should preserve their existing fallback behavior.
 func PageErrorDetailForError(err error) (PageErrorDetail, int, bool) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
-		return newPageErrorDetail(loc.Code, loc.Message, loc.Template, loc.Args...), pageErrorStatus(loc.Code), true
+		return sharederrors.LocalizedErrorDetailFromError(loc), pageErrorStatus(loc.Code), true
 	}
 
 	switch {
@@ -101,7 +129,7 @@ func PageErrorDetailForError(err error) (PageErrorDetail, int, bool) {
 	}
 }
 
-func respondWithPageStatusError(c *gin.Context, status int, code, message, template string, args ...string) {
+func respondWithPageStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, PageErrorResponse{
 		Error: newPageErrorDetail(code, message, template, args...),
 	})
@@ -119,7 +147,7 @@ func respondWithPageError(c *gin.Context, err error) {
 	var vErr *sharederrors.ValidationErrors
 	if errors.As(err, &vErr) {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  "validation_error",
+			"error":  pageValidationErrorCode,
 			"fields": vErr.Errors,
 		})
 		return
@@ -128,7 +156,7 @@ func respondWithPageError(c *gin.Context, err error) {
 	respondWithPageStatusError(c, http.StatusInternalServerError, ErrCodePageInternalError, err.Error(), "internal error")
 }
 
-func pageErrorStatus(code string) int {
+func pageErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodePageNotFound, ErrCodePageParentNotFound:
 		return http.StatusNotFound

@@ -9,9 +9,10 @@ import (
 
 // checkNodeVersion enforces optimistic locking inside a write lock.
 // Legacy nodes with no UpdatedAt (empty version) skip the check.
-// Pass VersionUnchecked to bypass for internal system operations.
-func checkNodeVersion(node *PageNode, expectedVersion string) error {
-	if expectedVersion == VersionUnchecked {
+// Pass the tree-owned unchecked sentinel through constrained operations to
+// bypass for internal system operations.
+func checkNodeVersion(node *PageNode, expectedVersion PageVersion) error {
+	if expectedVersion.IsUnchecked() {
 		return nil
 	}
 	nodeVersion := node.Version()
@@ -27,24 +28,24 @@ func checkNodeVersion(node *PageNode, expectedVersion string) error {
 	return nil
 }
 
-func GeneratePathFromPageNode(entry *PageNode) string {
+func GeneratePathFromPageNode(entry *PageNode) RoutePath {
 	path := ""
 	if entry.Parent != nil {
-		path = GeneratePathFromPageNode(entry.Parent) + "/" + entry.Slug
+		return GeneratePathFromPageNode(entry.Parent).Child(entry.Slug)
 	} else {
-		path = entry.Slug
+		path = entry.Slug.FilesystemPath()
 	}
-	return path
+	return NewRoutePathUnchecked(path)
 }
 
-func GenerateRoutePathFromPageNode(entry *PageNode) string {
+func GenerateRoutePathFromPageNode(entry *PageNode) RoutePath {
 	if entry == nil || entry.ID == "root" || entry.Parent == nil {
 		return ""
 	}
 	if parentPath := GenerateRoutePathFromPageNode(entry.Parent); parentPath != "" {
-		return parentPath + "/" + entry.Slug
+		return parentPath.Child(entry.Slug)
 	}
-	return entry.Slug
+	return entry.Slug.RoutePath()
 }
 
 func pageDirectoryDiskPath(storageDir string, pagePath string) string {

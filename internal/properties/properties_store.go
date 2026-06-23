@@ -10,6 +10,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/shared/sqliteutil"
+	"github.com/perber/wiki/internal/core/tree"
 	_ "modernc.org/sqlite"
 )
 
@@ -79,7 +80,7 @@ func (s *PropertiesStore) ensureSchema() error {
 // Keys and values are stored as-is — filtering of reserved keys (tags, title, leafwiki_*)
 // and type coercion are the caller's responsibility. All write paths go through
 // PropertiesService.SetPropertiesForPage or ExtractPropertiesFromContent, which enforce this.
-func (s *PropertiesStore) SetPropertiesForPage(pageID string, props map[string]PropertyEntry) error {
+func (s *PropertiesStore) SetPropertiesForPage(pageID tree.PageID, props map[string]PropertyEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -112,7 +113,7 @@ func (s *PropertiesStore) SetPropertiesForPage(pageID string, props map[string]P
 	return tx.Commit()
 }
 
-func (s *PropertiesStore) DeletePropertiesForPage(pageID string) error {
+func (s *PropertiesStore) DeletePropertiesForPage(pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -163,7 +164,7 @@ func (s *PropertiesStore) GetAllPropertyKeys(filter string, limit int) ([]Proper
 }
 
 // GetPageIDsByProperty returns page IDs where key = key AND value = value (exact match).
-func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]string, error) {
+func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -176,9 +177,9 @@ func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]string, err
 	}
 	defer shared.LogClose(rows.Close, "could not close rows")
 
-	var pageIDs []string
+	var pageIDs []tree.PageID
 	for rows.Next() {
-		var id string
+		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -188,12 +189,12 @@ func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]string, err
 }
 
 // GetPropertiesForPages returns a map of pageID → properties for the given page IDs.
-func (s *PropertiesStore) GetPropertiesForPages(pageIDs []string) (map[string]map[string]PropertyEntry, error) {
+func (s *PropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree.PageID]map[string]PropertyEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(pageIDs) == 0 {
-		return map[string]map[string]PropertyEntry{}, nil
+		return map[tree.PageID]map[string]PropertyEntry{}, nil
 	}
 
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(pageIDs)), ",")
@@ -212,9 +213,10 @@ func (s *PropertiesStore) GetPropertiesForPages(pageIDs []string) (map[string]ma
 	}
 	defer shared.LogClose(rows.Close, "could not close rows")
 
-	result := make(map[string]map[string]PropertyEntry)
+	result := make(map[tree.PageID]map[string]PropertyEntry)
 	for rows.Next() {
-		var pageID, key, value, typ string
+		var pageID tree.PageID
+		var key, value, typ string
 		if err := rows.Scan(&pageID, &key, &value, &typ); err != nil {
 			return nil, err
 		}

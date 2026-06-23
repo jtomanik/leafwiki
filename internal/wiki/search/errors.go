@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	ErrCodeSearchUnavailable    = "search_unavailable"
-	ErrCodeSearchInternal       = "search_internal_error"
-	ErrCodeSearchMissingQuery   = "search_missing_query"
-	ErrCodeSearchInvalidOffset  = "search_invalid_offset"
-	ErrCodeSearchInvalidLimit   = "search_invalid_limit"
+	ErrCodeSearchUnavailable   sharederrors.ErrorCode = "search_unavailable"
+	ErrCodeSearchInternal      sharederrors.ErrorCode = "search_internal_error"
+	ErrCodeSearchMissingQuery  sharederrors.ErrorCode = "search_missing_query"
+	ErrCodeSearchInvalidOffset sharederrors.ErrorCode = "search_invalid_offset"
+	ErrCodeSearchInvalidLimit  sharederrors.ErrorCode = "search_invalid_limit"
 )
 
 // SearchErrorResponse is the structured JSON error body returned by search endpoints.
@@ -21,35 +21,25 @@ type SearchErrorResponse struct {
 }
 
 // SearchErrorDetail carries the localization-ready error data.
-type SearchErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type SearchErrorDetail = sharederrors.LocalizedErrorDetail
 
-func respondWithSearchStatusError(c *gin.Context, status int, code, message, template string, args ...string) {
+func respondWithSearchStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, SearchErrorResponse{
-		Error: SearchErrorDetail{
-			Code:     code,
-			Message:  message,
-			Template: template,
-			Args:     append([]string(nil), args...),
-		},
+		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
 	})
 }
 
 // respondWithSearchError maps errors to JSON responses for search endpoints.
 func respondWithSearchError(c *gin.Context, err error) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
-		respondWithSearchStatusError(c, searchErrorStatus(loc.Code), loc.Code, loc.Message, loc.Template, loc.Args...)
+		c.JSON(searchErrorStatus(loc.Code), SearchErrorResponse{Error: sharederrors.LocalizedErrorDetailFromError(loc)})
 		return
 	}
 
 	respondWithSearchStatusError(c, http.StatusInternalServerError, ErrCodeSearchInternal, "Failed to perform search", "failed to perform search")
 }
 
-func searchErrorStatus(code string) int {
+func searchErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodeSearchUnavailable:
 		return http.StatusServiceUnavailable

@@ -7,14 +7,14 @@ type Page struct {
 }
 
 type PermalinkTarget struct {
-	ID   string   `json:"id"`
-	Slug string   `json:"slug"`
+	ID   PageID   `json:"id"`
+	Slug Slug     `json:"slug"`
 	Path string   `json:"path"`
 	Kind NodeKind `json:"kind"`
 }
 
 // Version returns a stable optimistic-lock token for the current page state.
-func (p *Page) Version() string {
+func (p *Page) Version() PageVersion {
 	if p == nil || p.PageNode == nil {
 		return ""
 	}

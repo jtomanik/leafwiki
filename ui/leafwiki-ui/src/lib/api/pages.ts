@@ -1,5 +1,13 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type {
+  PageID,
+  PageVersion,
+  RoutePath,
+  Slug,
+  UserID,
+  WorkspaceID,
+} from '../semanticTypes'
 
 export const NODE_KIND_PAGE = 'page'
 export const NODE_KIND_SECTION = 'section'
@@ -7,25 +15,25 @@ export const NODE_KIND_SECTION = 'section'
 export type PageMetadata = {
   createdAt: string
   updatedAt: string
-  creatorId: string
-  lastAuthorId: string
+  creatorId: UserID
+  lastAuthorId: UserID
   creator?: {
-    id: string
+    id: UserID
     username: string
   }
   lastAuthor?: {
-    id: string
+    id: UserID
     username: string
   }
 }
 
 export type PageNode = {
-  id: string
+  id: PageID
   title: string
-  slug: string
-  path: string
-  version: string
-  parentId?: string | null
+  slug: Slug
+  path: RoutePath
+  version: PageVersion
+  parentId?: PageID | null
   children: PageNode[] | null
   kind: 'page' | 'section'
   contentPath?: string
@@ -34,40 +42,40 @@ export type PageNode = {
 }
 
 export interface Page {
-  id: string
-  slug: string
-  path: string
+  id: PageID
+  slug: Slug
+  path: RoutePath
   title: string
   content: string
   tags?: string[]
   properties?: Record<string, string>
-  version: string
+  version: PageVersion
   kind: 'page' | 'section'
   metadata?: PageMetadata // optional metadata, because older API responses may not have it
 }
 
 export type PermalinkTarget = {
-  id: string
-  slug: string
-  path: string
+  id: PageID
+  slug: Slug
+  path: RoutePath
   kind: 'page' | 'section'
 }
 
 export type PageRefactorKind = 'rename' | 'move'
 
 export type PageRefactorAffectedPage = {
-  fromPageId: string
+  fromPageId: PageID
   fromTitle: string
-  fromPath: string
+  fromPath: RoutePath
   matchedPaths: string[]
   warnings: string[]
 }
 
 export type PageRefactorPreview = {
   kind: PageRefactorKind
-  pageId: string
-  oldPath: string
-  newPath: string
+  pageId: PageID
+  oldPath: RoutePath
+  newPath: RoutePath
   affectedPages: PageRefactorAffectedPage[]
   counts: {
     affectedPages: number
@@ -76,18 +84,18 @@ export type PageRefactorPreview = {
   warnings: string[]
 }
 
-export async function fetchTree(workspaceId: string): Promise<PageNode> {
+export async function fetchTree(workspaceId: WorkspaceID): Promise<PageNode> {
   return (await fetchWithAuth(
     workspaceApiPath('/api/tree', workspaceId),
   )) as PageNode
 }
 
 export async function suggestSlug(
-  parentId: string,
+  parentId: PageID | '',
   title: string,
-  workspaceId: string,
-  currentId?: string,
-): Promise<string> {
+  workspaceId: WorkspaceID,
+  currentId?: PageID | '',
+): Promise<Slug> {
   if (!currentId) currentId = ''
 
   const data = await fetchWithAuth(
@@ -96,14 +104,14 @@ export async function suggestSlug(
       workspaceId,
     ),
   )
-  const typedData = data as { slug: string }
+  const typedData = data as { slug: Slug }
   return typedData.slug
 }
 
 export async function getPageByPath(
-  path: string,
+  path: RoutePath,
   kind?: 'page' | 'section',
-  workspaceId?: string,
+  workspaceId?: WorkspaceID,
 ): Promise<Page> {
   if (!workspaceId) throw new Error('workspaceId is required')
   const query = new URLSearchParams({ path })
@@ -116,8 +124,8 @@ export async function getPageByPath(
 }
 
 export async function getPermalinkTarget(
-  id: string,
-  workspaceId: string,
+  id: PageID,
+  workspaceId: WorkspaceID,
 ): Promise<PermalinkTarget> {
   return (await fetchWithAuth(
     workspaceApiPath(
@@ -135,10 +143,10 @@ export async function createPage({
   workspaceId,
 }: {
   title: string
-  slug: string
-  parentId: string | null
+  slug: Slug
+  parentId: PageID | null
   kind: 'page' | 'section'
-  workspaceId: string
+  workspaceId: WorkspaceID
 }) {
   if (parentId === '') parentId = null
 
@@ -150,11 +158,11 @@ export async function createPage({
 }
 
 export async function copyPage(
-  id: string,
-  targetParentId: string | null,
+  id: PageID,
+  targetParentId: PageID | '' | 'root' | null,
   targetTitle: string,
-  targetSlug: string,
-  workspaceId: string,
+  targetSlug: Slug,
+  workspaceId: WorkspaceID,
 ) {
   if (targetParentId === '' || targetParentId === 'root') targetParentId = null
   return await fetchWithAuth(
@@ -172,14 +180,14 @@ export async function copyPage(
 }
 
 export async function updatePage(
-  id: string,
-  version: string,
+  id: PageID,
+  version: PageVersion,
   title: string,
-  slug: string,
+  slug: Slug,
   content: string,
   tags: string[],
   properties: Record<string, string>,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<Page | null> {
   return (await fetchWithAuth(
     workspaceApiPath(`/api/pages/${id}`, workspaceId),
@@ -192,10 +200,10 @@ export async function updatePage(
 }
 
 export async function deletePage(
-  id: string,
+  id: PageID,
   recursive: boolean,
-  version: string,
-  workspaceId: string,
+  version: PageVersion,
+  workspaceId: WorkspaceID,
 ) {
   if (recursive === undefined) recursive = false
 
@@ -213,10 +221,10 @@ export async function deletePage(
 }
 
 export async function movePage(
-  id: string,
-  version: string,
-  parentId: string | null,
-  workspaceId: string,
+  id: PageID,
+  version: PageVersion,
+  parentId: PageID | '' | 'root' | null,
+  workspaceId: WorkspaceID,
 ) {
   if (parentId === '' || parentId == 'root') parentId = null
 
@@ -231,18 +239,18 @@ export async function movePage(
 }
 
 export async function previewPageRefactor(
-  id: string,
+  id: PageID,
   payload:
     | {
         kind: 'rename'
         title: string
-        slug: string
+        slug: Slug
       }
     | {
         kind: 'move'
-        parentId: string | null
+        parentId: PageID | null
       },
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<PageRefactorPreview> {
   return (await fetchWithAuth(
     workspaceApiPath(`/api/pages/${id}/refactor/preview`, workspaceId),
@@ -255,23 +263,23 @@ export async function previewPageRefactor(
 }
 
 export async function applyPageRefactor(
-  id: string,
+  id: PageID,
   payload:
     | {
         kind: 'rename'
-        version: string
+        version: PageVersion
         title: string
-        slug: string
+        slug: Slug
         content: string
         rewriteLinks: boolean
       }
     | {
         kind: 'move'
-        version: string
-        parentId: string | null
+        version: PageVersion
+        parentId: PageID | null
         rewriteLinks: boolean
       },
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<Page | null> {
   return (await fetchWithAuth(
     workspaceApiPath(`/api/pages/${id}/refactor/apply`, workspaceId),
@@ -284,9 +292,9 @@ export async function applyPageRefactor(
 }
 
 export async function sortPages(
-  parentId: string,
-  orderedIDs: string[],
-  workspaceId: string,
+  parentId: PageID | '' | 'root',
+  orderedIDs: PageID[],
+  workspaceId: WorkspaceID,
 ) {
   if (parentId === '') parentId = 'root'
 
@@ -301,10 +309,10 @@ export async function sortPages(
 }
 
 export async function convertPage(
-  id: string,
+  id: PageID,
   targetKind: 'page' | 'section',
-  version: string,
-  workspaceId: string,
+  version: PageVersion,
+  workspaceId: WorkspaceID,
 ) {
   return await fetchWithAuth(
     workspaceApiPath(`/api/pages/convert/${id}`, workspaceId),
@@ -317,15 +325,15 @@ export async function convertPage(
 }
 
 export type PathLookupResult = {
-  path: string
+  path: RoutePath
   exists: boolean
   canCreate: boolean
-  segments: { slug: string; id?: string; exists: boolean }[]
+  segments: { slug: Slug; id?: PageID; exists: boolean }[]
 }
 
 export async function lookupPath(
-  path: string,
-  workspaceId: string,
+  path: RoutePath,
+  workspaceId: WorkspaceID,
   kind?: Page['kind'],
 ): Promise<PathLookupResult> {
   const query = new URLSearchParams({ path })
@@ -334,18 +342,13 @@ export async function lookupPath(
   }
   return (await fetchWithAuth(
     workspaceApiPath(`/api/pages/lookup?${query}`, workspaceId),
-  )) as {
-    path: string
-    exists: boolean
-    canCreate: boolean
-    segments: { slug: string; id?: string; exists: boolean }[]
-  }
+  )) as PathLookupResult
 }
 
 export async function ensurePage(
-  path: string,
+  path: RoutePath,
   targetTitle: string,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   kind: Page['kind'] = 'page',
 ) {
   return await fetchWithAuth(

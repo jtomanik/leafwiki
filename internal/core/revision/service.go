@@ -28,6 +28,26 @@ type assetManifestEntry struct {
 	hash string
 }
 
+const (
+	errCodeRevisionPreviewContentUnavailable sharederrors.ErrorCode = "revision_preview_content_unavailable"
+	errCodeRevisionPreviewAssetsUnavailable  sharederrors.ErrorCode = "revision_preview_assets_unavailable"
+	errCodeRevisionPreviewAssetInvalidName   sharederrors.ErrorCode = "revision_preview_asset_invalid_name"
+	errCodeRevisionPreviewAssetBlobMissing   sharederrors.ErrorCode = "revision_preview_asset_blob_unavailable"
+	errCodeRevisionPreviewAssetNotFound      sharederrors.ErrorCode = "revision_preview_asset_not_found"
+	errCodeRevisionRestoreInvalidPageID      sharederrors.ErrorCode = "revision_restore_invalid_page_id"
+	errCodeRevisionRestoreInvalidRevision    sharederrors.ErrorCode = "revision_restore_invalid_revision"
+	errCodeRevisionRestorePageNotFound       sharederrors.ErrorCode = "revision_restore_page_not_found"
+	errCodeRevisionRestoreFailed             sharederrors.ErrorCode = "revision_restore_failed"
+	errCodeRevisionRestoreRevisionNotFound   sharederrors.ErrorCode = "revision_restore_revision_not_found"
+	errCodeRevisionRestoreContentMissing     sharederrors.ErrorCode = "revision_restore_content_missing"
+	errCodeRevisionRestoreAssetsMissing      sharederrors.ErrorCode = "revision_restore_assets_missing"
+	errCodeRevisionIntegrityMissingContent   sharederrors.ErrorCode = "missing_content_blob"
+	errCodeRevisionIntegrityMissingManifest  sharederrors.ErrorCode = "missing_asset_manifest"
+	errCodeRevisionIntegrityMissingAssetBlob sharederrors.ErrorCode = "missing_asset_blob"
+	errCodeRevisionIntegrityHashMismatch     sharederrors.ErrorCode = "asset_blob_hash_mismatch"
+	errCodeRevisionIntegritySizeMismatch     sharederrors.ErrorCode = "asset_blob_size_mismatch"
+)
+
 type Service struct {
 	storageDir         string
 	pages              *tree.TreeService
@@ -63,7 +83,7 @@ func NewService(storageDir string, pages *tree.TreeService, logger *slog.Logger,
 
 // pruneAfterSave removes the oldest revisions beyond the configured limit.
 // Errors are non-fatal and only logged — a prune failure must not fail the save.
-func (s *Service) pruneAfterSave(pageID string) {
+func (s *Service) pruneAfterSave(pageID tree.PageID) {
 	if s.maxRevisions <= 0 {
 		return
 	}
@@ -74,7 +94,7 @@ func (s *Service) pruneAfterSave(pageID string) {
 
 // CapturePageState returns a full detached snapshot including current assets.
 // This is the "expensive" path and is mainly used for asset changes and delete.
-func (s *Service) CapturePageState(pageID string) (*RevisionState, error) {
+func (s *Service) CapturePageState(pageID tree.PageID) (*RevisionState, error) {
 	return s.capturePageState(pageID, true)
 }
 
@@ -85,7 +105,7 @@ func (s *Service) CapturePageState(pageID string) (*RevisionState, error) {
 //   - if this is the first revision for the page, assets are captured once
 //
 // Assumption: asset changes go through Upload/Rename/Delete hooks and call RecordAssetChange.
-func (s *Service) RecordContentUpdate(pageID, authorID, summary string) (*Revision, bool, error) {
+func (s *Service) RecordContentUpdate(pageID tree.PageID, authorID tree.UserID, summary string) (*Revision, bool, error) {
 	page, err := s.pages.GetPage(pageID)
 	if err != nil {
 		return nil, false, err
@@ -93,7 +113,7 @@ func (s *Service) RecordContentUpdate(pageID, authorID, summary string) (*Revisi
 	return s.recordContentUpdateForPage(page, authorID, summary)
 }
 
-func (s *Service) RecordContentUpdates(pages []*tree.Page, authorID, summary string) []error {
+func (s *Service) RecordContentUpdates(pages []*tree.Page, authorID tree.UserID, summary string) []error {
 	errs := make([]error, len(pages))
 	if len(pages) == 0 {
 		return errs
@@ -104,7 +124,7 @@ func (s *Service) RecordContentUpdates(pages []*tree.Page, authorID, summary str
 		page  *tree.Page
 	}
 
-	grouped := make(map[string][]batchItem)
+	grouped := make(map[tree.PageID][]batchItem)
 	nilItems := make([]int, 0)
 	for i, page := range pages {
 		if page == nil {
@@ -147,7 +167,7 @@ func (s *Service) RecordContentUpdates(pages []*tree.Page, authorID, summary str
 // RecordAssetChange records a full snapshot when live assets changed.
 // This method hashes the current assets and only writes a new revision when
 // content or the asset manifest actually changed.
-func (s *Service) RecordAssetChange(pageID, authorID, summary string) (*Revision, bool, error) {
+func (s *Service) RecordAssetChange(pageID tree.PageID, authorID tree.UserID, summary string) (*Revision, bool, error) {
 	prev, err := s.store.GetLatestRevision(pageID)
 	if err != nil {
 		return nil, false, err
@@ -197,7 +217,7 @@ func (s *Service) RecordAssetChange(pageID, authorID, summary string) (*Revision
 	return rev, true, nil
 }
 
-func (s *Service) RecordStructureChange(pageID, authorID, summary string) (*Revision, bool, error) {
+func (s *Service) RecordStructureChange(pageID tree.PageID, authorID tree.UserID, summary string) (*Revision, bool, error) {
 	prev, err := s.store.GetLatestRevision(pageID)
 	if err != nil {
 		return nil, false, err
@@ -233,7 +253,7 @@ func (s *Service) RecordStructureChange(pageID, authorID, summary string) (*Revi
 	return rev, true, nil
 }
 
-func (s *Service) resolveAssetManifestHash(pageID string, prev *Revision) (string, error) {
+func (s *Service) resolveAssetManifestHash(pageID tree.PageID, prev *Revision) (string, error) {
 	// Check in-memory cache first — avoids a full asset scan on every content save.
 	// Use a stat to verify the file still exists without parsing its JSON content.
 	if v, ok := s.assetManifestCache.Load(pageID); ok {
@@ -269,19 +289,21 @@ func (s *Service) resolveAssetManifestHash(pageID string, prev *Revision) (strin
 	return savedManifestHash, nil
 }
 
-func (s *Service) ListRevisions(pageID string) ([]*Revision, error) {
+func (s *Service) ListRevisions(pageID tree.PageID) ([]*Revision, error) {
 	return s.store.ListRevisions(pageID)
 }
 
-func (s *Service) ListRevisionsPage(pageID, cursor string, limit int) ([]*Revision, string, error) {
+func (s *Service) ListRevisionsPage(pageID tree.PageID, cursor string, limit int) ([]*Revision, string, error) {
 	return s.store.ListRevisionsPage(pageID, cursor, limit)
 }
 
-func (s *Service) GetLatestRevision(pageID string) (*Revision, error) {
+func (s *Service) GetLatestRevision(pageID tree.PageID) (*Revision, error) {
 	return s.store.GetLatestRevision(pageID)
 }
 
-func (s *Service) GetRevisionSnapshot(pageID, revisionID string) (*RevisionSnapshot, error) {
+func (s *Service) GetRevisionSnapshot(pageID tree.PageID, revisionID RevisionID) (*RevisionSnapshot, error) {
+	pageIDString := pageID.MetadataValue()
+	revisionIDString := revisionID.CommitID()
 	rev, err := s.store.GetRevision(pageID, revisionID)
 	if err != nil {
 		return nil, err
@@ -290,24 +312,24 @@ func (s *Service) GetRevisionSnapshot(pageID, revisionID string) (*RevisionSnaps
 	content, err := s.store.ReadContentBlob(rev.ContentHash)
 	if err != nil {
 		return nil, sharederrors.NewLocalizedError(
-			"revision_preview_content_unavailable",
+			errCodeRevisionPreviewContentUnavailable,
 			"Revision content is unavailable",
 			"revision content for page %s revision %s is unavailable",
 			err,
-			pageID,
-			revisionID,
+			pageIDString,
+			revisionIDString,
 		)
 	}
 
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
 		return nil, sharederrors.NewLocalizedError(
-			"revision_preview_assets_unavailable",
+			errCodeRevisionPreviewAssetsUnavailable,
 			"Revision assets are unavailable",
 			"revision assets for page %s revision %s are unavailable",
 			err,
-			pageID,
-			revisionID,
+			pageIDString,
+			revisionIDString,
 		)
 	}
 
@@ -318,7 +340,7 @@ func (s *Service) GetRevisionSnapshot(pageID, revisionID string) (*RevisionSnaps
 	}, nil
 }
 
-func (s *Service) CompareRevisionSnapshots(pageID, baseRevisionID, targetRevisionID string) (*RevisionComparison, error) {
+func (s *Service) CompareRevisionSnapshots(pageID tree.PageID, baseRevisionID RevisionID, targetRevisionID RevisionID) (*RevisionComparison, error) {
 	base, err := s.GetRevisionSnapshot(pageID, baseRevisionID)
 	if err != nil {
 		return nil, err
@@ -335,16 +357,18 @@ func (s *Service) CompareRevisionSnapshots(pageID, baseRevisionID, targetRevisio
 	}, nil
 }
 
-func (s *Service) GetRevisionAsset(pageID, revisionID, assetName string) (*RevisionAssetContent, error) {
-	assetName = strings.TrimSpace(strings.TrimPrefix(assetName, "/"))
-	if assetName == "" {
+func (s *Service) GetRevisionAsset(pageID tree.PageID, revisionID RevisionID, assetName tree.AssetName) (*RevisionAssetContent, error) {
+	pageIDString := pageID.MetadataValue()
+	revisionIDString := revisionID.CommitID()
+	assetNameString := strings.TrimSpace(strings.TrimPrefix(assetName.Filename(), "/"))
+	if assetNameString == "" {
 		return nil, sharederrors.NewLocalizedError(
-			"revision_preview_asset_invalid_name",
+			errCodeRevisionPreviewAssetInvalidName,
 			"Revision asset name is invalid",
 			"revision asset name for page %s revision %s is invalid",
 			fmt.Errorf("asset name is required"),
-			pageID,
-			revisionID,
+			pageIDString,
+			revisionIDString,
 		)
 	}
 
@@ -356,30 +380,30 @@ func (s *Service) GetRevisionAsset(pageID, revisionID, assetName string) (*Revis
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
 		return nil, sharederrors.NewLocalizedError(
-			"revision_preview_assets_unavailable",
+			errCodeRevisionPreviewAssetsUnavailable,
 			"Revision assets are unavailable",
 			"revision assets for page %s revision %s are unavailable",
 			err,
-			pageID,
-			revisionID,
+			pageIDString,
+			revisionIDString,
 		)
 	}
 
 	for _, asset := range assets {
-		if asset.Name != assetName {
+		if asset.Name != assetNameString {
 			continue
 		}
 
 		blobPath := s.store.AssetBlobPath(asset.SHA256)
 		if _, err := os.Stat(blobPath); err != nil {
 			return nil, sharederrors.NewLocalizedError(
-				"revision_preview_asset_blob_unavailable",
+				errCodeRevisionPreviewAssetBlobMissing,
 				"Revision asset is unavailable",
 				"revision asset %s for page %s revision %s is unavailable",
 				err,
-				assetName,
-				pageID,
-				revisionID,
+				assetNameString,
+				pageIDString,
+				revisionIDString,
 			)
 		}
 
@@ -390,13 +414,13 @@ func (s *Service) GetRevisionAsset(pageID, revisionID, assetName string) (*Revis
 	}
 
 	return nil, sharederrors.NewLocalizedError(
-		"revision_preview_asset_not_found",
+		errCodeRevisionPreviewAssetNotFound,
 		"Revision asset not found",
 		"revision asset %s for page %s revision %s not found",
-		fmt.Errorf("asset %q not found in revision manifest", assetName),
-		assetName,
-		pageID,
-		revisionID,
+		fmt.Errorf("asset %q not found in revision manifest", assetNameString),
+		assetNameString,
+		pageIDString,
+		revisionIDString,
 	)
 }
 
@@ -429,9 +453,8 @@ func compareRevisionAssets(baseAssets, targetAssets []AssetRef) []RevisionAssetD
 	return changes
 }
 
-func (s *Service) DeletePageData(pageID string) error {
-	pageID = strings.TrimSpace(pageID)
-	if pageID == "" {
+func (s *Service) DeletePageData(pageID tree.PageID) error {
+	if pageID.MetadataValue() == "" {
 		return nil
 	}
 
@@ -443,7 +466,7 @@ func (s *Service) DeletePageData(pageID string) error {
 	return nil
 }
 
-func (s *Service) CheckRevisionIntegrity(pageID string) ([]RevisionIntegrityIssue, error) {
+func (s *Service) CheckRevisionIntegrity(pageID tree.PageID) ([]RevisionIntegrityIssue, error) {
 	revisions, err := s.store.ListRevisions(pageID)
 	if err != nil {
 		return nil, err
@@ -457,81 +480,81 @@ func (s *Service) CheckRevisionIntegrity(pageID string) ([]RevisionIntegrityIssu
 		if strings.TrimSpace(rev.ContentHash) != "" {
 			rc, err := s.store.OpenContentBlob(rev.ContentHash)
 			if err != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "missing_content_blob", Message: "Revision content blob is missing or unreadable", Path: s.store.contentBlobPath(rev.ContentHash)})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingContent, Message: "Revision content blob is missing or unreadable", Path: s.store.contentBlobPath(rev.ContentHash)})
 			} else {
 				_ = rc.Close()
 			}
 		}
 		refs, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 		if err != nil {
-			issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "missing_asset_manifest", Message: "Revision asset manifest is missing or unreadable", Path: s.store.assetManifestPath(rev.AssetManifestHash)})
+			issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingManifest, Message: "Revision asset manifest is missing or unreadable", Path: s.store.assetManifestPath(rev.AssetManifestHash)})
 			continue
 		}
 		for _, ref := range refs {
 			blobPath := s.store.AssetBlobPath(ref.SHA256)
 			f, err := s.store.OpenAssetBlob(ref.SHA256)
 			if err != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "missing_asset_blob", Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
 				continue
 			}
 			hasher := sha256.New()
 			size, copyErr := io.Copy(hasher, f)
 			_ = f.Close()
 			if copyErr != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "missing_asset_blob", Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
 				continue
 			}
 			if hex.EncodeToString(hasher.Sum(nil)) != ref.SHA256 {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "asset_blob_hash_mismatch", Message: fmt.Sprintf("Revision asset blob for %s failed hash verification", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityHashMismatch, Message: fmt.Sprintf("Revision asset blob for %s failed hash verification", ref.Name), Path: blobPath})
 				continue
 			}
 			if size != ref.SizeBytes {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: "asset_blob_size_mismatch", Message: fmt.Sprintf("Revision asset blob for %s failed size verification", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegritySizeMismatch, Message: fmt.Sprintf("Revision asset blob for %s failed size verification", ref.Name), Path: blobPath})
 			}
 		}
 	}
 	return issues, nil
 }
 
-func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
-	pageID = strings.TrimSpace(pageID)
-	revisionID = strings.TrimSpace(revisionID)
-	if pageID == "" {
+func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, authorID tree.UserID) error {
+	pageIDString := pageID.MetadataValue()
+	revisionIDString := revisionID.CommitID()
+	if pageIDString == "" {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_invalid_page_id",
+			errCodeRevisionRestoreInvalidPageID,
 			"Failed to restore page",
 			"failed to restore page %s",
 			nil,
-			pageID,
+			pageIDString,
 		)
 	}
-	if revisionID == "" {
+	if revisionIDString == "" {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_invalid_revision",
+			errCodeRevisionRestoreInvalidRevision,
 			"Restore revision is invalid",
 			"restore revision %s for page %s is invalid",
 			nil,
-			revisionID,
-			pageID,
+			revisionIDString,
+			pageIDString,
 		)
 	}
 
 	if _, err := s.pages.GetPage(pageID); err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
 			return sharederrors.NewLocalizedError(
-				"revision_restore_page_not_found",
+				errCodeRevisionRestorePageNotFound,
 				"Page not found",
 				"page %s not found",
 				err,
-				pageID,
+				pageIDString,
 			)
 		}
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
@@ -539,131 +562,131 @@ func (s *Service) RestoreRevision(pageID, revisionID, authorID string) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return sharederrors.NewLocalizedError(
-				"revision_restore_revision_not_found",
+				errCodeRevisionRestoreRevisionNotFound,
 				"Restore revision not found",
 				"restore revision %s for page %s not found",
 				err,
-				revisionID,
-				pageID,
+				revisionIDString,
+				pageIDString,
 			)
 		}
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	content, err := s.store.ReadContentBlob(rev.ContentHash)
 	if err != nil {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_content_missing",
+			errCodeRevisionRestoreContentMissing,
 			"Restore content is unavailable",
 			"restore content for page %s is unavailable",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_assets_missing",
+			errCodeRevisionRestoreAssetsMissing,
 			"Restore assets are unavailable",
 			"restore assets for page %s are unavailable",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	beforeState, err := s.capturePageState(pageID, true)
 	if err != nil {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	restoredContent, restoreFromImport, err := buildRestoredRawContent(pageID, rev.Title, rev.PageMetadata, rev.ExtraFrontmatter, string(content))
 	if err != nil {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 	if err := s.updateRestoredContent(authorID, pageID, rev.Title, beforeState.Slug, &restoredContent, restoreFromImport); err != nil {
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	if err := s.restoreAssets(pageID, assets); err != nil {
 		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(pageID, beforeState.Title, beforeState.PageMetadata, beforeState.ExtraFrontmatter, beforeState.Content)
 		if buildErr != nil {
-			s.log.Warn("failed to rebuild rollback content", "pageID", pageID, "error", buildErr)
+			s.log.Warn("failed to rebuild rollback content", "pageID", pageIDString, "error", buildErr)
 			restoreRollbackContent = beforeState.Content
 			rollbackFromImport = false
 		}
 		if rollbackErr := s.updateRestoredContent(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, rollbackFromImport); rollbackErr != nil {
-			s.log.Warn("failed to rollback restored content", "pageID", pageID, "error", rollbackErr)
+			s.log.Warn("failed to rollback restored content", "pageID", pageIDString, "error", rollbackErr)
 		}
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
-			s.log.Warn("failed to rollback restored assets", "pageID", pageID, "error", rollbackErr)
+			s.log.Warn("failed to rollback restored assets", "pageID", pageIDString, "error", rollbackErr)
 		}
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	if err := s.recordRestoreRevision(pageID, authorID); err != nil {
 		restoreRollbackContent, rollbackFromImport, buildErr := buildRestoredRawContent(pageID, beforeState.Title, beforeState.PageMetadata, beforeState.ExtraFrontmatter, beforeState.Content)
 		if buildErr != nil {
-			s.log.Warn("failed to rebuild rollback content", "pageID", pageID, "error", buildErr)
+			s.log.Warn("failed to rebuild rollback content", "pageID", pageIDString, "error", buildErr)
 			restoreRollbackContent = beforeState.Content
 			rollbackFromImport = false
 		}
 		if rollbackErr := s.updateRestoredContent(authorID, pageID, beforeState.Title, beforeState.Slug, &restoreRollbackContent, rollbackFromImport); rollbackErr != nil {
-			s.log.Warn("failed to rollback restored content", "pageID", pageID, "error", rollbackErr)
+			s.log.Warn("failed to rollback restored content", "pageID", pageIDString, "error", rollbackErr)
 		}
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
-			s.log.Warn("failed to rollback restored assets", "pageID", pageID, "error", rollbackErr)
+			s.log.Warn("failed to rollback restored assets", "pageID", pageIDString, "error", rollbackErr)
 		}
 		return sharederrors.NewLocalizedError(
-			"revision_restore_failed",
+			errCodeRevisionRestoreFailed,
 			"Failed to restore page",
 			"failed to restore page %s",
 			err,
-			pageID,
+			pageIDString,
 		)
 	}
 
 	return nil
 }
 
-func (s *Service) updateRestoredContent(authorID string, pageID string, title string, slug string, content *string, replaceMetadata bool) error {
+func (s *Service) updateRestoredContent(authorID tree.UserID, pageID tree.PageID, title string, slug tree.Slug, content *string, replaceMetadata bool) error {
 	if replaceMetadata {
-		return s.pages.UpdateNodeReplacingMetadata(authorID, pageID, title, slug, content, tree.VersionUnchecked)
+		return s.pages.UpdateNodeReplacingMetadataUncheckedVersion(authorID, pageID, title, slug, content)
 	}
-	return s.pages.UpdateNode(authorID, pageID, title, slug, content, tree.VersionUnchecked, false)
+	return s.pages.UpdateNodeUncheckedVersion(authorID, pageID, title, slug, content, false)
 }
 
-func (s *Service) capturePageState(pageID string, withAssets bool) (*RevisionState, error) {
+func (s *Service) capturePageState(pageID tree.PageID, withAssets bool) (*RevisionState, error) {
 	page, err := s.pages.GetPage(pageID)
 	if err != nil {
 		return nil, err
@@ -694,8 +717,8 @@ func (s *Service) capturePageState(pageID string, withAssets bool) (*RevisionSta
 }
 
 func (s *Service) revisionStateFromPage(page *tree.Page) *RevisionState {
-	parentID := ""
-	if page.Parent != nil && page.Parent.ID != "root" {
+	var parentID tree.PageID
+	if page.Parent != nil && page.Parent.ID != tree.RootPageID {
 		parentID = page.Parent.ID
 	}
 
@@ -710,13 +733,13 @@ func (s *Service) revisionStateFromPage(page *tree.Page) *RevisionState {
 		ContentHash:   sha256HexBytes([]byte(page.Content)),
 		PageCreatedAt: page.Metadata.CreatedAt.UTC(),
 		PageUpdatedAt: page.Metadata.UpdatedAt.UTC(),
-		CreatorID:     strings.TrimSpace(page.Metadata.CreatorID),
-		LastAuthorID:  strings.TrimSpace(page.Metadata.LastAuthorID),
+		CreatorID:     page.Metadata.CreatorID.MetadataValue(),
+		LastAuthorID:  page.Metadata.LastAuthorID.MetadataValue(),
 		CapturedAt:    time.Now().UTC(),
 	}
 }
 
-func (s *Service) recordContentUpdateForPage(page *tree.Page, authorID, summary string) (*Revision, bool, error) {
+func (s *Service) recordContentUpdateForPage(page *tree.Page, authorID tree.UserID, summary string) (*Revision, bool, error) {
 	prev, err := s.store.GetLatestRevision(page.ID)
 	if err != nil {
 		return nil, false, err
@@ -756,18 +779,18 @@ func (s *Service) recordContentUpdateForPage(page *tree.Page, authorID, summary 
 	return rev, true, nil
 }
 
-func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID, summary, assetManifestHash string) (*Revision, error) {
+func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID tree.UserID, summary, assetManifestHash string) (*Revision, error) {
 	revisionID, err := shared.GenerateUniqueID()
 	if err != nil {
 		return nil, fmt.Errorf("generate revision id: %w", err)
 	}
 
 	return &Revision{
-		ID:                   revisionID,
+		ID:                   NewRevisionIDUnchecked(revisionID),
 		PageID:               state.PageID,
 		ParentID:             state.ParentID,
 		Type:                 t,
-		AuthorID:             strings.TrimSpace(authorID),
+		AuthorID:             authorID.MetadataValue(),
 		CreatedAt:            time.Now().UTC(),
 		Title:                state.Title,
 		Slug:                 state.Slug,
@@ -787,7 +810,7 @@ func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID, su
 	}, nil
 }
 
-func (s *Service) enrichStateWithExtraFrontmatter(pageID string, state *RevisionState) error {
+func (s *Service) enrichStateWithExtraFrontmatter(pageID tree.PageID, state *RevisionState) error {
 	if state == nil {
 		return fmt.Errorf("revision state is required")
 	}
@@ -872,12 +895,12 @@ func hashExtraFrontmatter(extra map[string]interface{}) (string, error) {
 	return sha256HexBytes(raw), nil
 }
 
-func buildRestoredRawContent(pageID string, title string, metadata *markdown.PageMetadata, extra map[string]interface{}, body string) (string, bool, error) {
+func buildRestoredRawContent(pageID tree.PageID, title string, metadata *markdown.PageMetadata, extra map[string]interface{}, body string) (string, bool, error) {
 	if metadata != nil {
 		meta := clonePageMetadata(*metadata)
 		meta.Version = 1
 		meta.Page = markdown.PageMetadataPage{
-			ID:    strings.TrimSpace(pageID),
+			ID:    pageID.MetadataValue(),
 			Title: strings.TrimSpace(title),
 		}
 		raw, err := markdown.RenderPageDocument(markdown.PageDocument{
@@ -895,7 +918,7 @@ func buildRestoredRawContent(pageID string, title string, metadata *markdown.Pag
 	}
 
 	raw, err := markdown.BuildMarkdownWithMetadata(markdown.Frontmatter{
-		LeafWikiID:    strings.TrimSpace(pageID),
+		LeafWikiID:    pageID.MetadataValue(),
 		LeafWikiTitle: strings.TrimSpace(title),
 		ExtraFields:   extra,
 	}, body)
@@ -931,7 +954,7 @@ func cloneMetadataMap(values map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
-func (s *Service) persistLiveAssets(pageID string, refs []AssetRef) error {
+func (s *Service) persistLiveAssets(pageID tree.PageID, refs []AssetRef) error {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -952,7 +975,7 @@ func (s *Service) persistLiveAssets(pageID string, refs []AssetRef) error {
 	return nil
 }
 
-func (s *Service) scanLiveAssets(pageID string) ([]AssetRef, error) {
+func (s *Service) scanLiveAssets(pageID tree.PageID) ([]AssetRef, error) {
 	dir := s.liveAssetDir(pageID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -991,8 +1014,8 @@ func (s *Service) scanLiveAssets(pageID string) ([]AssetRef, error) {
 // Assumption for V1:
 // live assets are stored under <storageDir>/assets/<pageID>/...
 // If your AssetService uses a different on-disk layout, only change this method.
-func (s *Service) liveAssetDir(pageID string) string {
-	return filepath.Join(s.storageDir, "assets", pageID)
+func (s *Service) liveAssetDir(pageID tree.PageID) string {
+	return filepath.Join(s.storageDir, "assets", pageID.MetadataValue())
 }
 
 func buildAssetRef(absPath, name string) (AssetRef, error) {
@@ -1033,7 +1056,7 @@ func computeAssetManifestHash(items []AssetRef) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (s *Service) restoreAssets(pageID string, refs []AssetRef) error {
+func (s *Service) restoreAssets(pageID tree.PageID, refs []AssetRef) error {
 	dir := s.liveAssetDir(pageID)
 	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reset live asset dir: %w", err)
@@ -1064,7 +1087,7 @@ func (s *Service) restoreAssets(pageID string, refs []AssetRef) error {
 	return nil
 }
 
-func (s *Service) recordRestoreRevision(pageID, authorID string) error {
+func (s *Service) recordRestoreRevision(pageID tree.PageID, authorID tree.UserID) error {
 	state, err := s.capturePageState(pageID, true)
 	if err != nil {
 		return err

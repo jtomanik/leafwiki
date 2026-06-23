@@ -35,7 +35,7 @@ func NewSlugService() *SlugService {
 
 // GenerateUniqueChildSlug returns a slug that is both valid and unique under the given parent.
 // Use this when creating or renaming a page in the actual tree, where sibling collisions matter.
-func (s *SlugService) GenerateUniqueChildSlug(parent *PageNode, currentID, desired string) string {
+func (s *SlugService) GenerateUniqueChildSlug(parent *PageNode, currentID PageID, desired string) string {
 	slug := normalizeSlug(desired)
 	if slug == "" {
 		slug = "page"
@@ -43,7 +43,7 @@ func (s *SlugService) GenerateUniqueChildSlug(parent *PageNode, currentID, desir
 	original := slug
 	i := 1
 
-	for hasSlugConflict(parent, currentID, slug) || s.IsValidSlug(slug) != nil {
+	for hasSlugConflict(parent, currentID, NewSlugUnchecked(slug)) || s.IsValidSlug(slug) != nil {
 		slug = fmt.Sprintf("%s-%d", original, i)
 		i++
 	}
@@ -104,9 +104,9 @@ func normalizeSlug(title string) string {
 }
 
 // Checks if the given slug already exists among parent's children
-func hasSlugConflict(parent *PageNode, currentID string, slug string) bool {
+func hasSlugConflict(parent *PageNode, currentID PageID, slug Slug) bool {
 	for _, child := range parent.Children {
-		if strings.EqualFold(child.Slug, slug) && child.ID != currentID {
+		if child.Slug.EqualFold(slug) && child.ID != currentID {
 			return true
 		}
 	}

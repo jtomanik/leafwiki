@@ -5,7 +5,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ory/fosite"
+	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
+)
+
+const (
+	oauthErrorInvalidClientMetadata = "invalid_client_metadata"
+	oauthErrorInvalidGrant          = "invalid_grant"
+	oauthErrorInvalidApproval       = "invalid_approval"
+	oauthErrorServerError           = "server_error"
+	oauthErrorDescriptionField      = "error_description"
+	oauthErrorUnauthorized          = "unauthorized"
 )
 
 func writeOAuthBadRequest(c *gin.Context, err error) {
@@ -14,22 +24,22 @@ func writeOAuthBadRequest(c *gin.Context, err error) {
 
 func writeRegistrationError(c *gin.Context, description string) {
 	c.JSON(http.StatusBadRequest, gin.H{
-		"error":             "invalid_client_metadata",
-		"error_description": description,
+		"error":                    oauthErrorInvalidClientMetadata,
+		oauthErrorDescriptionField: description,
 	})
 }
 
 func writeTokenError(c *gin.Context, err error) {
 	rfcErr := fosite.ErrorToRFC6749Error(err)
 	status := rfcErr.StatusCode()
-	if rfcErr.ErrorField == "invalid_grant" {
+	if rfcErr.ErrorField == oauthErrorInvalidGrant {
 		status = http.StatusUnauthorized
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
 	c.JSON(status, gin.H{
-		"error":             rfcErr.ErrorField,
-		"error_description": rfcErr.GetDescription(),
+		"error":                    rfcErr.ErrorField,
+		oauthErrorDescriptionField: rfcErr.GetDescription(),
 	})
 }
 
@@ -47,12 +57,12 @@ func (r *Routes) handleApprovalDetails(ctx httpinternal.RouterContext) gin.Handl
 	return func(c *gin.Context) {
 		user := r.currentWebUser(c, ctx)
 		if user == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": oauthErrorUnauthorized})
 			return
 		}
-		details, ok := r.service.approvalDetails(c.Query("approval_token"), user.ID)
+		details, ok := r.service.approvalDetails(c.Query("approval_token"), coreauth.NewUserIDUnchecked(user.ID))
 		if !ok {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_approval"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": oauthErrorInvalidApproval})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{

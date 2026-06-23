@@ -10,10 +10,10 @@ import (
 
 // ConvertPageInput is the input for ConvertPageUseCase.
 type ConvertPageInput struct {
-	UserID     string
+	UserID     tree.UserID
 	Source     string
-	ID         string
-	Version    string
+	ID         tree.PageID
+	Version    tree.PageVersion
 	TargetKind tree.NodeKind
 }
 
@@ -35,10 +35,10 @@ func NewConvertPageUseCase(
 
 // Execute converts the node kind and records a structure revision.
 func (uc *ConvertPageUseCase) Execute(_ context.Context, in ConvertPageInput) error {
-	if in.ID == "root" || in.ID == "" {
+	if in.ID.String() == "root" || in.ID.String() == "" {
 		return newPageRootOperationError("convert")
 	}
-	in.Version = sanitizeClientVersion(in.Version)
+	in.Version = sanitizeSemanticClientVersion(in.Version)
 	before, err := uc.tree.GetPage(in.ID)
 	if err != nil {
 		return err

@@ -50,14 +50,25 @@ export function MarkdownLink({
 }: MarkdownLinkProps) {
   void node
   const location = useLocation()
+  const workspaceId =
+    workspaceIdProp ?? splitWorkspaceRoute(location.pathname).workspaceId
   const openDialog = useDialogsStore((s) => s.openDialog)
-  const getPageByPath = useTreeStore((s) => s.getPageByPath)
+  const pagesByPath = useTreeStore(
+    (s) => s.getWorkspaceState(workspaceId).byPath,
+  )
+  const pagesByPathKind = useTreeStore(
+    (s) => s.getWorkspaceState(workspaceId).byPathKind,
+  )
   const user = useSessionStore((s) => s.user)
   const markdownLinkRootPrefix = useConfigStore((s) => s.markdownLinkRootPrefix)
 
   const editMode = useAppMode() === 'edit'
-  const workspaceId =
-    workspaceIdProp ?? splitWorkspaceRoute(location.pathname).workspaceId
+  const getPageByPath = (path: string, kind?: WikiNodeKind) => {
+    if (kind) {
+      return pagesByPathKind[path]?.[kind] ?? null
+    }
+    return pagesByPath[path] ?? null
+  }
 
   if (href === undefined) {
     return <>{children}</>
@@ -141,10 +152,10 @@ export function MarkdownLink({
     normalizedHref = resolveReadmeFallbackHref(
       normalizedHref,
       href,
-      (path, kind) => getPageByPath(path, kind, workspaceId),
+      (path, kind) => getPageByPath(path, kind),
     )
     browserHref = resolveReadmeFallbackHref(browserHref, href, (path, kind) =>
-      getPageByPath(path, kind, workspaceId),
+      getPageByPath(path, kind),
     )
     browserHref = buildWorkspaceViewPath(workspaceId, browserHref)
 
@@ -160,7 +171,7 @@ export function MarkdownLink({
     const targetKind = markdownRouteLookupKind(browserHref) ?? 'section'
 
     // Check if the page exists
-    const page = getPageByPath(normalizedTargetPath, targetKind, workspaceId)
+    const page = getPageByPath(normalizedTargetPath, targetKind)
     const pageExists = !!page
     if (!pageExists && user) {
       return (

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/agenthooks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
@@ -32,6 +33,7 @@ func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /sessions status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
+	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
 	if sessions.Count() != 0 {
 		t.Fatalf("sessions count = %d, want 0 after unauthorized register", sessions.Count())
 	}
@@ -40,6 +42,7 @@ func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /mcp status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
+	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
 	if mcpCalled {
 		t.Fatalf("private MCP handler was called for unauthorized request")
 	}
@@ -64,14 +67,14 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &handle); err != nil {
 		t.Fatalf("decode session handle: %v", err)
 	}
-	if strings.TrimSpace(handle.ID) == "" {
+	if strings.TrimSpace(handle.ID.String()) == "" {
 		t.Fatalf("session id is empty")
 	}
 	if sessions.Count() != 1 || joinTestCounts(counts) != "1" {
 		t.Fatalf("session count/counts = %d/%s, want 1/1", sessions.Count(), joinTestCounts(counts))
 	}
 
-	resp = controlServerRequest(t, handler, http.MethodPost, "/sessions/"+handle.ID+"/heartbeat", "control-token", nil)
+	resp = controlServerRequest(t, handler, http.MethodPost, "/sessions/"+handle.ID.String()+"/heartbeat", "control-token", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("heartbeat status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
 	}
@@ -79,8 +82,9 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("missing heartbeat status = %d, want %d", resp.Code, http.StatusNotFound)
 	}
+	assertControlStructuredError(t, resp, "daemon_session_not_found", "errors.daemon.session_not_found")
 
-	resp = controlServerRequest(t, handler, http.MethodDelete, "/sessions/"+handle.ID, "control-token", nil)
+	resp = controlServerRequest(t, handler, http.MethodDelete, "/sessions/"+handle.ID.String(), "control-token", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("release status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
 	}
@@ -120,6 +124,7 @@ func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *tes
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized POST status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
+	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
 	if presence.Count() != 0 {
 		t.Fatalf("presence count after unauthorized POST = %d, want 0", presence.Count())
 	}
@@ -127,6 +132,7 @@ func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *tes
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized GET status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
+	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
 
 	resp = controlServerRequest(t, handler, http.MethodPost, "/agent-presence/events", "control-token", bytes.NewReader(body))
 	if resp.Code != http.StatusOK {
@@ -184,23 +190,25 @@ func TestControlServerForwardsPrivateMCPAfterControlToken(t *testing.T) {
 
 func TestControlServerVerifyStdioAuthBoundary(t *testing.T) {
 	tests := []struct {
-		name         string
-		authDisabled bool
-		verify       func(string) error
-		body         string
-		wantStatus   int
+		name          string
+		authDisabled  bool
+		verify        func(string) error
+		body          string
+		wantStatus    int
+		wantCode      string
+		wantMessageID string
 	}{
-		{name: "malformed json", authDisabled: true, body: "{", wantStatus: http.StatusBadRequest},
+		{name: "malformed json", authDisabled: true, body: "{", wantStatus: http.StatusBadRequest, wantCode: "stdio_auth_invalid_request", wantMessageID: "errors.stdio.auth_invalid_request"},
 		{name: "disabled auth accepts empty key", authDisabled: true, body: `{}`, wantStatus: http.StatusOK},
-		{name: "disabled auth rejects api key", authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict},
-		{name: "enabled auth requires api key", body: `{}`, wantStatus: http.StatusUnauthorized},
-		{name: "enabled auth requires verifier", body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError},
+		{name: "disabled auth rejects api key", authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict, wantCode: "stdio_auth_api_key_rejected", wantMessageID: "errors.stdio.auth_api_key_rejected"},
+		{name: "enabled auth requires api key", body: `{}`, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_required", wantMessageID: "errors.stdio.auth_api_key_required"},
+		{name: "enabled auth requires verifier", body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError, wantCode: "stdio_auth_api_key_verifier_unavailable", wantMessageID: "errors.stdio.auth_api_key_verifier_unavailable"},
 		{name: "enabled auth rejects invalid api key", body: `{"apiKey":"lwk_key"}`, verify: func(string) error {
 			return ErrInvalidAPIKey
-		}, wantStatus: http.StatusUnauthorized},
+		}, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_invalid", wantMessageID: "errors.stdio.auth_api_key_invalid"},
 		{name: "enabled auth reports verifier storage failure", body: `{"apiKey":"lwk_key"}`, verify: func(string) error {
 			return errors.New("database is locked")
-		}, wantStatus: http.StatusServiceUnavailable},
+		}, wantStatus: http.StatusServiceUnavailable, wantCode: "stdio_auth_api_key_verifier_failed", wantMessageID: "errors.stdio.auth_api_key_verifier_failed"},
 		{name: "enabled auth accepts valid api key", body: `{"apiKey":"lwk_key"}`, verify: func(key string) error {
 			if key != "lwk_key" {
 				return errors.New("wrong key")
@@ -220,6 +228,20 @@ func TestControlServerVerifyStdioAuthBoundary(t *testing.T) {
 			resp := controlServerRequest(t, handler, http.MethodPost, "/stdio-auth/verify", "control-token", strings.NewReader(tc.body))
 			if resp.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%q", resp.Code, tc.wantStatus, resp.Body.String())
+			}
+			if tc.wantCode != "" {
+				var body struct {
+					Error struct {
+						Code      string `json:"code"`
+						MessageID string `json:"messageId"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode error response: %v; body=%q", err, resp.Body.String())
+				}
+				if body.Error.Code != tc.wantCode || body.Error.MessageID != tc.wantMessageID {
+					t.Fatalf("error = %#v, want code=%q messageId=%q", body.Error, tc.wantCode, tc.wantMessageID)
+				}
 			}
 		})
 	}
@@ -290,12 +312,28 @@ func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 		t.Fatalf("verified key = %q, want lwk_valid", verifiedKey)
 	}
 
-	if err := client.HeartbeatSession(ctx, "missing"); err == nil || !strings.Contains(err.Error(), "session not found") {
-		t.Fatalf("missing heartbeat error = %v, want session not found", err)
+	if err := client.HeartbeatSession(ctx, SessionID("missing")); err == nil {
+		t.Fatalf("missing heartbeat succeeded")
+	} else {
+		assertControlHTTPError(t, err, http.StatusNotFound, errCodeDaemonSessionNotFound)
 	}
 	badTokenClient := NewClient(server.URL, "wrong-token")
-	if err := badTokenClient.Ping(ctx); err == nil || !strings.Contains(err.Error(), "unauthorized") {
-		t.Fatalf("bad token error = %v, want unauthorized", err)
+	if err := badTokenClient.Ping(ctx); err == nil {
+		t.Fatalf("bad token ping succeeded")
+	} else {
+		assertControlHTTPError(t, err, http.StatusUnauthorized, errCodeDaemonControlUnauthorized)
+	}
+}
+
+func assertControlHTTPError(t *testing.T, err error, wantStatus int, wantCode sharederrors.ErrorCode) {
+	t.Helper()
+	var controlErr *ControlHTTPError
+	if !errors.As(err, &controlErr) {
+		t.Fatalf("error = %T %[1]v, want ControlHTTPError", err)
+	}
+	wantMessageID := sharederrors.MessageIDForCode(wantCode)
+	if controlErr.StatusCode != wantStatus || controlErr.Code != wantCode || controlErr.MessageID != wantMessageID || controlErr.Message == "" {
+		t.Fatalf("control error = %#v, want status=%d code=%q messageId=%q", controlErr, wantStatus, wantCode, wantMessageID)
 	}
 }
 
@@ -374,6 +412,23 @@ func controlServerRequest(t *testing.T, handler http.Handler, method string, pat
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 	return resp
+}
+
+func assertControlStructuredError(t *testing.T, resp *httptest.ResponseRecorder, code string, messageID string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode control error: %v; body=%s", err, resp.Body.String())
+	}
+	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message == "" {
+		t.Fatalf("control error = %#v, want code=%q messageId=%q with message", body.Error, code, messageID)
+	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

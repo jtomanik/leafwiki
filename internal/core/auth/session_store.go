@@ -15,7 +15,7 @@ import (
 type SessionStore struct {
 	mu         sync.Mutex
 	storageDir string
-	filename   string
+	dbFilename string
 	db         *sql.DB
 	cancel     context.CancelFunc
 	done       chan struct{}
@@ -30,7 +30,7 @@ func NewSessionStore(storageDir string) (*SessionStore, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &SessionStore{
 		storageDir: storageDir,
-		filename:   "sessions.db",
+		dbFilename: "sessions.db",
 		cancel:     cancel,
 		done:       make(chan struct{}),
 	}
@@ -72,7 +72,7 @@ func (s *SessionStore) withDB(fn func(db *sql.DB) error) error {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		db, err := sql.Open("sqlite", sessionDatabasePath(s.storageDir, s.filename))
+		db, err := sql.Open("sqlite", sessionDatabasePath(s.storageDir, s.dbFilename))
 		if err != nil {
 			return err
 		}
@@ -121,17 +121,17 @@ func (s *SessionStore) Close() error {
 	return nil
 }
 
-func (s *SessionStore) CreateSession(id, userID, tokenType string, expiresAt time.Time) error {
+func (s *SessionStore) CreateSession(id SessionID, userID UserID, tokenType string, expiresAt time.Time) error {
 	return s.withDB(func(db *sql.DB) error {
 		_, err := db.Exec(`
 			INSERT INTO sessions (id, user_id, token_type, created_at, expires_at, revoked_at)
 			VALUES (?, ?, ?, ?, ?, NULL);
-		`, id, userID, tokenType, time.Now().Unix(), expiresAt.Unix())
+		`, id.String(), userID.String(), tokenType, time.Now().Unix(), expiresAt.Unix())
 		return err
 	})
 }
 
-func (s *SessionStore) IsActive(id, userID, tokenType string, now time.Time) (bool, error) {
+func (s *SessionStore) IsActive(id SessionID, userID UserID, tokenType string, now time.Time) (bool, error) {
 	var expiresAt int64
 	var revokedAt sql.NullInt64
 
@@ -140,7 +140,7 @@ func (s *SessionStore) IsActive(id, userID, tokenType string, now time.Time) (bo
 			SELECT expires_at, revoked_at
 			FROM sessions
 			WHERE id = ? AND user_id = ? AND token_type = ?;
-		`, id, userID, tokenType).Scan(&expiresAt, &revokedAt)
+		`, id.String(), userID.String(), tokenType).Scan(&expiresAt, &revokedAt)
 	})
 
 	if err == sql.ErrNoRows {
@@ -160,24 +160,24 @@ func (s *SessionStore) IsActive(id, userID, tokenType string, now time.Time) (bo
 	return true, nil
 }
 
-func (s *SessionStore) RevokeSession(id string) error {
+func (s *SessionStore) RevokeSession(id SessionID) error {
 	return s.withDB(func(db *sql.DB) error {
 		_, err := db.Exec(`
 			UPDATE sessions
 			SET revoked_at = ?
 			WHERE id = ? AND revoked_at IS NULL;
-		`, time.Now().Unix(), id)
+		`, time.Now().Unix(), id.String())
 		return err
 	})
 }
 
-func (s *SessionStore) RevokeAllSessionsForUser(userID string) error {
+func (s *SessionStore) RevokeAllSessionsForUser(userID UserID) error {
 	return s.withDB(func(db *sql.DB) error {
 		_, err := db.Exec(`
 			UPDATE sessions
 			SET revoked_at = ?
 			WHERE user_id = ? AND revoked_at IS NULL;
-		`, time.Now().Unix(), userID)
+		`, time.Now().Unix(), userID.String())
 		return err
 	})
 }

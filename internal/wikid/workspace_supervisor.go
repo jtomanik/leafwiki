@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type WorkspaceState string
@@ -18,12 +20,12 @@ const (
 )
 
 type WorkspaceStatus struct {
-	WorkspaceID string         `json:"workspaceId"`
-	State       WorkspaceState `json:"state"`
-	PID         int            `json:"pid,omitempty"`
-	URL         string         `json:"url,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	WorkspaceID workspaceid.WorkspaceID `json:"workspaceId"`
+	State       WorkspaceState          `json:"state"`
+	PID         int                     `json:"pid,omitempty"`
+	URL         string                  `json:"url,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	UpdatedAt   time.Time               `json:"updatedAt"`
 }
 
 type WorkspaceSupervisorOptions struct {
@@ -35,8 +37,8 @@ type WorkspaceSupervisorOptions struct {
 type WorkspaceSupervisor struct {
 	mu       sync.Mutex
 	opts     WorkspaceSupervisorOptions
-	statuses map[string]WorkspaceStatus
-	restarts map[string]int
+	statuses map[workspaceid.WorkspaceID]WorkspaceStatus
+	restarts map[workspaceid.WorkspaceID]int
 }
 
 func NewWorkspaceSupervisor(opts WorkspaceSupervisorOptions) *WorkspaceSupervisor {
@@ -48,15 +50,14 @@ func NewWorkspaceSupervisor(opts WorkspaceSupervisorOptions) *WorkspaceSuperviso
 	}
 	return &WorkspaceSupervisor{
 		opts:     opts,
-		statuses: map[string]WorkspaceStatus{},
-		restarts: map[string]int{},
+		statuses: map[workspaceid.WorkspaceID]WorkspaceStatus{},
+		restarts: map[workspaceid.WorkspaceID]int{},
 	}
 }
 
-func (s *WorkspaceSupervisor) MarkStarting(workspaceID string) {
+func (s *WorkspaceSupervisor) MarkStarting(workspaceID workspaceid.WorkspaceID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	workspaceID = cleanWorkspaceID(workspaceID)
 	current := s.statuses[workspaceID]
 	current.WorkspaceID = workspaceID
 	current.State = WorkspaceStateStarting
@@ -65,10 +66,9 @@ func (s *WorkspaceSupervisor) MarkStarting(workspaceID string) {
 	s.statuses[workspaceID] = current
 }
 
-func (s *WorkspaceSupervisor) MarkReady(workspaceID string, pid int, url string) {
+func (s *WorkspaceSupervisor) MarkReady(workspaceID workspaceid.WorkspaceID, pid int, url string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	workspaceID = cleanWorkspaceID(workspaceID)
 	s.statuses[workspaceID] = WorkspaceStatus{
 		WorkspaceID: workspaceID,
 		State:       WorkspaceStateRunning,
@@ -81,7 +81,6 @@ func (s *WorkspaceSupervisor) MarkReady(workspaceID string, pid int, url string)
 func (s *WorkspaceSupervisor) MarkStatus(status WorkspaceStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	status.WorkspaceID = cleanWorkspaceID(status.WorkspaceID)
 	if status.WorkspaceID == "" {
 		return
 	}
@@ -91,10 +90,9 @@ func (s *WorkspaceSupervisor) MarkStatus(status WorkspaceStatus) {
 	s.statuses[status.WorkspaceID] = status
 }
 
-func (s *WorkspaceSupervisor) RecordCrash(workspaceID string, message string) (time.Time, bool) {
+func (s *WorkspaceSupervisor) RecordCrash(workspaceID workspaceid.WorkspaceID, message string) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	workspaceID = cleanWorkspaceID(workspaceID)
 	s.restarts[workspaceID]++
 	state := WorkspaceStateRestarting
 	scheduled := true
@@ -114,10 +112,9 @@ func (s *WorkspaceSupervisor) RecordCrash(workspaceID string, message string) (t
 	return current.UpdatedAt.Add(s.opts.Backoff), true
 }
 
-func (s *WorkspaceSupervisor) Status(workspaceID string) WorkspaceStatus {
+func (s *WorkspaceSupervisor) Status(workspaceID workspaceid.WorkspaceID) WorkspaceStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	workspaceID = cleanWorkspaceID(workspaceID)
 	status, ok := s.statuses[workspaceID]
 	if !ok {
 		return WorkspaceStatus{WorkspaceID: workspaceID, State: WorkspaceStateRegistered}
@@ -143,8 +140,4 @@ func (s *WorkspaceSupervisor) now() time.Time {
 		return s.opts.Now()
 	}
 	return time.Now().UTC()
-}
-
-func cleanWorkspaceID(workspaceID string) string {
-	return strings.TrimSpace(workspaceID)
 }

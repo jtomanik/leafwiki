@@ -10,11 +10,11 @@ import (
 
 // MovePageInput is the input for MovePageUseCase.
 type MovePageInput struct {
-	UserID   string
+	UserID   tree.UserID
 	Source   string
-	ID       string
-	Version  string
-	ParentID string
+	ID       tree.PageID
+	Version  tree.PageVersion
+	ParentID tree.PageID
 }
 
 // MovePageUseCase moves a page to a new parent, updating links and recording revisions.
@@ -35,18 +35,18 @@ func NewMovePageUseCase(
 
 // Execute moves the page and fires post-save side effects for the whole subtree.
 func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
-	if in.ID == "root" || in.ID == "" {
+	if in.ID.String() == "root" || in.ID.String() == "" {
 		return newPageRootOperationError("move")
 	}
 
-	parentID, err := ValidateMoveParentID(in.ParentID)
+	parentID, err := ValidateSemanticMoveParentID(in.ParentID)
 	if err != nil {
 		return err
 	}
 	in.ParentID = parentID
-	in.Version = sanitizeClientVersion(in.Version)
+	in.Version = sanitizeSemanticClientVersion(in.Version)
 
-	var subtreeIDs []string
+	var subtreeIDs []tree.PageID
 	var beforePage *tree.Page
 
 	if uc.tree.IsLoaded() {
@@ -58,7 +58,7 @@ func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
 		}
 	}
 	if len(subtreeIDs) == 0 {
-		subtreeIDs = []string{in.ID}
+		subtreeIDs = []tree.PageID{in.ID}
 	}
 	if beforePage == nil {
 		p, err := uc.tree.GetPage(in.ID)

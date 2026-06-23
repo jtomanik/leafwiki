@@ -2,6 +2,50 @@ import { Page } from '@playwright/test';
 import { toAppPath } from './appPath';
 import { expect } from '@playwright/test';
 
+function expectedLoadedPagePath(pagePath: string): string | null {
+  let path = pagePath.split('?')[0].split('#')[0];
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+
+  try {
+    path = decodeURI(path);
+  } catch {
+    // Keep the original route if it is not valid percent-encoded input.
+  }
+
+  const segments = path.split('/').filter(Boolean);
+  if (segments[0] === 'w' && segments.length >= 2) {
+    segments.splice(0, 2);
+  }
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const first = segments[0];
+  if (['e', 'history', 'login', 'p', 'settings'].includes(first)) {
+    return null;
+  }
+
+  const basename = segments[segments.length - 1]?.toLowerCase();
+  if (basename === 'readme.md') {
+    return null;
+  }
+
+  if (basename === 'index.md') {
+    segments.pop();
+    return segments.join('/');
+  }
+
+  const joined = segments.join('/');
+  if (joined.toLowerCase().endsWith('.md')) {
+    return joined.slice(0, -3);
+  }
+
+  return joined;
+}
+
 export default class ViewPage {
   constructor(private page: Page) {}
 
@@ -68,7 +112,16 @@ export default class ViewPage {
 
   async goto(pagePath: string = '/') {
     await this.page.goto(toAppPath(pagePath));
-    await this.page.locator('article').waitFor({ state: 'visible' });
+    const article = this.page.locator('article');
+    const expectedPath = expectedLoadedPagePath(pagePath);
+    if (expectedPath === null) {
+      await article.waitFor({ state: 'visible' });
+      return;
+    }
+    await expect(article).toBeVisible({ timeout: 10000 });
+    await expect(article).toHaveAttribute('data-page-path', expectedPath, {
+      timeout: 10000,
+    });
   }
 
   async isUserLoggedIn(): Promise<boolean> {

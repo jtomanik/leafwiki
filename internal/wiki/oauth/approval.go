@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/ory/fosite"
+	coreauth "github.com/perber/wiki/internal/core/auth"
 )
 
 type oauthApproval struct {
-	UserID     string
+	UserID     coreauth.UserID
 	RequestKey string
 	Details    approvalPageData
 	ExpiresAt  time.Time
@@ -27,7 +28,7 @@ type approvalPageData struct {
 	Resource    string
 }
 
-func (s *Service) issueApproval(userID, requestKey string, details approvalPageData) (string, error) {
+func (s *Service) issueApproval(userID coreauth.UserID, requestKey string, details approvalPageData) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("create oauth approval token: %w", err)
@@ -51,7 +52,7 @@ func (s *Service) issueApproval(userID, requestKey string, details approvalPageD
 	return token, nil
 }
 
-func (s *Service) consumeApproval(token, userID, requestKey string) bool {
+func (s *Service) consumeApproval(token string, userID coreauth.UserID, requestKey string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return false
@@ -67,7 +68,7 @@ func (s *Service) consumeApproval(token, userID, requestKey string) bool {
 	return approval.UserID == userID && approval.RequestKey == requestKey && approval.ExpiresAt.After(time.Now())
 }
 
-func (s *Service) approvalDetails(token, userID string) (approvalPageData, bool) {
+func (s *Service) approvalDetails(token string, userID coreauth.UserID) (approvalPageData, bool) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return approvalPageData{}, false

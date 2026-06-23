@@ -7,18 +7,21 @@ import (
 	"net/http"
 	"strings"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
 const PrivateWorkspacesPrefix = "/__leafwiki/workspaces"
 
+const ErrCodeWorkspaceGrantDenied sharederrors.ErrorCode = "workspace_grant_denied"
+
 type WorkspaceListItem struct {
-	ID          string          `json:"id"`
-	DisplayName string          `json:"displayName"`
-	DataDir     string          `json:"-"`
-	RootDir     string          `json:"-"`
-	Role        GrantRole       `json:"role"`
-	Status      WorkspaceStatus `json:"status"`
+	ID          workspaceid.WorkspaceID `json:"id"`
+	DisplayName string                  `json:"displayName"`
+	DataDir     string                  `json:"-"`
+	RootDir     string                  `json:"-"`
+	Role        GrantRole               `json:"role"`
+	Status      WorkspaceStatus         `json:"status"`
 }
 
 type WorkspaceListResponse struct {
@@ -86,7 +89,7 @@ func (h *privateWorkspaceAPI) list(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "load grants", http.StatusInternalServerError)
 		return
 	}
-	grantByWorkspace := map[string]Grant{}
+	grantByWorkspace := map[workspaceid.WorkspaceID]Grant{}
 	for _, grant := range grants {
 		grantByWorkspace[grant.WorkspaceID] = grant
 	}
@@ -116,7 +119,7 @@ func (h *privateWorkspaceAPI) workspaceAction(w http.ResponseWriter, req *http.R
 		return
 	}
 	if !granted {
-		http.Error(w, "workspace access denied", http.StatusForbidden)
+		writePrivateWorkspaceError(w, http.StatusForbidden, ErrCodeWorkspaceGrantDenied, "workspace access denied")
 		return
 	}
 	switch {
@@ -135,7 +138,7 @@ func (h *privateWorkspaceAPI) workspaceAction(w http.ResponseWriter, req *http.R
 	}
 }
 
-func (h *privateWorkspaceAPI) authorizedWorkspace(req *http.Request, workspaceID string) (WorkspaceRecord, Grant, bool, bool, error) {
+func (h *privateWorkspaceAPI) authorizedWorkspace(req *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRecord, Grant, bool, bool, error) {
 	workspace, ok, err := h.opts.Registry.Workspace(workspaceID)
 	if err != nil {
 		return WorkspaceRecord{}, Grant{}, false, false, err
@@ -191,7 +194,7 @@ func (h *privateWorkspaceAPI) item(workspace WorkspaceRecord, role GrantRole) Wo
 	}
 }
 
-func (h *privateWorkspaceAPI) status(workspaceID string) WorkspaceStatus {
+func (h *privateWorkspaceAPI) status(workspaceID workspaceid.WorkspaceID) WorkspaceStatus {
 	if h.opts.Supervisor == nil {
 		return WorkspaceStatus{WorkspaceID: workspaceID, State: WorkspaceStateRegistered}
 	}
@@ -208,16 +211,17 @@ func (h *privateWorkspaceAPI) ensure(ctx context.Context, workspace WorkspaceRec
 	return h.opts.Ensure(ctx, workspace)
 }
 
-func parsePrivateWorkspacePath(path string) (string, string, bool) {
+func parsePrivateWorkspacePath(path string) (workspaceid.WorkspaceID, string, bool) {
 	rest := strings.TrimPrefix(path, PrivateWorkspacesPrefix+"/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", false
 	}
-	if err := workspaceid.ValidateWorkspaceID(parts[0]); err != nil {
+	workspaceID, err := workspaceid.ValidateWorkspaceID(parts[0])
+	if err != nil {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	return workspaceID, parts[1], true
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
@@ -225,4 +229,26 @@ func writeJSON(w http.ResponseWriter, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, "encode response", http.StatusInternalServerError)
 	}
+}
+
+func writePrivateWorkspaceError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(privateWorkspaceErrorResponse{
+		Error: privateWorkspaceError{
+			Code:      code,
+			MessageID: sharederrors.MessageIDForCode(code),
+			Message:   message,
+		},
+	})
+}
+
+type privateWorkspaceErrorResponse struct {
+	Error privateWorkspaceError `json:"error"`
+}
+
+type privateWorkspaceError struct {
+	Code      sharederrors.ErrorCode `json:"code"`
+	MessageID sharederrors.MessageID `json:"messageId"`
+	Message   string                 `json:"message"`
 }

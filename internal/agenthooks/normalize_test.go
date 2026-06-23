@@ -43,6 +43,35 @@ func TestNormalizeCodexToolEventSanitizesSessionAndMetadata(t *testing.T) {
 	}
 }
 
+func TestNormalizeUsesSemanticProviderEventSourceAndToolTypes(t *testing.T) {
+	var provider ProviderID = ProviderCodex
+	var eventName AgentEventName = AgentEventPreToolUse
+	var source AgentSource = AgentSourceCLI
+	var tool AgentToolName = AgentToolName("mcp__leafwiki__wiki_get_page")
+
+	event, ok := Normalize(provider, []byte(`{
+		"hook_event_name":"PreToolUse",
+		"session_id":"typed-contract-session",
+		"source":"cli",
+		"tool_name":"mcp__leafwiki__wiki_get_page"
+	}`), time.Now())
+	if !ok {
+		t.Fatalf("Normalize returned ok=false")
+	}
+	if event.Provider != provider {
+		t.Fatalf("Provider = %q, want %q", event.Provider, provider)
+	}
+	if event.EventName != eventName {
+		t.Fatalf("EventName = %q, want %q", event.EventName, eventName)
+	}
+	if event.Source != source {
+		t.Fatalf("Source = %q, want %q", event.Source, source)
+	}
+	if event.ToolName != tool {
+		t.Fatalf("ToolName = %q, want %q", event.ToolName, tool)
+	}
+}
+
 func TestNormalizeRedactsUnsafeModelSourceAndToolMetadata(t *testing.T) {
 	event, ok := Normalize(ProviderCodex, []byte(`{
 		"hook_event_name":"PreToolUse",
@@ -63,7 +92,7 @@ func TestNormalizeSupportedProviderEvents(t *testing.T) {
 	seenAt := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name              string
-		provider          string
+		provider          ProviderID
 		payload           string
 		wantEvent         string
 		wantToolName      string
@@ -104,10 +133,10 @@ func TestNormalizeSupportedProviderEvents(t *testing.T) {
 			if !ok {
 				t.Fatalf("Normalize returned ok=false")
 			}
-			if event.Provider != tc.provider || event.EventName != tc.wantEvent {
+			if event.Provider != tc.provider || string(event.EventName) != tc.wantEvent {
 				t.Fatalf("provider/event = %q/%q, want %q/%q", event.Provider, event.EventName, tc.provider, tc.wantEvent)
 			}
-			if event.ToolName != tc.wantToolName || event.IsMCPTool != tc.wantMCPTool {
+			if string(event.ToolName) != tc.wantToolName || event.IsMCPTool != tc.wantMCPTool {
 				t.Fatalf("tool metadata = %q/%v, want %q/%v", event.ToolName, event.IsMCPTool, tc.wantToolName, tc.wantMCPTool)
 			}
 			if event.SubagentDelta != tc.wantSubagentDelta || event.EndsSession != tc.wantEndsSession {
@@ -130,7 +159,7 @@ func TestNormalizeFailsOpenForUnknownMalformedAndIncompletePayloads(t *testing.T
 	seenAt := time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC)
 	tests := []struct {
 		name     string
-		provider string
+		provider ProviderID
 		payload  string
 	}{
 		{name: "malformed JSON", provider: ProviderCodex, payload: `{`},
@@ -176,10 +205,10 @@ func TestAllowResponseUsesProviderProtocol(t *testing.T) {
 		provider string
 		want     string
 	}{
-		{provider: ProviderCodex, want: "{}\n"},
-		{provider: ProviderClaude, want: "{}\n"},
-		{provider: ProviderCursor, want: "{\"permission\":\"allow\"}\n"},
-		{provider: ProviderUnknown, want: ""},
+		{provider: string(ProviderCodex), want: "{}\n"},
+		{provider: string(ProviderClaude), want: "{}\n"},
+		{provider: string(ProviderCursor), want: "{\"permission\":\"allow\"}\n"},
+		{provider: string(ProviderUnknown), want: ""},
 		{provider: "unsupported", want: ""},
 	}
 
@@ -192,7 +221,7 @@ func TestAllowResponseUsesProviderProtocol(t *testing.T) {
 	}
 }
 
-func testSessionHash(provider, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(provider + "\x00" + rawSessionID))
+func testSessionHash(provider ProviderID, rawSessionID string) string {
+	sum := sha256.Sum256([]byte(string(provider) + "\x00" + rawSessionID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

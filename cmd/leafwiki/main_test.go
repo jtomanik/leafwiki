@@ -31,6 +31,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/locking"
@@ -39,6 +40,7 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	"github.com/perber/wiki/internal/wikid"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
@@ -321,7 +323,8 @@ func TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
-	created, err := w.APIKeyService().CreateAPIKey(editor.ID, "MCP client", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -460,6 +463,42 @@ func TestFrontdWorkspaceMCPRequiresBearerBeforeProxying(t *testing.T) {
 	}
 }
 
+func assertRuntimeStructuredError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+	t.Helper()
+	if rec.Code != wantStatus {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode structured runtime error: %v body=%q", err, rec.Body.String())
+	}
+	if body.Error.Code != wantCode || body.Error.MessageID != wantMessageID || body.Error.Message == "" {
+		t.Fatalf("structured runtime error = %#v, want code=%q messageId=%q", body.Error, wantCode, wantMessageID)
+	}
+}
+
+func TestWorkspaceMCPUnavailableHandlerReturnsStructuredError(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	workspaceMCPUnavailableHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp/workspaces/docs", nil))
+
+	assertRuntimeStructuredError(t, rec, http.StatusServiceUnavailable, "mcp_workspace_unavailable", "errors.mcp.workspace_unavailable")
+}
+
+func TestPrivateMCPUnauthorizedReturnsStructuredError(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	writePrivateMCPUnauthorized(rec)
+
+	assertRuntimeStructuredError(t, rec, http.StatusUnauthorized, "private_mcp_control_token_invalid", "errors.private.mcp_control_token_invalid")
+}
+
 func TestLocalOnlyHTTPMCPHandlerRejectsNonLoopbackRequests(t *testing.T) {
 	calls := 0
 	handler := localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -508,7 +547,8 @@ func TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore(t *testin
 	}
 	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
 	defer apiKeyService.Close()
-	created, err := apiKeyService.CreateAPIKey(editor.ID, "Native STDIO", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -608,6 +648,42 @@ func TestRegisterFederatedFirstContactDoesNotSeedStdioAPIKeyGrantForExistingWork
 	}
 }
 
+func TestEnsureFederatedWorkspacePreservesStructuredGrantDenial(t *testing.T) {
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/__leafwiki/workspaces/workspace-b/ensure" {
+			http.NotFound(w, req)
+			return
+		}
+		if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
+			t.Fatalf("control token = %q, want control-token", req.Header.Get(projectdaemon.ControlTokenHeader))
+		}
+		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
+	}))
+	t.Cleanup(control.Close)
+
+	err := ensureFederatedWorkspace(context.Background(), &projectdaemon.Descriptor{
+		ControlURL:    control.URL,
+		ControlToken:  "control-token",
+		SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+	}, workspaceid.WorkspaceID("workspace-b"), leafwikiRuntimeConfig{
+		APIKey: "valid-but-ungranted-key",
+	})
+
+	if err == nil {
+		t.Fatal("ensureFederatedWorkspace returned nil, want workspace grant denial")
+	}
+	var endpointErr *wikidPrivateEndpointError
+	if !errors.As(err, &endpointErr) {
+		t.Fatalf("ensure error = %T %v, want wikidPrivateEndpointError", err, err)
+	}
+	if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+		t.Fatalf("endpoint error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", endpointErr)
+	}
+	if !strings.Contains(err.Error(), "ensure workspace") || !strings.Contains(endpointErr.Message, "workspace access denied") {
+		t.Fatalf("ensure error = %v, want workspace access diagnostic", err)
+	}
+}
+
 func TestRegisterFederatedFirstContactPersistsMarkdownLinkRootPrefix(t *testing.T) {
 	baseDir := t.TempDir()
 	layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
@@ -684,6 +760,20 @@ func TestDaemonOwnerRuntimeConfigClearsHomeMarkdownLinkRootPrefix(t *testing.T) 
 	if ownerCfg.MarkdownLinkRootPrefix != "" {
 		t.Fatalf("owner markdown link root prefix = %q, want empty for home workspace", ownerCfg.MarkdownLinkRootPrefix)
 	}
+}
+
+func TestFederatedWorkspaceManagerUsesSemanticWorkspaceIDState(t *testing.T) {
+	manager := &federatedWorkspaceManager{}
+	manager.processes = map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{}
+	manager.descriptors = map[workspaceid.WorkspaceID][]string{}
+	manager.workspaces = map[workspaceid.WorkspaceID]wikid.WorkspaceRecord{}
+
+	var _ map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess = manager.processes
+	var _ map[workspaceid.WorkspaceID][]string = manager.descriptors
+	var _ map[workspaceid.WorkspaceID]wikid.WorkspaceRecord = manager.workspaces
+	var _ func(workspaceid.WorkspaceID, wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) = manager.ensureWorkspace
+	var _ func(workspaceid.WorkspaceID, *internalRuntimeRoleProcess) = manager.monitorWorkspaceProcess
+	var _ func(*coreauth.User, string, leafwikiRuntimeConfig, workspaceid.WorkspaceID, wikid.GrantRole) (projectdaemon.ActorContext, error) = actorContextForWorkspaceGrant
 }
 
 func TestSyncHomeWorkspaceStatusTracksWorkspacedRole(t *testing.T) {
@@ -803,6 +893,48 @@ func TestHandleWikidActorContextResolvesOAuthBearerForMCP(t *testing.T) {
 	}
 	if body.Actor.Username != "admin" || body.Actor.AuthMethod != "oauth" {
 		t.Fatalf("actor = %#v, want OAuth admin actor", body.Actor)
+	}
+}
+
+func TestHandleWikidActorContextReturnsStructuredWorkspaceGrantDenial(t *testing.T) {
+	w := newFrontdActorTestWiki(t)
+	defer w.Close()
+	cfg := leafwikiRuntimeConfig{
+		Workspace:     wiki.Workspace{ID: "current"},
+		PublicAccess:  true,
+		AllowInsecure: true,
+		MCPTransports: mcpTransports{HTTP: true},
+	}
+	layout := wikid.GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
+	if _, err := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
+		t.Fatalf("BootstrapHome failed: %v", err)
+	}
+	grants := wikid.NewGrantStore(layout.DBPath)
+	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
+	req.Header.Set("X-LeafWiki-Original-Method", http.MethodGet)
+	req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
+	rec := httptest.NewRecorder()
+
+	handleWikidActorContext(rec, req, w, cfg, nil, grants)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("actor context status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Error.Code != "workspace_grant_denied" || body.Error.MessageID != "errors.workspace.grant_denied" {
+		t.Fatalf("structured error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", body.Error)
+	}
+	if !strings.Contains(body.Error.Message, "workspace access denied") {
+		t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
 	}
 }
 
@@ -2950,9 +3082,9 @@ func TestMainProcessAgentHookProviderAllowResponsesFailOpen(t *testing.T) {
 		payload    string
 		wantStdout string
 	}{
-		{name: "claude malformed", provider: agenthooks.ProviderClaude, payload: "{", wantStdout: "{}\n"},
-		{name: "cursor malformed", provider: agenthooks.ProviderCursor, payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
-		{name: "unknown provider", provider: agenthooks.ProviderUnknown, payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
+		{name: "claude malformed", provider: string(agenthooks.ProviderClaude), payload: "{", wantStdout: "{}\n"},
+		{name: "cursor malformed", provider: string(agenthooks.ProviderCursor), payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
+		{name: "unknown provider", provider: string(agenthooks.ProviderUnknown), payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3744,7 +3876,7 @@ func TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID(t *testing
 		t.Fatalf("grant second workspace: %v", err)
 	}
 
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID + "/tree")
+	resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/tree")
 	if err != nil {
 		t.Fatalf("GET second workspace tree: %v", err)
 	}
@@ -3760,7 +3892,7 @@ func TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID(t *testing
 	query := url.Values{}
 	query.Set("path", "")
 	query.Set("kind", "section")
-	pageResp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID + "/pages/by-path?" + query.Encode())
+	pageResp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/pages/by-path?" + query.Encode())
 	if err != nil {
 		t.Fatalf("GET second workspace root page: %v", err)
 	}
@@ -3865,7 +3997,7 @@ func TestAttachFederatedStdioRejectsDescriptorForDifferentRegisteredWorkspace(t 
 	if err == nil {
 		t.Fatalf("attach with wrong workspace descriptor unexpectedly succeeded")
 	}
-	if !strings.Contains(err.Error(), "workspace-id") || !strings.Contains(err.Error(), registered.ID) || !strings.Contains(err.Error(), "alpha") {
+	if !strings.Contains(err.Error(), "workspace-id") || !strings.Contains(err.Error(), registered.ID.String()) || !strings.Contains(err.Error(), "alpha") {
 		t.Fatalf("attach error = %v, want workspace-id mismatch between alpha and %q", err, registered.ID)
 	}
 }
@@ -4093,7 +4225,7 @@ func TestFederatedWorkspaceManagerEnsureDoesNotSerializeDifferentWorkspaces(t *t
 		return nil
 	}
 
-	started := make(chan string, 2)
+	started := make(chan workspaceid.WorkspaceID, 2)
 	releaseStart := make(chan struct{})
 	processDone := make(chan error)
 	manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
@@ -4129,7 +4261,7 @@ func TestFederatedWorkspaceManagerEnsureDoesNotSerializeDifferentWorkspaces(t *t
 		}()
 	}
 
-	seen := map[string]bool{}
+	seen := map[workspaceid.WorkspaceID]bool{}
 	for len(seen) < 2 {
 		select {
 		case workspaceID := <-started:
@@ -5488,7 +5620,7 @@ func TestDaemonStdioBridgeHTTPClientRefreshesActorContextBeforeForwarding(t *tes
 		}
 		verifyCalls++
 		if revoked {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			http.Error(w, "access denied", http.StatusUnauthorized)
 			return
 		}
 		writeRuntimeJSON(w, map[string]any{"actor": projectdaemon.ActorContext{
@@ -5560,6 +5692,42 @@ func TestDaemonStdioBridgeHTTPClientRefreshesActorContextBeforeForwarding(t *tes
 	}
 	if verifyCalls != 2 || upstreamCalls != 1 {
 		t.Fatalf("revoked bridge calls verify/upstream = %d/%d, want 2/1", verifyCalls, upstreamCalls)
+	}
+}
+
+func TestDaemonStdioActorContextPreservesWorkspaceGrantDenial(t *testing.T) {
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/__leafwiki/actor-context" {
+			http.NotFound(w, req)
+			return
+		}
+		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
+	}))
+	t.Cleanup(control.Close)
+
+	transport := stdioActorContextRoundTripper{
+		AuthControlURL:   control.URL,
+		AuthControlToken: "control-token",
+		WorkspaceID:      "workspace-b",
+		APIKey:           "valid-but-ungranted-key",
+	}
+	_, err := transport.actorContext(httptest.NewRequest(http.MethodGet, "/mcp", nil))
+
+	if err == nil {
+		t.Fatalf("actorContext returned nil, want workspace grant denial")
+	}
+	if strings.Contains(err.Error(), "unauthorized native STDIO API key") {
+		t.Fatalf("actorContext error = %v, want grant denial not invalid API-key label", err)
+	}
+	var endpointErr *wikidPrivateEndpointError
+	if !errors.As(err, &endpointErr) {
+		t.Fatalf("actorContext error = %T %v, want wikidPrivateEndpointError", err, err)
+	}
+	if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+		t.Fatalf("endpoint error = %#v, want structured workspace grant denial", endpointErr)
+	}
+	if !strings.Contains(err.Error(), "resolve native STDIO actor context") || !strings.Contains(endpointErr.Message, "workspace access denied") {
+		t.Fatalf("actorContext error = %v, want workspace access diagnostic", err)
 	}
 }
 
@@ -7704,8 +7872,8 @@ func sha256Hex(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func agentHookSessionHash(provider, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(provider + "\x00" + rawSessionID))
+func agentHookSessionHash(provider agenthooks.ProviderID, rawSessionID string) string {
+	sum := sha256.Sum256([]byte(string(provider) + "\x00" + rawSessionID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
@@ -7943,7 +8111,8 @@ func createMCPAPIKeyInStorageDirWithUser(t *testing.T, storageDir string) testMC
 			t.Fatalf("close api key service: %v", err)
 		}
 	}()
-	created, err := apiKeyService.CreateAPIKey(user.ID, "Main process STDIO", user.ID)
+	userID := coreauth.NewUserIDUnchecked(user.ID)
+	created, err := apiKeyService.CreateAPIKey(userID, "Main process STDIO", userID)
 	if err != nil {
 		t.Fatalf("create API key: %v", err)
 	}

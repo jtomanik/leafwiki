@@ -11,16 +11,16 @@ import (
 )
 
 type AgentPresenceSession struct {
-	Provider        string    `json:"provider"`
-	SessionIDHash   string    `json:"sessionIdHash"`
-	FirstSeenAt     time.Time `json:"firstSeenAt"`
-	LastSeenAt      time.Time `json:"lastSeenAt"`
-	LastEvent       string    `json:"lastEvent"`
-	Model           string    `json:"model,omitempty"`
-	Source          string    `json:"source,omitempty"`
-	ToolName        string    `json:"toolName,omitempty"`
-	IsMCPTool       bool      `json:"isMcpTool"`
-	ActiveSubagents int       `json:"activeSubagents"`
+	Provider        agenthooks.ProviderID     `json:"provider"`
+	SessionIDHash   string                    `json:"sessionIdHash"`
+	FirstSeenAt     time.Time                 `json:"firstSeenAt"`
+	LastSeenAt      time.Time                 `json:"lastSeenAt"`
+	LastEvent       agenthooks.AgentEventName `json:"lastEvent"`
+	Model           string                    `json:"model,omitempty"`
+	Source          agenthooks.AgentSource    `json:"source,omitempty"`
+	ToolName        agenthooks.AgentToolName  `json:"toolName,omitempty"`
+	IsMCPTool       bool                      `json:"isMcpTool"`
+	ActiveSubagents int                       `json:"activeSubagents"`
 }
 
 type AgentPresenceRegistry struct {
@@ -52,7 +52,7 @@ func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
 	if seenAt.IsZero() {
 		seenAt = r.now()
 	}
-	key := presenceKey(event.Provider, event.SessionIDHash)
+	key := presenceKey(string(event.Provider), event.SessionIDHash)
 
 	r.mu.Lock()
 	before := len(r.sessions)
@@ -84,10 +84,10 @@ func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
 	if model := safeAgentMetadata(event.Model, 80); model != "" {
 		session.Model = model
 	}
-	if source := safeAgentSource(event.Source); source != "" {
+	if source := safeAgentSource(string(event.Source)); source != "" {
 		session.Source = source
 	}
-	if toolName := safeAgentMetadata(event.ToolName, 160); toolName != "" {
+	if toolName := safeAgentToolName(string(event.ToolName)); toolName != "" {
 		session.ToolName = toolName
 		session.IsMCPTool = event.IsMCPTool
 	}
@@ -184,14 +184,34 @@ func presenceKey(provider string, sessionIDHash string) string {
 	return provider + "\x00" + sessionIDHash
 }
 
-func safeAgentSource(raw string) string {
+func safeAgentSource(raw string) agenthooks.AgentSource {
 	source := strings.ToLower(safeAgentMetadata(raw, 40))
 	switch source {
-	case "", "cli", "startup", "hook", "mcp", "tool", "user", "ide", "agent":
-		return source
+	case "":
+		return ""
+	case string(agenthooks.AgentSourceCLI):
+		return agenthooks.AgentSourceCLI
+	case string(agenthooks.AgentSourceStartup):
+		return agenthooks.AgentSourceStartup
+	case string(agenthooks.AgentSourceHook):
+		return agenthooks.AgentSourceHook
+	case string(agenthooks.AgentSourceMCP):
+		return agenthooks.AgentSourceMCP
+	case string(agenthooks.AgentSourceTool):
+		return agenthooks.AgentSourceTool
+	case string(agenthooks.AgentSourceUser):
+		return agenthooks.AgentSourceUser
+	case string(agenthooks.AgentSourceIDE):
+		return agenthooks.AgentSourceIDE
+	case string(agenthooks.AgentSourceAgent):
+		return agenthooks.AgentSourceAgent
 	default:
-		return "unknown"
+		return agenthooks.AgentSourceUnknown
 	}
+}
+
+func safeAgentToolName(raw string) agenthooks.AgentToolName {
+	return agenthooks.AgentToolName(safeAgentMetadata(raw, 160))
 }
 
 func safeAgentMetadata(raw string, maxLen int) string {

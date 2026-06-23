@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
-const HomeWorkspaceID = "home"
+const HomeWorkspaceID workspaceid.WorkspaceID = "home"
 
 type RegistryService struct {
 	store  *RegistryStore
@@ -129,7 +130,7 @@ func (s *RegistryService) ListWorkspaces() ([]WorkspaceRecord, error) {
 	return workspaces, nil
 }
 
-func (s *RegistryService) Workspace(id string) (WorkspaceRecord, bool, error) {
+func (s *RegistryService) Workspace(id workspaceid.WorkspaceID) (WorkspaceRecord, bool, error) {
 	doc, err := s.store.Load()
 	if err != nil {
 		return WorkspaceRecord{}, false, err
@@ -155,9 +156,13 @@ func (s *RegistryService) workspaceRecordForRequest(req RegisterWorkspaceRequest
 	if err != nil {
 		return WorkspaceRecord{}, fmt.Errorf("normalize markdown link root prefix: %w", err)
 	}
+	workspaceID, err := workspaceIDFor(displayName, dataDir, rootDir)
+	if err != nil {
+		return WorkspaceRecord{}, err
+	}
 	now := s.now()
 	return WorkspaceRecord{
-		ID:                     workspaceIDFor(displayName, dataDir, rootDir),
+		ID:                     workspaceID,
 		DisplayName:            displayName,
 		DataDir:                dataDir,
 		RootDir:                rootDir,
@@ -172,10 +177,14 @@ func sameWorkspaceLocation(a WorkspaceRecord, b WorkspaceRecord) bool {
 		filepath.Clean(a.RootDir) == filepath.Clean(b.RootDir)
 }
 
-func workspaceIDFor(displayName string, dataDir string, rootDir string) string {
+func workspaceIDFor(displayName string, dataDir string, rootDir string) (workspaceid.WorkspaceID, error) {
 	slug := workspaceSlug(displayName)
 	sum := sha256.Sum256([]byte(filepath.Clean(dataDir) + "\x00" + filepath.Clean(rootDir)))
-	return slug + "-" + hex.EncodeToString(sum[:])[:10]
+	workspaceID, err := workspaceid.ParseWorkspaceID(slug + "-" + hex.EncodeToString(sum[:])[:10])
+	if err != nil {
+		return "", fmt.Errorf("derive workspace ID: %w", err)
+	}
+	return workspaceID, nil
 }
 
 var nonWorkspaceSlugChars = regexp.MustCompile(`[^a-z0-9]+`)

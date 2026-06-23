@@ -11,12 +11,12 @@ import (
 )
 
 type seededUser struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
-	APIKeyID string `json:"apiKeyId"`
-	APIKey   string `json:"apiKey"`
+	ID       string            `json:"id"`
+	Username string            `json:"username"`
+	Email    string            `json:"email"`
+	Role     string            `json:"role"`
+	APIKeyID coreauth.APIKeyID `json:"apiKeyId"`
+	APIKey   string            `json:"apiKey"`
 }
 
 type seedOutput struct {
@@ -111,10 +111,10 @@ func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
 	if out.Deleted, err = createKey(apiKeys, deleted, "E2E STDIO deleted"); err != nil {
 		return seedOutput{}, err
 	}
-	if err := apiKeys.RevokeAPIKey(revoked.ID, out.Revoked.APIKeyID); err != nil {
+	if err := apiKeys.RevokeAPIKey(coreauth.NewUserIDUnchecked(revoked.ID), out.Revoked.APIKeyID); err != nil {
 		return seedOutput{}, fmt.Errorf("revoke seeded key: %w", err)
 	}
-	if err := users.DeleteUser(deleted.ID); err != nil {
+	if err := users.DeleteUser(coreauth.NewUserIDUnchecked(deleted.ID)); err != nil {
 		return seedOutput{}, fmt.Errorf("delete seeded user: %w", err)
 	}
 	return out, nil
@@ -141,7 +141,8 @@ func createUser(users *coreauth.UserService, username, email, role string) (*cor
 }
 
 func createKey(apiKeys *coreauth.APIKeyService, user *coreauth.User, name string) (seededUser, error) {
-	created, err := apiKeys.CreateAPIKey(user.ID, name, user.ID)
+	userID := coreauth.NewUserIDUnchecked(user.ID)
+	created, err := apiKeys.CreateAPIKey(userID, name, userID)
 	if err != nil {
 		return seededUser{}, fmt.Errorf("create key for %s: %w", user.Username, err)
 	}

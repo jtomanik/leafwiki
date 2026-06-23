@@ -11,10 +11,10 @@ import (
 
 // DeletePageInput is the input for DeletePageUseCase.
 type DeletePageInput struct {
-	UserID    string
+	UserID    tree.UserID
 	Source    string
-	ID        string
-	Version   string
+	ID        tree.PageID
+	Version   tree.PageVersion
 	Recursive bool
 }
 
@@ -38,11 +38,11 @@ func NewDeletePageUseCase(
 
 // Execute deletes the page, cleaning up links (via orchestrator) and assets.
 func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) error {
-	if in.ID == "root" || in.ID == "" {
+	if in.ID.String() == "root" || in.ID.String() == "" {
 		return newPageRootOperationError("delete")
 	}
 
-	in.Version = sanitizeClientVersion(in.Version)
+	in.Version = sanitizeSemanticClientVersion(in.Version)
 
 	page, err := uc.tree.GetPage(in.ID)
 	if err != nil {
@@ -50,7 +50,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 	}
 
 	if in.Recursive {
-		var subtreeIDs []string
+		var subtreeIDs []tree.PageID
 
 		if uc.tree.IsLoaded() {
 			node, err := uc.tree.FindPageByID(in.ID)
@@ -59,7 +59,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 			}
 		}
 		if len(subtreeIDs) == 0 {
-			subtreeIDs = []string{in.ID}
+			subtreeIDs = []tree.PageID{in.ID}
 		}
 
 		// Build affected pages list before deletion (paths are no longer reachable after).
@@ -67,7 +67,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 		pages, errs := uc.tree.GetPages(subtreeIDs)
 		for i, p := range pages {
 			if errs[i] != nil {
-				uc.log.Warn("failed to get page before recursive delete", "pageID", subtreeIDs[i], "error", errs[i])
+				uc.log.Warn("failed to get page before recursive delete", "pageID", subtreeIDs[i].String(), "error", errs[i])
 				continue
 			}
 			affectedPages = append(affectedPages, p)

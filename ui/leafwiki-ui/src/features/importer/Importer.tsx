@@ -422,13 +422,23 @@ export default function Importer() {
               Review what LeafWiki is about to create, update, or skip before
               you start the import.
             </p>
-            <div className="importer__status-banner">
+            <div
+              className="importer__status-banner"
+              data-import-status={importStatus ?? "idle"}
+            >
               <div className="importer__status-header">
                 <div>
                   <div className="settings__preview-label">Current Status</div>
-                  <div className="importer__status-title">{statusLabel}</div>
+                  <div
+                    className="importer__status-title"
+                    data-import-status={importStatus ?? "idle"}
+                  >
+                    {statusLabel}
+                  </div>
                 </div>
-                <span className={statusPillClass}>{statusLabel}</span>
+                <span className={statusPillClass} data-import-status={importStatus ?? "idle"}>
+                  {statusLabel}
+                </span>
               </div>
               <div className="importer__status-meta">
                 <span>Plan ID: {importPlan.id}</span>
@@ -645,17 +655,25 @@ export default function Importer() {
             </p>
             {showRunStep && (
               <>
-                <div className="importer__status-banner">
+                <div
+                  className="importer__status-banner"
+                  data-import-status={importStatus ?? "idle"}
+                >
                   <div className="importer__status-header">
                     <div>
                       <div className="settings__preview-label">
                         Current Status
                       </div>
-                      <div className="importer__status-title">
+                      <div
+                        className="importer__status-title"
+                        data-import-status={importStatus ?? "idle"}
+                      >
                         {statusLabel}
                       </div>
                     </div>
-                    <span className={statusPillClass}>{statusLabel}</span>
+                    <span className={statusPillClass} data-import-status={importStatus ?? "idle"}>
+                      {statusLabel}
+                    </span>
                   </div>
                   <div className="importer__status-meta">
                     <span>Plan ID: {importPlan.id}</span>

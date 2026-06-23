@@ -157,17 +157,29 @@ export default class TreeView {
   async expandNodeByTitle(title: string) {
     await this.ensureSidebarVisible();
     await this.closeBlockingOverlayIfPresent();
-    const nodeRow = this.getNodeRowByTitle(title);
 
-    await nodeRow.waitFor({ state: 'visible' });
-    await nodeRow.scrollIntoViewIfNeeded();
-    await nodeRow.hover();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nodeRow = this.getNodeRowByTitle(title);
 
-    const toggleIcon = nodeRow.locator('svg[data-testid^="tree-node-toggle-icon-"]');
-    if (await toggleIcon.isVisible()) {
-      const classes = (await toggleIcon.getAttribute('class')) || '';
-      if (!classes.includes('tree-node__toggle--open')) {
-        await toggleIcon.click({ force: true });
+      try {
+        await nodeRow.waitFor({ state: 'visible' });
+        await nodeRow.scrollIntoViewIfNeeded();
+        await nodeRow.hover();
+
+        const toggleIcon = nodeRow.locator('svg[data-testid^="tree-node-toggle-icon-"]');
+        if (await toggleIcon.isVisible()) {
+          const classes = (await toggleIcon.getAttribute('class')) || '';
+          if (!classes.includes('tree-node__toggle--open')) {
+            await toggleIcon.click({ force: true });
+          }
+        }
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt === 2 || !message.includes('not attached to the DOM')) {
+          throw error;
+        }
+        await this.page.waitForTimeout(100);
       }
     }
   }
@@ -175,14 +187,25 @@ export default class TreeView {
   async createSubPageOfParent(parentTitle: string, newSubpageTitle: string) {
     await this.ensureSidebarVisible();
     await this.closeBlockingOverlayIfPresent();
-    const nodeRow = this.getNodeRowByTitle(parentTitle);
 
-    await nodeRow.waitFor({ state: 'visible' });
-    await nodeRow.scrollIntoViewIfNeeded();
-    await nodeRow.hover(); // oder mouse.move, s.u.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nodeRow = this.getNodeRowByTitle(parentTitle);
 
-    const addButton = nodeRow.locator('button[data-testid="tree-view-action-button-add"]');
-    await addButton.click({ force: true });
+      try {
+        await nodeRow.waitFor({ state: 'visible' });
+        await nodeRow.scrollIntoViewIfNeeded();
+        await nodeRow.hover();
+
+        const addButton = nodeRow.locator('button[data-testid="tree-view-action-button-add"]');
+        await addButton.click({ force: true, timeout: 5000 });
+        break;
+      } catch (error) {
+        if (attempt === 2) {
+          throw error;
+        }
+        await this.page.waitForTimeout(100);
+      }
+    }
 
     const addPageDialog = new AddPageDialog(this.page);
     await addPageDialog.fillTitle(newSubpageTitle);

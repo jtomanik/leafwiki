@@ -3,12 +3,17 @@ package revisions
 import (
 	"strings"
 
+	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
-func ValidateRevisionLookupInput(pageID, revisionID string) (string, string, error) {
-	pageID = strings.TrimSpace(pageID)
-	revisionID = strings.TrimSpace(revisionID)
+func ValidateRevisionLookupInput(rawPageID, rawRevisionID string) (tree.PageID, revision.RevisionID, error) {
+	return ValidateRevisionLookup(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawRevisionID)
+}
+
+func ValidateRevisionLookup(pageID tree.PageID, rawRevisionID string) (tree.PageID, revision.RevisionID, error) {
+	revisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawRevisionID))
 	if pageID == "" {
 		return "", "", sharederrors.NewLocalizedError(ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required", nil)
 	}
@@ -18,27 +23,41 @@ func ValidateRevisionLookupInput(pageID, revisionID string) (string, string, err
 	return pageID, revisionID, nil
 }
 
-func ValidateRevisionCompareInput(pageID, baseRevisionID, targetRevisionID string) (string, string, string, error) {
-	pageID = strings.TrimSpace(pageID)
-	baseRevisionID = strings.TrimSpace(baseRevisionID)
-	targetRevisionID = strings.TrimSpace(targetRevisionID)
+func ValidateRevisionCompareInput(rawPageID, rawBaseRevisionID, rawTargetRevisionID string) (tree.PageID, revision.RevisionID, revision.RevisionID, error) {
+	return ValidateRevisionCompare(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawBaseRevisionID, rawTargetRevisionID)
+}
+
+func ValidateRevisionCompare(pageID tree.PageID, rawBaseRevisionID, rawTargetRevisionID string) (tree.PageID, revision.RevisionID, revision.RevisionID, error) {
+	baseRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawBaseRevisionID))
+	targetRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawTargetRevisionID))
 	if pageID == "" {
 		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required", nil)
 	}
 	if baseRevisionID == "" || targetRevisionID == "" {
-		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionCompareInvalidRequest, "Revision compare request is invalid", "revision compare request for page %s is invalid", nil, pageID)
+		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionCompareInvalidRequest, "Revision compare request is invalid", "revision compare request for page %s is invalid", nil, pageID.MetadataValue())
 	}
 	return pageID, baseRevisionID, targetRevisionID, nil
 }
 
-func ValidateRevisionAssetInput(pageID, revisionID, assetName string) (string, string, string, error) {
-	pageID, revisionID, err := ValidateRevisionLookupInput(pageID, revisionID)
+func ValidateRevisionAssetInput(rawPageID string, rawRevisionID string, rawAssetName string) (tree.PageID, revision.RevisionID, tree.AssetName, error) {
+	return ValidateRevisionAsset(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawRevisionID, rawAssetName)
+}
+
+func ValidateRevisionAsset(pageID tree.PageID, rawRevisionID string, rawAssetName string) (tree.PageID, revision.RevisionID, tree.AssetName, error) {
+	pageID, revisionID, err := ValidateRevisionLookup(pageID, rawRevisionID)
 	if err != nil {
 		return "", "", "", err
 	}
-	assetName = strings.TrimSpace(strings.TrimPrefix(assetName, "/"))
+	assetName := tree.NewAssetNameUnchecked(strings.TrimSpace(strings.TrimPrefix(rawAssetName, "/")))
 	if assetName == "" {
-		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionPreviewAssetInvalidName, "Revision asset name is invalid", "revision asset name for page %s revision %s is invalid", nil, pageID, revisionID)
+		return "", "", "", sharederrors.NewLocalizedError(
+			ErrCodeRevisionPreviewAssetInvalidName,
+			"Revision asset name is invalid",
+			"revision asset name for page %s revision %s is invalid",
+			nil,
+			pageID.MetadataValue(),
+			revisionID.CommitID(),
+		)
 	}
 	return pageID, revisionID, assetName, nil
 }

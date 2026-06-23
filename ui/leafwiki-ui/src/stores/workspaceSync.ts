@@ -7,6 +7,7 @@ import {
   type WorkspaceSnapshot,
   type WorkspaceSyncStatus,
 } from '@/lib/api/workspaceSync'
+import { asCommitHash, asWorkspaceID, type CommitHash } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 
 export type WorkspaceSyncWorkspaceState = {
@@ -15,7 +16,7 @@ export type WorkspaceSyncWorkspaceState = {
   statusError: string | null
   refreshLoading: boolean
   snapshots: WorkspaceSnapshot[]
-  snapshotsNextCursor: string
+  snapshotsNextCursor: CommitHash | ''
   snapshotsLoading: boolean
   snapshotsLoadingMore: boolean
   snapshotsError: string | null
@@ -88,7 +89,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const status = await getWorkspaceSyncStatus(workspaceId)
+      const status = await getWorkspaceSyncStatus(asWorkspaceID(workspaceId))
       set((state) => patchWorkspaceState(state, workspaceId, { status }))
       return status
     } catch (err) {
@@ -114,7 +115,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const status = await refreshWorkspaceSync(workspaceId)
+      const status = await refreshWorkspaceSync(asWorkspaceID(workspaceId))
       set((state) =>
         patchWorkspaceState(state, workspaceId, {
           status,
@@ -147,7 +148,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const data = await listWorkspaceSnapshots(workspaceId)
+      const data = await listWorkspaceSnapshots(asWorkspaceID(workspaceId))
       set((state) =>
         patchWorkspaceState(state, workspaceId, {
           snapshots: data.snapshots,
@@ -185,7 +186,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
     )
     try {
       const data = await listWorkspaceSnapshots(
-        workspaceId,
+        asWorkspaceID(workspaceId),
         current.snapshotsNextCursor,
       )
       const latest = workspaceState(get(), workspaceId)
@@ -223,7 +224,10 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const status = await restoreWorkspaceSnapshot(commitId, workspaceId)
+      const status = await restoreWorkspaceSnapshot(
+        asCommitHash(commitId),
+        asWorkspaceID(workspaceId),
+      )
       set((state) =>
         patchWorkspaceState(state, workspaceId, {
           status,

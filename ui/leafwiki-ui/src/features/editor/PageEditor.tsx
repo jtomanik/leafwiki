@@ -108,7 +108,11 @@ export default function PageEditor() {
             testId: 'page-save-version-conflict-toast',
             action: {
               label: (
-                <span data-testid="page-save-version-conflict-action">
+                <span
+                  data-testid="page-save-version-conflict-action"
+                  data-error-code={localized.code}
+                  data-l10n-id={localized.messageId}
+                >
                   Save anyway
                 </span>
               ),

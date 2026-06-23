@@ -6,6 +6,7 @@ import { restoreRevision, type Revision } from '@/lib/api/revisions'
 import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildHistoryUrl } from '@/lib/routePath'
+import { asPageID, asRevisionID, asWorkspaceID } from '@/lib/semanticTypes'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
@@ -155,7 +156,11 @@ function formatTimestamp(value?: string) {
 
 function ErrorNotice({ error }: { error: ApiUiError }) {
   return (
-    <div className="page-history__error-notice">
+    <div
+      className="page-history__error-notice"
+      data-error-code={error.code}
+      data-l10n-id={error.messageId}
+    >
       <div className="page-history__error-title">{error.message}</div>
     </div>
   )
@@ -166,16 +171,18 @@ function MetaChip({ children }: { children: ReactNode }) {
 }
 
 function ChangeChip({
+  id,
   label,
   from,
   to,
 }: {
+  id: string
   label: string
   from: string
   to: string
 }) {
   return (
-    <div className="page-history__change-chip">
+    <div className="page-history__change-chip" data-history-change={id}>
       <span className="page-history__change-chip-label">{label}</span>
       <span className="page-history__change-chip-value">
         <span className="page-history__change-chip-from">{from}</span>
@@ -190,13 +197,20 @@ function ChangeChip({
 
 function RevisionBadge({
   children,
+  revisionId,
   testId,
 }: {
   children: ReactNode
+  revisionId?: string
   testId?: string
 }) {
   return (
-    <span className="history-sidebar__badge" data-testid={testId}>
+    <span
+      className="history-sidebar__badge"
+      data-testid={testId}
+      data-revision-badge="current"
+      data-revision-id={revisionId}
+    >
       {children}
     </span>
   )
@@ -278,10 +292,16 @@ export function PageHistoryContent({
   const structureChanges = useMemo(() => {
     if (!comparison) return []
 
-    const changes: Array<{ label: string; from: string; to: string }> = []
+    const changes: Array<{
+      id: 'title' | 'slug'
+      label: string
+      from: string
+      to: string
+    }> = []
 
     if (comparison.base.revision?.title !== comparison.target.revision?.title) {
       changes.push({
+        id: 'title',
         label: 'Title',
         from: comparison.base.revision?.title || '(empty)',
         to: comparison.target.revision?.title || '(empty)',
@@ -290,6 +310,7 @@ export function PageHistoryContent({
 
     if (comparison.base.revision?.slug !== comparison.target.revision?.slug) {
       changes.push({
+        id: 'slug',
         label: 'Slug',
         from: comparison.base.revision?.slug || '(empty)',
         to: comparison.target.revision?.slug || '(empty)',
@@ -374,9 +395,9 @@ export function PageHistoryContent({
     setRestoreLoading(true)
     try {
       const restoredPage = (await restoreRevision(
-        pageId,
-        selectedRevision.id,
-        workspaceId,
+        asPageID(pageId),
+        asRevisionID(selectedRevision.id),
+        asWorkspaceID(workspaceId),
       )) as Page
 
       await useTreeStore.getState().reloadTree(workspaceId)
@@ -588,6 +609,7 @@ export function PageHistoryContent({
                     </div>
                     {revision.id === latestRevisionId ? (
                       <RevisionBadge
+                        revisionId={revision.id}
                         testId={`history-sidebar-revision-current-badge-${revision.id}`}
                       >
                         Active version
@@ -710,6 +732,7 @@ export function PageHistoryContent({
                   {structureChanges.map((change) => (
                     <ChangeChip
                       key={change.label}
+                      id={change.id}
                       label={change.label}
                       from={change.from}
                       to={change.to}

@@ -30,14 +30,14 @@ func (w *Wiki) WorkspaceSyncSnapshots(ctx context.Context, limit int) ([]workspa
 	return w.workspaceSync.ListSnapshots(ctx, limit)
 }
 
-func (w *Wiki) WorkspaceSyncSnapshotPage(ctx context.Context, cursor string, limit int) (workspacesync.SnapshotList, error) {
+func (w *Wiki) WorkspaceSyncSnapshotPage(ctx context.Context, cursor workspacesync.CommitHash, limit int) (workspacesync.SnapshotList, error) {
 	if w.workspaceSync == nil {
 		return workspacesync.SnapshotList{}, fmt.Errorf("workspace sync is not enabled")
 	}
 	return w.workspaceSync.ListSnapshotPage(ctx, cursor, limit)
 }
 
-func (w *Wiki) WorkspaceSyncRestoreWorkspace(ctx context.Context, commitID string, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
+func (w *Wiki) WorkspaceSyncRestoreWorkspace(ctx context.Context, commitID workspacesync.CommitHash, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
 	if w.workspaceSync == nil {
 		return workspacesync.SyncStatus{Enabled: false}, fmt.Errorf("workspace sync is not enabled")
 	}
@@ -51,18 +51,18 @@ func (w *Wiki) WorkspaceSyncPageRevisions(ctx context.Context, page *tree.Page, 
 	return w.workspaceSync.ListPageRevisions(ctx, page, cursor, limit)
 }
 
-func (w *Wiki) WorkspaceSyncPageRevision(ctx context.Context, page *tree.Page, revisionID string) (*revision.RevisionSnapshot, error) {
+func (w *Wiki) WorkspaceSyncPageRevision(ctx context.Context, page *tree.Page, revisionID revision.RevisionID) (*revision.RevisionSnapshot, error) {
 	if w.workspaceSync == nil {
 		return nil, fmt.Errorf("workspace sync is not enabled")
 	}
-	return w.workspaceSync.GetPageRevisionSnapshot(ctx, page, revisionID)
+	return w.workspaceSync.GetPageRevisionSnapshot(ctx, page, workspacesync.CommitHashFromRevisionID(revisionID))
 }
 
-func (w *Wiki) WorkspaceSyncRestorePageRevision(ctx context.Context, page *tree.Page, revisionID string, actor workspacesync.Actor, source workspacesync.Source) (*tree.Page, error) {
+func (w *Wiki) WorkspaceSyncRestorePageRevision(ctx context.Context, page *tree.Page, revisionID revision.RevisionID, actor workspacesync.Actor, source workspacesync.Source) (*tree.Page, error) {
 	if w.workspaceSync == nil {
 		return nil, fmt.Errorf("workspace sync is not enabled")
 	}
-	if _, err := w.workspaceSync.RestoreDocumentWithSource(ctx, page, revisionID, actor, source); err != nil {
+	if _, err := w.workspaceSync.RestoreDocumentWithSource(ctx, page, workspacesync.CommitHashFromRevisionID(revisionID), actor, source); err != nil {
 		return nil, err
 	}
 	return w.tree.GetPage(page.ID)

@@ -12,7 +12,7 @@ type UserLabel struct {
 
 type UserResolver struct {
 	userService *UserService
-	resolved    map[string]*UserLabel
+	resolved    map[UserID]*UserLabel
 	mu          sync.RWMutex
 }
 
@@ -24,11 +24,11 @@ func NewUserResolver(userService *UserService) (*UserResolver, error) {
 	}
 	r := &UserResolver{
 		userService: userService,
-		resolved:    make(map[string]*UserLabel),
+		resolved:    make(map[UserID]*UserLabel),
 	}
 
 	for _, user := range users {
-		r.resolved[user.ID] = &UserLabel{
+		r.resolved[NewUserIDUnchecked(user.ID)] = &UserLabel{
 			ID:       user.ID,
 			Username: user.Username,
 		}
@@ -37,7 +37,7 @@ func NewUserResolver(userService *UserService) (*UserResolver, error) {
 	return r, nil
 }
 
-func (r *UserResolver) ResolveUserLabel(userID string) (*UserLabel, error) {
+func (r *UserResolver) ResolveUserLabel(userID UserID) (*UserLabel, error) {
 	if userID == "" {
 		return nil, nil
 	}
@@ -75,9 +75,9 @@ func (r *UserResolver) Reload() error {
 		return err
 	}
 
-	newMap := make(map[string]*UserLabel, len(users))
+	newMap := make(map[UserID]*UserLabel, len(users))
 	for _, u := range users {
-		newMap[u.ID] = &UserLabel{ID: u.ID, Username: u.Username}
+		newMap[NewUserIDUnchecked(u.ID)] = &UserLabel{ID: u.ID, Username: u.Username}
 	}
 
 	r.mu.Lock()

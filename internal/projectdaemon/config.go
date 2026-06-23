@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 const (
@@ -24,58 +26,58 @@ const (
 )
 
 type Config struct {
-	RuntimeStack            string `json:"runtimeStack,omitempty"`
-	WorkspaceID             string `json:"workspaceId,omitempty"`
-	DataDir                 string `json:"dataDir"`
-	RootDir                 string `json:"rootDir"`
-	PrivateMCPURL           string `json:"privateMcpUrl,omitempty"`
-	PrivateMCPToken         string `json:"privateMcpToken,omitempty"`
-	AuthDisabled            bool   `json:"authDisabled"`
-	PublicMCPEnabled        bool   `json:"publicMcpEnabled"`
-	Host                    string `json:"host"`
-	Port                    string `json:"port"`
-	BasePath                string `json:"basePath"`
-	MarkdownLinkRootPrefix  string `json:"markdownLinkRootPrefix"`
-	PublicAccess            bool   `json:"publicAccess"`
-	AllowInsecure           bool   `json:"allowInsecure"`
-	AccessTokenTimeout      string `json:"accessTokenTimeout"`
-	RefreshTokenTimeout     string `json:"refreshTokenTimeout"`
-	InjectCodeInHeaderHash  string `json:"injectCodeInHeaderHash,omitempty"`
-	CustomStylesheet        string `json:"customStylesheet"`
-	LogTarget               string `json:"logTarget"`
-	LogFile                 string `json:"logFile"`
-	HideLinkMetadataSection bool   `json:"hideLinkMetadataSection"`
-	MaxAssetUploadSizeBytes int64  `json:"maxAssetUploadSizeBytes"`
-	EnableWorkspaceSync     bool   `json:"enableWorkspaceSync"`
-	EnableLinkRefactor      bool   `json:"enableLinkRefactor"`
-	EnableHTTPRemoteUser    bool   `json:"enableHttpRemoteUser"`
-	HTTPRemoteUserHeader    string `json:"httpRemoteUserHeader"`
-	TrustedProxyIPs         string `json:"trustedProxyIps"`
-	HTTPRemoteUserLogoutURL string `json:"httpRemoteUserLogoutUrl"`
-	DisableRequestLog       bool   `json:"disableRequestLog"`
-	DaemonIdleTimeout       string `json:"daemonIdleTimeout"`
+	RuntimeStack            string                  `json:"runtimeStack,omitempty"`
+	WorkspaceID             workspaceid.WorkspaceID `json:"workspaceId,omitempty"`
+	DataDir                 string                  `json:"dataDir"`
+	RootDir                 string                  `json:"rootDir"`
+	PrivateMCPURL           string                  `json:"privateMcpUrl,omitempty"`
+	PrivateMCPToken         string                  `json:"privateMcpToken,omitempty"`
+	AuthDisabled            bool                    `json:"authDisabled"`
+	PublicMCPEnabled        bool                    `json:"publicMcpEnabled"`
+	Host                    string                  `json:"host"`
+	Port                    string                  `json:"port"`
+	BasePath                string                  `json:"basePath"`
+	MarkdownLinkRootPrefix  string                  `json:"markdownLinkRootPrefix"`
+	PublicAccess            bool                    `json:"publicAccess"`
+	AllowInsecure           bool                    `json:"allowInsecure"`
+	AccessTokenTimeout      string                  `json:"accessTokenTimeout"`
+	RefreshTokenTimeout     string                  `json:"refreshTokenTimeout"`
+	InjectCodeInHeaderHash  string                  `json:"injectCodeInHeaderHash,omitempty"`
+	CustomStylesheet        string                  `json:"customStylesheet"`
+	LogTarget               string                  `json:"logTarget"`
+	LogFile                 string                  `json:"logFile"`
+	HideLinkMetadataSection bool                    `json:"hideLinkMetadataSection"`
+	MaxAssetUploadSizeBytes int64                   `json:"maxAssetUploadSizeBytes"`
+	EnableWorkspaceSync     bool                    `json:"enableWorkspaceSync"`
+	EnableLinkRefactor      bool                    `json:"enableLinkRefactor"`
+	EnableHTTPRemoteUser    bool                    `json:"enableHttpRemoteUser"`
+	HTTPRemoteUserHeader    string                  `json:"httpRemoteUserHeader"`
+	TrustedProxyIPs         string                  `json:"trustedProxyIps"`
+	HTTPRemoteUserLogoutURL string                  `json:"httpRemoteUserLogoutUrl"`
+	DisableRequestLog       bool                    `json:"disableRequestLog"`
+	DaemonIdleTimeout       string                  `json:"daemonIdleTimeout"`
 }
 
 type Descriptor struct {
-	SchemaVersion    int          `json:"schemaVersion"`
-	RuntimeStack     string       `json:"runtimeStack,omitempty"`
-	Role             RoleName     `json:"role,omitempty"`
-	WorkspaceID      string       `json:"workspaceId,omitempty"`
-	PID              int          `json:"pid"`
-	StartedAt        time.Time    `json:"startedAt"`
-	DataDir          string       `json:"dataDir"`
-	RootDir          string       `json:"rootDir"`
-	PublicURL        string       `json:"publicUrl"`
-	PublicMCPEnabled bool         `json:"publicMcpEnabled"`
-	BasePath         string       `json:"basePath"`
-	ControlURL       string       `json:"controlUrl"`
-	PrivateMCPURL    string       `json:"privateMcpUrl,omitempty"`
-	PrivateMCPToken  string       `json:"privateMcpToken,omitempty"`
-	ConfigHash       string       `json:"configHash"`
-	IdleTimeout      string       `json:"idleTimeout"`
-	ControlToken     string       `json:"controlToken"`
-	Config           Config       `json:"config"`
-	Roles            []RoleHealth `json:"roles,omitempty"`
+	SchemaVersion    int                     `json:"schemaVersion"`
+	RuntimeStack     string                  `json:"runtimeStack,omitempty"`
+	Role             RoleName                `json:"role,omitempty"`
+	WorkspaceID      workspaceid.WorkspaceID `json:"workspaceId,omitempty"`
+	PID              int                     `json:"pid"`
+	StartedAt        time.Time               `json:"startedAt"`
+	DataDir          string                  `json:"dataDir"`
+	RootDir          string                  `json:"rootDir"`
+	PublicURL        string                  `json:"publicUrl"`
+	PublicMCPEnabled bool                    `json:"publicMcpEnabled"`
+	BasePath         string                  `json:"basePath"`
+	ControlURL       string                  `json:"controlUrl"`
+	PrivateMCPURL    string                  `json:"privateMcpUrl,omitempty"`
+	PrivateMCPToken  string                  `json:"privateMcpToken,omitempty"`
+	ConfigHash       string                  `json:"configHash"`
+	IdleTimeout      string                  `json:"idleTimeout"`
+	ControlToken     string                  `json:"controlToken"`
+	Config           Config                  `json:"config"`
+	Roles            []RoleHealth            `json:"roles,omitempty"`
 }
 
 type Mismatch struct {

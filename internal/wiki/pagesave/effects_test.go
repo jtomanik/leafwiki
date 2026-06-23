@@ -109,7 +109,7 @@ func TestWorkspaceSyncSideEffect_UsesMCPSourceFromPageEvent(t *testing.T) {
 
 func TestWorkspaceSyncSideEffect_UsesResolvedActorMetadata(t *testing.T) {
 	syncer := &captureWorkspaceSyncer{}
-	effect := NewWorkspaceSyncSideEffectWithActorLookup(syncer, nil, func(userID string) workspacesync.Actor {
+	effect := NewWorkspaceSyncSideEffectWithActorLookup(syncer, nil, func(userID tree.UserID) workspacesync.Actor {
 		if userID != "alice" {
 			t.Fatalf("actor lookup userID = %q, want alice", userID)
 		}

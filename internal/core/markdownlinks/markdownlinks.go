@@ -34,21 +34,34 @@ const (
 	TargetKindInvalid    TargetKind = "invalid"
 )
 
+type IssueCode string
+
+const (
+	IssueCodeEmpty                    IssueCode = "empty"
+	IssueCodeInvalidPercentEncoding   IssueCode = "invalid_percent_encoding"
+	IssueCodeWorkspaceEscape          IssueCode = "workspace_escape"
+	IssueCodeNonCanonicalMarkdownPath IssueCode = "non_canonical_markdown_path"
+	IssueCodeBrokenPage               IssueCode = "broken_page"
+	IssueCodeBrokenLink               IssueCode = "broken_link"
+	IssueCodeAmbiguousLegacyLink      IssueCode = "ambiguous_legacy_link"
+)
+
 type Entry struct {
 	Kind        EntryKind
-	Path        string
-	ContentPath string
+	RoutePath   tree.RoutePath
+	Path        tree.MarkdownPath
+	ContentPath tree.MarkdownPath
 }
 
 type Resolution struct {
 	Kind          TargetKind
 	CanonicalHref string
-	RoutePath     string
-	Code          string
+	RoutePath     tree.RoutePath
+	Code          IssueCode
 }
 
 type Issue struct {
-	Code        string
+	Code        IssueCode
 	Destination string
 }
 
@@ -73,17 +86,17 @@ type RewriteResult struct {
 }
 
 type Index struct {
-	pages                  map[string]pageEntry
-	sourcePages            map[string]pageEntry
-	sections               map[string]string
-	sectionFiles           map[string]string
-	assets                 map[string]struct{}
+	pages                  map[tree.RoutePath]pageEntry
+	sourcePages            map[tree.RoutePath]pageEntry
+	sections               map[tree.RoutePath]tree.RoutePath
+	sectionFiles           map[tree.MarkdownPath]tree.RoutePath
+	assets                 map[tree.MarkdownPath]struct{}
 	markdownLinkRootPrefix string
 }
 
 type pageEntry struct {
-	CanonicalPath string
-	RoutePath     string
+	CanonicalPath tree.MarkdownPath
+	RoutePath     tree.RoutePath
 }
 
 type resolveMode int
@@ -100,37 +113,48 @@ func NewIndex(entries []Entry) *Index {
 func NewIndexWithOptions(entries []Entry, opts Options) *Index {
 	prefix, _ := normalizeMarkdownLinkRootPrefix(opts.MarkdownLinkRootPrefix)
 	idx := &Index{
-		pages:                  map[string]pageEntry{},
-		sourcePages:            map[string]pageEntry{},
-		sections:               map[string]string{},
-		sectionFiles:           map[string]string{},
-		assets:                 map[string]struct{}{},
+		pages:                  map[tree.RoutePath]pageEntry{},
+		sourcePages:            map[tree.RoutePath]pageEntry{},
+		sections:               map[tree.RoutePath]tree.RoutePath{},
+		sectionFiles:           map[tree.MarkdownPath]tree.RoutePath{},
+		assets:                 map[tree.MarkdownPath]struct{}{},
 		markdownLinkRootPrefix: prefix,
 	}
 	for _, entry := range entries {
-		entryPath := cleanRelPath(entry.Path)
+		entryPath := entry.Path.Clean()
 		switch entry.Kind {
 		case EntryKindPage:
-			if entryPath == "" {
+			routePath := entry.RoutePath
+			if routePath == "" && entryPath != "" && entryPath.IsMarkdown() {
+				routePath = entryPath.RoutePath()
+			}
+			if routePath == "" {
 				continue
 			}
-			if strings.EqualFold(path.Ext(entryPath), ".md") {
-				routePath := strings.TrimSuffix(entryPath, path.Ext(entryPath))
-				page := pageEntry{CanonicalPath: entryPath, RoutePath: routePath}
+			canonicalPath := entryPath
+			if canonicalPath == "" {
+				canonicalPath = routePath.MarkdownPagePath()
+			}
+			if canonicalPath.IsMarkdown() {
+				page := pageEntry{CanonicalPath: canonicalPath, RoutePath: routePath}
 				idx.pages[routePath] = page
-				contentPath := cleanRelPath(entry.ContentPath)
-				if contentPath != "" && strings.EqualFold(path.Ext(contentPath), ".md") {
-					sourceRoutePath := strings.TrimSuffix(contentPath, path.Ext(contentPath))
+				contentPath := entry.ContentPath.Clean()
+				if contentPath != "" && contentPath.IsMarkdown() {
+					sourceRoutePath := contentPath.RoutePath()
 					if _, exists := idx.sourcePages[sourceRoutePath]; !exists {
 						idx.sourcePages[sourceRoutePath] = page
 					}
 				}
 			}
 		case EntryKindSection:
-			idx.sections[strings.Trim(entryPath, "/")] = strings.Trim(entryPath, "/")
-			contentPath := cleanRelPath(entry.ContentPath)
+			routePath := entry.RoutePath
+			if routePath == "" {
+				routePath = entryPath.RoutePath()
+			}
+			idx.sections[routePath] = routePath
+			contentPath := entry.ContentPath.Clean()
 			if contentPath != "" {
-				idx.sectionFiles[contentPath] = strings.Trim(entryPath, "/")
+				idx.sectionFiles[contentPath] = routePath
 			}
 		case EntryKindAsset:
 			if entryPath == "" {
@@ -139,7 +163,8 @@ func NewIndexWithOptions(entries []Entry, opts Options) *Index {
 			idx.assets[entryPath] = struct{}{}
 		}
 	}
-	idx.sections[""] = ""
+	var rootRoutePath tree.RoutePath
+	idx.sections[rootRoutePath] = rootRoutePath
 	return idx
 }
 
@@ -148,7 +173,7 @@ func NewIndexFromRoot(rootDir string) (*Index, error) {
 }
 
 func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
-	entries := []Entry{{Kind: EntryKindSection, Path: ""}}
+	entries := []Entry{{Kind: EntryKindSection}}
 	err := filepath.WalkDir(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -172,7 +197,7 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 			if route.Skip {
 				return filepath.SkipDir
 			}
-			entries = append(entries, Entry{Kind: EntryKindSection, Path: route.RoutePath})
+			entries = append(entries, Entry{Kind: EntryKindSection, RoutePath: route.RoutePath})
 			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
@@ -183,10 +208,10 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 			return nil
 		}
 		if route.Kind == tree.NodeKindSection {
-			entries = append(entries, Entry{Kind: EntryKindSection, Path: route.RoutePath, ContentPath: relPath})
+			entries = append(entries, Entry{Kind: EntryKindSection, RoutePath: route.RoutePath, ContentPath: tree.NewMarkdownPathUnchecked(relPath)})
 			return nil
 		}
-		entries = append(entries, Entry{Kind: EntryKindPage, Path: route.RoutePath + ".md", ContentPath: relPath})
+		entries = append(entries, Entry{Kind: EntryKindPage, RoutePath: route.RoutePath, ContentPath: tree.NewMarkdownPathUnchecked(relPath)})
 		return nil
 	})
 	if err != nil {
@@ -195,22 +220,22 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 	return NewIndexWithOptions(entries, opts), nil
 }
 
-func (idx *Index) Resolve(sourceFile string, href string) Resolution {
+func (idx *Index) Resolve(sourceFile tree.MarkdownPath, href string) Resolution {
 	return idx.resolve(sourceFile, href, resolveCanonical)
 }
 
-func (idx *Index) ResolveForMigration(sourceFile string, href string) Resolution {
+func (idx *Index) ResolveForMigration(sourceFile tree.MarkdownPath, href string) Resolution {
 	return idx.resolve(sourceFile, href, resolveMigration)
 }
 
-func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Resolution {
+func (idx *Index) resolve(sourceFile tree.MarkdownPath, href string, mode resolveMode) Resolution {
 	raw := strings.TrimSpace(href)
 	if isExternal(raw) {
 		return Resolution{Kind: TargetKindExternal, CanonicalHref: href}
 	}
 	base, suffix := splitURLSuffix(raw)
 	if base == "" {
-		return Resolution{Kind: TargetKindUnresolved, Code: "empty"}
+		return Resolution{Kind: TargetKindUnresolved, Code: IssueCodeEmpty}
 	}
 	resolveBase := idx.stripMarkdownLinkRootPrefix(base)
 	if isAsset(resolveBase) {
@@ -220,24 +245,22 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 
 	decodedBase, err := url.PathUnescape(resolveBase)
 	if err != nil {
-		return Resolution{Kind: TargetKindInvalid, CanonicalHref: href, Code: "invalid_percent_encoding"}
+		return Resolution{Kind: TargetKindInvalid, CanonicalHref: href, Code: IssueCodeInvalidPercentEncoding}
 	}
 	targetPath, escaped := resolveFilesystemPath(sourceFile, decodedBase)
 	if escaped {
-		return Resolution{Kind: TargetKindInvalid, CanonicalHref: href, Code: "workspace_escape"}
+		return Resolution{Kind: TargetKindInvalid, CanonicalHref: href, Code: IssueCodeWorkspaceEscape}
 	}
-	targetPath = strings.Trim(targetPath, "/")
-	if targetPath == "." {
-		targetPath = ""
-	}
+	targetPath = targetPath.Clean()
 
 	isAbsolute := strings.HasPrefix(base, "/")
-	targetRoute := strings.TrimSuffix(targetPath, path.Ext(targetPath))
-	if strings.EqualFold(path.Ext(targetPath), ".md") {
+	targetRoute := targetPath.RoutePath()
+	sectionRoute := targetPath.RoutePath()
+	if targetPath.IsMarkdown() {
 		if sectionPath, ok := idx.sectionFiles[targetPath]; ok {
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath.HrefPath(), false, isAbsolute, suffix, base),
 				RoutePath:     sectionPath,
 			}
 		}
@@ -261,24 +284,23 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 				Kind:          TargetKindUnresolved,
 				CanonicalHref: canonicalHref,
 				RoutePath:     page.RoutePath,
-				Code:          "non_canonical_markdown_path",
+				Code:          IssueCodeNonCanonicalMarkdownPath,
 			}
 		}
-		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetRoute, Code: "broken_page"}
+		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetRoute, Code: IssueCodeBrokenPage}
 	}
 
-	page, hasPage := idx.pages[targetPath]
-	_, hasSection := idx.sections[strings.TrimRight(targetPath, "/")]
+	page, hasPage := idx.pages[sectionRoute]
+	_, hasSection := idx.sections[sectionRoute]
 	if hasTrailingSlash {
 		if hasSection {
-			sectionPath := strings.TrimRight(targetPath, "/")
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
-				RoutePath:     sectionPath,
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionRoute.HrefPath(), false, isAbsolute, suffix, base),
+				RoutePath:     sectionRoute,
 			}
 		}
-		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetPath, Code: "broken_link"}
+		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: sectionRoute, Code: IssueCodeBrokenLink}
 	}
 	switch {
 	case hasPage && !hasSection:
@@ -288,28 +310,26 @@ func (idx *Index) resolve(sourceFile string, href string, mode resolveMode) Reso
 			RoutePath:     page.RoutePath,
 		}
 	case hasSection && !hasPage:
-		sectionPath := strings.TrimRight(targetPath, "/")
 		return Resolution{
 			Kind:          TargetKindSection,
-			CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
-			RoutePath:     sectionPath,
+			CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionRoute.HrefPath(), false, isAbsolute, suffix, base),
+			RoutePath:     sectionRoute,
 		}
 	case hasPage && hasSection:
 		if mode == resolveCanonical {
-			sectionPath := strings.TrimRight(targetPath, "/")
 			return Resolution{
 				Kind:          TargetKindSection,
-				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionPath, false, isAbsolute, suffix, base),
-				RoutePath:     sectionPath,
+				CanonicalHref: idx.formatCanonicalHref(sourceFile, sectionRoute.HrefPath(), false, isAbsolute, suffix, base),
+				RoutePath:     sectionRoute,
 			}
 		}
-		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetPath, Code: "ambiguous_legacy_link"}
+		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: sectionRoute, Code: IssueCodeAmbiguousLegacyLink}
 	default:
-		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: targetPath, Code: "broken_link"}
+		return Resolution{Kind: TargetKindUnresolved, CanonicalHref: href, RoutePath: sectionRoute, Code: IssueCodeBrokenLink}
 	}
 }
 
-func (idx *Index) RewriteMarkdown(sourceFile string, content string) RewriteResult {
+func (idx *Index) RewriteMarkdown(sourceFile tree.MarkdownPath, content string) RewriteResult {
 	if content == "" {
 		return RewriteResult{Content: content}
 	}
@@ -847,14 +867,6 @@ func applyReplacements(content string, replacements []replacement) (string, bool
 	return rewritten, rewritten != content
 }
 
-func cleanRelPath(value string) string {
-	cleaned := path.Clean(strings.Trim(strings.TrimSpace(value), "/"))
-	if cleaned == "." {
-		return ""
-	}
-	return cleaned
-}
-
 func splitURLSuffix(raw string) (base string, suffix string) {
 	queryIdx := strings.IndexByte(raw, '?')
 	hashIdx := strings.IndexByte(raw, '#')
@@ -908,25 +920,23 @@ func isAsset(href string) bool {
 	return ext != "" && ext != ".md" && ext != ".markdown"
 }
 
-func resolveFilesystemPath(sourceFile string, href string) (string, bool) {
+func resolveFilesystemPath(sourceFile tree.MarkdownPath, href string) (tree.MarkdownPath, bool) {
 	var resolved string
 	if strings.HasPrefix(href, "/") {
 		resolved = path.Clean(strings.TrimPrefix(href, "/"))
 	} else {
-		sourceDir := path.Dir(cleanRelPath(sourceFile))
-		if sourceDir == "." {
-			sourceDir = ""
-		}
-		resolved = path.Clean(path.Join(sourceDir, href))
+		resolved = path.Clean(path.Join(sourceFile.SourceDir().FilesystemPath(), href))
 	}
 	if resolved == "." {
 		resolved = ""
 	}
-	return resolved, resolved == ".." || strings.HasPrefix(resolved, "../")
+	escaped := resolved == ".." || strings.HasPrefix(resolved, "../")
+	return tree.CleanMarkdownPath(resolved), escaped
 }
 
-func formatHref(sourceFile string, targetPath string, page bool, absolute bool, suffix string) string {
-	targetPath = cleanRelPath(targetPath)
+func formatHref(sourceFile tree.MarkdownPath, targetPath tree.MarkdownPath, page bool, absolute bool, suffix string) string {
+	targetPath = targetPath.Clean()
+	targetPathString := targetPath.FilesystemPath()
 	if targetPath == "" && !page {
 		return "/" + suffix
 	}
@@ -934,15 +944,11 @@ func formatHref(sourceFile string, targetPath string, page bool, absolute bool, 
 		if targetPath == "" {
 			return "/" + suffix
 		}
-		return "/" + targetPath + suffix
+		return "/" + targetPathString + suffix
 	}
-	sourceDir := path.Dir(cleanRelPath(sourceFile))
-	if sourceDir == "." {
-		sourceDir = ""
-	}
-	rel, err := filepath.Rel(filepath.FromSlash(sourceDir), filepath.FromSlash(targetPath))
+	rel, err := filepath.Rel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(targetPathString))
 	if err != nil {
-		rel = targetPath
+		rel = targetPathString
 	}
 	rel = filepath.ToSlash(rel)
 	if rel == "." && !page {
@@ -951,7 +957,7 @@ func formatHref(sourceFile string, targetPath string, page bool, absolute bool, 
 	return rel + suffix
 }
 
-func formatCanonicalHref(sourceFile string, targetPath string, page bool, absolute bool, suffix string, originalBase string) string {
+func formatCanonicalHref(sourceFile tree.MarkdownPath, targetPath tree.MarkdownPath, page bool, absolute bool, suffix string, originalBase string) string {
 	if strings.Contains(originalBase, "%") {
 		base := strings.TrimSpace(originalBase)
 		if page {
@@ -965,7 +971,7 @@ func formatCanonicalHref(sourceFile string, targetPath string, page bool, absolu
 	return formatHref(sourceFile, targetPath, page, absolute, suffix)
 }
 
-func (idx *Index) formatCanonicalHref(sourceFile string, targetPath string, page bool, absolute bool, suffix string, originalBase string) string {
+func (idx *Index) formatCanonicalHref(sourceFile tree.MarkdownPath, targetPath tree.MarkdownPath, page bool, absolute bool, suffix string, originalBase string) string {
 	href := formatCanonicalHref(sourceFile, targetPath, page, absolute, suffix, idx.stripMarkdownLinkRootPrefix(originalBase))
 	if !absolute || idx.markdownLinkRootPrefix == "" {
 		return href

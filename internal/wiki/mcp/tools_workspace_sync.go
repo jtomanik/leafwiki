@@ -35,7 +35,7 @@ func (r *Routes) refreshWorkspaceSync(ctx context.Context, actor toolActor, in r
 	out := refreshOutput{
 		SyncStatus:         r.syncStatusOutput(status),
 		RecentChangedPaths: append([]string{}, status.RecentChangedMarkdownPaths...),
-		LastCommitHash:     status.LastCommitHash,
+		LastCommitHash:     status.LastCommitHash.String(),
 	}
 	if includeValidation(in.Validate) {
 		validation := r.validationFromSyncStatus(status)

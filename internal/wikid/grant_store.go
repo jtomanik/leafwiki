@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type GrantStore struct {
@@ -91,9 +93,15 @@ func (s *GrantStore) GrantsForSubject(subject string) ([]Grant, error) {
 	var grants []Grant
 	for rows.Next() {
 		var grant Grant
-		if err := rows.Scan(&grant.Subject, &grant.WorkspaceID, &grant.Role); err != nil {
+		var rawWorkspaceID string
+		if err := rows.Scan(&grant.Subject, &rawWorkspaceID, &grant.Role); err != nil {
 			return nil, err
 		}
+		workspaceID, err := workspaceid.ParseWorkspaceID(rawWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		grant.WorkspaceID = workspaceID
 		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
@@ -119,9 +127,15 @@ func loadGrantDocument(ctx context.Context, q grantQuerier) (GrantDocument, erro
 	doc := NewGrantDocument()
 	for rows.Next() {
 		var grant Grant
-		if err := rows.Scan(&grant.Subject, &grant.WorkspaceID, &grant.Role); err != nil {
+		var rawWorkspaceID string
+		if err := rows.Scan(&grant.Subject, &rawWorkspaceID, &grant.Role); err != nil {
 			return GrantDocument{}, err
 		}
+		workspaceID, err := workspaceid.ParseWorkspaceID(rawWorkspaceID)
+		if err != nil {
+			return GrantDocument{}, err
+		}
+		grant.WorkspaceID = workspaceID
 		doc.Grants = append(doc.Grants, grant)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,6 +148,9 @@ func loadGrantDocument(ctx context.Context, q grantQuerier) (GrantDocument, erro
 }
 
 func upsertGrant(ctx context.Context, conn *sql.Conn, grant Grant) error {
+	if err := grant.WorkspaceID.Validate(); err != nil {
+		return fmt.Errorf("grant workspace ID: %w", err)
+	}
 	grant = normalizeGrant(grant)
 	if err := validateGrant(grant); err != nil {
 		return err
@@ -149,6 +166,5 @@ func upsertGrant(ctx context.Context, conn *sql.Conn, grant Grant) error {
 
 func normalizeGrant(grant Grant) Grant {
 	grant.Subject = strings.TrimSpace(grant.Subject)
-	grant.WorkspaceID = strings.TrimSpace(grant.WorkspaceID)
 	return grant
 }

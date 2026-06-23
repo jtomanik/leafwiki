@@ -31,7 +31,7 @@ type wikidWorkspaceListResponse struct {
 	} `json:"workspaces"`
 }
 
-func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request) (string, error), error) {
+func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request) (workspaceid.WorkspaceID, error), error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
 		return nil, fmt.Errorf("invalid wikid upstream %q", wikidURL)
@@ -42,7 +42,7 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")
-	return func(source *http.Request) (string, error) {
+	return func(source *http.Request) (workspaceid.WorkspaceID, error) {
 		endpoint := baseURL + "/__leafwiki/workspaces"
 		ctx := contextForRequest(source)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -80,18 +80,18 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 		case 0:
 			return "", ErrWorkspaceForbidden
 		case 1:
-			workspaceID := strings.TrimSpace(out.Workspaces[0].ID)
-			if workspaceID == "" {
+			typedWorkspaceID, err := workspaceid.ParseWorkspaceID(out.Workspaces[0].ID)
+			if err != nil {
 				return "", ErrWorkspaceNotFound
 			}
-			return workspaceID, nil
+			return typedWorkspaceID, nil
 		default:
 			return "", ErrWorkspaceAmbiguous
 		}
 	}, nil
 }
 
-func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request, string) (WorkspaceRoute, error), error) {
+func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error), error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
 		return nil, fmt.Errorf("invalid wikid upstream %q", wikidURL)
@@ -102,11 +102,11 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")
-	return func(source *http.Request, workspaceID string) (WorkspaceRoute, error) {
-		if err := workspaceid.ValidateWorkspaceID(workspaceID); err != nil {
+	return func(source *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+		if err := workspaceID.Validate(); err != nil {
 			return WorkspaceRoute{}, ErrWorkspaceNotFound
 		}
-		endpoint := baseURL + "/__leafwiki/workspaces/" + url.PathEscape(workspaceID) + "/ensure"
+		endpoint := baseURL + "/__leafwiki/workspaces/" + workspaceID.URLPathSegment() + "/ensure"
 		ctx := contextForRequest(source)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 		if err != nil {
@@ -135,21 +135,34 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 			if msg == "" {
 				msg = resp.Status
 			}
-			return WorkspaceRoute{}, fmt.Errorf("ensure workspace %q failed: %s", workspaceID, msg)
+			return WorkspaceRoute{}, fmt.Errorf("ensure workspace %q failed: %s", workspaceID.String(), msg)
 		}
 		var out wikidWorkspaceStatusResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return WorkspaceRoute{}, fmt.Errorf("decode workspace ensure response: %w", err)
 		}
-		routeID := strings.TrimSpace(out.Status.WorkspaceID)
+		var routeID workspaceid.WorkspaceID
+		if out.Status.WorkspaceID != "" {
+			parsed, err := workspaceid.ParseWorkspaceID(out.Status.WorkspaceID)
+			if err != nil {
+				return WorkspaceRoute{}, fmt.Errorf("decode workspace ensure response ID: %w", err)
+			}
+			routeID = parsed
+		}
 		if routeID == "" {
-			routeID = strings.TrimSpace(out.Workspace.ID)
+			if out.Workspace.ID != "" {
+				parsed, err := workspaceid.ParseWorkspaceID(out.Workspace.ID)
+				if err != nil {
+					return WorkspaceRoute{}, fmt.Errorf("decode workspace ensure response ID: %w", err)
+				}
+				routeID = parsed
+			}
 		}
 		if routeID == "" {
 			routeID = workspaceID
 		}
 		if !strings.EqualFold(strings.TrimSpace(out.Status.State), "running") || strings.TrimSpace(out.Status.URL) == "" {
-			return WorkspaceRoute{}, fmt.Errorf("workspace %q is not running", workspaceID)
+			return WorkspaceRoute{}, fmt.Errorf("workspace %q is not running", workspaceID.String())
 		}
 		upstreamURL := strings.TrimRight(out.Status.URL, "/")
 		return WorkspaceRoute{

@@ -10,6 +10,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 func TestFSStoreRevisionReadPaths(t *testing.T) {
@@ -239,8 +240,8 @@ func TestFSStoreValidationAndEmptyPaths(t *testing.T) {
 func TestFSStoreGetRevision_BackwardCompatibleWithoutExtraFrontmatterFields(t *testing.T) {
 	store := NewFSStore(t.TempDir())
 	createdAt := time.Date(2026, 4, 20, 15, 4, 5, 0, time.UTC)
-	pageID := "page-1"
-	revisionID := "rev-legacy"
+	pageID := tree.NewPageIDUnchecked("page-1")
+	revisionID := tree.NewRevisionIDUnchecked("rev-legacy")
 
 	payload := map[string]interface{}{
 		"id":              revisionID,
@@ -266,7 +267,7 @@ func TestFSStoreGetRevision_BackwardCompatibleWithoutExtraFrontmatterFields(t *t
 	if err := writeJSONAtomic(revisionPath, payload); err != nil {
 		t.Fatalf("writeJSONAtomic failed: %v", err)
 	}
-	if err := store.saveRevisionIndex(pageID, revisionIndex{revisionID: filepath.Base(revisionPath)}); err != nil {
+	if err := store.saveRevisionIndex(pageID, revisionIndex{revisionID.CommitID(): filepath.Base(revisionPath)}); err != nil {
 		t.Fatalf("saveRevisionIndex failed: %v", err)
 	}
 
@@ -368,10 +369,10 @@ func TestFSStoreIdempotentSaves(t *testing.T) {
 
 func TestFSStoreCursorAndFileFilteringHelpers(t *testing.T) {
 	store := NewFSStore(t.TempDir())
-	pageID := "page-1"
+	pageID := tree.NewPageIDUnchecked("page-1")
 	created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 2; i++ {
-		rev := &Revision{ID: string(rune('a' + i)), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+		rev := &Revision{ID: tree.NewRevisionIDUnchecked(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
 		if err := store.SaveRevision(rev); err != nil {
 			t.Fatalf("SaveRevision(%d) failed: %v", i, err)
 		}
@@ -521,16 +522,17 @@ func TestFSStoreRejectsPathTraversalPageID(t *testing.T) {
 
 	for _, id := range traversalIDs {
 		t.Run(id, func(t *testing.T) {
-			if _, _, err := store.ListRevisionsPage(id, "", 50); err == nil {
+			pageID := tree.NewPageIDUnchecked(id)
+			if _, _, err := store.ListRevisionsPage(pageID, "", 50); err == nil {
 				t.Errorf("ListRevisionsPage(%q) should have failed", id)
 			}
-			if _, err := store.GetLatestRevision(id); err == nil {
+			if _, err := store.GetLatestRevision(pageID); err == nil {
 				t.Errorf("GetLatestRevision(%q) should have failed", id)
 			}
-			if _, err := store.GetRevision(id, "rev1"); err == nil {
+			if _, err := store.GetRevision(pageID, "rev1"); err == nil {
 				t.Errorf("GetRevision(%q, rev1) should have failed", id)
 			}
-			if err := store.PruneRevisions(id, 5); err == nil {
+			if err := store.PruneRevisions(pageID, 5); err == nil {
 				t.Errorf("PruneRevisions(%q) should have failed", id)
 			}
 		})
@@ -588,7 +590,7 @@ func TestFSStoreGetRevisionUsesAndBackfillsIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRevisionIndex failed: %v", err)
 	}
-	if got := index[rev.ID]; got == "" {
+	if got := index[rev.ID.CommitID()]; got == "" {
 		t.Fatalf("expected revision index entry for %q, got %#v", rev.ID, index)
 	}
 
@@ -606,7 +608,7 @@ func TestFSStoreGetRevisionUsesAndBackfillsIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRevisionIndex second failed: %v", err)
 	}
-	if got := index[rev.ID]; got == "" {
+	if got := index[rev.ID.CommitID()]; got == "" {
 		t.Fatalf("expected revision index backfill for %q, got %#v", rev.ID, index)
 	}
 }

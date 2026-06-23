@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestActorContextRoundTripValidatesPrivateEnvelope(t *testing.T) {
@@ -39,6 +41,12 @@ func TestActorContextRoundTripValidatesPrivateEnvelope(t *testing.T) {
 	if decoded.Subject != "user:admin" || decoded.Role != "admin" || decoded.AuthMethod != "disabled" {
 		t.Fatalf("decoded actor context = %#v", decoded)
 	}
+}
+
+func TestActorContextValidationCarriesSemanticWorkspaceID(t *testing.T) {
+	validation := ActorContextValidation{WorkspaceID: workspaceid.WorkspaceID("current")}
+
+	var _ workspaceid.WorkspaceID = validation.WorkspaceID
 }
 
 func TestDecodeActorContextRejectsSpoofedOrStaleEnvelope(t *testing.T) {

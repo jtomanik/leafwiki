@@ -219,8 +219,8 @@ func setupPropertiesService(t *testing.T) (*PropertiesService, *tree.TreeService
 
 func indexAllPages(t *testing.T, svc *PropertiesService, ts *tree.TreeService) {
 	t.Helper()
-	var ids []string
-	if err := ts.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := ts.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -242,13 +242,13 @@ func pageKind() *tree.NodeKind {
 	return &k
 }
 
-func createPageWithContent(t *testing.T, ts *tree.TreeService, title, slug, content string) string {
+func createPageWithContent(t *testing.T, ts *tree.TreeService, title, slug, content string) tree.PageID {
 	t.Helper()
-	idPtr, err := ts.CreateNode("system", nil, title, slug, pageKind())
+	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), pageKind())
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
-	if err := ts.UpdateNode("system", *idPtr, title, slug, &content, tree.VersionUnchecked, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &content, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 	return *idPtr

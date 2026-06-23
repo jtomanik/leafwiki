@@ -1,8 +1,10 @@
 package links
 
+import "github.com/perber/wiki/internal/core/tree"
+
 type Outgoing struct {
-	FromPageID string
-	ToPageID   string
+	FromPageID tree.PageID
+	ToPageID   tree.PageID
 	FromTitle  string
 	ToPath     string // Path of the target page
 	ToKind     string
@@ -15,10 +17,10 @@ type OutgoingResult struct {
 }
 
 type OutgoingResultItem struct {
-	ToPageID    string `json:"to_page_id"`
-	ToPageTitle string `json:"to_page_title"`
-	ToPath      string `json:"to_path"`
-	ToKind      string `json:"to_kind"`
-	Broken      bool   `json:"broken"`
-	FromPageID  string `json:"from_page_id"`
+	ToPageID    tree.PageID `json:"to_page_id"`
+	ToPageTitle string      `json:"to_page_title"`
+	ToPath      string      `json:"to_path"`
+	ToKind      string      `json:"to_kind"`
+	Broken      bool        `json:"broken"`
+	FromPageID  tree.PageID `json:"from_page_id"`
 }

@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,10 @@ import (
 	"github.com/perber/wiki/internal/test_utils"
 	"github.com/perber/wiki/internal/wiki"
 )
+
+func expectedAssetPath(pageID tree.PageID, filename string) string {
+	return fmt.Sprintf("/assets/%s/%s", pageID, filename)
+}
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Importer distinguishes folder README section from README child page
@@ -284,8 +289,8 @@ func TestImporterService_ExecuteCurrentPlan_RewritesLinksAndUploadsAssetsToDisk(
 		"[Guide Home](/guides)",
 		"[API](/reference/endpoints.md#intro)",
 		"[API Alias](/reference/endpoints.md)",
-		"/assets/" + setupPage.ID + "/logo.png",
-		"/assets/" + setupPage.ID + "/manual.pdf",
+		expectedAssetPath(setupPage.ID, "logo.png"),
+		expectedAssetPath(setupPage.ID, "manual.pdf"),
 	} {
 		if !strings.Contains(setupPage.Content, expected) {
 			t.Fatalf("expected content to contain %q, got:\n%s", expected, setupPage.Content)
@@ -332,9 +337,9 @@ func TestImporterService_ExecuteCurrentPlan_ImportsFixturePackage(t *testing.T) 
 		"[Container](/guides)",
 		"[Endpoints](/reference/endpoints.md)",
 		"[API Alias](/reference/endpoints.md)",
-		"![Relative Image](/assets/" + setupPage.ID + "/logo.png)",
-		"[Manual](/assets/" + setupPage.ID + "/manual.pdf)",
-		"![logo.png](/assets/" + setupPage.ID + "/logo.png)",
+		fmt.Sprintf("![Relative Image](%s)", expectedAssetPath(setupPage.ID, "logo.png")),
+		fmt.Sprintf("[Manual](%s)", expectedAssetPath(setupPage.ID, "manual.pdf")),
+		fmt.Sprintf("![logo.png](%s)", expectedAssetPath(setupPage.ID, "logo.png")),
 		"`[Inline](../Reference/Endpoints.md)`",
 		"`[[Reference/Endpoints|Inline Alias]]`",
 		"[Fenced](../Reference/Endpoints.md)",
@@ -525,7 +530,7 @@ func TestImporterService_ExecuteCurrentPlan_ImportsObsidianWikiLinksFixture(t *t
 		"[Brainstorm](/daily/brainstorm.md)",
 		"[[Meeting Notes]]",
 		"[Meeting Alias](/daily/meeting-notes.md)",
-		"![diagram.png](/assets/" + homePage.ID + "/diagram.png)",
+		fmt.Sprintf("![diagram.png](%s)", expectedAssetPath(homePage.ID, "diagram.png")),
 		"`[[Project Plan]]`",
 		"[[Daily/Meeting Notes]]",
 		"![[Attachments/diagram.png]]",

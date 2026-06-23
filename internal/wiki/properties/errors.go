@@ -8,52 +8,38 @@ import (
 )
 
 const (
-	ErrCodePropertiesInternal     = "properties_internal_error"
-	ErrCodePropertiesMissingKey   = "properties_missing_key"
-	ErrCodePropertiesMissingValue = "properties_missing_value"
-	ErrCodePropertiesInvalidLimit = "properties_invalid_limit"
+	ErrCodePropertiesInternal     sharederrors.ErrorCode = "properties_internal_error"
+	ErrCodePropertiesMissingKey   sharederrors.ErrorCode = "properties_missing_key"
+	ErrCodePropertiesMissingValue sharederrors.ErrorCode = "properties_missing_value"
+	ErrCodePropertiesInvalidLimit sharederrors.ErrorCode = "properties_invalid_limit"
 )
 
 type propertiesErrorResponse struct {
 	Error propertiesErrorDetail `json:"error"`
 }
 
-type propertiesErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type propertiesErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithPropertiesError(c *gin.Context, err error) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
 		c.JSON(propertiesErrorStatus(loc.Code), propertiesErrorResponse{
-			Error: propertiesErrorDetail{
-				Code:     loc.Code,
-				Message:  loc.Message,
-				Template: loc.Template,
-				Args:     loc.Args,
-			},
+			Error: sharederrors.LocalizedErrorDetailFromError(loc),
 		})
 		return
 	}
 
 	c.JSON(http.StatusInternalServerError, propertiesErrorResponse{
-		Error: propertiesErrorDetail{
-			Code:     ErrCodePropertiesInternal,
-			Message:  "Internal server error",
-			Template: "internal server error",
-		},
+		Error: sharederrors.NewLocalizedErrorDetail(ErrCodePropertiesInternal, "Internal server error", "internal server error"),
 	})
 }
 
-func respondWithPropertiesBadRequest(c *gin.Context, code, message, template string) {
+func respondWithPropertiesBadRequest(c *gin.Context, code sharederrors.ErrorCode, message, template string) {
 	c.JSON(http.StatusBadRequest, propertiesErrorResponse{
-		Error: propertiesErrorDetail{Code: code, Message: message, Template: template},
+		Error: sharederrors.NewLocalizedErrorDetail(code, message, template),
 	})
 }
 
-func propertiesErrorStatus(code string) int {
+func propertiesErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodePropertiesMissingKey, ErrCodePropertiesMissingValue, ErrCodePropertiesInvalidLimit:
 		return http.StatusBadRequest

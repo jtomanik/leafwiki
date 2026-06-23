@@ -6,15 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/middleware/security"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
+	"github.com/perber/wiki/internal/workspaceid"
+)
+
+const (
+	errCodePrivateControlTokenInvalid sharederrors.ErrorCode = "private_control_token_invalid"
+	errCodePrivateActorContextInvalid sharederrors.ErrorCode = "private_actor_context_invalid"
 )
 
 type PrivateAuthOptions struct {
 	DaemonToken string
-	WorkspaceID string
+	WorkspaceID workspaceid.WorkspaceID
 	Now         func() time.Time
 }
 
@@ -45,7 +52,7 @@ func (r privateAuthRegistrar) RegisterRoutes(ctx httpinternal.RouterContext) {
 func requirePrivateActorContext(opts PrivateAuthOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.GetHeader(projectdaemon.ControlTokenHeader) != opts.DaemonToken || opts.DaemonToken == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			abortPrivateActorError(c, http.StatusUnauthorized, errCodePrivateControlTokenInvalid, "unauthorized")
 			return
 		}
 		now := time.Now().UTC
@@ -57,7 +64,7 @@ func requirePrivateActorContext(opts PrivateAuthOptions) gin.HandlerFunc {
 			WorkspaceID: opts.WorkspaceID,
 		})
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid actor context"})
+			abortPrivateActorError(c, http.StatusUnauthorized, errCodePrivateActorContextInvalid, "invalid actor context")
 			return
 		}
 		c.Set("user", &coreauth.User{
@@ -69,4 +76,10 @@ func requirePrivateActorContext(opts PrivateAuthOptions) gin.HandlerFunc {
 		security.TrustPrivateChannel(c)
 		c.Next()
 	}
+}
+
+func abortPrivateActorError(c *gin.Context, status int, code sharederrors.ErrorCode, message string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	})
 }

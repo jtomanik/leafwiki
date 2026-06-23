@@ -11,13 +11,13 @@ import (
 )
 
 type APIKey struct {
-	ID              string     `json:"id"`
-	UserID          string     `json:"userId"`
+	ID              APIKeyID   `json:"id"`
+	UserID          UserID     `json:"userId"`
 	Name            string     `json:"name"`
 	Prefix          string     `json:"prefix"`
 	Last4           string     `json:"last4"`
 	Scopes          []string   `json:"scopes"`
-	CreatedByUserID string     `json:"createdByUserId"`
+	CreatedByUserID UserID     `json:"createdByUserId"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	LastUsedAt      *time.Time `json:"lastUsedAt"`
 	RevokedAt       *time.Time `json:"revokedAt"`
@@ -31,14 +31,14 @@ type storedAPIKey struct {
 type APIKeyStore struct {
 	mu         sync.Mutex
 	storageDir string
-	filename   string
+	dbFilename string
 	db         *sql.DB
 }
 
 func NewAPIKeyStore(storageDir string) (*APIKeyStore, error) {
 	s := &APIKeyStore{
 		storageDir: storageDir,
-		filename:   "api_keys.db",
+		dbFilename: "api_keys.db",
 	}
 	if err := s.ensureSchema(); err != nil {
 		if s.db != nil {
@@ -54,7 +54,7 @@ func (s *APIKeyStore) Connect() error {
 	if s.db != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", databasePath(s.storageDir, s.filename))
+	db, err := sql.Open("sqlite", databasePath(s.storageDir, s.dbFilename))
 	if err != nil {
 		return err
 	}
@@ -124,12 +124,12 @@ func (s *APIKeyStore) CreateAPIKey(key *APIKey, secretHash string) error {
 			created_by_user_id, created_at, last_used_at, revoked_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL);
-	`, key.ID, key.UserID, key.Name, secretHash, key.Prefix, key.Last4, string(scopes),
-		key.CreatedByUserID, key.CreatedAt.Unix())
+	`, key.ID, key.UserID.String(), key.Name, secretHash, key.Prefix, key.Last4, string(scopes),
+		key.CreatedByUserID.String(), key.CreatedAt.Unix())
 	return err
 }
 
-func (s *APIKeyStore) ListActiveAPIKeys(userID string) ([]*APIKey, error) {
+func (s *APIKeyStore) ListActiveAPIKeys(userID UserID) ([]*APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,7 +142,7 @@ func (s *APIKeyStore) ListActiveAPIKeys(userID string) ([]*APIKey, error) {
 		FROM api_keys
 		WHERE user_id = ? AND revoked_at IS NULL
 		ORDER BY created_at DESC, id DESC;
-	`, userID)
+	`, userID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (s *APIKeyStore) ListActiveAPIKeys(userID string) ([]*APIKey, error) {
 	return keys, nil
 }
 
-func (s *APIKeyStore) GetAPIKeyByID(id string) (*storedAPIKey, error) {
+func (s *APIKeyStore) GetAPIKeyByID(id APIKeyID) (*storedAPIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -189,7 +189,7 @@ func (s *APIKeyStore) GetAPIKeyByID(id string) (*storedAPIKey, error) {
 	return &storedAPIKey{key: key, secretHash: secretHash}, nil
 }
 
-func (s *APIKeyStore) RevokeAPIKey(userID, keyID string, revokedAt time.Time) error {
+func (s *APIKeyStore) RevokeAPIKey(userID UserID, keyID APIKeyID, revokedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -200,7 +200,7 @@ func (s *APIKeyStore) RevokeAPIKey(userID, keyID string, revokedAt time.Time) er
 		UPDATE api_keys
 		SET revoked_at = ?
 		WHERE id = ? AND user_id = ? AND revoked_at IS NULL;
-	`, revokedAt.Unix(), keyID, userID)
+	`, revokedAt.Unix(), keyID, userID.String())
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (s *APIKeyStore) RevokeAPIKey(userID, keyID string, revokedAt time.Time) er
 	return nil
 }
 
-func (s *APIKeyStore) MarkAPIKeyUsed(keyID string, usedAt time.Time) error {
+func (s *APIKeyStore) MarkAPIKeyUsed(keyID APIKeyID, usedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

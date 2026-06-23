@@ -33,11 +33,11 @@ func setupTagsEffectTest(t *testing.T) (*tree.TreeService, *tags.TagsService, *T
 func createPageWithFrontmatter(t *testing.T, treeSvc *tree.TreeService, title, slug, raw string) *tree.Page {
 	t.Helper()
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode("system", nil, title, slug, &kind)
+	id, err := treeSvc.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), &kind)
 	if err != nil {
 		t.Fatalf("CreateNode(%q): %v", title, err)
 	}
-	if err := treeSvc.UpdateNode("system", *id, title, slug, &raw, tree.VersionUnchecked, true); err != nil {
+	if err := treeSvc.UpdateNodeUncheckedVersion(tree.UserID("system"), *id, title, tree.NewSlugUnchecked(slug), &raw, true); err != nil {
 		t.Fatalf("UpdateNode(%q): %v", title, err)
 	}
 	page, err := treeSvc.GetPage(*id)
@@ -86,10 +86,10 @@ func TestTagsSideEffect_Apply_Update_ReindexesTags(t *testing.T) {
 	effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 	newRaw := "---\ntags:\n  - newtag\n---\n\nUpdated."
-	if err := treeSvc.UpdateNode("system", page.ID, "Update Tags", "update-tags", &newRaw, tree.VersionUnchecked, true); err != nil {
+	if err := treeSvc.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(page.ID), "Update Tags", tree.NewSlugUnchecked("update-tags"), &newRaw, true); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
-	updated, err := treeSvc.GetPage(page.ID)
+	updated, err := treeSvc.GetPage(tree.NewPageIDUnchecked(page.ID))
 	if err != nil {
 		t.Fatalf("GetPage after update: %v", err)
 	}

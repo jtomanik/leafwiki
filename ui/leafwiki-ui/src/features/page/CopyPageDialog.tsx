@@ -4,6 +4,7 @@ import { copyPage, NODE_KIND_PAGE, PageNode } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_COPY_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
+import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -110,7 +111,15 @@ export function CopyPageDialog({
     setLoading(true)
     setFieldErrors({})
     try {
-      await copyPage(sourcePage.id, targetParentID, title, slug, workspaceId)
+      await copyPage(
+        sourcePage.id,
+        targetParentID === 'root' || targetParentID === ''
+          ? targetParentID
+          : asPageID(targetParentID),
+        title,
+        asSlug(slug),
+        asWorkspaceID(workspaceId),
+      )
       toast.success(`${itemLabelCapitalized} copied`)
       await reloadTree(workspaceId)
       if (redirect) {

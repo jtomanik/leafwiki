@@ -54,11 +54,7 @@ func TestCSRFMiddleware_BlocksPostWithoutCookie(t *testing.T) {
 		t.Fatalf("expected status 403 for POST without CSRF cookie, got %d", w.Code)
 	}
 
-	var body map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	if body["error"] != "CSRF token missing" {
-		t.Fatalf("expected error 'CSRF token missing', got '%s'", body["error"])
-	}
+	assertCSRFStructuredError(t, w, "csrf_token_missing", "errors.csrf.token_missing", "CSRF token missing")
 }
 
 func TestCSRFMiddleware_BlocksPostWithCookieButNoHeader(t *testing.T) {
@@ -87,11 +83,7 @@ func TestCSRFMiddleware_BlocksPostWithCookieButNoHeader(t *testing.T) {
 		t.Fatalf("expected status 403 for POST with cookie but no header, got %d", w.Code)
 	}
 
-	var body map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	if body["error"] != "Invalid CSRF token" {
-		t.Fatalf("expected error 'Invalid CSRF token', got '%s'", body["error"])
-	}
+	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
 }
 
 func TestCSRFMiddleware_BlocksPostWithMismatchingTokens(t *testing.T) {
@@ -121,11 +113,7 @@ func TestCSRFMiddleware_BlocksPostWithMismatchingTokens(t *testing.T) {
 		t.Fatalf("expected status 403 for POST with mismatching tokens, got %d", w.Code)
 	}
 
-	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["error"] != "Invalid CSRF token" {
-		t.Fatalf("expected error 'Invalid CSRF token', got '%s'", resp["error"])
-	}
+	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
 }
 
 func TestCSRFMiddleware_AllowsPostWithMatchingTokens(t *testing.T) {
@@ -154,5 +142,22 @@ func TestCSRFMiddleware_AllowsPostWithMatchingTokens(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for POST with valid CSRF, got %d", w.Code)
+	}
+}
+
+func assertCSRFStructuredError(t *testing.T, rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode csrf error: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message != message {
+		t.Fatalf("csrf error = %#v, want code=%q messageId=%q message=%q", body.Error, code, messageID, message)
 	}
 }

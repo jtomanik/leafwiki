@@ -9,14 +9,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronRight, Plus, Tag, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { EditorFrontmatterField } from './frontmatter'
+import {
+  EditorFrontmatterField,
+  type EditorFrontmatterValidationErrors,
+} from './frontmatter'
 
 const METADATA_ALLOWED_HOTKEYS = 'Mod+KeyS Escape'
 
 type PageFrontmatterPanelProps = {
   tags: string[]
   fields: EditorFrontmatterField[]
-  errors: Record<string, string>
+  errors: EditorFrontmatterValidationErrors
   hasUnsupportedFields: boolean
   onTagsChange: (tags: string[]) => void
   onFieldsChange: (fields: EditorFrontmatterField[]) => void
@@ -178,8 +181,10 @@ export function PageFrontmatterPanel({
                     <p
                       className="page-frontmatter-panel__error"
                       data-testid="page-frontmatter-tags-error"
+                      data-error-code={errors.tags.code}
+                      data-l10n-id={errors.tags.messageId}
                     >
-                      {errors.tags}
+                      {errors.tags.message}
                     </p>
                   ) : null}
                 </div>
@@ -235,16 +240,28 @@ export function PageFrontmatterPanel({
                               <p
                                 className="page-frontmatter-panel__error"
                                 data-testid={`page-frontmatter-field-key-error-${index}`}
+                                data-error-code={
+                                  errors[`properties.${index}.key`].code
+                                }
+                                data-l10n-id={
+                                  errors[`properties.${index}.key`].messageId
+                                }
                               >
-                                {errors[`properties.${index}.key`]}
+                                {errors[`properties.${index}.key`].message}
                               </p>
                             ) : null}
                             {errors[`properties.${index}.value`] ? (
                               <p
                                 className="page-frontmatter-panel__error"
                                 data-testid={`page-frontmatter-field-value-error-${index}`}
+                                data-error-code={
+                                  errors[`properties.${index}.value`].code
+                                }
+                                data-l10n-id={
+                                  errors[`properties.${index}.value`].messageId
+                                }
                               >
-                                {errors[`properties.${index}.value`]}
+                                {errors[`properties.${index}.value`].message}
                               </p>
                             ) : null}
                           </div>

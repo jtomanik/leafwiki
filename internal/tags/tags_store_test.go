@@ -6,6 +6,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
 )
 
@@ -17,6 +18,32 @@ func newTestStore(t *testing.T) *TagsStore {
 	}
 	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
 	return store
+}
+
+func testPageIDs[T ~string](ids ...T) []tree.PageID {
+	pageIDs := make([]tree.PageID, 0, len(ids))
+	for _, id := range ids {
+		pageIDs = append(pageIDs, tree.NewPageIDUnchecked(id))
+	}
+	return pageIDs
+}
+
+func sortTestPageIDs(ids []tree.PageID) {
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
+}
+
+func assertPageIDSliceEqual(t *testing.T, got []tree.PageID, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i, w := range want {
+		if got[i] != tree.NewPageIDUnchecked(w) {
+			t.Errorf("[%d] = %q, want %q", i, got[i], w)
+		}
+	}
 }
 
 // ─── DB lifecycle ────────────────────────────────────────────────────────────
@@ -56,7 +83,7 @@ func TestTagsStore_SetTagsForPage_StoresTags(t *testing.T) {
 		t.Fatalf("SetTagsForPage: %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-1"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -75,7 +102,7 @@ func TestTagsStore_SetTagsForPage_ReplacesOnSecondCall(t *testing.T) {
 		t.Fatalf("second SetTagsForPage: %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-1"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -92,7 +119,7 @@ func TestTagsStore_SetTagsForPage_EmptyTagsClearsExisting(t *testing.T) {
 		t.Fatalf("SetTagsForPage (clear): %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-1"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -111,7 +138,7 @@ func TestTagsStore_SetTagsForPage_NilTagsClearsExisting(t *testing.T) {
 		t.Fatalf("SetTagsForPage (nil): %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-1"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -132,7 +159,7 @@ func TestTagsStore_DeleteTagsForPage_RemovesTags(t *testing.T) {
 		t.Fatalf("DeleteTagsForPage: %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-1"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -162,7 +189,7 @@ func TestTagsStore_DeleteTagsForPage_DoesNotAffectOtherPages(t *testing.T) {
 		t.Fatalf("DeleteTagsForPage: %v", err)
 	}
 
-	got, err := store.GetTagsForPages([]string{"page-2"})
+	got, err := store.GetTagsForPages(testPageIDs("page-2"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -348,9 +375,9 @@ func TestTagsStore_GetPageIDsByTags_SingleTag(t *testing.T) {
 		t.Fatalf("GetPageIDsByTags: %v", err)
 	}
 
-	sort.Strings(ids)
+	sortTestPageIDs(ids)
 	want := []string{"page-1", "page-2"}
-	assertStringSliceEqual(t, ids, want)
+	assertPageIDSliceEqual(t, ids, want)
 }
 
 func TestTagsStore_GetPageIDsByTags_NoMatch(t *testing.T) {
@@ -405,7 +432,7 @@ func TestTagsStore_GetTagsForPages_ReturnsTagsForMultiplePages(t *testing.T) {
 	_ = store.SetTagsForPage("page-2", []string{"typescript"})
 	_ = store.SetTagsForPage("page-3", []string{"react", "vue"})
 
-	got, err := store.GetTagsForPages([]string{"page-1", "page-3"})
+	got, err := store.GetTagsForPages(testPageIDs("page-1", "page-3"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -420,7 +447,7 @@ func TestTagsStore_GetTagsForPages_ReturnsTagsForMultiplePages(t *testing.T) {
 func TestTagsStore_GetTagsForPages_EmptyInputReturnsEmptyMap(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetTagsForPages([]string{})
+	got, err := store.GetTagsForPages(testPageIDs[string]())
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -435,7 +462,7 @@ func TestTagsStore_GetTagsForPages_EmptyInputReturnsEmptyMap(t *testing.T) {
 func TestTagsStore_GetTagsForPages_UnknownIDReturnsNoEntry(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetTagsForPages([]string{"does-not-exist"})
+	got, err := store.GetTagsForPages(testPageIDs("does-not-exist"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -474,13 +501,13 @@ func TestTagsStore_SetPageIndex_StoresTagsAndExcerpt(t *testing.T) {
 		t.Fatalf("SetPageIndex: %v", err)
 	}
 
-	gotTags, err := store.GetTagsForPages([]string{"page-1"})
+	gotTags, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
 	assertStringSliceEqual(t, gotTags["page-1"], []string{"go", "testing"})
 
-	gotExcerpts, err := store.GetExcerptsForPages([]string{"page-1"})
+	gotExcerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -495,7 +522,7 @@ func TestTagsStore_SetPageIndex_UpdatesExcerptOnSecondCall(t *testing.T) {
 	_ = store.SetPageIndex("page-1", []string{"go"}, "first excerpt")
 	_ = store.SetPageIndex("page-1", []string{"go"}, "updated excerpt")
 
-	got, err := store.GetExcerptsForPages([]string{"page-1"})
+	got, err := store.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -510,7 +537,7 @@ func TestTagsStore_SetPageIndex_EmptyTagsClearsTagsButKeepsExcerpt(t *testing.T)
 	_ = store.SetPageIndex("page-1", []string{"go"}, "excerpt here")
 	_ = store.SetPageIndex("page-1", []string{}, "excerpt here")
 
-	tags, err := store.GetTagsForPages([]string{"page-1"})
+	tags, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -518,7 +545,7 @@ func TestTagsStore_SetPageIndex_EmptyTagsClearsTagsButKeepsExcerpt(t *testing.T)
 		t.Errorf("expected no tags, got %v", tags["page-1"])
 	}
 
-	exc, err := store.GetExcerptsForPages([]string{"page-1"})
+	exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -537,7 +564,7 @@ func TestTagsStore_DeletePageIndex_RemovesTagsAndExcerpt(t *testing.T) {
 		t.Fatalf("DeletePageIndex: %v", err)
 	}
 
-	tags, err := store.GetTagsForPages([]string{"page-1"})
+	tags, err := store.GetTagsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetTagsForPages: %v", err)
 	}
@@ -545,7 +572,7 @@ func TestTagsStore_DeletePageIndex_RemovesTagsAndExcerpt(t *testing.T) {
 		t.Errorf("expected no tags after delete, got %v", tags["page-1"])
 	}
 
-	exc, err := store.GetExcerptsForPages([]string{"page-1"})
+	exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -569,7 +596,7 @@ func TestTagsStore_GetExcerptsForPages_ReturnsCorrectExcerpts(t *testing.T) {
 	_ = store.SetPageIndex("p1", []string{"go"}, "excerpt one")
 	_ = store.SetPageIndex("p2", []string{"ts"}, "excerpt two")
 
-	got, err := store.GetExcerptsForPages([]string{"p1", "p2"})
+	got, err := store.GetExcerptsForPages(testPageIDs("p1", "p2"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -584,7 +611,7 @@ func TestTagsStore_GetExcerptsForPages_ReturnsCorrectExcerpts(t *testing.T) {
 func TestTagsStore_GetExcerptsForPages_UnknownIDReturnsNoEntry(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetExcerptsForPages([]string{"ghost"})
+	got, err := store.GetExcerptsForPages(testPageIDs("ghost"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -596,7 +623,7 @@ func TestTagsStore_GetExcerptsForPages_UnknownIDReturnsNoEntry(t *testing.T) {
 func TestTagsStore_GetExcerptsForPages_EmptyInputReturnsEmptyMap(t *testing.T) {
 	store := newTestStore(t)
 
-	got, err := store.GetExcerptsForPages([]string{})
+	got, err := store.GetExcerptsForPages(testPageIDs[string]())
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages: %v", err)
 	}
@@ -619,7 +646,7 @@ func TestTagsStore_Clear_AlsoRemovesPageMeta(t *testing.T) {
 		t.Fatalf("Clear: %v", err)
 	}
 
-	exc, err := store.GetExcerptsForPages([]string{"page-1"})
+	exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
 	if err != nil {
 		t.Fatalf("GetExcerptsForPages after Clear: %v", err)
 	}

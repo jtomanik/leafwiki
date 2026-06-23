@@ -211,16 +211,19 @@ test('self-service dialog shows retry state instead of an empty list after load 
   });
 
   await openSelfAPIKeysDialog(page);
-  await expect(page.getByText('Could not load API keys.')).toBeVisible();
+  const loadError = page.getByTestId('mcp-api-keys-dialog-load-error');
+  await expect(loadError).toBeVisible();
+  await expect(loadError).toHaveAttribute('data-error-code', 'mcp_api_keys_load_failed');
+  await expect(loadError).toHaveAttribute('data-l10n-id', 'errors.mcp_api_keys.load_failed');
   await expect(page.getByText('No active keys.')).toHaveCount(0);
 
   await page.getByTestId('mcp-api-keys-dialog-name-input').fill('Retry key');
   await page.getByTestId('mcp-api-keys-dialog-current-password-input').fill(password);
   await expect(page.getByTestId('mcp-api-keys-dialog-button-create')).toBeDisabled();
 
-  await page.getByRole('button', { name: 'Retry' }).click();
+  await page.getByTestId('mcp-api-keys-dialog-retry').click();
   await expect(page.getByText('No active keys.')).toBeVisible();
-  await expect(page.getByText('Could not load API keys.')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-api-keys-dialog-load-error')).toHaveCount(0);
   await expect(page.getByTestId('mcp-api-keys-dialog-button-create')).toBeEnabled();
 });
 

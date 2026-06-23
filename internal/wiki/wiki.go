@@ -80,6 +80,8 @@ type Wiki struct {
 
 const SYSTEM_USER_ID = "system"
 
+const workspaceSyncStartupPhaseOpenService = "open_service"
+
 type WikiOptions struct {
 	Workspace               Workspace
 	StorageDir              string        // Path to storage directory
@@ -237,7 +239,7 @@ func (w *Wiki) initCoreServices(_ *WikiOptions) error {
 	workspaceSyncLog := w.log.With("subsystem", "workspaceSync")
 	phaseStarted := time.Now()
 	workspaceSyncLog.Info("workspace sync startup phase started",
-		"phase", "open_service",
+		"phase", workspaceSyncStartupPhaseOpenService,
 		"data_dir", w.workspace.DataDir,
 		"root_dir", w.workspace.RootDir,
 	)
@@ -251,14 +253,14 @@ func (w *Wiki) initCoreServices(_ *WikiOptions) error {
 	})
 	if err != nil {
 		workspaceSyncLog.Error("workspace sync startup phase failed",
-			"phase", "open_service",
+			"phase", workspaceSyncStartupPhaseOpenService,
 			"duration", time.Since(phaseStarted),
 			"error", err,
 		)
 		return err
 	}
 	workspaceSyncLog.Info("workspace sync startup phase completed",
-		"phase", "open_service",
+		"phase", workspaceSyncStartupPhaseOpenService,
 		"duration", time.Since(phaseStarted),
 	)
 	w.workspaceSync = service
@@ -321,8 +323,8 @@ func (w *Wiki) rebuildTagsAndProperties() error {
 	if err := w.props.ClearIndex(); err != nil {
 		return err
 	}
-	var ids []string
-	if err := w.tree.WalkNodes(func(id string) error {
+	var ids []tree.PageID
+	if err := w.tree.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
@@ -331,7 +333,7 @@ func (w *Wiki) rebuildTagsAndProperties() error {
 	pages, errs := w.tree.GetPages(ids)
 	for i, page := range pages {
 		if errs[i] != nil {
-			w.log.Warn("skipping page during bootstrap", "pageID", ids[i], "error", errs[i])
+			w.log.Warn("skipping page during bootstrap", "pageID", ids[i].String(), "error", errs[i])
 			continue
 		}
 		if err := w.tags.IndexPageContent(page.ID, page.RawContent); err != nil {
@@ -415,9 +417,10 @@ func (w *Wiki) EnsureWelcomePage() error {
 	}
 	o := w.newPageOrchestrator()
 	k := tree.NodeKindPage
+	systemUserID := tree.NewUserIDUnchecked(SYSTEM_USER_ID)
 	createOut, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, o, w.log).Execute(
 		context.Background(),
-		wikipages.CreatePageInput{UserID: SYSTEM_USER_ID, Title: "Welcome to LeafWiki", Slug: "welcome-to-leafwiki", Kind: &k},
+		wikipages.CreatePageInput{UserID: systemUserID, Title: "Welcome to LeafWiki", Slug: "welcome-to-leafwiki", Kind: &k},
 	)
 	if err != nil {
 		return err
@@ -462,7 +465,7 @@ For more information, visit the [LeafWiki GitHub repository](https://github.com/
 	}
 	if _, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, o, w.log).Execute(
 		context.Background(),
-		wikipages.UpdatePageInput{UserID: SYSTEM_USER_ID, ID: p.ID, Version: current.Version(), Title: p.Title, Slug: p.Slug, Content: &content, Kind: &k},
+		wikipages.UpdatePageInput{UserID: systemUserID, ID: p.ID, Version: current.Version(), Title: p.Title, Slug: p.Slug, Content: &content, Kind: &k},
 	); err != nil {
 		return err
 	}

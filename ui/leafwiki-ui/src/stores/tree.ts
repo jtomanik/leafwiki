@@ -1,6 +1,7 @@
 import { fetchTree, PageNode } from '@/lib/api/pages'
 import { HOME_WORKSPACE_ID } from '@/lib/api/workspaces'
 import { FlatPageSearchItem, buildFlatPageSearchItems } from '@/lib/pageSearch'
+import { asWorkspaceID } from '@/lib/semanticTypes'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -42,7 +43,10 @@ function collectExpandableNodeIds(root: PageNode | null): string[] {
   return out
 }
 
-function assignParentIds(node: PageNode, parentId: string | null = null) {
+function assignParentIds(
+  node: PageNode,
+  parentId: PageNode['parentId'] = null,
+) {
   node.parentId = parentId
   for (const child of node.children || []) {
     assignParentIds(child, node.id)
@@ -297,7 +301,7 @@ export const useTreeStore = create<TreeStore>()(
         const byPathKind = state.byPathKind
         const node = byId?.[id]
         if (!node) return
-        const updatedNode = { ...node, version }
+        const updatedNode = { ...node, version: version as PageNode['version'] }
         const currentPathKind = node.path ? (byPathKind[node.path] ?? {}) : {}
         const nextByPath =
           node.path && byPath[node.path]?.id === id
@@ -334,7 +338,7 @@ export const useTreeStore = create<TreeStore>()(
         })
 
         try {
-          const tree = await fetchTree(normalized)
+          const tree = await fetchTree(asWorkspaceID(normalized))
           if (
             get().getWorkspaceState(normalized).reloadRequestId !== requestId
           ) {

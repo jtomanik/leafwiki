@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { lookupPath } from '@/lib/api/pages'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
+import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
 import { toWikiLookupPath, type WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
@@ -47,8 +48,8 @@ export default function Page404({
     const loadLookup = async () => {
       try {
         const lookup = await lookupPath(
-          lookupPathValue,
-          workspaceId,
+          asRoutePath(lookupPathValue),
+          asWorkspaceID(workspaceId),
           targetKind,
         )
         if (active) {

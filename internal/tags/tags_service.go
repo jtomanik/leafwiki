@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 type TagsService struct {
@@ -19,21 +20,21 @@ func (s *TagsService) ClearIndex() error {
 }
 
 // IndexPageContent extracts tags and excerpt from rawContent and stores both atomically.
-func (s *TagsService) IndexPageContent(pageID, rawContent string) error {
+func (s *TagsService) IndexPageContent(pageID tree.PageID, rawContent string) error {
 	tags := ExtractTagsFromContent(rawContent)
 	excerpt := ExtractExcerptFromContent(rawContent)
 	return s.store.SetPageIndex(pageID, tags, excerpt)
 }
 
-func (s *TagsService) SetTagsForPage(pageID string, tags []string) error {
+func (s *TagsService) SetTagsForPage(pageID tree.PageID, tags []string) error {
 	return s.store.SetTagsForPage(pageID, tags)
 }
 
-func (s *TagsService) DeleteTagsForPage(pageID string) error {
+func (s *TagsService) DeleteTagsForPage(pageID tree.PageID) error {
 	return s.store.DeleteTagsForPage(pageID)
 }
 
-func (s *TagsService) DeletePageIndex(pageID string) error {
+func (s *TagsService) DeletePageIndex(pageID tree.PageID) error {
 	return s.store.DeletePageIndex(pageID)
 }
 
@@ -45,15 +46,15 @@ func (s *TagsService) GetAllTagsForSelection(filter string, selected []string, l
 	return s.store.GetAllTagsForSelection(filter, selected, limit)
 }
 
-func (s *TagsService) GetPageIDsByTags(tags []string) ([]string, error) {
+func (s *TagsService) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	return s.store.GetPageIDsByTags(tags)
 }
 
-func (s *TagsService) GetTagsForPages(pageIDs []string) (map[string][]string, error) {
+func (s *TagsService) GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]string, error) {
 	return s.store.GetTagsForPages(pageIDs)
 }
 
-func (s *TagsService) GetExcerptsForPages(pageIDs []string) (map[string]string, error) {
+func (s *TagsService) GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error) {
 	return s.store.GetExcerptsForPages(pageIDs)
 }
 

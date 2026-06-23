@@ -1,6 +1,7 @@
 package frontd
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/projectdaemon"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestWorkspaceRouterProxyResolvesWorkspaceAndRewritesAPIPath(t *testing.T) {
@@ -34,10 +36,10 @@ func TestWorkspaceRouterProxyResolvesWorkspaceAndRewritesAPIPath(t *testing.T) {
 	defer upstream.Close()
 
 	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
-		Resolve: func(*http.Request, string) (WorkspaceRoute, error) {
-			return WorkspaceRoute{WorkspaceID: "home", Upstream: upstream.URL, DaemonToken: "private-token"}, nil
+		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+			return WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("home"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
 		},
-		Actor: func(_ *http.Request, workspaceID string) (projectdaemon.ActorContext, error) {
+		Actor: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 			return projectdaemon.ActorContext{
 				Version:     1,
 				Issuer:      projectdaemon.ActorContextIssuerWikid,
@@ -85,10 +87,10 @@ func TestWorkspaceRouterProxyRewritesWorkspaceAssetPathsToStaticAssetRoute(t *te
 	defer upstream.Close()
 
 	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
-		Resolve: func(*http.Request, string) (WorkspaceRoute, error) {
-			return WorkspaceRoute{WorkspaceID: "docs", Upstream: upstream.URL, DaemonToken: "private-token"}, nil
+		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+			return WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("docs"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
 		},
-		Actor: func(_ *http.Request, workspaceID string) (projectdaemon.ActorContext, error) {
+		Actor: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 			return projectdaemon.ActorContext{
 				Version:     1,
 				Issuer:      projectdaemon.ActorContextIssuerWikid,
@@ -115,36 +117,39 @@ func TestWorkspaceRouterProxyRewritesWorkspaceAssetPathsToStaticAssetRoute(t *te
 
 func TestWorkspaceRouterProxyMapsResolverErrors(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		want int
+		name          string
+		err           error
+		wantStatus    int
+		wantCode      string
+		wantMessageID string
 	}{
-		{name: "not found", err: ErrWorkspaceNotFound, want: http.StatusNotFound},
-		{name: "forbidden", err: ErrWorkspaceForbidden, want: http.StatusForbidden},
+		{name: "not found", err: ErrWorkspaceNotFound, wantStatus: http.StatusNotFound, wantCode: "workspace_not_found", wantMessageID: "errors.workspace.not_found"},
+		{name: "forbidden", err: ErrWorkspaceForbidden, wantStatus: http.StatusForbidden, wantCode: "workspace_forbidden", wantMessageID: "errors.workspace.forbidden"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
-				Resolve: func(*http.Request, string) (WorkspaceRoute, error) {
+				Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
 					return WorkspaceRoute{}, tt.err
 				},
-				Actor: func(*http.Request, string) (projectdaemon.ActorContext, error) {
+				Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 					return projectdaemon.ActorContext{}, nil
 				},
 			})
 			rec := httptest.NewRecorder()
 			proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
-			if rec.Code != tt.want {
-				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.want, rec.Body.String())
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
+			assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
 		})
 	}
 
 	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
-		Resolve: func(*http.Request, string) (WorkspaceRoute, error) {
+		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
 			return WorkspaceRoute{}, errors.New("boom")
 		},
-		Actor: func(*http.Request, string) (projectdaemon.ActorContext, error) {
+		Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 			return projectdaemon.ActorContext{}, nil
 		},
 	})
@@ -152,5 +157,49 @@ func TestWorkspaceRouterProxyMapsResolverErrors(t *testing.T) {
 	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	assertStructuredFrontdError(t, rec, "workspace_unavailable", "errors.workspace.unavailable")
+}
+
+func TestWorkspaceRouterProxyReportsStructuredDependencyErrors(t *testing.T) {
+	t.Run("resolver unavailable", func(t *testing.T) {
+		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{})
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+		}
+		assertStructuredFrontdError(t, rec, "workspace_resolver_unavailable", "errors.workspace.resolver_unavailable")
+	})
+
+	t.Run("actor resolver unavailable", func(t *testing.T) {
+		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
+			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+				return WorkspaceRoute{WorkspaceID: "home", Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+		}
+		assertStructuredFrontdError(t, rec, "workspace_actor_context_unavailable", "errors.workspace.actor_context_unavailable")
+	})
+}
+
+func assertStructuredFrontdError(t *testing.T, rec *httptest.ResponseRecorder, code string, messageID string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode structured error: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message == "" {
+		t.Fatalf("structured error = %#v, want code=%q messageId=%q with message", body.Error, code, messageID)
 	}
 }

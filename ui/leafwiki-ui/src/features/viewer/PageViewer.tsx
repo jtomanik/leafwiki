@@ -193,7 +193,13 @@ export default function PageViewer() {
       <div className="page-viewer">
         {page && !error && (
           <div className="page-viewer__body">
-            <article className="page-viewer__content">
+            <article
+              className="page-viewer__content"
+              data-page-id={page.id}
+              data-page-kind={page.kind}
+              data-page-path={page.path}
+              data-workspace-id={workspaceId}
+            >
               <MarkdownPreview
                 content={page.content}
                 path={page.path}

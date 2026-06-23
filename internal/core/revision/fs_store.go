@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/shared"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 type FSStore struct {
@@ -141,16 +142,16 @@ func (s *FSStore) SaveRevision(rev *Revision) error {
 	if rev == nil {
 		return fmt.Errorf("revision is required")
 	}
-	if strings.TrimSpace(rev.ID) == "" {
+	if strings.TrimSpace(revisionIDStorageKey(rev.ID)) == "" {
 		return fmt.Errorf("revision id is required")
 	}
-	if err := validateStorageID(rev.PageID); err != nil {
+	if err := validateStorageID(pageIDStorageKey(rev.PageID)); err != nil {
 		return fmt.Errorf("page id is required")
 	}
 	if rev.CreatedAt.IsZero() {
 		return fmt.Errorf("created_at is required")
 	}
-	if err := validateStorageID(rev.ID); err != nil {
+	if err := validateStorageID(revisionIDStorageKey(rev.ID)); err != nil {
 		return fmt.Errorf("invalid revision id: %s", rev.ID)
 	}
 
@@ -165,14 +166,14 @@ func (s *FSStore) SaveRevision(rev *Revision) error {
 	if err != nil {
 		return err
 	}
-	index[strings.TrimSpace(rev.ID)] = filepath.Base(dst)
+	index[strings.TrimSpace(revisionIDStorageKey(rev.ID))] = filepath.Base(dst)
 	if err := s.saveRevisionIndex(rev.PageID, index); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *FSStore) ListRevisions(pageID string) ([]*Revision, error) {
+func (s *FSStore) ListRevisions(pageID tree.PageID) ([]*Revision, error) {
 	revisions, _, err := s.ListRevisionsPage(pageID, "", 0)
 	if err != nil {
 		return nil, err
@@ -180,8 +181,8 @@ func (s *FSStore) ListRevisions(pageID string) ([]*Revision, error) {
 	return revisions, nil
 }
 
-func (s *FSStore) ListRevisionsPage(pageID, cursor string, limit int) ([]*Revision, string, error) {
-	if err := validateStorageID(pageID); err != nil {
+func (s *FSStore) ListRevisionsPage(pageID tree.PageID, cursor string, limit int) ([]*Revision, string, error) {
+	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return nil, "", fmt.Errorf("invalid page ID: %w", err)
 	}
 	names, err := s.revisionFileNames(pageID)
@@ -229,8 +230,8 @@ func (s *FSStore) ListRevisionsPage(pageID, cursor string, limit int) ([]*Revisi
 	return revisions, nextCursor, nil
 }
 
-func (s *FSStore) GetLatestRevision(pageID string) (*Revision, error) {
-	if err := validateStorageID(pageID); err != nil {
+func (s *FSStore) GetLatestRevision(pageID tree.PageID) (*Revision, error) {
+	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return nil, fmt.Errorf("invalid page ID: %w", err)
 	}
 	names, err := s.revisionFileNames(pageID)
@@ -247,12 +248,12 @@ func (s *FSStore) GetLatestRevision(pageID string) (*Revision, error) {
 	return &rev, nil
 }
 
-func (s *FSStore) GetRevision(pageID, revisionID string) (*Revision, error) {
-	if err := validateStorageID(pageID); err != nil {
+func (s *FSStore) GetRevision(pageID tree.PageID, revisionID RevisionID) (*Revision, error) {
+	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return nil, fmt.Errorf("invalid page ID: %w", err)
 	}
-	revisionID = strings.TrimSpace(revisionID)
-	if revisionID == "" {
+	revisionIDKey := strings.TrimSpace(revisionIDStorageKey(revisionID))
+	if revisionIDKey == "" {
 		return nil, os.ErrNotExist
 	}
 
@@ -260,7 +261,7 @@ func (s *FSStore) GetRevision(pageID, revisionID string) (*Revision, error) {
 	if err != nil {
 		return nil, err
 	}
-	if name := strings.TrimSpace(index[revisionID]); name != "" {
+	if name := strings.TrimSpace(index[revisionIDKey]); name != "" {
 		var rev Revision
 		if err := readJSON(filepath.Join(s.revisionsPageDir(pageID), name), &rev); err != nil {
 			return nil, fmt.Errorf("read revision %s: %w", name, err)
@@ -273,12 +274,12 @@ func (s *FSStore) GetRevision(pageID, revisionID string) (*Revision, error) {
 		return nil, err
 	}
 	for _, name := range names {
-		if strings.HasSuffix(name, "_"+revisionID+".json") {
+		if strings.HasSuffix(name, "_"+revisionIDKey+".json") {
 			var rev Revision
 			if err := readJSON(filepath.Join(s.revisionsPageDir(pageID), name), &rev); err != nil {
 				return nil, fmt.Errorf("read revision %s: %w", name, err)
 			}
-			index[revisionID] = name
+			index[revisionIDKey] = name
 			_ = s.saveRevisionIndex(pageID, index)
 			return &rev, nil
 		}
@@ -290,11 +291,11 @@ func (s *FSStore) GetRevision(pageID, revisionID string) (*Revision, error) {
 // Files are sorted newest-first, so names[keepCount:] are the oldest ones.
 // Content blobs and asset manifests are NOT deleted — they are content-addressed and
 // may be shared across multiple revisions.
-func (s *FSStore) PruneRevisions(pageID string, keepCount int) error {
+func (s *FSStore) PruneRevisions(pageID tree.PageID, keepCount int) error {
 	if keepCount <= 0 {
 		return nil
 	}
-	if err := validateStorageID(pageID); err != nil {
+	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return fmt.Errorf("invalid page ID: %w", err)
 	}
 	names, err := s.revisionFileNames(pageID)
@@ -333,7 +334,7 @@ func (s *FSStore) PruneRevisions(pageID string, keepCount int) error {
 	return nil
 }
 
-func (s *FSStore) revisionFileNames(pageID string) ([]string, error) {
+func (s *FSStore) revisionFileNames(pageID tree.PageID) ([]string, error) {
 	dir := s.revisionsPageDir(pageID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -469,9 +470,8 @@ func (s *FSStore) CopyAssetBlobToPath(hash string, expectedSize int64, dstPath s
 	return nil
 }
 
-func (s *FSStore) DeletePageRevisions(pageID string) error {
-	pageID = strings.TrimSpace(pageID)
-	if err := validateStorageID(pageID); err != nil {
+func (s *FSStore) DeletePageRevisions(pageID tree.PageID) error {
+	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return nil
 	}
 
@@ -489,12 +489,12 @@ func (s *FSStore) revisionsDir() string {
 	return filepath.Join(s.baseDir(), "revisions")
 }
 
-func (s *FSStore) revisionsPageDir(pageID string) string {
-	return filepath.Join(s.revisionsDir(), pageID)
+func (s *FSStore) revisionsPageDir(pageID tree.PageID) string {
+	return filepath.Join(s.revisionsDir(), pageIDStorageKey(pageID))
 }
 
-func (s *FSStore) revisionFilePath(pageID, revisionID string, createdAt time.Time) string {
-	filename := fmt.Sprintf("%s_%s.json", revisionFileTimestamp(createdAt), revisionID)
+func (s *FSStore) revisionFilePath(pageID tree.PageID, revisionID RevisionID, createdAt time.Time) string {
+	filename := fmt.Sprintf("%s_%s.json", revisionFileTimestamp(createdAt), revisionIDStorageKey(revisionID))
 	return filepath.Join(s.revisionsPageDir(pageID), filename)
 }
 
@@ -587,11 +587,11 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func (s *FSStore) revisionIndexPath(pageID string) string {
+func (s *FSStore) revisionIndexPath(pageID tree.PageID) string {
 	return filepath.Join(s.revisionsPageDir(pageID), revisionIndexFileName)
 }
 
-func (s *FSStore) loadRevisionIndex(pageID string) (revisionIndex, error) {
+func (s *FSStore) loadRevisionIndex(pageID tree.PageID) (revisionIndex, error) {
 	path := s.revisionIndexPath(pageID)
 	var index revisionIndex
 	if err := readJSON(path, &index); err != nil {
@@ -606,7 +606,7 @@ func (s *FSStore) loadRevisionIndex(pageID string) (revisionIndex, error) {
 	return index, nil
 }
 
-func (s *FSStore) saveRevisionIndex(pageID string, index revisionIndex) error {
+func (s *FSStore) saveRevisionIndex(pageID tree.PageID, index revisionIndex) error {
 	if index == nil {
 		index = revisionIndex{}
 	}
@@ -618,4 +618,12 @@ func (s *FSStore) saveRevisionIndex(pageID string, index revisionIndex) error {
 		return fmt.Errorf("write revision index: %w", err)
 	}
 	return nil
+}
+
+func pageIDStorageKey(pageID tree.PageID) string {
+	return pageID.MetadataValue()
+}
+
+func revisionIDStorageKey(revisionID RevisionID) string {
+	return revisionID.CommitID()
 }

@@ -4,6 +4,7 @@ import { createPage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
+import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useMemo, useState } from 'react'
@@ -85,7 +86,13 @@ export function AddPageDialog({
       setLoading(true)
       setFieldErrors({})
       try {
-        await createPage({ title, slug, parentId, kind: nodeKind, workspaceId })
+        await createPage({
+          title,
+          slug: asSlug(slug),
+          parentId: parentId ? asPageID(parentId) : null,
+          kind: nodeKind,
+          workspaceId: asWorkspaceID(workspaceId),
+        })
         toast.success(`${itemLabelCapitalized} created`)
         await reloadTree(workspaceId)
         if (redirect) {

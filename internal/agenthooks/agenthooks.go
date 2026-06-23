@@ -8,20 +8,49 @@ import (
 	"time"
 )
 
+type ProviderID string
+type AgentEventName string
+type AgentSource string
+type AgentToolName string
+
 const (
-	ProviderCodex   = "codex"
-	ProviderClaude  = "claude"
-	ProviderCursor  = "cursor"
-	ProviderUnknown = "unknown"
+	ProviderCodex   ProviderID = "codex"
+	ProviderClaude  ProviderID = "claude"
+	ProviderCursor  ProviderID = "cursor"
+	ProviderUnknown ProviderID = "unknown"
+)
+
+const (
+	AgentEventSessionStart      AgentEventName = "SessionStart"
+	AgentEventSessionEnd        AgentEventName = "SessionEnd"
+	AgentEventPreToolUse        AgentEventName = "PreToolUse"
+	AgentEventPermissionRequest AgentEventName = "PermissionRequest"
+	AgentEventPostToolUse       AgentEventName = "PostToolUse"
+	AgentEventUserPromptSubmit  AgentEventName = "UserPromptSubmit"
+	AgentEventStop              AgentEventName = "Stop"
+	AgentEventSubagentStart     AgentEventName = "SubagentStart"
+	AgentEventSubagentStop      AgentEventName = "SubagentStop"
+)
+
+const (
+	AgentSourceCLI     AgentSource = "cli"
+	AgentSourceStartup AgentSource = "startup"
+	AgentSourceHook    AgentSource = "hook"
+	AgentSourceMCP     AgentSource = "mcp"
+	AgentSourceTool    AgentSource = "tool"
+	AgentSourceUser    AgentSource = "user"
+	AgentSourceIDE     AgentSource = "ide"
+	AgentSourceAgent   AgentSource = "agent"
+	AgentSourceUnknown AgentSource = "unknown"
 )
 
 type Event struct {
-	Provider      string
+	Provider      ProviderID
 	SessionIDHash string
-	EventName     string
+	EventName     AgentEventName
 	Model         string
-	Source        string
-	ToolName      string
+	Source        AgentSource
+	ToolName      AgentToolName
 	IsMCPTool     bool
 	SubagentDelta int
 	EndsSession   bool
@@ -38,9 +67,9 @@ type envelope struct {
 	ToolName             string `json:"tool_name"`
 }
 
-func Normalize(provider string, raw []byte, seenAt time.Time) (Event, bool) {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if !isSupportedProvider(provider) {
+func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) {
+	providerID := ProviderID(strings.ToLower(strings.TrimSpace(string(provider))))
+	if !isSupportedProvider(providerID) {
 		return Event{}, false
 	}
 
@@ -48,38 +77,54 @@ func Normalize(provider string, raw []byte, seenAt time.Time) (Event, bool) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return Event{}, false
 	}
-	eventName := strings.TrimSpace(payload.HookEventName)
-	if !isSupportedEvent(provider, eventName) {
+	eventName := AgentEventName(strings.TrimSpace(payload.HookEventName))
+	if !isSupportedEvent(providerID, eventName) {
 		return Event{}, false
 	}
-	sessionID := sessionKey(provider, eventName, payload)
+	sessionID := sessionKey(providerID, eventName, payload)
 	if strings.TrimSpace(sessionID) == "" {
 		return Event{}, false
 	}
 
 	toolName := strings.TrimSpace(payload.ToolName)
-	sanitizedToolName := sanitizeMetadataValue(toolName, 160)
+	sanitizedToolName := AgentToolName(sanitizeMetadataValue(toolName, 160))
 	return Event{
-		Provider:      provider,
-		SessionIDHash: hashSessionID(provider, sessionID),
+		Provider:      providerID,
+		SessionIDHash: hashSessionID(providerID, sessionID),
 		EventName:     eventName,
 		Model:         sanitizeMetadataValue(payload.Model, 80),
 		Source:        sanitizeSource(payload.Source),
 		ToolName:      sanitizedToolName,
 		IsMCPTool:     isMCPToolEvent(eventName, sanitizedToolName),
 		SubagentDelta: subagentDelta(eventName),
-		EndsSession:   endsSession(provider, eventName),
+		EndsSession:   endsSession(providerID, eventName),
 		SeenAt:        seenAt,
 	}, true
 }
 
-func sanitizeSource(raw string) string {
+func sanitizeSource(raw string) AgentSource {
 	source := strings.ToLower(sanitizeMetadataValue(raw, 40))
 	switch source {
-	case "", "cli", "startup", "hook", "mcp", "tool", "user", "ide", "agent":
-		return source
+	case "":
+		return ""
+	case string(AgentSourceCLI):
+		return AgentSourceCLI
+	case string(AgentSourceStartup):
+		return AgentSourceStartup
+	case string(AgentSourceHook):
+		return AgentSourceHook
+	case string(AgentSourceMCP):
+		return AgentSourceMCP
+	case string(AgentSourceTool):
+		return AgentSourceTool
+	case string(AgentSourceUser):
+		return AgentSourceUser
+	case string(AgentSourceIDE):
+		return AgentSourceIDE
+	case string(AgentSourceAgent):
+		return AgentSourceAgent
 	default:
-		return "unknown"
+		return AgentSourceUnknown
 	}
 }
 
@@ -108,9 +153,9 @@ func sanitizeMetadataValue(raw string, maxLen int) string {
 
 func AllowResponse(provider string) []byte {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case ProviderCodex, ProviderClaude:
+	case string(ProviderCodex), string(ProviderClaude):
 		return []byte("{}\n")
-	case ProviderCursor:
+	case string(ProviderCursor):
 		return []byte("{\"permission\":\"allow\"}\n")
 	default:
 		return nil
@@ -118,9 +163,9 @@ func AllowResponse(provider string) []byte {
 }
 
 func IsNormalizedEvent(event Event) bool {
-	provider := strings.TrimSpace(event.Provider)
-	eventName := strings.TrimSpace(event.EventName)
-	toolName := strings.TrimSpace(event.ToolName)
+	provider := ProviderID(strings.TrimSpace(string(event.Provider)))
+	eventName := AgentEventName(strings.TrimSpace(string(event.EventName)))
+	toolName := AgentToolName(strings.TrimSpace(string(event.ToolName)))
 	if provider != event.Provider || eventName != event.EventName || toolName != event.ToolName {
 		return false
 	}
@@ -139,7 +184,7 @@ func IsNormalizedEvent(event Event) bool {
 	return event.EndsSession == endsSession(provider, eventName)
 }
 
-func isSupportedProvider(provider string) bool {
+func isSupportedProvider(provider ProviderID) bool {
 	switch provider {
 	case ProviderCodex, ProviderClaude, ProviderCursor:
 		return true
@@ -148,16 +193,16 @@ func isSupportedProvider(provider string) bool {
 	}
 }
 
-func isSupportedEvent(provider string, eventName string) bool {
+func isSupportedEvent(provider ProviderID, eventName AgentEventName) bool {
 	switch provider {
 	case ProviderCodex:
 		switch eventName {
-		case "SessionStart", "PreToolUse", "PermissionRequest", "PostToolUse", "UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop":
+		case AgentEventSessionStart, AgentEventPreToolUse, AgentEventPermissionRequest, AgentEventPostToolUse, AgentEventUserPromptSubmit, AgentEventStop, AgentEventSubagentStart, AgentEventSubagentStop:
 			return true
 		}
 	case ProviderClaude:
 		switch eventName {
-		case "SessionStart", "SessionEnd", "PreToolUse", "PermissionRequest", "PostToolUse", "UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop":
+		case AgentEventSessionStart, AgentEventSessionEnd, AgentEventPreToolUse, AgentEventPermissionRequest, AgentEventPostToolUse, AgentEventUserPromptSubmit, AgentEventStop, AgentEventSubagentStart, AgentEventSubagentStop:
 			return true
 		}
 	case ProviderCursor:
@@ -169,7 +214,7 @@ func isSupportedEvent(provider string, eventName string) bool {
 	return false
 }
 
-func sessionKey(provider string, eventName string, payload envelope) string {
+func sessionKey(provider ProviderID, eventName AgentEventName, payload envelope) string {
 	if provider == ProviderCursor {
 		if eventName == "subagentStart" || eventName == "subagentStop" {
 			if strings.TrimSpace(payload.ParentConversationID) != "" {
@@ -184,13 +229,13 @@ func sessionKey(provider string, eventName string, payload envelope) string {
 	return payload.SessionID
 }
 
-func isMCPToolEvent(eventName string, toolName string) bool {
-	return strings.HasPrefix(toolName, "mcp__") ||
+func isMCPToolEvent(eventName AgentEventName, toolName AgentToolName) bool {
+	return strings.HasPrefix(string(toolName), "mcp__") ||
 		eventName == "beforeMCPExecution" ||
 		eventName == "afterMCPExecution"
 }
 
-func subagentDelta(eventName string) int {
+func subagentDelta(eventName AgentEventName) int {
 	switch eventName {
 	case "SubagentStart", "subagentStart":
 		return 1
@@ -201,13 +246,13 @@ func subagentDelta(eventName string) int {
 	}
 }
 
-func endsSession(provider string, eventName string) bool {
+func endsSession(provider ProviderID, eventName AgentEventName) bool {
 	return (provider == ProviderClaude && eventName == "SessionEnd") ||
 		(provider == ProviderCursor && eventName == "sessionEnd")
 }
 
-func hashSessionID(provider string, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(provider + "\x00" + rawSessionID))
+func hashSessionID(provider ProviderID, rawSessionID string) string {
+	sum := sha256.Sum256([]byte(string(provider) + "\x00" + rawSessionID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 

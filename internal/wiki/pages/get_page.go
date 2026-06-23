@@ -8,7 +8,7 @@ import (
 
 // GetPageInput is the input for GetPageUseCase.
 type GetPageInput struct {
-	ID string
+	ID tree.PageID
 }
 
 // GetPageOutput is the output of GetPageUseCase.
@@ -39,7 +39,7 @@ func (uc *GetPageUseCase) Execute(_ context.Context, in GetPageInput) (*GetPageO
 
 // FindByPathInput is the input for FindByPathUseCase.
 type FindByPathInput struct {
-	RoutePath string
+	RoutePath tree.RoutePath
 	Kind      tree.NodeKind
 }
 
@@ -60,14 +60,17 @@ func NewFindByPathUseCase(t *tree.TreeService) *FindByPathUseCase {
 
 // Execute finds the page matching the given route path.
 func (uc *FindByPathUseCase) Execute(_ context.Context, in FindByPathInput) (*FindByPathOutput, error) {
+	routePath, err := ValidateRoutePathValue(in.RoutePath)
+	if err != nil {
+		return nil, err
+	}
 	var (
 		page *tree.Page
-		err  error
 	)
 	if in.Kind == "" {
-		page, err = uc.tree.FindPageByRoutePath(in.RoutePath)
+		page, err = uc.tree.FindPageByRoutePath(routePath)
 	} else {
-		page, err = uc.tree.FindPageByRoutePathAndKind(in.RoutePath, in.Kind)
+		page, err = uc.tree.FindPageByRoutePathAndKind(routePath, in.Kind)
 	}
 	if err != nil {
 		return nil, err
@@ -79,7 +82,7 @@ func (uc *FindByPathUseCase) Execute(_ context.Context, in FindByPathInput) (*Fi
 
 // LookupPagePathInput is the input for LookupPagePathUseCase.
 type LookupPagePathInput struct {
-	Path string
+	Path tree.RoutePath
 	Kind tree.NodeKind
 }
 
@@ -100,14 +103,17 @@ func NewLookupPagePathUseCase(t *tree.TreeService) *LookupPagePathUseCase {
 
 // Execute looks up the path and returns segment metadata.
 func (uc *LookupPagePathUseCase) Execute(_ context.Context, in LookupPagePathInput) (*LookupPagePathOutput, error) {
+	routePath, err := ValidateRoutePathValue(in.Path)
+	if err != nil {
+		return nil, err
+	}
 	var (
 		lookup *tree.PathLookup
-		err    error
 	)
 	if in.Kind == "" {
-		lookup, err = uc.tree.LookupPagePath(in.Path)
+		lookup, err = uc.tree.LookupPagePath(routePath)
 	} else {
-		lookup, err = uc.tree.LookupPagePathForKind(in.Path, in.Kind)
+		lookup, err = uc.tree.LookupPagePathForKind(routePath, in.Kind)
 	}
 	if err != nil {
 		return nil, err
@@ -119,7 +125,7 @@ func (uc *LookupPagePathUseCase) Execute(_ context.Context, in LookupPagePathInp
 
 // ResolvePermalinkInput is the input for ResolvePermalinkUseCase.
 type ResolvePermalinkInput struct {
-	ID string
+	ID tree.PageID
 }
 
 // ResolvePermalinkOutput is the output of ResolvePermalinkUseCase.
@@ -150,8 +156,8 @@ func (uc *ResolvePermalinkUseCase) Execute(_ context.Context, in ResolvePermalin
 
 // SortPagesInput is the input for SortPagesUseCase.
 type SortPagesInput struct {
-	ParentID   string
-	OrderedIDs []string
+	ParentID   tree.PageID
+	OrderedIDs []tree.PageID
 }
 
 // SortPagesUseCase reorders the children of a parent node.
@@ -173,14 +179,14 @@ func (uc *SortPagesUseCase) Execute(_ context.Context, in SortPagesInput) error 
 
 // SuggestSlugInput is the input for SuggestSlugUseCase.
 type SuggestSlugInput struct {
-	ParentID  string
-	CurrentID string
+	ParentID  tree.PageID
+	CurrentID tree.PageID
 	Title     string
 }
 
 // SuggestSlugOutput is the output of SuggestSlugUseCase.
 type SuggestSlugOutput struct {
-	Slug string
+	Slug tree.Slug
 }
 
 // SuggestSlugUseCase generates a unique slug suggestion for the given title in a parent.
@@ -197,11 +203,11 @@ func NewSuggestSlugUseCase(t *tree.TreeService, s *tree.SlugService) *SuggestSlu
 // Execute generates and returns a unique slug suggestion.
 func (uc *SuggestSlugUseCase) Execute(_ context.Context, in SuggestSlugInput) (*SuggestSlugOutput, error) {
 	if in.ParentID == "" || in.ParentID == "root" {
-		return &SuggestSlugOutput{Slug: uc.slug.GenerateUniqueChildSlug(uc.tree.GetTree(), in.CurrentID, in.Title)}, nil
+		return &SuggestSlugOutput{Slug: tree.NewSlugUnchecked(uc.slug.GenerateUniqueChildSlug(uc.tree.GetTree(), in.CurrentID, in.Title))}, nil
 	}
 	parent, err := uc.tree.FindPageByID(in.ParentID)
 	if err != nil {
 		return nil, err
 	}
-	return &SuggestSlugOutput{Slug: uc.slug.GenerateUniqueChildSlug(parent, in.CurrentID, in.Title)}, nil
+	return &SuggestSlugOutput{Slug: tree.NewSlugUnchecked(uc.slug.GenerateUniqueChildSlug(parent, in.CurrentID, in.Title))}, nil
 }

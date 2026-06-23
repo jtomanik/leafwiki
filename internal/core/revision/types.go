@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 type RevisionType string
@@ -23,10 +25,10 @@ type AssetRef struct {
 }
 
 type RevisionState struct {
-	PageID               string
-	ParentID             string
+	PageID               tree.PageID
+	ParentID             tree.PageID
 	Title                string
-	Slug                 string
+	Slug                 tree.Slug
 	Kind                 string
 	Path                 string
 	Content              string
@@ -45,14 +47,14 @@ type RevisionState struct {
 }
 
 type Revision struct {
-	ID                   string                 `json:"id"`
-	PageID               string                 `json:"page_id"`
-	ParentID             string                 `json:"parent_id,omitempty"`
+	ID                   RevisionID             `json:"id"`
+	PageID               tree.PageID            `json:"page_id"`
+	ParentID             tree.PageID            `json:"parent_id,omitempty"`
 	Type                 RevisionType           `json:"type"`
 	AuthorID             string                 `json:"author_id"`
 	CreatedAt            time.Time              `json:"created_at"`
 	Title                string                 `json:"title"`
-	Slug                 string                 `json:"slug"`
+	Slug                 tree.Slug              `json:"slug"`
 	Kind                 string                 `json:"kind"`
 	Path                 string                 `json:"path"`
 	ContentHash          string                 `json:"content_hash"`
@@ -73,11 +75,11 @@ type assetManifest struct {
 }
 
 type RevisionIntegrityIssue struct {
-	PageID     string `json:"page_id"`
-	RevisionID string `json:"revision_id,omitempty"`
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Path       string `json:"path,omitempty"`
+	PageID     tree.PageID            `json:"page_id"`
+	RevisionID RevisionID             `json:"revision_id,omitempty"`
+	Code       sharederrors.ErrorCode `json:"code"`
+	Message    string                 `json:"message"`
+	Path       string                 `json:"path,omitempty"`
 }
 
 type RevisionSnapshot struct {

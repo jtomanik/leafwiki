@@ -102,12 +102,12 @@ func NewWorkspaceProxy(opts WorkspaceProxyOptions) (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		actor, err := opts.Actor(req)
 		if err != nil {
-			http.Error(w, "resolve actor context", http.StatusUnauthorized)
+			writeFrontdError(w, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed, "resolve actor context")
 			return
 		}
 		encoded, err := projectdaemon.EncodeActorContext(actor)
 		if err != nil {
-			http.Error(w, "encode actor context", http.StatusInternalServerError)
+			writeFrontdError(w, http.StatusInternalServerError, errCodeWorkspaceActorContextEncodeFailed, "encode actor context")
 			return
 		}
 		clone := req.Clone(req.Context())
@@ -161,7 +161,7 @@ func newPrivateActorProxy(upstream *url.URL, daemonToken func(*http.Request) str
 
 func retryableUnavailable(w http.ResponseWriter, _ *http.Request, _ error) {
 	w.Header().Set("Retry-After", "1")
-	http.Error(w, "workspaced unavailable", http.StatusServiceUnavailable)
+	writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspacedUnavailable, "workspaced unavailable")
 }
 
 func stripBasePath(path string, basePath string) (string, bool) {

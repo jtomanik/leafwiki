@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
-	"strings"
 
 	coreassets "github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -18,10 +17,10 @@ import (
 // ─── UploadAssetUseCase ──────────────────────────────────────────────────────
 
 type UploadAssetInput struct {
-	UserID   string
-	PageID   string
+	UserID   tree.UserID
+	PageID   tree.PageID
 	File     multipart.File
-	Filename string
+	Filename tree.AssetName
 	MaxBytes int64
 }
 
@@ -43,7 +42,7 @@ func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError("asset_page_not_found", "Page not found", "page %s not found", err, in.PageID)
+			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*
 // ─── ListAssetsUseCase ───────────────────────────────────────────────────────
 
 type ListAssetsInput struct {
-	PageID string
+	PageID tree.PageID
 }
 
 type ListAssetsOutput struct {
@@ -77,7 +76,7 @@ func (uc *ListAssetsUseCase) Execute(_ context.Context, in ListAssetsInput) (*Li
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError("asset_page_not_found", "Page not found", "page %s not found", err, in.PageID)
+			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -91,12 +90,12 @@ func (uc *ListAssetsUseCase) Execute(_ context.Context, in ListAssetsInput) (*Li
 // ─── GetAssetUseCase ────────────────────────────────────────────────────────
 
 type GetAssetInput struct {
-	PageID   string
-	Filename string
+	PageID   tree.PageID
+	Filename tree.AssetName
 }
 
 type GetAssetOutput struct {
-	Filename string
+	Filename tree.AssetName
 	MIMEType string
 	Content  []byte
 }
@@ -114,18 +113,18 @@ func (uc *GetAssetUseCase) Execute(_ context.Context, in GetAssetInput) (*GetAss
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError("asset_page_not_found", "Page not found", "page %s not found", err, in.PageID)
+			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
-	filename := strings.TrimSpace(in.Filename)
+	filename := in.Filename.Clean()
 	content, err := uc.asset.ReadAssetForPage(page, filename)
 	if err != nil {
 		return nil, err
 	}
 	return &GetAssetOutput{
 		Filename: filename,
-		MIMEType: DetectAssetMIMEType(filename, content),
+		MIMEType: DetectAssetMIMEType(filename.Filename(), content),
 		Content:  content,
 	}, nil
 }
@@ -140,10 +139,10 @@ func DetectAssetMIMEType(filename string, content []byte) string {
 // ─── RenameAssetUseCase ──────────────────────────────────────────────────────
 
 type RenameAssetInput struct {
-	UserID      string
-	PageID      string
-	OldFilename string
-	NewFilename string
+	UserID      tree.UserID
+	PageID      tree.PageID
+	OldFilename tree.AssetName
+	NewFilename tree.AssetName
 }
 
 type RenameAssetOutput struct {
@@ -164,7 +163,7 @@ func (uc *RenameAssetUseCase) Execute(_ context.Context, in RenameAssetInput) (*
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError("asset_page_not_found", "Page not found", "page %s not found", err, in.PageID)
+			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -178,9 +177,9 @@ func (uc *RenameAssetUseCase) Execute(_ context.Context, in RenameAssetInput) (*
 // ─── DeleteAssetUseCase ──────────────────────────────────────────────────────
 
 type DeleteAssetInput struct {
-	UserID   string
-	PageID   string
-	Filename string
+	UserID   tree.UserID
+	PageID   tree.PageID
+	Filename tree.AssetName
 }
 
 type DeleteAssetUseCase struct {
@@ -197,7 +196,7 @@ func (uc *DeleteAssetUseCase) Execute(_ context.Context, in DeleteAssetInput) er
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return sharederrors.NewLocalizedError("asset_page_not_found", "Page not found", "page %s not found", err, in.PageID)
+			return sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
 		}
 		return err
 	}

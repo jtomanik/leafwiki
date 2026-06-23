@@ -282,13 +282,13 @@ func validatePatchPropertyKeys(keys []string) error {
 		field := "removeProperties." + rawKey
 		switch {
 		case key == "":
-			ve.Add(field, "Property key must not be empty")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyRequired, MessageIDPagePropertyKeyRequired, "Property key must not be empty")
 		case key != rawKey:
-			ve.Add(field, "Property key must not contain leading or trailing whitespace")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace, "Property key must not contain leading or trailing whitespace")
 		case markdown.IsReservedMetadataKey(key):
-			ve.Add(field, "Property key uses a reserved prefix")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key uses a reserved prefix")
 		case strings.ToLower(key) == "tags" || strings.ToLower(key) == "title":
-			ve.Add(field, "Property key is reserved")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key is reserved")
 		}
 	}
 	if ve.HasErrors() {

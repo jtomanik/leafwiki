@@ -23,9 +23,9 @@ type GrantDocument struct {
 }
 
 type Grant struct {
-	Subject     string    `json:"subject"`
-	WorkspaceID string    `json:"workspaceId"`
-	Role        GrantRole `json:"role"`
+	Subject     string                  `json:"subject"`
+	WorkspaceID workspaceid.WorkspaceID `json:"workspaceId"`
+	Role        GrantRole               `json:"role"`
 }
 
 func NewGrantDocument() GrantDocument {
@@ -48,7 +48,7 @@ func validateGrant(grant Grant) error {
 	if strings.TrimSpace(grant.Subject) == "" {
 		return fmt.Errorf("grant subject is required")
 	}
-	if err := workspaceid.ValidateWorkspaceID(grant.WorkspaceID); err != nil {
+	if err := grant.WorkspaceID.Validate(); err != nil {
 		return fmt.Errorf("grant workspace ID: %w", err)
 	}
 	if !grant.Role.Valid() {

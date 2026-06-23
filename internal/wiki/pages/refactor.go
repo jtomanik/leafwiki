@@ -18,18 +18,18 @@ const (
 
 // RefactorPreviewInput is the input for PreviewPageRefactorUseCase.
 type RefactorPreviewInput struct {
-	PageID      string
+	PageID      tree.PageID
 	Kind        string
 	Title       string
-	Slug        string
+	Slug        tree.Slug
 	Content     *string
-	NewParentID *string
+	NewParentID *tree.PageID
 }
 
 // RefactorPreview is the result of a refactor preview operation.
 type RefactorPreview struct {
 	Kind          string                 `json:"kind"`
-	PageID        string                 `json:"pageId"`
+	PageID        tree.PageID            `json:"pageId"`
 	OldPath       string                 `json:"oldPath"`
 	NewPath       string                 `json:"newPath"`
 	AffectedPages []RefactorAffectedPage `json:"affectedPages"`
@@ -45,18 +45,18 @@ type RefactorPreviewCounts struct {
 
 // RefactorAffectedPage describes a page that has links affected by the refactor.
 type RefactorAffectedPage struct {
-	FromPageID   string   `json:"fromPageId"`
-	FromTitle    string   `json:"fromTitle"`
-	FromPath     string   `json:"fromPath"`
-	MatchedPaths []string `json:"matchedPaths"`
-	Warnings     []string `json:"warnings"`
+	FromPageID   tree.PageID `json:"fromPageId"`
+	FromTitle    string      `json:"fromTitle"`
+	FromPath     string      `json:"fromPath"`
+	MatchedPaths []string    `json:"matchedPaths"`
+	Warnings     []string    `json:"warnings"`
 }
 
 // RefactorApplyInput extends the preview with apply options.
 type RefactorApplyInput struct {
-	UserID  string
+	UserID  tree.UserID
 	Source  string
-	Version string
+	Version tree.PageVersion
 	RefactorPreviewInput
 	RewriteLinks bool
 }
@@ -101,7 +101,7 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 		return nil, err
 	}
 	in.Kind = kind
-	parentID, err := ValidateOptionalParentID(in.NewParentID)
+	parentID, err := ValidateOptionalSemanticParentID(in.NewParentID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +112,8 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 		return nil, err
 	}
 
-	oldPath := page.CalculatePath()
-	newPath, err := uc.computeTargetPath(page, in)
+	oldPath := page.CalculateRoutePath()
+	newRoutePath, err := uc.computeTargetPath(page, in)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,8 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 	return &RefactorPreview{
 		Kind:          in.Kind,
 		PageID:        in.PageID,
-		OldPath:       oldPath,
-		NewPath:       newPath,
+		OldPath:       oldPath.WikiPath(),
+		NewPath:       newRoutePath.WikiPath(),
 		AffectedPages: affectedPages,
 		Counts: RefactorPreviewCounts{
 			AffectedPages: len(affectedPages),
@@ -138,59 +138,52 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 	}, nil
 }
 
-func (uc *PreviewPageRefactorUseCase) computeTargetPath(page *tree.Page, in RefactorPreviewInput) (string, error) {
+func (uc *PreviewPageRefactorUseCase) computeTargetPath(page *tree.Page, in RefactorPreviewInput) (tree.RoutePath, error) {
 	switch in.Kind {
 	case RefactorKindRename:
 		ve := sharederrors.NewValidationErrors()
 		if in.Title == "" {
-			ve.Add("title", "Title must not be empty")
+			ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
 		}
-		if err := uc.slug.IsValidSlug(in.Slug); err != nil {
-			ve.Add("slug", err.Error())
+		if err := in.Slug.Validate(); err != nil {
+			ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
 		}
 		if ve.HasErrors() {
 			return "", ve
 		}
-		parentPath := ""
 		if page.Parent != nil {
-			parentPath = page.Parent.CalculatePath()
+			return page.Parent.CalculateRoutePath().Child(in.Slug), nil
 		}
-		if parentPath == "" {
-			return "/" + in.Slug, nil
-		}
-		return parentPath + "/" + in.Slug, nil
+		return in.Slug.RoutePath(), nil
 
 	case RefactorKindMove:
-		parentID := ""
+		var parentID tree.PageID
 		if in.NewParentID != nil {
 			parentID = *in.NewParentID
 		}
-		parentPath, err := uc.resolveParentPath(parentID)
+		parentRoutePath, err := uc.resolveParentRoutePath(parentID)
 		if err != nil {
 			return "", err
 		}
-		if parentPath == "" {
-			return "/" + page.Slug, nil
-		}
-		return parentPath + "/" + page.Slug, nil
+		return parentRoutePath.Child(page.Slug), nil
 
 	default:
 		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidRefactorKind, "Invalid refactor kind", "invalid refactor kind", nil)
 	}
 }
 
-func (uc *PreviewPageRefactorUseCase) resolveParentPath(parentID string) (string, error) {
-	if parentID == "" || parentID == "root" {
+func (uc *PreviewPageRefactorUseCase) resolveParentRoutePath(parentID tree.PageID) (tree.RoutePath, error) {
+	if parentID == "" || parentID == tree.RootPageID {
 		return "", nil
 	}
 	parent, err := uc.tree.GetPage(parentID)
 	if err != nil {
 		return "", err
 	}
-	return parent.CalculatePath(), nil
+	return parent.CalculateRoutePath(), nil
 }
 
-func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind tree.NodeKind, excludeIDs map[string]struct{}) ([]RefactorAffectedPage, int, error) {
+func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, rootKind tree.NodeKind, excludeIDs map[tree.PageID]struct{}) ([]RefactorAffectedPage, int, error) {
 	if uc.links == nil {
 		return nil, 0, nil
 	}
@@ -199,7 +192,7 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 		return nil, 0, err
 	}
 
-	grouped := make(map[string]*RefactorAffectedPage)
+	grouped := make(map[tree.PageID]*RefactorAffectedPage)
 	totalMatches := 0
 	for _, match := range matches {
 		if _, excluded := excludeIDs[match.FromPageID]; excluded {
@@ -218,8 +211,9 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 			}
 			grouped[match.FromPageID] = item
 		}
-		if !containsString(item.MatchedPaths, match.ToPath) {
-			item.MatchedPaths = append(item.MatchedPaths, match.ToPath)
+		matchedPath := match.ToPath.WikiPath()
+		if !containsString(item.MatchedPaths, matchedPath) {
+			item.MatchedPaths = append(item.MatchedPaths, matchedPath)
 		}
 		totalMatches++
 	}
@@ -232,7 +226,7 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath string, rootKind 
 			return nil, 0, err
 		}
 		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath, Kind: string(rootKind)}}
-		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculatePath(), links.MarkdownSourceKind(sourcePage.Kind), rules)
+		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculateRoutePath(), links.MarkdownSourceKind(sourcePage.Kind), rules)
 		for _, w := range result.Warnings {
 			if !containsString(item.Warnings, w.Message) {
 				item.Warnings = append(item.Warnings, w.Message)
@@ -333,12 +327,12 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 		return nil, err
 	}
 	in.Kind = kind
-	parentID, err := ValidateOptionalParentID(in.NewParentID)
+	parentID, err := ValidateOptionalSemanticParentID(in.NewParentID)
 	if err != nil {
 		return nil, err
 	}
 	in.NewParentID = parentID
-	in.Version = sanitizeClientVersion(in.Version)
+	in.Version = sanitizeSemanticClientVersion(in.Version)
 
 	plan, err := uc.buildApplyPlan(in)
 	if err != nil {
@@ -380,7 +374,7 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 		return uc.tree.GetPage(updated.Page.ID)
 
 	case RefactorKindMove:
-		parentID := ""
+		var parentID tree.PageID
 		if in.NewParentID != nil {
 			parentID = *in.NewParentID
 		}
@@ -425,10 +419,10 @@ func (uc *ApplyPageRefactorUseCase) rewriteIncomingLinks(in RefactorApplyInput, 
 
 type applyRefactorPlan struct {
 	page                    *tree.Page
-	oldPath                 string
-	newPath                 string
-	affectedPageIDs         []string
-	legacyPageLinkSourceIDs map[string]struct{}
+	oldPath                 tree.RoutePath
+	newPath                 tree.RoutePath
+	affectedPageIDs         []tree.PageID
+	legacyPageLinkSourceIDs map[tree.PageID]struct{}
 }
 
 func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*applyRefactorPlan, error) {
@@ -437,8 +431,8 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 		return nil, err
 	}
 
-	oldPath := page.CalculatePath()
-	newPath, err := uc.preview.computeTargetPath(page, in.RefactorPreviewInput)
+	oldPath := page.CalculateRoutePath()
+	newRoutePath, err := uc.preview.computeTargetPath(page, in.RefactorPreviewInput)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +440,7 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 	plan := &applyRefactorPlan{
 		page:    page,
 		oldPath: oldPath,
-		newPath: newPath,
+		newPath: newRoutePath,
 	}
 
 	if !in.RewriteLinks || uc.links == nil {
@@ -459,7 +453,7 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 	}
 
 	excludeIDs := subtreeIDSet(page.PageNode)
-	seenPageIDs := make(map[string]struct{}, len(matches))
+	seenPageIDs := make(map[tree.PageID]struct{}, len(matches))
 	for _, match := range matches {
 		if _, excluded := excludeIDs[match.FromPageID]; excluded {
 			continue
@@ -470,7 +464,7 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 		}
 		if page.Kind == tree.NodeKindPage && match.ToPath == oldPath && match.ToKind == "unknown" && !match.Broken {
 			if plan.legacyPageLinkSourceIDs == nil {
-				plan.legacyPageLinkSourceIDs = make(map[string]struct{})
+				plan.legacyPageLinkSourceIDs = make(map[tree.PageID]struct{})
 			}
 			plan.legacyPageLinkSourceIDs[match.FromPageID] = struct{}{}
 		}
@@ -479,8 +473,8 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 	return plan, nil
 }
 
-func validateRefactorVersion(page *tree.Page, version string) error {
-	if version == tree.VersionUnchecked {
+func validateRefactorVersion(page *tree.Page, version tree.PageVersion) error {
+	if version.IsUnchecked() {
 		return nil
 	}
 	pageVersion := page.Version()
@@ -497,8 +491,8 @@ func validateRefactorVersion(page *tree.Page, version string) error {
 }
 
 type pathChangeSnapshot struct {
-	PageID   string
-	OldPath  string
+	PageID   tree.PageID
+	OldPath  tree.RoutePath
 	Content  string
 	Kind     tree.NodeKind
 	RootPage bool
@@ -507,7 +501,7 @@ type pathChangeSnapshot struct {
 func (uc *ApplyPageRefactorUseCase) captureSnapshots(page *tree.Page, in RefactorApplyInput) ([]pathChangeSnapshot, error) {
 	ids := collectSubtreeIDs(page.PageNode)
 	if len(ids) == 0 {
-		ids = []string{in.PageID}
+		ids = []tree.PageID{in.PageID}
 	}
 	pages, errs := uc.tree.GetPages(ids)
 	snapshots := make([]pathChangeSnapshot, 0, len(ids))
@@ -520,13 +514,13 @@ func (uc *ApplyPageRefactorUseCase) captureSnapshots(page *tree.Page, in Refacto
 			content = *in.Content
 		}
 		snapshots = append(snapshots, pathChangeSnapshot{
-			PageID: p.ID, OldPath: p.CalculatePath(), Content: content, Kind: p.Kind, RootPage: ids[i] == in.PageID,
+			PageID: p.ID, OldPath: p.CalculateRoutePath(), Content: content, Kind: p.Kind, RootPage: ids[i] == in.PageID,
 		})
 	}
 	return snapshots, nil
 }
 
-func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source string, affectedPageIDs []string, rules []links.RewriteRule, legacyPageLinkSourceIDs map[string]struct{}) error {
+func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID tree.UserID, source string, affectedPageIDs []tree.PageID, rules []links.RewriteRule, legacyPageLinkSourceIDs map[tree.PageID]struct{}) error {
 	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
 
 	type pending struct {
@@ -557,7 +551,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 				}
 			}
 		}
-		result := engine.RewriteWithSourceKind(page.Content, page.CalculatePath(), links.MarkdownSourceKind(page.Kind), pageRules)
+		result := engine.RewriteWithSourceKind(page.Content, page.CalculateRoutePath(), links.MarkdownSourceKind(page.Kind), pageRules)
 		if result.Count() == 0 || result.Content == page.Content {
 			continue
 		}
@@ -570,7 +564,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 	}
 
 	errs := uc.tree.BulkUpdateContent(userID, bulk)
-	updatedIDs := make([]string, 0, len(items))
+	updatedIDs := make([]tree.PageID, 0, len(items))
 
 	for i, item := range items {
 		if errs[i] != nil {
@@ -587,7 +581,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID string, source s
 	return nil
 }
 
-func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, source string, snapshots []pathChangeSnapshot, oldPath, newPath string) error {
+func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID tree.UserID, source string, snapshots []pathChangeSnapshot, oldPath, newPath tree.RoutePath) error {
 	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
 	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath, Kind: string(planNodeKind(snapshots))}}
 
@@ -598,7 +592,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sou
 	var items []pending
 	var bulk []tree.BulkContentUpdate
 
-	pageIDs := make([]string, 0, len(snapshots))
+	pageIDs := make([]tree.PageID, 0, len(snapshots))
 	for _, snap := range snapshots {
 		pageIDs = append(pageIDs, snap.PageID)
 	}
@@ -609,7 +603,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sou
 		if !ok {
 			continue
 		}
-		result := engine.RewriteRelativeLinksForPathChangeWithSourceKind(snap.Content, snap.OldPath, current.CalculatePath(), links.MarkdownSourceKind(snap.Kind), rules)
+		result := engine.RewriteRelativeLinksForPathChangeWithSourceKind(snap.Content, snap.OldPath, current.CalculateRoutePath(), links.MarkdownSourceKind(snap.Kind), rules)
 		if (result.Count() == 0 && snap.Content == current.Content) || result.Content == current.Content {
 			continue
 		}
@@ -622,7 +616,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sou
 	}
 
 	errs := uc.tree.BulkUpdateContent(userID, bulk)
-	updatedIDs := make([]string, 0, len(items))
+	updatedIDs := make([]tree.PageID, 0, len(items))
 
 	for i, item := range items {
 		if errs[i] != nil {
@@ -639,7 +633,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID string, sou
 	return nil
 }
 
-func (uc *ApplyPageRefactorUseCase) runBulkContentUpdateSideEffects(userID string, source string, pages []*tree.Page) error {
+func (uc *ApplyPageRefactorUseCase) runBulkContentUpdateSideEffects(userID tree.UserID, source string, pages []*tree.Page) error {
 	if len(pages) == 0 {
 		return nil
 	}
@@ -655,8 +649,8 @@ func (uc *ApplyPageRefactorUseCase) runBulkContentUpdateSideEffects(userID strin
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-func subtreeIDSet(node *tree.PageNode) map[string]struct{} {
-	ids := make(map[string]struct{})
+func subtreeIDSet(node *tree.PageNode) map[tree.PageID]struct{} {
+	ids := make(map[tree.PageID]struct{})
 	for _, id := range collectSubtreeIDs(node) {
 		ids[id] = struct{}{}
 	}
@@ -688,31 +682,13 @@ func ensureStrings(values []string) []string {
 	return values
 }
 
-func samplePageIDs(pages []*tree.Page, limit int) []string {
-	if limit <= 0 || len(pages) == 0 {
-		return []string{}
-	}
-	if len(pages) < limit {
-		limit = len(pages)
-	}
-
-	ids := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		if pages[i] == nil {
-			continue
-		}
-		ids = append(ids, pages[i].ID)
-	}
-	return ids
-}
-
-func (uc *ApplyPageRefactorUseCase) loadPagesByID(ids []string, warningMessage string) map[string]*tree.Page {
+func (uc *ApplyPageRefactorUseCase) loadPagesByID(ids []tree.PageID, warningMessage string) map[tree.PageID]*tree.Page {
 	if len(ids) == 0 {
-		return map[string]*tree.Page{}
+		return map[tree.PageID]*tree.Page{}
 	}
 
 	pages, errs := uc.tree.GetPages(ids)
-	loaded := make(map[string]*tree.Page, len(ids))
+	loaded := make(map[tree.PageID]*tree.Page, len(ids))
 	for i, id := range ids {
 		if errs[i] != nil {
 			uc.log.Warn(warningMessage, "pageID", id, "error", errs[i])
@@ -727,7 +703,7 @@ func (uc *ApplyPageRefactorUseCase) loadPagesByID(ids []string, warningMessage s
 	return loaded
 }
 
-func (uc *ApplyPageRefactorUseCase) loadPagesInOrder(ids []string, warningMessage string) []*tree.Page {
+func (uc *ApplyPageRefactorUseCase) loadPagesInOrder(ids []tree.PageID, warningMessage string) []*tree.Page {
 	if len(ids) == 0 {
 		return nil
 	}

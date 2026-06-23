@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-func ValidatePageRoutePath(routePath string) (string, error) {
+func ValidatePageRoutePath(routePath string) (tree.RoutePath, error) {
 	validPath, err := tree.ValidateRoutePath(routePath)
 	if err == nil {
 		return validPath, nil
@@ -38,7 +38,7 @@ func ValidatePageKindString(kind string) (tree.NodeKind, error) {
 	return ValidatePageKind(&kind)
 }
 
-func NormalizePagePathInput(rawPath string, rawKind string) (string, tree.NodeKind, error) {
+func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
 	routePath := strings.Trim(strings.TrimSpace(rawPath), "/")
 	kind := tree.NodeKind("")
 	if strings.TrimSpace(rawKind) != "" {
@@ -72,18 +72,8 @@ func MarkdownPathInputKind(routePath string) tree.NodeKind {
 	return tree.NodeKindPage
 }
 
-func MarkdownContentPathForRoute(routePath string, kind tree.NodeKind) string {
-	routePath = strings.Trim(routePath, "/")
-	if kind == tree.NodeKindSection {
-		if routePath == "" {
-			return "index.md"
-		}
-		return routePath + "/index.md"
-	}
-	if routePath == "" {
-		return "index.md"
-	}
-	return routePath + ".md"
+func MarkdownContentPathForRoute(routePath tree.RoutePath, kind tree.NodeKind) tree.MarkdownPath {
+	return routePath.MarkdownContentPath(kind)
 }
 
 func ReadmeMarkdownPathFallbackRoutes(rawPath string) (string, string, bool) {
@@ -145,11 +135,12 @@ func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup Readm
 	}
 	var pageErr error
 	if fallback.TryPage {
-		if _, err := ValidatePageRoutePath(fallback.PageRoute); err != nil {
+		pageRoute, err := ValidatePageRoutePath(fallback.PageRoute)
+		if err != nil {
 			return nil, true, err
 		}
 		var pageOut *FindByPathOutput
-		pageOut, pageErr = lookup.FindByPath(FindByPathInput{RoutePath: fallback.PageRoute, Kind: tree.NodeKindPage})
+		pageOut, pageErr = lookup.FindByPath(FindByPathInput{RoutePath: pageRoute, Kind: tree.NodeKindPage})
 		if pageErr == nil {
 			return pageOut, true, nil
 		}
@@ -166,10 +157,11 @@ func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup Readm
 		if !fallback.TryPage {
 			return nil, true, tree.ErrPageNotFound
 		}
-		if _, err := ValidatePageRoutePath(fallback.PageRoute); err != nil {
+		pageRoute, err := ValidatePageRoutePath(fallback.PageRoute)
+		if err != nil {
 			return nil, true, err
 		}
-		out, err := lookup.FindByPath(FindByPathInput{RoutePath: fallback.PageRoute, Kind: tree.NodeKindPage})
+		out, err := lookup.FindByPath(FindByPathInput{RoutePath: pageRoute, Kind: tree.NodeKindPage})
 		return out, true, err
 	}
 	if fallback.SectionRoute == "" {
@@ -179,7 +171,11 @@ func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup Readm
 		}
 		return &FindByPathOutput{Page: page}, true, nil
 	}
-	out, err := lookup.FindByPath(FindByPathInput{RoutePath: fallback.SectionRoute, Kind: tree.NodeKindSection})
+	sectionRoute, err := ValidatePageRoutePath(fallback.SectionRoute)
+	if err != nil {
+		return nil, true, err
+	}
+	out, err := lookup.FindByPath(FindByPathInput{RoutePath: sectionRoute, Kind: tree.NodeKindSection})
 	return out, true, err
 }
 
@@ -235,6 +231,17 @@ func ValidateMoveParentID(parentID string) (string, error) {
 	return parentID, nil
 }
 
+func ValidateSemanticMoveParentID(parentID tree.PageID) (tree.PageID, error) {
+	if parentID == "" || parentID == tree.RootPageID {
+		return parentID, nil
+	}
+	raw := parentID.MetadataValue()
+	if raw != parentID.HashPayload() {
+		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidParentID, "Invalid parentId", "invalid parent id", nil)
+	}
+	return tree.NewPageIDUnchecked(raw), nil
+}
+
 func ValidateOptionalParentID(parentID *string) (*string, error) {
 	if parentID == nil {
 		return nil, nil
@@ -244,4 +251,54 @@ func ValidateOptionalParentID(parentID *string) (*string, error) {
 		return nil, err
 	}
 	return &validated, nil
+}
+
+func ValidateOptionalSemanticParentID(parentID *tree.PageID) (*tree.PageID, error) {
+	if parentID == nil {
+		return nil, nil
+	}
+	validated, err := ValidateSemanticMoveParentID(*parentID)
+	if err != nil {
+		return nil, err
+	}
+	return &validated, nil
+}
+
+func ValidateSemanticRoutePath(rawPath string) (tree.RoutePath, error) {
+	ve := sharederrors.NewValidationErrors()
+	cleanPath := strings.Trim(strings.TrimSpace(rawPath), "/")
+	if cleanPath == "" {
+		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired, "Path must not be empty")
+		return "", ve
+	}
+	routePath, err := tree.ParseRoutePath(cleanPath)
+	if err != nil {
+		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, err.Error())
+		return "", ve
+	}
+	return routePath, nil
+}
+
+func ValidateRoutePathValue(path tree.RoutePath) (tree.RoutePath, error) {
+	routePath := path.Clean()
+	if routePath.IsRoot() {
+		ve := sharederrors.NewValidationErrors()
+		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired, "Path must not be empty")
+		return "", ve
+	}
+	routePath, err := routePath.Validate()
+	if err != nil {
+		ve := sharederrors.NewValidationErrors()
+		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, err.Error())
+		return "", ve
+	}
+	return routePath, nil
+}
+
+func optionalPageIDString(id *tree.PageID) *string {
+	if id == nil {
+		return nil
+	}
+	raw := id.MetadataValue()
+	return &raw
 }

@@ -3,6 +3,7 @@ package tree
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -87,6 +88,10 @@ func writeTestFile(t *testing.T, filePath string, content string) {
 	}
 }
 
+func testPageIDs(ids ...PageID) []PageID {
+	return ids
+}
+
 func persistLegacyTreeSnapshot(t *testing.T, storageDir string, tree *PageNode) {
 	t.Helper()
 	raw, err := json.Marshal(tree)
@@ -111,6 +116,30 @@ func readOrderIDs(t *testing.T, dir string) []string {
 		t.Fatalf("unmarshal order file: %v", err)
 	}
 	return persisted.OrderedIDs
+}
+
+func assertOrderIDs(t *testing.T, got []string, want ...PageID) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("unexpected persisted order length: got %v want %v", got, want)
+	}
+	for i, rawID := range got {
+		if id := NewPageIDUnchecked(rawID); id != want[i] {
+			t.Fatalf("unexpected persisted order: got %v want %v", got, want)
+		}
+	}
+}
+
+func assertPageIDOrder(t *testing.T, got []PageID, want ...PageID) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("unexpected page ID order length: got %v want %v", got, want)
+	}
+	for i, id := range got {
+		if id != want[i] {
+			t.Fatalf("unexpected page ID order: got %v want %v", got, want)
+		}
+	}
 }
 
 // --- A) Load/Save basics ---
@@ -662,7 +691,7 @@ func TestTreeService_TreeHash_ChangesWhenTreeChanges(t *testing.T) {
 		t.Fatalf("expected hash to change after create")
 	}
 
-	if err := svc.UpdateNode("system", *pageID, "Welcome 2", "welcome", nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *pageID, "Welcome 2", NewSlugUnchecked("welcome"), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 	afterUpdate := svc.TreeHash()
@@ -684,7 +713,7 @@ func TestTreeService_TreeHash_ChangesWhenOrderChanges(t *testing.T) {
 	}
 
 	before := svc.TreeHash()
-	if err := svc.SortPages("", []string{*secondID, *firstID}); err != nil {
+	if err := svc.SortPages("", testPageIDs(*secondID, *firstID)); err != nil {
 		t.Fatalf("SortPages failed: %v", err)
 	}
 	after := svc.TreeHash()
@@ -713,7 +742,7 @@ func TestTreeService_CreateNode_ReloadsFromFilesystem(t *testing.T) {
 		t.Fatalf("expected 1 child after reload, got %d", len(root.Children))
 	}
 	if root.Children[0].ID != *id {
-		t.Fatalf("expected persisted child ID %q, got %q", *id, root.Children[0].ID)
+		t.Fatalf("expected persisted child ID %q, got %q", id.String(), root.Children[0].ID)
 	}
 }
 
@@ -736,7 +765,7 @@ func TestTreeService_CreateChild_RollsBackParentAutoConvertWhenTreeSaveFails(t *
 		t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
 	}
 	if childID != nil {
-		t.Fatalf("expected returned child id to be nil on failure, got %q", *childID)
+		t.Fatalf("expected returned child id to be nil on failure, got %q", childID.String())
 	}
 
 	root := svc.GetTree()
@@ -769,7 +798,7 @@ func TestTreeService_CreateNode_RollsBackWhenTreeSaveFails(t *testing.T) {
 		t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
 	}
 	if id != nil {
-		t.Fatalf("expected returned id to be nil on failure, got %q", *id)
+		t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
 	}
 	if len(svc.GetTree().Children) != 0 {
 		t.Fatalf("expected in-memory tree rollback, got %d root children", len(svc.GetTree().Children))
@@ -802,7 +831,7 @@ func TestTreeService_CreateNode_RollsBackWhenOrderWriteFails(t *testing.T) {
 		t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
 	}
 	if id != nil {
-		t.Fatalf("expected returned id to be nil on failure, got %q", *id)
+		t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
 	}
 
 	if len(svc.GetTree().Children) != 0 {
@@ -843,8 +872,8 @@ func TestTreeService_CreateNode_Page_Root_CreatesFileAndFrontmatter(t *testing.T
 	if !has {
 		t.Fatalf("expected frontmatter to exist")
 	}
-	if strings.TrimSpace(fm.LeafWikiID) != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(strings.TrimSpace(fm.LeafWikiID)) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
 		t.Fatalf("expected leafwiki timestamps to be set, got %#v", fm)
@@ -886,7 +915,7 @@ func TestTreeService_CreateNode_AllowsSameBasenamePageAndSectionTwins(t *testing
 		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
 	}
 	if page.ID != *pageID {
-		t.Fatalf("page ID = %q, want %q", page.ID, *pageID)
+		t.Fatalf("page ID = %q, want %q", page.ID, pageID.String())
 	}
 
 	section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
@@ -894,7 +923,7 @@ func TestTreeService_CreateNode_AllowsSameBasenamePageAndSectionTwins(t *testing
 		t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
 	}
 	if section.ID != *sectionID {
-		t.Fatalf("section ID = %q, want %q", section.ID, *sectionID)
+		t.Fatalf("section ID = %q, want %q", section.ID, sectionID.String())
 	}
 
 	if _, err := svc.CreateNode("system", nil, "Duplicate Page", "SYNC", ptrKind(NodeKindPage)); !errors.Is(err, ErrPageAlreadyExists) {
@@ -970,11 +999,7 @@ func TestTreeService_CreateNode_PersistsRootOrderFile(t *testing.T) {
 		t.Fatalf("CreateNode B failed: %v", err)
 	}
 
-	got := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-	want := []string{*idA, *idB}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("unexpected persisted order after create: got %v want %v", got, want)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *idA, *idB)
 }
 
 // - New section creates index.md
@@ -999,8 +1024,8 @@ func TestTreeService_CreateNode_Section_CreatesIndexWithFrontmatter(t *testing.T
 	if !has {
 		t.Fatalf("expected frontmatter to exist")
 	}
-	if strings.TrimSpace(fm.LeafWikiID) != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(strings.TrimSpace(fm.LeafWikiID)) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if fm.LeafWikiTitle != "Docs" {
 		t.Fatalf("expected leafwiki_title Docs, got %q", fm.LeafWikiTitle)
@@ -1070,7 +1095,7 @@ func TestTreeService_UpdateNode_TitleOnly_SyncsFrontmatterIfFileExists(t *testin
 	mustStat(t, p)
 
 	// Update title only: content=nil, slug unchanged
-	if err := svc.UpdateNode("system", *id, "Documentation", "docs", nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Documentation", NewSlugUnchecked("docs"), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
@@ -1102,7 +1127,7 @@ func TestTreeService_UpdateNode_SlugRename_RenamesOnDisk(t *testing.T) {
 	mustStat(t, oldPath)
 
 	newSlug := "documentation"
-	if err := svc.UpdateNode("system", *id, "Docs", newSlug, nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Docs", NewSlugUnchecked(newSlug), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
@@ -1122,7 +1147,7 @@ func TestTreeService_UpdateNode_AllowsRenameToSameBasenamePageSectionTwin(t *tes
 		t.Fatalf("CreateNode page failed: %v", err)
 	}
 
-	if err := svc.UpdateNode("system", *pageID, "Sync Page", "sync", nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *pageID, "Sync Page", NewSlugUnchecked("sync"), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode page rename to section basename failed: %v", err)
 	}
 
@@ -1134,7 +1159,7 @@ func TestTreeService_UpdateNode_AllowsRenameToSameBasenamePageSectionTwin(t *tes
 		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
 	}
 	if page.ID != *pageID {
-		t.Fatalf("page ID = %q, want %q", page.ID, *pageID)
+		t.Fatalf("page ID = %q, want %q", page.ID, pageID.String())
 	}
 }
 
@@ -1150,7 +1175,7 @@ func TestTreeService_UpdateNode_RejectsCaseInsensitiveSlugConflict(t *testing.T)
 		t.Fatalf("CreateNode second failed: %v", err)
 	}
 
-	err = svc.UpdateNode("system", *secondID, "Beta", "alpha", nil, VersionUnchecked, false)
+	err = svc.UpdateNode(UserID("system"), *secondID, "Beta", NewSlugUnchecked("alpha"), nil, pageVersionUnchecked, false)
 	if !errors.Is(err, ErrPageAlreadyExists) {
 		t.Fatalf("expected ErrPageAlreadyExists, got %v", err)
 	}
@@ -1171,7 +1196,7 @@ func TestTreeService_UpdateNode_RejectsTraversalSlug(t *testing.T) {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
 
-	err = svc.UpdateNode("system", *id, "Docs", "../outside", nil, VersionUnchecked, false)
+	err = svc.UpdateNode(UserID("system"), *id, "Docs", NewSlugUnchecked("../outside"), nil, pageVersionUnchecked, false)
 	if err == nil {
 		t.Fatalf("expected UpdateNode to reject traversal slug")
 	}
@@ -1198,7 +1223,7 @@ func TestTreeService_UpdateNode_SectionToPage_DisallowedWithChildren(t *testing.
 	}
 
 	// Now parent is section with children, attempt to convert back to page
-	err = svc.UpdateNode("system", *parentID, "Docs", "docs", nil, VersionUnchecked, false)
+	err = svc.UpdateNode(UserID("system"), *parentID, "Docs", NewSlugUnchecked("docs"), nil, pageVersionUnchecked, false)
 	if err == nil {
 		t.Fatalf("expected error converting section->page with children")
 	}
@@ -1214,7 +1239,7 @@ func TestTreeService_DeleteNode_NonRecursiveErrorsWhenHasChildren(t *testing.T) 
 	parentID, _ := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
 	_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
 
-	err := svc.DeleteNode("system", *parentID, false, VersionUnchecked)
+	err := svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -1233,7 +1258,7 @@ func TestTreeService_DeleteNode_RecursiveDeletesDiskAndTree(t *testing.T) {
 	parentDir := filepath.Join(tmpDir, "root", "parent")
 	mustStat(t, parentDir)
 
-	err := svc.DeleteNode("system", *parentID, true, VersionUnchecked)
+	err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked)
 	if err != nil {
 		t.Fatalf("DeleteNode recursive failed: %v", err)
 	}
@@ -1273,7 +1298,7 @@ func TestTreeService_DeletePage_Leaf_Success_RemovesFileAndTreeAndReindexes(t *t
 	}
 
 	// Delete middle page (B)
-	if err := svc.DeleteNode("system", *idB, false, VersionUnchecked); err != nil {
+	if err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked); err != nil {
 		t.Fatalf("DeleteNode failed: %v", err)
 	}
 
@@ -1328,15 +1353,11 @@ func TestTreeService_DeleteNode_UpdatesRootOrderFile(t *testing.T) {
 		t.Fatalf("CreateNode C: %v", err)
 	}
 
-	if err := svc.DeleteNode("system", *idB, false, VersionUnchecked); err != nil {
+	if err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked); err != nil {
 		t.Fatalf("DeleteNode failed: %v", err)
 	}
 
-	got := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-	want := []string{*idA, *idC}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("unexpected persisted order after delete: got %v want %v", got, want)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *idA, *idC)
 }
 
 func TestTreeService_DeletePage_WithChildren_NonRecursive_ReturnsErrPageHasChildren(t *testing.T) {
@@ -1352,7 +1373,7 @@ func TestTreeService_DeletePage_WithChildren_NonRecursive_ReturnsErrPageHasChild
 		t.Fatalf("CreateNode child: %v", err)
 	}
 
-	err = svc.DeleteNode("system", *parentID, false, VersionUnchecked)
+	err = svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected error deleting page with children without recursive")
 	}
@@ -1380,7 +1401,7 @@ func TestTreeService_DeletePage_WithChildren_Recursive_DeletesFolder(t *testing.
 	}
 
 	// Recursive delete should remove the folder
-	if err := svc.DeleteNode("system", *parentID, true, VersionUnchecked); err != nil {
+	if err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked); err != nil {
 		t.Fatalf("DeleteNode recursive failed: %v", err)
 	}
 
@@ -1397,7 +1418,7 @@ func TestTreeService_DeletePage_WithChildren_Recursive_DeletesFolder(t *testing.
 func TestTreeService_DeletePage_InvalidID_ReturnsErrPageNotFound(t *testing.T) {
 	svc, _ := newLoadedService(t)
 
-	err := svc.DeleteNode("system", "does-not-exist", false, VersionUnchecked)
+	err := svc.DeleteNode("system", "does-not-exist", false, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -1422,7 +1443,7 @@ func TestTreeService_DeletePage_Drift_FileMissing_ReturnsError(t *testing.T) {
 	}
 
 	// Now delete node - should error (drift)
-	err = svc.DeleteNode("system", *id, false, VersionUnchecked)
+	err = svc.DeleteNode("system", *id, false, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected drift error")
 	}
@@ -1442,7 +1463,7 @@ func TestTreeService_MoveNode_TargetPageAutoConvertsToSection(t *testing.T) {
 	bID, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
 	// Move A under B (B is a page => should auto-convert to section)
-	if err := svc.MoveNode("system", *aID, *bID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
 
@@ -1476,21 +1497,13 @@ func TestTreeService_MoveNode_UpdatesSourceAndDestinationOrderFiles(t *testing.T
 		t.Fatalf("CreateNode nested: %v", err)
 	}
 
-	if err := svc.MoveNode("system", *moveID, *destID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
 
-	rootOrder := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-	wantRoot := []string{*destID, *stayID}
-	if strings.Join(rootOrder, ",") != strings.Join(wantRoot, ",") {
-		t.Fatalf("unexpected root order after move: got %v want %v", rootOrder, wantRoot)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *destID, *stayID)
 
-	destOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "dest"))
-	wantDest := []string{*nestedID, *moveID}
-	if strings.Join(destOrder, ",") != strings.Join(wantDest, ",") {
-		t.Fatalf("unexpected destination order after move: got %v want %v", destOrder, wantDest)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root", "dest")), *nestedID, *moveID)
 }
 
 func TestTreeService_MoveNode_AllowsMoveToSameBasenamePageSectionTwin(t *testing.T) {
@@ -1508,7 +1521,7 @@ func TestTreeService_MoveNode_AllowsMoveToSameBasenamePageSectionTwin(t *testing
 		t.Fatalf("CreateNode page failed: %v", err)
 	}
 
-	if err := svc.MoveNode("system", *moveID, *destID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode page next to section basename failed: %v", err)
 	}
 
@@ -1520,7 +1533,7 @@ func TestTreeService_MoveNode_AllowsMoveToSameBasenamePageSectionTwin(t *testing
 		t.Fatalf("FindPageByRoutePathAndKind moved page failed: %v", err)
 	}
 	if page.ID != *moveID {
-		t.Fatalf("moved page ID = %q, want %q", page.ID, *moveID)
+		t.Fatalf("moved page ID = %q, want %q", page.ID, moveID.String())
 	}
 }
 
@@ -1542,7 +1555,7 @@ func TestTreeService_MoveNode_PersistsMovedNodeMetadataToFrontmatter(t *testing.
 	}
 	beforeUpdatedAt := node.Metadata.UpdatedAt
 
-	if err := svc.MoveNode("alice", *moveID, *destID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("alice", *moveID, *destID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
 
@@ -1605,7 +1618,7 @@ func TestTreeService_MoveNode_ReturnsErrorAndRollsBackWhenOrderPersistenceFails(
 	}
 	mustMkdir(t, filepath.Join(tmpDir, "root", "dest", ".order.json"))
 
-	err = svc.MoveNode("system", *moveID, *destID, VersionUnchecked)
+	err = svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked)
 	if err == nil {
 		t.Fatal("expected MoveNode to fail when child order persistence fails")
 	}
@@ -1639,7 +1652,7 @@ func TestTreeService_MoveNode_PreventsCircularReference(t *testing.T) {
 	bID, _ := svc.CreateNode("system", aID, "B", "b", ptrKind(NodeKindPage))
 
 	// Try move A under B (A -> ... -> B). Should error with circular reference.
-	err := svc.MoveNode("system", *aID, *bID, VersionUnchecked)
+	err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected error moving node under its descendant")
 	}
@@ -1653,7 +1666,7 @@ func TestTreeService_MoveNode_PreventsSelfParent(t *testing.T) {
 
 	aID, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 
-	err := svc.MoveNode("system", *aID, *aID, VersionUnchecked)
+	err := svc.MoveNode("system", *aID, *aID, pageVersionUnchecked)
 	if err == nil {
 		t.Fatalf("expected error moving node into itself")
 	}
@@ -1677,7 +1690,7 @@ func TestTreeService_MoveNode_RejectsCaseInsensitiveSlugConflict(t *testing.T) {
 		t.Fatalf("CreateNode existing failed: %v", err)
 	}
 
-	err = svc.MoveNode("system", *moveID, *parentID, VersionUnchecked)
+	err = svc.MoveNode("system", *moveID, *parentID, pageVersionUnchecked)
 	if !errors.Is(err, ErrPageAlreadyExists) {
 		t.Fatalf("expected ErrPageAlreadyExists, got %v", err)
 	}
@@ -1692,7 +1705,7 @@ func TestTreeService_SortPages_ValidOrder(t *testing.T) {
 	idB, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 	idC, _ := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
 
-	err := svc.SortPages("root", []string{*idC, *idA, *idB})
+	err := svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
 	if err != nil {
 		t.Fatalf("SortPages failed: %v", err)
 	}
@@ -1723,12 +1736,12 @@ func TestTreeService_SortPages_PersistsOrderFileWithoutChangingMetadata(t *testi
 	}
 
 	root := svc.GetTree()
-	before := map[string]PageMetadata{}
+	before := map[PageID]PageMetadata{}
 	for _, child := range root.Children {
 		before[child.ID] = child.Metadata
 	}
 
-	if err := svc.SortPages("root", []string{*idC, *idA, *idB}); err != nil {
+	if err := svc.SortPages("root", testPageIDs(*idC, *idA, *idB)); err != nil {
 		t.Fatalf("SortPages failed: %v", err)
 	}
 
@@ -1743,10 +1756,7 @@ func TestTreeService_SortPages_PersistsOrderFileWithoutChangingMetadata(t *testi
 	if err := json.Unmarshal(raw, &persisted); err != nil {
 		t.Fatalf("unmarshal order file: %v", err)
 	}
-	wantIDs := []string{*idC, *idA, *idB}
-	if strings.Join(persisted.OrderedIDs, ",") != strings.Join(wantIDs, ",") {
-		t.Fatalf("unexpected persisted order: got %v want %v", persisted.OrderedIDs, wantIDs)
-	}
+	assertOrderIDs(t, persisted.OrderedIDs, *idC, *idA, *idB)
 
 	for _, child := range svc.GetTree().Children {
 		if got := child.Metadata; got != before[child.ID] {
@@ -1776,7 +1786,7 @@ func TestTreeService_SortPages_RollsBackWhenOrderPersistenceFails(t *testing.T) 
 	}
 	mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
 
-	err = svc.SortPages("root", []string{*idC, *idA, *idB})
+	err = svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
 	if err == nil {
 		t.Fatalf("expected SortPages to fail when order persistence fails")
 	}
@@ -1785,11 +1795,8 @@ func TestTreeService_SortPages_RollsBackWhenOrderPersistenceFails(t *testing.T) 
 	}
 
 	root := svc.GetTree()
-	want := []string{*idA, *idB, *idC}
-	got := []string{root.Children[0].ID, root.Children[1].ID, root.Children[2].ID}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("expected in-memory order rollback, got %v want %v", got, want)
-	}
+	got := []PageID{root.Children[0].ID, root.Children[1].ID, root.Children[2].ID}
+	assertPageIDOrder(t, got, *idA, *idB, *idC)
 	for i, child := range root.Children {
 		if child.Position != i {
 			t.Fatalf("expected child %q position rollback to %d, got %d", child.ID, i, child.Position)
@@ -1803,7 +1810,7 @@ func TestTreeService_SortPages_InvalidLength(t *testing.T) {
 	_, _ = svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 	_, _ = svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
-	err := svc.SortPages("root", []string{"only-one"})
+	err := svc.SortPages("root", testPageIDs(NewPageIDUnchecked("only-one")))
 	if err == nil {
 		t.Fatalf("expected error for invalid length")
 	}
@@ -1818,7 +1825,7 @@ func TestTreeService_SortPages_DuplicateID(t *testing.T) {
 	idA, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 	idB, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
-	err := svc.SortPages("root", []string{*idA, *idA, *idB})
+	err := svc.SortPages("root", testPageIDs(*idA, *idA, *idB))
 	if err == nil {
 		t.Fatalf("expected error for duplicate IDs")
 	}
@@ -1844,7 +1851,7 @@ func TestTreeService_GetPage_SectionWithoutIndex_DoesNotMaterializeIndex(t *test
 		t.Fatalf("GetPage failed: %v", err)
 	}
 	if page.ID != *id {
-		t.Fatalf("expected page ID %q, got %q", *id, page.ID)
+		t.Fatalf("expected page ID %q, got %q", id.String(), page.ID)
 	}
 	if page.Content != "" {
 		t.Fatalf("expected empty content for section without index, got %q", page.Content)
@@ -1871,7 +1878,7 @@ func TestTreeService_ConvertNode_PageToSection_MaterializesIndexWithNodeMetadata
 	node.Metadata.CreatorID = "alice"
 	node.Metadata.LastAuthorID = "bob"
 
-	if err := svc.ConvertNode("carol", *id, NodeKindSection, VersionUnchecked); err != nil {
+	if err := svc.ConvertNode("carol", *id, NodeKindSection, pageVersionUnchecked); err != nil {
 		t.Fatalf("ConvertNode failed: %v", err)
 	}
 
@@ -1888,7 +1895,7 @@ func TestTreeService_ConvertNode_PageToSection_MaterializesIndexWithNodeMetadata
 	if !has {
 		t.Fatalf("expected frontmatter after conversion")
 	}
-	if fm.LeafWikiID != *id || fm.LeafWikiTitle != "Docs" {
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
 		t.Fatalf("unexpected converted frontmatter: %#v", fm)
 	}
 	if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" {
@@ -1916,7 +1923,7 @@ func TestTreeService_FindPageByRoutePath_ReturnsContent(t *testing.T) {
 	// Update specs content
 	specsNode := svc.GetTree().Children[0].Children[0].Children[0]
 	body := "# Specs\nHello"
-	if err := svc.UpdateNode("system", specsNode.ID, "Specs", "specs", &body, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), specsNode.ID, "Specs", NewSlugUnchecked("specs"), &body, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode content failed: %v", err)
 	}
 
@@ -2044,10 +2051,10 @@ func TestTreeService_FindPageByRoutePath_PrefersSectionForSameBasenameTwin(t *te
 		t.Fatalf("FindPageByRoutePath sync: %v", err)
 	}
 	if page.ID == *pageID {
-		t.Fatalf("FindPageByRoutePath sync resolved page twin %q, want section %q", *pageID, *sectionID)
+		t.Fatalf("FindPageByRoutePath sync resolved page twin %q, want section %q", pageID.String(), sectionID.String())
 	}
 	if page.ID != *sectionID {
-		t.Fatalf("FindPageByRoutePath sync resolved %q, want section %q", page.ID, *sectionID)
+		t.Fatalf("FindPageByRoutePath sync resolved %q, want section %q", page.ID, sectionID.String())
 	}
 	if page.Kind != NodeKindSection {
 		t.Fatalf("FindPageByRoutePath sync kind = %q, want section", page.Kind)
@@ -2120,7 +2127,7 @@ func TestTreeService_LookupPagePath_PrefersSectionForSameBasenameTwin(t *testing
 		t.Fatalf("lookup = %#v, want existing section segment", lookup)
 	}
 	if *lookup.Segments[0].ID != *sectionID {
-		t.Fatalf("LookupPagePath sync resolved ID %q, want section %q", *lookup.Segments[0].ID, *sectionID)
+		t.Fatalf("LookupPagePath sync resolved ID %q, want section %q", *lookup.Segments[0].ID, sectionID.String())
 	}
 	if lookup.Segments[0].Kind == nil || *lookup.Segments[0].Kind != NodeKindSection {
 		t.Fatalf("LookupPagePath sync kind = %v, want section", lookup.Segments[0].Kind)
@@ -2138,7 +2145,7 @@ func TestTreeService_LookupPagePath_ReflectsSlugRename(t *testing.T) {
 		t.Fatalf("CreateNode guide failed: %v", err)
 	}
 
-	if err := svc.UpdateNode("system", *id, "Documentation", "documentation", nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Documentation", NewSlugUnchecked("documentation"), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
@@ -2209,10 +2216,10 @@ func TestTreeService_ResolvePermalinkTarget_ReflectsRenameAndMove(t *testing.T) 
 		t.Fatalf("CreateNode archive failed: %v", err)
 	}
 
-	if err := svc.UpdateNode("system", *guideID, "User Guide", "user-guide", nil, VersionUnchecked, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *guideID, "User Guide", NewSlugUnchecked("user-guide"), nil, pageVersionUnchecked, false); err != nil {
 		t.Fatalf("UpdateNode guide failed: %v", err)
 	}
-	if err := svc.MoveNode("system", *guideID, *archiveID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode guide failed: %v", err)
 	}
 
@@ -2221,7 +2228,7 @@ func TestTreeService_ResolvePermalinkTarget_ReflectsRenameAndMove(t *testing.T) 
 		t.Fatalf("ResolvePermalinkTarget failed: %v", err)
 	}
 	if target.ID != *guideID {
-		t.Fatalf("expected permalink target ID %q, got %q", *guideID, target.ID)
+		t.Fatalf("expected permalink target ID %q, got %q", guideID.String(), target.ID)
 	}
 	if target.Slug != "user-guide" {
 		t.Fatalf("expected permalink target slug user-guide, got %q", target.Slug)
@@ -2252,22 +2259,22 @@ func TestTreeService_EnsurePagePath_PersistsOrderFilesForCreatedPath(t *testing.
 	}
 
 	rootOrder := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-	if len(rootOrder) != 1 || rootOrder[0] != res.Created[0].ID {
+	if len(rootOrder) != 1 || NewPageIDUnchecked(rootOrder[0]) != res.Created[0].ID {
 		t.Fatalf("unexpected root order after EnsurePagePath: %v", rootOrder)
 	}
 
 	homeOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home"))
-	if len(homeOrder) != 1 || homeOrder[0] != res.Created[1].ID {
+	if len(homeOrder) != 1 || NewPageIDUnchecked(homeOrder[0]) != res.Created[1].ID {
 		t.Fatalf("unexpected home order after EnsurePagePath: %v", homeOrder)
 	}
 
 	aboutOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home", "about"))
-	if len(aboutOrder) != 1 || aboutOrder[0] != res.Created[2].ID {
+	if len(aboutOrder) != 1 || NewPageIDUnchecked(aboutOrder[0]) != res.Created[2].ID {
 		t.Fatalf("unexpected about order after EnsurePagePath: %v", aboutOrder)
 	}
 
 	teamOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home", "about", "team"))
-	if len(teamOrder) != 1 || teamOrder[0] != res.Created[3].ID {
+	if len(teamOrder) != 1 || NewPageIDUnchecked(teamOrder[0]) != res.Created[3].ID {
 		t.Fatalf("unexpected team order after EnsurePagePath: %v", teamOrder)
 	}
 }
@@ -2333,7 +2340,7 @@ func TestTreeService_EnsurePagePath_CreatesPageTwinWhenSectionRouteExists(t *tes
 		t.Fatal("EnsurePagePath returned nil page")
 	}
 	if res.Page.ID == *sectionID {
-		t.Fatalf("EnsurePagePath returned existing section %q instead of creating page twin", *sectionID)
+		t.Fatalf("EnsurePagePath returned existing section %q instead of creating page twin", sectionID.String())
 	}
 	if res.Page.Kind != NodeKindPage {
 		t.Fatalf("ensured node kind = %q, want page", res.Page.Kind)
@@ -2347,7 +2354,7 @@ func TestTreeService_EnsurePagePath_CreatesPageTwinWhenSectionRouteExists(t *tes
 		t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
 	}
 	if section.ID != *sectionID {
-		t.Fatalf("section route ID = %q, want %q", section.ID, *sectionID)
+		t.Fatalf("section route ID = %q, want %q", section.ID, sectionID.String())
 	}
 	page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
 	if err != nil {
@@ -2388,7 +2395,7 @@ func TestTreeService_EnsurePagePath_CreatesSectionTwinWhenPageRouteExists(t *tes
 		t.Fatal("EnsurePagePath returned nil page")
 	}
 	if res.Page.ID == *pageID {
-		t.Fatalf("EnsurePagePath returned existing page %q instead of creating section twin", *pageID)
+		t.Fatalf("EnsurePagePath returned existing page %q instead of creating section twin", pageID.String())
 	}
 	if res.Page.Kind != NodeKindSection {
 		t.Fatalf("ensured node kind = %q, want section", res.Page.Kind)
@@ -2402,7 +2409,7 @@ func TestTreeService_EnsurePagePath_CreatesSectionTwinWhenPageRouteExists(t *tes
 		t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
 	}
 	if page.ID != *pageID {
-		t.Fatalf("page route ID = %q, want %q", page.ID, *pageID)
+		t.Fatalf("page route ID = %q, want %q", page.ID, pageID.String())
 	}
 	section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
 	if err != nil {
@@ -2443,7 +2450,7 @@ func TestTreeService_MoveNode_UpdatesPathLookup(t *testing.T) {
 		t.Fatalf("CreateNode guide failed: %v", err)
 	}
 
-	if err := svc.MoveNode("system", *guideID, *archiveID, VersionUnchecked); err != nil {
+	if err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked); err != nil {
 		t.Fatalf("MoveNode failed: %v", err)
 	}
 
@@ -2526,17 +2533,9 @@ func TestTreeService_LoadTree_MigratesToV5_BackfillsChildOrderFiles(t *testing.T
 		t.Fatalf("LoadTree (migrating) failed: %v", err)
 	}
 
-	rootOrder := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-	wantRoot := []string{*alphaID, *docsID}
-	if strings.Join(rootOrder, ",") != strings.Join(wantRoot, ",") {
-		t.Fatalf("unexpected root order after migration: got %v want %v", rootOrder, wantRoot)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *alphaID, *docsID)
 
-	docsOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "docs"))
-	wantDocs := []string{*betaID}
-	if strings.Join(docsOrder, ",") != strings.Join(wantDocs, ",") {
-		t.Fatalf("unexpected docs order after migration: got %v want %v", docsOrder, wantDocs)
-	}
+	assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root", "docs")), *betaID)
 }
 
 func TestTreeService_LoadTree_MigratesToV4_MaterializesMissingSectionIndex(t *testing.T) {
@@ -2598,7 +2597,7 @@ func TestTreeService_LoadTree_MigratesToV4_MaterializesMissingSectionIndex(t *te
 	if !has {
 		t.Fatalf("expected frontmatter after migration")
 	}
-	if fm.LeafWikiID != *id || fm.LeafWikiTitle != "Docs" {
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
 		t.Fatalf("expected section frontmatter to be materialized, got %#v", fm)
 	}
 	if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
@@ -2746,7 +2745,7 @@ func TestTreeService_LoadTree_MigratesToV3_BackfillsMetadataFrontmatter(t *testi
 	persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
 
 	pagePath := filepath.Join(tmpDir, "root", "page1.md")
-	legacyContent := "---\nleafwiki_id: " + *id + "\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n"
+	legacyContent := fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n", *id)
 	if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
 		t.Fatalf("write legacy content failed: %v", err)
 	}
@@ -2839,8 +2838,8 @@ func TestTreeService_LoadTree_MigratesToV2_AddsFrontmatterAndPreservesBody(t *te
 	if !has {
 		t.Fatalf("expected frontmatter after migration, got:\n%s", string(raw))
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
 		t.Fatalf("expected leafwiki_title to be set")
@@ -2918,8 +2917,8 @@ Hello World
 		t.Fatalf(`expected frontmatter after migration, got:
 %s`, migrated)
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
 		t.Fatalf("expected leafwiki_title to be set")
@@ -2987,8 +2986,8 @@ Hello World
 	if !has {
 		t.Fatalf("expected frontmatter after migration")
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if fm.LeafWikiTitle != "Existing Title" {
 		t.Fatalf("expected existing leafwiki_title to be preserved, got %q", fm.LeafWikiTitle)
@@ -3067,8 +3066,8 @@ Hello World
 	if !has {
 		t.Fatalf("expected frontmatter after migration")
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if fm.LeafWikiTitle != "Alias Title" {
 		t.Fatalf("expected title alias to remain effective, got %q", fm.LeafWikiTitle)
@@ -3283,7 +3282,7 @@ func TestTreeService_ReconstructTreeFromFS_ReloadsMetadataFallbacksWhenMissing(t
 	}
 
 	readme := findChildBySlug(t, newSvc.GetTree(), "readme")
-	if strings.TrimSpace(readme.ID) == "" {
+	if strings.TrimSpace(readme.ID.String()) == "" {
 		t.Fatalf("expected generated ID to persist")
 	}
 	if got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
@@ -3661,7 +3660,7 @@ func TestTreeService_HasPages_ReturnsTrueWhenPagesExist(t *testing.T) {
 func TestTreeService_WalkNodes_DoesNothingWhenNotLoaded(t *testing.T) {
 	svc := NewTreeService(t.TempDir())
 	called := false
-	err := svc.WalkNodes(func(_ string) error {
+	err := svc.WalkNodes(func(_ PageID) error {
 		called = true
 		return nil
 	})
@@ -3690,12 +3689,12 @@ func TestTreeService_WalkNodes_VisitsAllNonRootNodes(t *testing.T) {
 	}
 
 	var visited []string
-	if err := svc.WalkNodes(func(id string) error {
+	if err := svc.WalkNodes(func(id PageID) error {
 		page, err := svc.GetPage(id)
 		if err != nil {
 			return err
 		}
-		visited = append(visited, page.Slug)
+		visited = append(visited, page.Slug.String())
 		return nil
 	}); err != nil {
 		t.Fatalf("WalkNodes failed: %v", err)
@@ -3728,7 +3727,7 @@ func TestTreeService_WalkNodes_SkipsRootNode(t *testing.T) {
 		t.Fatalf("LoadTree failed: %v", err)
 	}
 
-	if err := svc.WalkNodes(func(id string) error {
+	if err := svc.WalkNodes(func(id PageID) error {
 		if id == "root" {
 			return errors.New("root node must not be visited")
 		}
@@ -3748,14 +3747,14 @@ func TestTreeService_WalkNodes_StopsOnError(t *testing.T) {
 		t.Fatalf("LoadTree failed: %v", err)
 	}
 	for _, title := range []string{"A", "B", "C"} {
-		if _, err := svc.CreateNode("u", nil, title, strings.ToLower(title), ptrKind(NodeKindPage)); err != nil {
+		if _, err := svc.CreateNode("u", nil, title, NewSlugUnchecked(strings.ToLower(title)), ptrKind(NodeKindPage)); err != nil {
 			t.Fatalf("CreateNode %s: %v", title, err)
 		}
 	}
 
 	sentinel := errors.New("stop")
 	calls := 0
-	err := svc.WalkNodes(func(_ string) error {
+	err := svc.WalkNodes(func(_ PageID) error {
 		calls++
 		return sentinel
 	})
@@ -3786,12 +3785,12 @@ func TestTreeService_WalkNodes_VisitsNestedNodes(t *testing.T) {
 	}
 
 	var visited []string
-	if err := svc.WalkNodes(func(id string) error {
+	if err := svc.WalkNodes(func(id PageID) error {
 		page, err := svc.GetPage(id)
 		if err != nil {
 			return err
 		}
-		visited = append(visited, page.Slug)
+		visited = append(visited, page.Slug.String())
 		return nil
 	}); err != nil {
 		t.Fatalf("WalkNodes failed: %v", err)
@@ -3814,7 +3813,7 @@ func TestTreeService_GetPages_PreservesOrderAndAlignsErrors(t *testing.T) {
 		t.Fatalf("CreateNode(second) failed: %v", err)
 	}
 
-	pages, errs := svc.GetPages([]string{*secondID, "missing-id", *firstID})
+	pages, errs := svc.GetPages([]PageID{*secondID, NewPageIDUnchecked("missing-id"), *firstID})
 	if len(pages) != 3 || len(errs) != 3 {
 		t.Fatalf("unexpected result lengths: pages=%d errs=%d", len(pages), len(errs))
 	}
@@ -3904,12 +3903,12 @@ func TestTreeService_UpdateNode_StaleVersion_ReturnsErrVersionConflict(t *testin
 	currentVersion := node.Version()
 
 	// First update succeeds — advances the version.
-	if err := svc.UpdateNode("system", *id, "Page v2", "page", nil, currentVersion, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Page v2", NewSlugUnchecked("page"), nil, NewPageVersionUnchecked(currentVersion), false); err != nil {
 		t.Fatalf("first UpdateNode failed: %v", err)
 	}
 
 	// Second update with the same (now stale) version must fail.
-	err := svc.UpdateNode("system", *id, "Page v3", "page", nil, currentVersion, false)
+	err := svc.UpdateNode(UserID("system"), *id, "Page v3", NewSlugUnchecked("page"), nil, NewPageVersionUnchecked(currentVersion), false)
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("expected ErrVersionConflict, got %v", err)
 	}
@@ -3919,7 +3918,7 @@ func TestTreeService_UpdateNode_MissingVersion_ReturnsErrVersionRequired(t *test
 	svc, _ := newLoadedService(t)
 	id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
-	err := svc.UpdateNode("system", *id, "Page v2", "page", nil, "", false)
+	err := svc.UpdateNode(UserID("system"), *id, "Page v2", NewSlugUnchecked("page"), nil, NewPageVersionUnchecked(""), false)
 	if !errors.Is(err, ErrVersionRequired) {
 		t.Fatalf("expected ErrVersionRequired, got %v", err)
 	}
@@ -3933,11 +3932,11 @@ func TestTreeService_DeleteNode_StaleVersion_ReturnsErrVersionConflict(t *testin
 	staleVersion := node.Version()
 
 	// Advance the version via an update.
-	if err := svc.UpdateNode("system", *id, "Page v2", "page", nil, staleVersion, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Page v2", NewSlugUnchecked("page"), nil, NewPageVersionUnchecked(staleVersion), false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
-	err := svc.DeleteNode("system", *id, false, staleVersion)
+	err := svc.DeleteNode("system", *id, false, NewPageVersionUnchecked(staleVersion))
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("expected ErrVersionConflict, got %v", err)
 	}
@@ -3962,11 +3961,11 @@ func TestTreeService_MoveNode_StaleVersion_ReturnsErrVersionConflict(t *testing.
 	staleVersion := node.Version()
 
 	// Advance the version.
-	if err := svc.UpdateNode("system", *moveID, "Move v2", "move", nil, staleVersion, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *moveID, "Move v2", NewSlugUnchecked("move"), nil, NewPageVersionUnchecked(staleVersion), false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
-	err := svc.MoveNode("system", *moveID, *destID, staleVersion)
+	err := svc.MoveNode("system", *moveID, *destID, NewPageVersionUnchecked(staleVersion))
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("expected ErrVersionConflict, got %v", err)
 	}
@@ -3991,11 +3990,11 @@ func TestTreeService_ConvertNode_StaleVersion_ReturnsErrVersionConflict(t *testi
 	staleVersion := node.Version()
 
 	// Advance the version.
-	if err := svc.UpdateNode("system", *id, "Page v2", "page", nil, staleVersion, false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Page v2", NewSlugUnchecked("page"), nil, NewPageVersionUnchecked(staleVersion), false); err != nil {
 		t.Fatalf("UpdateNode failed: %v", err)
 	}
 
-	err := svc.ConvertNode("system", *id, NodeKindSection, staleVersion)
+	err := svc.ConvertNode("system", *id, NodeKindSection, NewPageVersionUnchecked(staleVersion))
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("expected ErrVersionConflict, got %v", err)
 	}
@@ -4015,12 +4014,12 @@ func TestTreeService_VersionUnchecked_BypassesVersionCheck(t *testing.T) {
 	svc, _ := newLoadedService(t)
 	id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
-	// VersionUnchecked must always succeed regardless of actual node version.
-	if err := svc.UpdateNode("system", *id, "Page v2", "page", nil, VersionUnchecked, false); err != nil {
-		t.Fatalf("expected VersionUnchecked to bypass check, got: %v", err)
+	// The tree-owned unchecked operation must always succeed regardless of actual node version.
+	if err := svc.UpdateNode(UserID("system"), *id, "Page v2", NewSlugUnchecked("page"), nil, pageVersionUnchecked, false); err != nil {
+		t.Fatalf("expected unchecked operation to bypass check, got: %v", err)
 	}
-	if err := svc.UpdateNode("system", *id, "Page v3", "page", nil, VersionUnchecked, false); err != nil {
-		t.Fatalf("expected VersionUnchecked to bypass check on second call, got: %v", err)
+	if err := svc.UpdateNode(UserID("system"), *id, "Page v3", NewSlugUnchecked("page"), nil, pageVersionUnchecked, false); err != nil {
+		t.Fatalf("expected unchecked operation to bypass check on second call, got: %v", err)
 	}
 }
 
@@ -4038,7 +4037,7 @@ func TestTreeService_GetPage_RawContent_ContainsCanonicalMetadataAndBody(t *test
 	if err != nil {
 		t.Fatalf("GetPage before update: %v", err)
 	}
-	if err := svc.UpdateNode("system", *id, "Raw Test", "raw-test", &body, page.Version(), false); err != nil {
+	if err := svc.UpdateNode(UserID("system"), *id, "Raw Test", NewSlugUnchecked("raw-test"), &body, NewPageVersionUnchecked(page.Version()), false); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
 
@@ -4076,7 +4075,7 @@ func TestTreeService_GetPages_RawContent_PopulatedForAll(t *testing.T) {
 		t.Fatalf("CreateNode 2: %v", err)
 	}
 
-	pages, errs := svc.GetPages([]string{*id1, *id2})
+	pages, errs := svc.GetPages([]PageID{*id1, *id2})
 	for i, e := range errs {
 		if e != nil {
 			t.Fatalf("GetPages[%d]: %v", i, e)

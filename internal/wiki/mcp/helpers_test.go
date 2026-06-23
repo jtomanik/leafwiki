@@ -13,6 +13,7 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
@@ -27,6 +28,8 @@ func TestActorForRequestRejectsMissingTokenInfoByDefault(t *testing.T) {
 	} {
 		if user, err := routes.actorForRequest(req); err == nil {
 			t.Fatalf("actorForRequest(%#v) returned user %#v, want missing-token error", req, user)
+		} else {
+			assertLocalizedErrorCode(t, err, "mcp_token_info_missing", "errors.mcp.token_info_missing")
 		}
 	}
 }
@@ -77,7 +80,8 @@ func TestActorForMissingTokenInfoUsesStdioAPIKeyAndReloadsCurrentUser(t *testing
 	t.Parallel()
 
 	userService, apiKeyService, editor := newMCPAuthServices(t)
-	created, err := apiKeyService.CreateAPIKey(editor.ID, "Native STDIO", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -94,7 +98,7 @@ func TestActorForMissingTokenInfoUsesStdioAPIKeyAndReloadsCurrentUser(t *testing
 		t.Fatalf("user = %#v, want editor role", user)
 	}
 
-	if _, err := userService.UpdateUser(editor.ID, "editor", "editor@example.com", "", coreauth.RoleViewer); err != nil {
+	if _, err := userService.UpdateUser(editorID, "editor", "editor@example.com", "", coreauth.RoleViewer); err != nil {
 		t.Fatalf("UpdateUser role downgrade failed: %v", err)
 	}
 	user, err = routes.actorForRequest(nil)
@@ -105,12 +109,48 @@ func TestActorForMissingTokenInfoUsesStdioAPIKeyAndReloadsCurrentUser(t *testing
 		t.Fatalf("role after downgrade = %q, want viewer", user.Role)
 	}
 
-	if err := apiKeyService.RevokeAPIKey(editor.ID, created.Key.ID); err != nil {
+	if err := apiKeyService.RevokeAPIKey(editorID, created.Key.ID); err != nil {
 		t.Fatalf("RevokeAPIKey failed: %v", err)
 	}
-	if _, err := routes.actorForRequest(nil); err == nil || !strings.Contains(err.Error(), "authenticated MCP user") {
-		t.Fatalf("actorForRequest after revoke error = %v, want authenticated user error", err)
+	if _, err := routes.actorForRequest(nil); err == nil {
+		t.Fatalf("actorForRequest after revoke succeeded, want authenticated user error")
+	} else {
+		assertLocalizedErrorCode(t, err, "mcp_authenticated_user_not_found", "errors.mcp.authenticated_user_not_found")
 	}
+}
+
+func TestEditorActorForRequestRejectsViewerWithStableCode(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
+		Version:     1,
+		Issuer:      projectdaemon.ActorContextIssuerWikid,
+		Subject:     "user:viewer-1",
+		Username:    "viewer",
+		Role:        coreauth.RoleViewer,
+		WorkspaceID: "current",
+		AuthMethod:  "oauth",
+		IssuedAt:    now,
+		ExpiresAt:   now.Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("EncodeActorContext failed: %v", err)
+	}
+	header := http.Header{}
+	header.Set(projectdaemon.ActorContextHeader, encoded)
+	routes := &Routes{
+		workspaceID:          "current",
+		now:                  func() time.Time { return now.Add(time.Minute) },
+		actorContextAllowed:  true,
+		actorContextRequired: true,
+	}
+	req := &sdkmcp.CallToolRequest{Extra: &sdkmcp.RequestExtra{Header: header}}
+	user, err := routes.editorActorForRequest(req)
+	if err == nil {
+		t.Fatalf("editorActorForRequest returned user %#v, want role error", user)
+	}
+	assertLocalizedErrorCode(t, err, "mcp_editor_role_required", "errors.mcp.editor_role_required")
 }
 
 func TestAPIKeyBearerVerificationPreservesStorageErrors(t *testing.T) {
@@ -144,11 +184,23 @@ func TestActorForMissingTokenInfoPreservesAPIKeyStorageErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("actorForRequest unexpectedly succeeded")
 	}
-	if strings.Contains(err.Error(), "authenticated MCP user not found") {
-		t.Fatalf("actorForRequest error = %v, want storage failure not not-found classification", err)
-	}
-	if !strings.Contains(err.Error(), "authenticated MCP user") || !strings.Contains(err.Error(), "database") {
+	assertLocalizedErrorCode(t, err, "mcp_authenticated_user_lookup_failed", "errors.mcp.authenticated_user_lookup_failed")
+	if !strings.Contains(err.Error(), "database") {
 		t.Fatalf("actorForRequest error = %v, want authenticated-user storage failure context", err)
+	}
+}
+
+func assertLocalizedErrorCode(t *testing.T, err error, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
+	t.Helper()
+	localized, ok := sharederrors.AsLocalizedError(err)
+	if !ok {
+		t.Fatalf("error = %T %v, want LocalizedError", err, err)
+	}
+	if localized.Code != code {
+		t.Fatalf("code = %q, want %q", localized.Code, code)
+	}
+	if localized.MessageID != messageID {
+		t.Fatalf("messageId = %q, want %q", localized.MessageID, messageID)
 	}
 }
 
@@ -187,7 +239,8 @@ func newMCPAPIKeyAuthFixture(t *testing.T) (*coreauth.UserService, *coreauth.API
 			t.Fatalf("close api key service: %v", err)
 		}
 	})
-	created, err := apiKeyService.CreateAPIKey(editor.ID, "Native STDIO", editor.ID)
+	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}

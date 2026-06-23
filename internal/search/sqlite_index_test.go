@@ -23,7 +23,7 @@ func TestSQLiteIndex_IndexPage(t *testing.T) {
 
 	// Testdata
 	path := "docs/test.md"
-	pageID := "test123"
+	pageID := tree.NewPageIDUnchecked("test123")
 	title := "Test Page"
 	content := "This is a **test** page."
 	expectedContent := "This is a test page."
@@ -284,7 +284,7 @@ func TestSQLiteIndex_SearchPageIDs_RespectsQueryAndPageFilters(t *testing.T) {
 		t.Fatalf("failed to index gamma page: %v", err)
 	}
 
-	pageIDs, err := index.SearchPageIDs("shared token", []string{"alpha"})
+	pageIDs, err := index.SearchPageIDs("shared token", []tree.PageID{"alpha"})
 	if err != nil {
 		t.Fatalf("SearchPageIDs failed: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestSQLiteIndex_SearchPageIDs_RespectsQueryAndPageFilters(t *testing.T) {
 		t.Fatalf("expected only alpha page, got %#v", pageIDs)
 	}
 
-	noMatches, err := index.SearchPageIDs("shared token", []string{})
+	noMatches, err := index.SearchPageIDs("shared token", []tree.PageID{})
 	if err != nil {
 		t.Fatalf("SearchPageIDs with empty page filter failed: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestSQLiteIndex_Search_FiltersByPageIDs(t *testing.T) {
 		t.Fatalf("failed to index plain-guide page: %v", err)
 	}
 
-	result, err := index.Search("search", []string{"react-guide"}, 0, 10)
+	result, err := index.Search("search", []tree.PageID{"react-guide"}, 0, 10)
 	if err != nil {
 		t.Fatalf("search failed: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestSQLiteIndex_Search_ReturnsNoResultsWhenPageIDFilterIsEmpty(t *testing.T
 		t.Fatalf("failed to index react-guide page: %v", err)
 	}
 
-	result, err := index.Search("search", []string{}, 0, 10)
+	result, err := index.Search("search", []tree.PageID{}, 0, 10)
 	if err != nil {
 		t.Fatalf("search failed: %v", err)
 	}

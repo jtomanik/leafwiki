@@ -119,20 +119,20 @@ func NewCreateUserUseCase(u *coreauth.UserService, r *coreauth.UserResolver, log
 func (uc *CreateUserUseCase) Execute(_ context.Context, in CreateUserInput) (*CreateUserOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Username == "" {
-		ve.Add("username", "Username must not be empty")
+		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired, "Username must not be empty")
 	}
 	if in.Email == "" {
-		ve.Add("email", "Email must not be empty")
+		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired, "Email must not be empty")
 	} else if !emailRegex.MatchString(in.Email) {
-		ve.Add("email", "Email is not valid")
+		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid, "Email is not valid")
 	}
 	if in.Password == "" {
-		ve.Add("password", "Password must not be empty")
+		ve.AddWithCode("password", FieldCodeAuthPasswordRequired, MessageIDAuthPasswordRequired, "Password must not be empty")
 	} else if len(in.Password) < 8 {
-		ve.Add("password", "Password must be at least 8 characters long")
+		ve.AddWithCode("password", FieldCodeAuthPasswordTooShort, MessageIDAuthPasswordTooShort, "Password must be at least 8 characters long")
 	}
 	if !coreauth.IsValidRole(in.Role) {
-		ve.Add("role", "Invalid role")
+		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid, "Invalid role")
 	}
 	if ve.HasErrors() {
 		return nil, ve
@@ -151,7 +151,7 @@ func (uc *CreateUserUseCase) Execute(_ context.Context, in CreateUserInput) (*Cr
 // ─── UpdateUserUseCase ───────────────────────────────────────────────────────
 
 type UpdateUserInput struct {
-	ID               string
+	ID               coreauth.UserID
 	Username         string
 	Email            string
 	Password         string
@@ -176,17 +176,17 @@ func NewUpdateUserUseCase(u *coreauth.UserService, r *coreauth.UserResolver, log
 func (uc *UpdateUserUseCase) Execute(_ context.Context, in UpdateUserInput) (*UpdateUserOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Username == "" {
-		ve.Add("username", "Username must not be empty")
+		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired, "Username must not be empty")
 	}
 	if in.Email == "" {
-		ve.Add("email", "Email must not be empty")
+		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired, "Email must not be empty")
 	} else if !emailRegex.MatchString(in.Email) {
-		ve.Add("email", "Email is not valid")
+		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid, "Email is not valid")
 	}
 	role := in.Role
 	roleProvided := strings.TrimSpace(in.Role) != ""
 	if in.RequesterIsAdmin && roleProvided && !coreauth.IsValidRole(in.Role) {
-		ve.Add("role", "Invalid role")
+		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid, "Invalid role")
 	}
 	if ve.HasErrors() {
 		return nil, ve
@@ -213,7 +213,7 @@ func (uc *UpdateUserUseCase) Execute(_ context.Context, in UpdateUserInput) (*Up
 // ─── ChangeOwnPasswordUseCase ────────────────────────────────────────────────
 
 type ChangeOwnPasswordInput struct {
-	UserID      string
+	UserID      coreauth.UserID
 	OldPassword string
 	NewPassword string
 }
@@ -229,12 +229,12 @@ func NewChangeOwnPasswordUseCase(u *coreauth.UserService) *ChangeOwnPasswordUseC
 func (uc *ChangeOwnPasswordUseCase) Execute(_ context.Context, in ChangeOwnPasswordInput) error {
 	ve := sharederrors.NewValidationErrors()
 	if in.NewPassword == "" {
-		ve.Add("newPassword", "New password must not be empty")
+		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordRequired, MessageIDAuthNewPasswordRequired, "New password must not be empty")
 	} else if len(in.NewPassword) < 8 {
-		ve.Add("newPassword", "New password must be at least 8 characters long")
+		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordTooShort, MessageIDAuthNewPasswordTooShort, "New password must be at least 8 characters long")
 	}
 	if _, err := uc.user.DoesIDAndPasswordMatch(in.UserID, in.OldPassword); err != nil {
-		ve.Add("oldPassword", "Old password is incorrect")
+		ve.AddWithCode("oldPassword", FieldCodeAuthOldPasswordIncorrect, MessageIDAuthOldPasswordIncorrect, "Old password is incorrect")
 	}
 	if ve.HasErrors() {
 		return ve
@@ -244,7 +244,7 @@ func (uc *ChangeOwnPasswordUseCase) Execute(_ context.Context, in ChangeOwnPassw
 
 // ─── DeleteUserUseCase ───────────────────────────────────────────────────────
 
-type DeleteUserInput struct{ ID string }
+type DeleteUserInput struct{ ID coreauth.UserID }
 
 type DeleteUserUseCase struct {
 	user     *coreauth.UserService
@@ -292,7 +292,7 @@ func (uc *GetUsersUseCase) Execute(_ context.Context) (*GetUsersOutput, error) {
 
 // ─── GetUserByIDUseCase ──────────────────────────────────────────────────────
 
-type GetUserByIDInput struct{ ID string }
+type GetUserByIDInput struct{ ID coreauth.UserID }
 
 type GetUserByIDOutput struct {
 	User *coreauth.PublicUser
@@ -317,9 +317,9 @@ func (uc *GetUserByIDUseCase) Execute(_ context.Context, in GetUserByIDInput) (*
 // ─── API Key Use Cases ──────────────────────────────────────────────────────
 
 type CreateAPIKeyInput struct {
-	UserID                 string
+	UserID                 coreauth.UserID
 	Name                   string
-	CreatedByUserID        string
+	CreatedByUserID        coreauth.UserID
 	CurrentPassword        string
 	RequireCurrentPassword bool
 }
@@ -342,15 +342,15 @@ func (uc *CreateAPIKeyUseCase) Execute(_ context.Context, in CreateAPIKeyInput) 
 	ve := sharederrors.NewValidationErrors()
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		ve.Add("name", "Name must not be empty")
+		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired, "Name must not be empty")
 	} else if len(name) > maxAPIKeyNameLength {
-		ve.Add("name", "Name must be at most 80 characters long")
+		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong, "Name must be at most 80 characters long")
 	}
 	if in.RequireCurrentPassword {
 		if in.CurrentPassword == "" {
-			ve.Add("currentPassword", "Current password must not be empty")
+			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordRequired, MessageIDAuthCurrentPasswordRequired, "Current password must not be empty")
 		} else if _, err := uc.users.DoesIDAndPasswordMatch(in.UserID, in.CurrentPassword); err != nil {
-			ve.Add("currentPassword", "Current password is incorrect")
+			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordIncorrect, MessageIDAuthCurrentPasswordIncorrect, "Current password is incorrect")
 		}
 	}
 	if ve.HasErrors() {
@@ -365,7 +365,7 @@ func (uc *CreateAPIKeyUseCase) Execute(_ context.Context, in CreateAPIKeyInput) 
 }
 
 type ListAPIKeysInput struct {
-	UserID string
+	UserID coreauth.UserID
 }
 
 type ListAPIKeysOutput struct {
@@ -389,8 +389,8 @@ func (uc *ListAPIKeysUseCase) Execute(_ context.Context, in ListAPIKeysInput) (*
 }
 
 type RevokeAPIKeyInput struct {
-	UserID string
-	KeyID  string
+	UserID coreauth.UserID
+	KeyID  coreauth.APIKeyID
 }
 
 type RevokeAPIKeyUseCase struct {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type RegistryStore struct {
@@ -65,6 +67,9 @@ func (s *RegistryStore) RegisterWorkspaceWithResultAndGrants(
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	if err := workspace.ID.Validate(); err != nil {
+		return RegisterWorkspaceResult{}, err
+	}
 	workspace = normalizeWorkspaceRecord(workspace)
 	if err := validateWorkspaceRecord(workspace); err != nil {
 		return RegisterWorkspaceResult{}, err
@@ -86,10 +91,10 @@ func (s *RegistryStore) RegisterWorkspaceWithResultAndGrants(
 				return upsertWorkspaceGrantsForRegistration(ctx, conn, result, grants)
 			}
 			if cleanPath(existing.DataDir) == cleanPath(workspace.DataDir) {
-				return fmt.Errorf("data directory is already in use by workspace %q", existing.ID)
+				return fmt.Errorf("data directory is already in use by workspace %q", existing.ID.String())
 			}
 			if cleanPath(existing.RootDir) == cleanPath(workspace.RootDir) {
-				return fmt.Errorf("root directory is already in use by workspace %q", existing.ID)
+				return fmt.Errorf("root directory is already in use by workspace %q", existing.ID.String())
 			}
 		}
 		result = RegisterWorkspaceResult{Workspace: workspace, Created: true}
@@ -113,9 +118,10 @@ func upsertWorkspaceGrantsForRegistration(ctx context.Context, conn *sql.Conn, r
 		return err
 	}
 	for _, grant := range toUpsert {
-		grant.WorkspaceID = strings.TrimSpace(grant.WorkspaceID)
 		if grant.WorkspaceID == "" {
 			grant.WorkspaceID = result.Workspace.ID
+		} else if err := grant.WorkspaceID.Validate(); err != nil {
+			return fmt.Errorf("grant workspace ID: %w", err)
 		}
 		if err := upsertGrant(ctx, conn, grant); err != nil {
 			return err
@@ -153,13 +159,14 @@ func loadRegistryDocument(ctx context.Context, q registryQuerier) (RegistryDocum
 		); err != nil {
 			return RegistryDocument{}, err
 		}
+		var err error
 		workspace.CreatedAt, err = parseWikidTime(createdAt)
 		if err != nil {
-			return RegistryDocument{}, fmt.Errorf("parse workspace %q created_at: %w", workspace.ID, err)
+			return RegistryDocument{}, fmt.Errorf("parse workspace %q created_at: %w", workspace.ID.String(), err)
 		}
 		workspace.UpdatedAt, err = parseWikidTime(updatedAt)
 		if err != nil {
-			return RegistryDocument{}, fmt.Errorf("parse workspace %q updated_at: %w", workspace.ID, err)
+			return RegistryDocument{}, fmt.Errorf("parse workspace %q updated_at: %w", workspace.ID.String(), err)
 		}
 		doc.Workspaces = append(doc.Workspaces, workspace)
 	}
@@ -176,7 +183,7 @@ func saveRegistryDocument(ctx context.Context, conn *sql.Conn, doc RegistryDocum
 	if err := doc.Validate(); err != nil {
 		return err
 	}
-	keep := map[string]struct{}{}
+	keep := map[workspaceid.WorkspaceID]struct{}{}
 	for _, workspace := range doc.Workspaces {
 		workspace = normalizeWorkspaceRecord(workspace)
 		if err := upsertWorkspace(ctx, conn, workspace); err != nil {

@@ -10,20 +10,21 @@ import (
 	"sync"
 
 	"github.com/perber/wiki/internal/core/shared/sqliteutil"
+	"github.com/perber/wiki/internal/core/tree"
 	_ "modernc.org/sqlite" // Import SQLite driver
 )
 
 type LinksStore struct {
-	mu         sync.Mutex
-	storageDir string
-	filename   string
-	db         *sql.DB
+	mu           sync.Mutex
+	storageDir   string
+	databaseFile string
+	db           *sql.DB
 }
 
 const maxOutgoingLinksQueryArgs = 900
 
 type PageLinkUpdate struct {
-	FromPageID string
+	FromPageID tree.PageID
 	FromTitle  string
 	ToPath     string
 	ToKind     string
@@ -44,8 +45,8 @@ func linksDatabasePath(storageDir string, filename string) string {
 
 func NewLinksStore(storageDir string) (*LinksStore, error) {
 	s := &LinksStore{
-		storageDir: storageDir,
-		filename:   "links.db",
+		storageDir:   storageDir,
+		databaseFile: "links.db",
 	}
 
 	if err := s.Connect(); err != nil {
@@ -59,7 +60,7 @@ func NewLinksStore(storageDir string) (*LinksStore, error) {
 			return nil, err
 		}
 		slog.Default().Warn("links database corrupt, removing and retrying", "error", err)
-		sqliteutil.RemoveSQLiteFiles(linksDatabasePath(s.storageDir, s.filename))
+		sqliteutil.RemoveSQLiteFiles(linksDatabasePath(s.storageDir, s.databaseFile))
 		if err2 := s.Connect(); err2 != nil {
 			return nil, err2
 		}
@@ -79,7 +80,7 @@ func (s *LinksStore) Connect() error {
 		return nil
 	}
 	// Connect to the database
-	db, err := sql.Open("sqlite", linksDatabasePath(s.storageDir, s.filename))
+	db, err := sql.Open("sqlite", linksDatabasePath(s.storageDir, s.databaseFile))
 	if err != nil {
 		return err
 	}
@@ -237,7 +238,7 @@ func storedTargetKind(kind string) string {
 
 // DeleteOutgoingLinks removes all links originating from the given page.
 // This is correct when the page itself is deleted (no source markdown left).
-func (s *LinksStore) DeleteOutgoingLinks(fromPageID string) error {
+func (s *LinksStore) DeleteOutgoingLinks(fromPageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -247,7 +248,7 @@ func (s *LinksStore) DeleteOutgoingLinks(fromPageID string) error {
 
 // MarkIncomingLinksBroken marks links pointing to the given page as broken,
 // but keeps them (because the source markdown still contains them).
-func (s *LinksStore) MarkIncomingLinksBroken(toPageID string) error {
+func (s *LinksStore) MarkIncomingLinksBroken(toPageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -349,7 +350,7 @@ func (s *LinksStore) MarkLinksBrokenForPrefixAndKind(oldPrefix string, rootKind 
 	return err
 }
 
-func (s *LinksStore) AddLinks(fromPageID string, fromTitle string, toLinks []TargetLink) error {
+func (s *LinksStore) AddLinks(fromPageID tree.PageID, fromTitle string, toLinks []TargetLink) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.Begin()
@@ -508,7 +509,7 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 	return nil
 }
 
-func (s *LinksStore) GetBacklinksForPage(pageID string) ([]Backlink, error) {
+func (s *LinksStore) GetBacklinksForPage(pageID tree.PageID) ([]Backlink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT from_page_id, to_page_id, from_title, to_kind FROM links WHERE to_page_id = ? and broken = 0`, pageID)
@@ -529,7 +530,7 @@ func (s *LinksStore) GetBacklinksForPage(pageID string) ([]Backlink, error) {
 			return nil, err
 		}
 		if toPageID.Valid {
-			b.ToPageID = toPageID.String
+			b.ToPageID = tree.NewPageIDUnchecked(toPageID.String)
 		} else {
 			b.ToPageID = ""
 		}
@@ -542,7 +543,7 @@ func (s *LinksStore) GetBacklinksForPage(pageID string) ([]Backlink, error) {
 	return backlinks, nil
 }
 
-func (s *LinksStore) GetOutgoingLinksForPage(pageID string) ([]Outgoing, error) {
+func (s *LinksStore) GetOutgoingLinksForPage(pageID tree.PageID) ([]Outgoing, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -571,7 +572,7 @@ func (s *LinksStore) GetOutgoingLinksForPage(pageID string) ([]Outgoing, error) 
 		}
 
 		if toPageID.Valid {
-			o.ToPageID = toPageID.String
+			o.ToPageID = tree.NewPageIDUnchecked(toPageID.String)
 		} else {
 			o.ToPageID = ""
 		}
@@ -586,15 +587,15 @@ func (s *LinksStore) GetOutgoingLinksForPage(pageID string) ([]Outgoing, error) 
 	return outgoings, nil
 }
 
-func (s *LinksStore) GetOutgoingLinksForPages(pageIDs []string) (map[string][]Outgoing, error) {
+func (s *LinksStore) GetOutgoingLinksForPages(pageIDs []tree.PageID) (map[tree.PageID][]Outgoing, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(pageIDs) == 0 {
-		return map[string][]Outgoing{}, nil
+		return map[tree.PageID][]Outgoing{}, nil
 	}
 
-	outgoingByPageID := make(map[string][]Outgoing, len(pageIDs))
+	outgoingByPageID := make(map[tree.PageID][]Outgoing, len(pageIDs))
 	for start := 0; start < len(pageIDs); start += maxOutgoingLinksQueryArgs {
 		end := start + maxOutgoingLinksQueryArgs
 		if end > len(pageIDs) {
@@ -609,7 +610,7 @@ func (s *LinksStore) GetOutgoingLinksForPages(pageIDs []string) (map[string][]Ou
 	return outgoingByPageID, nil
 }
 
-func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[string][]Outgoing, pageIDs []string) error {
+func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[tree.PageID][]Outgoing, pageIDs []tree.PageID) error {
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(pageIDs)), ",")
 	args := make([]any, 0, len(pageIDs))
 	for _, pageID := range pageIDs {
@@ -641,7 +642,7 @@ func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[string
 		}
 
 		if toPageID.Valid {
-			outgoing.ToPageID = toPageID.String
+			outgoing.ToPageID = tree.NewPageIDUnchecked(toPageID.String)
 		}
 		outgoing.Broken = brokenInt != 0
 		outgoingByPageID[outgoing.FromPageID] = append(outgoingByPageID[outgoing.FromPageID], outgoing)
@@ -650,15 +651,16 @@ func (s *LinksStore) appendOutgoingLinksForPageBatch(outgoingByPageID map[string
 	return rows.Err()
 }
 
-func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLinkMatch, error) {
+func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix tree.RoutePath) ([]RefactorLinkMatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	oldPrefixPath := oldPrefix.WikiPath()
 	rows, err := s.db.Query(`
 		SELECT from_page_id, from_title, to_path, to_kind, broken
 		FROM links
 		WHERE to_path = ? OR to_path LIKE ?
-	`, oldPrefix, oldPrefix+"/%")
+	`, oldPrefixPath, oldPrefixPath+"/%")
 	if err != nil {
 		return nil, err
 	}
@@ -671,10 +673,12 @@ func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLi
 	var matches []RefactorLinkMatch
 	for rows.Next() {
 		var match RefactorLinkMatch
+		var toPath string
 		var brokenInt int
-		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &match.ToPath, &match.ToKind, &brokenInt); err != nil {
+		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &toPath, &match.ToKind, &brokenInt); err != nil {
 			return nil, err
 		}
+		match.ToPath = tree.NewRoutePathUnchecked(toPath).Clean()
 		match.Broken = brokenInt == 1
 		matches = append(matches, match)
 	}
@@ -685,24 +689,25 @@ func (s *LinksStore) GetRefactorMatchesForPrefix(oldPrefix string) ([]RefactorLi
 	return matches, nil
 }
 
-func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKind string) ([]RefactorLinkMatch, error) {
+func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix tree.RoutePath, rootKind tree.NodeKind) ([]RefactorLinkMatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storedKind := storedTargetKind(rootKind)
+	oldPrefixPath := oldPrefix.WikiPath()
+	storedKind := storedTargetKind(string(rootKind))
 	query := `
 		SELECT from_page_id, from_title, to_path, to_kind, broken
 		FROM links
 		WHERE to_path = ? AND (to_kind = ? OR (to_kind = ? AND broken = 0))
 	`
-	args := []any{oldPrefix, storedKind, unknownStoredTargetKind}
+	args := []any{oldPrefixPath, storedKind, unknownStoredTargetKind}
 	if storedKind == sectionStoredTargetKind {
 		query = `
 			SELECT from_page_id, from_title, to_path, to_kind, broken
 			FROM links
 			WHERE (to_path = ? AND to_kind = ?) OR to_path LIKE ?
 		`
-		args = append(args, oldPrefix+"/%")
+		args = []any{oldPrefixPath, storedKind, oldPrefixPath + "/%"}
 	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -717,10 +722,12 @@ func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKi
 	var matches []RefactorLinkMatch
 	for rows.Next() {
 		var match RefactorLinkMatch
+		var toPath string
 		var brokenInt int
-		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &match.ToPath, &match.ToKind, &brokenInt); err != nil {
+		if err := rows.Scan(&match.FromPageID, &match.FromTitle, &toPath, &match.ToKind, &brokenInt); err != nil {
 			return nil, err
 		}
+		match.ToPath = tree.NewRoutePathUnchecked(toPath).Clean()
 		match.Broken = brokenInt == 1
 		matches = append(matches, match)
 	}
@@ -731,15 +738,16 @@ func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix string, rootKi
 	return matches, nil
 }
 
-func (s *LinksStore) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]string, error) {
+func (s *LinksStore) GetRefactorSourcePageIDsForPrefix(oldPrefix tree.RoutePath) ([]tree.PageID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	oldPrefixPath := oldPrefix.WikiPath()
 	rows, err := s.db.Query(`
 		SELECT DISTINCT from_page_id
 		FROM links
 		WHERE to_path = ? OR to_path LIKE ?
-	`, oldPrefix, oldPrefix+"/%")
+	`, oldPrefixPath, oldPrefixPath+"/%")
 	if err != nil {
 		return nil, err
 	}
@@ -749,9 +757,9 @@ func (s *LinksStore) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]stri
 		}
 	}()
 
-	var pageIDs []string
+	var pageIDs []tree.PageID
 	for rows.Next() {
-		var pageID string
+		var pageID tree.PageID
 		if err := rows.Scan(&pageID); err != nil {
 			return nil, err
 		}
@@ -764,24 +772,25 @@ func (s *LinksStore) GetRefactorSourcePageIDsForPrefix(oldPrefix string) ([]stri
 	return pageIDs, nil
 }
 
-func (s *LinksStore) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix string, rootKind string) ([]string, error) {
+func (s *LinksStore) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix tree.RoutePath, rootKind tree.NodeKind) ([]tree.PageID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storedKind := storedTargetKind(rootKind)
+	oldPrefixPath := oldPrefix.WikiPath()
+	storedKind := storedTargetKind(string(rootKind))
 	query := `
 		SELECT DISTINCT from_page_id
 		FROM links
 		WHERE to_path = ? AND (to_kind = ? OR (to_kind = ? AND broken = 0))
 	`
-	args := []any{oldPrefix, storedKind, unknownStoredTargetKind}
+	args := []any{oldPrefixPath, storedKind, unknownStoredTargetKind}
 	if storedKind == sectionStoredTargetKind {
 		query = `
 			SELECT DISTINCT from_page_id
 			FROM links
 			WHERE (to_path = ? AND to_kind = ?) OR to_path LIKE ?
 		`
-		args = append(args, oldPrefix+"/%")
+		args = []any{oldPrefixPath, storedKind, oldPrefixPath + "/%"}
 	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -793,9 +802,9 @@ func (s *LinksStore) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix string, 
 		}
 	}()
 
-	var pageIDs []string
+	var pageIDs []tree.PageID
 	for rows.Next() {
-		var pageID string
+		var pageID tree.PageID
 		if err := rows.Scan(&pageID); err != nil {
 			return nil, err
 		}
@@ -835,7 +844,7 @@ func (s *LinksStore) GetBrokenIncomingForPath(toPath string) ([]Backlink, error)
 			return nil, err
 		}
 		if toPageID.Valid {
-			b.ToPageID = toPageID.String
+			b.ToPageID = tree.NewPageIDUnchecked(toPageID.String)
 		} else {
 			b.ToPageID = ""
 		}
@@ -876,7 +885,7 @@ func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath string, toKind strin
 			return nil, err
 		}
 		if toPageID.Valid {
-			b.ToPageID = toPageID.String
+			b.ToPageID = tree.NewPageIDUnchecked(toPageID.String)
 		} else {
 			b.ToPageID = ""
 		}
@@ -890,7 +899,7 @@ func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath string, toKind strin
 	return backlinks, nil
 }
 
-func (s *LinksStore) HealLinksForPath(toPath string, pageID string) error {
+func (s *LinksStore) HealLinksForPath(toPath string, pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -903,7 +912,7 @@ func (s *LinksStore) HealLinksForPath(toPath string, pageID string) error {
 	return err
 }
 
-func (s *LinksStore) HealLinksForPathAndKind(toPath string, toKind string, pageID string) error {
+func (s *LinksStore) HealLinksForPathAndKind(toPath string, toKind string, pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { NODE_KIND_PAGE, PageNode, sortPages } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_SORT_PAGES } from '@/lib/registries'
+import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
 import { useTreeStore } from '@/stores/tree'
 import {
   DndContext,
@@ -148,8 +149,8 @@ export function SortPagesDialog({
     const { active, over } = event
     if (over && active.id !== over.id) {
       setOrder((prev) => {
-        const oldIndex = prev.indexOf(active.id as string)
-        const newIndex = prev.indexOf(over.id as string)
+        const oldIndex = prev.indexOf(active.id as PageNode['id'])
+        const newIndex = prev.indexOf(over.id as PageNode['id'])
         return arrayMove(prev, oldIndex, newIndex)
       })
     }
@@ -170,7 +171,11 @@ export function SortPagesDialog({
   const handleSave = async (): Promise<boolean> => {
     setLoading(true)
     try {
-      await sortPages(parent.id, order, workspaceId)
+      await sortPages(
+        asPageID(parent.id),
+        order.map(asPageID),
+        asWorkspaceID(workspaceId),
+      )
       await reloadTree(workspaceId)
       toast.success(`${itemLabelCapitalized} children sorted successfully`)
       return true

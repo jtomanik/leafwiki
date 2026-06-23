@@ -35,14 +35,14 @@ func ToTaggedPage(node *tree.PageNode, pageTags []string, excerpt string, userRe
 	}
 
 	p := &TaggedPage{
-		ID:           node.ID,
+		ID:           node.ID.String(),
 		Title:        node.Title,
 		Path:         BuildPathFromNode(node),
 		Kind:         node.Kind,
 		Excerpt:      excerpt,
 		Tags:         pageTags,
-		LastAuthorID: node.Metadata.LastAuthorID,
-		CreatorID:    node.Metadata.CreatorID,
+		LastAuthorID: node.Metadata.LastAuthorID.String(),
+		CreatorID:    node.Metadata.CreatorID.String(),
 	}
 
 	if !node.Metadata.CreatedAt.IsZero() {
@@ -53,7 +53,7 @@ func ToTaggedPage(node *tree.PageNode, pageTags []string, excerpt string, userRe
 	}
 
 	if userResolver != nil {
-		p.LastAuthor, _ = userResolver.ResolveUserLabel(node.Metadata.LastAuthorID)
+		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	return p

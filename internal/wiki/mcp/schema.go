@@ -22,7 +22,7 @@ func addTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDescriptor,
 
 func addRequestTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDescriptor, handler func(context.Context, *sdkmcp.CallToolRequest, In) (Out, error)) {
 	tool := &sdkmcp.Tool{
-		Name:         descriptor.Name,
+		Name:         descriptor.Name.ProtocolName().String(),
 		Description:  descriptor.Description,
 		OutputSchema: toolOutputSchema(descriptor.Name),
 	}
@@ -30,11 +30,13 @@ func addRequestTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDesc
 		tool.InputSchema = inputSchema
 	}
 
-	sdkmcp.AddTool[In, Out](server, tool, func(ctx context.Context, req *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, Out, error) {
-		var zero Out
+	sdkmcp.AddTool[In, any](server, tool, func(ctx context.Context, req *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, any, error) {
 		out, err := handler(ctx, req, in)
 		if err != nil {
-			return nil, zero, mcpToolError(err)
+			if result, ok := mcpToolErrorResult(err); ok {
+				return result, nil, nil
+			}
+			return nil, nil, err
 		}
 		return nil, out, nil
 	})
@@ -62,7 +64,7 @@ func addEditorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descripto
 	})
 }
 
-func toolInputSchema(name string) *jsonschema.Schema {
+func toolInputSchema(name ToolID) *jsonschema.Schema {
 	switch name {
 	case ToolGetContext:
 		return objectSchema(map[string]*jsonschema.Schema{
@@ -220,7 +222,7 @@ func pagePathSchemaWith(extra map[string]*jsonschema.Schema, required []string) 
 	return objectSchema(props, required)
 }
 
-func toolOutputSchema(name string) *jsonschema.Schema {
+func toolOutputSchema(name ToolID) *jsonschema.Schema {
 	switch name {
 	case ToolGetContext:
 		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
@@ -302,7 +304,10 @@ func toolOutputSchema(name string) *jsonschema.Schema {
 	case ToolSuggestSlug:
 		return outputSchema(map[string]*jsonschema.Schema{"slug": stringSchema()})
 	case ToolDeletePage, ToolMovePage, ToolSortPages, ToolConvertPage, ToolDeleteAsset:
-		return outputSchema(map[string]*jsonschema.Schema{"message": stringSchema()})
+		return outputSchema(map[string]*jsonschema.Schema{
+			"messageId": stringSchema(),
+			"message":   stringSchema(),
+		})
 	case ToolSearchPages:
 		return outputSchema(map[string]*jsonschema.Schema{
 			"count":     integerSchema(),

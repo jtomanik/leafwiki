@@ -1,20 +1,21 @@
 import { fetchWithAuth } from './auth'
+import type { MCPAPIKeyID, UserID } from '../semanticTypes'
 
 export type User = {
-  id: string
+  id: UserID
   username: string
   email: string
   role: 'admin' | 'editor' | 'viewer'
 }
 
 export type MCPAPIKey = {
-  id: string
-  userId: string
+  id: MCPAPIKeyID
+  userId: UserID
   name: string
   prefix: string
   last4: string
   scopes: string[]
-  createdByUserId: string
+  createdByUserId: UserID
   createdAt: string
   lastUsedAt: string | null
   revokedAt: string | null
@@ -58,20 +59,22 @@ export async function changeOwnPassword(
   })
 }
 
-export async function deleteUser(id: string) {
+export async function deleteUser(id: UserID) {
   return await fetchWithAuth(`/api/users/${id}`, {
     method: 'DELETE',
   })
 }
 
-export async function getUserMCPAPIKeys(userId: string): Promise<MCPAPIKey[]> {
+export async function getUserMCPAPIKeys(
+  userId: UserID,
+): Promise<MCPAPIKey[]> {
   return (await fetchWithAuth(
     `/api/users/${userId}/mcp-api-keys`,
   )) as MCPAPIKey[]
 }
 
 export async function createUserMCPAPIKey(
-  userId: string,
+  userId: UserID,
   name: string,
 ): Promise<MCPAPIKeyCreateResponse> {
   return (await fetchWithAuth(`/api/users/${userId}/mcp-api-keys`, {
@@ -80,7 +83,10 @@ export async function createUserMCPAPIKey(
   })) as MCPAPIKeyCreateResponse
 }
 
-export async function revokeUserMCPAPIKey(userId: string, keyId: string) {
+export async function revokeUserMCPAPIKey(
+  userId: UserID,
+  keyId: MCPAPIKeyID,
+) {
   return await fetchWithAuth(`/api/users/${userId}/mcp-api-keys/${keyId}`, {
     method: 'DELETE',
   })
@@ -100,7 +106,7 @@ export async function createOwnMCPAPIKey(
   })) as MCPAPIKeyCreateResponse
 }
 
-export async function revokeOwnMCPAPIKey(keyId: string) {
+export async function revokeOwnMCPAPIKey(keyId: MCPAPIKeyID) {
   return await fetchWithAuth(`/api/users/me/mcp-api-keys/${keyId}`, {
     method: 'DELETE',
   })

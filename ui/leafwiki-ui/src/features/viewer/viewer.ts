@@ -3,6 +3,7 @@
 
 import { getPageByPath, Page } from '@/lib/api/pages'
 import { isPageNotFoundError } from '@/lib/api/errors'
+import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import { create } from 'zustand'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
@@ -62,16 +63,20 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     })
 
     try {
-      const page = await getPageByPath(path, kind, workspaceId)
+      const page = await getPageByPath(
+        asRoutePath(path),
+        kind,
+        asWorkspaceID(workspaceId),
+      )
       commit({ page, workspaceId, notFound: false })
     } catch (err) {
       if (isPageNotFoundError(err)) {
         if (fallbackPath) {
           try {
             const fallbackPage = await getPageByPath(
-              fallbackPath,
+              asRoutePath(fallbackPath),
               'section',
-              workspaceId,
+              asWorkspaceID(workspaceId),
             )
             if (fallbackPage.kind === 'section') {
               commit({ page: fallbackPage, workspaceId, notFound: false })

@@ -30,7 +30,7 @@ export default class ImporterPage {
   }
 
   async expectPlanStatus(status: 'Planned' | 'Running' | 'Completed' | 'Canceled' | 'Failed') {
-    await expect(this.page.locator('.importer__status-title')).toHaveText(status);
+    await expect(this.page.locator(`.importer__status-title[data-import-status="${status.toLowerCase()}"]`)).toBeVisible();
   }
 
   async expectPlanItemCount(count: number) {
@@ -50,6 +50,15 @@ export default class ImporterPage {
   }
 
   async clearImportPlanIfPresent() {
+    const closeButton = this.page.getByRole('button', { name: 'Close and Clear' });
+    if (await closeButton.count()) {
+      await closeButton.click();
+      await this.page.goto(toAppPath('/settings/importer'));
+      await expect(this.page.getByRole('heading', { name: 'Choose Import Package' })).toBeVisible();
+      await expect(this.page.getByRole('heading', { name: 'Import Result' })).toHaveCount(0);
+      return;
+    }
+
     const clearButton = this.page.getByRole('button', { name: 'Clear Import Plan' });
     if (await clearButton.count()) {
       await clearButton.click();
@@ -82,6 +91,7 @@ export default class ImporterPage {
 
   async closeAndClear() {
     await this.page.getByRole('button', { name: 'Close and Clear' }).click();
+    await expect(this.page.getByRole('heading', { name: 'Import Result' })).toHaveCount(0);
   }
 
   async expectNoStoredPlan() {

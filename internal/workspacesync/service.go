@@ -48,6 +48,11 @@ const watcherBatchDebounce = 250 * time.Millisecond
 var canonicalMarkdownRewriteWriter = writeCanonicalMarkdownRewritesAtomically
 
 type Actor = gitrevisions.Actor
+type ActorID = gitrevisions.ActorID
+
+func NewActorIDUnchecked(raw string) ActorID {
+	return gitrevisions.NewActorIDUnchecked(raw)
+}
 
 type treeReconstructor interface {
 	ReconstructTreeFromFS() error
@@ -105,10 +110,10 @@ type SyncRequest struct {
 }
 
 type ValidationError struct {
-	Code     string `json:"code,omitempty"`
-	Path     string `json:"path"`
-	Message  string `json:"message"`
-	Severity string `json:"severity,omitempty"`
+	Code     wikivalidation.IssueCode     `json:"code,omitempty"`
+	Path     string                       `json:"path"`
+	Message  string                       `json:"message"`
+	Severity wikivalidation.IssueSeverity `json:"severity,omitempty"`
 }
 
 type SyncStatus struct {
@@ -118,27 +123,27 @@ type SyncStatus struct {
 	PendingEventCount          int
 	LastSyncTime               time.Time
 	LastError                  string
-	LastCommitHash             string
+	LastCommitHash             CommitHash
 	RecentChangedMarkdownPaths []string
 	ValidationErrors           []ValidationError
 }
 
 type Snapshot struct {
-	ID                   string    `json:"id"`
-	Message              string    `json:"message,omitempty"`
-	AuthorID             string    `json:"authorId,omitempty"`
-	AuthorName           string    `json:"author,omitempty"`
-	AuthorEmail          string    `json:"authorEmail,omitempty"`
-	CreatedAt            time.Time `json:"createdAt,omitempty"`
-	Source               string    `json:"source,omitempty"`
-	Reason               string    `json:"reason,omitempty"`
-	ChangedMarkdownCount int       `json:"changedMarkdownCount,omitempty"`
-	ChangedMarkdownPaths []string  `json:"changedMarkdownPaths,omitempty"`
+	ID                   CommitHash `json:"id"`
+	Message              string     `json:"message,omitempty"`
+	AuthorID             string     `json:"authorId,omitempty"`
+	AuthorName           string     `json:"author,omitempty"`
+	AuthorEmail          string     `json:"authorEmail,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt,omitempty"`
+	Source               string     `json:"source,omitempty"`
+	Reason               string     `json:"reason,omitempty"`
+	ChangedMarkdownCount int        `json:"changedMarkdownCount,omitempty"`
+	ChangedMarkdownPaths []string   `json:"changedMarkdownPaths,omitempty"`
 }
 
 type SnapshotList struct {
 	Snapshots  []Snapshot
-	NextCursor string
+	NextCursor CommitHash
 }
 
 type PageRevisionList struct {
@@ -519,7 +524,7 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
-	s.status.LastCommitHash = commit.Hash
+	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -635,7 +640,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 		if err != nil {
 			return err
 		}
-		result := index.RewriteMarkdown(relPath, string(raw))
+		result := index.RewriteMarkdown(tree.NewMarkdownPathUnchecked(relPath), string(raw))
 		migrationIssues = append(migrationIssues, canonicalMigrationValidationErrors(s.rootDir, relPath, result.Issues)...)
 		if !result.Changed {
 			return nil
@@ -678,18 +683,18 @@ func canonicalMigrationValidationErrors(rootDir string, relPath string, issues [
 	}
 	out := make([]ValidationError, 0, len(issues))
 	for _, issue := range issues {
-		if issue.Code != "ambiguous_legacy_link" {
+		if issue.Code != markdownlinks.IssueCodeAmbiguousLegacyLink {
 			continue
 		}
-		routePath := tree.MarkdownPathToRoutePath(relPath)
+		routePath := tree.CleanMarkdownPath(relPath).RoutePath()
 		if route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false); err == nil && !route.Skip {
 			routePath = route.RoutePath
 		}
 		out = append(out, ValidationError{
-			Code:     issue.Code,
-			Path:     routePath,
+			Code:     wikivalidation.IssueCodeAmbiguousLegacyLink,
+			Path:     routePath.FilesystemPath(),
 			Message:  fmt.Sprintf("ambiguous_legacy_link: %s is ambiguous during canonical Markdown link migration", issue.Destination),
-			Severity: "error",
+			Severity: wikivalidation.IssueSeverityError,
 		})
 	}
 	return out
@@ -889,14 +894,14 @@ func (s *Service) Status() SyncStatus {
 }
 
 func (s *Service) ListSnapshots(ctx context.Context, limit int) ([]Snapshot, error) {
-	out, err := s.ListSnapshotPage(ctx, "", limit)
+	out, err := s.ListSnapshotPage(ctx, NewCommitHashUnchecked(""), limit)
 	if err != nil {
 		return nil, err
 	}
 	return out.Snapshots, nil
 }
 
-func (s *Service) ListSnapshotPage(ctx context.Context, cursor string, limit int) (SnapshotList, error) {
+func (s *Service) ListSnapshotPage(ctx context.Context, cursor CommitHash, limit int) (SnapshotList, error) {
 	s.mu.Lock()
 	if !s.enabled {
 		s.mu.Unlock()
@@ -911,16 +916,16 @@ func (s *Service) ListSnapshotPage(ctx context.Context, cursor string, limit int
 	}
 	s.storeMu.Lock()
 	commits, err := store.ListCommits(ctx, gitrevisions.ListRequest{
-		Cursor: strings.TrimSpace(cursor),
+		Cursor: cursor.String(),
 		Limit:  requestedLimit + 1,
 	})
 	s.storeMu.Unlock()
 	if err != nil {
 		return SnapshotList{}, err
 	}
-	nextCursor := ""
+	nextCursor := CommitHash("")
 	if len(commits) > requestedLimit {
-		nextCursor = commits[requestedLimit-1].Hash
+		nextCursor = NewCommitHashUnchecked(commits[requestedLimit-1].Hash)
 		commits = commits[:requestedLimit]
 	}
 	snapshots := make([]Snapshot, 0, len(commits))
@@ -932,9 +937,9 @@ func (s *Service) ListSnapshotPage(ctx context.Context, cursor string, limit int
 			return SnapshotList{}, err
 		}
 		snapshots = append(snapshots, Snapshot{
-			ID:                   commit.Hash,
+			ID:                   NewCommitHashUnchecked(commit.Hash),
 			Message:              commit.Message,
-			AuthorID:             commit.AuthorID,
+			AuthorID:             commit.AuthorID.String(),
 			AuthorName:           commit.AuthorName,
 			AuthorEmail:          commit.AuthorEmail,
 			CreatedAt:            commit.CreatedAt,
@@ -947,11 +952,11 @@ func (s *Service) ListSnapshotPage(ctx context.Context, cursor string, limit int
 	return SnapshotList{Snapshots: snapshots, NextCursor: nextCursor}, nil
 }
 
-func (s *Service) RestoreWorkspace(ctx context.Context, commitID string, actor Actor) (SyncStatus, error) {
+func (s *Service) RestoreWorkspace(ctx context.Context, commitID CommitHash, actor Actor) (SyncStatus, error) {
 	return s.RestoreWorkspaceWithSource(ctx, commitID, actor, SourceSystem)
 }
 
-func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID string, actor Actor, source Source) (SyncStatus, error) {
+func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID CommitHash, actor Actor, source Source) (SyncStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.enabled {
@@ -961,7 +966,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID strin
 		source = SourceSystem
 	}
 	s.storeMu.Lock()
-	commit, err := s.store.RestoreWorkspace(ctx, commitID, gitrevisions.CommitRequest{
+	commit, err := s.store.RestoreWorkspace(ctx, commitID.String(), gitrevisions.CommitRequest{
 		Reason: gitrevisions.ReasonRestore,
 		Source: source,
 		Actor:  actor,
@@ -972,7 +977,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID strin
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = commit.Hash
+	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -997,7 +1002,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID strin
 	return s.status, nil
 }
 
-func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, commitID string) (*revision.RevisionSnapshot, error) {
+func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, commitID CommitHash) (*revision.RevisionSnapshot, error) {
 	s.mu.Lock()
 	if !s.enabled || page == nil || page.PageNode == nil {
 		s.mu.Unlock()
@@ -1009,7 +1014,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	s.mu.Unlock()
 
 	s.storeMu.Lock()
-	changedFiles, err := store.ChangedMarkdownContents(ctx, commitID)
+	changedFiles, err := store.ChangedMarkdownContents(ctx, commitID.String())
 	if err != nil {
 		s.storeMu.Unlock()
 		return nil, err
@@ -1019,7 +1024,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 		s.storeMu.Unlock()
 		return nil, fmt.Errorf("document %s did not change in commit %s", relPath, commitID)
 	}
-	commit, err := store.GetCommit(ctx, commitID)
+	commit, err := store.GetCommit(ctx, commitID.String())
 	s.storeMu.Unlock()
 	if err != nil {
 		return nil, err
@@ -1031,11 +1036,11 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	}, nil
 }
 
-func (s *Service) RestoreDocument(ctx context.Context, page *tree.Page, commitID string, actor Actor) (SyncStatus, error) {
+func (s *Service) RestoreDocument(ctx context.Context, page *tree.Page, commitID CommitHash, actor Actor) (SyncStatus, error) {
 	return s.RestoreDocumentWithSource(ctx, page, commitID, actor, SourceSystem)
 }
 
-func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page, commitID string, actor Actor, source Source) (SyncStatus, error) {
+func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page, commitID CommitHash, actor Actor, source Source) (SyncStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.enabled || page == nil || page.PageNode == nil {
@@ -1045,7 +1050,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		source = SourceSystem
 	}
 	s.storeMu.Lock()
-	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID)
+	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID.String())
 	s.storeMu.Unlock()
 	if err != nil {
 		s.status.LastError = err.Error()
@@ -1072,7 +1077,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = commit.Hash
+	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -1110,7 +1115,7 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	if commit.Created && amendCreatedCommit {
-		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, commit.Hash)
+		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, NewCommitHashUnchecked(commit.Hash))
 		if err != nil {
 			return err
 		}
@@ -1127,17 +1132,17 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 		return err
 	}
 	if writebackCommit != nil && writebackCommit.Hash != "" {
-		s.status.LastCommitHash = writebackCommit.Hash
+		s.status.LastCommitHash = NewCommitHashUnchecked(writebackCommit.Hash)
 		s.recordChangedMarkdownPaths(writebackCommit.ChangedMarkdownPaths)
 	}
 	return nil
 }
 
-func capturedMarkdownRequiresMetadataWriteback(ctx context.Context, store revisionStore, commitHash string) (bool, error) {
-	if store == nil || strings.TrimSpace(commitHash) == "" {
+func capturedMarkdownRequiresMetadataWriteback(ctx context.Context, store revisionStore, commitHash CommitHash) (bool, error) {
+	if store == nil || commitHash.String() == "" {
 		return false, nil
 	}
-	changedFiles, err := store.ChangedMarkdownContents(ctx, commitHash)
+	changedFiles, err := store.ChangedMarkdownContents(ctx, commitHash.String())
 	if err != nil {
 		return false, err
 	}
@@ -1174,14 +1179,14 @@ func mergeValidationErrors(existing []ValidationError, next []ValidationError) [
 		return append([]ValidationError(nil), existing...)
 	}
 	merged := make([]ValidationError, 0, len(existing)+len(next))
-	seen := map[string]struct{}{}
+	seen := map[validationErrorDedupeKey]struct{}{}
 	appendUnique := func(validationError ValidationError) {
-		key := strings.Join([]string{
-			validationError.Code,
-			validationError.Path,
-			validationError.Message,
-			validationError.Severity,
-		}, "\x00")
+		key := validationErrorDedupeKey{
+			Code:     validationError.Code,
+			Path:     validationError.Path,
+			Message:  validationError.Message,
+			Severity: validationError.Severity,
+		}
 		if _, ok := seen[key]; ok {
 			return
 		}
@@ -1195,6 +1200,13 @@ func mergeValidationErrors(existing []ValidationError, next []ValidationError) [
 		appendUnique(validationError)
 	}
 	return merged
+}
+
+type validationErrorDedupeKey struct {
+	Code     wikivalidation.IssueCode
+	Path     string
+	Message  string
+	Severity wikivalidation.IssueSeverity
 }
 
 func (s *Service) runAfterSyncLocked() error {
@@ -1251,7 +1263,7 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 	}
 	nextCursor := ""
 	if len(revisions) > requestedLimit {
-		nextCursor = revisions[requestedLimit-1].ID
+		nextCursor = revisions[requestedLimit-1].ID.CommitID()
 		revisions = revisions[:requestedLimit]
 	}
 	return PageRevisionList{Revisions: revisions, NextCursor: nextCursor}, nil
@@ -1259,10 +1271,11 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 
 func pageMarkdownPath(page *tree.Page) string {
 	if sourcePath := pageWorkspaceSourcePath(page); sourcePath != "" {
+		sourcePathFS := sourcePath.FilesystemPath()
 		if page.Kind == tree.NodeKindSection {
-			return joinWorkspaceMarkdownPath(sourcePath, "index.md")
+			return joinWorkspaceMarkdownPath(sourcePathFS, "index.md")
 		}
-		return sourcePath
+		return sourcePathFS
 	}
 	path := strings.TrimPrefix(page.CalculatePath(), "/")
 	if page != nil && page.Kind == tree.NodeKindSection {
@@ -1281,10 +1294,11 @@ func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
 		return preferred
 	}
 	if sourcePath := pageWorkspaceSourcePath(page); sourcePath != "" {
+		sourcePathFS := sourcePath.FilesystemPath()
 		if page.Kind == tree.NodeKindSection {
-			return s.currentSectionContentPath(sourcePath, preferred)
+			return s.currentSectionContentPath(sourcePathFS, preferred)
 		}
-		return sourcePath
+		return sourcePathFS
 	}
 	if mappedPath, ok := s.currentWorkspaceMarkdownPathByRoute(page); ok {
 		return mappedPath
@@ -1316,11 +1330,11 @@ func (s *Service) currentPageMarkdownPath(page *tree.Page) string {
 	return preferred
 }
 
-func pageWorkspaceSourcePath(page *tree.Page) string {
+func pageWorkspaceSourcePath(page *tree.Page) tree.WorkspaceSourcePath {
 	if page == nil || page.PageNode == nil {
 		return ""
 	}
-	return cleanWorkspaceMarkdownPath(page.PageNode.WorkspaceSourcePath)
+	return page.PageNode.WorkspaceSourcePath.Clean()
 }
 
 func cleanWorkspaceMarkdownPath(value string) string {
@@ -1369,7 +1383,7 @@ func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, 
 	if page == nil || page.PageNode == nil {
 		return "", false
 	}
-	targetRoutePath := strings.Trim(page.CalculatePath(), "/")
+	targetRoutePath := tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean()
 	var found string
 	err := filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -1393,7 +1407,7 @@ func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, 
 		}
 		relPath = filepath.ToSlash(relPath)
 		routePath, kind := revisionRoutePathAndKind(s.rootDir, relPath, page)
-		if kind != page.Kind || strings.Trim(routePath, "/") != targetRoutePath {
+		if kind != page.Kind || routePath.Clean() != targetRoutePath {
 			return nil
 		}
 		found = relPath
@@ -1481,7 +1495,7 @@ func markdownPathMatchesPageRoute(rootDir string, page *tree.Page, relPath strin
 		return false
 	}
 	routePath, kind := revisionRoutePathAndKind(rootDir, relPath, page)
-	return kind == page.Kind && strings.Trim(routePath, "/") == strings.Trim(page.CalculatePath(), "/")
+	return kind == page.Kind && routePath.Clean() == tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean()
 }
 
 func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
@@ -1492,19 +1506,19 @@ func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
 	return leafWikiID == "" || leafWikiID == page.ID
 }
 
-func leafWikiIDFromContent(content string) (string, bool) {
+func leafWikiIDFromContent(content string) (tree.PageID, bool) {
 	doc, _, err := markdown.ParsePageDocument(content)
 	if err != nil {
 		return "", false
 	}
-	return strings.TrimSpace(doc.Metadata.Page.ID), true
+	return tree.NewPageIDUnchecked(strings.TrimSpace(doc.Metadata.Page.ID)), true
 }
 
 func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
 	sum := sha256.Sum256([]byte(content))
-	authorID := strings.TrimSpace(commit.AuthorID)
+	authorID := tree.NewUserIDUnchecked(strings.TrimSpace(commit.AuthorID.String()))
 	if authorID == "" {
-		authorID = PublicEditorActor().ID
+		authorID = tree.NewUserIDUnchecked(PublicEditorActor().ID.String())
 	}
 	summary := strings.TrimSpace(commit.Message)
 	if summary == "" {
@@ -1516,40 +1530,44 @@ func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions
 			title = strings.TrimSpace(historicalTitle)
 		}
 	}
-	path, slug, kind := revisionRoutePathSlugAndKind(rootDir, relPath, page)
+	routePath, slug, kind := revisionRoutePathSlugAndKind(rootDir, relPath, page)
 	return &revision.Revision{
-		ID:            commit.Hash,
+		ID:            tree.NewRevisionIDUnchecked(commit.Hash),
 		PageID:        page.ID,
 		Type:          revision.RevisionTypeContentUpdate,
-		AuthorID:      authorID,
+		AuthorID:      authorID.MetadataValue(),
 		CreatedAt:     commit.CreatedAt,
 		Title:         title,
 		Slug:          slug,
 		Kind:          string(kind),
-		Path:          path,
+		Path:          routePath.FilesystemPath(),
 		ContentHash:   hex.EncodeToString(sum[:]),
 		PageCreatedAt: page.Metadata.CreatedAt,
 		PageUpdatedAt: page.Metadata.UpdatedAt,
-		CreatorID:     firstNonEmpty(page.Metadata.CreatorID, authorID),
-		LastAuthorID:  firstNonEmpty(page.Metadata.LastAuthorID, authorID),
+		CreatorID:     firstNonEmptyUserID(page.Metadata.CreatorID, authorID),
+		LastAuthorID:  firstNonEmptyUserID(page.Metadata.LastAuthorID, authorID),
 		Summary:       summary,
 	}
 }
 
-func revisionRoutePathSlugAndKind(rootDir string, relPath string, page *tree.Page) (string, string, tree.NodeKind) {
-	relPath = filepath.ToSlash(relPath)
-	path, kind := revisionRoutePathAndKind(rootDir, relPath, page)
-	slug := ""
-	if path != "" {
-		slug = filepath.Base(path)
+func firstNonEmptyUserID(primary tree.UserID, fallback tree.UserID) string {
+	if primary != "" {
+		return primary.MetadataValue()
 	}
+	return fallback.MetadataValue()
+}
+
+func revisionRoutePathSlugAndKind(rootDir string, relPath string, page *tree.Page) (tree.RoutePath, tree.Slug, tree.NodeKind) {
+	relPath = filepath.ToSlash(relPath)
+	routePath, kind := revisionRoutePathAndKind(rootDir, relPath, page)
+	slug := routePath.LeafSlug()
 	if slug == "" && page != nil {
 		slug = page.Slug
 	}
-	return path, slug, kind
+	return routePath, slug, kind
 }
 
-func revisionRoutePathAndKind(rootDir string, relPath string, page *tree.Page) (string, tree.NodeKind) {
+func revisionRoutePathAndKind(rootDir string, relPath string, page *tree.Page) (tree.RoutePath, tree.NodeKind) {
 	relPath = filepath.ToSlash(relPath)
 	base := path.Base(relPath)
 	dir := path.Dir(relPath)
@@ -1562,12 +1580,12 @@ func revisionRoutePathAndKind(rootDir string, relPath string, page *tree.Page) (
 		return route.RoutePath, route.Kind
 	}
 	if isRevisionReadmeFallbackSection(relPath, page, dir) {
-		return dir, tree.NodeKindSection
+		return tree.NewRoutePathUnchecked(dir), tree.NodeKindSection
 	}
 	if strings.EqualFold(base, "index.md") {
-		return dir, tree.NodeKindSection
+		return tree.NewRoutePathUnchecked(dir), tree.NodeKindSection
 	}
-	return tree.MarkdownPathToRoutePath(relPath), tree.NodeKindPage
+	return tree.CleanMarkdownPath(relPath).RoutePath(), tree.NodeKindPage
 }
 
 func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string) bool {
@@ -1577,7 +1595,7 @@ func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string
 	if page == nil || page.PageNode == nil || page.Kind != tree.NodeKindSection {
 		return false
 	}
-	return strings.Trim(page.CalculatePath(), "/") == dir
+	return tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean() == tree.NewRoutePathUnchecked(dir).Clean()
 }
 
 func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
@@ -1593,7 +1611,7 @@ func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
 	for _, issue := range result.Issues {
 		validationErrors = append(validationErrors, ValidationError{
 			Code:     issue.Code,
-			Path:     issue.Path,
+			Path:     markdownValidationIssuePath(issue),
 			Message:  issue.Message,
 			Severity: issue.Severity,
 		})
@@ -1601,28 +1619,38 @@ func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
 	return validationErrors
 }
 
+func markdownValidationIssuePath(issue wikivalidation.Issue) string {
+	if issue.SourcePath != "" {
+		return issue.SourcePath.FilesystemPath()
+	}
+	return issue.RoutePath.FilesystemPath()
+}
+
 func (s *Service) validationErrorsFromError(err error) []ValidationError {
 	if err == nil {
 		return nil
 	}
-	if validationErrors := s.validateWorkspaceMarkdownFiles(); validationErrorsIncludeCode(validationErrors, "path_conflict") {
+	if validationErrors := s.validateWorkspaceMarkdownFiles(); validationErrorsIncludeActionableMarkdownCode(validationErrors) {
 		return validationErrors
 	}
 	message := err.Error()
 	paths := markdownPathsInError(s.rootDir, message)
 	if len(paths) == 0 {
-		return []ValidationError{{Code: "workspace_sync_error", Path: "workspace", Message: message, Severity: "error"}}
+		return []ValidationError{{Code: wikivalidation.IssueCodeWorkspaceSyncError, Path: "workspace", Message: message, Severity: wikivalidation.IssueSeverityError}}
 	}
 	errors := make([]ValidationError, 0, len(paths))
 	for _, path := range paths {
-		errors = append(errors, ValidationError{Code: "workspace_sync_error", Path: path, Message: message, Severity: "error"})
+		errors = append(errors, ValidationError{Code: wikivalidation.IssueCodeWorkspaceSyncError, Path: path, Message: message, Severity: wikivalidation.IssueSeverityError})
 	}
 	return errors
 }
 
-func validationErrorsIncludeCode(errors []ValidationError, code string) bool {
+func validationErrorsIncludeActionableMarkdownCode(errors []ValidationError) bool {
 	for _, validationError := range errors {
-		if validationError.Code == code {
+		switch validationError.Code {
+		case "", wikivalidation.IssueCodeWorkspaceScanError, wikivalidation.IssueCodeWorkspaceSyncError, wikivalidation.IssueCodeWorkspaceSyncValidation:
+			continue
+		default:
 			return true
 		}
 	}

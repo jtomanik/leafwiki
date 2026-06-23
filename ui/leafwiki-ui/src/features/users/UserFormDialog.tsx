@@ -39,20 +39,23 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
   const handleSubmit = async (): Promise<boolean> => {
     if (!username || !email || (!isEdit && !password)) return false // Should not happen due to button disabling
 
-    const userData = {
-      id: user?.id || '',
-      username,
-      email,
-      password,
-      role,
-    }
-
     setLoading(true)
     try {
-      if (isEdit) {
-        await updateUser({ ...userData, password: password || undefined })
+      if (isEdit && user) {
+        await updateUser({
+          id: user.id,
+          username,
+          email,
+          password: password || undefined,
+          role,
+        })
       } else {
-        await createUser(userData)
+        await createUser({
+          username,
+          email,
+          password,
+          role,
+        })
       }
       toast.success('User saved successfully')
       return true // Close the dialog

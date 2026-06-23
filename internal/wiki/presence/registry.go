@@ -1,41 +1,76 @@
 package presence
 
 import (
-	"fmt"
+	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 const (
 	DefaultWebPresenceTTL = 90 * time.Second
 )
 
-var validModes = map[string]struct{}{
-	"view":     {},
-	"edit":     {},
-	"history":  {},
-	"assets":   {},
-	"settings": {},
-	"import":   {},
-	"unknown":  {},
+const (
+	ErrCodePresenceRegistryUnavailable sharederrors.ErrorCode = "presence_registry_unavailable"
+	ErrCodePresenceUserRequired        sharederrors.ErrorCode = "presence_user_required"
+	ErrCodePresenceSessionUserMismatch sharederrors.ErrorCode = "presence_session_user_mismatch"
+	ErrCodePresenceSessionIDRequired   sharederrors.ErrorCode = "presence_session_id_required"
+	ErrCodePresenceSessionIDTooLong    sharederrors.ErrorCode = "presence_session_id_too_long"
+	ErrCodePresenceModeInvalid         sharederrors.ErrorCode = "presence_mode_invalid"
+)
+
+type SessionType string
+type SessionMode string
+type SessionState string
+
+const (
+	SessionTypeWeb   SessionType = "web"
+	SessionTypeAgent SessionType = "agent"
+)
+
+const (
+	SessionModeView     SessionMode = "view"
+	SessionModeEdit     SessionMode = "edit"
+	SessionModeHistory  SessionMode = "history"
+	SessionModeAssets   SessionMode = "assets"
+	SessionModeSettings SessionMode = "settings"
+	SessionModeImport   SessionMode = "import"
+	SessionModeUnknown  SessionMode = "unknown"
+)
+
+const (
+	SessionStateActive SessionState = "active"
+)
+
+var validModes = map[SessionMode]struct{}{
+	SessionModeView:     {},
+	SessionModeEdit:     {},
+	SessionModeHistory:  {},
+	SessionModeAssets:   {},
+	SessionModeSettings: {},
+	SessionModeImport:   {},
+	SessionModeUnknown:  {},
 }
 
 type Heartbeat struct {
-	SessionID string `json:"sessionId"`
-	Mode      string `json:"mode"`
-	PageID    string `json:"pageId,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Dirty     bool   `json:"dirty"`
+	SessionID string      `json:"sessionId"`
+	Mode      SessionMode `json:"mode"`
+	PageID    tree.PageID `json:"pageId,omitempty"`
+	Path      string      `json:"path,omitempty"`
+	Dirty     bool        `json:"dirty"`
 }
 
 type PageRef struct {
-	ID    string `json:"id"`
-	Path  string `json:"path"`
-	Title string `json:"title"`
+	ID    tree.PageID `json:"id"`
+	Path  string      `json:"path"`
+	Title string      `json:"title"`
 }
 
 type UserRef struct {
@@ -46,26 +81,35 @@ type UserRef struct {
 }
 
 type Session struct {
-	Type            string    `json:"type"`
-	SessionID       string    `json:"sessionId"`
-	Provider        string    `json:"provider,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	Mode            string    `json:"mode"`
-	State           string    `json:"state"`
-	User            UserRef   `json:"user,omitempty"`
-	Page            *PageRef  `json:"page,omitempty"`
-	Dirty           bool      `json:"dirty"`
-	Source          string    `json:"source,omitempty"`
-	LastEvent       string    `json:"lastEvent,omitempty"`
-	ActiveSubagents int       `json:"activeSubagents,omitempty"`
-	FirstSeenAt     time.Time `json:"firstSeenAt"`
-	LastSeenAt      time.Time `json:"lastSeenAt"`
+	Type            SessionType               `json:"type"`
+	SessionID       string                    `json:"sessionId"`
+	Provider        agenthooks.ProviderID     `json:"provider,omitempty"`
+	Model           string                    `json:"model,omitempty"`
+	Mode            SessionMode               `json:"mode"`
+	State           SessionState              `json:"state"`
+	User            UserRef                   `json:"user,omitempty"`
+	Page            *PageRef                  `json:"page,omitempty"`
+	Dirty           bool                      `json:"dirty"`
+	Source          agenthooks.AgentSource    `json:"source,omitempty"`
+	LastEvent       agenthooks.AgentEventName `json:"lastEvent,omitempty"`
+	ActiveSubagents int                       `json:"activeSubagents,omitempty"`
+	FirstSeenAt     time.Time                 `json:"firstSeenAt"`
+	LastSeenAt      time.Time                 `json:"lastSeenAt"`
+}
+
+func (mode *SessionMode) UnmarshalJSON(raw []byte) error {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	*mode = SessionMode(value)
+	return nil
 }
 
 type storedSession struct {
 	session Session
 	email   string
-	userID  string
+	userID  coreauth.UserID
 }
 
 type WebPresenceRegistry struct {
@@ -91,14 +135,14 @@ func NewWebPresenceRegistry(ttl time.Duration, now func() time.Time) *WebPresenc
 
 func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, page *PageRef) error {
 	if r == nil {
-		return fmt.Errorf("web presence registry unavailable")
+		return sharederrors.NewLocalizedError(ErrCodePresenceRegistryUnavailable, "web presence registry unavailable", "web presence registry unavailable", nil)
 	}
 	normalized, err := normalizeHeartbeat(heartbeat)
 	if err != nil {
 		return err
 	}
 	if user == nil {
-		return fmt.Errorf("user is required")
+		return sharederrors.NewLocalizedError(ErrCodePresenceUserRequired, "user is required", "user is required", nil)
 	}
 	seenAt := r.now().UTC()
 
@@ -106,8 +150,9 @@ func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, p
 	defer r.mu.Unlock()
 	pruneExpiredLocked(r.sessions, seenAt, r.ttl)
 	current := r.sessions[normalized.SessionID]
-	if current.userID != "" && current.userID != user.ID {
-		return fmt.Errorf("sessionId belongs to a different user")
+	userID := coreauth.NewUserIDUnchecked(user.ID)
+	if current.userID != "" && current.userID != userID {
+		return sharederrors.NewLocalizedError(ErrCodePresenceSessionUserMismatch, "sessionId belongs to a different user", "sessionId belongs to a different user", nil)
 	}
 	firstSeenAt := current.session.FirstSeenAt
 	if firstSeenAt.IsZero() {
@@ -115,12 +160,12 @@ func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, p
 	}
 	r.sessions[normalized.SessionID] = storedSession{
 		email:  user.Email,
-		userID: user.ID,
+		userID: userID,
 		session: Session{
-			Type:        "web",
+			Type:        SessionTypeWeb,
 			SessionID:   normalized.SessionID,
 			Mode:        normalized.Mode,
-			State:       "active",
+			State:       SessionStateActive,
 			User:        userRefForUser(user, false),
 			Page:        page,
 			Dirty:       normalized.Dirty,
@@ -145,7 +190,7 @@ func (r *WebPresenceRegistry) Remove(sessionID string, user *coreauth.User) bool
 	if !exists {
 		return false
 	}
-	if user == nil || stored.userID != user.ID {
+	if user == nil || stored.userID != coreauth.NewUserIDUnchecked(user.ID) {
 		return false
 	}
 	delete(r.sessions, trimmed)
@@ -181,19 +226,19 @@ func (r *WebPresenceRegistry) List(viewer *coreauth.User) []Session {
 func normalizeHeartbeat(heartbeat Heartbeat) (Heartbeat, error) {
 	heartbeat.SessionID = strings.TrimSpace(heartbeat.SessionID)
 	if heartbeat.SessionID == "" {
-		return Heartbeat{}, fmt.Errorf("sessionId is required")
+		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceSessionIDRequired, "sessionId is required", "sessionId is required", nil)
 	}
 	if len(heartbeat.SessionID) > 256 {
-		return Heartbeat{}, fmt.Errorf("sessionId is too long")
+		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceSessionIDTooLong, "sessionId is too long", "sessionId is too long", nil)
 	}
-	heartbeat.Mode = strings.TrimSpace(heartbeat.Mode)
+	heartbeat.Mode = SessionMode(strings.TrimSpace(string(heartbeat.Mode)))
 	if heartbeat.Mode == "" {
-		heartbeat.Mode = "unknown"
+		heartbeat.Mode = SessionModeUnknown
 	}
 	if _, ok := validModes[heartbeat.Mode]; !ok {
-		return Heartbeat{}, fmt.Errorf("mode must be view, edit, history, assets, settings, import, or unknown")
+		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceModeInvalid, "mode must be view, edit, history, assets, settings, import, or unknown", "mode must be view, edit, history, assets, settings, import, or unknown", nil)
 	}
-	heartbeat.PageID = strings.TrimSpace(heartbeat.PageID)
+	heartbeat.PageID = tree.NewPageIDUnchecked(strings.TrimSpace(heartbeat.PageID.MetadataValue()))
 	heartbeat.Path = normalizePagePath(heartbeat.Path)
 	return heartbeat, nil
 }

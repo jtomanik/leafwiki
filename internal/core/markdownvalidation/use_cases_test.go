@@ -61,6 +61,23 @@ func TestValidateWorkspaceMarkdownFilesAllowsRootReadmeFallbackRoute(t *testing.
 	}
 }
 
+func TestValidateWorkspaceMarkdownFilesAllowsRootSectionLinkWithoutRootContent(t *testing.T) {
+	rootDir := t.TempDir()
+	docsDir := filepath.Join(rootDir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatalf("create docs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "page.md"), canonicalValidationMarkdown("docs-page", "Docs Page", "# Docs Page\n\n[Root](/)\n"), 0o644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
+
+	if !result.OK {
+		t.Fatalf("validation = %#v, want root section link to resolve without root content", result)
+	}
+}
+
 func TestValidateWorkspaceMarkdownFiles_DuplicateCanonicalPageIDMessageUsesPageID(t *testing.T) {
 	rootDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(rootDir, "first.md"), canonicalValidationMarkdown("duplicate-id", "First", "# First\n"), 0o644); err != nil {
@@ -139,7 +156,7 @@ func TestValidateWorkspaceMarkdownFiles_ResolvesMarkdownLinkRootPrefix(t *testin
 
 func TestValidateMarkdownContent_ResolvesPrefixedAssetWithMarkdownLinkRootPrefix(t *testing.T) {
 	seenDestination := ""
-	result := ValidateMarkdownContentWithOptions("source", "![Logo](/docs/assets/logo.png)", ContentValidationOptions{
+	result := ValidateMarkdownContentWithOptions(tree.RoutePath("source"), "![Logo](/docs/assets/logo.png)", ContentValidationOptions{
 		ExistingPageID:         "source",
 		MarkdownLinkRootPrefix: "/docs",
 		AssetExists: func(destination string) bool {
@@ -158,7 +175,7 @@ func TestValidateMarkdownContent_ResolvesPrefixedAssetWithMarkdownLinkRootPrefix
 
 func TestValidateMarkdownContent_ReportsMissingPrefixedMarkdownAssetWithMarkdownLinkRootPrefix(t *testing.T) {
 	seenDestination := ""
-	result := ValidateMarkdownContentWithOptions("source", "[Manual](/docs/assets/manual.md)", ContentValidationOptions{
+	result := ValidateMarkdownContentWithOptions(tree.RoutePath("source"), "[Manual](/docs/assets/manual.md)", ContentValidationOptions{
 		ExistingPageID:         "source",
 		MarkdownLinkRootPrefix: "/docs",
 		AssetExists: func(destination string) bool {
@@ -199,7 +216,7 @@ func TestValidateWorkspaceMarkdownFiles_NormalizesWorkspaceRoutes(t *testing.T) 
 		t.Fatalf("validation = %#v, want normalizable plan filename and normalized link to validate", result)
 	}
 	for _, issue := range result.Issues {
-		if issue.Code == "invalid_slug" && strings.Contains(issue.Path, "agent_hooks.PLAN.md") {
+		if issue.Code == "invalid_slug" && strings.Contains(issuePathString(issue), "agent_hooks.PLAN.md") {
 			t.Fatalf("issues = %#v, want no invalid_slug for normalizable plan filename", result.Issues)
 		}
 	}
@@ -228,8 +245,8 @@ func TestValidateWorkspaceMarkdownFiles_RejectsRawNormalizedSourceMarkdownLinks(
 	if len(result.Issues) != 1 || result.Issues[0].Code != "non_canonical_markdown_path" {
 		t.Fatalf("issues = %#v, want one non_canonical_markdown_path", result.Issues)
 	}
-	if result.Issues[0].Path != "source" {
-		t.Fatalf("issue path = %q, want source", result.Issues[0].Path)
+	if issuePathString(result.Issues[0]) != "source" {
+		t.Fatalf("issue path = %q, want source", issuePathString(result.Issues[0]))
 	}
 }
 
@@ -253,11 +270,11 @@ func TestValidateWorkspaceMarkdownFiles_ReportsNormalizedRouteCollision(t *testi
 	var found bool
 	for _, issue := range result.Issues {
 		if issue.Code == "path_conflict" &&
-			(issue.Path == "plans/foo-bar.md" || issue.Path == "plans/foo_bar.md") &&
+			(issuePathString(issue) == "plans/foo-bar.md" || issuePathString(issue) == "plans/foo_bar.md") &&
 			(strings.Contains(issue.Message, "plans/foo-bar.md") || strings.Contains(issue.Message, "plans/foo_bar.md")) {
 			found = true
 		}
-		if issue.Code == "invalid_slug" && strings.Contains(issue.Path, "foo_bar.md") {
+		if issue.Code == "invalid_slug" && strings.Contains(issuePathString(issue), "foo_bar.md") {
 			t.Fatalf("issues = %#v, want path_conflict instead of invalid_slug for normalizable filename", result.Issues)
 		}
 	}
@@ -293,15 +310,15 @@ func TestValidateWorkspaceMarkdownFilesRequiresFilesystemTargets(t *testing.T) {
 	if len(result.Issues) != 1 || result.Issues[0].Code != "broken_link" {
 		t.Fatalf("issues = %#v, want one broken_link", result.Issues)
 	}
-	if result.Issues[0].Path != "source" {
-		t.Fatalf("issue path = %q, want source page path", result.Issues[0].Path)
+	if issuePathString(result.Issues[0]) != "source" {
+		t.Fatalf("issue path = %q, want source page path", issuePathString(result.Issues[0]))
 	}
 }
 
 func TestValidateMarkdownContent_DuplicateCanonicalPageIDMessageUsesPageID(t *testing.T) {
-	result := ValidateMarkdownContentWithOptions("docs/page", string(canonicalValidationMarkdown("duplicate-id", "Page", "# Page\n")), ContentValidationOptions{
+	result := ValidateMarkdownContentWithOptions(tree.RoutePath("docs/page"), string(canonicalValidationMarkdown("duplicate-id", "Page", "# Page\n")), ContentValidationOptions{
 		ExistingPageID: "current-id",
-		PageIDExists: func(pageID string) bool {
+		PageIDExists: func(pageID tree.PageID) bool {
 			return pageID == "duplicate-id"
 		},
 	})
@@ -346,8 +363,8 @@ func TestValidateWorkspaceMarkdownFilesReportsInvalidCanonicalLinks(t *testing.T
 		if issue.Code != "invalid_link" {
 			t.Fatalf("issue = %#v, want invalid_link", issue)
 		}
-		if issue.Path != "source" {
-			t.Fatalf("issue path = %q, want source", issue.Path)
+		if issuePathString(issue) != "source" {
+			t.Fatalf("issue path = %q, want source", issuePathString(issue))
 		}
 	}
 }
@@ -440,7 +457,7 @@ func TestValidateWorkspaceMarkdownFiles_UsesExactCaseSensitiveTargetMatching(t *
 
 	found := false
 	for _, issue := range result.Issues {
-		if issue.Code == "broken_link" && issue.Path == "docs/a" {
+		if issue.Code == "broken_link" && issuePathString(issue) == "docs/a" {
 			found = true
 		}
 	}
@@ -470,18 +487,18 @@ func TestValidateWorkspaceMarkdownFiles_RejectsUnmigratedExtensionlessPageLink(t
 	if len(result.Issues) != 1 || result.Issues[0].Code != "non_canonical_link" {
 		t.Fatalf("issues = %#v, want one non_canonical_link", result.Issues)
 	}
-	if result.Issues[0].Path != "docs/a" {
-		t.Fatalf("issue path = %q, want source page path", result.Issues[0].Path)
+	if issuePathString(result.Issues[0]) != "docs/a" {
+		t.Fatalf("issue path = %q, want source page path", issuePathString(result.Issues[0]))
 	}
 }
 
 func TestValidateMarkdownContent_UsesResolveMarkdownLinkWithoutLegacyResolver(t *testing.T) {
-	result := ValidateMarkdownContentWithOptions("docs/a", "[B](/docs/b)\n", ContentValidationOptions{
-		ResolveMarkdownLink: func(destination string) (string, tree.NodeKind, bool, string) {
+	result := ValidateMarkdownContentWithOptions(tree.RoutePath("docs/a"), "[B](/docs/b)\n", ContentValidationOptions{
+		ResolveMarkdownLink: func(destination string) (tree.PageID, tree.NodeKind, bool, IssueCode) {
 			if destination == "/docs/b" {
 				return "docs/b", tree.NodeKindPage, true, ""
 			}
-			return "", "", false, "broken_link"
+			return "", "", false, IssueCodeBrokenLink
 		},
 	})
 

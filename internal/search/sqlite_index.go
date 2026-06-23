@@ -20,10 +20,10 @@ import (
 )
 
 type SQLiteIndex struct {
-	mu         sync.Mutex
-	storageDir string
-	filename   string
-	db         *sql.DB
+	mu           sync.Mutex
+	storageDir   string
+	databaseFile string
+	db           *sql.DB
 }
 
 func searchIndexDatabasePath(storageDir string, filename string) string {
@@ -104,8 +104,8 @@ func buildFuzzyQuery(q string) string {
 
 func NewSQLiteIndex(storageDir string) (*SQLiteIndex, error) {
 	s := &SQLiteIndex{
-		storageDir: storageDir,
-		filename:   "search.db",
+		storageDir:   storageDir,
+		databaseFile: "search.db",
 	}
 
 	if err := s.ensureSchema(); err != nil {
@@ -119,7 +119,7 @@ func NewSQLiteIndex(storageDir string) (*SQLiteIndex, error) {
 		if closeErr := s.Close(); closeErr != nil {
 			slog.Default().Warn("failed to close corrupt search database before recovery", "error", closeErr)
 		}
-		sqliteutil.RemoveSQLiteFiles(searchIndexDatabasePath(s.storageDir, s.filename))
+		sqliteutil.RemoveSQLiteFiles(searchIndexDatabasePath(s.storageDir, s.databaseFile))
 		if err2 := s.ensureSchema(); err2 != nil {
 			_ = s.Close()
 			return nil, err2
@@ -133,7 +133,7 @@ func (s *SQLiteIndex) withDB(fn func(db *sql.DB) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		db, err := sql.Open("sqlite", searchIndexDatabasePath(s.storageDir, s.filename))
+		db, err := sql.Open("sqlite", searchIndexDatabasePath(s.storageDir, s.databaseFile))
 		if err != nil {
 			return err
 		}
@@ -187,7 +187,7 @@ func (s *SQLiteIndex) Close() error {
 	return nil
 }
 
-func (s *SQLiteIndex) IndexPage(path string, filePath string, pageID string, title string, kind tree.NodeKind, raw string) error {
+func (s *SQLiteIndex) IndexPage(path string, filePath string, pageID tree.PageID, title string, kind tree.NodeKind, raw string) error {
 	doc, _, err := markdown.ParsePageDocument(raw)
 	if err != nil {
 		return err
@@ -216,7 +216,7 @@ func (s *SQLiteIndex) IndexPage(path string, filePath string, pageID string, tit
 	})
 }
 
-func (s *SQLiteIndex) RemovePage(pageID string) error {
+func (s *SQLiteIndex) RemovePage(pageID tree.PageID) error {
 	return s.withDB(func(db *sql.DB) error {
 		_, err := db.Exec(`DELETE FROM pages WHERE pageID = ?`, pageID)
 		return err
@@ -240,7 +240,7 @@ func (s *SQLiteIndex) RemovePageByFilePath(filePath string) (int64, error) {
 	return rows, err
 }
 
-func (s *SQLiteIndex) Search(query string, pageIDs []string, offset, limit int) (*SearchResult, error) {
+func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, offset, limit int) (*SearchResult, error) {
 	query = strings.TrimSpace(query)
 
 	if len(pageIDs) == 0 && pageIDs != nil {
@@ -345,19 +345,19 @@ func (s *SQLiteIndex) Search(query string, pageIDs []string, offset, limit int) 
 	return sr, err
 }
 
-func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []string) ([]string, error) {
+func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []tree.PageID) ([]tree.PageID, error) {
 	query = strings.TrimSpace(query)
 
 	if len(pageIDs) == 0 && pageIDs != nil {
-		return []string{}, nil
+		return []tree.PageID{}, nil
 	}
 
 	if query == "" && len(pageIDs) == 0 {
-		return []string{}, nil
+		return []tree.PageID{}, nil
 	}
 
 	ftsQuery := buildFuzzyQuery(query)
-	var result []string
+	var result []tree.PageID
 
 	err := s.withDB(func(db *sql.DB) error {
 		whereClause, whereArgs := buildSearchWhereClause(query, ftsQuery, pageIDs)
@@ -379,7 +379,7 @@ func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []string) ([]string, e
 		}()
 
 		for rows.Next() {
-			var pageID string
+			var pageID tree.PageID
 			var bm25Score float64
 			if err := rows.Scan(&pageID, &bm25Score); err != nil {
 				return err
@@ -393,7 +393,7 @@ func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []string) ([]string, e
 	return result, err
 }
 
-func buildSearchWhereClause(query string, ftsQuery string, pageIDs []string) (string, []interface{}) {
+func buildSearchWhereClause(query string, ftsQuery string, pageIDs []tree.PageID) (string, []interface{}) {
 	clauses := make([]string, 0, 2)
 	args := make([]interface{}, 0, 1+len(pageIDs))
 

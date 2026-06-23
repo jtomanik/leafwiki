@@ -1,6 +1,7 @@
 package workspaced
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/perber/wiki/internal/core/assets"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
@@ -31,14 +33,16 @@ func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name   string
-		token  string
-		actor  string
-		status int
+		name          string
+		token         string
+		actor         string
+		status        int
+		wantCode      string
+		wantMessageID string
 	}{
-		{name: "missing token", status: http.StatusUnauthorized},
-		{name: "wrong token", token: "wrong", status: http.StatusUnauthorized},
-		{name: "missing actor", token: "private-token", status: http.StatusUnauthorized},
+		{name: "missing token", status: http.StatusUnauthorized, wantCode: "private_control_token_invalid", wantMessageID: "errors.private.control_token_invalid"},
+		{name: "wrong token", token: "wrong", status: http.StatusUnauthorized, wantCode: "private_control_token_invalid", wantMessageID: "errors.private.control_token_invalid"},
+		{name: "missing actor", token: "private-token", status: http.StatusUnauthorized, wantCode: "private_actor_context_invalid", wantMessageID: "errors.private.actor_context_invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := newPrivateRequest(http.MethodGet, "/api/tree", tc.token, tc.actor)
@@ -46,6 +50,7 @@ func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
+			assertStructuredPrivateAuthError(t, rec, tc.wantCode, tc.wantMessageID)
 		})
 	}
 
@@ -68,6 +73,7 @@ func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
 	if wrongWorkspaceRec.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong-workspace actor status = %d, want 401: %s", wrongWorkspaceRec.Code, wrongWorkspaceRec.Body.String())
 	}
+	assertStructuredPrivateAuthError(t, wrongWorkspaceRec, "private_actor_context_invalid", "errors.private.actor_context_invalid")
 
 	actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 		Version:     1,
@@ -88,6 +94,12 @@ func TestAuthenticatedRouterRequiresPrivateTokenAndActorContext(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid private request status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestPrivateAuthOptionsCarriesSemanticWorkspaceID(t *testing.T) {
+	auth := PrivateAuthOptions{WorkspaceID: workspaceid.WorkspaceID("current")}
+
+	var _ workspaceid.WorkspaceID = auth.WorkspaceID
 }
 
 func TestAuthenticatedRouterInstallsActorAsRequestUser(t *testing.T) {
@@ -183,4 +195,21 @@ func requestWithRequest(router http.Handler, req *http.Request) *httptest.Respon
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
+}
+
+func assertStructuredPrivateAuthError(t *testing.T, rec *httptest.ResponseRecorder, code string, messageID string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode private auth error: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message == "" {
+		t.Fatalf("private auth error = %#v, want %s/%s with message", body.Error, code, messageID)
+	}
 }

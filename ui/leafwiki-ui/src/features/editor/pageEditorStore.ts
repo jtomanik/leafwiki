@@ -9,6 +9,7 @@ import {
   updatePage,
 } from '@/lib/api/pages'
 import { isPageNotFoundError, mapApiError } from '@/lib/api/errors'
+import { asRoutePath, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
@@ -18,6 +19,7 @@ import { confirmPageRefactor } from '../page/pageRefactorDialogState'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
 import {
   EditorFrontmatterField,
+  EditorFrontmatterValidationErrors,
   validateEditorFrontmatterMetadata,
 } from './frontmatter'
 
@@ -28,7 +30,7 @@ export interface PageEditorState {
   tags: string[] // convenient tag editor state
   frontmatterFields: EditorFrontmatterField[]
   frontmatterUnsupported: string
-  frontmatterErrors: Record<string, string>
+  frontmatterErrors: EditorFrontmatterValidationErrors
   error: string | null // error message, if any
   notFound: boolean
   page: Page | null // current page being edited
@@ -41,7 +43,7 @@ export interface PageEditorState {
   setContent: (content: string) => void // set the current markdown content
   setTags: (tags: string[]) => void
   setFrontmatterFields: (fields: EditorFrontmatterField[]) => void
-  setFrontmatterErrors: (errors: Record<string, string>) => void
+  setFrontmatterErrors: (errors: EditorFrontmatterValidationErrors) => void
   setError: (error: string | null) => void // set the error message
   setPage: (page: Page | null) => void // set the current page
   savePage: () => Promise<Page | null | undefined> // save the current page
@@ -196,9 +198,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
           {
             kind: 'rename',
             title,
-            slug,
+            slug: asSlug(slug),
           },
-          workspaceId,
+          asWorkspaceID(workspaceId),
         )
         const rewriteLinks = await confirmPageRefactor(preview)
         if (rewriteLinks === null) {
@@ -213,11 +215,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             kind: 'rename',
             version: page.version,
             title,
-            slug,
+            slug: asSlug(slug),
             content,
             rewriteLinks,
           },
-          workspaceId,
+          asWorkspaceID(workspaceId),
         )
 
         if (updatedPage && frontmatterChanged) {
@@ -225,11 +227,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             updatedPage.id,
             updatedPage.version,
             title,
-            slug,
+            asSlug(slug),
             content,
             tags,
             properties,
-            workspaceId,
+            asWorkspaceID(workspaceId),
           )
         }
       } else {
@@ -237,11 +239,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
           page.id,
           page.version,
           title,
-          slug,
+          asSlug(slug),
           content,
           tags,
           properties,
-          workspaceId,
+          asWorkspaceID(workspaceId),
         )
       }
 
@@ -328,7 +330,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       )
     }
 
-    const fresh = await getPageByPath(page.path, page.kind, workspaceId)
+    const fresh = await getPageByPath(
+      page.path,
+      page.kind,
+      asWorkspaceID(workspaceId),
+    )
     if (!isCurrentOverwriteTarget()) return undefined
     set((state) => {
       if (!isCurrentOverwriteTarget() || !state.page) return {}
@@ -375,7 +381,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     })
     useProgressbarStore.getState().setLoading(true)
     try {
-      const page = await getPageByPath(path, kind, workspaceId)
+      const page = await getPageByPath(
+        asRoutePath(path),
+        kind,
+        asWorkspaceID(workspaceId),
+      )
       const fields: EditorFrontmatterField[] = Object.entries(
         page.properties ?? {},
       ).map(([key, value]) => ({
@@ -400,9 +410,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
         if (fallbackPath) {
           try {
             const fallbackPage = await getPageByPath(
-              fallbackPath,
+              asRoutePath(fallbackPath),
               'section',
-              workspaceId,
+              asWorkspaceID(workspaceId),
             )
             if (fallbackPage.kind === 'section') {
               const fields: EditorFrontmatterField[] = Object.entries(

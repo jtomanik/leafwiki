@@ -4,6 +4,7 @@ import { ensurePage, lookupPath, PathLookupResult } from '@/lib/api/pages'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
+import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode, type WikiNodeKind } from '@/lib/wikiPath'
 import { useDebounce } from '@/lib/useDebounce'
 import { useTreeStore } from '@/stores/tree'
@@ -47,7 +48,11 @@ export function CreatePageByPathDialog({
   const runLookup = useCallback(
     async (path: string) => {
       try {
-        const result = await lookupPath(path, workspaceId, initialKind)
+        const result = await lookupPath(
+          asRoutePath(path),
+          asWorkspaceID(workspaceId),
+          initialKind,
+        )
         if (result) {
           setLookup(result)
         }
@@ -66,7 +71,12 @@ export function CreatePageByPathDialog({
 
     try {
       // Here you would call your API to create the page
-      await ensurePage(path, title, workspaceId, initialKind)
+      await ensurePage(
+        asRoutePath(path),
+        title,
+        asWorkspaceID(workspaceId),
+        initialKind,
+      )
       await reloadTree(workspaceId)
       // On success, close the dialog
       if (forwardToEditMode) {

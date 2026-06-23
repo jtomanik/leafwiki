@@ -1,6 +1,8 @@
 package projectdaemon
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +42,16 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 	}
 	if got, want := joinCounts(counts), "1"; got != want {
 		t.Fatalf("counts = %s, want %s", got, want)
+	}
+	raw, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal session: %v", err)
+	}
+	if !strings.Contains(string(raw), `"provider":"codex"`) ||
+		!strings.Contains(string(raw), `"lastEvent":"PreToolUse"`) ||
+		!strings.Contains(string(raw), `"source":"cli"`) ||
+		!strings.Contains(string(raw), `"toolName":"mcp__leafwiki__wiki_get_page"`) {
+		t.Fatalf("session JSON = %s, want string compatibility fields", raw)
 	}
 }
 
@@ -127,7 +139,7 @@ func TestAgentPresenceRegistryUpdatesLifecycleAndExpires(t *testing.T) {
 func TestAgentPresenceRegistryIgnoresMissingEndEventsAsFirstActivity(t *testing.T) {
 	tests := []struct {
 		name     string
-		provider string
+		provider agenthooks.ProviderID
 		payload  string
 	}{
 		{
@@ -254,7 +266,7 @@ func TestAgentPresenceRegistryZeroTTLExpiresImmediately(t *testing.T) {
 	}
 }
 
-func normalizedPresenceEvent(t *testing.T, provider string, payload string) agenthooks.Event {
+func normalizedPresenceEvent(t *testing.T, provider agenthooks.ProviderID, payload string) agenthooks.Event {
 	t.Helper()
 	event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
 	if !ok {

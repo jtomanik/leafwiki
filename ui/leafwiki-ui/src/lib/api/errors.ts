@@ -1,7 +1,14 @@
 import i18next from '../i18n'
+import {
+  asApiErrorCode,
+  asMessageID,
+  type ApiErrorCode,
+  type MessageID,
+} from '../semanticTypes'
 
 export type ApiLocalizedErrorDetail = {
-  code: string
+  code: ApiErrorCode
+  messageId?: MessageID
   message: string
   template: string
   args?: string[]
@@ -13,21 +20,35 @@ export type ApiLocalizedErrorResponse = {
 
 export type ApiUiError = {
   message: string
-  code?: string
+  code?: ApiErrorCode
+  messageId?: MessageID
 }
 
 export class ApiLocalizedError extends Error {
-  code: string
+  code: ApiErrorCode
+  messageId: MessageID
   template: string
   args: string[]
 
   constructor(detail: ApiLocalizedErrorDetail) {
     super(detail.message)
     this.name = 'ApiLocalizedError'
-    this.code = detail.code
+    this.code = asApiErrorCode(detail.code)
+    this.messageId = detail.messageId ?? messageIDForCode(detail.code)
     this.template = detail.template
     this.args = detail.args ?? []
   }
+}
+
+function messageIDForCode(code: ApiErrorCode): MessageID {
+  const raw = String(code)
+  const firstUnderscore = raw.indexOf('_')
+  if (firstUnderscore <= 0 || firstUnderscore === raw.length - 1) {
+    return asMessageID(`errors.${raw}`)
+  }
+  const namespace = raw.slice(0, firstUnderscore)
+  const name = raw.slice(firstUnderscore + 1)
+  return asMessageID(`errors.${namespace}.${name}`)
 }
 
 export function isApiLocalizedErrorResponse(
@@ -41,6 +62,7 @@ export function isApiLocalizedErrorResponse(
   const detail = error as Partial<ApiLocalizedErrorDetail>
   return (
     typeof detail.code === 'string' &&
+    (detail.messageId === undefined || typeof detail.messageId === 'string') &&
     typeof detail.message === 'string' &&
     typeof detail.template === 'string'
   )
@@ -102,6 +124,7 @@ export function mapApiError(err: unknown, fallback: string): ApiUiError {
     return {
       message: message || fallback,
       code: localized.code,
+      messageId: localized.messageId,
     }
   }
 

@@ -10,22 +10,56 @@ import (
 )
 
 const (
-	ErrCodeAuthDisabled                 = "auth_disabled"
-	ErrCodeAuthInvalidCredentials       = "auth_invalid_credentials"
-	ErrCodeAuthTokenExpired             = "auth_token_expired"
-	ErrCodeAuthUserNotFound             = "auth_user_not_found"
-	ErrCodeAuthUserAlreadyExists        = "auth_user_already_exists"
-	ErrCodeAuthInvalidRole              = "auth_invalid_role"
-	ErrCodeAuthForbidden                = "auth_forbidden"
-	ErrCodeAuthAdminCannotDelete        = "auth_admin_cannot_delete"
-	ErrCodeAuthLastAdminCannotBeDemoted = "auth_last_admin_cannot_be_demoted"
-	ErrCodeAuthInternalError            = "auth_internal_error"
-	ErrCodeAuthInvalidPayload           = "auth_invalid_payload"
-	ErrCodeAuthCookieFailed             = "auth_cookie_failed"
-	ErrCodeAuthCsrfFailed               = "auth_csrf_failed"
-	ErrCodeAuthInvalidRefreshToken      = "auth_invalid_refresh_token"
-	ErrCodeAuthInvalidRequest           = "auth_invalid_request"
-	ErrCodeAuthAccountLocked            = "auth_account_locked"
+	ErrCodeAuthDisabled                 sharederrors.ErrorCode = "auth_disabled"
+	ErrCodeAuthInvalidCredentials       sharederrors.ErrorCode = "auth_invalid_credentials"
+	ErrCodeAuthTokenExpired             sharederrors.ErrorCode = "auth_token_expired"
+	ErrCodeAuthUserNotFound             sharederrors.ErrorCode = "auth_user_not_found"
+	ErrCodeAuthUserAlreadyExists        sharederrors.ErrorCode = "auth_user_already_exists"
+	ErrCodeAuthInvalidRole              sharederrors.ErrorCode = "auth_invalid_role"
+	ErrCodeAuthForbidden                sharederrors.ErrorCode = "auth_forbidden"
+	ErrCodeAuthAdminCannotDelete        sharederrors.ErrorCode = "auth_admin_cannot_delete"
+	ErrCodeAuthLastAdminCannotBeDemoted sharederrors.ErrorCode = "auth_last_admin_cannot_be_demoted"
+	ErrCodeAuthInternalError            sharederrors.ErrorCode = "auth_internal_error"
+	ErrCodeAuthInvalidPayload           sharederrors.ErrorCode = "auth_invalid_payload"
+	ErrCodeAuthCookieFailed             sharederrors.ErrorCode = "auth_cookie_failed"
+	ErrCodeAuthCsrfFailed               sharederrors.ErrorCode = "auth_csrf_failed"
+	ErrCodeAuthInvalidRefreshToken      sharederrors.ErrorCode = "auth_invalid_refresh_token"
+	ErrCodeAuthInvalidRequest           sharederrors.ErrorCode = "auth_invalid_request"
+	ErrCodeAuthAccountLocked            sharederrors.ErrorCode = "auth_account_locked"
+)
+
+const authValidationErrorCode = "validation_error"
+
+const (
+	FieldCodeAuthUsernameRequired         sharederrors.FieldErrorCode = "auth_username_required"
+	FieldCodeAuthEmailRequired            sharederrors.FieldErrorCode = "auth_email_required"
+	FieldCodeAuthEmailInvalid             sharederrors.FieldErrorCode = "auth_email_invalid"
+	FieldCodeAuthPasswordRequired         sharederrors.FieldErrorCode = "auth_password_required"
+	FieldCodeAuthPasswordTooShort         sharederrors.FieldErrorCode = "auth_password_too_short"
+	FieldCodeAuthRoleInvalid              sharederrors.FieldErrorCode = "auth_role_invalid"
+	FieldCodeAuthNewPasswordRequired      sharederrors.FieldErrorCode = "auth_new_password_required"
+	FieldCodeAuthNewPasswordTooShort      sharederrors.FieldErrorCode = "auth_new_password_too_short"
+	FieldCodeAuthOldPasswordIncorrect     sharederrors.FieldErrorCode = "auth_old_password_incorrect"
+	FieldCodeAuthAPIKeyNameRequired       sharederrors.FieldErrorCode = "auth_api_key_name_required"
+	FieldCodeAuthAPIKeyNameTooLong        sharederrors.FieldErrorCode = "auth_api_key_name_too_long"
+	FieldCodeAuthCurrentPasswordRequired  sharederrors.FieldErrorCode = "auth_current_password_required"
+	FieldCodeAuthCurrentPasswordIncorrect sharederrors.FieldErrorCode = "auth_current_password_incorrect"
+)
+
+const (
+	MessageIDAuthUsernameRequired         sharederrors.MessageID = "validation.auth.username_required"
+	MessageIDAuthEmailRequired            sharederrors.MessageID = "validation.auth.email_required"
+	MessageIDAuthEmailInvalid             sharederrors.MessageID = "validation.auth.email_invalid"
+	MessageIDAuthPasswordRequired         sharederrors.MessageID = "validation.auth.password_required"
+	MessageIDAuthPasswordTooShort         sharederrors.MessageID = "validation.auth.password_too_short"
+	MessageIDAuthRoleInvalid              sharederrors.MessageID = "validation.auth.role_invalid"
+	MessageIDAuthNewPasswordRequired      sharederrors.MessageID = "validation.auth.new_password_required"
+	MessageIDAuthNewPasswordTooShort      sharederrors.MessageID = "validation.auth.new_password_too_short"
+	MessageIDAuthOldPasswordIncorrect     sharederrors.MessageID = "validation.auth.old_password_incorrect"
+	MessageIDAuthAPIKeyNameRequired       sharederrors.MessageID = "validation.auth.api_key_name_required"
+	MessageIDAuthAPIKeyNameTooLong        sharederrors.MessageID = "validation.auth.api_key_name_too_long"
+	MessageIDAuthCurrentPasswordRequired  sharederrors.MessageID = "validation.auth.current_password_required"
+	MessageIDAuthCurrentPasswordIncorrect sharederrors.MessageID = "validation.auth.current_password_incorrect"
 )
 
 // AuthErrorResponse is the structured JSON error body returned by auth endpoints.
@@ -34,35 +68,25 @@ type AuthErrorResponse struct {
 }
 
 // AuthErrorDetail carries the localization-ready error data.
-type AuthErrorDetail struct {
-	Code     string   `json:"code"`
-	Message  string   `json:"message"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-}
+type AuthErrorDetail = sharederrors.LocalizedErrorDetail
 
-func respondWithAuthStatusError(c *gin.Context, status int, code, message, template string, args ...string) {
+func respondWithAuthStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, AuthErrorResponse{
-		Error: AuthErrorDetail{
-			Code:     code,
-			Message:  message,
-			Template: template,
-			Args:     append([]string(nil), args...),
-		},
+		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
 	})
 }
 
 // respondWithAuthError is the central error handler for auth endpoints.
 func respondWithAuthError(c *gin.Context, err error) {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
-		respondWithAuthStatusError(c, authErrorStatus(loc.Code), loc.Code, loc.Message, loc.Template, loc.Args...)
+		c.JSON(authErrorStatus(loc.Code), AuthErrorResponse{Error: sharederrors.LocalizedErrorDetailFromError(loc)})
 		return
 	}
 
 	var vErr *sharederrors.ValidationErrors
 	if errors.As(err, &vErr) {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  "validation_error",
+			"error":  authValidationErrorCode,
 			"fields": vErr.Errors,
 		})
 		return
@@ -96,7 +120,7 @@ func respondWithAuthError(c *gin.Context, err error) {
 	}
 }
 
-func authErrorStatus(code string) int {
+func authErrorStatus(code sharederrors.ErrorCode) int {
 	switch code {
 	case ErrCodeAuthUserNotFound:
 		return http.StatusNotFound

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 // reservedKeys are metadata keys that must never be stored in the properties index.
@@ -25,16 +26,16 @@ func (s *PropertiesService) ClearIndex() error {
 	return s.store.Clear()
 }
 
-func (s *PropertiesService) IndexPageContent(pageID, rawContent string) error {
+func (s *PropertiesService) IndexPageContent(pageID tree.PageID, rawContent string) error {
 	props := ExtractPropertiesFromContent(rawContent)
 	return s.store.SetPropertiesForPage(pageID, props)
 }
 
-func (s *PropertiesService) SetPropertiesForPage(pageID string, props map[string]PropertyEntry) error {
+func (s *PropertiesService) SetPropertiesForPage(pageID tree.PageID, props map[string]PropertyEntry) error {
 	return s.store.SetPropertiesForPage(pageID, props)
 }
 
-func (s *PropertiesService) DeletePropertiesForPage(pageID string) error {
+func (s *PropertiesService) DeletePropertiesForPage(pageID tree.PageID) error {
 	return s.store.DeletePropertiesForPage(pageID)
 }
 
@@ -42,11 +43,11 @@ func (s *PropertiesService) GetAllPropertyKeys(filter string, limit int) ([]Prop
 	return s.store.GetAllPropertyKeys(filter, limit)
 }
 
-func (s *PropertiesService) GetPageIDsByProperty(key, value string) ([]string, error) {
+func (s *PropertiesService) GetPageIDsByProperty(key, value string) ([]tree.PageID, error) {
 	return s.store.GetPageIDsByProperty(key, value)
 }
 
-func (s *PropertiesService) GetPropertiesForPages(pageIDs []string) (map[string]map[string]PropertyEntry, error) {
+func (s *PropertiesService) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree.PageID]map[string]PropertyEntry, error) {
 	return s.store.GetPropertiesForPages(pageIDs)
 }
 

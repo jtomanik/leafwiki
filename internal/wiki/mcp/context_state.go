@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/perber/wiki/internal/workspacesync"
 )
 
 const (
@@ -14,7 +16,7 @@ const (
 type contextCheckpoint struct {
 	Token      string
 	CreatedAt  time.Time
-	CommitHash string
+	CommitHash workspacesync.CommitHash
 }
 
 type contextCheckpointStore struct {

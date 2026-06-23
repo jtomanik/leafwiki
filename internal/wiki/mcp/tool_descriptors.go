@@ -1,104 +1,131 @@
 package mcp
 
+type ToolID string
+
+func (id ToolID) String() string {
+	return string(id)
+}
+
+func (id ToolID) ProtocolName() ToolProtocolName {
+	return ToolProtocolName(id)
+}
+
+type ToolProtocolName string
+
+func (name ToolProtocolName) String() string {
+	return string(name)
+}
+
+type ToolDescriptionID string
+
+func (id ToolDescriptionID) String() string {
+	return string(id)
+}
+
 // ToolDescriptor is the single source for an MCP tool's protocol name and
 // user-facing description.
 type ToolDescriptor struct {
-	Name        string
-	Description string
+	Name          ToolID
+	DescriptionID ToolDescriptionID
+	Description   string
 }
 
 const (
-	ToolGetConfig          = "wiki_get_config"
-	ToolGetCurrentUser     = "wiki_get_current_user"
-	ToolGetContext         = "wiki_get_context"
-	ToolRefresh            = "wiki_refresh"
-	ToolGetSubtree         = "wiki_get_subtree"
-	ToolValidatePage       = "wiki_validate_page"
-	ToolValidateContent    = "wiki_validate_content"
-	ToolValidateWiki       = "wiki_validate_wiki"
-	ToolUpdatePageMetadata = "wiki_update_page_metadata"
-	ToolReplacePageSection = "wiki_replace_page_section"
-	ToolGetTree            = "wiki_get_tree"
-	ToolGetPage            = "wiki_get_page"
-	ToolGetPageByPath      = "wiki_get_page_by_path"
-	ToolLookupPath         = "wiki_lookup_path"
-	ToolResolvePermalink   = "wiki_resolve_permalink"
-	ToolSuggestSlug        = "wiki_suggest_slug"
-	ToolCreatePage         = "wiki_create_page"
-	ToolUpdatePage         = "wiki_update_page"
-	ToolDeletePage         = "wiki_delete_page"
-	ToolMovePage           = "wiki_move_page"
-	ToolSortPages          = "wiki_sort_pages"
-	ToolEnsurePage         = "wiki_ensure_page"
-	ToolConvertPage        = "wiki_convert_page"
-	ToolCopyPage           = "wiki_copy_page"
-	ToolSearchPages        = "wiki_search_pages"
-	ToolGetSearchStatus    = "wiki_get_search_status"
-	ToolListTags           = "wiki_list_tags"
-	ToolGetPagesByTags     = "wiki_get_pages_by_tags"
-	ToolListPropertyKeys   = "wiki_list_property_keys"
-	ToolGetPagesByProperty = "wiki_get_pages_by_property"
-	ToolGetLinkStatus      = "wiki_get_link_status"
-	ToolUploadAsset        = "wiki_upload_asset"
-	ToolGetAsset           = "wiki_get_asset"
-	ToolListAssets         = "wiki_list_assets"
-	ToolRenameAsset        = "wiki_rename_asset"
-	ToolDeleteAsset        = "wiki_delete_asset"
-	ToolListRevisions      = "wiki_list_revisions"
-	ToolGetLatestRevision  = "wiki_get_latest_revision"
-	ToolGetRevision        = "wiki_get_revision"
-	ToolCompareRevisions   = "wiki_compare_revisions"
-	ToolGetRevisionAsset   = "wiki_get_revision_asset"
-	ToolRestoreRevision    = "wiki_restore_revision"
-	ToolPreviewRefactor    = "wiki_preview_page_refactor"
-	ToolApplyRefactor      = "wiki_apply_page_refactor"
+	ToolGetConfig          ToolID = "wiki_get_config"
+	ToolGetCurrentUser     ToolID = "wiki_get_current_user"
+	ToolGetContext         ToolID = "wiki_get_context"
+	ToolRefresh            ToolID = "wiki_refresh"
+	ToolGetSubtree         ToolID = "wiki_get_subtree"
+	ToolValidatePage       ToolID = "wiki_validate_page"
+	ToolValidateContent    ToolID = "wiki_validate_content"
+	ToolValidateWiki       ToolID = "wiki_validate_wiki"
+	ToolUpdatePageMetadata ToolID = "wiki_update_page_metadata"
+	ToolReplacePageSection ToolID = "wiki_replace_page_section"
+	ToolGetTree            ToolID = "wiki_get_tree"
+	ToolGetPage            ToolID = "wiki_get_page"
+	ToolGetPageByPath      ToolID = "wiki_get_page_by_path"
+	ToolLookupPath         ToolID = "wiki_lookup_path"
+	ToolResolvePermalink   ToolID = "wiki_resolve_permalink"
+	ToolSuggestSlug        ToolID = "wiki_suggest_slug"
+	ToolCreatePage         ToolID = "wiki_create_page"
+	ToolUpdatePage         ToolID = "wiki_update_page"
+	ToolDeletePage         ToolID = "wiki_delete_page"
+	ToolMovePage           ToolID = "wiki_move_page"
+	ToolSortPages          ToolID = "wiki_sort_pages"
+	ToolEnsurePage         ToolID = "wiki_ensure_page"
+	ToolConvertPage        ToolID = "wiki_convert_page"
+	ToolCopyPage           ToolID = "wiki_copy_page"
+	ToolSearchPages        ToolID = "wiki_search_pages"
+	ToolGetSearchStatus    ToolID = "wiki_get_search_status"
+	ToolListTags           ToolID = "wiki_list_tags"
+	ToolGetPagesByTags     ToolID = "wiki_get_pages_by_tags"
+	ToolListPropertyKeys   ToolID = "wiki_list_property_keys"
+	ToolGetPagesByProperty ToolID = "wiki_get_pages_by_property"
+	ToolGetLinkStatus      ToolID = "wiki_get_link_status"
+	ToolUploadAsset        ToolID = "wiki_upload_asset"
+	ToolGetAsset           ToolID = "wiki_get_asset"
+	ToolListAssets         ToolID = "wiki_list_assets"
+	ToolRenameAsset        ToolID = "wiki_rename_asset"
+	ToolDeleteAsset        ToolID = "wiki_delete_asset"
+	ToolListRevisions      ToolID = "wiki_list_revisions"
+	ToolGetLatestRevision  ToolID = "wiki_get_latest_revision"
+	ToolGetRevision        ToolID = "wiki_get_revision"
+	ToolCompareRevisions   ToolID = "wiki_compare_revisions"
+	ToolGetRevisionAsset   ToolID = "wiki_get_revision_asset"
+	ToolRestoreRevision    ToolID = "wiki_restore_revision"
+	ToolPreviewRefactor    ToolID = "wiki_preview_page_refactor"
+	ToolApplyRefactor      ToolID = "wiki_apply_page_refactor"
+)
+
+const (
+	ToolDescriptionMovePage ToolDescriptionID = "mcp.tools.wiki_move_page.description"
 )
 
 var (
-	toolGetConfig          = ToolDescriptor{Name: ToolGetConfig, Description: "Return local MCP-visible LeafWiki configuration"}
-	toolGetCurrentUser     = ToolDescriptor{Name: ToolGetCurrentUser, Description: "Return the effective MCP user"}
-	toolGetContext         = ToolDescriptor{Name: ToolGetContext, Description: "Return agent-ready wiki context, sync state, recent changes, and presence"}
-	toolRefresh            = ToolDescriptor{Name: ToolRefresh, Description: "Synchronize direct Markdown changes into LeafWiki state"}
-	toolGetSubtree         = ToolDescriptor{Name: ToolGetSubtree, Description: "Return a compact subtree rooted at a page, path, or the wiki root"}
-	toolValidatePage       = ToolDescriptor{Name: ToolValidatePage, Description: "Validate an existing page by page ID or path"}
-	toolValidateContent    = ToolDescriptor{Name: ToolValidateContent, Description: "Validate proposed Markdown content without writing it"}
-	toolValidateWiki       = ToolDescriptor{Name: ToolValidateWiki, Description: "Validate the current wiki state"}
-	toolUpdatePageMetadata = ToolDescriptor{Name: ToolUpdatePageMetadata, Description: "Safely patch page tags and properties without changing body content"}
-	toolReplacePageSection = ToolDescriptor{Name: ToolReplacePageSection, Description: "Safely replace Markdown under a target heading"}
-	toolGetTree            = ToolDescriptor{Name: ToolGetTree, Description: "Return the wiki page tree"}
-	toolGetPage            = ToolDescriptor{Name: ToolGetPage, Description: "Return a page by ID with link status context"}
-	toolGetPageByPath      = ToolDescriptor{Name: ToolGetPageByPath, Description: "Return a page by route path with link status context"}
-	toolLookupPath         = ToolDescriptor{Name: ToolLookupPath, Description: "Resolve a route path into existing and missing path segments; pass kind page or section to disambiguate same-route twins"}
-	toolResolvePermalink   = ToolDescriptor{Name: ToolResolvePermalink, Description: "Resolve a stable page ID to its current route path"}
-	toolSuggestSlug        = ToolDescriptor{Name: ToolSuggestSlug, Description: "Suggest a unique child slug for a title"}
-	toolCreatePage         = ToolDescriptor{Name: ToolCreatePage, Description: "Create a wiki page or section"}
-	toolUpdatePage         = ToolDescriptor{Name: ToolUpdatePage, Description: "Update page title, slug, content, tags, and properties"}
-	toolDeletePage         = ToolDescriptor{Name: ToolDeletePage, Description: "Delete a page"}
-	toolMovePage           = ToolDescriptor{Name: ToolMovePage, Description: "Move a page to a new parent"}
-	toolSortPages          = ToolDescriptor{Name: ToolSortPages, Description: "Sort a parent's child pages"}
-	toolEnsurePage         = ToolDescriptor{Name: ToolEnsurePage, Description: "Ensure a page exists at a route path"}
-	toolConvertPage        = ToolDescriptor{Name: ToolConvertPage, Description: "Convert a page between page and section kinds"}
-	toolCopyPage           = ToolDescriptor{Name: ToolCopyPage, Description: "Copy a page and its assets"}
-	toolSearchPages        = ToolDescriptor{Name: ToolSearchPages, Description: "Search pages using LeafWiki offset and limit pagination"}
-	toolGetSearchStatus    = ToolDescriptor{Name: ToolGetSearchStatus, Description: "Return the search indexing status"}
-	toolListTags           = ToolDescriptor{Name: ToolListTags, Description: "List tag counts"}
-	toolGetPagesByTags     = ToolDescriptor{Name: ToolGetPagesByTags, Description: "List pages matching all tags"}
-	toolListPropertyKeys   = ToolDescriptor{Name: ToolListPropertyKeys, Description: "List property key counts"}
-	toolGetPagesByProperty = ToolDescriptor{Name: ToolGetPagesByProperty, Description: "List pages with a property value"}
-	toolGetLinkStatus      = ToolDescriptor{Name: ToolGetLinkStatus, Description: "Return link status for a page"}
-	toolUploadAsset        = ToolDescriptor{Name: ToolUploadAsset, Description: "Upload an asset from base64 content"}
-	toolGetAsset           = ToolDescriptor{Name: ToolGetAsset, Description: "Read an asset as base64 content"}
-	toolListAssets         = ToolDescriptor{Name: ToolListAssets, Description: "List page assets"}
-	toolRenameAsset        = ToolDescriptor{Name: ToolRenameAsset, Description: "Rename a page asset"}
-	toolDeleteAsset        = ToolDescriptor{Name: ToolDeleteAsset, Description: "Delete a page asset"}
-	toolListRevisions      = ToolDescriptor{Name: ToolListRevisions, Description: "List page revisions"}
-	toolGetLatestRevision  = ToolDescriptor{Name: ToolGetLatestRevision, Description: "Get the latest page revision"}
-	toolGetRevision        = ToolDescriptor{Name: ToolGetRevision, Description: "Get a page revision snapshot"}
-	toolCompareRevisions   = ToolDescriptor{Name: ToolCompareRevisions, Description: "Compare two page revisions"}
-	toolGetRevisionAsset   = ToolDescriptor{Name: ToolGetRevisionAsset, Description: "Read a revision asset as base64 content"}
-	toolRestoreRevision    = ToolDescriptor{Name: ToolRestoreRevision, Description: "Restore a page revision"}
-	toolPreviewRefactor    = ToolDescriptor{Name: ToolPreviewRefactor, Description: "Preview a page rename or move refactor"}
-	toolApplyRefactor      = ToolDescriptor{Name: ToolApplyRefactor, Description: "Apply a page rename or move refactor"}
+	toolGetConfig          = newToolDescriptor(ToolGetConfig, "Return local MCP-visible LeafWiki configuration")
+	toolGetCurrentUser     = newToolDescriptor(ToolGetCurrentUser, "Return the effective MCP user")
+	toolGetContext         = newToolDescriptor(ToolGetContext, "Return agent-ready wiki context, sync state, recent changes, and presence")
+	toolRefresh            = newToolDescriptor(ToolRefresh, "Synchronize direct Markdown changes into LeafWiki state")
+	toolGetSubtree         = newToolDescriptor(ToolGetSubtree, "Return a compact subtree rooted at a page, path, or the wiki root")
+	toolValidatePage       = newToolDescriptor(ToolValidatePage, "Validate an existing page by page ID or path")
+	toolValidateContent    = newToolDescriptor(ToolValidateContent, "Validate proposed Markdown content without writing it")
+	toolValidateWiki       = newToolDescriptor(ToolValidateWiki, "Validate the current wiki state")
+	toolUpdatePageMetadata = newToolDescriptor(ToolUpdatePageMetadata, "Safely patch page tags and properties without changing body content")
+	toolReplacePageSection = newToolDescriptor(ToolReplacePageSection, "Safely replace Markdown under a target heading")
+	toolGetTree            = newToolDescriptor(ToolGetTree, "Return the wiki page tree")
+	toolGetPage            = newToolDescriptor(ToolGetPage, "Return a page by ID with link status context")
+	toolGetPageByPath      = newToolDescriptor(ToolGetPageByPath, "Return a page by route path with link status context")
+	toolLookupPath         = newToolDescriptor(ToolLookupPath, "Resolve a route path into existing and missing path segments; pass kind page or section to disambiguate same-route twins")
+	toolResolvePermalink   = newToolDescriptor(ToolResolvePermalink, "Resolve a stable page ID to its current route path")
+	toolSuggestSlug        = newToolDescriptor(ToolSuggestSlug, "Suggest a unique child slug for a title")
+	toolCreatePage         = newToolDescriptor(ToolCreatePage, "Create a wiki page or section")
+	toolUpdatePage         = newToolDescriptor(ToolUpdatePage, "Update page title, slug, content, tags, and properties")
+	toolDeletePage         = newToolDescriptor(ToolDeletePage, "Delete a page")
+	toolMovePage           = newToolDescriptor(ToolMovePage, "Move a page to a new parent")
+	toolSortPages          = newToolDescriptor(ToolSortPages, "Sort a parent's child pages")
+	toolEnsurePage         = newToolDescriptor(ToolEnsurePage, "Ensure a page exists at a route path")
+	toolConvertPage        = newToolDescriptor(ToolConvertPage, "Convert a page between page and section kinds")
+	toolCopyPage           = newToolDescriptor(ToolCopyPage, "Copy a page and its assets")
+	toolSearchPages        = newToolDescriptor(ToolSearchPages, "Search pages using LeafWiki offset and limit pagination")
+	toolGetSearchStatus    = newToolDescriptor(ToolGetSearchStatus, "Return the search indexing status")
+	toolListTags           = newToolDescriptor(ToolListTags, "List tag counts")
+	toolGetPagesByTags     = newToolDescriptor(ToolGetPagesByTags, "List pages matching all tags")
+	toolListPropertyKeys   = newToolDescriptor(ToolListPropertyKeys, "List property key counts")
+	toolGetPagesByProperty = newToolDescriptor(ToolGetPagesByProperty, "List pages with a property value")
+	toolGetLinkStatus      = newToolDescriptor(ToolGetLinkStatus, "Return link status for a page")
+	toolUploadAsset        = newToolDescriptor(ToolUploadAsset, "Upload an asset from base64 content")
+	toolGetAsset           = newToolDescriptor(ToolGetAsset, "Read an asset as base64 content")
+	toolListAssets         = newToolDescriptor(ToolListAssets, "List page assets")
+	toolRenameAsset        = newToolDescriptor(ToolRenameAsset, "Rename a page asset")
+	toolDeleteAsset        = newToolDescriptor(ToolDeleteAsset, "Delete a page asset")
+	toolListRevisions      = newToolDescriptor(ToolListRevisions, "List page revisions")
+	toolGetLatestRevision  = newToolDescriptor(ToolGetLatestRevision, "Get the latest page revision")
+	toolGetRevision        = newToolDescriptor(ToolGetRevision, "Get a page revision snapshot")
+	toolCompareRevisions   = newToolDescriptor(ToolCompareRevisions, "Compare two page revisions")
+	toolGetRevisionAsset   = newToolDescriptor(ToolGetRevisionAsset, "Read a revision asset as base64 content")
+	toolRestoreRevision    = newToolDescriptor(ToolRestoreRevision, "Restore a page revision")
+	toolPreviewRefactor    = newToolDescriptor(ToolPreviewRefactor, "Preview a page rename or move refactor")
+	toolApplyRefactor      = newToolDescriptor(ToolApplyRefactor, "Apply a page rename or move refactor")
 )
 
 var baseToolDescriptors = []ToolDescriptor{
@@ -145,7 +172,19 @@ func LinkRefactorToolNames() []string {
 func toolNames(descriptors []ToolDescriptor) []string {
 	names := make([]string, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		names = append(names, descriptor.Name)
+		names = append(names, descriptor.Name.ProtocolName().String())
 	}
 	return names
+}
+
+func newToolDescriptor(name ToolID, description string) ToolDescriptor {
+	return ToolDescriptor{
+		Name:          name,
+		DescriptionID: ToolDescriptionIDForTool(name),
+		Description:   description,
+	}
+}
+
+func ToolDescriptionIDForTool(name ToolID) ToolDescriptionID {
+	return ToolDescriptionID("mcp.tools." + name.ProtocolName().String() + ".description")
 }

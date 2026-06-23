@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 type ImporterService struct {
@@ -149,8 +150,8 @@ func (is *ImporterService) CancelCurrentPlan() (*CurrentPlanState, bool, error) 
 }
 
 // ExecuteCurrentPlan executes the currently stored import plan
-func (is *ImporterService) ExecuteCurrentPlan(userID string) (*ExecutionResult, error) {
-	sp, started, err := is.planStore.TryStartExecution(userID)
+func (is *ImporterService) ExecuteCurrentPlan(userID tree.UserID) (*ExecutionResult, error) {
+	sp, started, err := is.planStore.TryStartExecution(userID.MetadataValue())
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +183,8 @@ func (is *ImporterService) ExecuteCurrentPlan(userID string) (*ExecutionResult, 
 	return res, nil
 }
 
-func (is *ImporterService) StartCurrentPlanExecution(userID string) (*CurrentPlanState, bool, error) {
-	sp, started, err := is.planStore.TryStartExecution(userID)
+func (is *ImporterService) StartCurrentPlanExecution(userID tree.UserID) (*CurrentPlanState, bool, error) {
+	sp, started, err := is.planStore.TryStartExecution(userID.MetadataValue())
 	if err != nil {
 		return nil, false, err
 	}
@@ -224,7 +225,7 @@ func FindMarkdownEntries(sourceBasePath string) ([]ImportMDFile, error) {
 		}
 
 		out = append(out, ImportMDFile{
-			SourcePath: filepath.ToSlash(rel),
+			SourcePath: tree.NewWorkspaceSourcePathUnchecked(filepath.ToSlash(rel)),
 		})
 		return nil
 	})
@@ -232,10 +233,12 @@ func FindMarkdownEntries(sourceBasePath string) ([]ImportMDFile, error) {
 	// Order entries by depth (shallow first)
 	if err == nil {
 		sort.SliceStable(out, func(i, j int) bool {
-			depthI := strings.Count(out[i].SourcePath, "/")
-			depthJ := strings.Count(out[j].SourcePath, "/")
+			left := out[i].SourcePath.FilesystemPath()
+			right := out[j].SourcePath.FilesystemPath()
+			depthI := strings.Count(left, "/")
+			depthJ := strings.Count(right, "/")
 			if depthI == depthJ {
-				return out[i].SourcePath < out[j].SourcePath
+				return left < right
 			}
 			return depthI < depthJ
 		})
@@ -244,8 +247,8 @@ func FindMarkdownEntries(sourceBasePath string) ([]ImportMDFile, error) {
 	// index.md should always come first if present
 	if err == nil {
 		sort.SliceStable(out, func(i, j int) bool {
-			nameI := strings.ToLower(filepath.Base(out[i].SourcePath))
-			nameJ := strings.ToLower(filepath.Base(out[j].SourcePath))
+			nameI := strings.ToLower(filepath.Base(out[i].SourcePath.FilesystemPath()))
+			nameJ := strings.ToLower(filepath.Base(out[j].SourcePath.FilesystemPath()))
 			if nameI == "index.md" && nameJ != "index.md" {
 				return true
 			}
@@ -326,7 +329,7 @@ func (is *ImporterService) executeStoredPlan(sp *StoredPlan) (*ExecutionResult, 
 			return is.planStore.IsCancelRequested(sp.Plan.ID)
 		}).
 		WithResumeState(sp.ProcessedItems, sp.ExecutionResult)
-	return exec.Execute(sp.ExecutionUserID)
+	return exec.Execute(tree.NewUserIDUnchecked(sp.ExecutionUserID))
 }
 
 func (is *ImporterService) cleanupWorkspace(workspaceRoot string) {

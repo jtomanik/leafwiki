@@ -33,7 +33,7 @@ func TestListRevisionsToolPassesWorkspaceCursorAndReturnsNextCursor(t *testing.T
 		GetPage:     wikipages.NewGetPageUseCase(treeService),
 		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
 			if page.ID != *pageID {
-				t.Fatalf("workspace page id = %q, want %q", page.ID, *pageID)
+				t.Fatalf("workspace page id = %q, want %q", page.ID, pageID.String())
 			}
 			if limit != 1 {
 				t.Fatalf("workspace limit = %d, want 1", limit)
@@ -74,7 +74,7 @@ func TestListRevisionsToolPassesWorkspaceCursorAndReturnsNextCursor(t *testing.T
 	t.Cleanup(func() { session.Close() })
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      ToolListRevisions,
+		Name:      ToolListRevisions.String(),
 		Arguments: map[string]any{"pageId": *pageID, "cursor": "rev-5", "limit": float64(1)},
 	})
 	if err != nil {

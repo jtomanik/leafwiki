@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -126,10 +127,7 @@ func TestRequireAuth_WithAuthDisabled_NoUser(t *testing.T) {
 		t.Errorf("Expected status 401 when authDisabled=true but no user, got %d", w2.Code)
 	}
 
-	expectedBody := `{"error":"User not authenticated and auth is disabled"}`
-	if w2.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w2.Body.String())
-	}
+	assertAuthMiddlewareError(t, w2, "auth_disabled_missing_user", "errors.auth.disabled_missing_user", "User not authenticated and auth is disabled")
 }
 
 func TestRequireAuth_WithInvalidUserContext_NilUser(t *testing.T) {
@@ -157,10 +155,7 @@ func TestRequireAuth_WithInvalidUserContext_NilUser(t *testing.T) {
 		t.Errorf("Expected status 500 for nil user context, got %d", w.Code)
 	}
 
-	expectedBody := `{"error":"Invalid user context"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_invalid_user_context", "errors.auth.invalid_user_context", "Invalid user context")
 }
 
 func TestRequireAuth_WithInvalidUserContext_WrongType(t *testing.T) {
@@ -188,10 +183,7 @@ func TestRequireAuth_WithInvalidUserContext_WrongType(t *testing.T) {
 		t.Errorf("Expected status 500 for invalid user type, got %d", w.Code)
 	}
 
-	expectedBody := `{"error":"Invalid user context"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_invalid_user_context", "errors.auth.invalid_user_context", "Invalid user context")
 }
 
 func TestRequireAuth_WithAuthEnabled_ValidToken(t *testing.T) {
@@ -285,10 +277,7 @@ func TestRequireAuth_WithAuthEnabled_MissingToken(t *testing.T) {
 		t.Errorf("Expected status 401 when no token provided, got %d", w.Code)
 	}
 
-	expectedBody := `{"error":"Missing or invalid access token"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_access_token_missing", "errors.auth.access_token_missing", "Missing or invalid access token")
 }
 
 func TestRequireAuth_WithAuthEnabled_NilAuthService(t *testing.T) {
@@ -316,10 +305,7 @@ func TestRequireAuth_WithAuthEnabled_NilAuthService(t *testing.T) {
 		t.Errorf("Expected status 500 when auth service is nil, got %d", w.Code)
 	}
 
-	expectedBody := `{"error":"Authentication service unavailable"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_service_unavailable", "errors.auth.service_unavailable", "Authentication service unavailable")
 }
 
 func TestRequireAuth_WithAuthEnabled_InvalidToken(t *testing.T) {
@@ -356,10 +342,7 @@ func TestRequireAuth_WithAuthEnabled_InvalidToken(t *testing.T) {
 		t.Errorf("Expected status 401 when invalid token provided, got %d", w.Code)
 	}
 
-	expectedBody := `{"error":"Invalid or expired token"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_token_invalid", "errors.auth.token_invalid", "Invalid or expired token")
 }
 
 func TestRequireAuth_WithAuthEnabled_UserSetInContext(t *testing.T) {
@@ -572,10 +555,7 @@ func TestRequireAuth_ComprehensiveScenarios(t *testing.T) {
 			}
 
 			if tc.expectedError != "" {
-				expectedBody := `{"error":"` + tc.expectedError + `"}`
-				if w.Body.String() != expectedBody {
-					t.Errorf("Expected error %s, got %s", expectedBody, w.Body.String())
-				}
+				assertAuthMiddlewareErrorMessage(t, w, tc.expectedError)
 			}
 		})
 	}
@@ -696,10 +676,7 @@ func TestOptionalAuth_NilAuthService_WithToken_Returns500(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 for nil authService with token, got %d: %s", w.Code, w.Body.String())
 	}
-	expected := `{"error":"Authentication service unavailable"}`
-	if w.Body.String() != expected {
-		t.Errorf("expected %s, got %s", expected, w.Body.String())
-	}
+	assertAuthMiddlewareError(t, w, "auth_service_unavailable", "errors.auth.service_unavailable", "Authentication service unavailable")
 }
 
 func TestOptionalAuth_UserAlreadyInContext_ShortCircuits(t *testing.T) {
@@ -728,5 +705,37 @@ func TestOptionalAuth_UserAlreadyInContext_ShortCircuits(t *testing.T) {
 	}
 	if w.Body.String() != `{"username":"proxy"}` {
 		t.Errorf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func assertAuthMiddlewareError(t *testing.T, rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			MessageID string `json:"messageId"`
+			Message   string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode auth middleware error: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message != message {
+		t.Fatalf("auth middleware error = %#v, want code=%q messageId=%q message=%q", body.Error, code, messageID, message)
+	}
+}
+
+func assertAuthMiddlewareErrorMessage(t *testing.T, rec *httptest.ResponseRecorder, message string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode auth middleware error: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Message != message {
+		t.Fatalf("auth middleware message = %q, want %q; body=%s", body.Error.Message, message, rec.Body.String())
 	}
 }

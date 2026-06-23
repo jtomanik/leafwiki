@@ -35,7 +35,7 @@ func setupSearchTest(t *testing.T) (*tree.TreeService, *search.SQLiteIndex, *Sea
 func createPageWithContent(t *testing.T, treeSvc *tree.TreeService, title, slug, content string) *tree.Page {
 	t.Helper()
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode("system", nil, title, slug, &kind)
+	id, err := treeSvc.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), &kind)
 	if err != nil {
 		t.Fatalf("CreateNode(%q): %v", title, err)
 	}
@@ -43,7 +43,7 @@ func createPageWithContent(t *testing.T, treeSvc *tree.TreeService, title, slug,
 	if err != nil {
 		t.Fatalf("GetPage after CreateNode: %v", err)
 	}
-	if err := treeSvc.UpdateNode("system", *id, title, slug, &content, page.Version(), false); err != nil {
+	if err := treeSvc.UpdateNode(tree.UserID("system"), *id, title, tree.NewSlugUnchecked(slug), &content, tree.NewPageVersionUnchecked(page.Version()), false); err != nil {
 		t.Fatalf("UpdateNode(%q): %v", title, err)
 	}
 	page, err = treeSvc.GetPage(*id)
@@ -155,10 +155,10 @@ func TestSearchIndexSideEffect_Apply_Update_ReplacesContentAfterBootstrap(t *tes
 	}
 
 	newContent := "updated uniqueword_after content"
-	if err := treeSvc.UpdateNode("system", page.ID, page.Title, page.Slug, &newContent, page.Version(), false); err != nil {
+	if err := treeSvc.UpdateNode(tree.UserID("system"), tree.NewPageIDUnchecked(page.ID), page.Title, tree.NewSlugUnchecked(page.Slug), &newContent, tree.NewPageVersionUnchecked(page.Version()), false); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
-	updated, err := treeSvc.GetPage(page.ID)
+	updated, err := treeSvc.GetPage(tree.NewPageIDUnchecked(page.ID))
 	if err != nil {
 		t.Fatalf("GetPage after update: %v", err)
 	}
@@ -222,7 +222,8 @@ func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t
 	parent := createPageWithContent(t, treeSvc, "Parent Section", "parent", "parent uniqueterm_parent content")
 
 	kind := tree.NodeKindPage
-	child1ID, err := treeSvc.CreateNode("system", &parent.ID, "Child One", "child-one", &kind)
+	parentID := tree.NewPageIDUnchecked(parent.ID)
+	child1ID, err := treeSvc.CreateNode("system", &parentID, "Child One", "child-one", &kind)
 	if err != nil {
 		t.Fatalf("CreateNode child1: %v", err)
 	}
@@ -231,11 +232,11 @@ func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t
 		t.Fatalf("GetPage child1: %v", err)
 	}
 	content1 := "child one uniqueterm_child1 content"
-	if err := treeSvc.UpdateNode("system", child1.ID, child1.Title, child1.Slug, &content1, child1.Version(), false); err != nil {
+	if err := treeSvc.UpdateNode(tree.UserID("system"), tree.NewPageIDUnchecked(child1.ID), child1.Title, tree.NewSlugUnchecked(child1.Slug), &content1, tree.NewPageVersionUnchecked(child1.Version()), false); err != nil {
 		t.Fatalf("UpdateNode child1: %v", err)
 	}
 
-	child2ID, err := treeSvc.CreateNode("system", &parent.ID, "Child Two", "child-two", &kind)
+	child2ID, err := treeSvc.CreateNode("system", &parentID, "Child Two", "child-two", &kind)
 	if err != nil {
 		t.Fatalf("CreateNode child2: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t
 		t.Fatalf("GetPage child2: %v", err)
 	}
 	content2 := "child two uniqueterm_child2 content"
-	if err := treeSvc.UpdateNode("system", child2.ID, child2.Title, child2.Slug, &content2, child2.Version(), false); err != nil {
+	if err := treeSvc.UpdateNode(tree.UserID("system"), tree.NewPageIDUnchecked(child2.ID), child2.Title, tree.NewSlugUnchecked(child2.Slug), &content2, tree.NewPageVersionUnchecked(child2.Version()), false); err != nil {
 		t.Fatalf("UpdateNode child2: %v", err)
 	}
 
@@ -271,7 +272,7 @@ func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t
 	if err != nil {
 		t.Fatalf("GetPage child2Final: %v", err)
 	}
-	parentFinal, err := treeSvc.GetPage(parent.ID)
+	parentFinal, err := treeSvc.GetPage(tree.NewPageIDUnchecked(parent.ID))
 	if err != nil {
 		t.Fatalf("GetPage parentFinal: %v", err)
 	}
@@ -308,10 +309,10 @@ func TestSearchIndexSideEffect_Apply_Move_PageStillSearchableAtNewPath(t *testin
 	}
 
 	// Move the page under the parent section.
-	if err := treeSvc.MoveNode("system", page.ID, *parentID, page.Version()); err != nil {
+	if err := treeSvc.MoveNode("system", tree.NewPageIDUnchecked(page.ID), *parentID, tree.NewPageVersionUnchecked(page.Version())); err != nil {
 		t.Fatalf("MoveNode: %v", err)
 	}
-	moved, err := treeSvc.GetPage(page.ID)
+	moved, err := treeSvc.GetPage(tree.NewPageIDUnchecked(page.ID))
 	if err != nil {
 		t.Fatalf("GetPage after move: %v", err)
 	}

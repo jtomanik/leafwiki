@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"io"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -14,8 +13,8 @@ import (
 type PageMetadata struct {
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
-	CreatorID    string    `json:"creatorId"`
-	LastAuthorID string    `json:"lastAuthorId"`
+	CreatorID    UserID    `json:"creatorId"`
+	LastAuthorID UserID    `json:"lastAuthorId"`
 }
 
 type NodeKind string
@@ -29,32 +28,32 @@ const (
 // It has an ID, a parent, a path, and children
 // The ID is a unique identifier for the entry
 type PageNode struct {
-	ID       string      `json:"id"`       // Unique identifier for the entry
+	ID       PageID      `json:"id"`       // Unique identifier for the entry
 	Title    string      `json:"title"`    // Title is the name of the entry
-	Slug     string      `json:"slug"`     // Slug is the path of the entry
+	Slug     Slug        `json:"slug"`     // Slug is the path of the entry
 	Children []*PageNode `json:"children"` // Children are the children of the entry
 	Position int         `json:"position"` // Position is the position of the entry
 	Parent   *PageNode   `json:"-"`
 
-	Kind                NodeKind     `json:"kind"` // Kind is the kind of the node (page or folder)
-	WorkspaceSourcePath string       `json:"-"`    // root-relative source path for normalized workspace imports
-	Metadata            PageMetadata `json:"metadata"`
+	Kind                NodeKind            `json:"kind"` // Kind is the kind of the node (page or folder)
+	WorkspaceSourcePath WorkspaceSourcePath `json:"-"`    // root-relative source path for normalized workspace imports
+	Metadata            PageMetadata        `json:"metadata"`
 }
 
 func (p *PageNode) HasChildren() bool {
 	return len(p.Children) > 0
 }
 
-func (p *PageNode) ChildAlreadyExists(slug string) bool {
+func (p *PageNode) ChildAlreadyExists(slug Slug) bool {
 	for _, child := range p.Children {
-		if strings.EqualFold(child.Slug, slug) {
+		if child.Slug.EqualFold(slug) {
 			return true
 		}
 	}
 	return false
 }
 
-func (p *PageNode) IsChildOf(childID string, recursive bool) bool {
+func (p *PageNode) IsChildOf(childID PageID, recursive bool) bool {
 	for _, child := range p.Children {
 		if child.ID == childID {
 			return true
@@ -67,26 +66,34 @@ func (p *PageNode) IsChildOf(childID string, recursive bool) bool {
 }
 
 func (p *PageNode) CalculatePath() string {
+	routePath := p.CalculateRoutePath()
+	if routePath.IsRoot() {
+		return ""
+	}
+	return "/" + routePath.FilesystemPath()
+}
+
+func (p *PageNode) CalculateRoutePath() RoutePath {
 	// Calculate the path of the entry
 	// The path is the slug of the entry and its parent's path
 	if p.Parent == nil {
 		if p.Slug == "" || p.Slug == "root" {
 			return ""
 		}
-		return p.Slug
+		return p.Slug.RoutePath()
 	}
-	return p.Parent.CalculatePath() + "/" + p.Slug
+	return p.Parent.CalculateRoutePath().Child(p.Slug)
 }
 
 // Version returns a stable optimistic-lock token for the current node state.
-func (p *PageNode) Version() string {
+func (p *PageNode) Version() PageVersion {
 	if p == nil {
 		return ""
 	}
 	if p.Metadata.UpdatedAt.IsZero() {
 		return ""
 	}
-	return p.Metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	return NewPageVersionFromTime(p.Metadata.UpdatedAt)
 }
 
 // Hash returns a deterministic hash of the node and all descendants.
@@ -111,11 +118,11 @@ func (p *PageNode) hashSum(includeMetadata bool) [32]byte {
 func (p *PageNode) writeHashPayload(w io.Writer, includeMetadata bool) {
 	// Node fields (parent excluded)
 	writeString(w, "id")
-	writeString(w, p.ID)
+	writePageID(w, p.ID)
 	writeString(w, "title")
 	writeString(w, p.Title)
 	writeString(w, "slug")
-	writeString(w, p.Slug)
+	writeSlug(w, p.Slug)
 	writeString(w, "kind")
 	writeString(w, string(p.Kind))
 	writeString(w, "position")
@@ -127,9 +134,9 @@ func (p *PageNode) writeHashPayload(w io.Writer, includeMetadata bool) {
 		writeString(w, "meta.updatedAt")
 		writeTime(w, p.Metadata.UpdatedAt)
 		writeString(w, "meta.creatorId")
-		writeString(w, p.Metadata.CreatorID)
+		writeUserID(w, p.Metadata.CreatorID)
 		writeString(w, "meta.lastAuthorId")
-		writeString(w, p.Metadata.LastAuthorID)
+		writeUserID(w, p.Metadata.LastAuthorID)
 	}
 
 	// Children: enforce stable order (Position, then ID as tie-breaker)
@@ -165,6 +172,18 @@ func writeString(w io.Writer, s string) {
 	// length-prefixed string (uint32 len + bytes)
 	_ = binary.Write(w, binary.BigEndian, uint32(len(s)))
 	_, _ = io.WriteString(w, s)
+}
+
+func writePageID(w io.Writer, id PageID) {
+	writeString(w, id.HashPayload())
+}
+
+func writeUserID(w io.Writer, id UserID) {
+	writeString(w, id.HashPayload())
+}
+
+func writeSlug(w io.Writer, slug Slug) {
+	writeString(w, slug.HashPayload())
 }
 
 func writeInt64(w io.Writer, v int64) {

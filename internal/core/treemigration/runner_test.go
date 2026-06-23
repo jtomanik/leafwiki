@@ -2,6 +2,7 @@ package treemigration_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,18 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 )
+
+func assertOrderIDs(t *testing.T, got []string, want ...tree.PageID) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("unexpected persisted order length: got %v want %v", got, want)
+	}
+	for i, rawID := range got {
+		if id := tree.NewPageIDUnchecked(rawID); id != want[i] {
+			t.Fatalf("unexpected persisted order: got %v want %v", got, want)
+		}
+	}
+}
 
 func writeSchema(t *testing.T, dir string, version int) {
 	t.Helper()
@@ -84,8 +97,8 @@ func TestTreeMigration_LoadTree_MigratesToV2_AddsFrontmatterAndPreservesBody(t *
 	if !has {
 		t.Fatalf("expected frontmatter after migration, got:\n%s", string(raw))
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
 		t.Fatalf("expected leafwiki_title to be set")
@@ -153,8 +166,8 @@ Hello World
 	if !has {
 		t.Fatalf("expected frontmatter after migration, got:\n%s", migrated)
 	}
-	if fm.LeafWikiID != *id {
-		t.Fatalf("expected leafwiki_id=%q, got %q", *id, fm.LeafWikiID)
+	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id {
+		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
 		t.Fatalf("expected leafwiki_title to be set")
@@ -197,7 +210,7 @@ func TestTreeMigration_LoadTree_MigratesToV3_BackfillsMetadataFrontmatter(t *tes
 	persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
 
 	pagePath := filepath.Join(tmpDir, "root", "page1.md")
-	legacyContent := "---\nleafwiki_id: " + *id + "\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n"
+	legacyContent := fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n", *id)
 	if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
 		t.Fatalf("write legacy content failed: %v", err)
 	}
@@ -289,10 +302,7 @@ func TestTreeMigration_LoadTree_MigratesToV5_BackfillsChildOrderFiles(t *testing
 	if err := json.Unmarshal(rawRootOrder, &rootOrder); err != nil {
 		t.Fatalf("unmarshal root order file: %v", err)
 	}
-	wantRoot := []string{*alphaID, *docsID}
-	if strings.Join(rootOrder.OrderedIDs, ",") != strings.Join(wantRoot, ",") {
-		t.Fatalf("unexpected root order after migration: got %v want %v", rootOrder.OrderedIDs, wantRoot)
-	}
+	assertOrderIDs(t, rootOrder.OrderedIDs, *alphaID, *docsID)
 
 	var docsOrder struct {
 		OrderedIDs []string `json:"ordered_ids"`
@@ -304,10 +314,7 @@ func TestTreeMigration_LoadTree_MigratesToV5_BackfillsChildOrderFiles(t *testing
 	if err := json.Unmarshal(rawDocsOrder, &docsOrder); err != nil {
 		t.Fatalf("unmarshal docs order file: %v", err)
 	}
-	wantDocs := []string{*betaID}
-	if strings.Join(docsOrder.OrderedIDs, ",") != strings.Join(wantDocs, ",") {
-		t.Fatalf("unexpected docs order after migration: got %v want %v", docsOrder.OrderedIDs, wantDocs)
-	}
+	assertOrderIDs(t, docsOrder.OrderedIDs, *betaID)
 }
 
 func TestTreeMigration_LoadTree_MigratesToV4_MaterializesMissingSectionIndex(t *testing.T) {
@@ -363,7 +370,7 @@ func TestTreeMigration_LoadTree_MigratesToV4_MaterializesMissingSectionIndex(t *
 	if !has {
 		t.Fatalf("expected frontmatter after migration")
 	}
-	if fm.LeafWikiID != *id || fm.LeafWikiTitle != "Docs" {
+	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
 		t.Fatalf("expected section frontmatter to be materialized, got %#v", fm)
 	}
 	if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
@@ -445,10 +452,7 @@ func TestTreeMigration_LoadTree_MigratesToV5_PageNodeWithChildrenPreservesChildO
 	if err := json.Unmarshal(rawOrder, &notesOrder); err != nil {
 		t.Fatalf("unmarshal notes order file: %v", err)
 	}
-	want := []string{*zebraID, *alphaID}
-	if strings.Join(notesOrder.OrderedIDs, ",") != strings.Join(want, ",") {
-		t.Fatalf("unexpected notes child order after migration: got %v want %v", notesOrder.OrderedIDs, want)
-	}
+	assertOrderIDs(t, notesOrder.OrderedIDs, *zebraID, *alphaID)
 }
 
 func TestTreeMigration_LoadTree_MigratesToV5_ReturnsErrorWhenOrderFileCannotBeWritten(t *testing.T) {

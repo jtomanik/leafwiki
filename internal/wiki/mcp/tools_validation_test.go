@@ -12,30 +12,32 @@ import (
 )
 
 func TestCachedValidationAssetExistsBuildsPredicateOncePerPage(t *testing.T) {
-	calls := map[string]int{}
-	assetExists := cachedValidationAssetExists(func(pageID string) func(string) bool {
+	calls := map[tree.PageID]int{}
+	assetExists := cachedValidationAssetExists(func(pageID tree.PageID) func(string) bool {
 		calls[pageID]++
 		return func(destination string) bool {
-			return pageID == "page-1" && destination == "logo.png"
+			return pageID == tree.NewPageIDUnchecked("page-1") && destination == "logo.png"
 		}
 	})
 
-	if !assetExists(" page-1 ", "logo.png") {
+	if !assetExists(tree.NewPageIDUnchecked("page-1"), "logo.png") {
 		t.Fatalf("assetExists(page-1, logo.png) = false, want true")
 	}
-	if assetExists("page-1", "other.png") {
+	if assetExists(tree.NewPageIDUnchecked("page-1"), "other.png") {
 		t.Fatalf("assetExists(page-1, other.png) = true, want false")
 	}
-	if assetExists("page-2", "logo.png") {
+	if assetExists(tree.NewPageIDUnchecked("page-2"), "logo.png") {
 		t.Fatalf("assetExists(page-2, logo.png) = true, want false")
 	}
-	assetExists("page-1", "second.png")
+	assetExists(tree.NewPageIDUnchecked("page-1"), "second.png")
 
-	if calls["page-1"] != 1 {
-		t.Fatalf("page-1 predicate factory calls = %d, want 1", calls["page-1"])
+	pageOneID := tree.NewPageIDUnchecked("page-1")
+	pageTwoID := tree.NewPageIDUnchecked("page-2")
+	if calls[pageOneID] != 1 {
+		t.Fatalf("page-1 predicate factory calls = %d, want 1", calls[pageOneID])
 	}
-	if calls["page-2"] != 1 {
-		t.Fatalf("page-2 predicate factory calls = %d, want 1", calls["page-2"])
+	if calls[pageTwoID] != 1 {
+		t.Fatalf("page-2 predicate factory calls = %d, want 1", calls[pageTwoID])
 	}
 }
 
@@ -74,12 +76,13 @@ leafwiki_title: Sync Child
 	}
 	routes := &Routes{treeService: treeService}
 
-	result := routes.validateMarkdownContent(context.Background(), section.CalculatePath(), section.RawContent, section.ID, section.Kind)
+	routePath := tree.NewRoutePathUnchecked(section.CalculatePath())
+	result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, tree.NewPageIDUnchecked(section.ID), section.Kind)
 
 	if !result.OK {
 		t.Fatalf("validateMarkdownContent = %#v, want ok", result)
 	}
-	assertNoCoreValidationIssueCode(t, result, "broken_link")
+	assertNoCoreValidationIssueCode(t, result, wikivalidation.IssueCodeBrokenLink)
 }
 
 func TestValidateWorkspaceMarkdownFilesResolvesMarkdownLinkRootPrefix(t *testing.T) {
@@ -108,7 +111,7 @@ leafwiki_title: Glossary
 	if !result.OK {
 		t.Fatalf("validateWorkspaceMarkdownFiles = %#v, want ok", result)
 	}
-	assertNoCoreValidationIssueCode(t, result, "broken_link")
+	assertNoCoreValidationIssueCode(t, result, wikivalidation.IssueCodeBrokenLink)
 }
 
 func moveChildKindFirst(t *testing.T, root *tree.PageNode, routePath string, kind tree.NodeKind) {
@@ -138,7 +141,7 @@ func childBySlug(parent *tree.PageNode, slug string) *tree.PageNode {
 		return nil
 	}
 	for _, child := range parent.Children {
-		if child.Slug == slug {
+		if child.Slug == tree.NewSlugUnchecked(slug) {
 			return child
 		}
 	}
@@ -155,7 +158,7 @@ func writeValidationMarkdown(t *testing.T, filePath string, content string) {
 	}
 }
 
-func assertNoCoreValidationIssueCode(t *testing.T, result wikivalidation.Result, code string) {
+func assertNoCoreValidationIssueCode(t *testing.T, result wikivalidation.Result, code wikivalidation.IssueCode) {
 	t.Helper()
 	for _, issue := range result.Issues {
 		if issue.Code == code {
