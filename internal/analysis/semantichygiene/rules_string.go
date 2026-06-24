@@ -44,35 +44,19 @@ func reportSemanticStringEscape(ctx *analysisContext, expr ast.Expr, typeName st
 		case *ast.ParenExpr:
 			continue
 		case *ast.BinaryExpr:
-			if p.Op == token.EQL || p.Op == token.NEQ {
-				if isAllowedSerializedTestComparison(ctx, expr, p) {
-					return
-				}
-				if isEmptyOrRootString(p.X) || isEmptyOrRootString(p.Y) {
-					return
-				}
-				ctx.pass.Reportf(expr.Pos(), "%s", stringComparisonDiagnostic(typeName))
+			if handleStringBinaryEscape(ctx, expr, typeName, p) {
 				return
 			}
 			if p.Op == token.ADD {
 				continue
 			}
 		case *ast.CallExpr:
-			if isAllowedSemanticStringConstructorCall(ctx, p, typeName) ||
-				isAllowedSemanticConstructorTransform(ctx, p, typeName) {
-				return
-			}
-			if isAllowedTestStringCall(ctx, p) {
+			if handleStringCallEscape(ctx, expr, typeName, p) {
 				return
 			}
 			if isAllowedTerminalStringCall(ctx, p) {
-				if isAllowedTerminalCallBoundary(ctx, p) {
-					return
-				}
 				continue
 			}
-			ctx.pass.Reportf(expr.Pos(), "%s", stringCallDiagnostic(typeName, callName(p)))
-			return
 		case *ast.AssignStmt:
 			checkStringAssignment(ctx, expr, typeName, p)
 			return
@@ -98,6 +82,29 @@ func reportSemanticStringEscape(ctx *analysisContext, expr ast.Expr, typeName st
 			return
 		}
 	}
+}
+
+func handleStringBinaryEscape(ctx *analysisContext, expr ast.Expr, typeName string, binary *ast.BinaryExpr) bool {
+	if binary.Op != token.EQL && binary.Op != token.NEQ {
+		return false
+	}
+	if !isAllowedSerializedTestComparison(ctx, expr, binary) && !isEmptyOrRootString(binary.X) && !isEmptyOrRootString(binary.Y) {
+		ctx.pass.Reportf(expr.Pos(), "%s", stringComparisonDiagnostic(typeName))
+	}
+	return true
+}
+
+func handleStringCallEscape(ctx *analysisContext, expr ast.Expr, typeName string, call *ast.CallExpr) bool {
+	if isAllowedSemanticStringConstructorCall(ctx, call, typeName) ||
+		isAllowedSemanticConstructorTransform(ctx, call, typeName) ||
+		isAllowedTestStringCall(ctx, call) {
+		return true
+	}
+	if isAllowedTerminalStringCall(ctx, call) {
+		return isAllowedTerminalCallBoundary(ctx, call)
+	}
+	ctx.pass.Reportf(expr.Pos(), "%s", stringCallDiagnostic(typeName, callName(call)))
+	return true
 }
 
 func checkStringAssignment(ctx *analysisContext, expr ast.Expr, typeName string, stmt *ast.AssignStmt) {

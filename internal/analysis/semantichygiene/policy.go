@@ -138,6 +138,13 @@ var semanticPrimitiveNames = map[string]bool{
 	"offset":   true,
 }
 
+var semanticPrimitiveContextHints = map[string][]string{
+	"depth":    {"tree", "subtree", "navigation"},
+	"limit":    {"search", "tag", "propert", "revision", "snapshot", "page"},
+	"maxbytes": {"asset", "file", "stream", "upload", "write"},
+	"offset":   {"search", "page", "revision", "snapshot"},
+}
+
 func semanticTypeForName(name string) string {
 	if typ, ok := semanticTypeForCanonicalName(canonicalName(name)); ok {
 		return typ
@@ -151,37 +158,22 @@ func semanticPrimitiveName(name string) bool {
 }
 
 func semanticPrimitiveNameInContext(name string, context string) bool {
-	if !semanticPrimitiveName(name) {
-		return false
-	}
 	canonical := canonicalName(name)
-	canonicalContext := canonicalName(context)
-	switch canonical {
-	case "depth":
-		return strings.Contains(canonicalContext, "tree") ||
-			strings.Contains(canonicalContext, "subtree") ||
-			strings.Contains(canonicalContext, "navigation")
-	case "limit":
-		return strings.Contains(canonicalContext, "search") ||
-			strings.Contains(canonicalContext, "tag") ||
-			strings.Contains(canonicalContext, "propert") ||
-			strings.Contains(canonicalContext, "revision") ||
-			strings.Contains(canonicalContext, "snapshot") ||
-			strings.Contains(canonicalContext, "page")
-	case "maxbytes":
-		return strings.Contains(canonicalContext, "asset") ||
-			strings.Contains(canonicalContext, "file") ||
-			strings.Contains(canonicalContext, "stream") ||
-			strings.Contains(canonicalContext, "upload") ||
-			strings.Contains(canonicalContext, "write")
-	case "offset":
-		return strings.Contains(canonicalContext, "search") ||
-			strings.Contains(canonicalContext, "page") ||
-			strings.Contains(canonicalContext, "revision") ||
-			strings.Contains(canonicalContext, "snapshot")
-	default:
+	hints, ok := semanticPrimitiveContextHints[canonical]
+	if !ok {
 		return false
 	}
+	canonicalContext := canonicalName(context)
+	return containsAnyCanonical(canonicalContext, hints)
+}
+
+func containsAnyCanonical(value string, fragments []string) bool {
+	for _, fragment := range fragments {
+		if strings.Contains(value, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func semanticTypeForFieldName(fieldName string, typeName string) (string, bool) {
@@ -999,31 +991,11 @@ func isRawLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit)
 	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
 		switch n := current.(type) {
 		case *ast.CallExpr:
-			name := callName(n)
-			if isCLIControlProseCall(ctx, n) && callContainsArg(n, lit) {
-				return true
-			}
-			if isPrivateHTTPErrorProseCall(ctx, n) && callContainsArg(n, lit) {
-				return true
-			}
-			if localizedProseContractCalls[name] && callContainsArg(n, lit) {
-				return true
-			}
-			if localizedProseFirstArgContractCalls[name] && callContainsFirstArg(n, lit) {
-				return true
-			}
-			if localizedProseConstructorCalls[name] && callContainsArg(n, lit) && localizedProseConstructorRequiresCatalogOnly(name, ctx, n) {
+			if isRawLocalizedProseCallLiteral(ctx, n, lit) {
 				return true
 			}
 		case *ast.KeyValueExpr:
-			fieldName := keyName(n.Key)
-			if fieldName == "message" && containsNode(n.Value, lit) && isResponsePayloadLiteral(ctx, n) {
-				return true
-			}
-			if messageFieldName(fieldName) && containsNode(n.Value, lit) && isMessageFieldValueMissingMessageID(ctx, n) {
-				return true
-			}
-			if warningStringsFieldName(fieldName) && containsNode(n.Value, lit) && isWarningFieldValueMissingMessageID(ctx, n) {
+			if isRawLocalizedProseFieldLiteral(ctx, n, lit) {
 				return true
 			}
 		case *ast.FuncDecl:
@@ -1031,6 +1003,34 @@ func isRawLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit)
 		}
 	}
 	return false
+}
+
+func isRawLocalizedProseCallLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
+	name := callName(call)
+	if localizedProseFirstArgContractCalls[name] {
+		return callContainsFirstArg(call, lit)
+	}
+	if localizedProseConstructorCalls[name] {
+		return callContainsArg(call, lit) && localizedProseConstructorRequiresCatalogOnly(name, ctx, call)
+	}
+	if localizedProseContractCalls[name] || isCLIControlProseCall(ctx, call) || isPrivateHTTPErrorProseCall(ctx, call) {
+		return callContainsArg(call, lit)
+	}
+	return false
+}
+
+func isRawLocalizedProseFieldLiteral(ctx *analysisContext, kv *ast.KeyValueExpr, lit *ast.BasicLit) bool {
+	fieldName := keyName(kv.Key)
+	if !containsNode(kv.Value, lit) {
+		return false
+	}
+	if fieldName == "message" {
+		return isResponsePayloadLiteral(ctx, kv)
+	}
+	if messageFieldName(fieldName) {
+		return isMessageFieldValueMissingMessageID(ctx, kv)
+	}
+	return warningStringsFieldName(fieldName) && isWarningFieldValueMissingMessageID(ctx, kv)
 }
 
 func isCLIControlProseCall(ctx *analysisContext, call *ast.CallExpr) bool {
@@ -1088,22 +1088,33 @@ func isPrivateHTTPResponseFile(filename string) bool {
 }
 
 func isStrictLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" || messageIDPattern.MatchString(value) || toolIDPattern.MatchString(value) || errorCodePattern.MatchString(value) {
+	if isStableMessageLikeLiteral(value) {
 		return false
 	}
 	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
 		switch n := current.(type) {
 		case *ast.CallExpr:
-			if localizedProseStrictContractCalls[callName(n)] && callContainsArg(n, lit) {
-				return true
-			}
-			if isPrivateHTTPErrorProseCall(ctx, n) && callContainsArg(n, lit) {
+			if isStrictLocalizedProseCallLiteral(ctx, n, lit) {
 				return true
 			}
 		case *ast.FuncDecl:
 			return false
 		}
+	}
+	return false
+}
+
+func isStableMessageLikeLiteral(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" ||
+		messageIDPattern.MatchString(value) ||
+		toolIDPattern.MatchString(value) ||
+		errorCodePattern.MatchString(value)
+}
+
+func isStrictLocalizedProseCallLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
+	if localizedProseStrictContractCalls[callName(call)] || isPrivateHTTPErrorProseCall(ctx, call) {
+		return callContainsArg(call, lit)
 	}
 	return false
 }
@@ -1178,33 +1189,46 @@ func isStableContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value stri
 
 func stableLiteralContextSuggestsContract(ctx *analysisContext, lit *ast.BasicLit) bool {
 	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
-		switch n := current.(type) {
-		case *ast.CallExpr:
-			if nameSuggestsStableContract(callName(n)) {
-				return true
-			}
-		case *ast.KeyValueExpr:
-			if nameSuggestsStableContract(keyName(n.Key)) {
-				return true
-			}
-		case *ast.AssignStmt:
-			for i, rhs := range n.Rhs {
-				if containsNode(rhs, lit) && i < len(n.Lhs) && nameSuggestsStableContract(exprName(n.Lhs[i])) {
-					return true
-				}
-			}
-		case *ast.ValueSpec:
-			for i, value := range n.Values {
-				if containsNode(value, lit) && i < len(n.Names) && nameSuggestsStableContract(n.Names[i].Name) {
-					return true
-				}
-			}
-		case *ast.ReturnStmt:
-			if nameSuggestsStableContract(enclosingFuncName(ctx, n)) {
-				return true
-			}
-		case *ast.FuncDecl:
-			return nameSuggestsStableContract(n.Name.Name)
+		matches, terminal := stableLiteralContextDecision(ctx, current, lit)
+		if matches || terminal {
+			return matches
+		}
+	}
+	return false
+}
+
+func stableLiteralContextDecision(ctx *analysisContext, node ast.Node, lit *ast.BasicLit) (matches bool, terminal bool) {
+	switch n := node.(type) {
+	case *ast.CallExpr:
+		return nameSuggestsStableContract(callName(n)), false
+	case *ast.KeyValueExpr:
+		return nameSuggestsStableContract(keyName(n.Key)), false
+	case *ast.AssignStmt:
+		return assignStmtValueNameSuggestsStableContract(n, lit), false
+	case *ast.ValueSpec:
+		return valueSpecNameSuggestsStableContract(n, lit), false
+	case *ast.ReturnStmt:
+		return nameSuggestsStableContract(enclosingFuncName(ctx, n)), false
+	case *ast.FuncDecl:
+		return nameSuggestsStableContract(n.Name.Name), true
+	default:
+		return false, false
+	}
+}
+
+func assignStmtValueNameSuggestsStableContract(stmt *ast.AssignStmt, lit *ast.BasicLit) bool {
+	for i, rhs := range stmt.Rhs {
+		if containsNode(rhs, lit) && i < len(stmt.Lhs) {
+			return nameSuggestsStableContract(exprName(stmt.Lhs[i]))
+		}
+	}
+	return false
+}
+
+func valueSpecNameSuggestsStableContract(spec *ast.ValueSpec, lit *ast.BasicLit) bool {
+	for i, value := range spec.Values {
+		if containsNode(value, lit) && i < len(spec.Names) {
+			return nameSuggestsStableContract(spec.Names[i].Name)
 		}
 	}
 	return false
