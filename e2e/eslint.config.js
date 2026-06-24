@@ -3,6 +3,7 @@ const js = require('@eslint/js')
 const tseslint = require('typescript-eslint')
 const prettier = require('eslint-config-prettier')
 const pluginPrettier = require('eslint-plugin-prettier')
+const semanticHygiene = require('../ui/leafwiki-ui/eslint-rules/semantic-hygiene/index.cjs')
 
 module.exports = tseslint.config(
   js.configs.recommended,
@@ -18,9 +19,11 @@ module.exports = tseslint.config(
       }
     },
     plugins: {
+      'leafwiki-semantic-hygiene': semanticHygiene,
       prettier: pluginPrettier
     },
     rules: {
+      'leafwiki-semantic-hygiene/no-localized-prose-assertions': 'error',
       'prettier/prettier': ['error'],
 
       'quotes': ['error', 'single'],
@@ -40,5 +43,20 @@ module.exports = tseslint.config(
       ]
     },
     ignores: ['node_modules', 'dist']
+  },
+  {
+    files: ['pages/**/*.ts'],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        sourceType: 'module'
+      }
+    },
+    plugins: {
+      'leafwiki-semantic-hygiene': semanticHygiene
+    },
+    rules: {
+      'leafwiki-semantic-hygiene/no-localized-prose-assertions': 'error'
+    }
   }
 )

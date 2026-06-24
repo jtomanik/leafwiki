@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "eslint '{tests,pages}/**/*.ts' --max-warnings=0",
     "lint:fix": "eslint '{tests,pages}/**/*.ts' --fix",
+    "lint:semantic": "eslint '{tests,pages}/**/*.ts' --quiet --max-warnings=0",
     "format": "prettier \"{tests,pages}/**/*.{ts,tsx,js,jsx}\" --write",
     "format:check": "prettier \"{tests,pages}/**/*.{ts,tsx,js,jsx}\" --check",
     "install:browsers": "playwright install --with-deps"

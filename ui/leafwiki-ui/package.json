@@ -8,8 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:semantic": "eslint \"src/**/*.{ts,tsx}\" --quiet --max-warnings=0",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:eslint-rules": "vitest run eslint-rules/semantic-hygiene/rules.test.js",
     "format": "prettier --write \"src/**/*.{css,ts,tsx}\"",
     "format:check": "prettier --check \"src/**/*.{css,ts,tsx}\""
   },
