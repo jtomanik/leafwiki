@@ -23,6 +23,7 @@ func run(pass *analysis.Pass) (any, error) {
 	ins.Preorder([]ast.Node{
 		(*ast.CallExpr)(nil),
 		(*ast.FuncDecl)(nil),
+		(*ast.KeyValueExpr)(nil),
 		(*ast.TypeSpec)(nil),
 		(*ast.BasicLit)(nil),
 	}, func(node ast.Node) {
@@ -31,11 +32,15 @@ func run(pass *analysis.Pass) (any, error) {
 			checkStringLeak(ctx, n)
 			checkStringConversionLeak(ctx, n)
 			checkDirectCast(ctx, n)
+			checkUncheckedConstructorCall(ctx, n)
+			checkMessagePassthroughCall(ctx, n)
 		case *ast.FuncDecl:
 			checkSignature(ctx, n)
 			checkValidatorReturn(ctx, n)
+		case *ast.KeyValueExpr:
+			checkMessageFieldValue(ctx, n)
 		case *ast.TypeSpec:
-			checkStructFields(ctx, n)
+			checkTypeSpec(ctx, n)
 		case *ast.BasicLit:
 			checkStableLiteral(ctx, n)
 			checkLocalizedProseLiteral(ctx, n)

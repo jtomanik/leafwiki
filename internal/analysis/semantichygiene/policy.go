@@ -52,6 +52,7 @@ func semanticTypeNameOf(typ types.Type) (string, bool) {
 	if typ == nil {
 		return "", false
 	}
+	typ = types.Unalias(typ)
 	if ptr, ok := typ.(*types.Pointer); ok {
 		typ = ptr.Elem()
 	}
@@ -91,6 +92,7 @@ var semanticTypeNames = map[string]bool{
 	"PageVersion":          true,
 	"RevisionID":           true,
 	"RoutePath":            true,
+	"SessionID":            true,
 	"Slug":                 true,
 	"ToolDescriptionID":    true,
 	"ToolID":               true,
@@ -103,19 +105,25 @@ var semanticTypeNames = map[string]bool{
 var semanticNameTypes = map[string]string{
 	"apikeyid":             "APIKeyID",
 	"assetname":            "AssetName",
+	"commithash":           "CommitHash",
+	"currentpath":          "RoutePath",
 	"errorcode":            "ErrorCode",
 	"fieldcode":            "FieldErrorCode",
 	"fieldvalidationcode":  "FieldErrorCode",
 	"filename":             "AssetName",
 	"issuecode":            "IssueCode",
 	"messageid":            "MessageID",
+	"oldpath":              "RoutePath",
+	"pagepath":             "RoutePath",
 	"pageid":               "PageID",
 	"pageversion":          "PageVersion",
 	"revisionid":           "RevisionID",
 	"routepath":            "RoutePath",
+	"sessionid":            "SessionID",
 	"slug":                 "Slug",
 	"sourcepath":           "WorkspaceSourcePath",
 	"targetpath":           "RoutePath",
+	"topath":               "RoutePath",
 	"toolid":               "ToolID",
 	"userid":               "UserID",
 	"workspaceid":          "WorkspaceID",
@@ -123,11 +131,57 @@ var semanticNameTypes = map[string]string{
 	"workspacesyncissueid": "WorkspaceSyncIssueID",
 }
 
+var semanticPrimitiveNames = map[string]bool{
+	"depth":    true,
+	"limit":    true,
+	"maxbytes": true,
+	"offset":   true,
+}
+
 func semanticTypeForName(name string) string {
 	if typ, ok := semanticTypeForCanonicalName(canonicalName(name)); ok {
 		return typ
 	}
 	return "a semantic type"
+}
+
+func semanticPrimitiveName(name string) bool {
+	_, ok := semanticPrimitiveNames[canonicalName(name)]
+	return ok
+}
+
+func semanticPrimitiveNameInContext(name string, context string) bool {
+	if !semanticPrimitiveName(name) {
+		return false
+	}
+	canonical := canonicalName(name)
+	canonicalContext := canonicalName(context)
+	switch canonical {
+	case "depth":
+		return strings.Contains(canonicalContext, "tree") ||
+			strings.Contains(canonicalContext, "subtree") ||
+			strings.Contains(canonicalContext, "navigation")
+	case "limit":
+		return strings.Contains(canonicalContext, "search") ||
+			strings.Contains(canonicalContext, "tag") ||
+			strings.Contains(canonicalContext, "propert") ||
+			strings.Contains(canonicalContext, "revision") ||
+			strings.Contains(canonicalContext, "snapshot") ||
+			strings.Contains(canonicalContext, "page")
+	case "maxbytes":
+		return strings.Contains(canonicalContext, "asset") ||
+			strings.Contains(canonicalContext, "file") ||
+			strings.Contains(canonicalContext, "stream") ||
+			strings.Contains(canonicalContext, "upload") ||
+			strings.Contains(canonicalContext, "write")
+	case "offset":
+		return strings.Contains(canonicalContext, "search") ||
+			strings.Contains(canonicalContext, "page") ||
+			strings.Contains(canonicalContext, "revision") ||
+			strings.Contains(canonicalContext, "snapshot")
+	default:
+		return false
+	}
 }
 
 func semanticTypeForFieldName(fieldName string, typeName string) (string, bool) {
@@ -268,6 +322,136 @@ func isString(typ types.Type) bool {
 	return ok && (basic.Kind() == types.String || basic.Kind() == types.UntypedString)
 }
 
+func primitiveCarrierTypeName(typ types.Type) (string, bool) {
+	if typ == nil {
+		return "", false
+	}
+	basic, ok := typ.Underlying().(*types.Basic)
+	if !ok {
+		return "", false
+	}
+	switch basic.Kind() {
+	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
+		types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
+		return basic.Name(), true
+	default:
+		return "", false
+	}
+}
+
+func messageFieldName(name string) bool {
+	return canonicalName(name) == "message"
+}
+
+func warningStringsFieldName(name string) bool {
+	canonical := canonicalName(name)
+	return canonical == "warning" || canonical == "warnings"
+}
+
+func isMessageBearingStructName(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "issue") ||
+		strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "warning") ||
+		strings.Contains(canonical, "validation") ||
+		strings.Contains(canonical, "refactor")
+}
+
+func astStructHasField(strct *ast.StructType, fieldName string) bool {
+	for _, field := range strct.Fields.List {
+		for _, name := range field.Names {
+			if name != nil && canonicalName(name.Name) == canonicalName(fieldName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func astStructHasContractSignal(strct *ast.StructType) bool {
+	for _, field := range strct.Fields.List {
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			canonical := canonicalName(name.Name)
+			if canonical == "code" ||
+				strings.HasSuffix(canonical, "code") ||
+				canonical == "severity" ||
+				canonical == "path" ||
+				canonical == "pageid" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func astStructIsMessageBearing(typeName string, strct *ast.StructType) bool {
+	return isMessageBearingStructName(typeName) || astStructHasContractSignal(strct)
+}
+
+func namedStructIsMessageBearing(named *types.Named, strct *types.Struct) bool {
+	if named == nil || strct == nil {
+		return false
+	}
+	if isMessageBearingStructName(named.Obj().Name()) {
+		return true
+	}
+	for i := 0; i < strct.NumFields(); i++ {
+		canonical := canonicalName(strct.Field(i).Name())
+		if canonical == "code" ||
+			strings.HasSuffix(canonical, "code") ||
+			canonical == "severity" ||
+			canonical == "path" ||
+			canonical == "pageid" {
+			return true
+		}
+	}
+	return false
+}
+
+func namedStructHasMessageID(named *types.Named, strct *types.Struct) bool {
+	if named == nil || strct == nil {
+		return false
+	}
+	for i := 0; i < strct.NumFields(); i++ {
+		if canonicalName(strct.Field(i).Name()) == "messageid" {
+			return true
+		}
+	}
+	return false
+}
+
+func enclosingNamedCompositeStruct(ctx *analysisContext, node ast.Node) (*types.Named, *types.Struct, bool) {
+	named, strct, _, ok := enclosingNamedCompositeStructLiteral(ctx, node)
+	return named, strct, ok
+}
+
+func enclosingNamedCompositeStructLiteral(ctx *analysisContext, node ast.Node) (*types.Named, *types.Struct, *ast.CompositeLit, bool) {
+	for current := node; current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CompositeLit:
+			typ := ctx.pass.TypesInfo.TypeOf(n)
+			if ptr, ok := typ.(*types.Pointer); ok {
+				typ = ptr.Elem()
+			}
+			named, ok := typ.(*types.Named)
+			if !ok {
+				return nil, nil, nil, false
+			}
+			strct, ok := named.Underlying().(*types.Struct)
+			if !ok {
+				return nil, nil, nil, false
+			}
+			return named, strct, n, true
+		case *ast.FuncDecl:
+			return nil, nil, nil, false
+		}
+	}
+	return nil, nil, nil, false
+}
+
 func isTestFile(filename string) bool {
 	return strings.HasSuffix(filename, "_test.go")
 }
@@ -327,8 +511,12 @@ func isSemanticOwnerAdapterFile(ctx *analysisContext, pos token.Pos) bool {
 		return strings.HasSuffix(filename, "/internal/core/tree/semantic_types.go")
 	case "github.com/perber/wiki/internal/core/auth":
 		return strings.HasSuffix(filename, "/internal/core/auth/semantic_types.go")
+	case "github.com/perber/wiki/internal/core/revision":
+		return strings.HasSuffix(filename, "/internal/core/revision/semantic_types.go")
 	case "github.com/perber/wiki/internal/core/markdownvalidation":
 		return strings.HasSuffix(filename, "/internal/core/markdownvalidation/issue_codes.go")
+	case "github.com/perber/wiki/internal/workspacesync":
+		return strings.HasSuffix(filename, "/internal/workspacesync/semantic_types.go")
 	case "github.com/perber/wiki/internal/workspaceid":
 		return strings.HasSuffix(filename, "/internal/workspaceid/validate.go")
 	case "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/semanticcases":
@@ -369,6 +557,7 @@ var allowedSemanticOwnerAdapterFuncs = map[string]map[string]bool{
 	"NewPageVersionUnchecked":         {"PageVersion": true},
 	"NewRevisionIDUnchecked":          {"RevisionID": true},
 	"NewRoutePathUnchecked":           {"RoutePath": true},
+	"NewSessionIDUnchecked":           {"SessionID": true},
 	"NewSlugUnchecked":                {"Slug": true},
 	"NewUserIDUnchecked":              {"UserID": true},
 	"NewWorkspaceSourcePathUnchecked": {"WorkspaceSourcePath": true},
@@ -516,12 +705,28 @@ func functionReturnsSemanticType(ctx *analysisContext, fn *ast.FuncDecl, typeNam
 		return false
 	}
 	for _, result := range fn.Type.Results.List {
-		resultTypeName, ok := semanticTypeNameOf(ctx.pass.TypesInfo.TypeOf(result.Type))
-		if ok && resultTypeName == typeName {
+		if typeContainsSemanticType(ctx.pass.TypesInfo.TypeOf(result.Type), typeName) {
 			return true
 		}
 	}
 	return false
+}
+
+func typeContainsSemanticType(typ types.Type, typeName string) bool {
+	if resultTypeName, ok := semanticTypeNameOf(typ); ok && resultTypeName == typeName {
+		return true
+	}
+	if typ == nil {
+		return false
+	}
+	switch underlying := typ.Underlying().(type) {
+	case *types.Slice:
+		return typeContainsSemanticType(underlying.Elem(), typeName)
+	case *types.Array:
+		return typeContainsSemanticType(underlying.Elem(), typeName)
+	default:
+		return false
+	}
 }
 
 func functionHasSemanticReceiver(ctx *analysisContext, fn *ast.FuncDecl, typeName string) bool {
@@ -753,11 +958,15 @@ func looksLikeLocalizedProse(value string) bool {
 }
 
 var localizedProseContractCalls = map[string]bool{
-	"apiSuccessMessage": true,
-	"newMessageOutput":  true,
-	"newToolDescriptor": true,
-	"Render":            true,
-	"writeRuntimeError": true,
+	"apiSuccessMessage":          true,
+	"abortWorkspaceSyncError":    true,
+	"newMessageOutput":           true,
+	"newToolDescriptor":          true,
+	"Render":                     true,
+	"writeControlError":          true,
+	"writeFrontdError":           true,
+	"writePrivateWorkspaceError": true,
+	"writeRuntimeError":          true,
 }
 
 var localizedProseFirstArgContractCalls = map[string]bool{
@@ -773,11 +982,30 @@ var localizedProseConstructorCalls = map[string]bool{
 	"AddWithCode":                           true,
 }
 
+var localizedProseStrictContractCalls = map[string]bool{
+	"abortWorkspaceSyncError":    true,
+	"writeControlError":          true,
+	"writeFrontdError":           true,
+	"writePrivateWorkspaceError": true,
+}
+
+var localizedProseSignatureSinkCalls = map[string]bool{
+	"writeControlError":          true,
+	"writeFrontdError":           true,
+	"writePrivateWorkspaceError": true,
+}
+
 func isRawLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit) bool {
 	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
 		switch n := current.(type) {
 		case *ast.CallExpr:
 			name := callName(n)
+			if isCLIControlProseCall(ctx, n) && callContainsArg(n, lit) {
+				return true
+			}
+			if isPrivateHTTPErrorProseCall(ctx, n) && callContainsArg(n, lit) {
+				return true
+			}
 			if localizedProseContractCalls[name] && callContainsArg(n, lit) {
 				return true
 			}
@@ -788,7 +1016,89 @@ func isRawLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit)
 				return true
 			}
 		case *ast.KeyValueExpr:
-			if keyName(n.Key) == "message" && containsNode(n.Value, lit) && isGinHPayloadLiteral(ctx, n) {
+			fieldName := keyName(n.Key)
+			if fieldName == "message" && containsNode(n.Value, lit) && isResponsePayloadLiteral(ctx, n) {
+				return true
+			}
+			if messageFieldName(fieldName) && containsNode(n.Value, lit) && isMessageFieldValueMissingMessageID(ctx, n) {
+				return true
+			}
+			if warningStringsFieldName(fieldName) && containsNode(n.Value, lit) && isWarningFieldValueMissingMessageID(ctx, n) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func isCLIControlProseCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isCLIControlProseFile(ctx.filename(call.Pos())) {
+		return false
+	}
+	packagePath, name := calleePackageAndName(ctx, call)
+	if packagePath != "fmt" {
+		return false
+	}
+	switch name {
+	case "Printf", "Println":
+		return true
+	case "Fprint", "Fprintf", "Fprintln":
+		return len(call.Args) > 0 && isCLIOutputWriterExpr(call.Args[0])
+	case "Errorf":
+		return isCLIControlErrorfContext(ctx, call)
+	default:
+		return false
+	}
+}
+
+func isCLIOutputWriterExpr(expr ast.Expr) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	return exprName(sel.X) == "os" && (sel.Sel.Name == "Stdout" || sel.Sel.Name == "Stderr")
+}
+
+func isCLIControlErrorfContext(ctx *analysisContext, call *ast.CallExpr) bool {
+	fnName := canonicalName(enclosingFuncName(ctx, call))
+	return strings.Contains(fnName, "validatemcptransport") ||
+		strings.Contains(fnName, "mcptransportvalidation")
+}
+
+func isCLIControlProseFile(filename string) bool {
+	return strings.HasSuffix(filename, "/cmd/leafwiki/main.go") ||
+		isSemanticHygienePolicyFixtureFile(filename)
+}
+
+func isPrivateHTTPErrorProseCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isPrivateHTTPResponseFile(ctx.filename(call.Pos())) {
+		return false
+	}
+	packagePath, name := calleePackageAndName(ctx, call)
+	return packagePath == "net/http" && name == "Error"
+}
+
+func isPrivateHTTPResponseFile(filename string) bool {
+	return strings.Contains(filename, "/internal/wikid/") ||
+		strings.Contains(filename, "/internal/projectdaemon/") ||
+		strings.Contains(filename, "/internal/frontd/") ||
+		isSemanticHygienePolicyFixtureFile(filename)
+}
+
+func isStrictLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || messageIDPattern.MatchString(value) || toolIDPattern.MatchString(value) || errorCodePattern.MatchString(value) {
+		return false
+	}
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if localizedProseStrictContractCalls[callName(n)] && callContainsArg(n, lit) {
+				return true
+			}
+			if isPrivateHTTPErrorProseCall(ctx, n) && callContainsArg(n, lit) {
 				return true
 			}
 		case *ast.FuncDecl:
@@ -834,16 +1144,24 @@ func callContainsFirstArg(call *ast.CallExpr, target ast.Node) bool {
 	return len(call.Args) > 0 && containsNode(call.Args[0], target)
 }
 
-func isGinHPayloadLiteral(ctx *analysisContext, node ast.Node) bool {
+func isResponsePayloadLiteral(ctx *analysisContext, node ast.Node) bool {
 	for current := node; current != nil; current = ctx.parent(current) {
 		switch n := current.(type) {
 		case *ast.CompositeLit:
-			return exprName(n.Type) == "H"
+			return exprName(n.Type) == "H" || isStringKeyedMap(ctx.pass.TypesInfo.TypeOf(n))
 		case *ast.FuncDecl:
 			return false
 		}
 	}
 	return false
+}
+
+func isStringKeyedMap(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	m, ok := types.Unalias(typ).Underlying().(*types.Map)
+	return ok && isString(m.Key())
 }
 
 var (

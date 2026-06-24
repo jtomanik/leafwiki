@@ -22,7 +22,10 @@ func checkLocalizedProseLiteral(ctx *analysisContext, lit *ast.BasicLit) {
 		return
 	}
 	value, err := strconv.Unquote(lit.Value)
-	if err != nil || !looksLikeLocalizedProse(value) || !isRawLocalizedProseContractLiteral(ctx, lit) {
+	if err != nil || !isRawLocalizedProseContractLiteral(ctx, lit) {
+		return
+	}
+	if !looksLikeLocalizedProse(value) && !isStrictLocalizedProseContractLiteral(ctx, lit, value) {
 		return
 	}
 	ctx.pass.Reportf(lit.Pos(), "%s", rawLocalizedProseDiagnostic(value))

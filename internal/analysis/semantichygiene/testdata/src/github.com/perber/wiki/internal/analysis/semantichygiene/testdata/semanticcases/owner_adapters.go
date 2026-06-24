@@ -12,6 +12,10 @@ func NewUserIDUnchecked(raw string) UserID {
 	return UserID(raw)
 }
 
+func NewSlugUnchecked(raw string) Slug {
+	return Slug(raw)
+}
+
 func (code IssueCode) Normalize(defaultCode IssueCode) IssueCode {
 	normalized := IssueCode(strings.TrimSpace(string(code)))
 	if normalized == "" {
@@ -39,6 +43,17 @@ func (id WorkspaceID) StorageKey() string {
 func (id WorkspaceID) Validate() bool {
 	raw := string(id)
 	return strings.TrimSpace(raw) == raw
+}
+
+func (path RoutePath) Segments() []Slug {
+	var segments []Slug
+	for _, part := range strings.Split(string(path), "/") {
+		if part == "" {
+			continue
+		}
+		segments = append(segments, NewSlugUnchecked(part))
+	}
+	return segments
 }
 
 func (name AssetName) Clean() AssetName {

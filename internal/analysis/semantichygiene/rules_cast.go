@@ -1,6 +1,9 @@
 package semantichygiene
 
-import "go/ast"
+import (
+	"go/ast"
+	"strings"
+)
 
 func checkDirectCast(ctx *analysisContext, call *ast.CallExpr) {
 	typeName, ok := conversionSemanticTypeName(ctx.pass, call.Fun)
@@ -17,6 +20,57 @@ func checkDirectCast(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	ctx.pass.Reportf(call.Pos(), "%s", directCastDiagnostic(typeName))
+}
+
+func checkUncheckedConstructorCall(ctx *analysisContext, call *ast.CallExpr) {
+	funcName := callName(call)
+	if len(call.Args) == 0 ||
+		!strings.HasPrefix(funcName, "New") ||
+		!strings.HasSuffix(funcName, "Unchecked") {
+		return
+	}
+	typeName, ok := semanticTypeNameOf(ctx.pass.TypesInfo.TypeOf(call))
+	if !ok || !callHasPrimitiveArg(ctx, call) || isAllowedUncheckedConstructorCall(ctx, call, typeName) {
+		return
+	}
+	ctx.pass.Reportf(call.Pos(), "%s", uncheckedConstructorDiagnostic(funcName, typeName))
+}
+
+func callHasPrimitiveArg(ctx *analysisContext, call *ast.CallExpr) bool {
+	for _, arg := range call.Args {
+		if isStringType(ctx.pass, arg) {
+			return true
+		}
+		if _, ok := primitiveCarrierTypeName(ctx.pass.TypesInfo.TypeOf(arg)); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllowedUncheckedConstructorCall(ctx *analysisContext, call *ast.CallExpr, typeName string) bool {
+	filename := ctx.filename(call.Pos())
+	if isGeneratedOrVendored(filename) {
+		return true
+	}
+	if isAllowedFixtureDirectCastContext(filename, enclosingFuncName(ctx, call)) {
+		return true
+	}
+	if isAllowedSemanticConstructorFunction(ctx, call, typeName) {
+		return true
+	}
+	return isAllowedSemanticOwnerAdapterFunc(ctx, call, typeName) ||
+		isAllowedUncheckedConstructorOwnerContext(ctx, call, typeName)
+}
+
+func isAllowedUncheckedConstructorOwnerContext(ctx *analysisContext, call *ast.CallExpr, typeName string) bool {
+	if !isSemanticOwnerAdapterFile(ctx, call.Pos()) {
+		return false
+	}
+	fn := enclosingFunc(ctx, call)
+	return fn != nil && (functionReturnsSemanticType(ctx, fn, typeName) ||
+		functionHasSemanticReceiver(ctx, fn, typeName) ||
+		functionHasSemanticParameter(ctx, fn, typeName))
 }
 
 func containsSemanticStringEscape(ctx *analysisContext, expr ast.Expr) bool {

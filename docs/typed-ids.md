@@ -135,9 +135,17 @@ The script runs `cmd/leafwiki-vet`, which currently contains the
   comparisons, or domain assignments.
 - Direct casts to semantic types outside approved parser/constructor code and
   semantic-owner representation helpers.
+- Unchecked semantic constructors called from ordinary internal code instead
+  of parser, owner-adapter, or narrow fixture-builder contexts.
 - Raw `string`, `[]string`, or `map[string]...` carriers with semantic names in
-  the internal service, use-case, or domain signatures and fields covered by
-  the current analyzer policy.
+  the internal service, use-case, or domain signatures, interface methods, and
+  fields covered by the current analyzer policy.
+- Raw numeric semantic carriers such as pagination offsets/limits, tree depth,
+  and byte limits after boundary parsing.
+- Message-bearing Go contract structs and composites that expose or populate
+  rendered `message`/warning strings without a catalog-backed `messageId`.
+- Direct HTTP/private status response maps and CLI/control prose sinks that
+  forward rendered status/error text instead of catalog-backed metadata.
 - Validators that return primitive strings after validating known semantic
   values.
 - Raw stable contract literals for error codes, field validation codes,
