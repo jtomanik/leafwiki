@@ -126,7 +126,7 @@ func (s *SessionStore) CreateSession(id SessionID, userID UserID, tokenType stri
 		_, err := db.Exec(`
 			INSERT INTO sessions (id, user_id, token_type, created_at, expires_at, revoked_at)
 			VALUES (?, ?, ?, ?, ?, NULL);
-		`, id.String(), userID.String(), tokenType, time.Now().Unix(), expiresAt.Unix())
+		`, id, userID, tokenType, time.Now().Unix(), expiresAt.Unix())
 		return err
 	})
 }
@@ -140,7 +140,7 @@ func (s *SessionStore) IsActive(id SessionID, userID UserID, tokenType string, n
 			SELECT expires_at, revoked_at
 			FROM sessions
 			WHERE id = ? AND user_id = ? AND token_type = ?;
-		`, id.String(), userID.String(), tokenType).Scan(&expiresAt, &revokedAt)
+		`, id, userID, tokenType).Scan(&expiresAt, &revokedAt)
 	})
 
 	if err == sql.ErrNoRows {
@@ -166,7 +166,7 @@ func (s *SessionStore) RevokeSession(id SessionID) error {
 			UPDATE sessions
 			SET revoked_at = ?
 			WHERE id = ? AND revoked_at IS NULL;
-		`, time.Now().Unix(), id.String())
+		`, time.Now().Unix(), id)
 		return err
 	})
 }
@@ -177,7 +177,7 @@ func (s *SessionStore) RevokeAllSessionsForUser(userID UserID) error {
 			UPDATE sessions
 			SET revoked_at = ?
 			WHERE user_id = ? AND revoked_at IS NULL;
-		`, time.Now().Unix(), userID.String())
+		`, time.Now().Unix(), userID)
 		return err
 	})
 }

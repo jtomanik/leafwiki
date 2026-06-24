@@ -56,7 +56,7 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 
 func (r *Routes) handleGetLinkStatus(c *gin.Context) {
 	pageID := c.Param("id")
-	out, err := r.getLinkStatus.Execute(c.Request.Context(), GetLinkStatusInput{PageID: tree.NewPageIDUnchecked(pageID)})
+	out, err := r.getLinkStatus.Execute(c.Request.Context(), GetLinkStatusInput{PageID: tree.PageIDFromString(pageID)})
 	if err != nil {
 		respondWithLinkError(c, err)
 		return

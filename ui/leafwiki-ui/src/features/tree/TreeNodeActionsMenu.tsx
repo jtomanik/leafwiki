@@ -24,7 +24,7 @@ import {
   browserRoutePathForWikiNode,
   getDeleteRedirectRoutePath,
 } from '@/lib/wikiPath'
-import { asWorkspaceID } from '@/lib/semanticTypes'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import {
   buildWorkspaceViewPath,
   splitWorkspaceRoute,
@@ -52,7 +52,7 @@ import { useTreeNodeActionsMenusStore } from './treeNodeActionsMenus'
 
 export type TreeNodeActionsMenuProps = {
   node: PageNode
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 export default function TreeNodeActionsMenu({
@@ -75,10 +75,12 @@ export default function TreeNodeActionsMenu({
       nodeId,
       nodeKind === NODE_KIND_PAGE ? NODE_KIND_SECTION : NODE_KIND_PAGE,
       nodeVersion,
-      asWorkspaceID(workspaceId),
+      workspaceId,
     )
       .then(() => {
-        toast.success('Page converted successfully')
+        toast.success('Page converted successfully', {
+          messageId: 'ui.toast.page.converted',
+        })
         reloadTree(workspaceId)
       })
       .catch((err) => {
@@ -99,6 +101,7 @@ export default function TreeNodeActionsMenu({
           }
           toast.error(
             'This page was modified by another user. Please try again.',
+            { messageId: 'ui.toast.page.convert_conflict' },
           )
         } else {
           const mapped = mapApiError(err, 'Failed to convert page')

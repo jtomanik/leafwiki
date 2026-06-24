@@ -8,7 +8,13 @@ import {
   type RevisionComparison,
   type RevisionSnapshot,
 } from '@/lib/api/revisions'
-import { asPageID, asRevisionID, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asRevisionID,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
@@ -16,8 +22,8 @@ import { useProgressbarStore } from '../progressbar/progressbarStore'
 export type HistoryTab = 'changes' | 'preview' | 'raw'
 
 type PageHistoryState = {
-  workspaceId: string
-  pageId: string
+  workspaceId: WorkspaceID | ''
+  pageId: PageID | ''
   revisions: Revision[]
   selectedRevisionId: string | null
   latestRevisionId: string | null
@@ -63,8 +69,8 @@ const initialState: PageHistoryState = {
 }
 
 async function loadPageHistoryState(
-  pageId: string,
-  workspaceId: string,
+  pageId: PageID,
+  workspaceId: WorkspaceID,
   update: (patch: Partial<PageHistoryState>) => void,
 ) {
   update({
@@ -154,8 +160,8 @@ export const usePageHistoryStore = create<PageHistoryStore>((set) => ({
 }))
 
 export function usePageHistory(
-  pageId: string | null,
-  workspaceId: string,
+  pageId: PageID | null,
+  workspaceId: WorkspaceID,
   enabled = true,
 ) {
   const update = usePageHistoryStore((state) => state.update)
@@ -199,8 +205,7 @@ export function usePageHistory(
     if (
       !pageId ||
       !selectedRevisionId ||
-      activeTab !== 'preview' &&
-      activeTab !== 'raw'
+      (activeTab !== 'preview' && activeTab !== 'raw')
     ) {
       return
     }
@@ -351,7 +356,10 @@ export async function loadMorePageHistory() {
   }
 }
 
-export async function reloadPageHistory(pageId: string, workspaceId: string) {
+export async function reloadPageHistory(
+  pageId: PageID,
+  workspaceId: WorkspaceID,
+) {
   await loadPageHistoryState(
     pageId,
     workspaceId,

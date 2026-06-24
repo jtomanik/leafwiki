@@ -1,5 +1,6 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { PageID, UserID, WorkspaceID } from '../semanticTypes'
 
 export type TagCount = {
   tag: string
@@ -7,18 +8,18 @@ export type TagCount = {
 }
 
 export type TaggedPage = {
-  id: string
+  id: PageID
   title: string
   path: string
   kind: 'page' | 'section'
   excerpt?: string
   tags: string[]
   updatedAt?: string
-  lastAuthor?: { id: string; username: string }
+  lastAuthor?: { id: UserID; username: string }
 }
 
 export async function fetchTags(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   filter = '',
   limit = 50,
   selected: string[] = [],
@@ -35,7 +36,7 @@ export async function fetchTags(
 
 export async function fetchPagesByTags(
   tags: string[],
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   signal?: AbortSignal,
 ): Promise<TaggedPage[]> {
   const params = new URLSearchParams()

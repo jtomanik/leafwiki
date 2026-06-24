@@ -4,27 +4,31 @@ import {
   HOME_WORKSPACE_ID,
   type WorkspaceListItem,
 } from '@/lib/api/workspaces'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 type WorkspacesStore = {
-  activeWorkspaceId: string
+  activeWorkspaceId: WorkspaceID
   workspaces: WorkspaceListItem[]
   loading: boolean
   error: string | null
-  expandedWorkspaceIds: string[]
-  setActiveWorkspaceId: (workspaceId: string) => void
-  getMarkdownLinkRootPrefix: (workspaceId?: string, fallback?: string) => string
+  expandedWorkspaceIds: WorkspaceID[]
+  setActiveWorkspaceId: (workspaceId: WorkspaceID) => void
+  getMarkdownLinkRootPrefix: (
+    workspaceId?: WorkspaceID,
+    fallback?: string,
+  ) => string
   loadWorkspaces: () => Promise<void>
-  ensureWorkspaceExpanded: (workspaceId: string) => Promise<void>
-  toggleWorkspaceExpanded: (workspaceId: string) => Promise<void>
+  ensureWorkspaceExpanded: (workspaceId: WorkspaceID) => Promise<void>
+  toggleWorkspaceExpanded: (workspaceId: WorkspaceID) => Promise<void>
 }
 
-function normalizeWorkspaceId(workspaceId?: string) {
-  return workspaceId?.trim() || HOME_WORKSPACE_ID
+function normalizeWorkspaceId(workspaceId?: WorkspaceID): WorkspaceID {
+  return workspaceId || HOME_WORKSPACE_ID
 }
 
-function uniqueWorkspaceIds(ids: string[]) {
+function uniqueWorkspaceIds(ids: WorkspaceID[]): WorkspaceID[] {
   return Array.from(new Set(ids.map(normalizeWorkspaceId)))
 }
 
@@ -51,7 +55,7 @@ export const useWorkspacesStore = create<WorkspacesStore>()(
       loading: false,
       error: null,
       expandedWorkspaceIds: [HOME_WORKSPACE_ID],
-      setActiveWorkspaceId: (workspaceId: string) => {
+      setActiveWorkspaceId: (workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         if (get().activeWorkspaceId !== normalized) {
           set({ activeWorkspaceId: normalized })
@@ -76,7 +80,7 @@ export const useWorkspacesStore = create<WorkspacesStore>()(
           set({ loading: false })
         }
       },
-      ensureWorkspaceExpanded: async (workspaceId: string) => {
+      ensureWorkspaceExpanded: async (workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const response = await ensureWorkspace(normalized)
         set({
@@ -90,7 +94,7 @@ export const useWorkspacesStore = create<WorkspacesStore>()(
           ]),
         })
       },
-      toggleWorkspaceExpanded: async (workspaceId: string) => {
+      toggleWorkspaceExpanded: async (workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         if (get().expandedWorkspaceIds.includes(normalized)) {
           set({

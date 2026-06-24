@@ -1,8 +1,9 @@
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { useLinkStatusStore } from '../links/linkstatus_store'
 import { useViewerStore } from '../viewer/viewer'
 
 export async function refreshCurrentViewerPageAndLinkStatus(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ) {
   const viewerState = useViewerStore.getState()
   if (viewerState.workspaceId !== workspaceId) return

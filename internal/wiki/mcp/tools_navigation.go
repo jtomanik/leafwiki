@@ -40,7 +40,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 	var node *tree.PageNode
 	switch {
 	case pageID != "":
-		page, err := r.treeService.GetPage(tree.NewPageIDUnchecked(pageID))
+		page, err := r.treeService.GetPage(tree.PageIDFromString(pageID))
 		if err != nil {
 			return subtreeOutput{}, err
 		}
@@ -64,7 +64,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 	return subtreeOutput{
 		Root:        root,
 		Breadcrumbs: breadcrumbs,
-		Depth:       depth,
+		Depth:       depth.Int(),
 		Truncated:   subtreeTruncated(node, depth),
 	}, nil
 }
@@ -75,7 +75,7 @@ type subtreeOptions struct {
 	IncludeContentPreview bool
 }
 
-func (r *Routes) subtreeNode(ctx context.Context, node *tree.PageNode, parentPath string, depth int, opts subtreeOptions) *subtreeNode {
+func (r *Routes) subtreeNode(ctx context.Context, node *tree.PageNode, parentPath string, levels treeDisplayDepth, opts subtreeOptions) *subtreeNode {
 	if node == nil {
 		return nil
 	}
@@ -100,15 +100,12 @@ func (r *Routes) subtreeNode(ctx context.Context, node *tree.PageNode, parentPat
 	if opts.IncludeContentPreview && node.Kind == tree.NodeKindPage {
 		out.ContentPreview = r.subtreeContentPreview(node.ID)
 	}
-	if depth == 0 {
+	if levels == 0 {
 		return out
 	}
-	childDepth := depth - 1
-	if depth < 0 {
-		childDepth = -1
-	}
+	childLevels := levels.ChildDepth()
 	for _, child := range node.Children {
-		out.Children = append(out.Children, r.subtreeNode(ctx, child, apiNode.Path, childDepth, opts))
+		out.Children = append(out.Children, r.subtreeNode(ctx, child, apiNode.Path, childLevels, opts))
 	}
 	return out
 }
@@ -153,7 +150,7 @@ func (r *Routes) breadcrumbNodes(ctx context.Context, node *tree.PageNode, opts 
 	}
 	out := make([]*subtreeNode, 0, len(stack))
 	for _, item := range stack {
-		out = append(out, r.subtreeNode(ctx, item, parentPathForNode(item), 0, opts))
+		out = append(out, r.subtreeNode(ctx, item, parentPathForNode(item), treeDisplayDepth(0), opts))
 	}
 	return out
 }
@@ -170,22 +167,22 @@ func ensureSubtreeNodeChildrenArray(node *subtreeNode) {
 	}
 }
 
-func subtreeTruncated(node *tree.PageNode, depth int) bool {
-	if node == nil || depth < 0 {
+func subtreeTruncated(node *tree.PageNode, levels treeDisplayDepth) bool {
+	if node == nil || levels < 0 {
 		return false
 	}
-	if depth == 0 {
+	if levels == 0 {
 		return len(node.Children) > 0
 	}
 	for _, child := range node.Children {
-		if subtreeTruncated(child, depth-1) {
+		if subtreeTruncated(child, levels.ChildDepth()) {
 			return true
 		}
 	}
 	return false
 }
 
-func boundedSubtreeDepth(raw *int) (int, error) {
+func boundedSubtreeDepth(raw *int) (treeDisplayDepth, error) {
 	if raw == nil {
 		return defaultContextTreeDepth, nil
 	}
@@ -195,5 +192,5 @@ func boundedSubtreeDepth(raw *int) (int, error) {
 	if *raw > maxContextTreeDepth {
 		return maxContextTreeDepth, nil
 	}
-	return *raw, nil
+	return treeDisplayDepth(*raw), nil
 }

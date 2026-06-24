@@ -6,6 +6,7 @@ import (
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 	"github.com/perber/wiki/internal/localization"
@@ -52,16 +53,17 @@ type contextCheckpointOutput struct {
 }
 
 type validationSummaryOutput struct {
-	Errors   int `json:"errors"`
-	Warnings int `json:"warnings"`
+	Errors       int `json:"errors"`
+	WarningCount int `json:"warnings"`
 }
 
 type validationIssueOutput struct {
-	Severity wikivalidation.IssueSeverity `json:"severity"`
-	Code     wikivalidation.IssueCode     `json:"code"`
-	Path     string                       `json:"path,omitempty"`
-	PageID   tree.PageID                  `json:"pageId,omitempty"`
-	Message  string                       `json:"message"`
+	Severity  wikivalidation.IssueSeverity `json:"severity"`
+	Code      wikivalidation.IssueCode     `json:"code"`
+	MessageID sharederrors.MessageID       `json:"messageId,omitempty"`
+	Path      string                       `json:"path,omitempty"`
+	PageID    tree.PageID                  `json:"pageId,omitempty"`
+	Message   string                       `json:"message"`
 }
 
 type validationOutput struct {

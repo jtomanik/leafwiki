@@ -9,11 +9,12 @@ import { DIALOG_ASSET_MANAGER } from '@/lib/registries'
 import { useDialogsStore } from '@/stores/dialogs'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { useEffect } from 'react'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { AssetManager } from './AssetManager'
 
 export type AssetManagerDialogProps = {
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
   editorRef: React.RefObject<{
     insertAtCursor: (md: string) => void
     replaceFilenameInMarkdown?: (before: string, after: string) => void

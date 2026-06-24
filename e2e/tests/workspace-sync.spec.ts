@@ -23,14 +23,22 @@ type WorkspaceSnapshot = {
 
 type WorkspaceSyncValidationError = {
   code?: string;
-  message?: string;
+  messageId?: string;
   path?: string;
   severity?: string;
 };
 
 type WorkspaceSyncStatus = {
   validationErrors?: WorkspaceSyncValidationError[];
+  validationErrorDetails?: WorkspaceSyncValidationError[];
 };
+
+function normalizeWorkspaceSyncStatus(status: WorkspaceSyncStatus): WorkspaceSyncStatus {
+  return {
+    ...status,
+    validationErrors: status.validationErrorDetails ?? status.validationErrors ?? [],
+  };
+}
 
 async function listWorkspaceSnapshots(page: import('@playwright/test').Page) {
   return await page.evaluate(async (): Promise<WorkspaceSnapshot[]> => {
@@ -111,7 +119,7 @@ async function expectWorkspaceStatusClean(page: import('@playwright/test').Page)
 async function getWorkspaceSyncStatus(
   page: import('@playwright/test').Page,
 ): Promise<WorkspaceSyncStatus> {
-  return await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
+  const status = await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
     const response = await fetch('/api/workspace-sync/status', {
       credentials: 'include',
     });
@@ -122,6 +130,7 @@ async function getWorkspaceSyncStatus(
 
     return (await response.json()) as WorkspaceSyncStatus;
   });
+  return normalizeWorkspaceSyncStatus(status);
 }
 
 function validationErrorsMentioning(
@@ -131,7 +140,7 @@ function validationErrorsMentioning(
   return validationErrors.filter((validationError) =>
     [
       validationError.code,
-      validationError.message,
+      validationError.messageId,
       validationError.path,
       validationError.severity,
     ].some((value) => value?.includes(text)),
@@ -161,7 +170,7 @@ ${body}`;
 async function refreshWorkspaceSync(
   page: import('@playwright/test').Page,
 ): Promise<WorkspaceSyncStatus> {
-  return await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
+  const status = await page.evaluate(async (): Promise<WorkspaceSyncStatus> => {
     const hostMatch =
       document.cookie.match(/(?:^|;\s*)__Host-leafwiki_csrf=([^;]+)/) ??
       document.cookie.match(/(?:^|;\s*)leafwiki_csrf=([^;]+)/);
@@ -191,6 +200,7 @@ async function refreshWorkspaceSync(
 
     return (await response.json()) as WorkspaceSyncStatus;
   });
+  return normalizeWorkspaceSyncStatus(status);
 }
 
 async function runCleanupPreservingTestError(
@@ -532,7 +542,9 @@ Root README home content`,
           .poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 })
           .toContain(`[Missing](/${missingSlug})`);
         await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('workspace-sync-status')).toContainText(missingSlug);
+        await expect(
+          page.getByTestId('workspace-sync-status').locator('[data-validation-code="broken_link"]'),
+        ).toBeVisible();
       },
       async () => {
         writeRootMarkdown(
@@ -591,7 +603,9 @@ Root README home content`,
           .poll(() => readRootMarkdown(`${sourceSlug}.md`), { timeout: 15000 })
           .toContain(`[Missing](/${missingSlug})`);
         await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('workspace-sync-status')).toContainText(missingSlug);
+        await expect(
+          page.getByTestId('workspace-sync-status').locator('[data-validation-code="broken_link"]'),
+        ).toBeVisible();
 
         await expect
           .poll(
@@ -840,8 +854,6 @@ Legacy metadata should be canonicalized exactly once.`,
         await expect(
           workspaceSyncStatus.locator('[data-validation-code="duplicate_leafwiki_id"]'),
         ).toBeVisible();
-        await expect(workspaceSyncStatus).toContainText(duplicateId);
-        await expect(workspaceSyncStatus).toContainText('.md');
       },
       async () => {
         writeRootMarkdown(
@@ -876,20 +888,16 @@ Legacy metadata should be canonicalized exactly once.`,
         const conflicts = (syncStatus.validationErrors ?? []).filter(
           (validationError) =>
             validationError.code === 'path_conflict' &&
-            validationError.path?.startsWith(conflictDir) &&
-            validationError.message?.includes(firstPath) &&
-            validationError.message?.includes(secondPath),
+            validationError.path?.startsWith(conflictDir),
         );
         expect(conflicts).toHaveLength(1);
 
         await expect(page.getByTestId('workspace-sync-status')).toBeVisible({ timeout: 15000 });
         await expect(
-          page.getByText('Workspace synced, but some Markdown files could not be loaded.'),
+          page
+            .getByTestId('workspace-sync-status')
+            .locator('[data-validation-code="path_conflict"]'),
         ).toBeVisible();
-        await expect(page.getByTestId('workspace-sync-status')).toContainText(conflictDir);
-        await expect(page.getByTestId('workspace-sync-status')).toContainText(
-          'route path conflict',
-        );
       },
       async () => {
         removeRootPath(conflictDir);

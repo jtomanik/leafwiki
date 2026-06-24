@@ -11,18 +11,18 @@ import (
 
 func TestContentValidationOptionsUseSemanticPageIDs(t *testing.T) {
 	opts := ContentValidationOptions{
-		ExistingPageID: tree.NewPageIDUnchecked("page-1"),
+		ExistingPageID: newFixturePageID("page-1"),
 		ResolvePageID: func(tree.RoutePath) (tree.PageID, bool) {
-			return tree.NewPageIDUnchecked("page-2"), true
+			return newFixturePageID("page-2"), true
 		},
 		ResolveLinkPageID: func(tree.RoutePath) (tree.PageID, bool) {
-			return tree.NewPageIDUnchecked("page-3"), true
+			return newFixturePageID("page-3"), true
 		},
 		ResolveLinkTarget: func(tree.RoutePath) (tree.PageID, tree.NodeKind, bool) {
-			return tree.NewPageIDUnchecked("page-4"), tree.NodeKindPage, true
+			return newFixturePageID("page-4"), tree.NodeKindPage, true
 		},
 		ResolveMarkdownLink: func(string) (tree.PageID, tree.NodeKind, bool, IssueCode) {
-			return tree.NewPageIDUnchecked("page-5"), tree.NodeKindPage, true, ""
+			return newFixturePageID("page-5"), tree.NodeKindPage, true, ""
 		},
 		PageIDExists: func(tree.PageID) bool {
 			return true
@@ -51,8 +51,8 @@ func TestIssueCarriesSemanticPathsAndPageIDs(t *testing.T) {
 		Code:         IssueCodeBrokenLink,
 		SourcePath:   tree.MarkdownPath("docs/source.md"),
 		RoutePath:    tree.RoutePath("docs/source"),
-		PageID:       tree.NewPageIDUnchecked("source-page-id"),
-		TargetPageID: tree.NewPageIDUnchecked("target-page-id"),
+		PageID:       newFixturePageID("source-page-id"),
+		TargetPageID: newFixturePageID("target-page-id"),
 		Message:      "broken link",
 	}
 
@@ -65,7 +65,7 @@ func TestIssueCarriesSemanticPathsAndPageIDs(t *testing.T) {
 		t.Fatalf("source issue path = %q, want docs/source.md", issuePathString(sourceIssue))
 	}
 
-	routeIssue := Issue{RoutePath: tree.RoutePath("docs/source"), PageID: tree.NewPageIDUnchecked("source-page-id")}
+	routeIssue := Issue{RoutePath: tree.RoutePath("docs/source"), PageID: newFixturePageID("source-page-id")}
 	if issuePathString(routeIssue) != "docs/source" {
 		t.Fatalf("route issue path = %q, want docs/source", issuePathString(routeIssue))
 	}
@@ -80,16 +80,16 @@ func issuePathString(issue Issue) string {
 
 func TestWorkspaceMarkdownLinkRouteMappingReturnsSemanticPageID(t *testing.T) {
 	filesByRoute := map[workspaceValidationRouteKey]tree.PageID{
-		workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):     tree.NewPageIDUnchecked("target-page-id"),
-		workspaceValidationRouteConflictKey(tree.RoutePath("docs/section"), tree.NodeKindSection): tree.NewPageIDUnchecked("section-page-id"),
+		workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):     newFixturePageID("target-page-id"),
+		workspaceValidationRouteConflictKey(tree.RoutePath("docs/section"), tree.NodeKindSection): newFixturePageID("section-page-id"),
 	}
 
 	pageID, ok := workspaceLinkPageIDForRoute(filesByRoute, tree.RoutePath("docs/target"), tree.NodeKindPage)
-	if !ok || pageID != tree.NewPageIDUnchecked("target-page-id") {
+	if !ok || pageID != newFixturePageID("target-page-id") {
 		t.Fatalf("page route mapped to %q, ok=%v; want target-page-id", pageID, ok)
 	}
 	sectionID, ok := workspaceLinkPageIDForRoute(filesByRoute, tree.RoutePath("docs/section"), tree.NodeKindSection)
-	if !ok || sectionID != tree.NewPageIDUnchecked("section-page-id") {
+	if !ok || sectionID != newFixturePageID("section-page-id") {
 		t.Fatalf("section route mapped to %q, ok=%v; want section-page-id", sectionID, ok)
 	}
 	missingID, ok := workspaceLinkPageIDForRoute(filesByRoute, tree.RoutePath("docs/missing"), tree.NodeKindPage)
@@ -117,24 +117,24 @@ func TestWorkspaceMarkdownLinkResolverReturnsMetadataPageIDs(t *testing.T) {
 		t.Fatalf("build markdown link index: %v", err)
 	}
 	filesByRoute := map[workspaceValidationRouteKey]tree.PageID{
-		workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):  tree.NewPageIDUnchecked("target-page-id"),
-		workspaceValidationRouteConflictKey(tree.RoutePath("docs/sync"), tree.NodeKindSection): tree.NewPageIDUnchecked("sync-section-id"),
+		workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):  newFixturePageID("target-page-id"),
+		workspaceValidationRouteConflictKey(tree.RoutePath("docs/sync"), tree.NodeKindSection): newFixturePageID("sync-section-id"),
 	}
 	resolver := newWorkspaceMarkdownLinkResolver("docs/source.md", linkIndex, filesByRoute)
 
 	pageID, kind, ok, code := resolver("/docs/target.md")
-	if !ok || code != "" || kind != tree.NodeKindPage || pageID != tree.NewPageIDUnchecked("target-page-id") {
+	if !ok || code != "" || kind != tree.NodeKindPage || pageID != newFixturePageID("target-page-id") {
 		t.Fatalf("page resolution = pageID %q kind %q ok=%v code=%q; want target-page-id page true", pageID, kind, ok, code)
 	}
-	if pageID == tree.NewPageIDUnchecked("docs/target") {
+	if pageID == newFixturePageID("docs/target") {
 		t.Fatalf("page resolution returned route path %q instead of metadata page ID", pageID)
 	}
 
 	sectionID, kind, ok, code := resolver("/docs/sync")
-	if !ok || code != "" || kind != tree.NodeKindSection || sectionID != tree.NewPageIDUnchecked("sync-section-id") {
+	if !ok || code != "" || kind != tree.NodeKindSection || sectionID != newFixturePageID("sync-section-id") {
 		t.Fatalf("section resolution = pageID %q kind %q ok=%v code=%q; want sync-section-id section true", sectionID, kind, ok, code)
 	}
-	if sectionID == tree.NewPageIDUnchecked("docs/sync") {
+	if sectionID == newFixturePageID("docs/sync") {
 		t.Fatalf("section resolution returned route path %q instead of metadata page ID", sectionID)
 	}
 }
@@ -165,13 +165,13 @@ func TestValidateWorkspaceMarkdownFilesLinkIssueCarriesResolvedMetadataPageID(t 
 	if issue.RoutePath != tree.RoutePath("docs/source") {
 		t.Fatalf("issue route path = %q, want docs/source", issue.RoutePath)
 	}
-	if issue.PageID != tree.NewPageIDUnchecked("source-page-id") {
+	if issue.PageID != newFixturePageID("source-page-id") {
 		t.Fatalf("issue page ID = %q, want source-page-id", issue.PageID)
 	}
-	if issue.TargetPageID != tree.NewPageIDUnchecked("target-page-id") {
+	if issue.TargetPageID != newFixturePageID("target-page-id") {
 		t.Fatalf("issue target page ID = %q, want target-page-id", issue.TargetPageID)
 	}
-	if issue.TargetPageID == tree.NewPageIDUnchecked("docs/target") {
+	if issue.TargetPageID == newFixturePageID("docs/target") {
 		t.Fatalf("issue target page ID used route path %q instead of metadata page ID", issue.TargetPageID)
 	}
 }

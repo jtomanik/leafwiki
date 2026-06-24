@@ -16,6 +16,7 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView, keymap } from '@codemirror/view'
 import { githubLight } from '@fsegurai/codemirror-theme-github-light'
 import { useEffect, useRef, useState } from 'react'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { useDesignModeStore } from '../designtoggle/designmode'
 import { insertHeadingAtStart, insertWrappedText } from './editorCommands'
 import type { InternalLinkCompletion } from './internalLinkCompletion'
@@ -45,7 +46,7 @@ type MarkdownCodeEditorProps = {
   onChange: (value: string) => void
   onCursorLineChange?: (line: number) => void
   editorViewRef: React.RefObject<EditorView | null>
-  workspaceId: string
+  workspaceId: WorkspaceID
   lineWrap?: boolean
 }
 

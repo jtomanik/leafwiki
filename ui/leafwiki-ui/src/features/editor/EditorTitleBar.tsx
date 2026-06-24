@@ -1,6 +1,6 @@
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
 import { lookupPath } from '@/lib/api/pages'
-import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
+import { asRoutePath, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
 import { getParentWikiRoutePath, toWikiLookupPath } from '@/lib/wikiPath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsMobile } from '@/lib/useIsMobile'
@@ -30,7 +30,7 @@ export function EditorTitleBar() {
     const parentPath = toWikiLookupPath(getParentWikiRoutePath(page.path))
     const parentId = async () => {
       if (!parentPath) return ''
-      const p = getPageByPath(parentPath, 'section', workspaceId)
+      const p = getPageByPath(asRoutePath(parentPath), 'section', workspaceId)
       if (p) return p.id
       const lookup = await lookupPath(
         asRoutePath(parentPath),
@@ -53,7 +53,7 @@ export function EditorTitleBar() {
       workspaceId,
       onChange: (title: string, slug: string) => {
         setTitle(title)
-        setSlug(slug)
+        setSlug(asSlug(slug))
       },
     })
   }

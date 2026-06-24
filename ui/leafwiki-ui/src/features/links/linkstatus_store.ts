@@ -1,4 +1,5 @@
 import { fetchLinkStatus, type LinkStatusResult } from '@/lib/api/links'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 
 type LinkStatusStore = {
@@ -7,13 +8,16 @@ type LinkStatusStore = {
   error: string | null
   activeRequestKey: string | null
   activeRequestId: number
-  fetchLinkStatusForPage: (pageId: string, workspaceId: string) => Promise<void>
+  fetchLinkStatusForPage: (
+    pageId: PageID,
+    workspaceId: WorkspaceID,
+  ) => Promise<void>
   clear: () => void
 }
 
 let linkStatusRequestId = 0
 
-function requestKey(pageId: string, workspaceId: string) {
+function requestKey(pageId: PageID, workspaceId: WorkspaceID) {
   return `${workspaceId}:${pageId}`
 }
 
@@ -33,7 +37,7 @@ export const useLinkStatusStore = create<LinkStatusStore>((set) => ({
       activeRequestId: ++linkStatusRequestId,
     }),
 
-  fetchLinkStatusForPage: async (pageId: string, workspaceId: string) => {
+  fetchLinkStatusForPage: async (pageId: PageID, workspaceId: WorkspaceID) => {
     if (!pageId) {
       set({
         status: null,

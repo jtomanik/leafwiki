@@ -18,6 +18,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdownlinks"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/revision"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
 )
@@ -63,14 +64,14 @@ type revisionStore interface {
 	Amend(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
 	ListCommits(context.Context, gitrevisions.ListRequest) ([]gitrevisions.Commit, error)
 	ForEachCommit(context.Context, func(gitrevisions.Commit) (bool, error)) error
-	ChangedMarkdownPaths(context.Context, string) ([]string, error)
-	ChangedMarkdownContents(context.Context, string) (map[string]string, error)
-	GetCommit(context.Context, string) (gitrevisions.Commit, error)
-	RestoreWorkspace(context.Context, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
-	RestoreDocument(context.Context, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
-	RestoreDocumentToPath(context.Context, string, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
-	RestoreDocumentContentToPath(context.Context, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
-	FilesAt(context.Context, string) (map[string]string, error)
+	ChangedMarkdownPaths(context.Context, CommitHash) ([]string, error)
+	ChangedMarkdownContents(context.Context, CommitHash) (map[string]string, error)
+	GetCommit(context.Context, CommitHash) (gitrevisions.Commit, error)
+	RestoreWorkspace(context.Context, CommitHash, gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocument(ctx context.Context, relFile string, commitID CommitHash, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocumentToPath(ctx context.Context, targetFile string, sourceFile string, commitID CommitHash, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	RestoreDocumentContentToPath(ctx context.Context, targetFile string, content string, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error)
+	FilesAt(context.Context, CommitHash) (map[string]string, error)
 }
 
 type watcherEvent struct {
@@ -110,10 +111,11 @@ type SyncRequest struct {
 }
 
 type ValidationError struct {
-	Code     wikivalidation.IssueCode     `json:"code,omitempty"`
-	Path     string                       `json:"path"`
-	Message  string                       `json:"message"`
-	Severity wikivalidation.IssueSeverity `json:"severity,omitempty"`
+	Code      wikivalidation.IssueCode     `json:"code,omitempty"`
+	MessageID sharederrors.MessageID       `json:"messageId,omitempty"`
+	Path      string                       `json:"path"`
+	Message   string                       `json:"message"`
+	Severity  wikivalidation.IssueSeverity `json:"severity,omitempty"`
 }
 
 type SyncStatus struct {
@@ -524,7 +526,7 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
-	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
+	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -640,7 +642,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 		if err != nil {
 			return err
 		}
-		result := index.RewriteMarkdown(tree.NewMarkdownPathUnchecked(relPath), string(raw))
+		result := index.RewriteMarkdown(tree.MarkdownPathFromString(relPath), string(raw))
 		migrationIssues = append(migrationIssues, canonicalMigrationValidationErrors(s.rootDir, relPath, result.Issues)...)
 		if !result.Changed {
 			return nil
@@ -691,10 +693,11 @@ func canonicalMigrationValidationErrors(rootDir string, relPath string, issues [
 			routePath = route.RoutePath
 		}
 		out = append(out, ValidationError{
-			Code:     wikivalidation.IssueCodeAmbiguousLegacyLink,
-			Path:     routePath.FilesystemPath(),
-			Message:  fmt.Sprintf("ambiguous_legacy_link: %s is ambiguous during canonical Markdown link migration", issue.Destination),
-			Severity: wikivalidation.IssueSeverityError,
+			Code:      wikivalidation.IssueCodeAmbiguousLegacyLink,
+			MessageID: wikivalidation.IssueCodeAmbiguousLegacyLink.MessageID(),
+			Path:      routePath.FilesystemPath(),
+			Message:   fmt.Sprintf("ambiguous_legacy_link: %s is ambiguous during canonical Markdown link migration", issue.Destination),
+			Severity:  wikivalidation.IssueSeverityError,
 		})
 	}
 	return out
@@ -893,15 +896,15 @@ func (s *Service) Status() SyncStatus {
 	return s.status
 }
 
-func (s *Service) ListSnapshots(ctx context.Context, limit int) ([]Snapshot, error) {
-	out, err := s.ListSnapshotPage(ctx, NewCommitHashUnchecked(""), limit)
+func (s *Service) ListSnapshots(ctx context.Context, pageSize SnapshotLimit) ([]Snapshot, error) {
+	out, err := s.ListSnapshotPage(ctx, CommitHashFromString(""), pageSize)
 	if err != nil {
 		return nil, err
 	}
 	return out.Snapshots, nil
 }
 
-func (s *Service) ListSnapshotPage(ctx context.Context, cursor CommitHash, limit int) (SnapshotList, error) {
+func (s *Service) ListSnapshotPage(ctx context.Context, cursor CommitHash, pageSize SnapshotLimit) (SnapshotList, error) {
 	s.mu.Lock()
 	if !s.enabled {
 		s.mu.Unlock()
@@ -910,34 +913,34 @@ func (s *Service) ListSnapshotPage(ctx context.Context, cursor CommitHash, limit
 	store := s.store
 	s.mu.Unlock()
 
-	requestedLimit := limit
+	requestedLimit := int(pageSize)
 	if requestedLimit <= 0 {
 		requestedLimit = 50
 	}
 	s.storeMu.Lock()
 	commits, err := store.ListCommits(ctx, gitrevisions.ListRequest{
-		Cursor: cursor.String(),
+		Cursor: cursor,
 		Limit:  requestedLimit + 1,
 	})
 	s.storeMu.Unlock()
 	if err != nil {
 		return SnapshotList{}, err
 	}
-	nextCursor := CommitHash("")
+	nextCursor := CommitHashFromString("")
 	if len(commits) > requestedLimit {
-		nextCursor = NewCommitHashUnchecked(commits[requestedLimit-1].Hash)
+		nextCursor = CommitHashFromString(commits[requestedLimit-1].Hash)
 		commits = commits[:requestedLimit]
 	}
 	snapshots := make([]Snapshot, 0, len(commits))
 	for _, commit := range commits {
 		s.storeMu.Lock()
-		changedPaths, err := store.ChangedMarkdownPaths(ctx, commit.Hash)
+		changedPaths, err := store.ChangedMarkdownPaths(ctx, CommitHashFromString(commit.Hash))
 		s.storeMu.Unlock()
 		if err != nil {
 			return SnapshotList{}, err
 		}
 		snapshots = append(snapshots, Snapshot{
-			ID:                   NewCommitHashUnchecked(commit.Hash),
+			ID:                   CommitHashFromString(commit.Hash),
 			Message:              commit.Message,
 			AuthorID:             commit.AuthorID.String(),
 			AuthorName:           commit.AuthorName,
@@ -966,7 +969,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID Commi
 		source = SourceSystem
 	}
 	s.storeMu.Lock()
-	commit, err := s.store.RestoreWorkspace(ctx, commitID.String(), gitrevisions.CommitRequest{
+	commit, err := s.store.RestoreWorkspace(ctx, commitID, gitrevisions.CommitRequest{
 		Reason: gitrevisions.ReasonRestore,
 		Source: source,
 		Actor:  actor,
@@ -977,7 +980,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID Commi
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
+	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -1014,7 +1017,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	s.mu.Unlock()
 
 	s.storeMu.Lock()
-	changedFiles, err := store.ChangedMarkdownContents(ctx, commitID.String())
+	changedFiles, err := store.ChangedMarkdownContents(ctx, commitID)
 	if err != nil {
 		s.storeMu.Unlock()
 		return nil, err
@@ -1024,7 +1027,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 		s.storeMu.Unlock()
 		return nil, fmt.Errorf("document %s did not change in commit %s", relPath, commitID)
 	}
-	commit, err := store.GetCommit(ctx, commitID.String())
+	commit, err := store.GetCommit(ctx, commitID)
 	s.storeMu.Unlock()
 	if err != nil {
 		return nil, err
@@ -1050,7 +1053,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		source = SourceSystem
 	}
 	s.storeMu.Lock()
-	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID.String())
+	changedFiles, err := s.store.ChangedMarkdownContents(ctx, commitID)
 	s.storeMu.Unlock()
 	if err != nil {
 		s.status.LastError = err.Error()
@@ -1077,7 +1080,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = NewCommitHashUnchecked(commit.Hash)
+	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -1115,7 +1118,7 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	if commit.Created && amendCreatedCommit {
-		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, NewCommitHashUnchecked(commit.Hash))
+		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, CommitHashFromString(commit.Hash))
 		if err != nil {
 			return err
 		}
@@ -1132,17 +1135,17 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 		return err
 	}
 	if writebackCommit != nil && writebackCommit.Hash != "" {
-		s.status.LastCommitHash = NewCommitHashUnchecked(writebackCommit.Hash)
+		s.status.LastCommitHash = CommitHashFromString(writebackCommit.Hash)
 		s.recordChangedMarkdownPaths(writebackCommit.ChangedMarkdownPaths)
 	}
 	return nil
 }
 
 func capturedMarkdownRequiresMetadataWriteback(ctx context.Context, store revisionStore, commitHash CommitHash) (bool, error) {
-	if store == nil || commitHash.String() == "" {
+	if store == nil || commitHash == "" {
 		return false, nil
 	}
-	changedFiles, err := store.ChangedMarkdownContents(ctx, commitHash.String())
+	changedFiles, err := store.ChangedMarkdownContents(ctx, commitHash)
 	if err != nil {
 		return false, err
 	}
@@ -1182,10 +1185,11 @@ func mergeValidationErrors(existing []ValidationError, next []ValidationError) [
 	seen := map[validationErrorDedupeKey]struct{}{}
 	appendUnique := func(validationError ValidationError) {
 		key := validationErrorDedupeKey{
-			Code:     validationError.Code,
-			Path:     validationError.Path,
-			Message:  validationError.Message,
-			Severity: validationError.Severity,
+			Code:      validationError.Code,
+			MessageID: validationError.MessageID,
+			Path:      validationError.Path,
+			Message:   validationError.Message,
+			Severity:  validationError.Severity,
 		}
 		if _, ok := seen[key]; ok {
 			return
@@ -1203,10 +1207,11 @@ func mergeValidationErrors(existing []ValidationError, next []ValidationError) [
 }
 
 type validationErrorDedupeKey struct {
-	Code     wikivalidation.IssueCode
-	Path     string
-	Message  string
-	Severity wikivalidation.IssueSeverity
+	Code      wikivalidation.IssueCode
+	MessageID sharederrors.MessageID
+	Path      string
+	Message   string
+	Severity  wikivalidation.IssueSeverity
 }
 
 func (s *Service) runAfterSyncLocked() error {
@@ -1216,7 +1221,7 @@ func (s *Service) runAfterSyncLocked() error {
 	return s.afterSync()
 }
 
-func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor string, limit int) (PageRevisionList, error) {
+func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor string, pageSize PageRevisionLimit) (PageRevisionList, error) {
 	s.mu.Lock()
 	if !s.enabled || page == nil || page.PageNode == nil {
 		s.mu.Unlock()
@@ -1226,7 +1231,7 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 	rootDir := s.rootDir
 	s.mu.Unlock()
 
-	requestedLimit := limit
+	requestedLimit := int(pageSize)
 	if requestedLimit <= 0 {
 		requestedLimit = 50
 	}
@@ -1243,7 +1248,7 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 			}
 			return true, nil
 		}
-		changedFiles, err := store.ChangedMarkdownContents(ctx, commit.Hash)
+		changedFiles, err := store.ChangedMarkdownContents(ctx, CommitHashFromString(commit.Hash))
 		if err != nil {
 			return false, err
 		}
@@ -1383,7 +1388,7 @@ func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, 
 	if page == nil || page.PageNode == nil {
 		return "", false
 	}
-	targetRoutePath := tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean()
+	targetRoutePath := tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/")).Clean()
 	var found string
 	err := filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -1495,7 +1500,7 @@ func markdownPathMatchesPageRoute(rootDir string, page *tree.Page, relPath strin
 		return false
 	}
 	routePath, kind := revisionRoutePathAndKind(rootDir, relPath, page)
-	return kind == page.Kind && routePath.Clean() == tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean()
+	return kind == page.Kind && routePath.Clean() == tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/")).Clean()
 }
 
 func contentMatchesLeafWikiID(page *tree.Page, content string) bool {
@@ -1511,14 +1516,14 @@ func leafWikiIDFromContent(content string) (tree.PageID, bool) {
 	if err != nil {
 		return "", false
 	}
-	return tree.NewPageIDUnchecked(strings.TrimSpace(doc.Metadata.Page.ID)), true
+	return tree.PageIDFromString(strings.TrimSpace(doc.Metadata.Page.ID)), true
 }
 
 func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
 	sum := sha256.Sum256([]byte(content))
-	authorID := tree.NewUserIDUnchecked(strings.TrimSpace(commit.AuthorID.String()))
+	authorID := tree.UserIDFromString(strings.TrimSpace(commit.AuthorID.String()))
 	if authorID == "" {
-		authorID = tree.NewUserIDUnchecked(PublicEditorActor().ID.String())
+		authorID = tree.UserIDFromString(PublicEditorActor().ID.String())
 	}
 	summary := strings.TrimSpace(commit.Message)
 	if summary == "" {
@@ -1532,7 +1537,7 @@ func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions
 	}
 	routePath, slug, kind := revisionRoutePathSlugAndKind(rootDir, relPath, page)
 	return &revision.Revision{
-		ID:            tree.NewRevisionIDUnchecked(commit.Hash),
+		ID:            tree.RevisionIDFromString(CommitHashFromString(commit.Hash)),
 		PageID:        page.ID,
 		Type:          revision.RevisionTypeContentUpdate,
 		AuthorID:      authorID.MetadataValue(),
@@ -1580,10 +1585,10 @@ func revisionRoutePathAndKind(rootDir string, relPath string, page *tree.Page) (
 		return route.RoutePath, route.Kind
 	}
 	if isRevisionReadmeFallbackSection(relPath, page, dir) {
-		return tree.NewRoutePathUnchecked(dir), tree.NodeKindSection
+		return tree.RoutePathFromString(dir), tree.NodeKindSection
 	}
 	if strings.EqualFold(base, "index.md") {
-		return tree.NewRoutePathUnchecked(dir), tree.NodeKindSection
+		return tree.RoutePathFromString(dir), tree.NodeKindSection
 	}
 	return tree.CleanMarkdownPath(relPath).RoutePath(), tree.NodeKindPage
 }
@@ -1595,7 +1600,7 @@ func isRevisionReadmeFallbackSection(relPath string, page *tree.Page, dir string
 	if page == nil || page.PageNode == nil || page.Kind != tree.NodeKindSection {
 		return false
 	}
-	return tree.NewRoutePathUnchecked(strings.Trim(page.CalculatePath(), "/")).Clean() == tree.NewRoutePathUnchecked(dir).Clean()
+	return tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/")).Clean() == tree.RoutePathFromString(dir).Clean()
 }
 
 func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
@@ -1610,10 +1615,11 @@ func (s *Service) validateWorkspaceMarkdownFiles() []ValidationError {
 	validationErrors := make([]ValidationError, 0, len(result.Issues))
 	for _, issue := range result.Issues {
 		validationErrors = append(validationErrors, ValidationError{
-			Code:     issue.Code,
-			Path:     markdownValidationIssuePath(issue),
-			Message:  issue.Message,
-			Severity: issue.Severity,
+			Code:      issue.Code,
+			MessageID: issue.Code.MessageID(),
+			Path:      markdownValidationIssuePath(issue),
+			Message:   issue.Message,
+			Severity:  issue.Severity,
 		})
 	}
 	return validationErrors
@@ -1636,11 +1642,23 @@ func (s *Service) validationErrorsFromError(err error) []ValidationError {
 	message := err.Error()
 	paths := markdownPathsInError(s.rootDir, message)
 	if len(paths) == 0 {
-		return []ValidationError{{Code: wikivalidation.IssueCodeWorkspaceSyncError, Path: "workspace", Message: message, Severity: wikivalidation.IssueSeverityError}}
+		return []ValidationError{{
+			Code:      wikivalidation.IssueCodeWorkspaceSyncError,
+			MessageID: wikivalidation.IssueCodeWorkspaceSyncError.MessageID(),
+			Path:      "workspace",
+			Message:   message,
+			Severity:  wikivalidation.IssueSeverityError,
+		}}
 	}
 	errors := make([]ValidationError, 0, len(paths))
 	for _, path := range paths {
-		errors = append(errors, ValidationError{Code: wikivalidation.IssueCodeWorkspaceSyncError, Path: path, Message: message, Severity: wikivalidation.IssueSeverityError})
+		errors = append(errors, ValidationError{
+			Code:      wikivalidation.IssueCodeWorkspaceSyncError,
+			MessageID: wikivalidation.IssueCodeWorkspaceSyncError.MessageID(),
+			Path:      path,
+			Message:   message,
+			Severity:  wikivalidation.IssueSeverityError,
+		})
 	}
 	return errors
 }

@@ -9,12 +9,12 @@ import (
 func TestLinkUseCaseInputsUseSemanticPageIDs(t *testing.T) {
 	t.Parallel()
 
-	status := GetLinkStatusInput{PageID: tree.NewPageIDUnchecked("page-1")}
+	status := GetLinkStatusInput{PageID: newFixturePageID("page-1")}
 	var _ tree.PageID = status.PageID
 
-	backlinks := GetBacklinksInput{PageID: tree.NewPageIDUnchecked("page-1")}
+	backlinks := GetBacklinksInput{PageID: newFixturePageID("page-1")}
 	var _ tree.PageID = backlinks.PageID
 
-	outgoing := GetOutgoingLinksInput{PageID: tree.NewPageIDUnchecked("page-1")}
+	outgoing := GetOutgoingLinksInput{PageID: newFixturePageID("page-1")}
 	var _ tree.PageID = outgoing.PageID
 }

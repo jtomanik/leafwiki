@@ -51,7 +51,7 @@ func (uc *GetLinkStatusUseCase) Execute(_ context.Context, in GetLinkStatusInput
 		}
 		return nil, err
 	}
-	status, err := uc.links.GetLinkStatusForPage(in.PageID, page.CalculatePath())
+	status, err := uc.links.GetLinkStatusForPage(in.PageID, page.CalculateRoutePath())
 	if err != nil {
 		return nil, err
 	}

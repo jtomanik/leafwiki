@@ -1,5 +1,6 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { PageID, WorkspaceID } from '../semanticTypes'
 
 export type IndexingStatus = {
   active: boolean
@@ -9,7 +10,7 @@ export type IndexingStatus = {
 }
 
 export type SearchResultItem = {
-  page_id: string
+  page_id: PageID
   path: string
   title: string
   kind: 'page' | 'section'
@@ -35,7 +36,7 @@ export async function searchPages(
   query: string,
   offset: number,
   limit: number,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   tags: string[] = [],
 ): Promise<SearchResult> {
   if (offset < 0) offset = 0
@@ -62,7 +63,7 @@ export async function searchPages(
 }
 
 export async function getSearchStatus(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<IndexingStatus> {
   const res = await fetchWithAuth(
     workspaceApiPath('/api/search/status', workspaceId),

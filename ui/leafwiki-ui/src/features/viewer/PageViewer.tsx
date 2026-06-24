@@ -10,6 +10,7 @@ import {
   DIALOG_PAGE_PERMALINK,
 } from '@/lib/registries'
 import { buildEditUrl, buildHistoryUrl } from '@/lib/routePath'
+import { asRoutePath } from '@/lib/semanticTypes'
 import { useScrollRestoration } from '@/lib/useScrollRestoration'
 import {
   buildWorkspaceViewPath,
@@ -112,7 +113,12 @@ export default function PageViewer() {
 
   useEffect(() => {
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
-    loadPageData?.(lookup.path, lookup.fallbackPath, lookup.kind, workspaceId)
+    loadPageData?.(
+      asRoutePath(lookup.path),
+      lookup.fallbackPath ? asRoutePath(lookup.fallbackPath) : undefined,
+      lookup.kind,
+      workspaceId,
+    )
   }, [pathname, loadPageData, workspaceId])
 
   useEffect(() => {

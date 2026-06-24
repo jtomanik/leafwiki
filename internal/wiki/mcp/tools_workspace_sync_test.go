@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -60,15 +61,15 @@ func TestRefreshWorkspaceSyncReturnsValidationStatusWithoutToolError(t *testing.
 	if !ok {
 		t.Fatalf("syncStatus has type %T: %#v", out.SyncStatus, out.SyncStatus)
 	}
-	if status["lastError"] != "" {
+	if lastErrorDetail, ok := status["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail); ok && lastErrorDetail != nil {
 		t.Fatalf("syncStatus = %#v, did not want validation status modeled as tool error", status)
 	}
-	validationErrors, ok := status["validationErrors"].([]workspacesync.ValidationError)
+	validationErrors, ok := status["validationErrorDetails"].([]workspacesync.ValidationError)
 	if !ok || len(validationErrors) != 1 {
-		t.Fatalf("syncStatus validationErrors = %#v, want one validation error", status["validationErrors"])
+		t.Fatalf("syncStatus validationErrorDetails = %#v, want one validation error", status["validationErrorDetails"])
 	}
 	if validationErrors[0].Path != "<root-dir>/a.md" || !strings.Contains(validationErrors[0].Message, "<data-dir>/.leafwiki/scan") {
-		t.Fatalf("syncStatus validationErrors = %#v, want redacted root/data paths", validationErrors)
+		t.Fatalf("syncStatus validationErrorDetails = %#v, want redacted root/data paths", validationErrors)
 	}
 }
 

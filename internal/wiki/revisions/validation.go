@@ -9,11 +9,11 @@ import (
 )
 
 func ValidateRevisionLookupInput(rawPageID, rawRevisionID string) (tree.PageID, revision.RevisionID, error) {
-	return ValidateRevisionLookup(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawRevisionID)
+	return ValidateRevisionLookup(tree.PageIDFromString(strings.TrimSpace(rawPageID)), rawRevisionID)
 }
 
 func ValidateRevisionLookup(pageID tree.PageID, rawRevisionID string) (tree.PageID, revision.RevisionID, error) {
-	revisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawRevisionID))
+	revisionID := revision.RevisionIDFromString(strings.TrimSpace(rawRevisionID))
 	if pageID == "" {
 		return "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidPageID, nil)
 	}
@@ -24,12 +24,12 @@ func ValidateRevisionLookup(pageID tree.PageID, rawRevisionID string) (tree.Page
 }
 
 func ValidateRevisionCompareInput(rawPageID, rawBaseRevisionID, rawTargetRevisionID string) (tree.PageID, revision.RevisionID, revision.RevisionID, error) {
-	return ValidateRevisionCompare(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawBaseRevisionID, rawTargetRevisionID)
+	return ValidateRevisionCompare(tree.PageIDFromString(strings.TrimSpace(rawPageID)), rawBaseRevisionID, rawTargetRevisionID)
 }
 
 func ValidateRevisionCompare(pageID tree.PageID, rawBaseRevisionID, rawTargetRevisionID string) (tree.PageID, revision.RevisionID, revision.RevisionID, error) {
-	baseRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawBaseRevisionID))
-	targetRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawTargetRevisionID))
+	baseRevisionID := revision.RevisionIDFromString(strings.TrimSpace(rawBaseRevisionID))
+	targetRevisionID := revision.RevisionIDFromString(strings.TrimSpace(rawTargetRevisionID))
 	if pageID == "" {
 		return "", "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidPageID, nil)
 	}
@@ -40,7 +40,7 @@ func ValidateRevisionCompare(pageID tree.PageID, rawBaseRevisionID, rawTargetRev
 }
 
 func ValidateRevisionAssetInput(rawPageID string, rawRevisionID string, rawAssetName string) (tree.PageID, revision.RevisionID, tree.AssetName, error) {
-	return ValidateRevisionAsset(tree.NewPageIDUnchecked(strings.TrimSpace(rawPageID)), rawRevisionID, rawAssetName)
+	return ValidateRevisionAsset(tree.PageIDFromString(strings.TrimSpace(rawPageID)), rawRevisionID, rawAssetName)
 }
 
 func ValidateRevisionAsset(pageID tree.PageID, rawRevisionID string, rawAssetName string) (tree.PageID, revision.RevisionID, tree.AssetName, error) {
@@ -48,7 +48,7 @@ func ValidateRevisionAsset(pageID tree.PageID, rawRevisionID string, rawAssetNam
 	if err != nil {
 		return "", "", "", err
 	}
-	assetName := tree.NewAssetNameUnchecked(strings.TrimSpace(strings.TrimPrefix(rawAssetName, "/")))
+	assetName := tree.AssetNameFromString(strings.TrimSpace(strings.TrimPrefix(rawAssetName, "/")))
 	if assetName == "" {
 		return "", "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionPreviewAssetInvalidName, nil, pageID.MetadataValue(), revisionID.CommitID())
 	}

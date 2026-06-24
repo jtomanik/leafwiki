@@ -4,7 +4,13 @@ import { copyPage, NODE_KIND_PAGE, PageNode } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_COPY_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
-import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asSlug,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -22,9 +28,9 @@ export function CopyPageDialog({
   workspaceId,
 }: {
   sourcePage: CopyPageSource
-  workspaceId: string
+  workspaceId: WorkspaceID
 }) {
-  const [targetParentID, setTargetParentID] = useState<string>('root')
+  const [targetParentID, setTargetParentID] = useState<PageID | 'root'>('root')
   const [title, setTitle] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
   const [slug, setSlug] = useState<string>('')
@@ -33,7 +39,10 @@ export function CopyPageDialog({
   const [lastSlugTitle, setLastSlugTitle] = useState<string>('')
   const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const parentPath = useTreeStore(
-    (s) => s.getPathById(targetParentID, workspaceId) || '',
+    (s) =>
+      (targetParentID === 'root'
+        ? ''
+        : s.getPathById(targetParentID, workspaceId)) || '',
   )
   const navigate = useNavigate()
   const itemLabel = sourcePage.kind === NODE_KIND_PAGE ? 'page' : 'section'
@@ -71,7 +80,7 @@ export function CopyPageDialog({
     (!slugTouched && (slugLoading || title !== lastSlugTitle))
 
   const parentId = useMemo(() => {
-    const findParent = (node: PageNode): string | null => {
+    const findParent = (node: PageNode): PageID | null => {
       for (const child of node.children || []) {
         if (child.id === sourcePage.id) return node.id
         const found = findParent(child)
@@ -99,12 +108,16 @@ export function CopyPageDialog({
     if (!title) return false
 
     if (!slug) {
-      toast.error('Slug could not be generated. Please enter it manually.')
+      toast.error('Slug could not be generated. Please enter it manually.', {
+        messageId: 'ui.toast.page.slug_generation_failed',
+      })
       return false
     }
 
     if (!slugTouched && (slugLoading || title !== lastSlugTitle)) {
-      toast.warning('Please wait until the slug is fully generated.')
+      toast.warning('Please wait until the slug is fully generated.', {
+        messageId: 'ui.toast.page.slug_generation_pending',
+      })
       return false
     }
 

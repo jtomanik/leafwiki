@@ -8,6 +8,10 @@ func NewUserIDUnchecked(raw string) UserID {
 	return UserID(raw)
 }
 
+func UserIDFromString[T ~string](raw T) UserID {
+	return NewUserIDUnchecked(string(raw))
+}
+
 func (id UserID) String() string {
 	return string(id)
 }
@@ -30,6 +34,10 @@ func NewRevisionIDUnchecked(raw string) RevisionID {
 	return RevisionID(raw)
 }
 
+func RevisionIDFromString[T ~string](raw T) RevisionID {
+	return NewRevisionIDUnchecked(string(raw))
+}
+
 func (id RevisionID) String() string {
 	return string(id)
 }
@@ -42,6 +50,10 @@ type CommitHash string
 
 func NewCommitHashUnchecked(raw string) CommitHash {
 	return CommitHash(raw)
+}
+
+func CommitHashFromString[T ~string](raw T) CommitHash {
+	return NewCommitHashUnchecked(string(raw))
 }
 
 func (hash CommitHash) String() string {

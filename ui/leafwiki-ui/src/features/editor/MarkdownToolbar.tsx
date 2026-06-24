@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { DIALOG_ASSET_MANAGER, DIALOG_LINK_INSERT } from '@/lib/registries'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { useDialogsStore } from '@/stores/dialogs'
 import {
@@ -29,8 +30,8 @@ import { MarkdownEditorRef } from './MarkdownEditor'
 type Props = {
   editorRef: React.RefObject<MarkdownEditorRef>
   onAssetVersionChange?: (version: number) => void
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
   previewVisible: boolean
   onTogglePreview: () => void
 }

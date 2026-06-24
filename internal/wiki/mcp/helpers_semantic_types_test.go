@@ -13,7 +13,7 @@ func TestExactlyOneIDOrPageIDReturnsSemanticPageID(t *testing.T) {
 	}
 
 	var semanticPageID tree.PageID = pageID
-	if semanticPageID != tree.NewPageIDUnchecked("page-1") {
+	if semanticPageID != newFixturePageID("page-1") {
 		t.Fatalf("pageID = %q, want page-1", semanticPageID)
 	}
 }

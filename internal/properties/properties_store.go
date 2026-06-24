@@ -131,7 +131,7 @@ func (s *PropertiesStore) Clear() error {
 
 // GetAllPropertyKeys returns distinct property keys with page count, optionally filtered by
 // prefix. limit <= 0 means no limit.
-func (s *PropertiesStore) GetAllPropertyKeys(filter string, limit int) ([]PropertyKeyCount, error) {
+func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) ([]PropertyKeyCount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,8 +142,8 @@ func (s *PropertiesStore) GetAllPropertyKeys(filter string, limit int) ([]Proper
 		GROUP BY key
 		ORDER BY count DESC, key ASC
 	`
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+	if pageSize > 0 {
+		query += fmt.Sprintf(" LIMIT %d", int(pageSize))
 	}
 
 	rows, err := s.db.Query(query, escapeLikePrefix(filter))

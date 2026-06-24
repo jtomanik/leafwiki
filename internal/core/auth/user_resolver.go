@@ -28,7 +28,7 @@ func NewUserResolver(userService *UserService) (*UserResolver, error) {
 	}
 
 	for _, user := range users {
-		r.resolved[NewUserIDUnchecked(user.ID)] = &UserLabel{
+		r.resolved[UserIDFromString(user.ID)] = &UserLabel{
 			ID:       user.ID,
 			Username: user.Username,
 		}
@@ -77,7 +77,7 @@ func (r *UserResolver) Reload() error {
 
 	newMap := make(map[UserID]*UserLabel, len(users))
 	for _, u := range users {
-		newMap[NewUserIDUnchecked(u.ID)] = &UserLabel{ID: u.ID, Username: u.Username}
+		newMap[UserIDFromString(u.ID)] = &UserLabel{ID: u.ID, Username: u.Username}
 	}
 
 	r.mu.Lock()

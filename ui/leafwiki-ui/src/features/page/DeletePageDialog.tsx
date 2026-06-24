@@ -5,7 +5,13 @@ import { asApiLocalizedError } from '@/lib/api/errors'
 import { deletePage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
-import { asPageID, asPageVersion, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asPageVersion,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useViewerStore } from '../viewer/viewer'
 import { DIALOG_DELETE_PAGE_CONFIRMATION } from '@/lib/registries'
@@ -17,9 +23,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 export type DeletePageDialogProps = {
-  pageId: string
+  pageId: PageID
   redirectTo: string
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 function deleteSuccessToast(itemLabelCapitalized: 'Page' | 'Section') {

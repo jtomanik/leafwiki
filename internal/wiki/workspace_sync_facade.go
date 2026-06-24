@@ -23,18 +23,18 @@ func (w *Wiki) WorkspaceSyncRefresh(ctx context.Context, req workspacesync.SyncR
 	return w.workspaceSync.SyncNow(ctx, req)
 }
 
-func (w *Wiki) WorkspaceSyncSnapshots(ctx context.Context, limit int) ([]workspacesync.Snapshot, error) {
+func (w *Wiki) WorkspaceSyncSnapshots(ctx context.Context, pageSize workspacesync.SnapshotLimit) ([]workspacesync.Snapshot, error) {
 	if w.workspaceSync == nil {
 		return nil, fmt.Errorf("workspace sync is not enabled")
 	}
-	return w.workspaceSync.ListSnapshots(ctx, limit)
+	return w.workspaceSync.ListSnapshots(ctx, pageSize)
 }
 
-func (w *Wiki) WorkspaceSyncSnapshotPage(ctx context.Context, cursor workspacesync.CommitHash, limit int) (workspacesync.SnapshotList, error) {
+func (w *Wiki) WorkspaceSyncSnapshotPage(ctx context.Context, cursor workspacesync.CommitHash, pageSize workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 	if w.workspaceSync == nil {
 		return workspacesync.SnapshotList{}, fmt.Errorf("workspace sync is not enabled")
 	}
-	return w.workspaceSync.ListSnapshotPage(ctx, cursor, limit)
+	return w.workspaceSync.ListSnapshotPage(ctx, cursor, pageSize)
 }
 
 func (w *Wiki) WorkspaceSyncRestoreWorkspace(ctx context.Context, commitID workspacesync.CommitHash, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
@@ -44,11 +44,11 @@ func (w *Wiki) WorkspaceSyncRestoreWorkspace(ctx context.Context, commitID works
 	return w.workspaceSync.RestoreWorkspaceWithSource(ctx, commitID, actor, source)
 }
 
-func (w *Wiki) WorkspaceSyncPageRevisions(ctx context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
+func (w *Wiki) WorkspaceSyncPageRevisions(ctx context.Context, page *tree.Page, cursor string, pageSize workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 	if w.workspaceSync == nil {
 		return workspacesync.PageRevisionList{}, fmt.Errorf("workspace sync is not enabled")
 	}
-	return w.workspaceSync.ListPageRevisions(ctx, page, cursor, limit)
+	return w.workspaceSync.ListPageRevisions(ctx, page, cursor, pageSize)
 }
 
 func (w *Wiki) WorkspaceSyncPageRevision(ctx context.Context, page *tree.Page, revisionID revision.RevisionID) (*revision.RevisionSnapshot, error) {

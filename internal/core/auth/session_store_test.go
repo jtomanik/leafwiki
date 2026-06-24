@@ -18,8 +18,8 @@ func TestSessionStore_CreateAndValidateSession(t *testing.T) {
 	defer test_utils.WrapCloseWithErrorCheck(store.Close, t)
 
 	expiresAt := time.Now().Add(time.Hour)
-	userID := NewUserIDUnchecked("u1")
-	sessionID := NewSessionIDUnchecked("s1")
+	userID := newFixtureUserID("u1")
+	sessionID := newFixtureSessionID("s1")
 	if err := store.CreateSession(sessionID, userID, "refresh", expiresAt); err != nil {
 		t.Fatalf("CreateSession err: %v", err)
 	}

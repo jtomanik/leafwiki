@@ -10,6 +10,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
+	coretags "github.com/perber/wiki/internal/tags"
 )
 
 // Routes is the RouteRegistrar for the tags domain.
@@ -74,7 +75,7 @@ func (r *Routes) handleGetTags(c *gin.Context) {
 	out, err := r.getTags.Execute(c.Request.Context(), GetTagsInput{
 		Filter:   filter,
 		Selected: queryTags(c, "selected"),
-		Limit:    limit,
+		PageSize: coretags.TagLimit(limit),
 	})
 	if err != nil {
 		respondWithTagsError(c, err)

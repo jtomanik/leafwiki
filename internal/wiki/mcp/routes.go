@@ -67,12 +67,12 @@ type Routes struct {
 	renameAsset  *wikiassets.RenameAssetUseCase
 	deleteAsset  *wikiassets.DeleteAssetUseCase
 
-	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	listWorkspaceRevisions   func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
 	getWorkspaceRevision     func(context.Context, *tree.Page, tree.RevisionID) (*corerevision.RevisionSnapshot, error)
 	restoreWorkspaceRevision func(context.Context, *tree.Page, tree.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	workspaceSyncStatus      func() workspacesync.SyncStatus
 	workspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	listWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	listWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error)
 	workspaceRootDir         string
 	workspaceDataDir         string
 	markdownLinkRootPrefix   string
@@ -119,12 +119,12 @@ type RoutesConfig struct {
 	RenameAsset  *wikiassets.RenameAssetUseCase
 	DeleteAsset  *wikiassets.DeleteAssetUseCase
 
-	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
 	GetWorkspaceRevision     func(context.Context, *tree.Page, tree.RevisionID) (*corerevision.RevisionSnapshot, error)
 	RestoreWorkspaceRevision func(context.Context, *tree.Page, tree.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	WorkspaceSyncStatus      func() workspacesync.SyncStatus
 	WorkspaceSyncRefresh     func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	ListWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	ListWorkspaceSnapshots   func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error)
 	WorkspaceRootDir         string
 	WorkspaceDataDir         string
 	MarkdownLinkRootPrefix   string

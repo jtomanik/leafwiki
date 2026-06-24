@@ -42,10 +42,10 @@ func TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInputs(t *testing.T) {
 
 	pageIDs := make([]tree.PageID, 0, maxOutgoingLinksQueryArgs+5)
 	for i := 0; i < maxOutgoingLinksQueryArgs+5; i++ {
-		pageID := tree.NewPageIDUnchecked(fmt.Sprintf("page-%d", i))
+		pageID := newFixturePageID(fmt.Sprintf("page-%d", i))
 		pageIDs = append(pageIDs, pageID)
 		if err := store.AddLinks(pageID, fmt.Sprintf("Title %s", pageID), []TargetLink{{
-			TargetPageID:   tree.NewPageIDUnchecked(fmt.Sprintf("target-%s", pageID)),
+			TargetPageID:   newFixturePageID(fmt.Sprintf("target-%s", pageID)),
 			TargetPagePath: fmt.Sprintf("target/%s", pageID),
 		}}); err != nil {
 			t.Fatalf("AddLinks(%s) failed: %v", pageID, err)
@@ -68,8 +68,8 @@ func TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInputs(t *testing.T) {
 		if outgoings[0].FromPageID != pageID {
 			t.Fatalf("expected outgoing from %s, got %s", pageID, outgoings[0].FromPageID)
 		}
-		if wantPath := fmt.Sprintf("target/%s", pageID); outgoings[0].ToPath != wantPath {
-			t.Fatalf("expected target path %q, got %q", wantPath, outgoings[0].ToPath)
+		if wantPath := fmt.Sprintf("/target/%s", pageID); outgoings[0].ToPath.WikiPath() != wantPath {
+			t.Fatalf("expected target path %q, got %q", wantPath, outgoings[0].ToPath.WikiPath())
 		}
 	}
 }

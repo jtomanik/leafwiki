@@ -9,7 +9,7 @@ import {
   updatePage,
 } from '@/lib/api/pages'
 import { isPageNotFoundError, mapApiError } from '@/lib/api/errors'
-import { asRoutePath, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
+import type { RoutePath, Slug, WorkspaceID } from '@/lib/semanticTypes'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
@@ -25,7 +25,7 @@ import {
 
 export interface PageEditorState {
   title: string // current title in the editor
-  slug: string // current slug in the editor
+  slug: Slug // current slug in the editor
   content: string // current markdown content in the editor
   tags: string[] // convenient tag editor state
   frontmatterFields: EditorFrontmatterField[]
@@ -35,11 +35,11 @@ export interface PageEditorState {
   notFound: boolean
   page: Page | null // current page being edited
   initialPage: Page | null // initial page data when loaded
-  workspaceId: string | null
+  workspaceId: WorkspaceID | null
   activeRequestKey: string | null
   activeRequestId: number
   setTitle: (title: string) => void // set the current title
-  setSlug: (slug: string) => void // set the current slug
+  setSlug: (slug: Slug) => void // set the current slug
   setContent: (content: string) => void // set the current markdown content
   setTags: (tags: string[]) => void
   setFrontmatterFields: (fields: EditorFrontmatterField[]) => void
@@ -50,10 +50,10 @@ export interface PageEditorState {
   forceOverwrite: () => Promise<Page | null | undefined> // re-fetch server version, then save
   invalidateActiveRequest: () => void
   loadPageData: (
-    path: string,
-    fallbackPath?: string,
+    path: RoutePath,
+    fallbackPath?: RoutePath,
     kind?: WikiNodeKind,
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => Promise<void> // load page data by path
 }
 
@@ -108,7 +108,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   page: null,
   title: '',
   path: '',
-  slug: '',
+  slug: '' as Slug,
   content: '',
   tags: [],
   frontmatterFields: [],
@@ -198,9 +198,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
           {
             kind: 'rename',
             title,
-            slug: asSlug(slug),
+            slug,
           },
-          asWorkspaceID(workspaceId),
+          workspaceId,
         )
         const rewriteLinks = await confirmPageRefactor(preview)
         if (rewriteLinks === null) {
@@ -215,11 +215,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             kind: 'rename',
             version: page.version,
             title,
-            slug: asSlug(slug),
+            slug,
             content,
             rewriteLinks,
           },
-          asWorkspaceID(workspaceId),
+          workspaceId,
         )
 
         if (updatedPage && frontmatterChanged) {
@@ -227,11 +227,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             updatedPage.id,
             updatedPage.version,
             title,
-            asSlug(slug),
+            slug,
             content,
             tags,
             properties,
-            asWorkspaceID(workspaceId),
+            workspaceId,
           )
         }
       } else {
@@ -239,11 +239,11 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
           page.id,
           page.version,
           title,
-          asSlug(slug),
+          slug,
           content,
           tags,
           properties,
-          asWorkspaceID(workspaceId),
+          workspaceId,
         )
       }
 
@@ -333,7 +333,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     const fresh = await getPageByPath(
       page.path,
       page.kind,
-      asWorkspaceID(workspaceId),
+      workspaceId,
     )
     if (!isCurrentOverwriteTarget()) return undefined
     set((state) => {
@@ -352,10 +352,10 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     useProgressbarStore.getState().setLoading(false)
   },
   loadPageData: async (
-    path: string,
-    fallbackPath?: string,
+    path: RoutePath,
+    fallbackPath?: RoutePath,
     kind?: WikiNodeKind,
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => {
     if (!workspaceId) throw new Error('workspaceId is required')
     const requestKey = `${workspaceId}:${kind ?? ''}:${path}:${fallbackPath ?? ''}`
@@ -382,9 +382,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     useProgressbarStore.getState().setLoading(true)
     try {
       const page = await getPageByPath(
-        asRoutePath(path),
+        path,
         kind,
-        asWorkspaceID(workspaceId),
+        workspaceId,
       )
       const fields: EditorFrontmatterField[] = Object.entries(
         page.properties ?? {},
@@ -410,9 +410,9 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
         if (fallbackPath) {
           try {
             const fallbackPage = await getPageByPath(
-              asRoutePath(fallbackPath),
+              fallbackPath,
               'section',
-              asWorkspaceID(workspaceId),
+              workspaceId,
             )
             if (fallbackPage.kind === 'section') {
               const fields: EditorFrontmatterField[] = Object.entries(

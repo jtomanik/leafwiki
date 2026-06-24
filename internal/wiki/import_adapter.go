@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -123,10 +124,10 @@ func (a *WikiImportAdapter) UpdatePage(userID tree.UserID, id tree.PageID, title
 	return out.Page, nil
 }
 
-func (a *WikiImportAdapter) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, maxBytes int64) (string, error) {
+func (a *WikiImportAdapter) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 	out, err := wikiassets.NewUploadAssetUseCase(a.tree, a.asset, a.log).Execute(
 		context.Background(),
-		wikiassets.UploadAssetInput{UserID: userID, PageID: pageID, File: file, Filename: filename, MaxBytes: maxBytes},
+		wikiassets.UploadAssetInput{UserID: userID, PageID: pageID, File: file, Filename: filename, ByteCap: byteCap},
 	)
 	if err != nil {
 		return "", err

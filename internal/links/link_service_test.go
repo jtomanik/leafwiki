@@ -111,15 +111,15 @@ func TestLinkService_GetRefactorMatchesForPrefixAndKindAcceptsRoutePath(t *testi
 		t.Fatalf("NewLinksStore failed: %v", err)
 	}
 
-	if err := store.AddLinks(tree.NewPageIDUnchecked("source"), "Source", []TargetLink{
-		{TargetPageID: tree.NewPageIDUnchecked("target"), TargetPagePath: "/docs/guide", TargetKind: string(tree.NodeKindSection)},
-		{TargetPageID: tree.NewPageIDUnchecked("child"), TargetPagePath: "/docs/guide/child", TargetKind: string(tree.NodeKindSection)},
+	if err := store.AddLinks(newFixturePageID("source"), "Source", []TargetLink{
+		{TargetPageID: newFixturePageID("target"), TargetPagePath: "/docs/guide", TargetKind: string(tree.NodeKindSection)},
+		{TargetPageID: newFixturePageID("child"), TargetPagePath: "/docs/guide/child", TargetKind: string(tree.NodeKindSection)},
 	}); err != nil {
 		t.Fatalf("AddLinks failed: %v", err)
 	}
 
 	service := NewLinkService(t.TempDir(), nil, store)
-	matches, err := service.GetRefactorMatchesForPrefixAndKind(tree.NewRoutePathUnchecked("docs/guide"), tree.NodeKindSection)
+	matches, err := service.GetRefactorMatchesForPrefixAndKind(tree.RoutePath("docs/guide"), tree.NodeKindSection)
 	if err != nil {
 		t.Fatalf("GetRefactorMatchesForPrefixAndKind failed: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestResolveTargetLinks_FindsExistingTargets(t *testing.T) {
 	ts, page1ID, page2ID := setupTreeForLinksTest(t)
 
 	// current page: docs/page1
-	page1, err := ts.GetPage(tree.NewPageIDUnchecked(page1ID))
+	page1, err := ts.GetPage(newFixturePageID(page1ID))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
@@ -241,14 +241,14 @@ func TestResolveTargetLinks_FindsExistingTargets(t *testing.T) {
 	// we want to link from page1 to page2 using a relative link
 	links := []string{"./page2.md"}
 
-	targets := resolveTargetLinks(ts, currentPath, links)
+	targets := resolveTargetLinks(ts, tree.RoutePathFromString(currentPath), links)
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
 	}
 
 	got := targets[0]
-	if got.TargetPageID != tree.NewPageIDUnchecked(page2ID) {
+	if got.TargetPageID != newFixturePageID(page2ID) {
 		t.Errorf("TargetPageID = %q, want %q", got.TargetPageID, page2ID)
 	}
 	if got.TargetPagePath == "" {
@@ -260,12 +260,12 @@ func TestResolveTargetLinks_FindsExistingTargets(t *testing.T) {
 func TestResolveTargetLinks_ResolvesCanonicalRelativePageMdFromSourceFileDirectory(t *testing.T) {
 	ts, page1ID, page2ID := setupTreeForLinksTest(t)
 
-	page1, err := ts.GetPage(tree.NewPageIDUnchecked(page1ID))
+	page1, err := ts.GetPage(newFixturePageID(page1ID))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
 
-	targets := resolveTargetLinks(ts, page1.CalculatePath(), []string{"./page2.md"})
+	targets := resolveTargetLinks(ts, page1.CalculateRoutePath(), []string{"./page2.md"})
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -274,7 +274,7 @@ func TestResolveTargetLinks_ResolvesCanonicalRelativePageMdFromSourceFileDirecto
 	if got.Broken {
 		t.Fatalf("target = %#v, want resolved canonical .md page link", got)
 	}
-	if got.TargetPageID != tree.NewPageIDUnchecked(page2ID) {
+	if got.TargetPageID != newFixturePageID(page2ID) {
 		t.Fatalf("TargetPageID = %q, want %q", got.TargetPageID, page2ID)
 	}
 	if got.TargetPagePath != "/docs/page2" {
@@ -311,7 +311,7 @@ func TestResolveTargetLinks_ResolvesRelativeSectionLinkFromSourceFileDirectory(t
 		t.Fatalf("GetPage current failed: %v", err)
 	}
 
-	targets := resolveTargetLinks(ts, current.CalculatePath(), []string{"../b"})
+	targets := resolveTargetLinks(ts, current.CalculateRoutePath(), []string{"../b"})
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -358,7 +358,7 @@ leafwiki_title: Guides
 		t.Fatalf("GetPage guides failed: %v", err)
 	}
 
-	targets := resolveTargetLinks(ts, source.CalculatePath(), extractLinksFromMarkdown(source.Content))
+	targets := resolveTargetLinks(ts, source.CalculateRoutePath(), extractLinksFromMarkdown(source.Content))
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -408,7 +408,7 @@ leafwiki_title: Sync Section
 		t.Fatalf("GetPage source failed: %v", err)
 	}
 
-	targets := resolveTargetLinks(ts, source.CalculatePath(), extractLinksFromMarkdown(source.Content))
+	targets := resolveTargetLinks(ts, source.CalculateRoutePath(), extractLinksFromMarkdown(source.Content))
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -459,7 +459,7 @@ leafwiki_title: Sync Child
 		t.Fatalf("GetPage section source failed: %v", err)
 	}
 
-	targets := resolveTargetLinksForSourceKind(ts, source.CalculatePath(), source.Kind, extractLinksFromMarkdown(source.Content))
+	targets := resolveTargetLinksForSourceKind(ts, source.CalculateRoutePath(), source.Kind, extractLinksFromMarkdown(source.Content))
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -514,7 +514,7 @@ leafwiki_title: Nested Sibling
 		t.Fatalf("GetPage page source failed: %v", err)
 	}
 
-	targets := resolveTargetLinksForSourceKind(ts, source.CalculatePath(), source.Kind, extractLinksFromMarkdown(source.Content))
+	targets := resolveTargetLinksForSourceKind(ts, source.CalculateRoutePath(), source.Kind, extractLinksFromMarkdown(source.Content))
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target link, got %d: %#v", len(targets), targets)
@@ -534,7 +534,7 @@ leafwiki_title: Nested Sibling
 func TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting(t *testing.T) {
 	ts, page1ID, _ := setupTreeForLinksTest(t)
 
-	page1, err := ts.GetPage(tree.NewPageIDUnchecked(page1ID))
+	page1, err := ts.GetPage(newFixturePageID(page1ID))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting(t *testing.T) {
 		"/docs/unknown",
 	}
 
-	targets := resolveTargetLinks(ts, currentPath, links)
+	targets := resolveTargetLinks(ts, tree.RoutePathFromString(currentPath), links)
 
 	if len(targets) != 2 {
 		t.Fatalf("expected 2 target links, got %d: %#v", len(targets), targets)
@@ -575,12 +575,12 @@ func TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting(t *testing.T) {
 func TestResolveTargetLinks_IgnoresAssetDestinations(t *testing.T) {
 	ts, page1ID, _ := setupTreeForLinksTest(t)
 
-	page1, err := ts.GetPage(tree.NewPageIDUnchecked(page1ID))
+	page1, err := ts.GetPage(newFixturePageID(page1ID))
 	if err != nil {
 		t.Fatalf("GetPage(page1) failed: %v", err)
 	}
 
-	targets := resolveTargetLinks(ts, page1.CalculatePath(), []string{
+	targets := resolveTargetLinks(ts, page1.CalculateRoutePath(), []string{
 		"/assets/abc/manual.pdf",
 		"assets/abc/picture.png",
 	})
@@ -624,21 +624,21 @@ func createSimpleLinkedPages(t *testing.T, ts *tree.TreeService) (pageAID, pageB
 	}
 	pageBID = *bIDPtr
 
-	aPage, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	aPage, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
 	contentA := "Link to B: [Go to B](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(aPage.ID), aPage.Title, tree.NewSlugUnchecked(aPage.Slug), &contentA, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &contentA, false); err != nil {
 		t.Fatalf("UpdatePage a failed: %v", err)
 	}
 
-	bPage, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	bPage, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage b failed: %v", err)
 	}
 	contentB := "# Page B\nNo outgoing links."
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(bPage.ID), bPage.Title, tree.NewSlugUnchecked(bPage.Slug), &contentB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(bPage.ID), bPage.Title, newFixtureSlug(bPage.Slug), &contentB, false); err != nil {
 		t.Fatalf("UpdatePage b failed: %v", err)
 	}
 
@@ -653,7 +653,7 @@ func TestLinkService_IndexAllPages_BuildsLinks(t *testing.T) {
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	data, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
@@ -663,10 +663,10 @@ func TestLinkService_IndexAllPages_BuildsLinks(t *testing.T) {
 	}
 
 	bl := data.Backlinks[0]
-	if bl.FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if bl.FromPageID != newFixturePageID(pageAID) {
 		t.Errorf("FromPageID = %q, want %q", bl.FromPageID, pageAID)
 	}
-	if bl.ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if bl.ToPageID != newFixturePageID(pageBID) {
 		t.Errorf("ToPageID = %q, want %q", bl.ToPageID, pageBID)
 	}
 	if bl.FromTitle == "" {
@@ -740,11 +740,11 @@ leafwiki_title: Sync Section
 		}
 		targetIDs[item.ToPageID] = true
 	}
-	if !targetIDs[tree.NewPageIDUnchecked("sync-page")] || !targetIDs[tree.NewPageIDUnchecked("sync-section")] {
+	if !targetIDs[newFixturePageID("sync-page")] || !targetIDs[newFixturePageID("sync-section")] {
 		t.Fatalf("outgoing target IDs = %#v, want page sync-page and section sync-section", targetIDs)
 	}
 
-	pageBacklinks, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked("sync-page"))
+	pageBacklinks, err := svc.GetBacklinksForPage(newFixturePageID("sync-page"))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage(page) failed: %v", err)
 	}
@@ -758,7 +758,7 @@ leafwiki_title: Sync Section
 	if !pageBacklinkKinds[string(tree.NodeKindPage)] || !pageBacklinkKinds[string(tree.NodeKindSection)] {
 		t.Fatalf("page backlink FromKind values = %#v, want page and section", pageBacklinkKinds)
 	}
-	sectionBacklinks, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked("sync-section"))
+	sectionBacklinks, err := svc.GetBacklinksForPage(newFixturePageID("sync-section"))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage(section) failed: %v", err)
 	}
@@ -926,12 +926,12 @@ func TestLinkService_IndexAllPages_ReplacesExistingLinks(t *testing.T) {
 		t.Fatalf("IndexAllPages (first) failed: %v", err)
 	}
 
-	aPage, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	aPage, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
 	var noLinks = "No more links."
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(aPage.ID), aPage.Title, tree.NewSlugUnchecked(aPage.Slug), &noLinks, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &noLinks, false); err != nil {
 		t.Fatalf("UpdatePage a failed: %v", err)
 	}
 
@@ -939,7 +939,7 @@ func TestLinkService_IndexAllPages_ReplacesExistingLinks(t *testing.T) {
 		t.Fatalf("IndexAllPages (second) failed: %v", err)
 	}
 
-	data, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
@@ -952,7 +952,7 @@ func TestLinkService_UpdateLinksForPage_OnlyAffectsOnePage(t *testing.T) {
 	svc, ts, _ := setupLinkService(t)
 	pageAID, pageBID := createSimpleLinkedPages(t, ts)
 
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
@@ -960,7 +960,7 @@ func TestLinkService_UpdateLinksForPage_OnlyAffectsOnePage(t *testing.T) {
 		t.Fatalf("UpdateLinksForPage failed: %v", err)
 	}
 
-	dataB, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	dataB, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage for B failed: %v", err)
 	}
@@ -968,7 +968,7 @@ func TestLinkService_UpdateLinksForPage_OnlyAffectsOnePage(t *testing.T) {
 		t.Fatalf("expected 1 backlink for B, got %d: %#v", len(dataB.Backlinks), dataB.Backlinks)
 	}
 
-	dataA, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageAID))
+	dataA, err := svc.GetBacklinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage for A failed: %v", err)
 	}
@@ -989,7 +989,7 @@ func TestLinkService_ClearLinks_RemovesAllLinks(t *testing.T) {
 		t.Fatalf("ClearLinks failed: %v", err)
 	}
 
-	data, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestLinkService_GetOutgoingLinksForPage_ReturnsOutgoingLinks(t *testing.T) 
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	result, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	result, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
 	}
@@ -1021,15 +1021,15 @@ func TestLinkService_GetOutgoingLinksForPage_ReturnsOutgoingLinks(t *testing.T) 
 
 	item := result.Outgoings[0]
 
-	if item.FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if item.FromPageID != newFixturePageID(pageAID) {
 		t.Errorf("FromPageID = %q, want %q", item.FromPageID, pageAID)
 	}
 
-	if item.ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if item.ToPageID != newFixturePageID(pageBID) {
 		t.Errorf("ToPageID = %q, want %q", item.ToPageID, pageBID)
 	}
 
-	pageB, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	pageB, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage(pageB) failed: %v", err)
 	}
@@ -1050,13 +1050,13 @@ func TestLinkService_GetOutgoingLinksForPage_NoOutgoings(t *testing.T) {
 	}
 	lonelyID := *aIDPtr
 
-	page, err := ts.GetPage(tree.NewPageIDUnchecked(lonelyID))
+	page, err := ts.GetPage(newFixturePageID(lonelyID))
 	if err != nil {
 		t.Fatalf("GetPage lonely failed: %v", err)
 	}
 
 	var noLinks = "Just some text, no links."
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(page.ID), page.Title, tree.NewSlugUnchecked(page.Slug), &noLinks, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &noLinks, false); err != nil {
 		t.Fatalf("UpdateNode lonely failed: %v", err)
 	}
 
@@ -1064,7 +1064,7 @@ func TestLinkService_GetOutgoingLinksForPage_NoOutgoings(t *testing.T) {
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	result, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(lonelyID))
+	result, err := svc.GetOutgoingLinksForPage(newFixturePageID(lonelyID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
 	}
@@ -1093,12 +1093,12 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 	}
 	pageBID := *bIDPtr
 
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
 	contentA := "Asset: [Manual](/assets/abc/manual.pdf)\nPage: [Go](/b)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &contentA, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &contentA, false); err != nil {
 		t.Fatalf("UpdateNode a failed: %v", err)
 	}
 
@@ -1106,7 +1106,7 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	outgoing, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	outgoing, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
 	}
@@ -1120,7 +1120,7 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 		t.Fatalf("extensionless page link should be indexed as broken/non-canonical, got %#v", outgoing.Outgoings[0])
 	}
 
-	status, err := svc.GetLinkStatusForPage(tree.NewPageIDUnchecked(pageAID), "/a")
+	status, err := svc.GetLinkStatusForPage(newFixturePageID(pageAID), "/a")
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage failed: %v", err)
 	}
@@ -1128,7 +1128,7 @@ func TestLinkService_IndexAllPages_IgnoresAssetLinksInOutgoingAndBrokenSets(t *t
 		t.Fatalf("unexpected link status counts: %#v", status.Counts)
 	}
 
-	backlinks, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	backlinks, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
@@ -1145,7 +1145,7 @@ func TestToOutgoingResult_MapsOutgoingToResultItems(t *testing.T) {
 		t.Fatalf("tree root is nil")
 	}
 
-	outgoings := []Outgoing{{FromPageID: tree.NewPageIDUnchecked(page1ID), ToPageID: tree.NewPageIDUnchecked(page2ID), ToPath: "/docs/page2", Broken: false, FromTitle: "Page 1"}}
+	outgoings := []Outgoing{{FromPageID: newFixturePageID(page1ID), ToPageID: newFixturePageID(page2ID), ToPath: "/docs/page2", Broken: false, FromTitle: "Page 1"}}
 
 	result := toOutgoingLinkResult(ts, outgoings)
 	if result == nil {
@@ -1157,14 +1157,14 @@ func TestToOutgoingResult_MapsOutgoingToResultItems(t *testing.T) {
 
 	item := result.Outgoings[0]
 
-	if item.FromPageID != tree.NewPageIDUnchecked(page1ID) {
+	if item.FromPageID != newFixturePageID(page1ID) {
 		t.Errorf("FromPageID = %q, want %q", item.FromPageID, page1ID)
 	}
-	if item.ToPageID != tree.NewPageIDUnchecked(page2ID) {
+	if item.ToPageID != newFixturePageID(page2ID) {
 		t.Errorf("ToPageID = %q, want %q", item.ToPageID, page2ID)
 	}
 
-	page2, err := ts.GetPage(tree.NewPageIDUnchecked(page2ID))
+	page2, err := ts.GetPage(newFixturePageID(page2ID))
 	if err != nil {
 		t.Fatalf("GetPage page2 failed: %v", err)
 	}
@@ -1189,12 +1189,12 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 	}
 	pageAID := *aIDPtr
 
-	aPage, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	aPage, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage a failed: %v", err)
 	}
 	var linkToB = "Link to B: [Go](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(aPage.ID), aPage.Title, tree.NewSlugUnchecked(aPage.Slug), &linkToB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &linkToB, false); err != nil {
 		t.Fatalf("UpdateNode a failed: %v", err)
 	}
 
@@ -1202,7 +1202,7 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	out1, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	out1, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
 	}
@@ -1225,12 +1225,12 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 	}
 	pageBID := *bIDPtr
 
-	bPage, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	bPage, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage b failed: %v", err)
 	}
 	var pageBContent = "# Page B"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(bPage.ID), bPage.Title, tree.NewSlugUnchecked(bPage.Slug), &pageBContent, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(bPage.ID), bPage.Title, newFixtureSlug(bPage.Slug), &pageBContent, false); err != nil {
 		t.Fatalf("UpdateNode b failed: %v", err)
 	}
 
@@ -1238,7 +1238,7 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 		t.Fatalf("IndexAllPages (second) failed: %v", err)
 	}
 
-	out2, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	out2, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage (second) failed: %v", err)
 	}
@@ -1248,21 +1248,21 @@ func TestLinkService_LateCreatedTarget_BecomesResolvedAfterReindex(t *testing.T)
 	if out2.Outgoings[0].Broken != false {
 		t.Fatalf("expected outgoing to be resolved, got %#v", out2.Outgoings[0])
 	}
-	if out2.Outgoings[0].ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if out2.Outgoings[0].ToPageID != newFixturePageID(pageBID) {
 		t.Fatalf("expected ToPageID %q, got %q", pageBID, out2.Outgoings[0].ToPageID)
 	}
 
-	bl, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	bl, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
 	if bl.Count != 1 {
 		t.Fatalf("expected 1 backlink, got %d: %#v", bl.Count, bl.Backlinks)
 	}
-	if bl.Backlinks[0].FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if bl.Backlinks[0].FromPageID != newFixturePageID(pageAID) {
 		t.Fatalf("expected FromPageID %q, got %q", pageAID, bl.Backlinks[0].FromPageID)
 	}
-	if bl.Backlinks[0].ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if bl.Backlinks[0].ToPageID != newFixturePageID(pageBID) {
 		t.Fatalf("expected ToPageID %q, got %q", pageBID, bl.Backlinks[0].ToPageID)
 	}
 }
@@ -1276,12 +1276,12 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 	}
 	pageAID := *aIDPtr
 
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	var linkToB = "Link to B: [Go](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &linkToB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
@@ -1289,7 +1289,7 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 		t.Fatalf("IndexAllPages failed: %v", err)
 	}
 
-	out1, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	out1, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
 	}
@@ -1313,7 +1313,7 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 	}
 	pageBID := *bIDPtr
 
-	pageB, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	pageB, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage B failed: %v", err)
 	}
@@ -1322,7 +1322,7 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 		t.Fatalf("HealLinksForExactPath failed: %v", err)
 	}
 
-	out2, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	out2, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage (after heal) failed: %v", err)
 	}
@@ -1333,21 +1333,21 @@ func TestLinkService_HealOnPageCreate_ResolvesBrokenLinksWithoutReindex(t *testi
 	if out2.Outgoings[0].Broken != false {
 		t.Fatalf("expected outgoing to be resolved after heal, got %#v", out2.Outgoings[0])
 	}
-	if out2.Outgoings[0].ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if out2.Outgoings[0].ToPageID != newFixturePageID(pageBID) {
 		t.Fatalf("expected ToPageID %q after heal, got %q", pageBID, out2.Outgoings[0].ToPageID)
 	}
 
-	bl, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	bl, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
 	if bl.Count != 1 {
 		t.Fatalf("expected 1 backlink for B after heal, got %d: %#v", bl.Count, bl.Backlinks)
 	}
-	if bl.Backlinks[0].FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if bl.Backlinks[0].FromPageID != newFixturePageID(pageAID) {
 		t.Fatalf("expected backlink FromPageID %q, got %q", pageAID, bl.Backlinks[0].FromPageID)
 	}
-	if bl.Backlinks[0].ToPageID != tree.NewPageIDUnchecked(pageBID) {
+	if bl.Backlinks[0].ToPageID != newFixturePageID(pageBID) {
 		t.Fatalf("expected backlink ToPageID %q, got %q", pageBID, bl.Backlinks[0].ToPageID)
 	}
 }
@@ -1375,30 +1375,30 @@ func TestLinksStore_GetBrokenIncomingForPath_ReturnsBrokenLinks(t *testing.T) {
 	pageCID := *cIDPtr
 
 	// Update A and B to link to a non-existent page "/nonexistent"
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	var linkToMissing = "Link: [Missing](/nonexistent)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &linkToMissing, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToMissing, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
-	pageB, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	pageB, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage B failed: %v", err)
 	}
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageB.ID), pageB.Title, tree.NewSlugUnchecked(pageB.Slug), &linkToMissing, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &linkToMissing, false); err != nil {
 		t.Fatalf("UpdateNode B failed: %v", err)
 	}
 
 	// Page C links to a different broken page
-	pageC, err := ts.GetPage(tree.NewPageIDUnchecked(pageCID))
+	pageC, err := ts.GetPage(newFixturePageID(pageCID))
 	if err != nil {
 		t.Fatalf("GetPage C failed: %v", err)
 	}
 	var linkToOther = "Link: [Other](/other-missing)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageC.ID), pageC.Title, tree.NewSlugUnchecked(pageC.Slug), &linkToOther, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageC.ID), pageC.Title, newFixtureSlug(pageC.Slug), &linkToOther, false); err != nil {
 		t.Fatalf("UpdateNode C failed: %v", err)
 	}
 
@@ -1435,10 +1435,10 @@ func TestLinksStore_GetBrokenIncomingForPath_ReturnsBrokenLinks(t *testing.T) {
 	for _, link := range brokenLinks {
 		fromPageIDs[link.FromPageID] = struct{}{}
 	}
-	if _, found := fromPageIDs[tree.NewPageIDUnchecked(pageAID)]; !found {
+	if _, found := fromPageIDs[newFixturePageID(pageAID)]; !found {
 		t.Errorf("expected broken link from page A (%s)", pageAID)
 	}
-	if _, found := fromPageIDs[tree.NewPageIDUnchecked(pageBID)]; !found {
+	if _, found := fromPageIDs[newFixturePageID(pageBID)]; !found {
 		t.Errorf("expected broken link from page B (%s)", pageBID)
 	}
 }
@@ -1459,22 +1459,22 @@ func TestLinksStore_GetBrokenIncomingForPath_FiltersByPath(t *testing.T) {
 	pageBID := *bIDPtr
 
 	// Page A links to "/missing1"
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	var linkToMissing1 = "Link: [Missing1](/missing1)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &linkToMissing1, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToMissing1, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
 	// Page B links to "/missing2"
-	pageB, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	pageB, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage B failed: %v", err)
 	}
 	var linkToMissing2 = "Link: [Missing2](/missing2)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageB.ID), pageB.Title, tree.NewSlugUnchecked(pageB.Slug), &linkToMissing2, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &linkToMissing2, false); err != nil {
 		t.Fatalf("UpdateNode B failed: %v", err)
 	}
 
@@ -1491,7 +1491,7 @@ func TestLinksStore_GetBrokenIncomingForPath_FiltersByPath(t *testing.T) {
 	if len(broken1) != 1 {
 		t.Fatalf("expected 1 broken link for /missing1, got %d: %#v", len(broken1), broken1)
 	}
-	if broken1[0].FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if broken1[0].FromPageID != newFixturePageID(pageAID) {
 		t.Errorf("broken link FromPageID = %q, want %q", broken1[0].FromPageID, pageAID)
 	}
 
@@ -1504,7 +1504,7 @@ func TestLinksStore_GetBrokenIncomingForPath_FiltersByPath(t *testing.T) {
 	if len(broken2) != 1 {
 		t.Fatalf("expected 1 broken link for /missing2, got %d: %#v", len(broken2), broken2)
 	}
-	if broken2[0].FromPageID != tree.NewPageIDUnchecked(pageBID) {
+	if broken2[0].FromPageID != newFixturePageID(pageBID) {
 		t.Errorf("broken link FromPageID = %q, want %q", broken2[0].FromPageID, pageBID)
 	}
 }
@@ -1524,12 +1524,12 @@ func TestLinksStore_GetBrokenIncomingForPath_EmptyWhenNoBrokenLinks(t *testing.T
 	}
 
 	// Page A links to existing Page B (not broken)
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	var linkToB = "Link: [To B](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &linkToB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
@@ -1585,7 +1585,7 @@ func TestLinksStore_GetBrokenIncomingForPath_OrdersByFromTitle(t *testing.T) {
 			t.Fatalf("GetPage(%s) failed: %v", id, err)
 		}
 		var linkToMissing = "Link: [Missing](/missing)"
-		if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(page.ID), page.Title, tree.NewSlugUnchecked(page.Slug), &linkToMissing, false); err != nil {
+		if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &linkToMissing, false); err != nil {
 			t.Fatalf("UpdateNode(%s) failed: %v", id, err)
 		}
 	}
@@ -1623,12 +1623,12 @@ func TestLinksStore_GetBrokenIncomingForPath_OnlyReturnsBrokenNotResolved(t *tes
 	}
 	pageAID := *aIDPtr
 
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	var linkToB = "Link: [To B](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &linkToB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
@@ -1653,12 +1653,12 @@ func TestLinksStore_GetBrokenIncomingForPath_OnlyReturnsBrokenNotResolved(t *tes
 	}
 	pageBID := *bIDPtr
 
-	pageB, err := ts.GetPage(tree.NewPageIDUnchecked(pageBID))
+	pageB, err := ts.GetPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetPage B failed: %v", err)
 	}
 	var contentB = "# Page B"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageB.ID), pageB.Title, tree.NewSlugUnchecked(pageB.Slug), &contentB, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &contentB, false); err != nil {
 		t.Fatalf("UpdateNode B failed: %v", err)
 	}
 
@@ -1677,14 +1677,14 @@ func TestLinksStore_GetBrokenIncomingForPath_OnlyReturnsBrokenNotResolved(t *tes
 	}
 
 	// Verify the link still exists but is not broken
-	backlinks, err := store.GetBacklinksForPage(tree.NewPageIDUnchecked(pageBID))
+	backlinks, err := store.GetBacklinksForPage(newFixturePageID(pageBID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage failed: %v", err)
 	}
 	if len(backlinks) != 1 {
 		t.Fatalf("expected 1 resolved backlink, got %d: %#v", len(backlinks), backlinks)
 	}
-	if backlinks[0].FromPageID != tree.NewPageIDUnchecked(pageAID) {
+	if backlinks[0].FromPageID != newFixturePageID(pageAID) {
 		t.Errorf("backlink FromPageID = %q, want %q", backlinks[0].FromPageID, pageAID)
 	}
 }
@@ -1697,15 +1697,15 @@ func TestLinkService_HealLinksForExactPath_RehomesExtensionlessLinkToSectionTwin
 		t.Fatalf("CreateNode source failed: %v", err)
 	}
 	sourceID := *sourceIDPtr
-	source, err := ts.GetPage(tree.NewPageIDUnchecked(sourceID))
+	source, err := ts.GetPage(newFixturePageID(sourceID))
 	if err != nil {
 		t.Fatalf("GetPage source failed: %v", err)
 	}
 	sourceContent := "Link: [Target](/x)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(source.ID), source.Title, tree.NewSlugUnchecked(source.Slug), &sourceContent, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &sourceContent, false); err != nil {
 		t.Fatalf("UpdateNode source failed: %v", err)
 	}
-	source, err = ts.GetPage(tree.NewPageIDUnchecked(sourceID))
+	source, err = ts.GetPage(newFixturePageID(sourceID))
 	if err != nil {
 		t.Fatalf("GetPage updated source failed: %v", err)
 	}
@@ -1713,7 +1713,7 @@ func TestLinkService_HealLinksForExactPath_RehomesExtensionlessLinkToSectionTwin
 		t.Fatalf("UpdateLinksForPage source failed: %v", err)
 	}
 
-	initialStatus, err := svc.GetLinkStatusForPage(source.ID, source.CalculatePath())
+	initialStatus, err := svc.GetLinkStatusForPage(source.ID, source.CalculateRoutePath())
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage initial failed: %v", err)
 	}
@@ -1739,7 +1739,7 @@ func TestLinkService_HealLinksForExactPath_RehomesExtensionlessLinkToSectionTwin
 	if pageBacklinks.Count != 0 {
 		t.Fatalf("page target backlinks after extensionless heal = %#v, want none", pageBacklinks.Backlinks)
 	}
-	statusAfterPageHeal, err := svc.GetLinkStatusForPage(source.ID, source.CalculatePath())
+	statusAfterPageHeal, err := svc.GetLinkStatusForPage(source.ID, source.CalculateRoutePath())
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage after page heal failed: %v", err)
 	}
@@ -1790,21 +1790,21 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 	}
 	pageCID := *cIDPtr
 
-	pageA, err := ts.GetPage(tree.NewPageIDUnchecked(pageAID))
+	pageA, err := ts.GetPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetPage A failed: %v", err)
 	}
 	contentA := "Link: [B](/b.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageA.ID), pageA.Title, tree.NewSlugUnchecked(pageA.Slug), &contentA, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &contentA, false); err != nil {
 		t.Fatalf("UpdateNode A failed: %v", err)
 	}
 
-	pageC, err := ts.GetPage(tree.NewPageIDUnchecked(pageCID))
+	pageC, err := ts.GetPage(newFixturePageID(pageCID))
 	if err != nil {
 		t.Fatalf("GetPage C failed: %v", err)
 	}
 	contentC := "Link: [D](/d.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(pageC.ID), pageC.Title, tree.NewSlugUnchecked(pageC.Slug), &contentC, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageC.ID), pageC.Title, newFixtureSlug(pageC.Slug), &contentC, false); err != nil {
 		t.Fatalf("UpdateNode C failed: %v", err)
 	}
 
@@ -1834,7 +1834,7 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 		t.Fatalf("UpdateLinksAndHealForPages failed: %v", err)
 	}
 
-	outA, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageAID))
+	outA, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage(A) failed: %v", err)
 	}
@@ -1848,7 +1848,7 @@ func TestLinkService_UpdateLinksAndHealForPages_UpdatesAndHealsMultiplePages(t *
 		t.Fatalf("A ToPageID = %q, want %q", outA.Outgoings[0].ToPageID, pageB.ID)
 	}
 
-	outC, err := svc.GetOutgoingLinksForPage(tree.NewPageIDUnchecked(pageCID))
+	outC, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageCID))
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage(C) failed: %v", err)
 	}
@@ -1875,7 +1875,7 @@ func TestLinkService_UpdateLinksAndHealForPages_DoesNotHealUnknownExtensionlessL
 		t.Fatalf("GetPage source failed: %v", err)
 	}
 	content := "[Legacy](/target)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(source.ID), source.Title, tree.NewSlugUnchecked(source.Slug), &content, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &content, false); err != nil {
 		t.Fatalf("UpdateNode source failed: %v", err)
 	}
 
@@ -2118,12 +2118,12 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 	}
 	oldTargetID := *oldTargetIDPtr
 
-	source, err := ts.GetPage(tree.NewPageIDUnchecked(sourceID))
+	source, err := ts.GetPage(newFixturePageID(sourceID))
 	if err != nil {
 		t.Fatalf("GetPage source failed: %v", err)
 	}
 	oldContent := "Link: [Old](/old-target.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(source.ID), source.Title, tree.NewSlugUnchecked(source.Slug), &oldContent, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &oldContent, false); err != nil {
 		t.Fatalf("UpdateNode source failed: %v", err)
 	}
 
@@ -2138,11 +2138,11 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 	newTargetID := *newTargetIDPtr
 
 	updatedContent := "Link: [New](/new-target.md)"
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), tree.NewPageIDUnchecked(source.ID), source.Title, tree.NewSlugUnchecked(source.Slug), &updatedContent, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &updatedContent, false); err != nil {
 		t.Fatalf("UpdateNode source (rewrite) failed: %v", err)
 	}
 
-	updatedSource, err := ts.GetPage(tree.NewPageIDUnchecked(sourceID))
+	updatedSource, err := ts.GetPage(newFixturePageID(sourceID))
 	if err != nil {
 		t.Fatalf("GetPage source (updated) failed: %v", err)
 	}
@@ -2151,7 +2151,7 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 		t.Fatalf("UpdateLinksAndHealForPages failed: %v", err)
 	}
 
-	oldBacklinks, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(oldTargetID))
+	oldBacklinks, err := svc.GetBacklinksForPage(newFixturePageID(oldTargetID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage(old target) failed: %v", err)
 	}
@@ -2159,14 +2159,14 @@ func TestLinkService_UpdateLinksAndHealForPages_ReindexesOutgoingForSourcePages(
 		t.Fatalf("expected 0 backlinks for old target, got %d: %#v", oldBacklinks.Count, oldBacklinks.Backlinks)
 	}
 
-	newBacklinks, err := svc.GetBacklinksForPage(tree.NewPageIDUnchecked(newTargetID))
+	newBacklinks, err := svc.GetBacklinksForPage(newFixturePageID(newTargetID))
 	if err != nil {
 		t.Fatalf("GetBacklinksForPage(new target) failed: %v", err)
 	}
 	if newBacklinks.Count != 1 {
 		t.Fatalf("expected 1 backlink for new target, got %d: %#v", newBacklinks.Count, newBacklinks.Backlinks)
 	}
-	if newBacklinks.Backlinks[0].FromPageID != tree.NewPageIDUnchecked(sourceID) {
+	if newBacklinks.Backlinks[0].FromPageID != newFixturePageID(sourceID) {
 		t.Fatalf("new backlink FromPageID = %q, want %q", newBacklinks.Backlinks[0].FromPageID, sourceID)
 	}
 }

@@ -9,7 +9,11 @@ import {
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useAppMode } from '@/lib/useAppMode'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
-import type { WorkspaceSyncIssueCode } from '@/lib/semanticTypes'
+import {
+  asRoutePath,
+  type WorkspaceID,
+  type WorkspaceSyncIssueCode,
+} from '@/lib/semanticTypes'
 import {
   getWikiTargetRoutePath,
   markdownRouteLookupKind,
@@ -45,7 +49,7 @@ import { TreeNode } from './TreeNode'
 import { refreshCurrentViewerPageAndLinkStatus } from './workspaceSyncRefresh'
 
 type TreeViewProps = {
-  workspaceId?: string
+  workspaceId?: WorkspaceID
 }
 
 export default function TreeView({
@@ -78,7 +82,7 @@ export default function TreeView({
     (state) => state.page?.id ?? state.initialPage?.id,
   )
   const observedWorkspaceCommitRef = useRef<string | null>(null)
-  const observedWorkspaceIdRef = useRef<string | null>(null)
+  const observedWorkspaceIdRef = useRef<WorkspaceID | null>(null)
 
   const route = splitWorkspaceRoute(pathname)
   const routeMatchesWorkspace = route.workspaceId === workspaceId
@@ -129,7 +133,7 @@ export default function TreeView({
 
   useEffect(() => {
     if (!tree || !routeMatchesWorkspace || !currentPath) return
-    openAncestorsForPath(currentPath, currentKind, workspaceId)
+    openAncestorsForPath(asRoutePath(currentPath), currentKind, workspaceId)
   }, [
     tree,
     routeMatchesWorkspace,
@@ -158,7 +162,7 @@ export default function TreeView({
 
     const node = useTreeStore
       .getState()
-      .getPageByPath(currentPath, currentKind, workspaceId)
+      .getPageByPath(asRoutePath(currentPath), currentKind, workspaceId)
     setActiveNodeId(node?.id ?? null, workspaceId)
   }, [
     tree,
@@ -221,9 +225,13 @@ export default function TreeView({
       await reloadTree(workspaceId)
       await refreshCurrentViewerPageAndLinkStatus(workspaceId)
       if (status.validationErrors.length > 0 || status.lastError) {
-        toast.warning('Workspace synced with Markdown errors')
+        toast.warning('Workspace synced with Markdown errors', {
+          validationCode: 'workspace_sync_validation',
+        })
       } else {
-        toast.success('Workspace synced')
+        toast.success('Workspace synced', {
+          messageId: 'ui.toast.workspace.synced',
+        })
       }
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to sync workspace')

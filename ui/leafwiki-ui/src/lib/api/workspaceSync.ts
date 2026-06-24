@@ -3,6 +3,8 @@ import { workspaceApiPath } from './workspaces'
 import type {
   CommitHash,
   MarkdownPath,
+  MessageID,
+  UserID,
   WorkspaceID,
   WorkspaceSyncIssueCode,
   WorkspaceSyncIssueSeverity,
@@ -10,9 +12,16 @@ import type {
 
 export type WorkspaceSyncValidationError = {
   code?: WorkspaceSyncIssueCode
+  messageId?: MessageID
   path?: MarkdownPath
   message: string
   severity?: WorkspaceSyncIssueSeverity
+}
+
+export type WorkspaceSyncErrorDetail = {
+  code?: string
+  messageId?: MessageID
+  message: string
 }
 
 export type WorkspaceSyncStatus = {
@@ -27,8 +36,13 @@ export type WorkspaceSyncStatus = {
   validationErrors: WorkspaceSyncValidationError[]
 }
 
+type WorkspaceSyncStatusPayload = Partial<WorkspaceSyncStatus> & {
+  lastErrorDetail?: WorkspaceSyncErrorDetail | null
+  validationErrorDetails?: WorkspaceSyncValidationError[] | null
+}
+
 export type WorkspaceSnapshotAuthor = {
-  id?: string
+  id?: UserID
   name?: string
   username?: string
   email?: string
@@ -56,11 +70,24 @@ export type WorkspaceSnapshotsResponse = {
   nextCursor?: CommitHash
 }
 
-function normalizeStatus(value: unknown): WorkspaceSyncStatus {
+function messageFromErrorDetail(
+  detail: WorkspaceSyncStatusPayload['lastErrorDetail'],
+): string | undefined {
+  return detail && typeof detail.message === 'string'
+    ? detail.message
+    : undefined
+}
+
+export function normalizeWorkspaceSyncStatus(value: unknown): WorkspaceSyncStatus {
   const raw =
     value && typeof value === 'object'
-      ? (value as Partial<WorkspaceSyncStatus>)
+      ? (value as WorkspaceSyncStatusPayload)
       : {}
+  const validationErrors = Array.isArray(raw.validationErrorDetails)
+    ? raw.validationErrorDetails
+    : Array.isArray(raw.validationErrors)
+      ? raw.validationErrors
+      : []
 
   return {
     enabled: raw.enabled ?? false,
@@ -68,21 +95,19 @@ function normalizeStatus(value: unknown): WorkspaceSyncStatus {
     watcherRunning: raw.watcherRunning,
     pendingEventCount: raw.pendingEventCount,
     lastSyncTime: raw.lastSyncTime,
-    lastError: raw.lastError,
+    lastError: messageFromErrorDetail(raw.lastErrorDetail) ?? raw.lastError,
     recentChangedMarkdownPaths: Array.isArray(raw.recentChangedMarkdownPaths)
       ? raw.recentChangedMarkdownPaths
       : [],
     lastCommitHash: raw.lastCommitHash,
-    validationErrors: Array.isArray(raw.validationErrors)
-      ? raw.validationErrors
-      : [],
+    validationErrors,
   }
 }
 
 export async function getWorkspaceSyncStatus(
   workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
-  return normalizeStatus(
+  return normalizeWorkspaceSyncStatus(
     await fetchWithAuth(
       workspaceApiPath('/api/workspace-sync/status', workspaceId),
     ),
@@ -92,7 +117,7 @@ export async function getWorkspaceSyncStatus(
 export async function refreshWorkspaceSync(
   workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
-  return normalizeStatus(
+  return normalizeWorkspaceSyncStatus(
     await fetchWithAuth(
       workspaceApiPath('/api/workspace-sync/refresh', workspaceId),
       {
@@ -123,7 +148,7 @@ export async function restoreWorkspaceSnapshot(
   commitId: CommitHash,
   workspaceId: WorkspaceID,
 ): Promise<WorkspaceSyncStatus> {
-  return normalizeStatus(
+  return normalizeWorkspaceSyncStatus(
     await fetchWithAuth(
       workspaceApiPath(
         `/api/workspace-sync/snapshots/${encodeURIComponent(commitId)}/restore`,

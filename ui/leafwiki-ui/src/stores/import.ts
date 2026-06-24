@@ -1,6 +1,7 @@
 import * as importAPI from '@/lib/api/import'
 import { ApiError } from '@/lib/api/auth'
 import { mapApiError } from '@/lib/api/errors'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { useTreeStore } from './tree'
@@ -10,14 +11,17 @@ type ImportStore = {
   executingImportPlan: boolean
   cancelingImportPlan: boolean
   loadingImportPlan: boolean
-  workspaceId: string | null
+  workspaceId: WorkspaceID | null
   operationId: number
   importPlan: importAPI.ImportPlan | null
   importResult: importAPI.ImportResult | null
-  createImportPlan: (sourcePath: File, workspaceId: string) => Promise<boolean>
-  loadImportPlan: (workspaceId: string) => Promise<void>
-  executeImportPlan: (workspaceId: string) => Promise<void>
-  cancelImportPlan: (workspaceId: string) => Promise<boolean>
+  createImportPlan: (
+    sourcePath: File,
+    workspaceId: WorkspaceID,
+  ) => Promise<boolean>
+  loadImportPlan: (workspaceId: WorkspaceID) => Promise<void>
+  executeImportPlan: (workspaceId: WorkspaceID) => Promise<void>
+  cancelImportPlan: (workspaceId: WorkspaceID) => Promise<boolean>
 }
 
 const IMPORT_POLL_INTERVAL_MS = 1000
@@ -29,7 +33,7 @@ function sleep(ms: number): Promise<void> {
 
 async function pollImportPlanUntilSettled(
   initialPlan: importAPI.ImportPlan,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   commit: (partial: Partial<ImportStore>) => boolean,
 ): Promise<importAPI.ImportPlan> {
   let currentPlan = initialPlan
@@ -65,7 +69,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
   cancelingImportPlan: false,
   loadingImportPlan: false,
   importResult: null,
-  createImportPlan: async (sourcePath: File, workspaceId: string) => {
+  createImportPlan: async (sourcePath: File, workspaceId) => {
     const operationId = get().operationId + 1
     const commit = (partial: Partial<ImportStore>) => {
       const state = get()
@@ -91,7 +95,9 @@ export const useImportStore = create<ImportStore>((set, get) => ({
         workspaceId,
       )
       if (commit({ importPlan, importResult: null })) {
-        toast.success('Import plan created successfully')
+        toast.success('Import plan created successfully', {
+          importStatus: importPlan.execution_status,
+        })
       }
       return true
     } catch (err) {
@@ -107,7 +113,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
       commit({ creatingImportPlan: false })
     }
   },
-  loadImportPlan: async (workspaceId: string) => {
+  loadImportPlan: async (workspaceId) => {
     const operationId = get().operationId + 1
     const commit = (partial: Partial<ImportStore>) => {
       const state = get()
@@ -173,7 +179,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
       commit({ loadingImportPlan: false, executingImportPlan: false })
     }
   },
-  executeImportPlan: async (workspaceId: string) => {
+  executeImportPlan: async (workspaceId) => {
     const operationId = get().operationId + 1
     const commit = (partial: Partial<ImportStore>) => {
       const state = get()
@@ -189,7 +195,9 @@ export const useImportStore = create<ImportStore>((set, get) => ({
     const importPlan =
       state.workspaceId === workspaceId ? state.importPlan : null
     if (importPlan === null) {
-      toast.error('No import plan to execute')
+      toast.error('No import plan to execute', {
+        importStatus: 'missing_plan',
+      })
       return
     }
     try {
@@ -218,7 +226,9 @@ export const useImportStore = create<ImportStore>((set, get) => ({
             importResult: currentPlan.execution_result ?? null,
           })
         ) {
-          toast.success('Import completed successfully')
+          toast.success('Import completed successfully', {
+            importStatus: currentPlan.execution_status,
+          })
         }
       } else if (currentPlan.execution_status === 'canceled') {
         if (
@@ -227,7 +237,9 @@ export const useImportStore = create<ImportStore>((set, get) => ({
             importResult: currentPlan.execution_result ?? null,
           })
         ) {
-          toast.success('Import canceled')
+          toast.success('Import canceled', {
+            importStatus: currentPlan.execution_status,
+          })
         }
       } else if (currentPlan.execution_status === 'failed') {
         commit({ importPlan: currentPlan })
@@ -249,7 +261,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
       void useTreeStore.getState().reloadTree(workspaceId)
     }
   },
-  cancelImportPlan: async (workspaceId: string) => {
+  cancelImportPlan: async (workspaceId) => {
     const operationId = get().operationId + 1
     const commit = (partial: Partial<ImportStore>) => {
       const state = get()
@@ -265,7 +277,9 @@ export const useImportStore = create<ImportStore>((set, get) => ({
     const importPlan =
       state.workspaceId === workspaceId ? state.importPlan : null
     if (importPlan === null) {
-      toast.error('No import plan to clear')
+      toast.error('No import plan to clear', {
+        importStatus: 'missing_plan',
+      })
       return false
     }
     try {
@@ -300,6 +314,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
             finalPlan.execution_status === 'canceled'
               ? 'Import canceled'
               : 'Import finished before cancellation completed',
+            { importStatus: finalPlan.execution_status },
           )
         }
         void useTreeStore.getState().reloadTree(workspaceId)
@@ -307,7 +322,7 @@ export const useImportStore = create<ImportStore>((set, get) => ({
       }
 
       if (commit({ importPlan: null, importResult: null })) {
-        toast.success('Import plan cleared')
+        toast.success('Import plan cleared', { importStatus: 'cleared' })
       }
       return true
     } catch (err) {

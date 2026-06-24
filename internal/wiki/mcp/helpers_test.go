@@ -80,7 +80,7 @@ func TestActorForMissingTokenInfoUsesStdioAPIKeyAndReloadsCurrentUser(t *testing
 	t.Parallel()
 
 	userService, apiKeyService, editor := newMCPAuthServices(t)
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -239,7 +239,7 @@ func newMCPAPIKeyAuthFixture(t *testing.T) (*coreauth.UserService, *coreauth.API
 			t.Fatalf("close api key service: %v", err)
 		}
 	})
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)

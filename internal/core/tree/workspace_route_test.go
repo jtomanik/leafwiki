@@ -82,7 +82,7 @@ func TestMapWorkspaceMarkdownRoute(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MapWorkspaceMarkdownRoute() error = %v", err)
 			}
-			if got.SourcePath != NewWorkspaceSourcePathUnchecked(tt.relPath) {
+			if got.SourcePath != newFixtureWorkspaceSourcePath(tt.relPath) {
 				t.Fatalf("SourcePath = %q, want %q", got.SourcePath, tt.relPath)
 			}
 			if got.Skip != tt.wantSkip {
@@ -94,13 +94,13 @@ func TestMapWorkspaceMarkdownRoute(t *testing.T) {
 			if tt.wantSkip {
 				return
 			}
-			if got.RoutePath != NewRoutePathUnchecked(tt.wantRoute) {
+			if got.RoutePath != newFixtureRoutePath(tt.wantRoute) {
 				t.Fatalf("RoutePath = %q, want %q", got.RoutePath, tt.wantRoute)
 			}
 			if got.Kind != tt.wantKind {
 				t.Fatalf("Kind = %q, want %q", got.Kind, tt.wantKind)
 			}
-			if got.ContentPath != NewMarkdownPathUnchecked(tt.wantContent) {
+			if got.ContentPath != newFixtureMarkdownPath(tt.wantContent) {
 				t.Fatalf("ContentPath = %q, want %q", got.ContentPath, tt.wantContent)
 			}
 		})

@@ -4,7 +4,12 @@ import { Button } from '@/components/ui/button'
 import { NODE_KIND_PAGE, PageNode, sortPages } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_SORT_PAGES } from '@/lib/registries'
-import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useTreeStore } from '@/stores/tree'
 import {
   DndContext,
@@ -34,7 +39,7 @@ function SortableItem({
   total,
   onMove,
 }: {
-  id: string
+  id: PageID
   title: string
   index: number
   total: number
@@ -105,7 +110,7 @@ export function SortPagesDialog({
   workspaceId,
 }: {
   parent: PageNode
-  workspaceId: string
+  workspaceId: WorkspaceID
 }) {
   const itemLabel = parent.kind === NODE_KIND_PAGE ? 'page' : 'section'
   const itemLabelCapitalized =

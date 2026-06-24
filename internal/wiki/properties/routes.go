@@ -9,6 +9,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
+	coreprop "github.com/perber/wiki/internal/properties"
 )
 
 // Routes is the RouteRegistrar for the properties domain.
@@ -70,7 +71,10 @@ func (r *Routes) handleGetPropertyKeys(c *gin.Context) {
 		return
 	}
 
-	out, err := r.getPropertyKeys.Execute(c.Request.Context(), GetPropertyKeysInput{Filter: filter, Limit: limit})
+	out, err := r.getPropertyKeys.Execute(c.Request.Context(), GetPropertyKeysInput{
+		Filter:   filter,
+		PageSize: coreprop.PropertyKeyLimit(limit),
+	})
 	if err != nil {
 		respondWithPropertiesError(c, err)
 		return

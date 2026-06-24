@@ -9,6 +9,7 @@ import {
   splitWorkspaceRoute,
 } from '@/lib/workspaceRoute'
 import { isAssetPath, workspaceAssetPath } from '@/lib/workspaceAssets'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import {
   markdownHrefToWikiBrowserPath,
   markdownHrefToWikiRoutePath,
@@ -36,7 +37,7 @@ interface MarkdownLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   path?: string
   sourceKind?: WikiNodeKind
   node?: unknown
-  workspaceId?: string
+  workspaceId?: WorkspaceID
   resolveAssetUrl?: (src: string) => string
 }
 

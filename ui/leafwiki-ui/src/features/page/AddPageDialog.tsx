@@ -4,7 +4,13 @@ import { createPage, NODE_KIND_PAGE } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
-import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asSlug,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
 import { useCallback, useMemo, useState } from 'react'
@@ -15,8 +21,8 @@ import { SlugInputWithSuggestion } from './SlugInputWithSuggestion'
 const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type AddPageDialogProps = {
-  parentId: string
-  workspaceId: string
+  parentId: PageID | ''
+  workspaceId: WorkspaceID
   nodeKind?: 'page' | 'section'
 }
 
@@ -34,7 +40,7 @@ export function AddPageDialog({
   const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const reloadTree = useTreeStore((s) => s.reloadTree)
   const parentPath = useTreeStore(
-    (s) => s.getPathById(parentId, workspaceId) || '',
+    (s) => (parentId ? s.getPathById(parentId, workspaceId) : '') || '',
   )
   const navigate = useNavigate()
   const itemLabel = nodeKind === NODE_KIND_PAGE ? 'page' : 'section'
@@ -74,12 +80,16 @@ export function AddPageDialog({
       if (!title) return false
 
       if (!slug) {
-        toast.error('Slug could not be generated. Please enter it manually.')
+        toast.error('Slug could not be generated. Please enter it manually.', {
+          messageId: 'ui.toast.page.slug_generation_failed',
+        })
         return false
       }
 
       if (!slugTouched && (slugLoading || title !== lastSlugTitle)) {
-        toast.warning('Please wait until the slug is fully generated.')
+        toast.warning('Please wait until the slug is fully generated.', {
+          messageId: 'ui.toast.page.slug_generation_pending',
+        })
         return false
       }
 

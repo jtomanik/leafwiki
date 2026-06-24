@@ -38,7 +38,9 @@ export function handleFieldErrors(
       }
     }
     setFieldErrors?.(errorMap)
-    toast.error('Validation failed')
+    toast.error('Validation failed', {
+      messageId: 'ui.toast.validation.failed',
+    })
   } else {
     const mapped = mapApiError(err, fallbackMessage)
     toast.error(mapped.message)

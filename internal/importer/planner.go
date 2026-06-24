@@ -140,7 +140,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	readmeFallback := sourceFilename == "README.md" && !p.sourceDirHasIndex(options.SourceBasePath, sourceDir)
 	if filenameLower == "index.md" || readmeFallback {
 		kind = tree.NodeKindSection
-		wikiPath = tree.NewRoutePathUnchecked(strings.Trim(path.Join(targetBase, normalizedSourceDir), "/"))
+		wikiPath = tree.RoutePathFromString(strings.Trim(path.Join(targetBase, normalizedSourceDir), "/"))
 	} else {
 		// File names map to page slugs, so we normalize the basename but preserve the extension.
 		normalizedFilename, err := p.slugger.NormalizeFilenameToValidSlug(filenameLower) // e.g. "my-page.md"
@@ -151,7 +151,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 		if sourceFilename == "README.md" {
 			baseSlug = "README"
 		}
-		wikiPath = tree.NewRoutePathUnchecked(strings.Trim(path.Join(targetBase, normalizedSourceDir, baseSlug), "/"))
+		wikiPath = tree.RoutePathFromString(strings.Trim(path.Join(targetBase, normalizedSourceDir, baseSlug), "/"))
 	}
 
 	// lookup existing

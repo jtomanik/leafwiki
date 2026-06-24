@@ -22,7 +22,7 @@ func EnrichPageMetadata(page *dto.Page, readPageRaw func(tree.PageID) (string, e
 	page.Tags = []string{}
 	page.Properties = map[string]string{}
 
-	raw, err := readPageRaw(tree.NewPageIDUnchecked(page.ID))
+	raw, err := readPageRaw(tree.PageIDFromString(page.ID))
 	if err != nil {
 		return
 	}

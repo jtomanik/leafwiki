@@ -129,7 +129,7 @@ func pageKind() *tree.NodeKind {
 func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
 	t.Helper()
 
-	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), pageKind())
+	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), pageKind())
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
@@ -140,7 +140,7 @@ func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, 
 	}
 	fm += "---\n\n# " + title
 
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &fm, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, newFixtureSlug(slug), &fm, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 
@@ -220,7 +220,7 @@ func TestTagsService_IndexAllPages_PagesWithoutTagsAreSkipped(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	content := "# No Tags Page\n\nNo frontmatter."
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, "No Tags Page", tree.NewSlugUnchecked("no-tags"), &content, false); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, "No Tags Page", newFixtureSlug("no-tags"), &content, false); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
 

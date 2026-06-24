@@ -17,12 +17,12 @@ type loginAttemptEntry struct {
 
 type loginAttemptTracker struct {
 	mu      sync.Mutex
-	entries map[string]*loginAttemptEntry
+	entries map[UserID]*loginAttemptEntry
 }
 
 func newLoginAttemptTracker() *loginAttemptTracker {
 	return &loginAttemptTracker{
-		entries: make(map[string]*loginAttemptEntry),
+		entries: make(map[UserID]*loginAttemptEntry),
 	}
 }
 
@@ -31,7 +31,7 @@ func newLoginAttemptTracker() *loginAttemptTracker {
 // locked (caller must reject the attempt), true if the attempt may proceed.
 // On the Nth failure the lock is set inside the same critical section, so there
 // is no window between the check and the increment.
-func (t *loginAttemptTracker) recordAttempt(userID string) bool {
+func (t *loginAttemptTracker) recordAttempt(userID UserID) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -61,7 +61,7 @@ func (t *loginAttemptTracker) recordAttempt(userID string) bool {
 	return true
 }
 
-func (t *loginAttemptTracker) reset(userID string) {
+func (t *loginAttemptTracker) reset(userID UserID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.entries, userID)

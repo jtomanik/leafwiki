@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { deferStateUpdate } from '@/lib/deferState'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { DIALOG_PAGE_QUICK_SWITCHER } from '@/lib/registries'
+import { asRoutePath } from '@/lib/semanticTypes'
 import { cn } from '@/lib/utils'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useDialogsStore } from '@/stores/dialogs'
@@ -82,7 +83,7 @@ export function PageQuickSwitcherDialog() {
 
   const openResult = (path: string, kind: 'page' | 'section') => {
     queueMicrotask(() => {
-      openAncestorsForPath(path, kind, workspaceId)
+      openAncestorsForPath(asRoutePath(path), kind, workspaceId)
       navigate(browserRoutePathForWikiNode(path, kind, workspaceId), {
         state: createNavigationVisitState(),
       })

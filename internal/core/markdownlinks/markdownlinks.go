@@ -208,10 +208,10 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 			return nil
 		}
 		if route.Kind == tree.NodeKindSection {
-			entries = append(entries, Entry{Kind: EntryKindSection, RoutePath: route.RoutePath, ContentPath: tree.NewMarkdownPathUnchecked(relPath)})
+			entries = append(entries, Entry{Kind: EntryKindSection, RoutePath: route.RoutePath, ContentPath: tree.MarkdownPathFromString(relPath)})
 			return nil
 		}
-		entries = append(entries, Entry{Kind: EntryKindPage, RoutePath: route.RoutePath, ContentPath: tree.NewMarkdownPathUnchecked(relPath)})
+		entries = append(entries, Entry{Kind: EntryKindPage, RoutePath: route.RoutePath, ContentPath: tree.MarkdownPathFromString(relPath)})
 		return nil
 	})
 	if err != nil {

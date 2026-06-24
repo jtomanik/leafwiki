@@ -43,7 +43,7 @@ func (s *SlugService) GenerateUniqueChildSlug(parent *PageNode, currentID PageID
 	original := slug
 	i := 1
 
-	for hasSlugConflict(parent, currentID, NewSlugUnchecked(slug)) || s.IsValidSlug(slug) != nil {
+	for hasSlugConflict(parent, currentID, SlugFromString(slug)) || s.IsValidSlug(slug) != nil {
 		slug = fmt.Sprintf("%s-%d", original, i)
 		i++
 	}

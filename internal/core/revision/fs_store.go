@@ -181,7 +181,7 @@ func (s *FSStore) ListRevisions(pageID tree.PageID) ([]*Revision, error) {
 	return revisions, nil
 }
 
-func (s *FSStore) ListRevisionsPage(pageID tree.PageID, cursor string, limit int) ([]*Revision, string, error) {
+func (s *FSStore) ListRevisionsPage(pageID tree.PageID, cursor string, pageSize RevisionListLimit) ([]*Revision, string, error) {
 	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
 		return nil, "", fmt.Errorf("invalid page ID: %w", err)
 	}
@@ -209,8 +209,8 @@ func (s *FSStore) ListRevisionsPage(pageID tree.PageID, cursor string, limit int
 	}
 
 	end := len(names)
-	if limit > 0 && start+limit < end {
-		end = start + limit
+	if pageSize > 0 && start+int(pageSize) < end {
+		end = start + int(pageSize)
 	}
 
 	dir := s.revisionsPageDir(pageID)

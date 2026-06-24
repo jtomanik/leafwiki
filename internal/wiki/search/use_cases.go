@@ -27,10 +27,10 @@ var ErrSearchUnavailable = sharederrors.NewLocalizedErrorFromCodeWithFallback(
 // ─── SearchUseCase ───────────────────────────────────────────────────────────
 
 type SearchInput struct {
-	Query  string
-	Tags   []string
-	Offset int
-	Limit  int
+	Query    string
+	Tags     []string
+	StartAt  coresearch.ResultOffset
+	PageSize coresearch.ResultLimit
 }
 
 type SearchOutput struct {
@@ -72,10 +72,10 @@ func (uc *SearchUseCase) Execute(_ context.Context, in SearchInput) (*SearchOutp
 	}
 
 	if strings.TrimSpace(in.Query) == "" && len(pageIDs) > 0 {
-		return uc.searchByTags(pageIDs, in.Offset, in.Limit)
+		return uc.searchByTags(pageIDs, in.StartAt, in.PageSize)
 	}
 
-	result, err := uc.index.Search(in.Query, pageIDs, in.Offset, in.Limit)
+	result, err := uc.index.Search(in.Query, pageIDs, in.StartAt, in.PageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -90,14 +90,14 @@ func (uc *SearchUseCase) Execute(_ context.Context, in SearchInput) (*SearchOutp
 	return &SearchOutput{Result: result}, nil
 }
 
-func (uc *SearchUseCase) searchByTags(pageIDs []tree.PageID, offset, limit int) (*SearchOutput, error) {
+func (uc *SearchUseCase) searchByTags(pageIDs []tree.PageID, startAt coresearch.ResultOffset, pageSize coresearch.ResultLimit) (*SearchOutput, error) {
 	if uc.tags == nil || uc.tree == nil {
 		return &SearchOutput{
 			Result: &coresearch.SearchResult{
 				Count:     0,
 				Items:     []coresearch.SearchResultItem{},
-				Offset:    offset,
-				Limit:     limit,
+				StartAt:   startAt,
+				PageSize:  pageSize,
 				TagFacets: []coresearch.SearchTagFacet{},
 			},
 		}, nil
@@ -132,30 +132,31 @@ func (uc *SearchUseCase) searchByTags(pageIDs []tree.PageID, offset, limit int) 
 		return items[i].Title < items[j].Title
 	})
 
-	if offset < 0 {
-		offset = 0
+	if startAt < 0 {
+		startAt = 0
 	}
-	if limit <= 0 {
-		limit = 20
+	if pageSize <= 0 {
+		pageSize = 20
 	}
 
 	count := len(items)
-	if offset > count {
-		offset = count
+	offsetIndex := int(startAt)
+	if offsetIndex > count {
+		offsetIndex = count
 	}
-	end := offset + limit
+	end := offsetIndex + int(pageSize)
 	if end > count {
 		end = count
 	}
-	pagedItems := items[offset:end]
+	pagedItems := items[offsetIndex:end]
 	uc.attachTags(pagedItems)
 
 	return &SearchOutput{
 		Result: &coresearch.SearchResult{
 			Count:     count,
 			Items:     pagedItems,
-			Offset:    offset,
-			Limit:     limit,
+			StartAt:   startAt,
+			PageSize:  pageSize,
 			TagFacets: uc.buildTagFacets(pageIDs),
 		},
 	}, nil

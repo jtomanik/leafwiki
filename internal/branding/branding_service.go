@@ -133,7 +133,7 @@ func (s *BrandingService) UploadLogo(file multipart.File, filename string) (stri
 	targetPath := filepath.Join(assetsDir, "logo"+ext)
 
 	// Write new logo atomically first
-	if err := shared.WriteStreamAtomic(targetPath, file, s.brandingConfig.BrandingConstraints.MaxLogoSize); err != nil {
+	if err := shared.WriteStreamAtomic(targetPath, file, shared.MaxBytes(s.brandingConfig.BrandingConstraints.MaxLogoSize)); err != nil {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoUploadFailed, err)
 	}
 
@@ -187,7 +187,7 @@ func (s *BrandingService) UploadFavicon(file multipart.File, filename string) (s
 	targetPath := filepath.Join(assetsDir, "favicon"+ext)
 
 	// Write new favicon atomically first
-	if err := shared.WriteStreamAtomic(targetPath, file, s.brandingConfig.BrandingConstraints.MaxFaviconSize); err != nil {
+	if err := shared.WriteStreamAtomic(targetPath, file, shared.MaxBytes(s.brandingConfig.BrandingConstraints.MaxFaviconSize)); err != nil {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconUploadFailed, err)
 	}
 

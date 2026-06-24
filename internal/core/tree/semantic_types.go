@@ -51,16 +51,28 @@ func NewPageIDUnchecked[T ~string](raw T) PageID {
 	return PageID(raw)
 }
 
+func PageIDFromString[T ~string](raw T) PageID {
+	return NewPageIDUnchecked(raw)
+}
+
 type UserID = identity.UserID
 
 func NewUserIDUnchecked(raw string) UserID {
 	return identity.NewUserIDUnchecked(raw)
 }
 
+func UserIDFromString[T ~string](raw T) UserID {
+	return identity.NewUserIDUnchecked(string(raw))
+}
+
 type RevisionID = identity.RevisionID
 
 func NewRevisionIDUnchecked(raw string) RevisionID {
 	return identity.NewRevisionIDUnchecked(raw)
+}
+
+func RevisionIDFromString[T ~string](raw T) RevisionID {
+	return identity.NewRevisionIDUnchecked(string(raw))
 }
 
 type CommitHash = identity.CommitHash
@@ -84,6 +96,10 @@ func NewPageVersionUnchecked[T ~string](raw T) PageVersion {
 	return PageVersion(raw)
 }
 
+func PageVersionFromString[T ~string](raw T) PageVersion {
+	return NewPageVersionUnchecked(raw)
+}
+
 func NewPageVersionFromTime(value time.Time) PageVersion {
 	if value.IsZero() {
 		return ""
@@ -95,6 +111,26 @@ type RoutePath string
 
 func (path RoutePath) String() string {
 	return string(path)
+}
+
+func (path RoutePath) Value() (driver.Value, error) {
+	return path.WikiPath(), nil
+}
+
+func (path *RoutePath) Scan(value any) error {
+	switch typed := value.(type) {
+	case nil:
+		*path = ""
+		return nil
+	case string:
+		*path = RoutePathFromString(typed)
+		return nil
+	case []byte:
+		*path = RoutePathFromString(string(typed))
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T into RoutePath", value)
+	}
 }
 
 func (path RoutePath) FilesystemPath() string {
@@ -127,12 +163,47 @@ func NewMarkdownPathUnchecked(raw string) MarkdownPath {
 	return MarkdownPath(raw)
 }
 
+func MarkdownPathFromString[T ~string](raw T) MarkdownPath {
+	return NewMarkdownPathUnchecked(string(raw))
+}
+
 func (path MarkdownPath) Clean() MarkdownPath {
 	return CleanMarkdownPath(string(path))
 }
 
 func (path MarkdownPath) Ext() string {
 	return pathpkg.Ext(string(path))
+}
+
+func (path MarkdownPath) IsIndexFile() bool {
+	base := path
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			base = path[i+1:]
+			break
+		}
+	}
+	return equalFoldASCII(base, "index.md")
+}
+
+func equalFoldASCII[T ~string](value T, expected string) bool {
+	if len(value) != len(expected) {
+		return false
+	}
+	for i := 0; i < len(expected); i++ {
+		got := value[i]
+		want := expected[i]
+		if got >= 'A' && got <= 'Z' {
+			got += 'a' - 'A'
+		}
+		if want >= 'A' && want <= 'Z' {
+			want += 'a' - 'A'
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func (path MarkdownPath) IsMarkdown() bool {
@@ -302,6 +373,10 @@ func NewWorkspaceSourcePathUnchecked(raw string) WorkspaceSourcePath {
 	return WorkspaceSourcePath(raw)
 }
 
+func WorkspaceSourcePathFromString[T ~string](raw T) WorkspaceSourcePath {
+	return NewWorkspaceSourcePathUnchecked(string(raw))
+}
+
 type Slug string
 
 func (slug Slug) String() string {
@@ -336,6 +411,10 @@ func NewSlugUnchecked[T ~string](raw T) Slug {
 	return Slug(raw)
 }
 
+func SlugFromString[T ~string](raw T) Slug {
+	return NewSlugUnchecked(raw)
+}
+
 type SlugKey string
 
 type AssetName string
@@ -356,12 +435,20 @@ func NewAssetNameUnchecked(raw string) AssetName {
 	return AssetName(raw)
 }
 
+func AssetNameFromString[T ~string](raw T) AssetName {
+	return NewAssetNameUnchecked(string(raw))
+}
+
 func ParseRoutePath(raw string) (RoutePath, error) {
 	return ValidateRoutePath(raw)
 }
 
 func NewRoutePathUnchecked(raw string) RoutePath {
 	return RoutePath(raw)
+}
+
+func RoutePathFromString[T ~string](raw T) RoutePath {
+	return NewRoutePathUnchecked(string(raw))
 }
 
 func ParseSlug(raw string) (Slug, error) {

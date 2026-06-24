@@ -53,7 +53,7 @@ func (a *AuthService) Login(identifier, password string) (*AuthToken, error) {
 		return nil, ErrUserInvalidCredentials
 	}
 
-	if !a.attempts.recordAttempt(user.ID) {
+	if !a.attempts.recordAttempt(UserIDFromString(user.ID)) {
 		return nil, ErrUserAccountLocked
 	}
 
@@ -61,7 +61,7 @@ func (a *AuthService) Login(identifier, password string) (*AuthToken, error) {
 		return nil, ErrUserInvalidCredentials
 	}
 
-	a.attempts.reset(user.ID)
+	a.attempts.reset(UserIDFromString(user.ID))
 	user.Password = ""
 
 	accessToken, _, accessTokenExpiresAt, err := a.generateToken(user, a.accessTokenLifetime, "access")
@@ -76,8 +76,8 @@ func (a *AuthService) Login(identifier, password string) (*AuthToken, error) {
 
 	// store refresh token session
 	if err := a.sessionStore.CreateSession(
-		NewSessionIDUnchecked(refreshJTI),
-		NewUserIDUnchecked(user.ID),
+		SessionIDFromString(refreshJTI),
+		UserIDFromString(user.ID),
 		"refresh",
 		time.Now().Add(a.refreshTokenLifetime),
 	); err != nil {
@@ -114,8 +114,8 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	}
 
 	// Check if the refresh token session is active
-	typedUserID := NewUserIDUnchecked(userID)
-	active, err := a.sessionStore.IsActive(NewSessionIDUnchecked(jti), typedUserID, "refresh", time.Now())
+	typedUserID := UserIDFromString(userID)
+	active, err := a.sessionStore.IsActive(SessionIDFromString(jti), typedUserID, "refresh", time.Now())
 	if err != nil || !active {
 		return nil, ErrInvalidToken
 	}
@@ -138,8 +138,8 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	}
 
 	if err := a.sessionStore.CreateSession(
-		NewSessionIDUnchecked(newRefreshJTI),
-		NewUserIDUnchecked(user.ID),
+		SessionIDFromString(newRefreshJTI),
+		UserIDFromString(user.ID),
 		"refresh",
 		time.Now().Add(a.refreshTokenLifetime),
 	); err != nil {
@@ -151,7 +151,7 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	// remains valid and the user can retry. If revocation fails, we log a warning but
 	// don't fail the refresh operation - the old token will expire naturally, and
 	// having two valid tokens temporarily is safer than logging the user out.
-	err = a.sessionStore.RevokeSession(NewSessionIDUnchecked(jti))
+	err = a.sessionStore.RevokeSession(SessionIDFromString(jti))
 	if err != nil {
 		slog.Warn("failed to revoke used refresh token session", "error", err)
 	}
@@ -180,7 +180,7 @@ func (a *AuthService) RevokeRefreshToken(tokenString string) error {
 		return ErrInvalidToken
 	}
 
-	return a.sessionStore.RevokeSession(NewSessionIDUnchecked(jti))
+	return a.sessionStore.RevokeSession(SessionIDFromString(jti))
 }
 
 func (a *AuthService) RevokeAllUserSessions(userID UserID) error {
@@ -261,5 +261,5 @@ func (a *AuthService) ValidateToken(tokenString string) (*User, error) {
 		return nil, ErrInvalidToken
 	}
 
-	return a.userService.GetUserByID(NewUserIDUnchecked(userID))
+	return a.userService.GetUserByID(UserIDFromString(userID))
 }

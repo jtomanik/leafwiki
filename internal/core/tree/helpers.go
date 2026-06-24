@@ -35,7 +35,7 @@ func GeneratePathFromPageNode(entry *PageNode) RoutePath {
 	} else {
 		path = entry.Slug.FilesystemPath()
 	}
-	return NewRoutePathUnchecked(path)
+	return RoutePathFromString(path)
 }
 
 func GenerateRoutePathFromPageNode(entry *PageNode) RoutePath {
@@ -66,9 +66,10 @@ func pageIndexDiskPath(storageDir string, pagePath string) string {
 
 // EnsurePageIsFolder checks if a page path is still a flat .md file,
 // and if so, converts it into a folder with an index.md file.
-func EnsurePageIsFolder(storageDir string, pagePath string) error {
-	mdPath := pageMarkdownDiskPath(storageDir, pagePath)
-	dirPath := pageDirectoryDiskPath(storageDir, pagePath)
+func EnsurePageIsFolder(storageDir string, route RoutePath) error {
+	routeString := route.FilesystemPath()
+	mdPath := pageMarkdownDiskPath(storageDir, routeString)
+	dirPath := pageDirectoryDiskPath(storageDir, routeString)
 
 	// Already a folder? Nothing to do.
 	if info, err := os.Stat(dirPath); err == nil && info.IsDir() {
@@ -81,7 +82,7 @@ func EnsurePageIsFolder(storageDir string, pagePath string) error {
 			return fmt.Errorf("could not create folder: %w", err)
 		}
 
-		newPath := pageIndexDiskPath(storageDir, pagePath)
+		newPath := pageIndexDiskPath(storageDir, routeString)
 		if err := os.Rename(mdPath, newPath); err != nil {
 			return fmt.Errorf("could not move file to index.md: %w", err)
 		}

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import type { Page } from '@/lib/api/pages'
 import { DIALOG_PAGE_PERMALINK } from '@/lib/registries'
 import { withBasePath } from '@/lib/routePath'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { buildWorkspacePermalinkPath } from '@/lib/workspaceRoute'
 import copy from 'copy-to-clipboard'
 import { Copy, ExternalLink } from 'lucide-react'
@@ -12,7 +13,7 @@ import { toast } from 'sonner'
 
 type PermalinkDialogProps = {
   page: Pick<Page, 'id' | 'slug' | 'title'>
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 export function PermalinkDialog({ page, workspaceId }: PermalinkDialogProps) {
@@ -28,11 +29,15 @@ export function PermalinkDialog({ page, workspaceId }: PermalinkDialogProps) {
 
   const handleCopy = () => {
     if (!copy(permalink)) {
-      toast.error('Could not copy permalink')
+      toast.error('Could not copy permalink', {
+        messageId: 'ui.toast.permalink.copy_failed',
+      })
       return
     }
 
-    toast.success('Permalink copied')
+    toast.success('Permalink copied', {
+      messageId: 'ui.toast.permalink.copied',
+    })
   }
 
   const handleClose = () => true

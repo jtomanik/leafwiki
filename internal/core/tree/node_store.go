@@ -73,7 +73,7 @@ func (f *NodeStore) isSectionContentFileInDir(sectionDir string, filePath string
 }
 
 func ensureUniqueReconstructedID(seenIDs map[PageID]string, id PageID, path string) error {
-	trimmedID := NewPageIDUnchecked(id.MetadataValue())
+	trimmedID := PageIDFromString(id.MetadataValue())
 	if trimmedID == "" {
 		return fmt.Errorf("reconstruct tree from fs: empty leafwiki_id at %s", path)
 	}
@@ -290,8 +290,8 @@ func (f *NodeStore) metadataFromPageMetadata(meta markdown.PageMetadata, fallbac
 	return PageMetadata{
 		CreatedAt:    f.parseMetadataTime(meta.Page.CreatedAt, fallbackTime, "page.created_at", filePath),
 		UpdatedAt:    f.parseMetadataTime(meta.Page.UpdatedAt, fallbackTime, "page.updated_at", filePath),
-		CreatorID:    NewUserIDUnchecked(fallbackMetadataString(meta.Page.CreatorID)),
-		LastAuthorID: NewUserIDUnchecked(fallbackMetadataString(meta.Page.LastAuthorID)),
+		CreatorID:    UserIDFromString(fallbackMetadataString(meta.Page.CreatorID)),
+		LastAuthorID: UserIDFromString(fallbackMetadataString(meta.Page.LastAuthorID)),
 	}
 }
 
@@ -402,7 +402,7 @@ func (f *NodeStore) applyRootSectionContent(root *PageNode, reconstructNow time.
 	} else {
 		f.log.Error("could not extract title from root section index", "path", indexPath, "error", err)
 	}
-	if mdFile.RequiresWriteback() || NewPageIDUnchecked(strings.TrimSpace(meta.Page.ID)) != root.ID || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == "" {
+	if mdFile.RequiresWriteback() || PageIDFromString(strings.TrimSpace(meta.Page.ID)) != root.ID || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == "" {
 		if err := f.writeReconstructedMetadata(mdFile, root); err != nil {
 			return err
 		}
@@ -493,7 +493,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 			}
 
 			child := &PageNode{
-				ID:                  NewPageIDUnchecked(id),
+				ID:                  PageIDFromString(id),
 				Slug:                slug,
 				Title:               title,
 				Parent:              parent,
@@ -568,7 +568,7 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		needsWriteback := mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == ""
 
 		child := &PageNode{
-			ID:                  NewPageIDUnchecked(id),
+			ID:                  PageIDFromString(id),
 			Slug:                slug,
 			Title:               title,
 			Parent:              parent,

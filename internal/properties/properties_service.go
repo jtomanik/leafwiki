@@ -18,6 +18,8 @@ type PropertiesService struct {
 	store *PropertiesStore
 }
 
+type PropertyKeyLimit int
+
 func NewPropertiesService(store *PropertiesStore) *PropertiesService {
 	return &PropertiesService{store: store}
 }
@@ -39,8 +41,8 @@ func (s *PropertiesService) DeletePropertiesForPage(pageID tree.PageID) error {
 	return s.store.DeletePropertiesForPage(pageID)
 }
 
-func (s *PropertiesService) GetAllPropertyKeys(filter string, limit int) ([]PropertyKeyCount, error) {
-	return s.store.GetAllPropertyKeys(filter, limit)
+func (s *PropertiesService) GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) ([]PropertyKeyCount, error) {
+	return s.store.GetAllPropertyKeys(filter, pageSize)
 }
 
 func (s *PropertiesService) GetPageIDsByProperty(key, value string) ([]tree.PageID, error) {

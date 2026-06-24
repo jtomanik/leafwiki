@@ -26,7 +26,7 @@ func TestValidationErrorsAddWithCodeSerializesStableFieldContract(t *testing.T) 
 	}
 }
 
-func TestValidationErrorsLegacyAddKeepsMessageAndProvidesDefaultCode(t *testing.T) {
+func TestValidationErrorsLegacyAddRendersCatalogBackedDefaultCode(t *testing.T) {
 	t.Parallel()
 
 	validation := NewValidationErrors()
@@ -42,7 +42,7 @@ func TestValidationErrorsLegacyAddKeepsMessageAndProvidesDefaultCode(t *testing.
 	if field.MessageID != FieldValidationErrorMessageID {
 		t.Fatalf("MessageID = %q, want validation.field.validation_error", field.MessageID)
 	}
-	if field.Field != "siteName" || field.Message != "site name is required" {
+	if field.Field != "siteName" || field.Message != "Validation error" {
 		t.Fatalf("field error = %#v", field)
 	}
 }

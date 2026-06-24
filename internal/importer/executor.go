@@ -9,6 +9,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -54,7 +55,7 @@ const (
 type Executor struct {
 	plan                   *PlanResult
 	planOptions            *PlanOptions
-	assetMaxBytes          int64
+	assetMaxBytes          shared.MaxBytes
 	wiki                   ImporterWiki
 	logger                 *slog.Logger
 	markdownLinkRootPrefix string
@@ -68,11 +69,11 @@ type ExecutorOptions struct {
 	MarkdownLinkRootPrefix string
 }
 
-func NewExecutor(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes int64, wiki ImporterWiki, logger *slog.Logger) *Executor {
+func NewExecutor(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes shared.MaxBytes, wiki ImporterWiki, logger *slog.Logger) *Executor {
 	return NewExecutorWithOptions(plan, planOptions, assetMaxBytes, wiki, logger, ExecutorOptions{})
 }
 
-func NewExecutorWithOptions(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes int64, wiki ImporterWiki, logger *slog.Logger, opts ExecutorOptions) *Executor {
+func NewExecutorWithOptions(plan *PlanResult, planOptions *PlanOptions, assetMaxBytes shared.MaxBytes, wiki ImporterWiki, logger *slog.Logger, opts ExecutorOptions) *Executor {
 	if assetMaxBytes <= 0 {
 		assetMaxBytes = assets.DefaultMaxUploadSizeBytes
 	}

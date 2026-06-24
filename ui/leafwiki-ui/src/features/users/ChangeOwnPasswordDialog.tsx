@@ -62,7 +62,9 @@ export function ChangeOwnPasswordDialog() {
     setLoading(true)
     try {
       await changeOwnPassword(oldPassword, newPassword)
-      toast.success('Password changed successfully')
+      toast.success('Password changed successfully', {
+        messageId: 'ui.toast.user.password_changed',
+      })
       return true
     } catch (err) {
       console.warn(err)

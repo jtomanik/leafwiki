@@ -10,6 +10,8 @@ import (
 
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+
+	"github.com/perber/wiki/internal/core/identity"
 )
 
 func actorIDStrings(ids []ActorID) []string {
@@ -57,7 +59,7 @@ func TestStoreInitialSnapshotTracksMarkdownOnly(t *testing.T) {
 		t.Fatalf("root .git state = %v, want absent", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), commit.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(commit.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt: %v", err)
 	}
@@ -102,7 +104,7 @@ func TestStoreCaptureTracksUppercaseMarkdownExtension(t *testing.T) {
 	if strings.Join(commit.ChangedMarkdownPaths, ",") != "Page.MD" {
 		t.Fatalf("ChangedMarkdownPaths = %#v, want Page.MD", commit.ChangedMarkdownPaths)
 	}
-	files, err := store.FilesAt(context.Background(), commit.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(commit.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt: %v", err)
 	}
@@ -244,7 +246,7 @@ func TestStoreListCommitsResumesAfterCursorHash(t *testing.T) {
 		t.Fatalf("Capture newest: %v", err)
 	}
 
-	commits, err := store.ListCommits(context.Background(), ListRequest{Cursor: cursor.Hash, Limit: 2})
+	commits, err := store.ListCommits(context.Background(), ListRequest{Cursor: identity.CommitHashFromString(cursor.Hash), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListCommits: %v", err)
 	}
@@ -411,14 +413,14 @@ func TestStoreChangedMarkdownContentsReturnsOnlyCurrentChangedMarkdownBlobs(t *t
 		t.Fatalf("Capture changed: %v", err)
 	}
 
-	paths, err := store.ChangedMarkdownPaths(context.Background(), commit.Hash)
+	paths, err := store.ChangedMarkdownPaths(context.Background(), identity.CommitHashFromString(commit.Hash))
 	if err != nil {
 		t.Fatalf("ChangedMarkdownPaths: %v", err)
 	}
 	if strings.Join(paths, ",") != "changed.md,deleted.md" {
 		t.Fatalf("changed paths = %#v, want changed.md and deleted.md", paths)
 	}
-	contents, err := store.ChangedMarkdownContents(context.Background(), commit.Hash)
+	contents, err := store.ChangedMarkdownContents(context.Background(), identity.CommitHashFromString(commit.Hash))
 	if err != nil {
 		t.Fatalf("ChangedMarkdownContents: %v", err)
 	}
@@ -551,7 +553,7 @@ func TestStoreCapturePrunesPreviouslyTrackedDotDirectoryMarkdown(t *testing.T) {
 	if _, err := prunedTree.File(".obsidian/local.md"); err == nil {
 		t.Fatalf("pruned commit still tracks .obsidian/local.md")
 	}
-	files, err := store.FilesAt(context.Background(), prune.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(prune.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt prune: %v", err)
 	}
@@ -591,7 +593,7 @@ func TestStoreCaptureRecordsMarkdownDeletes(t *testing.T) {
 		t.Fatalf("delete Capture: %v", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), commit.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(commit.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt: %v", err)
 	}
@@ -641,7 +643,7 @@ func TestStoreAmendRecordsMetadataWritebackInSameCommit(t *testing.T) {
 	if len(commits) != 1 {
 		t.Fatalf("commit count = %d, want 1: %#v", len(commits), commits)
 	}
-	files, err := store.FilesAt(context.Background(), amended.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(amended.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt: %v", err)
 	}
@@ -671,7 +673,7 @@ func TestStoreRestoreWorkspaceRestoresMarkdownOnlyAndCreatesCommit(t *testing.T)
 	writeFile(t, filepath.Join(rootDir, "one.md"), "# One current\n")
 	writeFile(t, filepath.Join(rootDir, "three.md"), "# Three current\n")
 	writeFile(t, filepath.Join(rootDir, "image.png"), "png")
-	restore, err := store.RestoreWorkspace(context.Background(), snapshot.Hash, CommitRequest{
+	restore, err := store.RestoreWorkspace(context.Background(), identity.CommitHashFromString(snapshot.Hash), CommitRequest{
 		Reason: ReasonRestore,
 		Source: SourceSystem,
 		Actor:  PublicEditorActor(),
@@ -689,7 +691,7 @@ func TestStoreRestoreWorkspaceRestoresMarkdownOnlyAndCreatesCommit(t *testing.T)
 		t.Fatalf("three.md state = %v, want removed", err)
 	}
 	assertFileContent(t, filepath.Join(rootDir, "image.png"), "png")
-	files, err := store.FilesAt(context.Background(), restore.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(restore.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt restore: %v", err)
 	}
@@ -727,7 +729,7 @@ func TestStoreRestoreDocumentWritesHistoricalContentToCurrentPath(t *testing.T) 
 		t.Fatalf("current Capture: %v", err)
 	}
 
-	restore, err := store.RestoreDocument(context.Background(), "docs/page.md", previous.Hash, CommitRequest{
+	restore, err := store.RestoreDocument(context.Background(), "docs/page.md", identity.CommitHashFromString(previous.Hash), CommitRequest{
 		Reason: ReasonRestore,
 		Source: SourceSystem,
 		Actor:  PublicEditorActor(),
@@ -740,7 +742,7 @@ func TestStoreRestoreDocumentWritesHistoricalContentToCurrentPath(t *testing.T) 
 		t.Fatalf("restore hash = previous hash %s, want new commit", restore.Hash)
 	}
 	assertFileContent(t, filepath.Join(rootDir, "docs", "page.md"), "# Previous\n")
-	files, err := store.FilesAt(context.Background(), restore.Hash)
+	files, err := store.FilesAt(context.Background(), identity.CommitHashFromString(restore.Hash))
 	if err != nil {
 		t.Fatalf("FilesAt restore: %v", err)
 	}

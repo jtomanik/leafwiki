@@ -31,7 +31,7 @@ func TestListRevisionsToolPassesWorkspaceCursorAndReturnsNextCursor(t *testing.T
 	routes := NewRoutes(RoutesConfig{
 		TreeService: treeService,
 		GetPage:     wikipages.NewGetPageUseCase(treeService),
-		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
+		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 			if page.ID != *pageID {
 				t.Fatalf("workspace page id = %q, want %q", page.ID, pageID.String())
 			}

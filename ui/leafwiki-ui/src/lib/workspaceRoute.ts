@@ -1,8 +1,16 @@
-const HOME_WORKSPACE_ID = 'home'
+import {
+  asPageID,
+  asWorkspaceID,
+  type PageID,
+  type Slug,
+  type WorkspaceID,
+} from './semanticTypes'
+
+const HOME_WORKSPACE_ID = asWorkspaceID('home')
 const workspaceIdPattern = /^[a-z0-9][a-z0-9-]*$/
 
 export type WorkspaceRouteParts = {
-  workspaceId: string
+  workspaceId: WorkspaceID
   innerPath: string
 }
 
@@ -11,11 +19,11 @@ function ensureLeadingSlash(pathname: string): string {
   return pathname.startsWith('/') ? pathname : `/${pathname}`
 }
 
-function decodeWorkspaceId(rawWorkspaceId: string): string {
+function decodeWorkspaceId(rawWorkspaceId: string): WorkspaceID {
   try {
     const workspaceId = decodeURIComponent(rawWorkspaceId || HOME_WORKSPACE_ID)
     return workspaceIdPattern.test(workspaceId)
-      ? workspaceId
+      ? asWorkspaceID(workspaceId)
       : HOME_WORKSPACE_ID
   } catch {
     return HOME_WORKSPACE_ID
@@ -37,12 +45,12 @@ export function splitWorkspaceRoute(pathname: string): WorkspaceRouteParts {
   }
 }
 
-export function workspaceRoutePrefix(workspaceId: string): string {
+export function workspaceRoutePrefix(workspaceId: WorkspaceID): string {
   return `/w/${encodeURIComponent(workspaceId || HOME_WORKSPACE_ID)}`
 }
 
 export function buildWorkspaceViewPath(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   pathname: string,
 ): string {
   const normalized = ensureLeadingSlash(pathname)
@@ -50,7 +58,7 @@ export function buildWorkspaceViewPath(
 }
 
 export function buildWorkspaceEditPath(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   pathname: string,
 ): string {
   const normalized = ensureLeadingSlash(pathname)
@@ -58,7 +66,7 @@ export function buildWorkspaceEditPath(
 }
 
 export function buildWorkspaceHistoryPath(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   pathname: string,
 ): string {
   const normalized = ensureLeadingSlash(pathname)
@@ -66,11 +74,11 @@ export function buildWorkspaceHistoryPath(
 }
 
 export function buildWorkspacePermalinkPath(
-  workspaceId: string,
-  id: string,
-  slug?: string,
+  workspaceId: WorkspaceID,
+  id: PageID,
+  slug?: Slug,
 ): string {
-  const encodedID = encodeURIComponent(id)
+  const encodedID = encodeURIComponent(asPageID(id))
   const normalizedSlug = slug?.trim()
   const base = `${workspaceRoutePrefix(workspaceId)}/p/${encodedID}`
   return normalizedSlug ? `${base}/${encodeURIComponent(normalizedSlug)}` : base

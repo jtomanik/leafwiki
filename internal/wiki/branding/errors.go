@@ -36,7 +36,7 @@ type BrandingErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithBrandingStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, BrandingErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

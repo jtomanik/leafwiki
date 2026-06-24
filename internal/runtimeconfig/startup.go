@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"gopkg.in/yaml.v3"
@@ -21,11 +22,23 @@ func (err ConfigFlagMixError) Error() string {
 }
 
 type ConfigUsageError struct {
-	Message string
+	Code            sharederrors.ErrorCode
+	MessageID       sharederrors.MessageID
+	RenderedMessage string
 }
 
 func (err ConfigUsageError) Error() string {
-	return err.Message
+	return err.RenderedMessage
+}
+
+const errCodeRuntimeConfigUsage sharederrors.ErrorCode = "runtime_config_usage"
+
+func newConfigUsageError(message string) ConfigUsageError {
+	return ConfigUsageError{
+		Code:            errCodeRuntimeConfigUsage,
+		MessageID:       sharederrors.MessageIDForCode(errCodeRuntimeConfigUsage),
+		RenderedMessage: message,
+	}
 }
 
 type DaemonServiceConfigMissingError struct {
@@ -56,10 +69,10 @@ func ValidateRawConfigFlagUsage(args []string) error {
 			if hasInlineValue {
 				_, value, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 				if IsInvalidBareConfigPathValue(value) {
-					return ConfigUsageError{Message: "--config requires a path"}
+					return newConfigUsageError("--config requires a path")
 				}
 			} else if i+1 >= len(args) || IsInvalidBareConfigPathValue(args[i+1]) {
-				return ConfigUsageError{Message: "--config requires a path"}
+				return newConfigUsageError("--config requires a path")
 			}
 		}
 		if _, takesValue := ValueTakingFlagNames()[name]; takesValue && !hasInlineValue {
@@ -157,7 +170,7 @@ func DefaultDaemonServiceConfigPath() (string, error) {
 func ApplyYAMLConfigFile(fs *flag.FlagSet, configPath string, visited map[string]bool) error {
 	path := strings.TrimSpace(configPath)
 	if IsInvalidBareConfigPathValue(path) {
-		return ConfigUsageError{Message: "--config requires a path"}
+		return newConfigUsageError("--config requires a path")
 	}
 	if name, _, ok := RawFlagName(path); ok {
 		return ConfigFlagMixError{Flag: configModeFlagDisplay(path, name)}

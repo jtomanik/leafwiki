@@ -1,5 +1,6 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { SessionID, WorkspaceID } from '../semanticTypes'
 
 export type PresenceMode =
   | 'view'
@@ -11,7 +12,7 @@ export type PresenceMode =
   | 'unknown'
 
 export type PresenceHeartbeat = {
-  sessionId: string
+  sessionId: SessionID
   mode: PresenceMode
   path?: string
   dirty: boolean
@@ -19,7 +20,7 @@ export type PresenceHeartbeat = {
 
 export async function sendPresenceHeartbeat(
   input: PresenceHeartbeat,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   signal?: AbortSignal,
 ) {
   await fetchWithAuth(
@@ -33,8 +34,8 @@ export async function sendPresenceHeartbeat(
 }
 
 export async function deletePresenceSession(
-  sessionId: string,
-  workspaceId: string,
+  sessionId: SessionID,
+  workspaceId: WorkspaceID,
 ) {
   await fetchWithAuth(
     workspaceApiPath(

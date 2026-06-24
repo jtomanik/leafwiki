@@ -9,7 +9,13 @@ import {
 } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_MOVE_PAGE } from '@/lib/registries'
-import { asPageID, asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asRoutePath,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import { useMemo, useState } from 'react'
@@ -23,8 +29,8 @@ export function MovePageDialog({
   pageId,
   workspaceId,
 }: {
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
 }) {
   const tree = useTreeStore((s) => s.workspaceTrees[workspaceId]?.tree ?? null)
   const [loading, setLoading] = useState(false)
@@ -36,7 +42,7 @@ export function MovePageDialog({
   const navigate = useNavigate()
 
   const parentId = useMemo(() => {
-    const findParent = (node: PageNode): string | null => {
+    const findParent = (node: PageNode): PageID | null => {
       for (const child of node.children || []) {
         if (child.id === pageId) return node.id
         const found = findParent(child)
@@ -49,7 +55,9 @@ export function MovePageDialog({
     return findParent(tree)
   }, [tree, pageId])
 
-  const [newParentId, setNewParentId] = useState<string>(parentId || '')
+  const [newParentId, setNewParentId] = useState<PageID | 'root'>(
+    parentId || 'root',
+  )
 
   if (!tree) return null
   if (!parentId) return null
@@ -59,9 +67,10 @@ export function MovePageDialog({
   const itemLabelCapitalized = page.kind === NODE_KIND_PAGE ? 'Page' : 'Section'
 
   const getSyntheticMovePreview = (): PageRefactorPreview => {
-    const nextParent = newParentId
-      ? useTreeStore.getState().getPageById(newParentId, workspaceId)
-      : null
+    const nextParent =
+      newParentId && newParentId !== 'root'
+        ? useTreeStore.getState().getPageById(newParentId, workspaceId)
+        : null
     const nextParentPath = nextParent?.path ?? ''
     const normalizedParentPath =
       nextParentPath && nextParentPath !== '/' ? nextParentPath : ''
@@ -86,6 +95,7 @@ export function MovePageDialog({
 
   const handleMove = async (): Promise<boolean> => {
     if (!newParentId || newParentId === parentId) return false
+    const targetParentId = newParentId === 'root' ? null : newParentId
 
     setLoading(true)
     try {
@@ -96,7 +106,7 @@ export function MovePageDialog({
           asPageID(pageId),
           {
             kind: 'move',
-            parentId: asPageID(newParentId),
+            parentId: targetParentId,
           },
           asWorkspaceID(workspaceId),
         )
@@ -110,7 +120,7 @@ export function MovePageDialog({
           {
             kind: 'move',
             version: page.version,
-            parentId: asPageID(newParentId),
+            parentId: targetParentId,
             rewriteLinks,
           },
           asWorkspaceID(workspaceId),
@@ -119,7 +129,7 @@ export function MovePageDialog({
         await movePage(
           asPageID(pageId),
           page.version,
-          asPageID(newParentId),
+          newParentId,
           asWorkspaceID(workspaceId),
         )
         preview = getSyntheticMovePreview()
@@ -132,7 +142,9 @@ export function MovePageDialog({
         workspaceId,
       })
 
-      toast.success('Page moved successfully')
+      toast.success('Page moved successfully', {
+        messageId: 'ui.toast.page.moved',
+      })
       return true // Close the dialog
     } catch (err: unknown) {
       console.warn(err)

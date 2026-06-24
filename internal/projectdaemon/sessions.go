@@ -14,6 +14,10 @@ func (id SessionID) String() string {
 	return string(id)
 }
 
+func SessionIDFromString[T ~string](raw T) SessionID {
+	return SessionID(raw)
+}
+
 type SessionRegistry struct {
 	mu       sync.Mutex
 	handles  map[SessionID]time.Time
@@ -40,7 +44,7 @@ func (r *SessionRegistry) Register() (SessionID, error) {
 	if err != nil {
 		return "", err
 	}
-	sessionID := SessionID(id)
+	sessionID := SessionIDFromString(id)
 	r.mu.Lock()
 	r.seen = true
 	r.handles[sessionID] = r.now().Add(r.ttl)

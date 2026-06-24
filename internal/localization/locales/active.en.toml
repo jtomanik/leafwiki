@@ -114,6 +114,18 @@ other = "Runtime role failed"
 description = "Printed when service mode requires a config file."
 other = "Service config file is required for service mode"
 
+["cli.error.stdio_auth_api_key_conflict"]
+description = "Printed when disabled auth is combined with an API-key STDIO identity."
+other = "disabled auth and API-key STDIO identity cannot be combined"
+
+["cli.error.stdio_auth_identity_required"]
+description = "Printed when native STDIO is missing an auth mode."
+other = "native STDIO requires either disabled auth or an API key"
+
+["cli.error.stdout_reserved_for_mcp_stdio"]
+description = "Printed when stdout logging is requested for MCP STDIO."
+other = "stdout is reserved for MCP STDIO"
+
 ["cli.help.body"]
 description = "Top-level LeafWiki CLI help body."
 other = "LeafWiki – lightweight selfhosted wiki 🌿\n\n\tUsage:\n\tleafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki --mcp=stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki agent-hook <codex|claude|cursor|unknown> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki daemon\n\tleafwiki reset-admin-password\n\tleafwiki --help\n\n\tService mode:\n\tleafwiki daemon reads ~/.leafwiki/leafwiki.yml and runs the install-wide wikid/frontd/workspaced runtime in the foreground.\n\n\tOptions:\n\t--host             Host/IP address to bind the server to (default: 127.0.0.1)\n\t--port             Port to run the server on (default: 8080)\n\t--data-dir         Path to data directory (default: ./data)\n\t--root-dir         Path to managed markdown content directory (default: <data-dir>/root)\n\t--markdown-link-root-prefix Repository-root prefix for absolute Markdown links (for example /docs) (default: \"\")\n\t--admin-password   Initial admin password (used only if no admin exists)\n\t--jwt-secret       Secret for signing auth tokens (JWT) (required)\n\t--public-access    Allow public access to the wiki only with read access (default: false)\n\t--allow-insecure   Allow insecure HTTP connections (default: false)\n\t--access-token-timeout  Access token timeout duration (e.g. 24h, 15m) (default: 15m)\n\t--refresh-token-timeout Refresh token timeout duration (e.g. 168h, 7d) (default: 7d)\n\t--inject-code-in-header  Raw HTML/JS code injected into <head> tag (e.g., analytics, custom CSS) (default: \"\")\n\t                         WARNING: Use only with trusted code to avoid XSS vulnerabilities. No sanitization is performed.\n\t--custom-stylesheet      Path to a .css file inside the data dir, served publicly as /custom.css\n\t                         (or <base-path>/custom.css when --base-path is set) (default: \"\")\n\t--log-target             Log target: file, stderr, or stdout (default: file)\n\t--log-file               Log file path when --log-target=file; relative paths resolve under --data-dir\n\t                         (default: <data-dir>/.leafwiki/logs/leafwiki.log)\n\t--disable-auth                Disable authentication completely (default: false) (WARNING: only use in trusted networks!)\n\t--hide-link-metadata-section  Hide link metadata section in the frontend UI (default: false)\n\t--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: \"\")\n\t--max-asset-upload-size       Maximum size for asset uploads (for example 50MiB, 50MB, 52428800) (default: 50MiB)\n\t--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)\n\t--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)\n\t--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY\n\t--daemon-idle-timeout         Federated runtime idle timeout after the last session or presence record exits; 0 stops immediately (default: 10m)\n\t--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)\n\t--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)\n\t--trusted-proxy-ips             Comma-separated trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)\n\t--http-remote-user-logout-url   URL the frontend redirects to after logout in proxy-auth mode (default: \"\")\n\t--disable-request-log           Suppress per-request HTTP access log lines (default: false)\n\t--config                        Path to flat YAML config file; mutually exclusive with other CLI flags\n\n\tEnvironment variables:\n\tLEAFWIKI_HOST\n\tLEAFWIKI_PORT\n\tLEAFWIKI_DATA_DIR\n\tLEAFWIKI_ROOT_DIR\n\tLEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX\n\tLEAFWIKI_JWT_SECRET\n\tLEAFWIKI_LOG_LEVEL\n\tLEAFWIKI_ADMIN_PASSWORD\n\tLEAFWIKI_PUBLIC_ACCESS\n\tLEAFWIKI_ALLOW_INSECURE\n\tLEAFWIKI_INJECT_CODE_IN_HEADER\n\tLEAFWIKI_CUSTOM_STYLESHEET\n\tLEAFWIKI_LOG_TARGET\n\tLEAFWIKI_LOG_FILE\n\tLEAFWIKI_ACCESS_TOKEN_TIMEOUT\n\tLEAFWIKI_REFRESH_TOKEN_TIMEOUT\n\tLEAFWIKI_DISABLE_AUTH\n\tLEAFWIKI_HIDE_LINK_METADATA_SECTION\n\tLEAFWIKI_BASE_PATH\n\tLEAFWIKI_MAX_ASSET_UPLOAD_SIZE\n\tLEAFWIKI_ENABLE_LINK_REFACTOR\n\tLEAFWIKI_MCP\n\tLEAFWIKI_MCP_API_KEY\n\tLEAFWIKI_DAEMON_IDLE_TIMEOUT\n\tLEAFWIKI_ENABLE_HTTP_REMOTE_USER\n\tLEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME\n\tLEAFWIKI_TRUSTED_PROXY_IPS\n\tLEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL\n\tLEAFWIKI_DISABLE_REQUEST_LOG\n\t"
@@ -121,6 +133,22 @@ other = "LeafWiki – lightweight selfhosted wiki 🌿\n\n\tUsage:\n\tleafwiki -
 ["cli.help.usage"]
 description = "Top-level LeafWiki CLI usage line."
 other = "Usage: leafwiki [command]"
+
+["cli.status.admin_password_reset"]
+description = "Printed after resetting the admin password."
+other = "Admin password reset successfully."
+
+["cli.status.admin_password_value"]
+description = "Printed with the newly generated admin password."
+other = "New password for user {{.Arg0}}: {{.Arg1}}"
+
+["cli.status.remove_workspace_descriptor"]
+description = "Printed when removing a workspace descriptor fails."
+other = "leafwiki: remove workspace descriptor {{.Arg0}}: {{.Arg1}}"
+
+["cli.status.unknown_command"]
+description = "Printed when an unknown positional command is provided."
+other = "Unknown command: {{.Arg0}}"
 
 ["errors.asset.already_exists"]
 description = "Derived from ErrorCode asset_already_exists."
@@ -370,6 +398,10 @@ other = "CSRF token missing"
 description = "Derived from ErrorCode daemon_agent_presence_invalid_request."
 other = "Daemon agent presence invalid request"
 
+["errors.daemon.control_encode_response"]
+description = "Derived from ErrorCode daemon_control_encode_response."
+other = "Daemon control encode response"
+
 ["errors.daemon.control_unauthorized"]
 description = "Derived from ErrorCode daemon_control_unauthorized."
 other = "Daemon control unauthorized"
@@ -618,9 +650,37 @@ other = "Private actor context invalid"
 description = "Derived from ErrorCode private_control_token_invalid."
 other = "Private control token invalid"
 
+["errors.private.encode_response_failed"]
+description = "Derived from ErrorCode private_encode_response_failed."
+other = "Private encode response failed"
+
+["errors.private.grants_load_failed"]
+description = "Derived from ErrorCode private_grants_load_failed."
+other = "Private grants load failed"
+
 ["errors.private.mcp_control_token_invalid"]
 description = "Returned when a private MCP control token is invalid."
 other = "Unauthorized"
+
+["errors.private.registry_load_failed"]
+description = "Derived from ErrorCode private_registry_load_failed."
+other = "Private registry load failed"
+
+["errors.private.subject_resolve_failed"]
+description = "Derived from ErrorCode private_subject_resolve_failed."
+other = "Private subject resolve failed"
+
+["errors.private.unauthorized"]
+description = "Derived from ErrorCode private_unauthorized."
+other = "Private unauthorized"
+
+["errors.private.workspace_auth_failed"]
+description = "Derived from ErrorCode private_workspace_auth_failed."
+other = "Private workspace auth failed"
+
+["errors.private.workspace_ensure_failed"]
+description = "Derived from ErrorCode private_workspace_ensure_failed."
+other = "Private workspace ensure failed"
 
 ["errors.properties.internal_error"]
 description = "Derived from ErrorCode properties_internal_error."
@@ -717,6 +777,10 @@ other = "Restore revision not found"
 ["errors.revision.service_unavailable"]
 description = "Derived from ErrorCode revision_service_unavailable."
 other = "Revision service unavailable"
+
+["errors.runtime.config_usage"]
+description = "Derived from ErrorCode runtime_config_usage."
+other = "Runtime config usage"
 
 ["errors.search.internal_error"]
 description = "Derived from ErrorCode search_internal_error."
@@ -1210,6 +1274,74 @@ other = "Site name must not exceed the maximum length"
 description = "Fallback field validation message."
 other = "Validation error"
 
+["validation.markdown.ambiguous_legacy_link"]
+description = "Returned when a markdown link is ambiguous under legacy resolution."
+other = "Ambiguous legacy markdown link"
+
+["validation.markdown.broken_link"]
+description = "Returned when markdown content links to a missing page."
+other = "Broken markdown link"
+
+["validation.markdown.duplicate_leafwiki_id"]
+description = "Returned when multiple markdown files declare the same page ID."
+other = "Duplicate LeafWiki page ID"
+
+["validation.markdown.hidden_markdown_path"]
+description = "Returned when a markdown file is hidden from workspace discovery."
+other = "Hidden markdown path"
+
+["validation.markdown.invalid_link"]
+description = "Returned when markdown content contains an invalid link."
+other = "Invalid markdown link"
+
+["validation.markdown.invalid_path"]
+description = "Returned when a markdown path is invalid."
+other = "Invalid markdown path"
+
+["validation.markdown.invalid_slug"]
+description = "Returned when markdown metadata contains an invalid slug."
+other = "Invalid markdown slug"
+
+["validation.markdown.metadata_parse_error"]
+description = "Returned when markdown metadata cannot be parsed."
+other = "Markdown metadata parse error"
+
+["validation.markdown.missing_asset"]
+description = "Returned when markdown content references a missing asset."
+other = "Missing markdown asset"
+
+["validation.markdown.missing_title"]
+description = "Returned when markdown metadata is missing a title."
+other = "Missing markdown title"
+
+["validation.markdown.non_canonical_link"]
+description = "Returned when markdown content uses a non-canonical link."
+other = "Non-canonical markdown link"
+
+["validation.markdown.non_canonical_markdown_path"]
+description = "Returned when a markdown file path is non-canonical."
+other = "Non-canonical markdown path"
+
+["validation.markdown.path_conflict"]
+description = "Returned when a markdown path belongs to another page."
+other = "Markdown path conflict"
+
+["validation.markdown.reserved_metadata"]
+description = "Returned when markdown metadata uses reserved fields."
+other = "Reserved markdown metadata"
+
+["validation.markdown.workspace_scan_error"]
+description = "Returned when workspace markdown scanning fails."
+other = "Workspace markdown scan error"
+
+["validation.markdown.workspace_sync_error"]
+description = "Returned when workspace sync validation fails."
+other = "Workspace sync error"
+
+["validation.markdown.workspace_sync_validation"]
+description = "Returned for workspace sync validation issues."
+other = "Workspace sync validation issue"
+
 ["validation.page.kind_invalid"]
 description = "Returned when a page kind is invalid."
 other = "Kind must be either 'page' or 'section'"
@@ -1261,3 +1393,15 @@ other = "Tag must not contain leading or trailing whitespace"
 ["validation.page.title_required"]
 description = "Returned when a page title is empty."
 other = "Title must not be empty"
+
+["warnings.link_rewrite.empty_destination"]
+description = "Returned when link rewriting would produce an empty destination."
+other = "Skipped empty rewritten destination"
+
+["warnings.link_rewrite.unresolved_destination"]
+description = "Returned when link rewriting cannot resolve a destination."
+other = "Skipped unresolved link destination"
+
+["warnings.link_rewrite.unsupported_syntax"]
+description = "Returned when link rewriting skips unsupported syntax."
+other = "Skipped unsupported link syntax"

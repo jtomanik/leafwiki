@@ -31,7 +31,7 @@ func (w *Wiki) workspaceSyncActorForUser(userID tree.UserID) workspacesync.Actor
 	if w.user == nil || actorID.Trimmed() == "" {
 		return actor
 	}
-	user, err := w.user.GetUserByID(coreauth.NewUserIDUnchecked(actorID.String()))
+	user, err := w.user.GetUserByID(coreauth.UserIDFromString(actorID.String()))
 	if err != nil || user == nil {
 		return actor
 	}

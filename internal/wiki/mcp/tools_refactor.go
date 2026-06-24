@@ -20,7 +20,7 @@ func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
 			PageID:      pageID,
 			Kind:        in.Kind,
 			Title:       in.Title,
-			Slug:        tree.NewSlugUnchecked(in.Slug),
+			Slug:        tree.SlugFromString(in.Slug),
 			Content:     in.Content,
 			NewParentID: mcpPageIDPtr(in.ParentID),
 		})
@@ -36,15 +36,15 @@ func (r *Routes) registerRefactorTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		page, err := r.applyRef.Execute(ctx, wikipages.RefactorApplyInput{
-			UserID:       tree.NewUserIDUnchecked(actor.ID),
+			UserID:       tree.UserIDFromString(actor.ID),
 			Source:       pagesave.PageMutationSourceMCP,
-			Version:      tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
+			Version:      tree.PageVersionFromString(strings.TrimSpace(in.Version)),
 			RewriteLinks: in.RewriteLinks,
 			RefactorPreviewInput: wikipages.RefactorPreviewInput{
 				PageID:      pageID,
 				Kind:        in.Kind,
 				Title:       in.Title,
-				Slug:        tree.NewSlugUnchecked(in.Slug),
+				Slug:        tree.SlugFromString(in.Slug),
 				Content:     in.Content,
 				NewParentID: mcpPageIDPtr(in.ParentID),
 			},

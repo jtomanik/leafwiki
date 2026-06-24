@@ -235,7 +235,7 @@ func (s *TagsStore) Clear() error {
 }
 
 // GetAllTags returns tags with page count, optionally filtered by prefix. limit <= 0 means no limit.
-func (s *TagsStore) GetAllTags(filter string, limit int) ([]TagCount, error) {
+func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -246,8 +246,8 @@ func (s *TagsStore) GetAllTags(filter string, limit int) ([]TagCount, error) {
 		GROUP BY tag
 		ORDER BY count DESC, tag ASC
 	`
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+	if pageSize > 0 {
+		query += fmt.Sprintf(" LIMIT %d", int(pageSize))
 	}
 
 	rows, err := s.db.Query(query, escapeLikePrefix(filter))
@@ -270,12 +270,12 @@ func (s *TagsStore) GetAllTags(filter string, limit int) ([]TagCount, error) {
 // GetAllTagsForSelection returns suggestion tags with counts for pages that
 // already match all selected tags. Selected tags themselves are excluded from
 // the result set so the caller only gets additive suggestions.
-func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, limit int) ([]TagCount, error) {
+func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pageSize TagLimit) ([]TagCount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(selected) == 0 {
-		return s.getAllTagsLocked(filter, limit)
+		return s.getAllTagsLocked(filter, pageSize)
 	}
 
 	filterArg := escapeLikePrefix(filter)
@@ -305,8 +305,8 @@ func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, lim
 		GROUP BY pt.tag
 		ORDER BY count DESC, tag ASC
 	`, selectionPlaceholders, selectionPlaceholders)
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+	if pageSize > 0 {
+		query += fmt.Sprintf(" LIMIT %d", int(pageSize))
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -365,7 +365,7 @@ func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	return pageIDs, rows.Err()
 }
 
-func (s *TagsStore) getAllTagsLocked(filter string, limit int) ([]TagCount, error) {
+func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) ([]TagCount, error) {
 	query := `
 		SELECT tag, COUNT(DISTINCT page_id) AS count
 		FROM page_tags
@@ -373,8 +373,8 @@ func (s *TagsStore) getAllTagsLocked(filter string, limit int) ([]TagCount, erro
 		GROUP BY tag
 		ORDER BY count DESC, tag ASC
 	`
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+	if pageSize > 0 {
+		query += fmt.Sprintf(" LIMIT %d", int(pageSize))
 	}
 
 	rows, err := s.db.Query(query, escapeLikePrefix(filter))

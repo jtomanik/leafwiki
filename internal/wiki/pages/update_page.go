@@ -66,7 +66,7 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 	}
 
 	slugChanged := in.Slug != before.Slug
-	oldPath := before.CalculatePath()
+	oldPath := before.CalculateRoutePath()
 	// Snapshot mutable fields before UpdateNode mutates the live tree node.
 	oldTitle := before.Title
 	oldContent := before.Content

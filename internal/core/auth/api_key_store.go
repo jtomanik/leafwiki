@@ -124,8 +124,8 @@ func (s *APIKeyStore) CreateAPIKey(key *APIKey, secretHash string) error {
 			created_by_user_id, created_at, last_used_at, revoked_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL);
-	`, key.ID, key.UserID.String(), key.Name, secretHash, key.Prefix, key.Last4, string(scopes),
-		key.CreatedByUserID.String(), key.CreatedAt.Unix())
+	`, key.ID, key.UserID, key.Name, secretHash, key.Prefix, key.Last4, string(scopes),
+		key.CreatedByUserID, key.CreatedAt.Unix())
 	return err
 }
 
@@ -142,7 +142,7 @@ func (s *APIKeyStore) ListActiveAPIKeys(userID UserID) ([]*APIKey, error) {
 		FROM api_keys
 		WHERE user_id = ? AND revoked_at IS NULL
 		ORDER BY created_at DESC, id DESC;
-	`, userID.String())
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (s *APIKeyStore) RevokeAPIKey(userID UserID, keyID APIKeyID, revokedAt time
 		UPDATE api_keys
 		SET revoked_at = ?
 		WHERE id = ? AND user_id = ? AND revoked_at IS NULL;
-	`, revokedAt.Unix(), keyID, userID.String())
+	`, revokedAt.Unix(), keyID, userID)
 	if err != nil {
 		return err
 	}

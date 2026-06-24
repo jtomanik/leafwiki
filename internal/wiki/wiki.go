@@ -11,6 +11,7 @@ import (
 	"github.com/perber/wiki/internal/branding"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -84,17 +85,17 @@ const workspaceSyncStartupPhaseOpenService = "open_service"
 
 type WikiOptions struct {
 	Workspace               Workspace
-	StorageDir              string        // Path to storage directory
-	AuthStorageDir          string        // Optional path for user/session/API-key stores
-	WorkspaceOnly           bool          // Skip identity, OAuth, API-key, session, and branding stores
-	ControlPlaneOnly        bool          // Skip workspace services while keeping identity, OAuth, and branding routes
-	AdminPassword           string        // Initial admin password
-	JWTSecret               string        // JWT secret for authentication
-	AccessTokenTimeout      time.Duration // Access token timeout duration
-	RefreshTokenTimeout     time.Duration // Refresh token timeout duration
-	AuthDisabled            bool          // Whether authentication is disabled
-	MaxAssetUploadSizeBytes int64         // Maximum allowed size in bytes for asset/import uploads; 0 = default
-	MarkdownLinkRootPrefix  string        // Repository-root prefix for absolute Markdown links
+	StorageDir              string          // Path to storage directory
+	AuthStorageDir          string          // Optional path for user/session/API-key stores
+	WorkspaceOnly           bool            // Skip identity, OAuth, API-key, session, and branding stores
+	ControlPlaneOnly        bool            // Skip workspace services while keeping identity, OAuth, and branding routes
+	AdminPassword           string          // Initial admin password
+	JWTSecret               string          // JWT secret for authentication
+	AccessTokenTimeout      time.Duration   // Access token timeout duration
+	RefreshTokenTimeout     time.Duration   // Refresh token timeout duration
+	AuthDisabled            bool            // Whether authentication is disabled
+	MaxAssetUploadSizeBytes shared.MaxBytes // Maximum allowed size in bytes for asset/import uploads; 0 = default
+	MarkdownLinkRootPrefix  string          // Repository-root prefix for absolute Markdown links
 }
 
 func NewWiki(options *WikiOptions) (*Wiki, error) {
@@ -417,7 +418,7 @@ func (w *Wiki) EnsureWelcomePage() error {
 	}
 	o := w.newPageOrchestrator()
 	k := tree.NodeKindPage
-	systemUserID := tree.NewUserIDUnchecked(SYSTEM_USER_ID)
+	systemUserID := tree.UserIDFromString(SYSTEM_USER_ID)
 	createOut, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, o, w.log).Execute(
 		context.Background(),
 		wikipages.CreatePageInput{UserID: systemUserID, Title: "Welcome to LeafWiki", Slug: "welcome-to-leafwiki", Kind: &k},

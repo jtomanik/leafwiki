@@ -61,11 +61,11 @@ var validModes = map[SessionMode]struct{}{
 }
 
 type Heartbeat struct {
-	SessionID string      `json:"sessionId"`
-	Mode      SessionMode `json:"mode"`
-	PageID    tree.PageID `json:"pageId,omitempty"`
-	Path      string      `json:"path,omitempty"`
-	Dirty     bool        `json:"dirty"`
+	SessionID WebSessionID `json:"sessionId"`
+	Mode      SessionMode  `json:"mode"`
+	PageID    tree.PageID  `json:"pageId,omitempty"`
+	Path      string       `json:"path,omitempty"`
+	Dirty     bool         `json:"dirty"`
 }
 
 type PageRef struct {
@@ -83,7 +83,7 @@ type UserRef struct {
 
 type Session struct {
 	Type            SessionType               `json:"type"`
-	SessionID       string                    `json:"sessionId"`
+	SessionID       WebSessionID              `json:"sessionId"`
 	Provider        agenthooks.ProviderID     `json:"provider,omitempty"`
 	Model           string                    `json:"model,omitempty"`
 	Mode            SessionMode               `json:"mode"`
@@ -113,9 +113,19 @@ type storedSession struct {
 	userID  coreauth.UserID
 }
 
+type WebSessionID string
+
+func (id WebSessionID) String() string {
+	return string(id)
+}
+
+func WebSessionIDFromString(raw string) WebSessionID {
+	return WebSessionID(strings.TrimSpace(raw))
+}
+
 type WebPresenceRegistry struct {
 	mu       sync.Mutex
-	sessions map[string]storedSession
+	sessions map[WebSessionID]storedSession
 	ttl      time.Duration
 	now      func() time.Time
 }
@@ -128,7 +138,7 @@ func NewWebPresenceRegistry(ttl time.Duration, now func() time.Time) *WebPresenc
 		now = time.Now
 	}
 	return &WebPresenceRegistry{
-		sessions: map[string]storedSession{},
+		sessions: map[WebSessionID]storedSession{},
 		ttl:      ttl,
 		now:      now,
 	}
@@ -151,7 +161,7 @@ func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, p
 	defer r.mu.Unlock()
 	pruneExpiredLocked(r.sessions, seenAt, r.ttl)
 	current := r.sessions[normalized.SessionID]
-	userID := coreauth.NewUserIDUnchecked(user.ID)
+	userID := coreauth.UserIDFromString(user.ID)
 	if current.userID != "" && current.userID != userID {
 		return sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionUserMismatch, nil)
 	}
@@ -177,24 +187,23 @@ func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, p
 	return nil
 }
 
-func (r *WebPresenceRegistry) Remove(sessionID string, user *coreauth.User) bool {
+func (r *WebPresenceRegistry) Remove(sessionID WebSessionID, user *coreauth.User) bool {
 	if r == nil {
 		return false
 	}
-	trimmed := strings.TrimSpace(sessionID)
-	if trimmed == "" {
+	if sessionID == "" {
 		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	stored, exists := r.sessions[trimmed]
+	stored, exists := r.sessions[sessionID]
 	if !exists {
 		return false
 	}
-	if user == nil || stored.userID != coreauth.NewUserIDUnchecked(user.ID) {
+	if user == nil || stored.userID != coreauth.UserIDFromString(user.ID) {
 		return false
 	}
-	delete(r.sessions, trimmed)
+	delete(r.sessions, sessionID)
 	return true
 }
 
@@ -225,11 +234,11 @@ func (r *WebPresenceRegistry) List(viewer *coreauth.User) []Session {
 }
 
 func normalizeHeartbeat(heartbeat Heartbeat) (Heartbeat, error) {
-	heartbeat.SessionID = strings.TrimSpace(heartbeat.SessionID)
+	heartbeat.SessionID = WebSessionIDFromString(heartbeat.SessionID.String())
 	if heartbeat.SessionID == "" {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDRequired, nil)
 	}
-	if len(heartbeat.SessionID) > 256 {
+	if len(heartbeat.SessionID.String()) > 256 {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDTooLong, nil)
 	}
 	heartbeat.Mode = SessionMode(strings.TrimSpace(string(heartbeat.Mode)))
@@ -239,7 +248,7 @@ func normalizeHeartbeat(heartbeat Heartbeat) (Heartbeat, error) {
 	if _, ok := validModes[heartbeat.Mode]; !ok {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceModeInvalid, nil)
 	}
-	heartbeat.PageID = tree.NewPageIDUnchecked(strings.TrimSpace(heartbeat.PageID.MetadataValue()))
+	heartbeat.PageID = tree.PageIDFromString(strings.TrimSpace(heartbeat.PageID.MetadataValue()))
 	heartbeat.Path = normalizePagePath(heartbeat.Path)
 	return heartbeat, nil
 }
@@ -264,7 +273,7 @@ func userRefForUser(user *coreauth.User, includeEmail bool) UserRef {
 	return ref
 }
 
-func pruneExpiredLocked(sessions map[string]storedSession, now time.Time, ttl time.Duration) {
+func pruneExpiredLocked(sessions map[WebSessionID]storedSession, now time.Time, ttl time.Duration) {
 	for key, stored := range sessions {
 		if !stored.session.LastSeenAt.Add(ttl).After(now) {
 			delete(sessions, key)

@@ -64,7 +64,7 @@ func TestRespondWithLinkError_InternalErrorIsSanitized(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"failed to load link status"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"Failed to load link status"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }

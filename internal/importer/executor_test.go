@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -31,7 +32,7 @@ type fakeExecWiki struct {
 	updateTitles       []string
 	uploadCalls        int
 	uploadedAssets     []string
-	lastUploadMaxBytes int64
+	lastUploadByteCap  shared.MaxBytes
 }
 
 func (f *fakeExecWiki) TreeHash() string { return f.hash }
@@ -53,7 +54,7 @@ func (f *fakeExecWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath,
 	if f.ensureFn != nil {
 		return f.ensureFn(userID, targetPath, title, kind)
 	}
-	return &tree.Page{PageNode: &tree.PageNode{ID: tree.NewPageIDUnchecked("p1"), Title: title, Slug: "slug", Kind: *kind}}, nil
+	return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: "slug", Kind: *kind}}, nil
 }
 
 func (f *fakeExecWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
@@ -68,10 +69,10 @@ func (f *fakeExecWiki) UpdatePage(userID tree.UserID, id tree.PageID, title stri
 	return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
 }
 
-func (f *fakeExecWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, maxBytes int64) (string, error) {
+func (f *fakeExecWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 	f.uploadCalls++
 	f.uploadedAssets = append(f.uploadedAssets, filename.Filename())
-	f.lastUploadMaxBytes = maxBytes
+	f.lastUploadByteCap = byteCap
 	return "/assets/" + pageID.MetadataValue() + "/" + filename.Filename(), nil
 }
 
@@ -92,7 +93,7 @@ func TestExecutor_StalePlan(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: t.TempDir()}
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
-	got, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	got, err := ex.Execute(newFixtureUserID("user1"))
 	if err == nil {
 		t.Fatalf("expected stale plan error")
 	}
@@ -126,7 +127,7 @@ func TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter(t *testing.T)
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
-	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	res, err := ex.Execute(newFixtureUserID("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestExecutor_Create_HappyPath_PreservesDistinctExtraFieldValues(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -246,7 +247,7 @@ func TestExecutor_Skip_DoesNotCallWiki(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	res, err := ex.Execute(newFixtureUserID("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -278,7 +279,7 @@ func TestExecutor_Create_EnsurePathError_SkipsItem(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	res, err := ex.Execute(newFixtureUserID("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -305,7 +306,7 @@ func TestExecutor_UnknownAction_SkipsItem(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	res, err := ex.Execute(newFixtureUserID("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -337,7 +338,7 @@ title: Ordner
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	res, err := ex.Execute(tree.NewUserIDUnchecked("user1"))
+	res, err := ex.Execute(newFixtureUserID("user1"))
 	if err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
@@ -395,7 +396,7 @@ func TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -453,7 +454,7 @@ func TestExecutor_Create_RewritesBodyLinksWithoutTouchingMetadataValues(t *testi
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 	setupContent, ok := updatedContentByTitle["Setup"]
@@ -501,7 +502,7 @@ func TestExecutor_Create_UploadsRelativeAndRootAssets(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 1234, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -520,8 +521,8 @@ func TestExecutor_Create_UploadsRelativeAndRootAssets(t *testing.T) {
 	if !strings.Contains(*w.lastUpdatedContent, "![logo.png](/assets/p1/logo.png)") {
 		t.Fatalf("expected wiki asset link rewrite, got:\n%s", *w.lastUpdatedContent)
 	}
-	if w.lastUploadMaxBytes != 1234 {
-		t.Fatalf("expected asset uploads to use configured max bytes, got %d", w.lastUploadMaxBytes)
+	if w.lastUploadByteCap != 1234 {
+		t.Fatalf("expected asset uploads to use configured max bytes, got %d", w.lastUploadByteCap)
 	}
 }
 
@@ -545,7 +546,7 @@ func TestExecutor_Create_WikiLinkToNonImageAssetStaysNormalLink(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -595,7 +596,7 @@ func TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBasenameOnly(t *testing.
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -638,7 +639,7 @@ func TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -676,7 +677,7 @@ func TestExecutor_Create_UnresolvedWikiLinkFallsBackToDeadMarkdownLink(t *testin
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -724,7 +725,7 @@ func TestExecutor_Create_DoesNotRewriteLinksInsideCode(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -774,7 +775,7 @@ func TestExecutor_Create_RewritesWindowsStyleMarkdownAndAssetPaths(t *testing.T)
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 
@@ -808,7 +809,7 @@ func TestExecutor_Create_LeavesWindowsDriveLetterPathsUntouched(t *testing.T) {
 	opts := &PlanOptions{SourceBasePath: tmp}
 
 	ex := NewExecutor(plan, opts, 0, w, slog.Default())
-	if _, err := ex.Execute(tree.NewUserIDUnchecked("user1")); err != nil {
+	if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
 		t.Fatalf("Execute err: %v", err)
 	}
 

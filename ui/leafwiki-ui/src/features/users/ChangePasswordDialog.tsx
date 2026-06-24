@@ -73,7 +73,9 @@ export function ChangePasswordDialog({
         ...user,
         password,
       })
-      toast.success('Password changed successfully')
+      toast.success('Password changed successfully', {
+        messageId: 'ui.toast.user.password_changed',
+      })
       return true // Close the dialog
     } catch (err) {
       console.warn(err)

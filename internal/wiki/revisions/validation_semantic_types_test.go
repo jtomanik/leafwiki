@@ -15,10 +15,10 @@ func TestValidateRevisionInputsReturnSemanticValues(t *testing.T) {
 
 	var semanticPageID tree.PageID = pageID
 	var semanticRevisionID revision.RevisionID = revisionID
-	if semanticPageID != tree.NewPageIDUnchecked("page-1") {
+	if semanticPageID != newFixturePageID("page-1") {
 		t.Fatalf("pageID = %q, want page-1", semanticPageID)
 	}
-	if semanticRevisionID != revision.NewRevisionIDUnchecked("rev-1") {
+	if semanticRevisionID != newFixtureRevisionID("rev-1") {
 		t.Fatalf("revisionID = %q, want rev-1", semanticRevisionID)
 	}
 
@@ -29,13 +29,13 @@ func TestValidateRevisionInputsReturnSemanticValues(t *testing.T) {
 	var semanticAssetPageID tree.PageID = assetPageID
 	var semanticAssetRevisionID revision.RevisionID = assetRevisionID
 	var semanticAssetName tree.AssetName = assetName
-	if semanticAssetPageID != tree.NewPageIDUnchecked("page-1") {
+	if semanticAssetPageID != newFixturePageID("page-1") {
 		t.Fatalf("asset pageID = %q, want page-1", semanticAssetPageID)
 	}
-	if semanticAssetRevisionID != revision.NewRevisionIDUnchecked("rev-1") {
+	if semanticAssetRevisionID != newFixtureRevisionID("rev-1") {
 		t.Fatalf("asset revisionID = %q, want rev-1", semanticAssetRevisionID)
 	}
-	if semanticAssetName != tree.NewAssetNameUnchecked("asset.png") {
+	if semanticAssetName != tree.AssetName("asset.png") {
 		t.Fatalf("assetName = %q, want asset.png", semanticAssetName)
 	}
 }

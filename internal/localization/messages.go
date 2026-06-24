@@ -27,6 +27,13 @@ const (
 	MessageIDCLIErrorProjectDaemonFailed             = "cli.error.project_daemon_failed"
 	MessageIDCLIErrorRuntimeRoleFailed               = "cli.error.runtime_role_failed"
 	MessageIDCLIErrorServiceConfigRequired           = "cli.error.service_config_required"
+	MessageIDCLIStatusAdminPasswordReset             = "cli.status.admin_password_reset"
+	MessageIDCLIStatusAdminPasswordValue             = "cli.status.admin_password_value"
+	MessageIDCLIStatusRemoveWorkspaceDescriptor      = "cli.status.remove_workspace_descriptor"
+	MessageIDCLIStatusUnknownCommand                 = "cli.status.unknown_command"
+	MessageIDCLIErrorStdioAuthAPIKeyConflict         = "cli.error.stdio_auth_api_key_conflict"
+	MessageIDCLIErrorStdioAuthIdentityRequired       = "cli.error.stdio_auth_identity_required"
+	MessageIDCLIErrorStdoutReservedForMCPStdio       = "cli.error.stdout_reserved_for_mcp_stdio"
 	MessageIDShellRunUsage                           = "shell.run.usage"
 	MessageIDShellRunHelpBody                        = "shell.run.help_body"
 	MessageIDShellRunErrorPrefix                     = "shell.run.error_prefix"
@@ -262,6 +269,141 @@ var registryMessages = []*i18n.Message{
 		ID:          MessageIDCLIErrorServiceConfigRequired,
 		Description: "Printed when service mode requires a config file.",
 		Other:       "Service config file is required for service mode",
+	},
+	{
+		ID:          MessageIDCLIErrorStdioAuthAPIKeyConflict,
+		Description: "Printed when disabled auth is combined with an API-key STDIO identity.",
+		Other:       "disabled auth and API-key STDIO identity cannot be combined",
+	},
+	{
+		ID:          MessageIDCLIErrorStdioAuthIdentityRequired,
+		Description: "Printed when native STDIO is missing an auth mode.",
+		Other:       "native STDIO requires either disabled auth or an API key",
+	},
+	{
+		ID:          MessageIDCLIErrorStdoutReservedForMCPStdio,
+		Description: "Printed when stdout logging is requested for MCP STDIO.",
+		Other:       "stdout is reserved for MCP STDIO",
+	},
+	{
+		ID:          MessageIDCLIStatusAdminPasswordReset,
+		Description: "Printed after resetting the admin password.",
+		Other:       "Admin password reset successfully.",
+	},
+	{
+		ID:          MessageIDCLIStatusAdminPasswordValue,
+		Description: "Printed with the newly generated admin password.",
+		Other:       "New password for user {{.Arg0}}: {{.Arg1}}",
+	},
+	{
+		ID:          MessageIDCLIStatusRemoveWorkspaceDescriptor,
+		Description: "Printed when removing a workspace descriptor fails.",
+		Other:       "leafwiki: remove workspace descriptor {{.Arg0}}: {{.Arg1}}",
+	},
+	{
+		ID:          MessageIDCLIStatusUnknownCommand,
+		Description: "Printed when an unknown positional command is provided.",
+		Other:       "Unknown command: {{.Arg0}}",
+	},
+	{
+		ID:          "validation.markdown.ambiguous_legacy_link",
+		Description: "Returned when a markdown link is ambiguous under legacy resolution.",
+		Other:       "Ambiguous legacy markdown link",
+	},
+	{
+		ID:          "validation.markdown.broken_link",
+		Description: "Returned when markdown content links to a missing page.",
+		Other:       "Broken markdown link",
+	},
+	{
+		ID:          "validation.markdown.duplicate_leafwiki_id",
+		Description: "Returned when multiple markdown files declare the same page ID.",
+		Other:       "Duplicate LeafWiki page ID",
+	},
+	{
+		ID:          "validation.markdown.hidden_markdown_path",
+		Description: "Returned when a markdown file is hidden from workspace discovery.",
+		Other:       "Hidden markdown path",
+	},
+	{
+		ID:          "validation.markdown.invalid_link",
+		Description: "Returned when markdown content contains an invalid link.",
+		Other:       "Invalid markdown link",
+	},
+	{
+		ID:          "validation.markdown.invalid_path",
+		Description: "Returned when a markdown path is invalid.",
+		Other:       "Invalid markdown path",
+	},
+	{
+		ID:          "validation.markdown.invalid_slug",
+		Description: "Returned when markdown metadata contains an invalid slug.",
+		Other:       "Invalid markdown slug",
+	},
+	{
+		ID:          "validation.markdown.metadata_parse_error",
+		Description: "Returned when markdown metadata cannot be parsed.",
+		Other:       "Markdown metadata parse error",
+	},
+	{
+		ID:          "validation.markdown.missing_asset",
+		Description: "Returned when markdown content references a missing asset.",
+		Other:       "Missing markdown asset",
+	},
+	{
+		ID:          "validation.markdown.missing_title",
+		Description: "Returned when markdown metadata is missing a title.",
+		Other:       "Missing markdown title",
+	},
+	{
+		ID:          "validation.markdown.non_canonical_link",
+		Description: "Returned when markdown content uses a non-canonical link.",
+		Other:       "Non-canonical markdown link",
+	},
+	{
+		ID:          "validation.markdown.non_canonical_markdown_path",
+		Description: "Returned when a markdown file path is non-canonical.",
+		Other:       "Non-canonical markdown path",
+	},
+	{
+		ID:          "validation.markdown.path_conflict",
+		Description: "Returned when a markdown path belongs to another page.",
+		Other:       "Markdown path conflict",
+	},
+	{
+		ID:          "validation.markdown.reserved_metadata",
+		Description: "Returned when markdown metadata uses reserved fields.",
+		Other:       "Reserved markdown metadata",
+	},
+	{
+		ID:          "validation.markdown.workspace_scan_error",
+		Description: "Returned when workspace markdown scanning fails.",
+		Other:       "Workspace markdown scan error",
+	},
+	{
+		ID:          "validation.markdown.workspace_sync_error",
+		Description: "Returned when workspace sync validation fails.",
+		Other:       "Workspace sync error",
+	},
+	{
+		ID:          "validation.markdown.workspace_sync_validation",
+		Description: "Returned for workspace sync validation issues.",
+		Other:       "Workspace sync validation issue",
+	},
+	{
+		ID:          "warnings.link_rewrite.empty_destination",
+		Description: "Returned when link rewriting would produce an empty destination.",
+		Other:       "Skipped empty rewritten destination",
+	},
+	{
+		ID:          "warnings.link_rewrite.unresolved_destination",
+		Description: "Returned when link rewriting cannot resolve a destination.",
+		Other:       "Skipped unresolved link destination",
+	},
+	{
+		ID:          "warnings.link_rewrite.unsupported_syntax",
+		Description: "Returned when link rewriting skips unsupported syntax.",
+		Other:       "Skipped unsupported link syntax",
 	},
 	{
 		ID:          MessageIDShellRunErrorAgentHookRequiresProvider,

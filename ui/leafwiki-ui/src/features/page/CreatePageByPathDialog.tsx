@@ -4,7 +4,11 @@ import { ensurePage, lookupPath, PathLookupResult } from '@/lib/api/pages'
 import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
-import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asRoutePath,
+  asWorkspaceID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode, type WikiNodeKind } from '@/lib/wikiPath'
 import { useDebounce } from '@/lib/useDebounce'
 import { useTreeStore } from '@/stores/tree'
@@ -18,7 +22,7 @@ const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 type CreatePageByPathDialogProps = {
   initialPath?: string
   initialKind?: WikiNodeKind
-  workspaceId: string
+  workspaceId: WorkspaceID
   readOnlyPath?: boolean
   forwardToEditMode?: boolean
 }
@@ -87,7 +91,9 @@ export function CreatePageByPathDialog({
         )
       }
 
-      toast.success('Page created successfully')
+      toast.success('Page created successfully', {
+        messageId: 'ui.toast.page.created_by_path',
+      })
       return true // Close the dialog
     } catch (err: unknown) {
       console.warn(err)

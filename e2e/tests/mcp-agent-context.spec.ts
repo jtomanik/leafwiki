@@ -43,7 +43,7 @@ type WikiContext = {
   };
   syncStatus?: {
     enabled?: boolean;
-    validationErrors?: ValidationIssue[];
+    validationErrorDetails?: ValidationIssue[];
   };
   tree?: unknown;
   validation?: {
@@ -58,7 +58,7 @@ type WikiContext = {
 
 type ValidationIssue = {
   code?: string;
-  message?: string;
+  messageId?: string;
   path?: string;
   severity?: string;
 };
@@ -386,15 +386,15 @@ leafwiki_title: MCP Validation Source
       expect.arrayContaining([
         expect.objectContaining({
           code: 'broken_link',
-          message: expect.stringContaining(`/${missingSlug}`),
+          path: expect.stringContaining(`${slug}.md`),
         }),
       ]),
     );
-    expect(refresh.syncStatus?.validationErrors).toEqual(
+    expect(refresh.syncStatus?.validationErrorDetails).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'broken_link',
-          message: expect.stringContaining(`/${missingSlug}`),
+          path: expect.stringContaining(`${slug}.md`),
         }),
       ]),
     );
@@ -464,15 +464,15 @@ leafwiki_title: MCP Ambiguous Source
       expect.arrayContaining([
         expect.objectContaining({
           code: 'ambiguous_legacy_link',
-          message: expect.stringContaining(`/${targetSlug}`),
+          path: expect.stringContaining(`${sourceSlug}.md`),
         }),
       ]),
     );
-    expect(refresh.syncStatus?.validationErrors).toEqual(
+    expect(refresh.syncStatus?.validationErrorDetails).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'ambiguous_legacy_link',
-          message: expect.stringContaining(`/${targetSlug}`),
+          path: expect.stringContaining(`${sourceSlug}.md`),
         }),
       ]),
     );
@@ -546,17 +546,15 @@ leafwiki_title: MCP Validate Source
       expect.arrayContaining([
         expect.objectContaining({
           code: 'broken_link',
-          message: expect.stringContaining(`/${missingSlug}`),
+          path: expect.stringContaining(`${sourceSlug}.md`),
         }),
         expect.objectContaining({
           code: 'missing_asset',
-          message: expect.stringContaining('missing.png'),
+          path: expect.stringContaining(`${sourceSlug}.md`),
         }),
       ]),
     );
     for (const issue of invalidIssues) {
-      expect(issue.message ?? '').not.toContain(targetSlug);
-      expect(issue.message ?? '').not.toContain(sectionSlug);
       expect(issue.path ?? '').not.toContain(targetSlug);
       expect(issue.path ?? '').not.toContain(sectionSlug);
     }

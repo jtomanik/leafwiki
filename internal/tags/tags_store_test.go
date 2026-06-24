@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *TagsStore {
 func testPageIDs[T ~string](ids ...T) []tree.PageID {
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, tree.NewPageIDUnchecked(id))
+		pageIDs = append(pageIDs, newFixturePageID(id))
 	}
 	return pageIDs
 }
@@ -40,7 +40,7 @@ func assertPageIDSliceEqual(t *testing.T, got []tree.PageID, want []string) {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 	for i, w := range want {
-		if got[i] != tree.NewPageIDUnchecked(w) {
+		if got[i] != newFixturePageID(w) {
 			t.Errorf("[%d] = %q, want %q", i, got[i], w)
 		}
 	}

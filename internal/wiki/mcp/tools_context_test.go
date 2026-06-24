@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -141,7 +142,7 @@ func TestRecentChangesResolveRootIndexPageID(t *testing.T) {
 	routes := newContextToolTestRoutes(t)
 	ctx := context.Background()
 	createdAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
-	routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error) {
+	routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 		return workspacesync.SnapshotList{
 			Snapshots: []workspacesync.Snapshot{{
 				ID:                   "root-index-commit",
@@ -228,8 +229,9 @@ func TestGetContextSyncModesAndSessionHistory(t *testing.T) {
 		t.Fatalf("errored auto refresh calls = %d, want 3", refreshCalls)
 	}
 	erroredStatus, ok := errored.SyncStatus.(map[string]any)
-	if !ok || erroredStatus["lastError"] != "sync still failed" {
-		t.Fatalf("errored sync status = %#v, want surfaced refresh error", errored.SyncStatus)
+	lastErrorDetail, detailOK := erroredStatus["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
+	if !ok || !detailOK || lastErrorDetail == nil || lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
+		t.Fatalf("errored sync status = %#v, want structured refresh error detail", errored.SyncStatus)
 	}
 
 	routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
@@ -255,7 +257,8 @@ func TestGetContextSyncModesAndSessionHistory(t *testing.T) {
 		t.Fatalf("none refresh calls = %d, want still 4", refreshCalls)
 	}
 	noneStatus, ok := none.SyncStatus.(map[string]any)
-	if !ok || noneStatus["lastError"] != "reported without refresh" {
+	lastErrorDetail, detailOK = noneStatus["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
+	if !ok || !detailOK || lastErrorDetail == nil || lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
 		t.Fatalf("none sync status = %#v, want existing last error", none.SyncStatus)
 	}
 
@@ -353,21 +356,21 @@ func TestGetContextRedactsSyncStatusLastErrorPaths(t *testing.T) {
 	if !ok {
 		t.Fatalf("SyncStatus has type %T, want map", out.SyncStatus)
 	}
-	lastError, ok := status["lastError"].(string)
-	if !ok {
-		t.Fatalf("lastError has type %T, want string", status["lastError"])
+	lastErrorDetail, ok := status["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
+	if !ok || lastErrorDetail == nil {
+		t.Fatalf("lastErrorDetail has type %T, want structured detail", status["lastErrorDetail"])
 	}
-	if strings.Contains(lastError, rootDir) || strings.Contains(lastError, dataDir) {
-		t.Fatalf("lastError = %q, want root/data paths redacted", lastError)
-	}
-	for _, want := range []string{"<root-dir>/docs/api.md", "<data-dir>/.leafwiki/git/HEAD", "permission denied"} {
-		if !strings.Contains(lastError, want) {
-			t.Fatalf("lastError = %q, want substring %q", lastError, want)
+	for _, got := range []string{lastErrorDetail.Message, lastErrorDetail.Template} {
+		if strings.Contains(got, rootDir) || strings.Contains(got, dataDir) {
+			t.Fatalf("lastErrorDetail field = %q, want root/data paths omitted", got)
 		}
 	}
-	validationErrors, ok := status["validationErrors"].([]workspacesync.ValidationError)
+	if lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
+		t.Fatalf("lastErrorDetail = %#v, want workspace sync failed code", lastErrorDetail)
+	}
+	validationErrors, ok := status["validationErrorDetails"].([]workspacesync.ValidationError)
 	if !ok || len(validationErrors) != 1 {
-		t.Fatalf("validationErrors = %#v, want one redacted validation error", status["validationErrors"])
+		t.Fatalf("validationErrorDetails = %#v, want one redacted validation error", status["validationErrorDetails"])
 	}
 	for _, got := range []string{validationErrors[0].Path, validationErrors[0].Message} {
 		if strings.Contains(got, rootDir) || strings.Contains(got, dataDir) {
@@ -469,7 +472,7 @@ func TestValidationFromSyncStatusSeparatesWarningsFromErrors(t *testing.T) {
 	if !validation.OK {
 		t.Fatalf("validation.OK = false, want warnings-only status to be OK")
 	}
-	if validation.Summary.Errors != 0 || validation.Summary.Warnings != 1 {
+	if validation.Summary.Errors != 0 || validation.Summary.WarningCount != 1 {
 		t.Fatalf("validation summary = %#v, want 0 errors and 1 warning", validation.Summary)
 	}
 }

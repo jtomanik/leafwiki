@@ -244,11 +244,11 @@ func pageKind() *tree.NodeKind {
 
 func createPageWithContent(t *testing.T, ts *tree.TreeService, title, slug, content string) tree.PageID {
 	t.Helper()
-	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), pageKind())
+	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), pageKind())
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &content, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, newFixtureSlug(slug), &content, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 	return *idPtr

@@ -69,12 +69,14 @@ export default function MarkdownCodeBlock(
   const handleCopy = () => {
     const copiedSuccessfully = copy(code)
     if (!copiedSuccessfully) {
-      toast.error('Could not copy code')
+      toast.error('Could not copy code', {
+        messageId: 'ui.toast.markdown_code.copy_failed',
+      })
       return
     }
 
     setCopied(true)
-    toast.success('Code copied')
+    toast.success('Code copied', { messageId: 'ui.toast.markdown_code.copied' })
   }
 
   return (

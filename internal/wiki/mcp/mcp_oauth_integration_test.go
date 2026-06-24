@@ -616,7 +616,7 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 	deletedCode := authorizeCode(t, router, deletedCookies, redirectURI, "refresh-deleted-state", verifier+"2", resource)
 	deletedToken := exchangeCode(t, router, deletedCode, redirectURI, verifier+"2")
 	deletedRefresh := stringFromMap(t, deletedToken, "refresh_token")
-	if err := w.UserService().DeleteUser(coreauth.NewUserIDUnchecked(deleted.ID)); err != nil {
+	if err := w.UserService().DeleteUser(newFixtureUserID(deleted.ID)); err != nil {
 		t.Fatalf("delete refresh-deleted user: %v", err)
 	}
 	deletedRefreshForm := url.Values{
@@ -900,7 +900,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("create editor user: %v", err)
 	}
 	editorToken := oauthAccessTokenForUser(t, router, "editor", "editorpass", "editor-state")
-	if _, err := w.UserService().UpdateUser(coreauth.NewUserIDUnchecked(editor.ID), editor.Username, editor.Email, "", coreauth.RoleViewer); err != nil {
+	if _, err := w.UserService().UpdateUser(newFixtureUserID(editor.ID), editor.Username, editor.Email, "", coreauth.RoleViewer); err != nil {
 		t.Fatalf("downgrade editor user: %v", err)
 	}
 	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
@@ -917,7 +917,7 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 		t.Fatalf("create deleted user: %v", err)
 	}
 	deletedToken := oauthAccessTokenForUser(t, router, "deleted", "deletedpass", "deleted-state")
-	if err := w.UserService().DeleteUser(coreauth.NewUserIDUnchecked(deleted.ID)); err != nil {
+	if err := w.UserService().DeleteUser(newFixtureUserID(deleted.ID)); err != nil {
 		t.Fatalf("delete user before MCP request: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
@@ -942,7 +942,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create api editor user: %v", err)
 	}
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	editorKey, err := w.APIKeyService().CreateAPIKey(editorID, "Editor MCP", editorID)
 	if err != nil {
 		t.Fatalf("create editor api key: %v", err)
@@ -970,7 +970,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create api viewer user: %v", err)
 	}
-	viewerID := coreauth.NewUserIDUnchecked(viewer.ID)
+	viewerID := newFixtureUserID(viewer.ID)
 	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer MCP", viewerID)
 	if err != nil {
 		t.Fatalf("create viewer api key: %v", err)
@@ -1003,7 +1003,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create role-change user: %v", err)
 	}
-	roleUserID := coreauth.NewUserIDUnchecked(roleUser.ID)
+	roleUserID := newFixtureUserID(roleUser.ID)
 	roleKey, err := w.APIKeyService().CreateAPIKey(roleUserID, "Role MCP", roleUserID)
 	if err != nil {
 		t.Fatalf("create role-change api key: %v", err)
@@ -1024,7 +1024,7 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create deleted api key user: %v", err)
 	}
-	deletedID := coreauth.NewUserIDUnchecked(deleted.ID)
+	deletedID := newFixtureUserID(deleted.ID)
 	deletedKey, err := w.APIKeyService().CreateAPIKey(deletedID, "Deleted MCP", deletedID)
 	if err != nil {
 		t.Fatalf("create deleted-user api key: %v", err)
@@ -1049,7 +1049,7 @@ func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create context viewer: %v", err)
 	}
-	viewerID := coreauth.NewUserIDUnchecked(viewer.ID)
+	viewerID := newFixtureUserID(viewer.ID)
 	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer Context MCP", viewerID)
 	if err != nil {
 		t.Fatalf("create viewer context api key: %v", err)
@@ -1084,7 +1084,7 @@ func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testin
 	if err != nil {
 		t.Fatalf("create private stdio editor user: %v", err)
 	}
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	apiKey, err := w.APIKeyService().CreateAPIKey(editorID, "Private STDIO MCP", editorID)
 	if err != nil {
 		t.Fatalf("create private stdio api key: %v", err)
@@ -1112,7 +1112,7 @@ func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get admin user: %v", err)
 	}
-	adminID := coreauth.NewUserIDUnchecked(admin.ID)
+	adminID := newFixtureUserID(admin.ID)
 	apiKey, err := w.APIKeyService().CreateAPIKey(adminID, "Base Path MCP", adminID)
 	if err != nil {
 		t.Fatalf("create base-path api key: %v", err)

@@ -22,7 +22,7 @@ type ActorContext struct {
 	Scopes      []string                `json:"scopes,omitempty"`
 	WorkspaceID workspaceid.WorkspaceID `json:"workspaceId"`
 	AuthMethod  string                  `json:"authMethod"`
-	SessionID   string                  `json:"sessionId,omitempty"`
+	SessionID   SessionID               `json:"sessionId,omitempty"`
 	IssuedAt    time.Time               `json:"issuedAt"`
 	ExpiresAt   time.Time               `json:"expiresAt"`
 }
@@ -42,7 +42,7 @@ type actorContextWire struct {
 	Scopes      []string  `json:"scopes,omitempty"`
 	WorkspaceID string    `json:"workspaceId"`
 	AuthMethod  string    `json:"authMethod"`
-	SessionID   string    `json:"sessionId,omitempty"`
+	SessionID   SessionID `json:"sessionId,omitempty"`
 	IssuedAt    time.Time `json:"issuedAt"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 }

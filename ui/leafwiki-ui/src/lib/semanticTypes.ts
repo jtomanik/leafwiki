@@ -10,6 +10,8 @@ export type RevisionID = Brand<string, 'RevisionID'>
 export type CommitHash = Brand<string, 'CommitHash'>
 export type WorkspaceID = Brand<string, 'WorkspaceID'>
 export type UserID = Brand<string, 'UserID'>
+export type SessionID = Brand<string, 'SessionID'>
+export type ImportPlanID = Brand<string, 'ImportPlanID'>
 export type MCPAPIKeyID = Brand<string, 'MCPAPIKeyID'>
 export type PageVersion = Brand<string, 'PageVersion'>
 export type RoutePath = Brand<string, 'RoutePath'>
@@ -45,6 +47,14 @@ export function asWorkspaceID(value: string): WorkspaceID {
 
 export function asUserID(value: string): UserID {
   return value as UserID
+}
+
+export function asSessionID(value: string): SessionID {
+  return value as SessionID
+}
+
+export function asImportPlanID(value: string): ImportPlanID {
+  return value as ImportPlanID
 }
 
 export function asMCPAPIKeyID(value: string): MCPAPIKeyID {

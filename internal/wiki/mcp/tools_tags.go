@@ -4,6 +4,7 @@ import (
 	"context"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	coretags "github.com/perber/wiki/internal/tags"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 )
 
@@ -12,7 +13,7 @@ func (r *Routes) registerTagTools(server *sdkmcp.Server) {
 		out, err := r.getTags.Execute(ctx, wikitags.GetTagsInput{
 			Filter:   in.Query,
 			Selected: in.Selected,
-			Limit:    in.Limit,
+			PageSize: coretags.TagLimit(in.Limit),
 		})
 		if err != nil {
 			return listTagsOutput{}, err

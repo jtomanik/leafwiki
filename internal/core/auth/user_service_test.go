@@ -77,7 +77,7 @@ func TestUserService_UpdateUser(t *testing.T) {
 	service := setupTestUserService(t)
 
 	user, _ := service.CreateUser("bob", "bob@example.com", "initial", "editor")
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 
 	updated, err := service.UpdateUser(userID, "bobnew", "bobnew@example.com", "newpass", "admin")
 	if err != nil {
@@ -93,7 +93,7 @@ func TestUserService_UpdateUser_EmptyRolePreservesExistingRole(t *testing.T) {
 	service := setupTestUserService(t)
 
 	user, _ := service.CreateUser("bob", "bob@example.com", "initial", RoleEditor)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 
 	updated, err := service.UpdateUser(userID, "bobnew", "bobnew@example.com", "", "")
 	if err != nil {
@@ -112,7 +112,7 @@ func TestUserService_UpdateUser_LastAdminCannotBeDemoted(t *testing.T) {
 
 	admin, _ := service.CreateUser("admin", "admin@example.com", "pass", RoleAdmin)
 
-	_, err := service.UpdateUser(NewUserIDUnchecked(admin.ID), admin.Username, admin.Email, "", RoleViewer)
+	_, err := service.UpdateUser(newFixtureUserID(admin.ID), admin.Username, admin.Email, "", RoleViewer)
 	if err != ErrLastAdminCannotBeDemoted {
 		t.Errorf("expected ErrLastAdminCannotBeDemoted, got: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestUserService_UpdateUser_AdminCanBeDemotedWhenAnotherAdminExists(t *testi
 	admin1, _ := service.CreateUser("admin1", "admin1@example.com", "pass", RoleAdmin)
 	_, _ = service.CreateUser("admin2", "admin2@example.com", "pass", RoleAdmin)
 
-	updated, err := service.UpdateUser(NewUserIDUnchecked(admin1.ID), admin1.Username, admin1.Email, "", RoleViewer)
+	updated, err := service.UpdateUser(newFixtureUserID(admin1.ID), admin1.Username, admin1.Email, "", RoleViewer)
 	if err != nil {
 		t.Fatalf("expected demotion to succeed with two admins, got: %v", err)
 	}
@@ -138,13 +138,13 @@ func TestUserService_DeleteUser(t *testing.T) {
 
 	// admin should not be deletable
 	admin, _ := service.CreateUser("admin", "admin@example.com", "secret", "admin")
-	err := service.DeleteUser(NewUserIDUnchecked(admin.ID))
+	err := service.DeleteUser(newFixtureUserID(admin.ID))
 	if err != ErrUserAdminCannotBeDeleted {
 		t.Errorf("Expected ErrUserAdminCannotBeDeleted when deleting admin, got: %v", err)
 	}
 
 	editor, _ := service.CreateUser("editor", "editor@example.com", "secret", "editor")
-	err = service.DeleteUser(NewUserIDUnchecked(editor.ID))
+	err = service.DeleteUser(newFixtureUserID(editor.ID))
 	if err != nil {
 		t.Errorf("Failed to delete editor: %v", err)
 	}

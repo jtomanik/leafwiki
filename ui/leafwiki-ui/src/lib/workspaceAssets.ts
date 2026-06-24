@@ -1,4 +1,5 @@
 import { workspaceApiPath } from './api/workspaces'
+import type { WorkspaceID } from './semanticTypes'
 
 export function isAssetPath(src: string): boolean {
   return (
@@ -19,7 +20,10 @@ export function normalizeAssetPath(src: string): string {
   return src
 }
 
-export function workspaceAssetPath(src: string, workspaceId?: string): string {
+export function workspaceAssetPath(
+  src: string,
+  workspaceId?: WorkspaceID,
+): string {
   const normalized = normalizeAssetPath(src)
   if (!workspaceId || !normalized.startsWith('/assets/')) return normalized
   return workspaceApiPath(normalized, workspaceId)

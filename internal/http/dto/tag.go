@@ -53,7 +53,7 @@ func ToTaggedPage(node *tree.PageNode, pageTags []string, excerpt string, userRe
 	}
 
 	if userResolver != nil {
-		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
+		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.UserIDFromString(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	return p

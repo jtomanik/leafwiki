@@ -55,25 +55,29 @@ func (r *Routes) handleHeartbeat(c *gin.Context) {
 	}
 	var heartbeat Heartbeat
 	if err := c.ShouldBindJSON(&heartbeat); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": sharederrors.NewLocalizedErrorDetail(ErrCodePresenceInvalidRequest, "", "", err.Error()),
+		c.JSON(http.StatusBadRequest, presenceErrorResponse{
+			Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodePresenceInvalidRequest, err.Error()),
 		})
 		return
 	}
 	page := r.resolvePage(heartbeat.PageID, heartbeat.Path)
 	if err := r.registry.Record(heartbeat, user, page); err != nil {
 		if loc, ok := sharederrors.AsLocalizedError(err); ok {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": sharederrors.LocalizedErrorDetailFromError(loc),
+			c.JSON(http.StatusBadRequest, presenceErrorResponse{
+				Error: sharederrors.LocalizedErrorDetailFromError(loc),
 			})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": sharederrors.NewLocalizedErrorDetail(ErrCodePresenceInvalidRequest, "", "", err.Error()),
+		c.JSON(http.StatusBadRequest, presenceErrorResponse{
+			Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodePresenceInvalidRequest, err.Error()),
 		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+type presenceErrorResponse struct {
+	Error sharederrors.LocalizedErrorDetail `json:"error"`
 }
 
 func (r *Routes) handleDeleteSession(c *gin.Context) {
@@ -82,7 +86,7 @@ func (r *Routes) handleDeleteSession(c *gin.Context) {
 		return
 	}
 	sessionID := strings.TrimSpace(c.Param("id"))
-	r.registry.Remove(sessionID, user)
+	r.registry.Remove(WebSessionIDFromString(sessionID), user)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

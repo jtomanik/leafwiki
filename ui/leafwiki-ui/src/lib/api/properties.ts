@@ -1,5 +1,6 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { PageID, UserID, WorkspaceID } from '../semanticTypes'
 
 export type PropertyKeyCount = {
   key: string
@@ -7,16 +8,16 @@ export type PropertyKeyCount = {
 }
 
 export type PropertyPage = {
-  id: string
+  id: PageID
   title: string
   path: string
   properties: Record<string, { value: string; type: string }>
   updatedAt?: string
-  lastAuthor?: { id: string; username: string }
+  lastAuthor?: { id: UserID; username: string }
 }
 
 export async function fetchPropertyKeys(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   filter = '',
   limit = 50,
 ): Promise<PropertyKeyCount[]> {
@@ -30,7 +31,7 @@ export async function fetchPropertyKeys(
 export async function fetchPagesByProperty(
   key: string,
   value: string,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<PropertyPage[]> {
   const params = new URLSearchParams({ key, value })
   return (await fetchWithAuth(

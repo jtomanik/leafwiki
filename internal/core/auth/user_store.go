@@ -183,7 +183,7 @@ func (f *UserStore) UpdateUser(user *User) error {
 	}
 
 	// Check if a user with the given ID exists
-	existingUser, err := f.GetUserByID(NewUserIDUnchecked(user.ID))
+	existingUser, err := f.GetUserByID(UserIDFromString(user.ID))
 	if err != nil {
 		if err == ErrUserNotFound {
 			return ErrUserNotFound

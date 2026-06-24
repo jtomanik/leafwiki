@@ -40,7 +40,7 @@ func TestUpdateUser_AdminCanChangeRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(viewer.ID),
+		ID:               newFixtureUserID(viewer.ID),
 		Username:         viewer.Username,
 		Email:            viewer.Email,
 		Role:             coreauth.RoleAdmin,
@@ -63,7 +63,7 @@ func TestUpdateUser_AdminCanUpdateProfileWithoutRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(editor.ID),
+		ID:               newFixtureUserID(editor.ID),
 		Username:         "ed-admin-updated",
 		Email:            "ed-admin-updated@example.com",
 		Role:             "",
@@ -92,7 +92,7 @@ func TestUpdateUser_NonAdminCannotEscalateRole(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(viewer.ID),
+		ID:               newFixtureUserID(viewer.ID),
 		Username:         viewer.Username,
 		Email:            viewer.Email,
 		Role:             coreauth.RoleAdmin,
@@ -115,7 +115,7 @@ func TestUpdateUser_NonAdminCanUpdateOwnProfile(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(editor.ID),
+		ID:               newFixtureUserID(editor.ID),
 		Username:         "ed-updated",
 		Email:            "ed-updated@example.com",
 		Role:             coreauth.RoleAdmin,
@@ -144,7 +144,7 @@ func TestUpdateUser_LastAdminCannotSelfDemote(t *testing.T) {
 	}
 
 	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(admin.ID),
+		ID:               newFixtureUserID(admin.ID),
 		Username:         admin.Username,
 		Email:            admin.Email,
 		Role:             coreauth.RoleViewer,
@@ -167,7 +167,7 @@ func TestUpdateUser_AdminCanBeDemotedWhenAnotherExists(t *testing.T) {
 	}
 
 	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(admin1.ID),
+		ID:               newFixtureUserID(admin1.ID),
 		Username:         admin1.Username,
 		Email:            admin1.Email,
 		Role:             coreauth.RoleViewer,
@@ -190,7 +190,7 @@ func TestUpdateUser_AdminInvalidRole(t *testing.T) {
 	}
 
 	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               coreauth.NewUserIDUnchecked(user.ID),
+		ID:               newFixtureUserID(user.ID),
 		Username:         user.Username,
 		Email:            user.Email,
 		Role:             "superuser",
@@ -233,13 +233,13 @@ func TestCreateAPIKeyUseCaseValidationReturnsStableFieldCodes(t *testing.T) {
 }
 
 func TestAPIKeyUseCaseInputsUseSemanticIDs(t *testing.T) {
-	_ = GetUserByIDInput{ID: coreauth.NewUserIDUnchecked("user-1")}
+	_ = GetUserByIDInput{ID: newFixtureUserID("user-1")}
 	_ = CreateAPIKeyInput{
-		UserID:          coreauth.NewUserIDUnchecked("user-1"),
-		CreatedByUserID: coreauth.NewUserIDUnchecked("admin-1"),
+		UserID:          newFixtureUserID("user-1"),
+		CreatedByUserID: newFixtureUserID("admin-1"),
 	}
-	_ = ListAPIKeysInput{UserID: coreauth.NewUserIDUnchecked("user-1")}
-	_ = RevokeAPIKeyInput{UserID: coreauth.NewUserIDUnchecked("user-1"), KeyID: coreauth.NewAPIKeyIDUnchecked("key-1")}
+	_ = ListAPIKeysInput{UserID: newFixtureUserID("user-1")}
+	_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
 }
 
 func assertAuthFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {

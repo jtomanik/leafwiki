@@ -1,6 +1,7 @@
 import { getAssets, uploadAsset } from '@/lib/api/assets'
 import { mapApiError } from '@/lib/api/errors'
 import { formatBytes } from '@/lib/config'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { useConfigStore } from '@/stores/config'
 import { UploadCloud } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -8,8 +9,8 @@ import { toast } from 'sonner'
 import { AssetItem } from './AssetItem'
 
 type Props = {
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
   onInsert?: (md: string) => void
   onFilenameChange?: (before: string, after: string) => void
   onAssetVersionChange?: () => void

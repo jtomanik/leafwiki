@@ -25,7 +25,7 @@ const (
 type Routes struct {
 	status           func() workspacesync.SyncStatus
 	refresh          func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	listSnapshots    func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	listSnapshots    func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error)
 	restoreWorkspace func(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
 	authService      *coreauth.AuthService
 }
@@ -33,7 +33,7 @@ type Routes struct {
 type RoutesConfig struct {
 	Status           func() workspacesync.SyncStatus
 	Refresh          func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
-	ListSnapshots    func(context.Context, workspacesync.CommitHash, int) (workspacesync.SnapshotList, error)
+	ListSnapshots    func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error)
 	RestoreWorkspace func(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
 	AuthService      *coreauth.AuthService
 }
@@ -77,14 +77,14 @@ func (r *Routes) handleStatus(c *gin.Context) {
 
 func (r *Routes) handleSnapshots(c *gin.Context) {
 	if r.listSnapshots == nil {
-		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled)
 		return
 	}
 	rawCursor := strings.TrimSpace(c.Query("cursor"))
-	cursor := workspacesync.NewCommitHashUnchecked(rawCursor)
-	if cursor.String() != "" {
-		if len(cursor.String()) > 256 || strings.ContainsAny(cursor.String(), " \t\r\n") {
-			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidCursor, "invalid snapshot cursor")
+	cursor := workspacesync.CommitHashFromString(rawCursor)
+	if rawCursor != "" {
+		if len(rawCursor) > 256 || strings.ContainsAny(rawCursor, " \t\r\n") {
+			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidCursor)
 			return
 		}
 	}
@@ -92,14 +92,14 @@ func (r *Routes) handleSnapshots(c *gin.Context) {
 	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
 		parsed, err := strconv.Atoi(rawLimit)
 		if err != nil || parsed <= 0 || parsed > 200 {
-			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidLimit, "invalid snapshot limit")
+			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidLimit)
 			return
 		}
 		limit = parsed
 	}
-	out, err := r.listSnapshots(c.Request.Context(), cursor, limit)
+	out, err := r.listSnapshots(c.Request.Context(), cursor, workspacesync.SnapshotLimit(limit))
 	if err != nil {
-		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"snapshots": out.Snapshots, "nextCursor": out.NextCursor})
@@ -107,7 +107,7 @@ func (r *Routes) handleSnapshots(c *gin.Context) {
 
 func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 	if r.restoreWorkspace == nil {
-		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled)
 		return
 	}
 	user := authmw.MustGetUser(c)
@@ -116,12 +116,12 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 	}
 	status, err := r.restoreWorkspace(
 		c.Request.Context(),
-		workspacesync.NewCommitHashUnchecked(strings.TrimSpace(c.Param("commit"))),
+		workspacesync.CommitHashFromString(strings.TrimSpace(c.Param("commit"))),
 		workspacesync.Actor{ID: workspacesync.NewActorIDUnchecked(user.ID), Name: user.Username, Email: user.Email},
 		workspacesync.SourceWeb,
 	)
 	if err != nil {
-		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed)
 		return
 	}
 	c.JSON(http.StatusOK, statusResponse(status))
@@ -129,7 +129,7 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 
 func (r *Routes) handleRefresh(c *gin.Context) {
 	if r.refresh == nil {
-		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled)
 		return
 	}
 	status, err := r.refresh(c.Request.Context(), workspacesync.SyncRequest{
@@ -138,16 +138,20 @@ func (r *Routes) handleRefresh(c *gin.Context) {
 		Actor:  workspacesync.PublicEditorActor(),
 	})
 	if err != nil {
-		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed)
 		return
 	}
 	c.JSON(http.StatusOK, statusResponse(status))
 }
 
-func abortWorkspaceSyncError(c *gin.Context, status int, code sharederrors.ErrorCode, message string, args ...string) {
-	c.JSON(status, gin.H{
-		"error": sharederrors.NewLocalizedErrorDetail(code, message, message, args...),
+func abortWorkspaceSyncError(c *gin.Context, status int, code sharederrors.ErrorCode) {
+	c.JSON(status, workspaceSyncErrorResponse{
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
+}
+
+type workspaceSyncErrorResponse struct {
+	Error sharederrors.LocalizedErrorDetail `json:"error"`
 }
 
 func statusResponse(status workspacesync.SyncStatus) gin.H {
@@ -157,9 +161,17 @@ func statusResponse(status workspacesync.SyncStatus) gin.H {
 		"watcherRunning":             status.WatcherRunning,
 		"pendingEventCount":          status.PendingEventCount,
 		"lastSyncTime":               status.LastSyncTime,
-		"lastError":                  status.LastError,
+		"lastErrorDetail":            workspaceSyncLastErrorDetail(status.LastError),
 		"lastCommitHash":             status.LastCommitHash,
 		"recentChangedMarkdownPaths": status.RecentChangedMarkdownPaths,
-		"validationErrors":           status.ValidationErrors,
+		"validationErrorDetails":     status.ValidationErrors,
 	}
+}
+
+func workspaceSyncLastErrorDetail(lastError string) *sharederrors.LocalizedErrorDetail {
+	if strings.TrimSpace(lastError) == "" {
+		return nil
+	}
+	detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeWorkspaceSyncFailed)
+	return &detail
 }

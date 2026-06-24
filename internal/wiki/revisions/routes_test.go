@@ -29,10 +29,10 @@ func TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor(t *testing
 	}
 
 	var seenCursor string
-	var seenLimit int
+	var seenLimit workspacesync.PageRevisionLimit
 	routes := NewRoutes(RoutesConfig{
 		TreeService: treeService,
-		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit int) (workspacesync.PageRevisionList, error) {
+		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 			if page.ID != *pageID {
 				t.Fatalf("workspace page id = %q, want %q", page.ID, pageID.String())
 			}

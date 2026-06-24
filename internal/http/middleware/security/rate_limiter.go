@@ -78,8 +78,8 @@ func NewRateLimiter(limit int, window time.Duration, resetOnSuccess bool) gin.Ha
 		}
 		if len(events) >= rl.limit {
 			rl.mu.Unlock()
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": sharederrors.NewLocalizedErrorDetail(ErrCodeRateLimitExceeded, "", ""),
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, securityErrorResponse{
+				Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodeRateLimitExceeded),
 			})
 			return
 		}
@@ -96,4 +96,8 @@ func NewRateLimiter(limit int, window time.Duration, resetOnSuccess bool) gin.Ha
 		}
 		rl.mu.Unlock()
 	}
+}
+
+type securityErrorResponse struct {
+	Error sharederrors.LocalizedErrorDetail `json:"error"`
 }

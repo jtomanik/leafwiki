@@ -79,7 +79,11 @@ func requirePrivateActorContext(opts PrivateAuthOptions) gin.HandlerFunc {
 }
 
 func abortPrivateActorError(c *gin.Context, status int, code sharederrors.ErrorCode, message string) {
-	c.AbortWithStatusJSON(status, gin.H{
-		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	c.AbortWithStatusJSON(status, privateActorErrorResponse{
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
+}
+
+type privateActorErrorResponse struct {
+	Error sharederrors.LocalizedErrorDetail `json:"error"`
 }

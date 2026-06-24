@@ -95,8 +95,8 @@ func toAPINode(node *tree.PageNode, parentPath string, userResolver *auth.UserRe
 
 	var creator, lastAuthor *auth.UserLabel
 	if userResolver != nil {
-		creator, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.CreatorID.MetadataValue()))
-		lastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
+		creator, _ = userResolver.ResolveUserLabel(auth.UserIDFromString(node.Metadata.CreatorID.MetadataValue()))
+		lastAuthor, _ = userResolver.ResolveUserLabel(auth.UserIDFromString(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	contentPath := contentPathForNode(node, contentPathResolver)

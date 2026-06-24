@@ -220,7 +220,11 @@ func RequireSelf() gin.HandlerFunc {
 }
 
 func abortAuthMiddlewareError(c *gin.Context, status int, code sharederrors.ErrorCode, message string) {
-	c.AbortWithStatusJSON(status, gin.H{
-		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	c.AbortWithStatusJSON(status, authMiddlewareErrorResponse{
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
+}
+
+type authMiddlewareErrorResponse struct {
+	Error sharederrors.LocalizedErrorDetail `json:"error"`
 }

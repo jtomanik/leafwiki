@@ -21,7 +21,7 @@ import (
 
 // Routes is the RouteRegistrar for the revisions domain.
 type Routes struct {
-	listWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	listWorkspaceRevisions   func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
 	getWorkspaceRevision     func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error)
 	restoreWorkspaceRevision func(context.Context, *tree.Page, revision.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	userResolver             *coreauth.UserResolver
@@ -31,7 +31,7 @@ type Routes struct {
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
 type RoutesConfig struct {
-	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, int) (workspacesync.PageRevisionList, error)
+	ListWorkspaceRevisions   func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
 	GetWorkspaceRevision     func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error)
 	RestoreWorkspaceRevision func(context.Context, *tree.Page, revision.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	UserResolver             *coreauth.UserResolver
@@ -73,13 +73,13 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
 func (r *Routes) handleListRevisions(c *gin.Context) {
-	pageID := tree.NewPageIDUnchecked(strings.TrimSpace(c.Param("id")))
+	pageID := tree.PageIDFromString(strings.TrimSpace(c.Param("id")))
 	if pageID == "" {
 		respondWithRevisionStatusError(c, http.StatusBadRequest, ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required")
 		return
 	}
 
-	limit := DefaultRevisionListLimit
+	limit := workspacesync.PageRevisionLimit(DefaultRevisionListLimit)
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
@@ -91,13 +91,13 @@ func (r *Routes) handleListRevisions(c *gin.Context) {
 			respondWithRevisionError(c, err)
 			return
 		}
-		limit = normalized
+		limit = workspacesync.PageRevisionLimit(normalized)
 	}
 
 	r.handleListWorkspaceRevisions(c, pageID, strings.TrimSpace(c.Query("cursor")), limit)
 }
 
-func (r *Routes) handleListWorkspaceRevisions(c *gin.Context, pageID tree.PageID, cursor string, limit int) {
+func (r *Routes) handleListWorkspaceRevisions(c *gin.Context, pageID tree.PageID, cursor string, pageSize workspacesync.PageRevisionLimit) {
 	if r.treeService == nil {
 		respondWithRevisionStatusError(c, http.StatusInternalServerError, ErrCodeRevisionInternalError, "Failed to list revisions", "tree service is unavailable")
 		return
@@ -111,7 +111,7 @@ func (r *Routes) handleListWorkspaceRevisions(c *gin.Context, pageID tree.PageID
 		respondWithRevisionStatusError(c, http.StatusNotFound, ErrCodeRevisionNotFound, "Page not found", "page %s not found", pageID.MetadataValue())
 		return
 	}
-	out, err := r.listWorkspaceRevisions(c.Request.Context(), page, cursor, limit)
+	out, err := r.listWorkspaceRevisions(c.Request.Context(), page, cursor, pageSize)
 	if err != nil {
 		respondWithRevisionStatusError(c, http.StatusInternalServerError, ErrCodeRevisionInternalError, "Failed to list revisions", "failed to list workspace revisions for page %s", pageID.MetadataValue())
 		return
@@ -154,7 +154,7 @@ func (r *Routes) handleGetWorkspaceRevision(c *gin.Context, pageID tree.PageID, 
 }
 
 func (r *Routes) handleGetLatestRevision(c *gin.Context) {
-	pageID := tree.NewPageIDUnchecked(strings.TrimSpace(c.Param("id")))
+	pageID := tree.PageIDFromString(strings.TrimSpace(c.Param("id")))
 	if pageID == "" {
 		respondWithRevisionStatusError(c, http.StatusBadRequest, ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required")
 		return

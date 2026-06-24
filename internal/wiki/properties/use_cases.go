@@ -20,8 +20,8 @@ var ErrPropertiesMissingValue = sharederrors.NewLocalizedErrorFromCode(ErrCodePr
 // ─── GetPropertyKeysUseCase ──────────────────────────────────────────────────
 
 type GetPropertyKeysInput struct {
-	Filter string
-	Limit  int
+	Filter   string
+	PageSize coreprop.PropertyKeyLimit
 }
 
 type GetPropertyKeysOutput struct {
@@ -37,15 +37,15 @@ func NewGetPropertyKeysUseCase(svc *coreprop.PropertiesService) *GetPropertyKeys
 }
 
 func (uc *GetPropertyKeysUseCase) Execute(_ context.Context, in GetPropertyKeysInput) (*GetPropertyKeysOutput, error) {
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 50
+	pageSize := in.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
 	}
-	if limit > 200 {
-		limit = 200
+	if pageSize > 200 {
+		pageSize = 200
 	}
 
-	keys, err := uc.svc.GetAllPropertyKeys(strings.ToLower(strings.TrimSpace(in.Filter)), limit)
+	keys, err := uc.svc.GetAllPropertyKeys(strings.ToLower(strings.TrimSpace(in.Filter)), pageSize)
 	if err != nil {
 		return nil, err
 	}

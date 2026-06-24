@@ -16,7 +16,7 @@ import (
 	"github.com/perber/wiki/internal/test_utils"
 )
 
-const testAssetMaxBytes int64 = 1024
+const testAssetMaxBytes shared.MaxBytes = 1024
 
 func TestSaveAndListAsset(t *testing.T) {
 	tmp := t.TempDir()
@@ -621,7 +621,7 @@ func newTestMultipartFile(content []byte) multipart.File {
 }
 
 func assetName(raw string) tree.AssetName {
-	return tree.NewAssetNameUnchecked(raw)
+	return newFixtureAssetName(raw)
 }
 
 func (f *testMultipartFile) Close() error {

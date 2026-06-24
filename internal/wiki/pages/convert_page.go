@@ -43,7 +43,7 @@ func (uc *ConvertPageUseCase) Execute(_ context.Context, in ConvertPageInput) er
 	if err != nil {
 		return err
 	}
-	oldPath := before.CalculatePath()
+	oldPath := before.CalculateRoutePath()
 	if err := uc.tree.ConvertNode(in.UserID, in.ID, in.TargetKind, in.Version); err != nil {
 		return err
 	}

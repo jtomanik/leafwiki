@@ -8,6 +8,7 @@ import {
 } from '@/lib/config'
 import { withBasePath } from '@/lib/routePath'
 import { workspaceAssetPath } from '@/lib/workspaceAssets'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { Check, FileText, Link2, Pencil, Play, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -19,8 +20,8 @@ const audioExtensions = AUDIO_EXTENSIONS
 const videoExtensions = VIDEO_EXTENSIONS
 
 type Props = {
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
   filename: string
   editingFilename: string | null
   setEditingFilename: (filename: string | null) => void
@@ -64,7 +65,7 @@ export function AssetItem({
       }
 
       await renameAsset(pageId, baseName, newFilename, workspaceId)
-      toast.success('Asset renamed')
+      toast.success('Asset renamed', { messageId: 'ui.toast.asset.renamed' })
       onFilenameChange?.(baseName, newFilename)
       onAssetVersionChange?.()
       onReload()
@@ -86,7 +87,7 @@ export function AssetItem({
   const handleDelete = async () => {
     try {
       await deleteAsset(pageId, baseName, workspaceId)
-      toast.success('Asset deleted')
+      toast.success('Asset deleted', { messageId: 'ui.toast.asset.deleted' })
       onReload()
       onAssetVersionChange?.()
     } catch (err) {

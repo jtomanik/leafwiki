@@ -13,7 +13,16 @@ import (
 
 const PrivateWorkspacesPrefix = "/__leafwiki/workspaces"
 
-const ErrCodeWorkspaceGrantDenied sharederrors.ErrorCode = "workspace_grant_denied"
+const (
+	ErrCodeWorkspaceGrantDenied         sharederrors.ErrorCode = "workspace_grant_denied"
+	errCodePrivateUnauthorized          sharederrors.ErrorCode = "private_unauthorized"
+	errCodePrivateSubjectResolveFailed  sharederrors.ErrorCode = "private_subject_resolve_failed"
+	errCodePrivateRegistryLoadFailed    sharederrors.ErrorCode = "private_registry_load_failed"
+	errCodePrivateGrantsLoadFailed      sharederrors.ErrorCode = "private_grants_load_failed"
+	errCodePrivateWorkspaceAuthFailed   sharederrors.ErrorCode = "private_workspace_auth_failed"
+	errCodePrivateWorkspaceEnsureFailed sharederrors.ErrorCode = "private_workspace_ensure_failed"
+	errCodePrivateEncodeResponseFailed  sharederrors.ErrorCode = "private_encode_response_failed"
+)
 
 type WorkspaceListItem struct {
 	ID                     workspaceid.WorkspaceID `json:"id"`
@@ -69,12 +78,12 @@ func (h *privateWorkspaceAPI) ServeHTTP(w http.ResponseWriter, req *http.Request
 func (h *privateWorkspaceAPI) list(w http.ResponseWriter, req *http.Request) {
 	subject, err := h.subject(req)
 	if err != nil {
-		http.Error(w, "resolve subject", http.StatusUnauthorized)
+		writePrivateWorkspaceError(w, http.StatusUnauthorized, errCodePrivateSubjectResolveFailed)
 		return
 	}
 	workspaces, err := h.opts.Registry.ListWorkspaces()
 	if err != nil {
-		http.Error(w, "load registry", http.StatusInternalServerError)
+		writePrivateWorkspaceError(w, http.StatusInternalServerError, errCodePrivateRegistryLoadFailed)
 		return
 	}
 	out := WorkspaceListResponse{}
@@ -87,7 +96,7 @@ func (h *privateWorkspaceAPI) list(w http.ResponseWriter, req *http.Request) {
 	}
 	grants, err := h.opts.Grants.GrantsForSubject(subject.Subject)
 	if err != nil {
-		http.Error(w, "load grants", http.StatusInternalServerError)
+		writePrivateWorkspaceError(w, http.StatusInternalServerError, errCodePrivateGrantsLoadFailed)
 		return
 	}
 	grantByWorkspace := map[workspaceid.WorkspaceID]Grant{}
@@ -112,7 +121,7 @@ func (h *privateWorkspaceAPI) workspaceAction(w http.ResponseWriter, req *http.R
 	}
 	workspace, grant, granted, found, err := h.authorizedWorkspace(req, workspaceID)
 	if err != nil {
-		http.Error(w, "authorize workspace", http.StatusInternalServerError)
+		writePrivateWorkspaceError(w, http.StatusInternalServerError, errCodePrivateWorkspaceAuthFailed)
 		return
 	}
 	if !found {
@@ -120,7 +129,7 @@ func (h *privateWorkspaceAPI) workspaceAction(w http.ResponseWriter, req *http.R
 		return
 	}
 	if !granted {
-		writePrivateWorkspaceError(w, http.StatusForbidden, ErrCodeWorkspaceGrantDenied, "workspace access denied")
+		writePrivateWorkspaceError(w, http.StatusForbidden, ErrCodeWorkspaceGrantDenied)
 		return
 	}
 	switch {
@@ -130,7 +139,7 @@ func (h *privateWorkspaceAPI) workspaceAction(w http.ResponseWriter, req *http.R
 	case req.Method == http.MethodPost && action == "ensure":
 		status, err := h.ensure(req.Context(), workspace)
 		if err != nil {
-			http.Error(w, "ensure workspace: "+err.Error(), http.StatusInternalServerError)
+			writePrivateWorkspaceError(w, http.StatusInternalServerError, errCodePrivateWorkspaceEnsureFailed)
 			return
 		}
 		writeJSON(w, WorkspaceStatusResponse{Workspace: h.item(workspace, grant.Role), Status: status})
@@ -229,18 +238,19 @@ func parsePrivateWorkspacePath(path string) (workspaceid.WorkspaceID, string, bo
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, "encode response", http.StatusInternalServerError)
+		writePrivateWorkspaceError(w, http.StatusInternalServerError, errCodePrivateEncodeResponseFailed)
 	}
 }
 
-func writePrivateWorkspaceError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+func writePrivateWorkspaceError(w http.ResponseWriter, status int, code sharederrors.ErrorCode) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	detail := sharederrors.NewLocalizedErrorDetailFromCode(code)
 	_ = json.NewEncoder(w).Encode(privateWorkspaceErrorResponse{
 		Error: privateWorkspaceError{
 			Code:      code,
-			MessageID: sharederrors.MessageIDForCode(code),
-			Message:   message,
+			MessageID: detail.MessageID,
+			Message:   detail.Message,
 		},
 	})
 }

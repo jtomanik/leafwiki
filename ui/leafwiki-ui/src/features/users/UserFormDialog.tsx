@@ -57,7 +57,9 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
           role,
         })
       }
-      toast.success('User saved successfully')
+      toast.success('User saved successfully', {
+        messageId: 'ui.toast.user.saved',
+      })
       return true // Close the dialog
     } catch (err) {
       console.warn(err)

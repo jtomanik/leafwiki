@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { PageRefactorPreview } from '@/lib/api/pages'
 import { DIALOG_PAGE_REFACTOR_CONFIRMATION } from '@/lib/registries'
 import { useRef, useState } from 'react'
+import { refactorWarningKey, refactorWarningText } from './pageRefactorWarnings'
 
 export type PageRefactorDialogProps = {
   preview: PageRefactorPreview
@@ -94,8 +95,10 @@ export function PageRefactorDialog({
               className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900"
               data-testid="page-refactor-dialog-warnings"
             >
-              {previewWarnings.map((warning) => (
-                <div key={warning}>{warning}</div>
+              {previewWarnings.map((warning, index) => (
+                <div key={refactorWarningKey(warning, index)}>
+                  {refactorWarningText(warning)}
+                </div>
               ))}
             </div>
           )}
@@ -141,8 +144,10 @@ export function PageRefactorDialog({
                           className="page-refactor-dialog__affected-page-warnings"
                           data-testid="page-refactor-dialog-affected-page-warnings"
                         >
-                          {pageWarnings.map((warning) => (
-                            <div key={warning}>{warning}</div>
+                          {pageWarnings.map((warning, index) => (
+                            <div key={refactorWarningKey(warning, index)}>
+                              {refactorWarningText(warning)}
+                            </div>
                           ))}
                         </div>
                       )}

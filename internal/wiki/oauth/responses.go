@@ -60,7 +60,7 @@ func (r *Routes) handleApprovalDetails(ctx httpinternal.RouterContext) gin.Handl
 			c.JSON(http.StatusUnauthorized, gin.H{"error": oauthErrorUnauthorized})
 			return
 		}
-		details, ok := r.service.approvalDetails(c.Query("approval_token"), coreauth.NewUserIDUnchecked(user.ID))
+		details, ok := r.service.approvalDetails(c.Query("approval_token"), coreauth.UserIDFromString(user.ID))
 		if !ok {
 			c.JSON(http.StatusBadRequest, gin.H{"error": oauthErrorInvalidApproval})
 			return

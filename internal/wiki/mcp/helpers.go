@@ -75,7 +75,7 @@ func (r *Routes) actorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.User, e
 	if r.userService == nil {
 		return nil, newMCPHelperError(errCodeMCPAuthenticatedUserServiceUnavailable, "authenticated MCP user service is unavailable", nil)
 	}
-	user, err := r.userService.GetUserByID(coreauth.NewUserIDUnchecked(tokenInfo.UserID))
+	user, err := r.userService.GetUserByID(coreauth.UserIDFromString(tokenInfo.UserID))
 	if err != nil {
 		if !errors.Is(err, coreauth.ErrUserNotFound) {
 			return nil, newMCPHelperError(errCodeMCPAuthenticatedUserLookupFailed, "authenticated MCP user lookup failed", err)
@@ -166,12 +166,7 @@ func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 			IsError: true,
 		}, true
 	}
-	detail := sharederrors.NewLocalizedErrorDetail(
-		errCodeMCPToolError,
-		"",
-		"",
-		err.Error(),
-	)
+	detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeMCPToolError, err.Error())
 	return &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{
 			&sdkmcp.TextContent{Text: fmt.Sprintf("%s: %s", detail.Code, detail.Message)},
@@ -204,9 +199,9 @@ func exactlyOneIDOrPageID(id string, pageID string) (tree.PageID, error) {
 		return "", sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageIdentifierRequired, nil)
 	}
 	if pageID != "" {
-		return tree.NewPageIDUnchecked(pageID), nil
+		return tree.PageIDFromString(pageID), nil
 	}
-	return tree.NewPageIDUnchecked(id), nil
+	return tree.PageIDFromString(id), nil
 }
 
 func normalizeToolRoutePath(path string) string {

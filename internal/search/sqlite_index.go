@@ -26,9 +26,9 @@ type SQLiteIndex struct {
 	db           *sql.DB
 }
 
-func searchIndexDatabasePath(storageDir string, filename string) string {
+func searchIndexDatabasePath(storageDir string, filename tree.AssetName) string {
 	normalizedStorageDir := filepath.FromSlash(strings.ReplaceAll(storageDir, `\`, `/`))
-	return filepath.Join(normalizedStorageDir, filename)
+	return filepath.Join(normalizedStorageDir, filename.Filename())
 }
 
 var headingParser = goldmark.New()
@@ -119,7 +119,7 @@ func NewSQLiteIndex(storageDir string) (*SQLiteIndex, error) {
 		if closeErr := s.Close(); closeErr != nil {
 			slog.Default().Warn("failed to close corrupt search database before recovery", "error", closeErr)
 		}
-		sqliteutil.RemoveSQLiteFiles(searchIndexDatabasePath(s.storageDir, s.databaseFile))
+		sqliteutil.RemoveSQLiteFiles(searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
 		if err2 := s.ensureSchema(); err2 != nil {
 			_ = s.Close()
 			return nil, err2
@@ -133,7 +133,7 @@ func (s *SQLiteIndex) withDB(fn func(db *sql.DB) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		db, err := sql.Open("sqlite", searchIndexDatabasePath(s.storageDir, s.databaseFile))
+		db, err := sql.Open("sqlite", searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
 		if err != nil {
 			return err
 		}
@@ -240,15 +240,15 @@ func (s *SQLiteIndex) RemovePageByFilePath(filePath string) (int64, error) {
 	return rows, err
 }
 
-func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, offset, limit int) (*SearchResult, error) {
+func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, startAt ResultOffset, pageSize ResultLimit) (*SearchResult, error) {
 	query = strings.TrimSpace(query)
 
 	if len(pageIDs) == 0 && pageIDs != nil {
 		return &SearchResult{
 			Count:     0,
 			Items:     []SearchResultItem{},
-			Offset:    offset,
-			Limit:     limit,
+			StartAt:   startAt,
+			PageSize:  pageSize,
 			TagFacets: []SearchTagFacet{},
 		}, nil
 	}
@@ -257,8 +257,8 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, offset, limit 
 		return &SearchResult{
 			Count:     0,
 			Items:     []SearchResultItem{},
-			Offset:    offset,
-			Limit:     limit,
+			StartAt:   startAt,
+			PageSize:  pageSize,
 			TagFacets: []SearchTagFacet{},
 		}, nil
 	}
@@ -297,7 +297,7 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, offset, limit 
 			searchOrderByExpr(query != ""),
 		)
 
-		queryArgs := append(append([]interface{}{}, whereArgs...), limit, offset)
+		queryArgs := append(append([]interface{}{}, whereArgs...), int(pageSize), int(startAt))
 		rows, err := db.Query(searchQuery, queryArgs...)
 		if err != nil {
 			return err
@@ -337,8 +337,8 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, offset, limit 
 			return err
 		}
 		sr.Items = results
-		sr.Offset = offset
-		sr.Limit = limit
+		sr.StartAt = startAt
+		sr.PageSize = pageSize
 		return nil
 	})
 

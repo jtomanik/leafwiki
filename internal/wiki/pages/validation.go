@@ -48,7 +48,7 @@ func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tre
 		}
 		kind = validKind
 	}
-	if derivedKind := MarkdownPathInputKind(routePath); derivedKind != "" {
+	if derivedKind := MarkdownPathInputKind(tree.MarkdownPathFromString(routePath)); derivedKind != "" {
 		routePath = tree.MarkdownPathToRoutePath(routePath)
 		if kind != "" && kind != derivedKind {
 			return "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidKind, nil)
@@ -62,11 +62,11 @@ func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tre
 	return validPath, kind, nil
 }
 
-func MarkdownPathInputKind(routePath string) tree.NodeKind {
-	if !strings.EqualFold(path.Ext(routePath), ".md") {
+func MarkdownPathInputKind(markdownPath tree.MarkdownPath) tree.NodeKind {
+	if !strings.EqualFold(markdownPath.Ext(), ".md") {
 		return ""
 	}
-	if strings.EqualFold(path.Base(routePath), "index.md") {
+	if markdownPath.IsIndexFile() {
 		return tree.NodeKindSection
 	}
 	return tree.NodeKindPage
@@ -239,7 +239,7 @@ func ValidateSemanticMoveParentID(parentID tree.PageID) (tree.PageID, error) {
 	if raw != parentID.HashPayload() {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidParentID, nil)
 	}
-	return tree.NewPageIDUnchecked(raw), nil
+	return tree.PageIDFromString(raw), nil
 }
 
 func ValidateOptionalParentID(parentID *string) (*string, error) {

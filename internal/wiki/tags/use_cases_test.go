@@ -35,7 +35,7 @@ func createAndIndexPage(t *testing.T, ts *tree.TreeService, svc *coretags.TagsSe
 	t.Helper()
 
 	kind := tree.NodeKindPage
-	idPtr, err := ts.CreateNode("system", nil, title, tree.NewSlugUnchecked(slug), &kind)
+	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), &kind)
 	if err != nil {
 		t.Fatalf("CreateNode %q: %v", slug, err)
 	}
@@ -46,7 +46,7 @@ func createAndIndexPage(t *testing.T, ts *tree.TreeService, svc *coretags.TagsSe
 	}
 	fm += "---\n\n" + body
 
-	if err := ts.UpdateNodeUncheckedVersion(tree.UserID("system"), *idPtr, title, tree.NewSlugUnchecked(slug), &fm, true); err != nil {
+	if err := ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, newFixtureSlug(slug), &fm, true); err != nil {
 		t.Fatalf("UpdateNode %q: %v", slug, err)
 	}
 
@@ -76,7 +76,7 @@ func TestGetPagesByTagsUseCase_ReturnsMatchingPages(t *testing.T) {
 	if len(out.Pages) != 1 {
 		t.Fatalf("expected 1 page, got %d", len(out.Pages))
 	}
-	if tree.NewPageIDUnchecked(out.Pages[0].ID) != id1 {
+	if newFixturePageID(out.Pages[0].ID) != id1 {
 		t.Errorf("page ID = %q, want %q", out.Pages[0].ID, id1)
 	}
 }
@@ -111,7 +111,7 @@ func TestGetPagesByTagsUseCase_ANDLogic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(out.Pages) != 1 || tree.NewPageIDUnchecked(out.Pages[0].ID) != id1 {
+	if len(out.Pages) != 1 || newFixturePageID(out.Pages[0].ID) != id1 {
 		t.Errorf("expected only %q, got %v", id1, out.Pages)
 	}
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
-	"github.com/perber/wiki/internal/core/tree"
 )
 
 func TestFSStoreRevisionReadPaths(t *testing.T) {
@@ -240,8 +239,8 @@ func TestFSStoreValidationAndEmptyPaths(t *testing.T) {
 func TestFSStoreGetRevision_BackwardCompatibleWithoutExtraFrontmatterFields(t *testing.T) {
 	store := NewFSStore(t.TempDir())
 	createdAt := time.Date(2026, 4, 20, 15, 4, 5, 0, time.UTC)
-	pageID := tree.NewPageIDUnchecked("page-1")
-	revisionID := tree.NewRevisionIDUnchecked("rev-legacy")
+	pageID := newFixturePageID("page-1")
+	revisionID := newFixtureRevisionID("rev-legacy")
 
 	payload := map[string]interface{}{
 		"id":              revisionID,
@@ -369,10 +368,10 @@ func TestFSStoreIdempotentSaves(t *testing.T) {
 
 func TestFSStoreCursorAndFileFilteringHelpers(t *testing.T) {
 	store := NewFSStore(t.TempDir())
-	pageID := tree.NewPageIDUnchecked("page-1")
+	pageID := newFixturePageID("page-1")
 	created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 2; i++ {
-		rev := &Revision{ID: tree.NewRevisionIDUnchecked(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+		rev := &Revision{ID: newFixtureRevisionID(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
 		if err := store.SaveRevision(rev); err != nil {
 			t.Fatalf("SaveRevision(%d) failed: %v", i, err)
 		}
@@ -522,7 +521,7 @@ func TestFSStoreRejectsPathTraversalPageID(t *testing.T) {
 
 	for _, id := range traversalIDs {
 		t.Run(id, func(t *testing.T) {
-			pageID := tree.NewPageIDUnchecked(id)
+			pageID := newFixturePageID(id)
 			if _, _, err := store.ListRevisionsPage(pageID, "", 50); err == nil {
 				t.Errorf("ListRevisionsPage(%q) should have failed", id)
 			}

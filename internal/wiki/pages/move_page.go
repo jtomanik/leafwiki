@@ -68,9 +68,9 @@ func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
 		beforePage = p
 	}
 
-	var oldPath string
+	var oldPath tree.RoutePath
 	if beforePage != nil {
-		oldPath = beforePage.CalculatePath()
+		oldPath = beforePage.CalculateRoutePath()
 	}
 
 	if err := uc.tree.MoveNode(in.UserID, in.ID, in.ParentID, in.Version); err != nil {

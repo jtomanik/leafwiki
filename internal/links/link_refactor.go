@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -30,8 +31,15 @@ const (
 )
 
 type RewriteWarning struct {
-	Message string
+	MessageID sharederrors.MessageID
+	Message   string
 }
+
+const (
+	rewriteWarningUnsupportedSyntax sharederrors.MessageID = "warnings.link_rewrite.unsupported_syntax"
+	rewriteWarningUnresolved        sharederrors.MessageID = "warnings.link_rewrite.unresolved_destination"
+	rewriteWarningEmptyDestination  sharederrors.MessageID = "warnings.link_rewrite.empty_destination"
+)
 
 type RewriteReplacement struct {
 	Start    int
@@ -180,7 +188,8 @@ func buildRewritePlan(currentPath tree.RoutePath, sourceKind MarkdownSourceKind,
 			continue
 		}
 		warnings = append(warnings, RewriteWarning{
-			Message: fmt.Sprintf("Skipped unsupported link syntax for destination %q", candidate.Destination),
+			MessageID: rewriteWarningUnsupportedSyntax,
+			Message:   fmt.Sprintf("Skipped unsupported link syntax for destination %q", candidate.Destination),
 		})
 	}
 
@@ -214,7 +223,8 @@ func buildPathChangeRewritePlan(oldCurrentPath tree.RoutePath, newCurrentPath tr
 			continue
 		}
 		warnings = append(warnings, RewriteWarning{
-			Message: fmt.Sprintf("Skipped unsupported link syntax for destination %q", candidate.Destination),
+			MessageID: rewriteWarningUnsupportedSyntax,
+			Message:   fmt.Sprintf("Skipped unsupported link syntax for destination %q", candidate.Destination),
 		})
 	}
 
@@ -243,7 +253,8 @@ func rewriteLinkDestination(currentPath tree.RoutePath, sourceKind MarkdownSourc
 	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(currentPath, sourceKind), resolutionDest)
 	if err != nil || resolvedPath.IsRoot() && strings.TrimSpace(resolutionDest) == "" {
 		return destination, false, &RewriteWarning{
-			Message: fmt.Sprintf("Skipped unresolved link destination %q", destination),
+			MessageID: rewriteWarningUnresolved,
+			Message:   fmt.Sprintf("Skipped unresolved link destination %q", destination),
 		}
 	}
 
@@ -275,7 +286,8 @@ func rewriteLinkDestination(currentPath tree.RoutePath, sourceKind MarkdownSourc
 
 	if rewrittenBase == "" {
 		return destination, false, &RewriteWarning{
-			Message: fmt.Sprintf("Skipped empty rewritten destination for %q", destination),
+			MessageID: rewriteWarningEmptyDestination,
+			Message:   fmt.Sprintf("Skipped empty rewritten destination for %q", destination),
 		}
 	}
 
@@ -334,7 +346,8 @@ func rewriteRelativeLinkForPathChange(oldCurrentPath tree.RoutePath, newCurrentP
 	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(oldCurrentPath, sourceKind), baseDest)
 	if err != nil || resolvedPath.IsRoot() && strings.TrimSpace(baseDest) == "" {
 		return destination, false, &RewriteWarning{
-			Message: fmt.Sprintf("Skipped unresolved link destination %q", destination),
+			MessageID: rewriteWarningUnresolved,
+			Message:   fmt.Sprintf("Skipped unresolved link destination %q", destination),
 		}
 	}
 
@@ -351,7 +364,8 @@ func rewriteRelativeLinkForPathChange(oldCurrentPath tree.RoutePath, newCurrentP
 	rewrittenBase = preserveExplicitDotSlashStyle(baseDest, rewrittenBase)
 	if rewrittenBase == "" {
 		return destination, false, &RewriteWarning{
-			Message: fmt.Sprintf("Skipped empty rewritten destination for %q", destination),
+			MessageID: rewriteWarningEmptyDestination,
+			Message:   fmt.Sprintf("Skipped empty rewritten destination for %q", destination),
 		}
 	}
 
@@ -394,9 +408,9 @@ func resolveMarkdownRoutePathForSource(sourceFile tree.MarkdownPath, destination
 		return "", nil
 	}
 	if strings.EqualFold(path.Ext(resolved), ".md") {
-		return tree.NewMarkdownPathUnchecked(resolved).RoutePath(), nil
+		return tree.MarkdownPathFromString(resolved).RoutePath(), nil
 	}
-	return tree.NewRoutePathUnchecked(resolved).Clean(), nil
+	return tree.RoutePathFromString(resolved).Clean(), nil
 }
 
 func relativeMarkdownDestinationForSource(currentPath tree.RoutePath, sourceKind MarkdownSourceKind, targetPath tree.RoutePath, pageLink bool) string {
@@ -500,7 +514,7 @@ func applyRewriteRulesForKindWithRule(resolvedPath tree.RoutePath, targetKind st
 				continue
 			}
 			suffix := strings.TrimPrefix(resolved.FilesystemPath(), oldPath.FilesystemPath())
-			return tree.NewRoutePathUnchecked(rule.NewPath.Clean().FilesystemPath() + suffix), rule, true
+			return tree.RoutePathFromString(rule.NewPath.Clean().FilesystemPath() + suffix), rule, true
 		}
 	}
 	return "", RewriteRule{}, false

@@ -77,7 +77,7 @@ func ToRevisionResponse(rev *revision.Revision, userResolver *coreauth.UserResol
 	}
 	var author *coreauth.UserLabel
 	if userResolver != nil {
-		author, _ = userResolver.ResolveUserLabel(coreauth.NewUserIDUnchecked(rev.AuthorID))
+		author, _ = userResolver.ResolveUserLabel(coreauth.UserIDFromString(rev.AuthorID))
 	}
 	return &RevisionResponse{
 		ID:                rev.ID.CommitID(),

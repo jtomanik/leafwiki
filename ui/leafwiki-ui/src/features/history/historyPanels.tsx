@@ -3,6 +3,7 @@ import {
   type RevisionSnapshot,
 } from '@/lib/api/revisions'
 import { workspaceAssetPath } from '@/lib/workspaceAssets'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { useCallback } from 'react'
 import MarkdownPreview from '../preview/MarkdownPreview'
 import type { LineDiff } from './revisionDiff'
@@ -124,7 +125,7 @@ export function PreviewPanel({
   workspaceId,
 }: {
   snapshot: RevisionSnapshot
-  workspaceId: string
+  workspaceId: WorkspaceID
 }) {
   const resolveAssetUrl = useCallback(
     (src: string) => {

@@ -39,7 +39,7 @@ func setupTestAPIKeyService(t *testing.T) (string, *UserService, *APIKeyStore, *
 
 func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 	_, _, store, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 
 	created, err := service.CreateAPIKey(userID, "  Local Codex  ", userID)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestAPIKeyServiceCreateStoresOnlyHashAndListsMetadata(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *testing.T) {
 	_, userService, _, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 
 	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestAPIKeyServiceVerifyRejectsMalformedWrongSecretRevokedAndDeletedUser(t *
 
 func TestAPIKeyServiceVerifyRetriesTransientLastUsedLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -208,7 +208,7 @@ func TestAPIKeyServiceVerifyRetriesTransientLastUsedLock(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -244,7 +244,7 @@ func TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock(t *testing.T) {
 
 func TestAPIKeyServiceVerifyRetriesTransientUserLookupLock(t *testing.T) {
 	storageDir, _, _, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 	created, err := service.CreateAPIKey(userID, "MCP client", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -280,13 +280,13 @@ func TestAPIKeyServiceVerifyRetriesTransientUserLookupLock(t *testing.T) {
 
 func TestAPIKeyStoreRevocationIsScopedToUser(t *testing.T) {
 	_, userService, _, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 	other, err := userService.CreateUser("other", "other@example.com", "password123", RoleEditor)
 	if err != nil {
 		t.Fatalf("CreateUser other failed: %v", err)
 	}
 
-	created, err := service.CreateAPIKey(NewUserIDUnchecked(other.ID), "Other key", userID)
+	created, err := service.CreateAPIKey(newFixtureUserID(other.ID), "Other key", userID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
 	}
@@ -328,7 +328,7 @@ func (b sqliteExclusiveBlocker) rollback(t *testing.T) {
 
 func TestAPIKeyStoreMarkUsedRejectsRevokedKey(t *testing.T) {
 	_, _, store, service, user := setupTestAPIKeyService(t)
-	userID := NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 
 	created, err := service.CreateAPIKey(userID, "Race key", userID)
 	if err != nil {

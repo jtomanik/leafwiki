@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -95,7 +96,7 @@ func createRouterTestInstanceWithRevision(w *wiki.Wiki, t *testing.T) *gin.Engin
 	})
 }
 
-func createRouterTestInstanceWithMaxAssetUploadSize(w *wiki.Wiki, t *testing.T, maxAssetUploadSizeBytes int64) *gin.Engine {
+func createRouterTestInstanceWithMaxAssetUploadSize(w *wiki.Wiki, t *testing.T, maxAssetUploadSizeBytes shared.MaxBytes) *gin.Engine {
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
 		InjectCodeInHeader:      "",
@@ -973,7 +974,7 @@ func TestConfigEndpoint_IncludesMaxAssetUploadSizeBytes(t *testing.T) {
 	w := createWikiTestInstance(t)
 	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
 
-	const maxAssetUploadSizeBytes int64 = 123456
+	const maxAssetUploadSizeBytes shared.MaxBytes = 123456
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		InjectCodeInHeader:      "",
@@ -1002,7 +1003,7 @@ func TestConfigEndpoint_IncludesMaxAssetUploadSizeBytes(t *testing.T) {
 		t.Fatalf("Expected maxAssetUploadSizeBytes in config response, got %v", resp)
 	}
 
-	if int64(gotSize) != maxAssetUploadSizeBytes {
+	if int64(gotSize) != int64(maxAssetUploadSizeBytes) {
 		t.Fatalf("Expected maxAssetUploadSizeBytes=%d, got %v", maxAssetUploadSizeBytes, gotSize)
 	}
 }
@@ -1459,7 +1460,7 @@ func TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit(t *testi
 	if secondPageID == firstPageID {
 		t.Fatalf("second page duplicated first page snapshot %s after newer commit", firstPageID)
 	}
-	if secondPageID != initialCommit.String() {
+	if workspacesync.CommitHashFromString(secondPageID) != initialCommit {
 		t.Fatalf("second page snapshot = %s, want original older commit %s", secondPageID, initialCommit)
 	}
 }

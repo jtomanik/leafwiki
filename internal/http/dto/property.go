@@ -57,7 +57,7 @@ func ToPropertyPage(node *tree.PageNode, props map[string]coreprop.PropertyEntry
 	}
 
 	if userResolver != nil {
-		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.NewUserIDUnchecked(node.Metadata.LastAuthorID.MetadataValue()))
+		p.LastAuthor, _ = userResolver.ResolveUserLabel(auth.UserIDFromString(node.Metadata.LastAuthorID.MetadataValue()))
 	}
 
 	return p

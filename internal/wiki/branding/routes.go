@@ -134,7 +134,7 @@ func (r *Routes) handleUploadLogo(c *gin.Context) {
 			r.log.Error("could not close logo file", "error", err)
 		}
 	}()
-	out, err := r.uploadLogo.Execute(c.Request.Context(), UploadLogoInput{File: file, Filename: tree.NewAssetNameUnchecked(header.Filename)})
+	out, err := r.uploadLogo.Execute(c.Request.Context(), UploadLogoInput{File: file, Filename: tree.AssetNameFromString(header.Filename)})
 	if err != nil {
 		respondWithBrandingError(c, err)
 		return
@@ -173,7 +173,7 @@ func (r *Routes) handleUploadFavicon(c *gin.Context) {
 			r.log.Error("could not close favicon file", "error", err)
 		}
 	}()
-	out, err := r.uploadFavicon.Execute(c.Request.Context(), UploadFaviconInput{File: file, Filename: tree.NewAssetNameUnchecked(header.Filename)})
+	out, err := r.uploadFavicon.Execute(c.Request.Context(), UploadFaviconInput{File: file, Filename: tree.AssetNameFromString(header.Filename)})
 	if err != nil {
 		respondWithBrandingError(c, err)
 		return
@@ -198,7 +198,7 @@ func (r *Routes) handleServeBrandingAsset(c *gin.Context) {
 		return
 	}
 
-	cleanPath, status := r.resolveBrandingAssetPath(tree.NewAssetNameUnchecked(c.Param("filename")), cfg)
+	cleanPath, status := r.resolveBrandingAssetPath(tree.AssetNameFromString(c.Param("filename")), cfg)
 	if status != http.StatusOK {
 		c.Status(status)
 		return
@@ -217,7 +217,7 @@ func (r *Routes) handleServeCurrentFavicon(c *gin.Context) {
 	}
 
 	if cfg.FaviconFile != "" {
-		cleanPath, status := r.resolveBrandingAssetPath(tree.NewAssetNameUnchecked(cfg.FaviconFile), cfg)
+		cleanPath, status := r.resolveBrandingAssetPath(tree.AssetNameFromString(cfg.FaviconFile), cfg)
 		if status == http.StatusOK {
 			disableClientCache(c)
 			c.File(cleanPath)

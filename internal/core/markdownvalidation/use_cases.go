@@ -9,6 +9,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -22,6 +23,7 @@ type Issue struct {
 	RoutePath    tree.RoutePath
 	PageID       tree.PageID
 	TargetPageID tree.PageID
+	MessageID    sharederrors.MessageID
 	Message      string
 }
 
@@ -58,15 +60,16 @@ type WorkspaceMarkdownValidationOptions struct {
 }
 
 type WorkspaceStatusIssue struct {
-	Code     IssueCode
-	Path     string
-	Message  string
-	Severity IssueSeverity
+	Code      IssueCode
+	Path      string
+	MessageID sharederrors.MessageID
+	Message   string
+	Severity  IssueSeverity
 }
 
 func ValidateMarkdownContent(routePath string, content string, existingPageID string) Result {
-	return ValidateMarkdownContentWithOptions(tree.NewRoutePathUnchecked(routePath), content, ContentValidationOptions{
-		ExistingPageID: tree.NewPageIDUnchecked(existingPageID),
+	return ValidateMarkdownContentWithOptions(tree.RoutePathFromString(routePath), content, ContentValidationOptions{
+		ExistingPageID: tree.PageIDFromString(existingPageID),
 	})
 }
 
@@ -77,6 +80,7 @@ func ValidateMarkdownContentWithOptions(routePath tree.RoutePath, content string
 		issues = append(issues, Issue{
 			Severity:  IssueSeverityError,
 			Code:      IssueCodeInvalidPath,
+			MessageID: IssueCodeInvalidPath.MessageID(),
 			RoutePath: normalizedRoutePath,
 			PageID:    opts.ExistingPageID,
 			Message:   "missing path",
@@ -86,6 +90,7 @@ func ValidateMarkdownContentWithOptions(routePath tree.RoutePath, content string
 			issues = append(issues, Issue{
 				Severity:  IssueSeverityError,
 				Code:      IssueCodeInvalidPath,
+				MessageID: IssueCodeInvalidPath.MessageID(),
 				RoutePath: normalizedRoutePath,
 				PageID:    opts.ExistingPageID,
 				Message:   err.Error(),
@@ -99,6 +104,7 @@ func ValidateMarkdownContentWithOptions(routePath tree.RoutePath, content string
 			issues = append(issues, Issue{
 				Severity:  IssueSeverityError,
 				Code:      IssueCodePathConflict,
+				MessageID: IssueCodePathConflict.MessageID(),
 				RoutePath: normalizedRoutePath,
 				PageID:    opts.ExistingPageID,
 				Message:   "path already belongs to another page",
@@ -110,6 +116,7 @@ func ValidateMarkdownContentWithOptions(routePath tree.RoutePath, content string
 		issues = append(issues, Issue{
 			Severity:  IssueSeverityError,
 			Code:      IssueCodeMetadataParseError,
+			MessageID: IssueCodeMetadataParseError.MessageID(),
 			RoutePath: normalizedRoutePath,
 			PageID:    opts.ExistingPageID,
 			Message:   err.Error(),
@@ -130,10 +137,15 @@ func ValidateWorkspaceStatus(statusIssues []WorkspaceStatusIssue, includeWarning
 			continue
 		}
 		code := err.Code.Normalize(IssueCodeWorkspaceSyncValidation)
+		messageID := err.MessageID
+		if messageID == "" {
+			messageID = code.MessageID()
+		}
 		issues = append(issues, Issue{
 			Severity:   severity,
 			Code:       code,
-			SourcePath: tree.NewMarkdownPathUnchecked(err.Path),
+			MessageID:  messageID,
+			SourcePath: tree.MarkdownPathFromString(err.Path),
 			Message:    err.Message,
 		})
 	}
@@ -163,7 +175,8 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		issues = append(issues, Issue{
 			Severity:   severity,
 			Code:       code,
-			SourcePath: tree.NewMarkdownPathUnchecked(filepath.ToSlash(relPath)),
+			MessageID:  code.MessageID(),
+			SourcePath: tree.MarkdownPathFromString(filepath.ToSlash(relPath)),
 			PageID:     pageID,
 			Message:    message,
 		})
@@ -243,7 +256,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		doc, _, err := markdown.ParsePageDocument(raw)
 		var existingPageID tree.PageID
 		if err == nil {
-			existingPageID = tree.NewPageIDUnchecked(strings.TrimSpace(doc.Metadata.Page.ID))
+			existingPageID = tree.PageIDFromString(strings.TrimSpace(doc.Metadata.Page.ID))
 			if existingPageID != "" {
 				if firstPath, exists := seenIDs[existingPageID]; exists {
 					addIssue(IssueSeverityError, IssueCodeDuplicateLeafwikiID, relPath, existingPageID, "metadata page.id already appears in "+firstPath)
@@ -259,7 +272,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		}
 		filesByRoute[workspaceValidationRouteConflictKey(routePath, routeKind)] = existingPageID
 		files = append(files, workspaceFile{
-			RelPath:        tree.NewMarkdownPathUnchecked(relPath),
+			RelPath:        tree.MarkdownPathFromString(relPath),
 			RoutePath:      routePath,
 			Content:        raw,
 			ExistingPageID: existingPageID,
@@ -360,11 +373,12 @@ func newWorkspaceMarkdownLinkResolver(sourceRelPath tree.MarkdownPath, linkIndex
 
 func validateMetadata(routePath tree.RoutePath, opts ContentValidationOptions, meta markdown.PageMetadata) []Issue {
 	issues := []Issue{}
-	if id := tree.NewPageIDUnchecked(strings.TrimSpace(meta.Page.ID)); id != "" && id != opts.ExistingPageID {
+	if id := tree.PageIDFromString(strings.TrimSpace(meta.Page.ID)); id != "" && id != opts.ExistingPageID {
 		if opts.PageIDExists != nil && opts.PageIDExists(id) {
 			issues = append(issues, Issue{
 				Severity:  IssueSeverityError,
 				Code:      IssueCodeDuplicateLeafwikiID,
+				MessageID: IssueCodeDuplicateLeafwikiID.MessageID(),
 				RoutePath: routePath,
 				PageID:    opts.ExistingPageID,
 				Message:   "metadata page.id already belongs to another page",
@@ -376,6 +390,7 @@ func validateMetadata(routePath tree.RoutePath, opts ContentValidationOptions, m
 			issues = append(issues, Issue{
 				Severity:  IssueSeverityError,
 				Code:      IssueCodeReservedMetadata,
+				MessageID: IssueCodeReservedMetadata.MessageID(),
 				RoutePath: routePath,
 				PageID:    opts.ExistingPageID,
 				Message:   "metadata key uses reserved leafwiki_ prefix",
@@ -404,6 +419,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:  IssueSeverityError,
 					Code:      IssueCodeMissingAsset,
+					MessageID: IssueCodeMissingAsset.MessageID(),
 					RoutePath: routePath,
 					PageID:    opts.ExistingPageID,
 					Message:   "asset reference does not resolve: " + ref.Destination,
@@ -420,6 +436,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:     "error",
 					Code:         code,
+					MessageID:    code.MessageID(),
 					RoutePath:    routePath,
 					PageID:       opts.ExistingPageID,
 					TargetPageID: targetPageID,
@@ -431,6 +448,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:     IssueSeverityError,
 					Code:         IssueCodeNonCanonicalLink,
+					MessageID:    IssueCodeNonCanonicalLink.MessageID(),
 					RoutePath:    routePath,
 					PageID:       opts.ExistingPageID,
 					TargetPageID: targetPageID,
@@ -460,6 +478,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:  IssueSeverityError,
 					Code:      IssueCodeBrokenLink,
+					MessageID: IssueCodeBrokenLink.MessageID(),
 					RoutePath: routePath,
 					PageID:    opts.ExistingPageID,
 					Message:   "wiki link does not resolve: " + resolved,
@@ -473,6 +492,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:  IssueSeverityError,
 					Code:      IssueCodeBrokenLink,
+					MessageID: IssueCodeBrokenLink.MessageID(),
 					RoutePath: routePath,
 					PageID:    opts.ExistingPageID,
 					Message:   "wiki link does not resolve: " + resolved,
@@ -483,6 +503,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 				issues = append(issues, Issue{
 					Severity:  IssueSeverityError,
 					Code:      IssueCodeNonCanonicalLink,
+					MessageID: IssueCodeNonCanonicalLink.MessageID(),
 					RoutePath: routePath,
 					PageID:    opts.ExistingPageID,
 					Message:   "page link must use .md: " + ref.Destination,
@@ -494,6 +515,7 @@ func validateMarkdownReferences(routePath tree.RoutePath, body string, opts Cont
 			issues = append(issues, Issue{
 				Severity:  IssueSeverityError,
 				Code:      IssueCodeBrokenLink,
+				MessageID: IssueCodeBrokenLink.MessageID(),
 				RoutePath: routePath,
 				PageID:    opts.ExistingPageID,
 				Message:   "wiki link does not resolve: " + resolved,

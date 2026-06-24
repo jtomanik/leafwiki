@@ -35,7 +35,7 @@ func TestEnsurePageIsFolder_ConvertsFlatFileToFolder(t *testing.T) {
 		t.Fatalf("WriteFile err: %v", err)
 	}
 
-	if err := EnsurePageIsFolder(tmp, pagePath); err != nil {
+	if err := EnsurePageIsFolder(tmp, RoutePathFromString(pagePath)); err != nil {
 		t.Fatalf("EnsurePageIsFolder err: %v", err)
 	}
 

@@ -22,7 +22,7 @@ import (
 func findChildBySlug(t *testing.T, parent *PageNode, slug string) *PageNode {
 	t.Helper()
 	for _, ch := range parent.Children {
-		if ch.Slug == NewSlugUnchecked(slug) {
+		if ch.Slug == newFixtureSlug(slug) {
 			return ch
 		}
 	}
@@ -483,7 +483,7 @@ func TestNodeStore_ReconstructTreeFromFS_SectionWithoutIndex_UsesDirNameAsTitleA
 	if !has {
 		t.Fatalf("expected frontmatter in materialized index")
 	}
-	if NewPageIDUnchecked(fm.LeafWikiID) != sec.ID || fm.LeafWikiTitle != sec.Title {
+	if newFixturePageID(fm.LeafWikiID) != sec.ID || fm.LeafWikiTitle != sec.Title {
 		t.Fatalf("unexpected frontmatter in materialized index: %#v", fm)
 	}
 	if strings.TrimSpace(body) != "" {
@@ -913,7 +913,7 @@ func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reload page: %v", err)
 	}
-	if NewPageIDUnchecked(pageMd.GetFrontmatter().LeafWikiID) != page.ID {
+	if newFixturePageID(pageMd.GetFrontmatter().LeafWikiID) != page.ID {
 		t.Fatalf("expected page frontmatter ID=%q, got %q", page.ID, pageMd.GetFrontmatter().LeafWikiID)
 	}
 
@@ -921,7 +921,7 @@ func TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reload section index: %v", err)
 	}
-	if NewPageIDUnchecked(sectionMd.GetFrontmatter().LeafWikiID) != section.ID {
+	if newFixturePageID(sectionMd.GetFrontmatter().LeafWikiID) != section.ID {
 		t.Fatalf("expected section frontmatter ID=%q, got %q", section.ID, sectionMd.GetFrontmatter().LeafWikiID)
 	}
 
@@ -1127,7 +1127,7 @@ func TestNodeStore_ReconstructTreeFromFS_MissingMetadataFallsBackToMtimeAndSyste
 		t.Fatalf("LoadMarkdownFile: %v", err)
 	}
 	fm := mdFile.GetFrontmatter()
-	if NewPageIDUnchecked(fm.LeafWikiID) != page.ID {
+	if newFixturePageID(fm.LeafWikiID) != page.ID {
 		t.Fatalf("expected generated ID to be written back, got %q want %q", fm.LeafWikiID, page.ID)
 	}
 	if fm.LeafWikiCreatedAt != wantTime.Format(time.RFC3339) {

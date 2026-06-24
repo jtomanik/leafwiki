@@ -17,7 +17,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-const DefaultMaxUploadSizeBytes int64 = 50 * 1024 * 1024
+const DefaultMaxUploadSizeBytes shared.MaxBytes = 50 * 1024 * 1024
 
 const (
 	ErrCodeAssetUploadFailed     sharederrors.ErrorCode = "asset_upload_failed"
@@ -116,7 +116,7 @@ func (s *AssetService) buildPublicPath(page *tree.PageNode, filename tree.AssetN
 }
 
 // SaveAssetForPage saves a file under a page's slug-based path and returns its public URL.
-func (s *AssetService) SaveAssetForPage(page *tree.PageNode, file multipart.File, originalFilename tree.AssetName, maxBytes int64) (string, error) {
+func (s *AssetService) SaveAssetForPage(page *tree.PageNode, file multipart.File, originalFilename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -132,14 +132,14 @@ func (s *AssetService) SaveAssetForPage(page *tree.PageNode, file multipart.File
 		existing = append(existing, e.Name())
 	}
 
-	finalFilename := tree.NewAssetNameUnchecked(s.slugger.GenerateUniqueFilename(existing, originalFilename.Filename()))
+	finalFilename := tree.AssetNameFromString(s.slugger.GenerateUniqueFilename(existing, originalFilename.Filename()))
 	finalFilename, err = validateAssetFilename(finalFilename)
 	if err != nil {
 		return "", err
 	}
 	fullPath := assetFileDiskPath(uploadPath, finalFilename)
 
-	if err := shared.WriteStreamAtomic(fullPath, file, maxBytes); err != nil {
+	if err := shared.WriteStreamAtomic(fullPath, file, byteCap); err != nil {
 		if errors.Is(err, shared.ErrFileTooLarge) {
 			return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetFileTooLarge, err)
 		}
@@ -168,7 +168,7 @@ func (s *AssetService) ListAssetsForPage(page *tree.PageNode) ([]string, error) 
 	result := []string{}
 	for _, f := range files {
 		if !f.IsDir() {
-			result = append(result, s.buildPublicPath(page, tree.NewAssetNameUnchecked(f.Name())))
+			result = append(result, s.buildPublicPath(page, tree.AssetNameFromString(f.Name())))
 		}
 	}
 
@@ -313,7 +313,7 @@ func validateAssetFilename(filename tree.AssetName) (tree.AssetName, error) {
 	if strings.ContainsAny(raw, `/\`) || raw != filepath.Base(raw) {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetInvalidName, nil, raw)
 	}
-	return tree.NewAssetNameUnchecked(raw), nil
+	return tree.AssetNameFromString(raw), nil
 }
 
 func (s *AssetService) CopyAllAssets(sourcePage *tree.PageNode, targetPage *tree.PageNode) error {
@@ -349,7 +349,7 @@ func (s *AssetService) CopyAllAssets(sourcePage *tree.PageNode, targetPage *tree
 }
 
 func (s *AssetService) copySingleAsset(sourceAssetPath string, targetAssetPath string, entry os.DirEntry) error {
-	filename := tree.NewAssetNameUnchecked(entry.Name())
+	filename := tree.AssetNameFromString(entry.Name())
 	sourceFilePath := assetFileDiskPath(sourceAssetPath, filename)
 	targetFilePath := assetFileDiskPath(targetAssetPath, filename)
 

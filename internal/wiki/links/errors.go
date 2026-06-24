@@ -23,7 +23,7 @@ type LinkErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithLinkStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string) {
 	c.JSON(status, LinkErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
 }
 

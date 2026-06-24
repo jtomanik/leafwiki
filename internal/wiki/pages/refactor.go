@@ -28,13 +28,13 @@ type RefactorPreviewInput struct {
 
 // RefactorPreview is the result of a refactor preview operation.
 type RefactorPreview struct {
-	Kind          string                 `json:"kind"`
-	PageID        tree.PageID            `json:"pageId"`
-	OldPath       string                 `json:"oldPath"`
-	NewPath       string                 `json:"newPath"`
-	AffectedPages []RefactorAffectedPage `json:"affectedPages"`
-	Counts        RefactorPreviewCounts  `json:"counts"`
-	Warnings      []string               `json:"warnings"`
+	Kind           string                 `json:"kind"`
+	PageID         tree.PageID            `json:"pageId"`
+	OldPath        tree.RoutePath         `json:"oldPath"`
+	NewPath        string                 `json:"newPath"`
+	AffectedPages  []RefactorAffectedPage `json:"affectedPages"`
+	Counts         RefactorPreviewCounts  `json:"counts"`
+	WarningDetails []RefactorWarning      `json:"warnings"`
 }
 
 // RefactorPreviewCounts holds aggregated counts for the preview.
@@ -45,11 +45,16 @@ type RefactorPreviewCounts struct {
 
 // RefactorAffectedPage describes a page that has links affected by the refactor.
 type RefactorAffectedPage struct {
-	FromPageID   tree.PageID `json:"fromPageId"`
-	FromTitle    string      `json:"fromTitle"`
-	FromPath     string      `json:"fromPath"`
-	MatchedPaths []string    `json:"matchedPaths"`
-	Warnings     []string    `json:"warnings"`
+	FromPageID     tree.PageID       `json:"fromPageId"`
+	FromTitle      string            `json:"fromTitle"`
+	FromPath       string            `json:"fromPath"`
+	MatchedPaths   []string          `json:"matchedPaths"`
+	WarningDetails []RefactorWarning `json:"warnings"`
+}
+
+type RefactorWarning struct {
+	MessageID sharederrors.MessageID `json:"messageId"`
+	Message   string                 `json:"message"`
 }
 
 // RefactorApplyInput extends the preview with apply options.
@@ -127,14 +132,14 @@ func (uc *PreviewPageRefactorUseCase) Execute(_ context.Context, in RefactorPrev
 	return &RefactorPreview{
 		Kind:          in.Kind,
 		PageID:        in.PageID,
-		OldPath:       oldPath.WikiPath(),
+		OldPath:       oldPath,
 		NewPath:       newRoutePath.WikiPath(),
 		AffectedPages: affectedPages,
 		Counts: RefactorPreviewCounts{
 			AffectedPages: len(affectedPages),
 			MatchedLinks:  matchedLinks,
 		},
-		Warnings: collectPreviewWarnings(affectedPages),
+		WarningDetails: collectPreviewWarnings(affectedPages),
 	}, nil
 }
 
@@ -185,7 +190,7 @@ func (uc *PreviewPageRefactorUseCase) resolveParentRoutePath(parentID tree.PageI
 
 func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, rootKind tree.NodeKind, excludeIDs map[tree.PageID]struct{}) ([]RefactorAffectedPage, int, error) {
 	if uc.links == nil {
-		return nil, 0, nil
+		return []RefactorAffectedPage{}, 0, nil
 	}
 	matches, err := uc.links.GetRefactorMatchesForPrefixAndKind(oldPath, rootKind)
 	if err != nil {
@@ -228,14 +233,15 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, r
 		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath, Kind: string(rootKind)}}
 		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculateRoutePath(), links.MarkdownSourceKind(sourcePage.Kind), rules)
 		for _, w := range result.Warnings {
-			if !containsString(item.Warnings, w.Message) {
-				item.Warnings = append(item.Warnings, w.Message)
+			warning := RefactorWarning{MessageID: w.MessageID, Message: w.Message}
+			if !containsRefactorWarning(item.WarningDetails, warning) {
+				item.WarningDetails = append(item.WarningDetails, warning)
 			}
 		}
 		sort.Strings(item.MatchedPaths)
-		sort.Strings(item.Warnings)
+		sortRefactorWarnings(item.WarningDetails)
 		item.MatchedPaths = ensureStrings(item.MatchedPaths)
-		item.Warnings = ensureStrings(item.Warnings)
+		item.WarningDetails = ensureRefactorWarnings(item.WarningDetails)
 		items = append(items, *item)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -682,6 +688,13 @@ func ensureStrings(values []string) []string {
 	return values
 }
 
+func ensureRefactorWarnings(values []RefactorWarning) []RefactorWarning {
+	if values == nil {
+		return []RefactorWarning{}
+	}
+	return values
+}
+
 func (uc *ApplyPageRefactorUseCase) loadPagesByID(ids []tree.PageID, warningMessage string) map[tree.PageID]*tree.Page {
 	if len(ids) == 0 {
 		return map[tree.PageID]*tree.Page{}
@@ -722,17 +735,35 @@ func (uc *ApplyPageRefactorUseCase) loadPagesInOrder(ids []tree.PageID, warningM
 	return loaded
 }
 
-func collectPreviewWarnings(pages []RefactorAffectedPage) []string {
-	var warnings []string
+func collectPreviewWarnings(pages []RefactorAffectedPage) []RefactorWarning {
+	var warnings []RefactorWarning
 	for _, p := range pages {
-		for _, w := range p.Warnings {
-			if !containsString(warnings, w) {
+		for _, w := range p.WarningDetails {
+			if !containsRefactorWarning(warnings, w) {
 				warnings = append(warnings, w)
 			}
 		}
 	}
-	sort.Strings(warnings)
-	return ensureStrings(warnings)
+	sortRefactorWarnings(warnings)
+	return ensureRefactorWarnings(warnings)
+}
+
+func containsRefactorWarning(warnings []RefactorWarning, warning RefactorWarning) bool {
+	for _, existing := range warnings {
+		if existing.MessageID == warning.MessageID && existing.Message == warning.Message {
+			return true
+		}
+	}
+	return false
+}
+
+func sortRefactorWarnings(warnings []RefactorWarning) {
+	sort.Slice(warnings, func(i, j int) bool {
+		if warnings[i].MessageID == warnings[j].MessageID {
+			return warnings[i].Message < warnings[j].Message
+		}
+		return warnings[i].MessageID < warnings[j].MessageID
+	})
 }
 
 func kindPage() *tree.NodeKind {

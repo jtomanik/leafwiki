@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { mapApiError } from '@/lib/api/errors'
 import { type WorkspaceSnapshot } from '@/lib/api/workspaceSync'
 import { DIALOG_WORKSPACE_SNAPSHOTS } from '@/lib/registries'
+import { asCommitHash, type CommitHash, type WorkspaceID } from '@/lib/semanticTypes'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
 import {
@@ -70,7 +71,7 @@ function snapshotChangedMarkdownPaths(snapshot: WorkspaceSnapshot) {
 export function WorkspaceSnapshotsDialog({
   workspaceId,
 }: {
-  workspaceId: string
+  workspaceId: WorkspaceID
 }) {
   const open = useDialogsStore(
     (state) => state.dialogType === DIALOG_WORKSPACE_SNAPSHOTS,
@@ -93,7 +94,9 @@ export function WorkspaceSnapshotsDialog({
   )
   const loadStatus = useWorkspaceSyncStore((state) => state.loadStatus)
   const reloadTree = useTreeStore((state) => state.reloadTree)
-  const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null)
+  const [selectedCommitId, setSelectedCommitId] = useState<CommitHash | null>(
+    null,
+  )
   const closeResolvedRef = useRef(false)
 
   useEffect(() => {
@@ -105,7 +108,8 @@ export function WorkspaceSnapshotsDialog({
     setSelectedCommitId(null)
     void loadSnapshots(workspaceId)
       .then((items) => {
-        setSelectedCommitId(snapshotCommitId(items[0] ?? { id: '' }) || null)
+        const commitId = snapshotCommitId(items[0] ?? { id: '' })
+        setSelectedCommitId(commitId ? asCommitHash(commitId) : null)
       })
       .catch((err) => {
         const mapped = mapApiError(err, 'Failed to load workspace snapshots')
@@ -132,9 +136,13 @@ export function WorkspaceSnapshotsDialog({
       await refreshCurrentViewerPageAndLinkStatus(workspaceId)
       await loadStatus(workspaceId)
       if (status.validationErrors.length > 0 || status.lastError) {
-        toast.warning('Workspace restored with Markdown errors')
+        toast.warning('Workspace restored with Markdown errors', {
+          validationCode: 'workspace_sync_validation',
+        })
       } else {
-        toast.success('Workspace snapshot restored')
+        toast.success('Workspace snapshot restored', {
+          messageId: 'ui.toast.workspace.snapshot_restored',
+        })
       }
       return true
     } catch (err) {
@@ -230,7 +238,7 @@ export function WorkspaceSnapshotsDialog({
                         ? 'workspace-snapshots-dialog__item--selected'
                         : ''
                     }`}
-                    onClick={() => setSelectedCommitId(commitId)}
+                    onClick={() => setSelectedCommitId(asCommitHash(commitId))}
                     disabled={restoring}
                     data-testid={`workspace-snapshots-dialog-commit-${commitId}`}
                   >

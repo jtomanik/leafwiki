@@ -349,7 +349,7 @@ func TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -573,7 +573,7 @@ func TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore(t *testin
 	}
 	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
 	defer apiKeyService.Close()
-	editorID := coreauth.NewUserIDUnchecked(editor.ID)
+	editorID := newFixtureUserID(editor.ID)
 	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 	if err != nil {
 		t.Fatalf("CreateAPIKey failed: %v", err)
@@ -5327,8 +5327,8 @@ func TestWaitForProjectDaemonConcurrentStartupHandlesStructuredLockError(t *test
 	descriptorPath := projectdaemon.DescriptorPath(canonicalData)
 	errorPath := filepath.Join(t.TempDir(), "startup.err")
 	rawErr, err := json.Marshal(projectDaemonStartupError{
-		Kind:    projectDaemonStartupErrorKindLock,
-		Message: "acquire data directory lock: data directory is already in use",
+		Kind:            projectDaemonStartupErrorKindLock,
+		RenderedMessage: "acquire data directory lock: data directory is already in use",
 	})
 	if err != nil {
 		t.Fatalf("marshal startup error: %v", err)
@@ -5428,8 +5428,8 @@ func TestWaitForProjectDaemonReportsStructuredNonLockStartupErrorDirectly(t *tes
 	}
 	errorPath := filepath.Join(t.TempDir(), "startup.err")
 	rawErr, err := json.Marshal(projectDaemonStartupError{
-		Kind:    projectDaemonStartupErrorKindStartup,
-		Message: "start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use",
+		Kind:            projectDaemonStartupErrorKindStartup,
+		RenderedMessage: "start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use",
 	})
 	if err != nil {
 		t.Fatalf("marshal startup error: %v", err)
@@ -8161,7 +8161,7 @@ func createMCPAPIKeyInStorageDirWithUser(t *testing.T, storageDir string) testMC
 			t.Fatalf("close api key service: %v", err)
 		}
 	}()
-	userID := coreauth.NewUserIDUnchecked(user.ID)
+	userID := newFixtureUserID(user.ID)
 	created, err := apiKeyService.CreateAPIKey(userID, "Main process STDIO", userID)
 	if err != nil {
 		t.Fatalf("create API key: %v", err)

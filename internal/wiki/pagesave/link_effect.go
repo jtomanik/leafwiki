@@ -103,17 +103,18 @@ func (e *LinkIndexSideEffect) updateAndHeal(p *tree.Page) {
 	e.healExact(p)
 }
 
-func (e *LinkIndexSideEffect) markBrokenForOldPath(oldPath string, page *tree.Page) {
+func (e *LinkIndexSideEffect) markBrokenForOldPath(oldPath tree.RoutePath, page *tree.Page) {
 	if oldPath == "" {
 		return
 	}
+	oldPathString := oldPath.WikiPath()
 	if page == nil {
-		if err := e.svc.MarkLinksBrokenForPrefix(oldPath); err != nil {
+		if err := e.svc.MarkLinksBrokenForPrefix(oldPathString); err != nil {
 			e.log.Warn("failed to mark links broken for prefix", "path", oldPath, "error", err)
 		}
 		return
 	}
-	if err := e.svc.MarkLinksBrokenForPrefixAndKind(oldPath, page.Kind); err != nil {
+	if err := e.svc.MarkLinksBrokenForPrefixAndKind(oldPathString, page.Kind); err != nil {
 		e.log.Warn("failed to mark links broken for prefix", "path", oldPath, "error", err)
 	}
 }

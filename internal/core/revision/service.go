@@ -293,8 +293,8 @@ func (s *Service) ListRevisions(pageID tree.PageID) ([]*Revision, error) {
 	return s.store.ListRevisions(pageID)
 }
 
-func (s *Service) ListRevisionsPage(pageID tree.PageID, cursor string, limit int) ([]*Revision, string, error) {
-	return s.store.ListRevisionsPage(pageID, cursor, limit)
+func (s *Service) ListRevisionsPage(pageID tree.PageID, cursor string, pageSize RevisionListLimit) ([]*Revision, string, error) {
+	return s.store.ListRevisionsPage(pageID, cursor, pageSize)
 }
 
 func (s *Service) GetLatestRevision(pageID tree.PageID) (*Revision, error) {
@@ -436,36 +436,36 @@ func (s *Service) CheckRevisionIntegrity(pageID tree.PageID) ([]RevisionIntegrit
 		if strings.TrimSpace(rev.ContentHash) != "" {
 			rc, err := s.store.OpenContentBlob(rev.ContentHash)
 			if err != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingContent, Message: "Revision content blob is missing or unreadable", Path: s.store.contentBlobPath(rev.ContentHash)})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingContent, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegrityMissingContent), Message: "Revision content blob is missing or unreadable", Path: s.store.contentBlobPath(rev.ContentHash)})
 			} else {
 				_ = rc.Close()
 			}
 		}
 		refs, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 		if err != nil {
-			issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingManifest, Message: "Revision asset manifest is missing or unreadable", Path: s.store.assetManifestPath(rev.AssetManifestHash)})
+			issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingManifest, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegrityMissingManifest), Message: "Revision asset manifest is missing or unreadable", Path: s.store.assetManifestPath(rev.AssetManifestHash)})
 			continue
 		}
 		for _, ref := range refs {
 			blobPath := s.store.AssetBlobPath(ref.SHA256)
 			f, err := s.store.OpenAssetBlob(ref.SHA256)
 			if err != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegrityMissingAssetBlob), Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
 				continue
 			}
 			hasher := sha256.New()
 			size, copyErr := io.Copy(hasher, f)
 			_ = f.Close()
 			if copyErr != nil {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityMissingAssetBlob, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegrityMissingAssetBlob), Message: fmt.Sprintf("Revision asset blob for %s is missing or unreadable", ref.Name), Path: blobPath})
 				continue
 			}
 			if hex.EncodeToString(hasher.Sum(nil)) != ref.SHA256 {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityHashMismatch, Message: fmt.Sprintf("Revision asset blob for %s failed hash verification", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegrityHashMismatch, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegrityHashMismatch), Message: fmt.Sprintf("Revision asset blob for %s failed hash verification", ref.Name), Path: blobPath})
 				continue
 			}
 			if size != ref.SizeBytes {
-				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegritySizeMismatch, Message: fmt.Sprintf("Revision asset blob for %s failed size verification", ref.Name), Path: blobPath})
+				issues = append(issues, RevisionIntegrityIssue{PageID: rev.PageID, RevisionID: rev.ID, Code: errCodeRevisionIntegritySizeMismatch, MessageID: sharederrors.MessageIDForCode(errCodeRevisionIntegritySizeMismatch), Message: fmt.Sprintf("Revision asset blob for %s failed size verification", ref.Name), Path: blobPath})
 			}
 		}
 	}
@@ -662,7 +662,7 @@ func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID tre
 	}
 
 	return &Revision{
-		ID:                   NewRevisionIDUnchecked(revisionID),
+		ID:                   RevisionIDFromString(revisionID),
 		PageID:               state.PageID,
 		ParentID:             state.ParentID,
 		Type:                 t,

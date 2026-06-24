@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -57,14 +58,28 @@ type Event struct {
 	SeenAt        time.Time
 }
 
+type SessionID string
+
+func (id SessionID) String() string {
+	return string(id)
+}
+
+func (id SessionID) IsEmpty() bool {
+	return id == ""
+}
+
+func SessionIDFromString[T ~string](raw T) SessionID {
+	return SessionID(raw)
+}
+
 type envelope struct {
-	HookEventName        string `json:"hook_event_name"`
-	SessionID            string `json:"session_id"`
-	ConversationID       string `json:"conversation_id"`
-	ParentConversationID string `json:"parent_conversation_id"`
-	Model                string `json:"model"`
-	Source               string `json:"source"`
-	ToolName             string `json:"tool_name"`
+	HookEventName        string    `json:"hook_event_name"`
+	SessionID            SessionID `json:"session_id"`
+	ConversationID       string    `json:"conversation_id"`
+	ParentConversationID string    `json:"parent_conversation_id"`
+	Model                string    `json:"model"`
+	Source               string    `json:"source"`
+	ToolName             string    `json:"tool_name"`
 }
 
 func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) {
@@ -82,7 +97,7 @@ func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) 
 		return Event{}, false
 	}
 	sessionID := sessionKey(providerID, eventName, payload)
-	if strings.TrimSpace(sessionID) == "" {
+	if sessionID.IsEmpty() {
 		return Event{}, false
 	}
 
@@ -214,17 +229,17 @@ func isSupportedEvent(provider ProviderID, eventName AgentEventName) bool {
 	return false
 }
 
-func sessionKey(provider ProviderID, eventName AgentEventName, payload envelope) string {
+func sessionKey(provider ProviderID, eventName AgentEventName, payload envelope) SessionID {
 	if provider == ProviderCursor {
 		if eventName == "subagentStart" || eventName == "subagentStop" {
 			if strings.TrimSpace(payload.ParentConversationID) != "" {
-				return payload.ParentConversationID
+				return SessionIDFromString(payload.ParentConversationID)
 			}
 		}
-		if strings.TrimSpace(payload.SessionID) != "" {
+		if !payload.SessionID.IsEmpty() {
 			return payload.SessionID
 		}
-		return payload.ConversationID
+		return SessionIDFromString(payload.ConversationID)
 	}
 	return payload.SessionID
 }
@@ -251,8 +266,8 @@ func endsSession(provider ProviderID, eventName AgentEventName) bool {
 		(provider == ProviderCursor && eventName == "sessionEnd")
 }
 
-func hashSessionID(provider ProviderID, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(string(provider) + "\x00" + rawSessionID))
+func hashSessionID(provider ProviderID, rawSessionID SessionID) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s", provider, rawSessionID)))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 

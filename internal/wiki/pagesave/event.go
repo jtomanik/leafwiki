@@ -36,7 +36,7 @@ type PageSaveEvent struct {
 
 	// OldPath is the path of Before before the mutation (CalculatePath on a live node
 	// returns the new path after UpdateNode/MoveNode mutates the tree in place).
-	OldPath string
+	OldPath tree.RoutePath
 
 	// AffectedPages contains every page touched by the operation (e.g. a moved/deleted subtree).
 	// For single-page operations it holds the one affected page.

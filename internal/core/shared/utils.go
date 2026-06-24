@@ -29,6 +29,8 @@ var charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#
 
 var ErrFileTooLarge = errors.New("file too large")
 
+type MaxBytes int64
+
 func GenerateRandomPassword(length int) (string, error) {
 	password := make([]byte, length)
 	for i := range password {
@@ -111,18 +113,18 @@ func WriteFileAtomic(filename string, data []byte, perm os.FileMode) error {
 }
 
 // CopyWithLimit copies from src to dst but returns an error if more than max bytes are copied.
-func CopyWithLimit(dst io.Writer, src io.Reader, max int64) error {
-	n, err := io.Copy(dst, io.LimitReader(src, max+1))
+func CopyWithLimit(dst io.Writer, src io.Reader, max MaxBytes) error {
+	n, err := io.Copy(dst, io.LimitReader(src, int64(max)+1))
 	if err != nil {
 		return err
 	}
-	if n > max {
+	if n > int64(max) {
 		return fmt.Errorf("%w: %d bytes (max %d)", ErrFileTooLarge, n, max)
 	}
 	return nil
 }
 
-func WriteStreamAtomic(targetPath string, src io.Reader, maxBytes int64) error {
+func WriteStreamAtomic(targetPath string, src io.Reader, byteCap MaxBytes) error {
 	dir := atomicWriteDir(targetPath)
 
 	out, err := os.CreateTemp(dir, ".tmp-*")
@@ -150,7 +152,7 @@ func WriteStreamAtomic(targetPath string, src io.Reader, maxBytes int64) error {
 		}
 	}()
 
-	if err := CopyWithLimit(out, src, maxBytes); err != nil {
+	if err := CopyWithLimit(out, src, byteCap); err != nil {
 		return err
 	}
 

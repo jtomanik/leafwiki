@@ -10,6 +10,8 @@ import (
 
 type RevisionType string
 
+type RevisionListLimit int
+
 const (
 	RevisionTypeContentUpdate   RevisionType = "content_update"
 	RevisionTypeAssetUpdate     RevisionType = "asset_update"
@@ -78,6 +80,7 @@ type RevisionIntegrityIssue struct {
 	PageID     tree.PageID            `json:"page_id"`
 	RevisionID RevisionID             `json:"revision_id,omitempty"`
 	Code       sharederrors.ErrorCode `json:"code"`
+	MessageID  sharederrors.MessageID `json:"message_id"`
 	Message    string                 `json:"message"`
 	Path       string                 `json:"path,omitempty"`
 }

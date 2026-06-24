@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -83,9 +84,9 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
-func (r *Routes) handleUpload(maxUploadSize int64) gin.HandlerFunc {
+func (r *Routes) handleUpload(maxUploadSize shared.MaxBytes) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(maxUploadSize))
 
 		if err := c.Request.ParseMultipartForm(maxMultipartMemory); err != nil {
 			respondWithAssetStatusError(c, http.StatusRequestEntityTooLarge, ErrCodeAssetFileTooLarge, "File too large", "file too large")
@@ -110,11 +111,11 @@ func (r *Routes) handleUpload(maxUploadSize int64) gin.HandlerFunc {
 		}
 
 		out, err := r.upload.Execute(c.Request.Context(), UploadAssetInput{
-			UserID:   tree.NewUserIDUnchecked(user.ID),
-			PageID:   tree.NewPageIDUnchecked(pageID),
+			UserID:   tree.UserIDFromString(user.ID),
+			PageID:   tree.PageIDFromString(pageID),
 			File:     file,
-			Filename: tree.NewAssetNameUnchecked(header.Filename),
-			MaxBytes: maxUploadSize,
+			Filename: tree.AssetNameFromString(header.Filename),
+			ByteCap:  maxUploadSize,
 		})
 		if err != nil {
 			respondWithAssetError(c, err)
@@ -126,7 +127,7 @@ func (r *Routes) handleUpload(maxUploadSize int64) gin.HandlerFunc {
 
 func (r *Routes) handleList(c *gin.Context) {
 	pageID := c.Param("id")
-	out, err := r.list.Execute(c.Request.Context(), ListAssetsInput{PageID: tree.NewPageIDUnchecked(pageID)})
+	out, err := r.list.Execute(c.Request.Context(), ListAssetsInput{PageID: tree.PageIDFromString(pageID)})
 	if err != nil {
 		respondWithAssetError(c, err)
 		return
@@ -149,10 +150,10 @@ func (r *Routes) handleRename(c *gin.Context) {
 		return
 	}
 	out, err := r.rename.Execute(c.Request.Context(), RenameAssetInput{
-		UserID:      tree.NewUserIDUnchecked(user.ID),
-		PageID:      tree.NewPageIDUnchecked(pageID),
-		OldFilename: tree.NewAssetNameUnchecked(req.OldFilename),
-		NewFilename: tree.NewAssetNameUnchecked(req.NewFilename),
+		UserID:      tree.UserIDFromString(user.ID),
+		PageID:      tree.PageIDFromString(pageID),
+		OldFilename: tree.AssetNameFromString(req.OldFilename),
+		NewFilename: tree.AssetNameFromString(req.NewFilename),
 	})
 	if err != nil {
 		respondWithAssetError(c, err)
@@ -173,9 +174,9 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		return
 	}
 	if err := r.delete.Execute(c.Request.Context(), DeleteAssetInput{
-		UserID:   tree.NewUserIDUnchecked(user.ID),
-		PageID:   tree.NewPageIDUnchecked(pageID),
-		Filename: tree.NewAssetNameUnchecked(filename),
+		UserID:   tree.UserIDFromString(user.ID),
+		PageID:   tree.PageIDFromString(pageID),
+		Filename: tree.AssetNameFromString(filename),
 	}); err != nil {
 		respondWithAssetError(c, err)
 		return

@@ -64,7 +64,7 @@ func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *tree.Page
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.CreatePageInput{UserID: tree.UserID(userID), ParentID: parentID, Title: title, Slug: tree.NewSlugUnchecked(slug), Kind: kind},
+		wikipages.CreatePageInput{UserID: newFixtureUserID(userID), ParentID: parentID, Title: title, Slug: newFixtureSlug(slug), Kind: kind},
 	)
 	if err != nil {
 		t.Fatalf("CreatePage failed: %v", err)
@@ -82,7 +82,7 @@ func updatePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, tit
 
 	out, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.UpdatePageInput{UserID: tree.UserID(userID), ID: id, Version: tree.NewPageVersionUnchecked(current.Version()), Title: title, Slug: tree.NewSlugUnchecked(slug), Content: content, Kind: kind},
+		wikipages.UpdatePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Title: title, Slug: newFixtureSlug(slug), Content: content, Kind: kind},
 	)
 	if err != nil {
 		t.Fatalf("UpdatePage failed: %v", err)
@@ -100,7 +100,7 @@ func deletePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, rec
 
 	if err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: tree.UserID(userID), ID: id, Version: tree.NewPageVersionUnchecked(current.Version()), Recursive: recursive},
+		wikipages.DeletePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Recursive: recursive},
 	); err != nil {
 		t.Fatalf("DeletePage failed: %v", err)
 	}
@@ -618,7 +618,7 @@ workspace-sync-search-token`
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages: %v", err)
 	}
-	if props[tree.NewPageIDUnchecked("indexed-page")]["status"].Value != "draft" {
+	if props[newFixturePageID("indexed-page")]["status"].Value != "draft" {
 		t.Fatalf("properties = %#v, want status draft", props)
 	}
 	result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -668,7 +668,7 @@ workspace-sync-updated-token`
 	if err != nil {
 		t.Fatalf("GetPropertiesForPages after update: %v", err)
 	}
-	if props[tree.NewPageIDUnchecked("indexed-page")]["status"].Value != "published" {
+	if props[newFixturePageID("indexed-page")]["status"].Value != "published" {
 		t.Fatalf("properties after update = %#v, want status published", props)
 	}
 	result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -971,7 +971,7 @@ func TestWiki_DeletePage_WithChildren(t *testing.T) {
 
 	err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: tree.NewPageVersionUnchecked(parent.Version()), Recursive: false},
+		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: newFixturePageVersion(parent.Version()), Recursive: false},
 	)
 	if err == nil {
 		t.Error("Expected error when deleting parent with children")

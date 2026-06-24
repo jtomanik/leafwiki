@@ -3,16 +3,17 @@ import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
 import type { FieldErrorMap } from '@/lib/handleFieldErrors'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { useCallback, useState } from 'react'
 import { SlugInputWithSuggestion } from './SlugInputWithSuggestion'
 
 const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
 
 type EditPageMetadataDialogProps = {
-  parentId: string
+  parentId: PageID | ''
   parentPath: string
-  workspaceId: string
-  currentId?: string
+  workspaceId: WorkspaceID
+  currentId?: PageID | ''
   itemKind?: Page['kind']
   title: string
   slug: string

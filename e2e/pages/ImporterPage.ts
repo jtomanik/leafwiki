@@ -54,7 +54,6 @@ export default class ImporterPage {
 
   async clearImportPlan() {
     await this.page.getByRole('button', { name: 'Clear Import Plan' }).click();
-    await expect(this.page.getByText('Import plan cleared')).toBeVisible();
     await expect(this.page.getByRole('heading', { name: 'Import Plan' })).toHaveCount(0);
   }
 
@@ -71,7 +70,6 @@ export default class ImporterPage {
     const clearButton = this.page.getByRole('button', { name: 'Clear Import Plan' });
     if (await clearButton.count()) {
       await clearButton.click();
-      await expect(this.page.getByText('Import plan cleared')).toBeVisible();
       await expect(this.page.getByRole('heading', { name: 'Import Plan' })).toHaveCount(0);
     }
   }
@@ -91,11 +89,7 @@ export default class ImporterPage {
   async startNewImport() {
     await this.page.getByRole('button', { name: 'Start New Import' }).click();
     await expect(this.page.getByRole('heading', { name: 'Choose Import Package' })).toBeVisible();
-    await expect(
-      this.page.getByText(
-        'Start a new import to clear this result and choose a different zip file.',
-      ),
-    ).toHaveCount(0);
+    await expect(this.page.getByRole('heading', { name: 'Import Result' })).toHaveCount(0);
   }
 
   async closeAndClear() {

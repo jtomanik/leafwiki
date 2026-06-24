@@ -34,6 +34,12 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type controlPath string
+
+func (path controlPath) String() string {
+	return string(path)
+}
+
 type ControlHTTPError struct {
 	StatusCode int
 	Code       sharederrors.ErrorCode
@@ -87,18 +93,26 @@ func (c *Client) RegisterSession(ctx context.Context) (*SessionHandle, error) {
 	if err := c.doJSON(ctx, http.MethodPost, "/sessions", map[string]string{}, &out); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(out.ID.String()) == "" {
+	if out.ID == "" {
 		return nil, fmt.Errorf("daemon returned empty session id")
 	}
 	return &out, nil
 }
 
 func (c *Client) HeartbeatSession(ctx context.Context, id SessionID) error {
-	return c.doJSON(ctx, http.MethodPost, "/sessions/"+id.String()+"/heartbeat", map[string]string{}, nil)
+	return c.doJSON(ctx, http.MethodPost, sessionHeartbeatPath(id), map[string]string{}, nil)
 }
 
 func (c *Client) ReleaseSession(ctx context.Context, id SessionID) error {
-	return c.doJSON(ctx, http.MethodDelete, "/sessions/"+id.String(), nil, nil)
+	return c.doJSON(ctx, http.MethodDelete, sessionPath(id), nil, nil)
+}
+
+func sessionPath(id SessionID) controlPath {
+	return controlPath(fmt.Sprintf("/sessions/%s", id))
+}
+
+func sessionHeartbeatPath(id SessionID) controlPath {
+	return controlPath(sessionPath(id).String() + "/heartbeat")
 }
 
 func (c *Client) VerifyStdioAuth(ctx context.Context, apiKey string) error {
@@ -117,7 +131,7 @@ func (c *Client) ListAgentPresence(ctx context.Context) ([]AgentPresenceSession,
 	return out, nil
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, in any, out any) error {
+func (c *Client) doJSON(ctx context.Context, method string, path controlPath, in any, out any) error {
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)
@@ -126,7 +140,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in any, out an
 		}
 		body = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path.String(), body)
 	if err != nil {
 		return err
 	}

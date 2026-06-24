@@ -2,9 +2,12 @@ package search
 
 import "github.com/perber/wiki/internal/core/tree"
 
+type ResultLimit int
+type ResultOffset int
+
 type SearchResult struct {
-	Limit     int                `json:"limit"`
-	Offset    int                `json:"offset"`
+	PageSize  ResultLimit        `json:"limit"`
+	StartAt   ResultOffset       `json:"offset"`
 	Count     int                `json:"count"`
 	Items     []SearchResultItem `json:"items"`
 	TagFacets []SearchTagFacet   `json:"tag_facets"`

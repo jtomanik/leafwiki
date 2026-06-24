@@ -6,6 +6,7 @@ import {
   toWikiLookupPath,
   wikiPageLookupInputForBrowserRoute,
 } from './wikiPath'
+import { asWorkspaceID } from './semanticTypes'
 
 describe('wiki path helpers', () => {
   it('normalizes route paths and lookup keys', () => {
@@ -16,11 +17,19 @@ describe('wiki path helpers', () => {
   })
 
   it('keeps workspace identity when building browser routes for wiki nodes', () => {
-    expect(browserRoutePathForWikiNode('plans/federated', 'page', 'docs')).toBe(
-      '/w/docs/plans/federated.md',
-    )
     expect(
-      browserRoutePathForWikiNode('plans/federated', 'section', 'docs'),
+      browserRoutePathForWikiNode(
+        'plans/federated',
+        'page',
+        asWorkspaceID('docs'),
+      ),
+    ).toBe('/w/docs/plans/federated.md')
+    expect(
+      browserRoutePathForWikiNode(
+        'plans/federated',
+        'section',
+        asWorkspaceID('docs'),
+      ),
     ).toBe('/w/docs/plans/federated')
   })
 

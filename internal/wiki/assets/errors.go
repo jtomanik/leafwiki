@@ -40,7 +40,7 @@ type AssetErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithAssetStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, AssetErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

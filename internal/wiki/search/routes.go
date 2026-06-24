@@ -10,6 +10,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
+	coresearch "github.com/perber/wiki/internal/search"
 )
 
 // Routes is the RouteRegistrar for the search domain.
@@ -82,7 +83,12 @@ func (r *Routes) handleSearch(c *gin.Context) {
 		return
 	}
 
-	out, err := r.search.Execute(c.Request.Context(), SearchInput{Query: query, Tags: tags, Offset: offset, Limit: limit})
+	out, err := r.search.Execute(c.Request.Context(), SearchInput{
+		Query:    query,
+		Tags:     tags,
+		StartAt:  coresearch.ResultOffset(offset),
+		PageSize: coresearch.ResultLimit(limit),
+	})
 	if err != nil {
 		respondWithSearchError(c, err)
 		return

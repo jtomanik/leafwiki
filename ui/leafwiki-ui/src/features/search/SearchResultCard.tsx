@@ -1,6 +1,7 @@
 import { SearchResultItem } from '@/lib/api/search'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildViewUrl } from '@/lib/routePath'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import {
   browserRoutePathForWikiNode,
   getWikiTargetRoutePath,
@@ -13,7 +14,7 @@ import { usePageEditorStore } from '../editor/pageEditorStore'
 
 type SearchResultCardProps = {
   item: SearchResultItem
-  workspaceId: string
+  workspaceId: WorkspaceID
   isSelected?: boolean
   onMouseEnter?: () => void
   onFocus?: () => void

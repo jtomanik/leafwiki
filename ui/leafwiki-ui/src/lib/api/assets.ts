@@ -1,14 +1,15 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { PageID, WorkspaceID } from '../semanticTypes'
 
 export type UploadAssetResponse = {
   file: string
 }
 
 export async function uploadAsset(
-  pageId: string,
+  pageId: PageID,
   file: File,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<UploadAssetResponse> {
   const form = new FormData()
   form.append('file', file)
@@ -22,8 +23,8 @@ export async function uploadAsset(
 }
 
 export async function getAssets(
-  pageId: string,
-  workspaceId: string,
+  pageId: PageID,
+  workspaceId: WorkspaceID,
 ): Promise<string[]> {
   const data = await fetchWithAuth(
     workspaceApiPath(`/api/pages/${pageId}/assets`, workspaceId),
@@ -34,9 +35,9 @@ export async function getAssets(
 }
 
 export async function deleteAsset(
-  pageId: string,
+  pageId: PageID,
   filename: string,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ) {
   return await fetchWithAuth(
     workspaceApiPath(
@@ -50,10 +51,10 @@ export async function deleteAsset(
 }
 
 export async function renameAsset(
-  pageId: string,
+  pageId: PageID,
   oldFilename: string,
   newFilename: string,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ) {
   return await fetchWithAuth(
     workspaceApiPath(`/api/pages/${pageId}/assets/rename`, workspaceId),

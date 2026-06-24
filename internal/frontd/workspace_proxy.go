@@ -61,18 +61,18 @@ func (p *workspaceRouterProxy) ServeHTTP(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	if p.opts.Resolve == nil {
-		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceResolverUnavailable, "workspace resolver is unavailable")
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceResolverUnavailable)
 		return
 	}
 	route, err := p.opts.Resolve(req, workspaceID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrWorkspaceNotFound):
-			writeFrontdError(w, http.StatusNotFound, errCodeWorkspaceNotFound, "workspace not found")
+			writeFrontdError(w, http.StatusNotFound, errCodeWorkspaceNotFound)
 		case errors.Is(err, ErrWorkspaceForbidden):
-			writeFrontdError(w, http.StatusForbidden, errCodeWorkspaceForbidden, "workspace forbidden")
+			writeFrontdError(w, http.StatusForbidden, errCodeWorkspaceForbidden)
 		default:
-			writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceUnavailable, "workspace unavailable")
+			writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceUnavailable)
 		}
 		return
 	}
@@ -80,22 +80,22 @@ func (p *workspaceRouterProxy) ServeHTTP(w http.ResponseWriter, req *http.Reques
 		route.WorkspaceID = workspaceID
 	}
 	if p.opts.Actor == nil {
-		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceActorContextUnavailable, "actor context resolver is unavailable")
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceActorContextUnavailable)
 		return
 	}
 	actor, err := p.opts.Actor(req, route.WorkspaceID)
 	if err != nil {
-		writeFrontdError(w, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed, "resolve actor context")
+		writeFrontdError(w, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed)
 		return
 	}
 	encoded, err := projectdaemon.EncodeActorContext(actor)
 	if err != nil {
-		writeFrontdError(w, http.StatusInternalServerError, errCodeWorkspaceActorContextEncodeFailed, "encode actor context")
+		writeFrontdError(w, http.StatusInternalServerError, errCodeWorkspaceActorContextEncodeFailed)
 		return
 	}
 	proxy, err := p.proxy(route)
 	if err != nil {
-		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceUnavailable, "workspace unavailable")
+		writeFrontdError(w, http.StatusServiceUnavailable, errCodeWorkspaceUnavailable)
 		return
 	}
 	clone := req.Clone(req.Context())
@@ -108,11 +108,11 @@ func (p *workspaceRouterProxy) ServeHTTP(w http.ResponseWriter, req *http.Reques
 	proxy.ServeHTTP(w, clone)
 }
 
-func writeFrontdError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+func writeFrontdError(w http.ResponseWriter, status int, code sharederrors.ErrorCode) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+		"error": sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
 }
 

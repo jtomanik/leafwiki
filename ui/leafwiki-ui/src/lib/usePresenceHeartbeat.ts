@@ -4,6 +4,11 @@ import {
   type PresenceHeartbeat,
   type PresenceMode,
 } from '@/lib/api/presence'
+import {
+  asSessionID,
+  type SessionID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useCallback, useEffect, useRef } from 'react'
 
 const HEARTBEAT_INTERVAL_MS = 25_000
@@ -13,20 +18,20 @@ type PresenceHeartbeatState = {
   mode: PresenceMode
   path?: string
   dirty: boolean
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 export function usePresenceHeartbeat(state: PresenceHeartbeatState) {
-  const sessionIdRef = useRef<string | null>(null)
+  const sessionIdRef = useRef<SessionID | null>(null)
   const latestStateRef = useRef(state)
   const pendingHeartbeatsRef = useRef<Set<AbortController>>(new Set())
   const { dirty, mode, path, workspaceId } = state
 
   const sendHeartbeat = useCallback(
     (
-      sessionId: string,
+      sessionId: SessionID,
       heartbeatState: PresenceHeartbeatState,
-      targetWorkspaceId: string,
+      targetWorkspaceId: WorkspaceID,
     ) => {
       const controller = new AbortController()
       pendingHeartbeatsRef.current.add(controller)
@@ -80,7 +85,7 @@ export function usePresenceHeartbeat(state: PresenceHeartbeatState) {
 }
 
 function buildHeartbeat(
-  sessionId: string,
+  sessionId: SessionID,
   state: PresenceHeartbeatState,
 ): PresenceHeartbeat {
   const heartbeat: PresenceHeartbeat = {
@@ -94,13 +99,13 @@ function buildHeartbeat(
   return heartbeat
 }
 
-function getPresenceSessionId(): string {
+function getPresenceSessionId(): SessionID {
   if (typeof window === 'undefined') {
     return newPresenceSessionId()
   }
   try {
     const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY)
-    if (existing) return existing
+    if (existing) return asSessionID(existing)
     const next = newPresenceSessionId()
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, next)
     return next
@@ -109,12 +114,12 @@ function getPresenceSessionId(): string {
   }
 }
 
-function newPresenceSessionId(): string {
+function newPresenceSessionId(): SessionID {
   if (
     typeof crypto !== 'undefined' &&
     typeof crypto.randomUUID === 'function'
   ) {
-    return crypto.randomUUID()
+    return asSessionID(crypto.randomUUID())
   }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return asSessionID(`${Date.now()}-${Math.random().toString(36).slice(2)}`)
 }

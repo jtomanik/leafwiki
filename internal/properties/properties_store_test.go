@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *PropertiesStore {
 func testPageIDs(ids ...string) []tree.PageID {
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, tree.NewPageIDUnchecked(id))
+		pageIDs = append(pageIDs, newFixturePageID(id))
 	}
 	return pageIDs
 }
@@ -352,7 +352,7 @@ func TestPropertiesStore_GetPageIDsByProperty_ExactMatch(t *testing.T) {
 		t.Fatalf("expected %v, got %v", want, ids)
 	}
 	for i, w := range want {
-		if ids[i] != tree.NewPageIDUnchecked(w) {
+		if ids[i] != newFixturePageID(w) {
 			t.Errorf("[%d] = %q, want %q", i, ids[i], w)
 		}
 	}

@@ -25,7 +25,7 @@ type SearchErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithSearchStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, SearchErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

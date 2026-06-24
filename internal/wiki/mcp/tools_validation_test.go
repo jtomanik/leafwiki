@@ -16,23 +16,23 @@ func TestCachedValidationAssetExistsBuildsPredicateOncePerPage(t *testing.T) {
 	assetExists := cachedValidationAssetExists(func(pageID tree.PageID) func(string) bool {
 		calls[pageID]++
 		return func(destination string) bool {
-			return pageID == tree.NewPageIDUnchecked("page-1") && destination == "logo.png"
+			return pageID == newFixturePageID("page-1") && destination == "logo.png"
 		}
 	})
 
-	if !assetExists(tree.NewPageIDUnchecked("page-1"), "logo.png") {
+	if !assetExists(newFixturePageID("page-1"), "logo.png") {
 		t.Fatalf("assetExists(page-1, logo.png) = false, want true")
 	}
-	if assetExists(tree.NewPageIDUnchecked("page-1"), "other.png") {
+	if assetExists(newFixturePageID("page-1"), "other.png") {
 		t.Fatalf("assetExists(page-1, other.png) = true, want false")
 	}
-	if assetExists(tree.NewPageIDUnchecked("page-2"), "logo.png") {
+	if assetExists(newFixturePageID("page-2"), "logo.png") {
 		t.Fatalf("assetExists(page-2, logo.png) = true, want false")
 	}
-	assetExists(tree.NewPageIDUnchecked("page-1"), "second.png")
+	assetExists(newFixturePageID("page-1"), "second.png")
 
-	pageOneID := tree.NewPageIDUnchecked("page-1")
-	pageTwoID := tree.NewPageIDUnchecked("page-2")
+	pageOneID := newFixturePageID("page-1")
+	pageTwoID := newFixturePageID("page-2")
 	if calls[pageOneID] != 1 {
 		t.Fatalf("page-1 predicate factory calls = %d, want 1", calls[pageOneID])
 	}
@@ -76,8 +76,8 @@ leafwiki_title: Sync Child
 	}
 	routes := &Routes{treeService: treeService}
 
-	routePath := tree.NewRoutePathUnchecked(section.CalculatePath())
-	result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, tree.NewPageIDUnchecked(section.ID), section.Kind)
+	routePath := newFixtureRoutePath(section.CalculatePath())
+	result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, newFixturePageID(section.ID), section.Kind)
 
 	if !result.OK {
 		t.Fatalf("validateMarkdownContent = %#v, want ok", result)
@@ -141,7 +141,7 @@ func childBySlug(parent *tree.PageNode, slug string) *tree.PageNode {
 		return nil
 	}
 	for _, child := range parent.Children {
-		if child.Slug == tree.NewSlugUnchecked(slug) {
+		if child.Slug == newFixtureSlug(slug) {
 			return child
 		}
 	}

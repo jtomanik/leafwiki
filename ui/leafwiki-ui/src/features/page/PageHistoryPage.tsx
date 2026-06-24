@@ -22,6 +22,7 @@ import { useViewerStore } from '../viewer/viewer'
 import { PageHistoryContent } from '@/features/history/PageHistoryContent'
 import { usePageHistory } from '@/features/history/pageHistory'
 import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
+import { asRoutePath } from '@/lib/semanticTypes'
 
 export default function PageHistoryPage() {
   const location = useLocation()
@@ -57,8 +58,8 @@ export default function PageHistoryPage() {
   useEffect(() => {
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
     void loadPageData?.(
-      lookup.path,
-      lookup.fallbackPath,
+      asRoutePath(lookup.path),
+      lookup.fallbackPath ? asRoutePath(lookup.fallbackPath) : undefined,
       lookup.kind,
       workspaceId,
     )

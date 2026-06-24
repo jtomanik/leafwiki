@@ -23,7 +23,7 @@ func TestSQLiteIndex_IndexPage(t *testing.T) {
 
 	// Testdata
 	path := "docs/test.md"
-	pageID := tree.NewPageIDUnchecked("test123")
+	pageID := newFixturePageID("test123")
 	title := "Test Page"
 	content := "This is a **test** page."
 	expectedContent := "This is a test page."

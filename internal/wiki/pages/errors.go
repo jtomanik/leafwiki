@@ -88,7 +88,13 @@ type PageErrorResponse struct {
 type PageErrorDetail = sharederrors.LocalizedErrorDetail
 
 func newPageErrorDetail(code sharederrors.ErrorCode, message, template string, args ...string) PageErrorDetail {
-	return sharederrors.NewLocalizedErrorDetail(code, message, template, args...)
+	return PageErrorDetail{
+		Code:      code,
+		MessageID: sharederrors.MessageIDForCode(code),
+		Message:   message,
+		Template:  template,
+		Args:      append([]string(nil), args...),
+	}
 }
 
 func apiSuccessMessage(messageID sharederrors.MessageID) string {

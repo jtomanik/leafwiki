@@ -1,9 +1,16 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type {
+  CommitHash,
+  ImportPlanID,
+  PageID,
+  Slug,
+  WorkspaceID,
+} from '../semanticTypes'
 
 export type ImportPlan = {
-  id: string
-  tree_hash: string
+  id: ImportPlanID
+  tree_hash: CommitHash
   items: ImportPlanItem[]
   errors: string[]
   execution_status: ImportExecutionStatus
@@ -28,10 +35,10 @@ export type ImportPlanItem = {
   source_path: string
   target_path: string
   title: string
-  desired_slug: string
+  desired_slug: Slug
   kind: 'page' | 'section'
   exists: boolean
-  existing_id: string | null
+  existing_id: PageID | null
   action: 'create' | 'update' | 'skip'
   conflicts: string[] | null
   notes: string[] | null
@@ -47,13 +54,13 @@ export type ImportResult = {
     action: 'created' | 'updated' | 'skipped' | 'conflicted'
     error?: string
   }[]
-  tree_hash: string
-  tree_hash_before: string
+  tree_hash: CommitHash
+  tree_hash_before: CommitHash
 }
 
 export async function createImportPlanFromZip(
   file: File,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<ImportPlan> {
   const formData = new FormData()
   formData.append('file', file)
@@ -68,7 +75,7 @@ export async function createImportPlanFromZip(
   )) as ImportPlan
 }
 
-export async function getImportPlan(workspaceId: string): Promise<ImportPlan> {
+export async function getImportPlan(workspaceId: WorkspaceID): Promise<ImportPlan> {
   return (await fetchWithAuth(
     workspaceApiPath('/api/import/plan', workspaceId),
     {
@@ -78,7 +85,7 @@ export async function getImportPlan(workspaceId: string): Promise<ImportPlan> {
 }
 
 export async function executeImportPlan(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<ImportPlan> {
   return (await fetchWithAuth(
     workspaceApiPath('/api/import/execute', workspaceId),
@@ -89,7 +96,7 @@ export async function executeImportPlan(
 }
 
 export async function cancelImportPlan(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<ImportPlan | null> {
   const response = await fetchWithAuth(
     workspaceApiPath('/api/import/plan', workspaceId),

@@ -62,10 +62,11 @@ func (e *LocalizedError) Unwrap() error {
 }
 
 func NewLocalizedError(code ErrorCode, message, template string, cause error, args ...string) *LocalizedError {
+	messageID := MessageIDForCode(code)
 	return &LocalizedError{
 		Code:      code,
-		MessageID: MessageIDForCode(code),
-		Message:   message,
+		MessageID: messageID,
+		Message:   renderMessage(messageID, message, args...),
 		Template:  template,
 		Args:      append([]string(nil), args...),
 		Cause:     cause,
@@ -119,6 +120,18 @@ func NewLocalizedErrorDetail(code ErrorCode, message, template string, args ...s
 		MessageID: messageID,
 		Message:   renderMessage(messageID, message, args...),
 		Template:  template,
+		Args:      append([]string(nil), args...),
+	}
+}
+
+func NewLocalizedErrorDetailFromCode(code ErrorCode, args ...string) LocalizedErrorDetail {
+	messageID := MessageIDForCode(code)
+	message := renderMessage(messageID, "", args...)
+	return LocalizedErrorDetail{
+		Code:      code,
+		MessageID: messageID,
+		Message:   message,
+		Template:  message,
 		Args:      append([]string(nil), args...),
 	}
 }

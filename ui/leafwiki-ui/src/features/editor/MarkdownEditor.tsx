@@ -21,6 +21,7 @@ import { insertHeadingAtStart, insertWrappedText } from './editorCommands'
 import { uploadAsset, UploadAssetResponse } from '@/lib/api/assets'
 import { mapApiError } from '@/lib/api/errors'
 import { formatBytes, IMAGE_EXTENSIONS } from '@/lib/config'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 import { workspaceAssetPath } from '@/lib/workspaceAssets'
 import { useConfigStore } from '@/stores/config'
 import { useEditorStore } from '@/stores/editor'
@@ -46,8 +47,8 @@ export type MarkdownEditorRef = {
 type Props = {
   initialValue?: string
   onChange: (newValue: string) => void
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
 }
 
 const MarkdownEditor = (

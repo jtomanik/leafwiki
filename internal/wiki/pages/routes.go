@@ -147,7 +147,7 @@ func (r *Routes) handleGetTree(c *gin.Context) {
 
 func (r *Routes) handleGetPage(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
-	out, err := r.getPage.Execute(c.Request.Context(), GetPageInput{ID: tree.NewPageIDUnchecked(id)})
+	out, err := r.getPage.Execute(c.Request.Context(), GetPageInput{ID: tree.PageIDFromString(id)})
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -241,7 +241,7 @@ func (r *Routes) handleResolvePermalink(c *gin.Context) {
 		respondWithPageStatusError(c, http.StatusBadRequest, ErrCodePageMissingID, "Page ID is required", "page id is required")
 		return
 	}
-	out, err := r.resolvePermalink.Execute(c.Request.Context(), ResolvePermalinkInput{ID: tree.NewPageIDUnchecked(id)})
+	out, err := r.resolvePermalink.Execute(c.Request.Context(), ResolvePermalinkInput{ID: tree.PageIDFromString(id)})
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -256,8 +256,8 @@ func (r *Routes) handleSuggestSlug(c *gin.Context) {
 		return
 	}
 	out, err := r.suggestSlug.Execute(c.Request.Context(), SuggestSlugInput{
-		ParentID:  tree.NewPageIDUnchecked(strings.TrimSpace(c.Query("parentId"))),
-		CurrentID: tree.NewPageIDUnchecked(strings.TrimSpace(c.Query("currentId"))),
+		ParentID:  tree.PageIDFromString(strings.TrimSpace(c.Query("parentId"))),
+		CurrentID: tree.PageIDFromString(strings.TrimSpace(c.Query("currentId"))),
 		Title:     title,
 	})
 	if err != nil {
@@ -299,7 +299,7 @@ func (r *Routes) handleCreate(c *gin.Context) {
 		return
 	}
 	out, err := r.createPage.Execute(c.Request.Context(), CreatePageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), ParentID: semanticPageIDPtr(req.ParentID), Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug), Kind: &kind,
+		UserID: tree.UserIDFromString(user.ID), ParentID: semanticPageIDPtr(req.ParentID), Title: req.Title, Slug: tree.SlugFromString(req.Slug), Kind: &kind,
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -342,7 +342,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 	contentToSave := req.Content
 	fromImport := false
 	if req.Content != nil || req.Tags != nil || req.Properties != nil {
-		currentRaw, err := r.treeService.ReadPageRaw(tree.NewPageIDUnchecked(id))
+		currentRaw, err := r.treeService.ReadPageRaw(tree.PageIDFromString(id))
 		if err != nil {
 			respondWithPageError(c, err)
 			return
@@ -358,7 +358,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 			}
 			body = doc.Body
 		}
-		combined, err := BuildMarkdownWithPublicMetadataPatch(currentRaw, tree.NewPageIDUnchecked(id), req.Title, PublicMetadataPatch{
+		combined, err := BuildMarkdownWithPublicMetadataPatch(currentRaw, tree.PageIDFromString(id), req.Title, PublicMetadataPatch{
 			Tags:              tagsForValidation,
 			TagsPresent:       req.Tags != nil,
 			Properties:        propertiesForValidation,
@@ -374,7 +374,7 @@ func (r *Routes) handleUpdate(c *gin.Context) {
 
 	kind := tree.NodeKindPage
 	out, err := r.updatePage.Execute(c.Request.Context(), UpdatePageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+		UserID: tree.UserIDFromString(user.ID), ID: tree.PageIDFromString(id), Version: tree.PageVersionFromString(req.Version), Title: req.Title, Slug: tree.SlugFromString(req.Slug),
 		Content: contentToSave, Kind: &kind, FromImport: fromImport,
 	})
 	if err != nil {
@@ -415,7 +415,7 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		return
 	}
 	if err := r.deletePage.Execute(c.Request.Context(), DeletePageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(version), Recursive: recursive,
+		UserID: tree.UserIDFromString(user.ID), ID: tree.PageIDFromString(id), Version: tree.PageVersionFromString(version), Recursive: recursive,
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -438,7 +438,7 @@ func (r *Routes) handleMove(c *gin.Context) {
 		return
 	}
 	if err := r.movePage.Execute(c.Request.Context(), MovePageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), ParentID: tree.NewPageIDUnchecked(req.ParentID),
+		UserID: tree.UserIDFromString(user.ID), ID: tree.PageIDFromString(id), Version: tree.PageVersionFromString(req.Version), ParentID: tree.PageIDFromString(req.ParentID),
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -456,7 +456,7 @@ func (r *Routes) handleSort(c *gin.Context) {
 		return
 	}
 	if err := r.sortPages.Execute(c.Request.Context(), SortPagesInput{
-		ParentID: tree.NewPageIDUnchecked(parentID), OrderedIDs: semanticPageIDs(req.OrderedIDs),
+		ParentID: tree.PageIDFromString(parentID), OrderedIDs: semanticPageIDs(req.OrderedIDs),
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -489,7 +489,7 @@ func (r *Routes) handleEnsurePath(c *gin.Context) {
 		return
 	}
 	out, err := r.ensurePath.Execute(c.Request.Context(), EnsurePathInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), TargetPath: targetPath, TargetTitle: req.Title, Kind: &kind,
+		UserID: tree.UserIDFromString(user.ID), TargetPath: targetPath, TargetTitle: req.Title, Kind: &kind,
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -518,7 +518,7 @@ func (r *Routes) handleConvert(c *gin.Context) {
 		return
 	}
 	if err := r.convertPage.Execute(c.Request.Context(), ConvertPageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), Source: pagesave.PageMutationSourceWeb, ID: tree.NewPageIDUnchecked(id), Version: tree.NewPageVersionUnchecked(req.Version), TargetKind: targetKind,
+		UserID: tree.UserIDFromString(user.ID), Source: pagesave.PageMutationSourceWeb, ID: tree.PageIDFromString(id), Version: tree.PageVersionFromString(req.Version), TargetKind: targetKind,
 	}); err != nil {
 		respondWithPageError(c, err)
 		return
@@ -549,8 +549,8 @@ func (r *Routes) handleCopy(c *gin.Context) {
 		return
 	}
 	out, err := r.copyPage.Execute(c.Request.Context(), CopyPageInput{
-		UserID: tree.NewUserIDUnchecked(user.ID), SourcePageID: tree.NewPageIDUnchecked(sourceID), TargetParentID: semanticPageIDPtr(req.ParentID),
-		Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+		UserID: tree.UserIDFromString(user.ID), SourcePageID: tree.PageIDFromString(sourceID), TargetParentID: semanticPageIDPtr(req.ParentID),
+		Title: req.Title, Slug: tree.SlugFromString(req.Slug),
 	})
 	if err != nil {
 		respondWithPageError(c, err)
@@ -573,7 +573,7 @@ func (r *Routes) handleRefactorPreview(c *gin.Context) {
 		return
 	}
 	out, err := r.previewRefactor.Execute(c.Request.Context(), RefactorPreviewInput{
-		PageID: tree.NewPageIDUnchecked(id), Kind: req.Kind, Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+		PageID: tree.PageIDFromString(id), Kind: req.Kind, Title: req.Title, Slug: tree.SlugFromString(req.Slug),
 		Content: req.Content, NewParentID: semanticPageIDPtr(req.NewParentID),
 	})
 	if err != nil {
@@ -603,11 +603,11 @@ func (r *Routes) handleRefactorApply(c *gin.Context) {
 		return
 	}
 	page, err := r.applyRefactor.Execute(c.Request.Context(), RefactorApplyInput{
-		Version: tree.NewPageVersionUnchecked(req.Version),
-		UserID:  tree.NewUserIDUnchecked(user.ID),
+		Version: tree.PageVersionFromString(req.Version),
+		UserID:  tree.UserIDFromString(user.ID),
 		Source:  pagesave.PageMutationSourceWeb,
 		RefactorPreviewInput: RefactorPreviewInput{
-			PageID: tree.NewPageIDUnchecked(id), Kind: req.Kind, Title: req.Title, Slug: tree.NewSlugUnchecked(req.Slug),
+			PageID: tree.PageIDFromString(id), Kind: req.Kind, Title: req.Title, Slug: tree.SlugFromString(req.Slug),
 			Content: req.Content, NewParentID: semanticPageIDPtr(req.NewParentID),
 		},
 		RewriteLinks: req.RewriteLinks,
@@ -635,14 +635,14 @@ func semanticPageIDPtr(id *string) *tree.PageID {
 	if id == nil {
 		return nil
 	}
-	typed := tree.NewPageIDUnchecked(*id)
+	typed := tree.PageIDFromString(*id)
 	return &typed
 }
 
 func semanticPageIDs(ids []string) []tree.PageID {
 	out := make([]tree.PageID, len(ids))
 	for i, id := range ids {
-		out[i] = tree.NewPageIDUnchecked(id)
+		out[i] = tree.PageIDFromString(id)
 	}
 	return out
 }

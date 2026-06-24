@@ -11,6 +11,7 @@ import {
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import { useWorkspacesStore } from '@/stores/workspaces'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 
 const MAX_RESULTS = 20
 const SUPPRESSED_EXTERNAL_PREFIXES = ['http', 'https', 'mailto']
@@ -52,7 +53,7 @@ function getLinkTargetRange(context: CompletionContext) {
   }
 }
 
-function getMarkdownLinkRootPrefix(workspaceId?: string) {
+function getMarkdownLinkRootPrefix(workspaceId?: WorkspaceID) {
   return useWorkspacesStore
     .getState()
     .getMarkdownLinkRootPrefix(
@@ -63,7 +64,7 @@ function getMarkdownLinkRootPrefix(workspaceId?: string) {
 
 function buildCompletionOptions(
   items: FlatPageSearchItem[],
-  workspaceId?: string,
+  workspaceId?: WorkspaceID,
 ): InternalLinkCompletion[] {
   const markdownLinkRootPrefix = getMarkdownLinkRootPrefix(workspaceId)
   return items.map((item) => ({
@@ -82,7 +83,7 @@ function buildCompletionOptions(
 
 export function internalLinkCompletionSource(
   context: CompletionContext,
-  workspaceId?: string,
+  workspaceId?: WorkspaceID,
 ): CompletionResult | null {
   const range = getLinkTargetRange(context)
   if (!range) return null

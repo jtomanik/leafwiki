@@ -1,9 +1,10 @@
 import { fetchWithAuth } from './auth'
+import { asWorkspaceID, type WorkspaceID } from '../semanticTypes'
 
-export const HOME_WORKSPACE_ID = 'home'
+export const HOME_WORKSPACE_ID = asWorkspaceID('home')
 
 export type WorkspaceStatus = {
-  workspaceId: string
+  workspaceId: WorkspaceID
   state: string
   pid?: number
   url?: string
@@ -12,7 +13,7 @@ export type WorkspaceStatus = {
 }
 
 export type WorkspaceListItem = {
-  id: string
+  id: WorkspaceID
   displayName: string
   markdownLinkRootPrefix?: string
   role: 'viewer' | 'editor' | 'admin'
@@ -28,8 +29,8 @@ export type WorkspaceStatusResponse = {
   status: WorkspaceStatus
 }
 
-export function workspaceApiPath(path: string, workspaceId: string): string {
-  let cleanPath = path.startsWith('/') ? path : `/${path}`
+export function workspaceApiPath(endpoint: string, workspaceId: WorkspaceID): string {
+  let cleanPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
   if (cleanPath === '/api') {
     cleanPath = ''
   } else if (cleanPath.startsWith('/api/')) {
@@ -46,7 +47,7 @@ export async function fetchWorkspaces(): Promise<WorkspaceListItem[]> {
 }
 
 export async function ensureWorkspace(
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): Promise<WorkspaceStatusResponse> {
   const response = (await fetchWithAuth(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/ensure`,

@@ -20,7 +20,7 @@ func assertOrderIDs(t *testing.T, got []string, want ...tree.PageID) {
 		t.Fatalf("unexpected persisted order length: got %v want %v", got, want)
 	}
 	for i, rawID := range got {
-		if id := tree.NewPageIDUnchecked(rawID); id != want[i] {
+		if id := newFixturePageID(rawID); id != want[i] {
 			t.Fatalf("unexpected persisted order: got %v want %v", got, want)
 		}
 	}
@@ -97,7 +97,7 @@ func TestTreeMigration_LoadTree_MigratesToV2_AddsFrontmatterAndPreservesBody(t *
 	if !has {
 		t.Fatalf("expected frontmatter after migration, got:\n%s", string(raw))
 	}
-	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id {
+	if newFixturePageID(fm.LeafWikiID) != *id {
 		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
@@ -166,7 +166,7 @@ Hello World
 	if !has {
 		t.Fatalf("expected frontmatter after migration, got:\n%s", migrated)
 	}
-	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id {
+	if newFixturePageID(fm.LeafWikiID) != *id {
 		t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
 	}
 	if strings.TrimSpace(fm.LeafWikiTitle) == "" {
@@ -370,7 +370,7 @@ func TestTreeMigration_LoadTree_MigratesToV4_MaterializesMissingSectionIndex(t *
 	if !has {
 		t.Fatalf("expected frontmatter after migration")
 	}
-	if tree.NewPageIDUnchecked(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
+	if newFixturePageID(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
 		t.Fatalf("expected section frontmatter to be materialized, got %#v", fm)
 	}
 	if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {

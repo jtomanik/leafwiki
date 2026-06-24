@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/perber/wiki/internal/core/markdown"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
 )
@@ -78,7 +79,7 @@ func (f *fakeWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath, tit
 	return &tree.Page{PageNode: &tree.PageNode{
 		ID:    "p1",
 		Title: title,
-		Slug:  tree.NewSlugUnchecked("slug"),
+		Slug:  newFixtureSlug("slug"),
 		Kind:  k,
 	}}, nil
 }
@@ -96,14 +97,14 @@ func (f *fakeWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, 
 		k = *kind
 	}
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    tree.NewPageIDUnchecked(id),
+		ID:    newFixturePageID(id),
 		Title: title,
 		Slug:  slug,
 		Kind:  k,
 	}}, nil
 }
 
-func (f *fakeWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, maxBytes int64) (string, error) {
+func (f *fakeWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 	return "/assets/" + pageID.MetadataValue() + "/" + filename.Filename(), nil
 }
 
@@ -112,9 +113,9 @@ func newPlannerWithFake(w *fakeWiki) *Planner {
 }
 
 func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, exists bool) tree.PathSegment {
-	pageID := tree.NewPageIDUnchecked(id)
+	pageID := newFixturePageID(id)
 	return tree.PathSegment{
-		Slug:   tree.NewSlugUnchecked(slug),
+		Slug:   newFixtureSlug(slug),
 		Kind:   &kind,
 		ID:     &pageID,
 		Title:  &title,
@@ -124,7 +125,7 @@ func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, e
 
 func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
 	return tree.PathSegment{
-		Slug:   tree.NewSlugUnchecked(slug),
+		Slug:   newFixtureSlug(slug),
 		Kind:   &kind,
 		Exists: false,
 	}
@@ -251,7 +252,7 @@ func TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPage(t *testing.T) {
 			wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 			p := newPlannerWithFake(wiki)
 
-			res, err := p.CreatePlan([]ImportMDFile{{SourcePath: tree.NewWorkspaceSourcePathUnchecked(tt.sourcePath)}}, PlanOptions{
+			res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath(tt.sourcePath)}}, PlanOptions{
 				SourceBasePath: tmp,
 				TargetBasePath: "docs",
 			})
@@ -262,7 +263,7 @@ func TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPage(t *testing.T) {
 			if it.Kind != tree.NodeKindPage {
 				t.Fatalf("Kind = %v, want page", it.Kind)
 			}
-			if it.TargetPath != tree.NewRoutePathUnchecked(tt.wantPath) {
+			if it.TargetPath != newFixtureRoutePath(tt.wantPath) {
 				t.Fatalf("TargetPath = %q, want %s", it.TargetPath, tt.wantPath)
 			}
 		})
@@ -440,7 +441,7 @@ func TestPlanner_CreatePlan_SkipExisting_UsesLookupLastSegment(t *testing.T) {
 				Exists: true,
 				Segments: []tree.PathSegment{
 					{Slug: "docs", Exists: true},
-					{Slug: "a", Exists: true, ID: func() *tree.PageID { id := tree.NewPageIDUnchecked(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
+					{Slug: "a", Exists: true, ID: func() *tree.PageID { id := newFixturePageID(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
 				},
 			},
 		},
@@ -465,7 +466,7 @@ func TestPlanner_CreatePlan_SkipExisting_UsesLookupLastSegment(t *testing.T) {
 	if !it.Exists {
 		t.Fatalf("Exists = false")
 	}
-	if it.ExistingID == nil || *it.ExistingID != tree.NewPageIDUnchecked(existingID) {
+	if it.ExistingID == nil || *it.ExistingID != newFixturePageID(existingID) {
 		t.Fatalf("ExistingID = %#v (want %q)", it.ExistingID, existingID)
 	}
 	if it.DesiredSlug != "a" {

@@ -81,11 +81,11 @@ func sectionKind() *tree.NodeKind {
 }
 
 func semanticUserID(id string) tree.UserID {
-	return tree.UserID(id)
+	return newFixtureUserID(id)
 }
 
 func pageID[T ~string](id T) tree.PageID {
-	return tree.NewPageIDUnchecked(id)
+	return newFixturePageID(id)
 }
 
 func pageIDPtr[T ~string](id T) *tree.PageID {
@@ -94,11 +94,11 @@ func pageIDPtr[T ~string](id T) *tree.PageID {
 }
 
 func pageVersion[T ~string](version T) tree.PageVersion {
-	return tree.NewPageVersionUnchecked(version)
+	return newFixturePageVersion(version)
 }
 
 func slug[T ~string](value T) tree.Slug {
-	return tree.NewSlugUnchecked(value)
+	return newFixtureSlug(value)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,10 +198,10 @@ func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
 func TestPageUseCaseInputsUseSemanticTypesAtBoundary(t *testing.T) {
 	t.Parallel()
 
-	pageID := tree.NewPageIDUnchecked("page-1")
-	parentID := tree.NewPageIDUnchecked("parent-1")
-	version := tree.NewPageVersionUnchecked("version-1")
-	slug := tree.NewSlugUnchecked("page-slug")
+	pageID := newFixturePageID("page-1")
+	parentID := newFixturePageID("parent-1")
+	version := newFixturePageVersion("version-1")
+	slug := newFixtureSlug("page-slug")
 	routePath := tree.RoutePath("docs/page")
 
 	_ = pages.GetPageInput{ID: pageID}
@@ -211,14 +211,14 @@ func TestPageUseCaseInputsUseSemanticTypesAtBoundary(t *testing.T) {
 	_ = pages.CreatePageInput{ParentID: &parentID, Slug: slug}
 	_ = pages.UpdatePageInput{ID: pageID, Version: version, Slug: slug}
 	_ = pages.DeletePageInput{ID: pageID, Version: version}
-	_ = pages.MovePageInput{UserID: tree.UserID("user-1"), ID: pageID, Version: version, ParentID: parentID}
-	_ = pages.ConvertPageInput{UserID: tree.UserID("user-1"), ID: pageID, Version: version}
-	_ = pages.CopyPageInput{UserID: tree.UserID("user-1"), SourcePageID: pageID, TargetParentID: &parentID, Slug: slug}
-	_ = pages.EnsurePathInput{UserID: tree.UserID("user-1"), TargetPath: routePath}
+	_ = pages.MovePageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version, ParentID: parentID}
+	_ = pages.ConvertPageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version}
+	_ = pages.CopyPageInput{UserID: newFixtureUserID("user-1"), SourcePageID: pageID, TargetParentID: &parentID, Slug: slug}
+	_ = pages.EnsurePathInput{UserID: newFixtureUserID("user-1"), TargetPath: routePath}
 	_ = pages.SortPagesInput{ParentID: parentID, OrderedIDs: []tree.PageID{pageID}}
 	_ = pages.SuggestSlugInput{ParentID: parentID, CurrentID: pageID}
 	_ = pages.RefactorPreviewInput{PageID: pageID, Slug: slug, NewParentID: &parentID}
-	_ = pages.RefactorApplyInput{UserID: tree.UserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
+	_ = pages.RefactorApplyInput{UserID: newFixtureUserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
 }
 
 func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
@@ -394,7 +394,7 @@ func TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired(t *
 	_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
 		UserID:  "user1",
 		ID:      pageID(created.Page.ID),
-		Version: tree.NewPageVersionUnchecked("\x00"),
+		Version: newFixturePageVersion("\x00"),
 		Title:   "Page",
 		Slug:    "page",
 		Content: &content,
@@ -445,7 +445,7 @@ func TestDeletePageUseCase_HappyPath(t *testing.T) {
 	}
 
 	// Verify it is gone
-	if _, err := deps.tree.GetPage(tree.NewPageIDUnchecked(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
+	if _, err := deps.tree.GetPage(newFixturePageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
 		t.Errorf("expected page-not-found after delete, got %v", err)
 	}
 }
@@ -507,7 +507,7 @@ func TestMovePageUseCase_HappyPath(t *testing.T) {
 		t.Fatalf("unexpected error moving page: %v", err)
 	}
 
-	moved, err := deps.tree.GetPage(tree.NewPageIDUnchecked(child.Page.ID))
+	moved, err := deps.tree.GetPage(newFixturePageID(child.Page.ID))
 	if err != nil {
 		t.Fatalf("could not get moved page: %v", err)
 	}
@@ -1036,7 +1036,7 @@ func TestSortPagesUseCase_HappyPath(t *testing.T) {
 		t.Fatalf("unexpected error sorting pages: %v", err)
 	}
 
-	sortedParent, err := deps.tree.GetPage(tree.NewPageIDUnchecked(parent.Page.ID))
+	sortedParent, err := deps.tree.GetPage(newFixturePageID(parent.Page.ID))
 	if err != nil {
 		t.Fatalf("failed to reload parent: %v", err)
 	}
@@ -1210,7 +1210,7 @@ func TestCopyPageUseCase_WithAssets(t *testing.T) {
 	}
 	defer test_utils.WrapCloseWithErrorCheck(file.Close, t)
 
-	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.NewAssetNameUnchecked("image.png"), 1024); err != nil {
+	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.AssetName("image.png"), 1024); err != nil {
 		t.Fatalf("Failed to save asset for original page: %v", err)
 	}
 
@@ -1307,8 +1307,8 @@ func TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 	if event.Before != nil {
 		t.Fatal("expected Before to be omitted for update events")
 	}
-	if event.OldPath != "/old" {
-		t.Fatalf("expected OldPath=/old, got %q", event.OldPath)
+	if event.OldPath != "old" {
+		t.Fatalf("expected OldPath=old, got %q", event.OldPath)
 	}
 }
 
@@ -1354,8 +1354,8 @@ func TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 	if event.Before != nil {
 		t.Fatal("expected Before to be omitted for move events")
 	}
-	if event.OldPath != "/a/child" {
-		t.Fatalf("expected OldPath=/a/child, got %q", event.OldPath)
+	if event.OldPath != "a/child" {
+		t.Fatalf("expected OldPath=a/child, got %q", event.OldPath)
 	}
 }
 
@@ -1387,8 +1387,8 @@ func TestPreviewPageRefactorUseCase_RenameListsAffectedPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreviewPageRefactor failed: %v", err)
 	}
-	if preview.OldPath != "/target" {
-		t.Fatalf("OldPath = %q, want %q", preview.OldPath, "/target")
+	if preview.OldPath != "target" {
+		t.Fatalf("OldPath = %q, want %q", preview.OldPath, "target")
 	}
 	if preview.NewPath != "/target-renamed" {
 		t.Fatalf("NewPath = %q, want %q", preview.NewPath, "/target-renamed")
@@ -1485,7 +1485,7 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 		t.Fatalf("ApplyPageRefactor failed: %v", err)
 	}
 
-	refPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
+	refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1634,7 +1634,7 @@ func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealt
 		t.Fatalf("ApplyPageRefactor failed: %v", err)
 	}
 
-	status, err := deps.links.GetLinkStatusForPage(sectionDescendantRef.Page.ID, sectionDescendantRef.Page.CalculatePath())
+	status, err := deps.links.GetLinkStatusForPage(sectionDescendantRef.Page.ID, sectionDescendantRef.Page.CalculateRoutePath())
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage failed: %v", err)
 	}
@@ -1684,7 +1684,7 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 		t.Fatalf("updated path mismatch: %q", updated.CalculatePath())
 	}
 
-	refPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
+	refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1864,7 +1864,7 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 		t.Fatalf("ApplyPageRefactor stale version error = %v, want ErrVersionConflict", err)
 	}
 
-	refAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
+	refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
@@ -1913,14 +1913,14 @@ func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *t
 		t.Fatalf("ApplyPageRefactor conflict error = %v, want ErrPageAlreadyExists", err)
 	}
 
-	refAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(ref.Page.ID))
+	refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(ref) failed: %v", err)
 	}
 	if refAfter.Content != refContent {
 		t.Fatalf("conflicting refactor rewrote incoming link content = %q, want %q", refAfter.Content, refContent)
 	}
-	targetAfter, err := deps.tree.GetPage(tree.NewPageIDUnchecked(target.Page.ID))
+	targetAfter, err := deps.tree.GetPage(newFixturePageID(target.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(target) failed: %v", err)
 	}
@@ -1947,14 +1947,14 @@ func TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreviewPageRefactor failed: %v", err)
 	}
-	if preview.Warnings == nil {
+	if preview.WarningDetails == nil {
 		t.Fatalf("expected preview warnings to be an empty slice, got nil")
 	}
-	if len(preview.Warnings) != 0 {
-		t.Fatalf("expected no preview warnings, got %d", len(preview.Warnings))
+	if len(preview.WarningDetails) != 0 {
+		t.Fatalf("expected no preview warnings, got %d", len(preview.WarningDetails))
 	}
 	for i, affected := range preview.AffectedPages {
-		if affected.Warnings == nil {
+		if affected.WarningDetails == nil {
 			t.Fatalf("affected page %d warnings should be empty slice, got nil", i)
 		}
 		if affected.MatchedPaths == nil {
@@ -2050,7 +2050,7 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		t.Fatalf("updated path = %q, want %q", updated.CalculatePath(), "/archive/page-a")
 	}
 
-	movedPage, err := deps.tree.GetPage(tree.NewPageIDUnchecked(pageA.Page.ID))
+	movedPage, err := deps.tree.GetPage(newFixturePageID(pageA.Page.ID))
 	if err != nil {
 		t.Fatalf("GetPage(pageA) failed: %v", err)
 	}
@@ -2111,7 +2111,7 @@ func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
 
 	byPath := map[string]bool{}
 	for _, it := range out1.Outgoings {
-		byPath[it.ToPath] = it.Broken
+		byPath[it.ToPath.WikiPath()] = it.Broken
 	}
 	if broken, ok := byPath["/x"]; !ok || !broken {
 		t.Fatalf("expected /x to be broken before ensure, got map=%#v, out=%#v", byPath, out1.Outgoings)
@@ -2346,7 +2346,7 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
-		byPath[it.ToPath] = struct {
+		byPath[it.ToPath.WikiPath()] = struct {
 			broken bool
 			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
@@ -2408,7 +2408,7 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
-		byPath[it.ToPath] = struct {
+		byPath[it.ToPath.WikiPath()] = struct {
 			broken bool
 			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
@@ -2469,7 +2469,7 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 		toID   tree.PageID
 	}{}
 	for _, it := range out2.Outgoings {
-		state[it.ToPath] = struct {
+		state[it.ToPath.WikiPath()] = struct {
 			broken bool
 			toID   tree.PageID
 		}{it.Broken, it.ToPageID}
@@ -2532,7 +2532,7 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 		toID   tree.PageID
 	}{}
 	for _, it := range out.Outgoings {
-		state[it.ToPath] = struct {
+		state[it.ToPath.WikiPath()] = struct {
 			broken bool
 			toID   tree.PageID
 		}{it.Broken, it.ToPageID}

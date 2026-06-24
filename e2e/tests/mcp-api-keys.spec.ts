@@ -269,9 +269,7 @@ test('remote-user mode disables self-service key creation UI', async ({ page }) 
   await loginAsAdmin(page);
   await openSelfAPIKeysDialog(page);
 
-  await expect(
-    page.getByText('Creating keys is unavailable for HTTP remote-user sign-in.'),
-  ).toBeVisible();
+  await expect(page.getByTestId('mcp-api-keys-dialog-remote-user-notice')).toBeVisible();
   await expect(page.getByTestId('mcp-api-keys-dialog-name-input')).toHaveCount(0);
   await expect(page.getByTestId('mcp-api-keys-dialog-button-create')).toHaveCount(0);
 });

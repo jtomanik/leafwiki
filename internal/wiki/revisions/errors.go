@@ -41,7 +41,7 @@ type RevisionErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithRevisionStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, RevisionErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

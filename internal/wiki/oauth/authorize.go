@@ -47,7 +47,7 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrInvalidRequest)
 			return
 		}
-		userID := coreauth.NewUserIDUnchecked(user.ID)
+		userID := coreauth.UserIDFromString(user.ID)
 		switch c.PostForm("decision") {
 		case "approve":
 			if !r.service.consumeApproval(c.PostForm("approval_token"), userID, approvalKey) {

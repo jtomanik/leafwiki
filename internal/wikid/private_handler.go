@@ -23,7 +23,7 @@ func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
 		switch {
 		case req.URL.Path == "/__leafwiki/actor-context":
 			if !hasDaemonToken(req, opts.DaemonToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writePrivateWorkspaceError(w, http.StatusUnauthorized, errCodePrivateUnauthorized)
 				return
 			}
 			if opts.ActorContext == nil {
@@ -33,7 +33,7 @@ func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
 			opts.ActorContext.ServeHTTP(w, req)
 		case req.URL.Path == "/__leafwiki/token/verify":
 			if !hasDaemonToken(req, opts.DaemonToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writePrivateWorkspaceError(w, http.StatusUnauthorized, errCodePrivateUnauthorized)
 				return
 			}
 			if opts.TokenVerify == nil {
@@ -43,7 +43,7 @@ func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
 			opts.TokenVerify.ServeHTTP(w, req)
 		case req.URL.Path == PrivateWorkspacesPrefix || strings.HasPrefix(req.URL.Path, PrivateWorkspacesPrefix+"/"):
 			if !hasDaemonToken(req, opts.DaemonToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writePrivateWorkspaceError(w, http.StatusUnauthorized, errCodePrivateUnauthorized)
 				return
 			}
 			if opts.WorkspaceAPI == nil {
@@ -53,7 +53,7 @@ func NewPrivateHandler(opts PrivateHandlerOptions) http.Handler {
 			opts.WorkspaceAPI.ServeHTTP(w, req)
 		case strings.HasPrefix(req.URL.Path, frontd.ControlPlanePrefix):
 			if !hasDaemonToken(req, opts.DaemonToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writePrivateWorkspaceError(w, http.StatusUnauthorized, errCodePrivateUnauthorized)
 				return
 			}
 			if opts.ControlPlane == nil {

@@ -128,7 +128,7 @@ func (r *Routes) handleExecute(c *gin.Context) {
 		return
 	}
 
-	out, err := r.execute.Execute(c.Request.Context(), ExecuteImportInput{UserID: tree.NewUserIDUnchecked(user.ID)})
+	out, err := r.execute.Execute(c.Request.Context(), ExecuteImportInput{UserID: tree.UserIDFromString(user.ID)})
 	if err != nil {
 		respondWithImporterError(c, err)
 		return

@@ -203,11 +203,11 @@ func NewSuggestSlugUseCase(t *tree.TreeService, s *tree.SlugService) *SuggestSlu
 // Execute generates and returns a unique slug suggestion.
 func (uc *SuggestSlugUseCase) Execute(_ context.Context, in SuggestSlugInput) (*SuggestSlugOutput, error) {
 	if in.ParentID == "" || in.ParentID == "root" {
-		return &SuggestSlugOutput{Slug: tree.NewSlugUnchecked(uc.slug.GenerateUniqueChildSlug(uc.tree.GetTree(), in.CurrentID, in.Title))}, nil
+		return &SuggestSlugOutput{Slug: tree.SlugFromString(uc.slug.GenerateUniqueChildSlug(uc.tree.GetTree(), in.CurrentID, in.Title))}, nil
 	}
 	parent, err := uc.tree.FindPageByID(in.ParentID)
 	if err != nil {
 		return nil, err
 	}
-	return &SuggestSlugOutput{Slug: tree.NewSlugUnchecked(uc.slug.GenerateUniqueChildSlug(parent, in.CurrentID, in.Title))}, nil
+	return &SuggestSlugOutput{Slug: tree.SlugFromString(uc.slug.GenerateUniqueChildSlug(parent, in.CurrentID, in.Title))}, nil
 }

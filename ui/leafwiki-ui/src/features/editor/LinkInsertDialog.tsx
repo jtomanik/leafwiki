@@ -21,6 +21,7 @@ import { HotKeyDefinition, useHotKeysStore } from '@/stores/hotkeys'
 import { useTreeStore } from '@/stores/tree'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useRef, useState } from 'react'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import type { MarkdownEditorRef } from './MarkdownEditor'
 
 const EXTERNAL_PREFIXES = ['http', 'https', 'mailto']
@@ -36,7 +37,7 @@ function isExternalUrl(value: string) {
 type LinkInsertDialogProps = {
   editorRef: React.RefObject<MarkdownEditorRef>
   selectedText: string
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 export function LinkInsertDialog({

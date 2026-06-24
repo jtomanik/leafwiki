@@ -1,4 +1,5 @@
 import { useDesignModeStore } from '@/features/designtoggle/designmode'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import {
   Component,
@@ -35,7 +36,7 @@ type Props = {
   content: string
   path?: string
   pageKind?: WikiNodeKind
-  workspaceId?: string
+  workspaceId?: WorkspaceID
   resolveAssetUrl?: (src: string) => string
   enableHeadlineLinks?: boolean
   showToc?: boolean

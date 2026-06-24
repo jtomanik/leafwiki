@@ -1,5 +1,6 @@
 import { DIALOG_IMAGE_PREVIEW } from '@/lib/registries'
 import { withBasePath } from '@/lib/routePath'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { stripMarkdownLinkRootPrefix } from '@/lib/wikiPath'
 import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
@@ -8,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 type Props = React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
 type MarkdownImageProps = Omit<Props, 'node'> & {
-  workspaceId?: string
+  workspaceId?: WorkspaceID
   resolveAssetUrl?: (src: string) => string
 }
 

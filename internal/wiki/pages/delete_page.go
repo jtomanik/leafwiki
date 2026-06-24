@@ -73,7 +73,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 			affectedPages = append(affectedPages, p)
 		}
 
-		oldPath := page.CalculatePath()
+		oldPath := page.CalculateRoutePath()
 
 		if err := uc.tree.DeleteNode(in.UserID, in.ID, true, in.Version); err != nil {
 			return err
@@ -100,7 +100,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 	}
 
 	// Non-recursive delete.
-	oldPath := page.CalculatePath()
+	oldPath := page.CalculateRoutePath()
 
 	if err := uc.tree.DeleteNode(in.UserID, in.ID, false, in.Version); err != nil {
 		return err

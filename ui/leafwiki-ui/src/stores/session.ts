@@ -1,9 +1,10 @@
 import * as authAPI from '@/lib/api/auth'
+import type { UserID } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 type UserInfo = {
-  id: string
+  id: UserID
   username: string
   email: string
   role: 'admin' | 'editor' | 'viewer'

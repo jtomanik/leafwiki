@@ -100,11 +100,11 @@ func normalizeWikiPath(p string) string {
 	return p
 }
 
-func resolveTargetLinks(treeService *tree.TreeService, currentPath string, links []string) []TargetLink {
+func resolveTargetLinks(treeService *tree.TreeService, currentPath tree.RoutePath, links []string) []TargetLink {
 	return resolveTargetLinksForSourceKind(treeService, currentPath, tree.NodeKindPage, links)
 }
 
-func resolveTargetLinksForSourceKind(treeService *tree.TreeService, currentPath string, sourceKind tree.NodeKind, links []string) []TargetLink {
+func resolveTargetLinksForSourceKind(treeService *tree.TreeService, currentPath tree.RoutePath, sourceKind tree.NodeKind, links []string) []TargetLink {
 	if !treeService.IsLoaded() {
 		return nil
 	}
@@ -112,7 +112,7 @@ func resolveTargetLinksForSourceKind(treeService *tree.TreeService, currentPath 
 	return resolveTargetLinksWithIndex(treeService, markdownLinkIndexForTree(treeService), currentPath, sourceKind, links)
 }
 
-func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownlinks.Index, currentPath string, sourceKind tree.NodeKind, links []string) []TargetLink {
+func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownlinks.Index, currentPath tree.RoutePath, sourceKind tree.NodeKind, links []string) []TargetLink {
 	if treeService == nil || !treeService.IsLoaded() {
 		return nil
 	}
@@ -288,8 +288,8 @@ func markdownLinkIndexFromLoadedTreeWithOptions(root *tree.PageNode, opts markdo
 	return markdownlinks.NewIndexWithOptions(entries, opts)
 }
 
-func markdownSourceFileForRoute(routePath string, kind tree.NodeKind) tree.MarkdownPath {
-	normalized := strings.Trim(normalizeWikiPath(routePath), "/")
+func markdownSourceFileForRoute(routePath tree.RoutePath, kind tree.NodeKind) tree.MarkdownPath {
+	normalized := strings.Trim(normalizeWikiPath(routePath.WikiPath()), "/")
 	if normalized == "" {
 		var rootRoutePath tree.RoutePath
 		return markdownContentPathForRoute(rootRoutePath, kind)

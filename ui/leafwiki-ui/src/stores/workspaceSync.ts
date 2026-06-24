@@ -7,7 +7,7 @@ import {
   type WorkspaceSnapshot,
   type WorkspaceSyncStatus,
 } from '@/lib/api/workspaceSync'
-import { asCommitHash, asWorkspaceID, type CommitHash } from '@/lib/semanticTypes'
+import type { CommitHash, WorkspaceID } from '@/lib/semanticTypes'
 import { create } from 'zustand'
 
 export type WorkspaceSyncWorkspaceState = {
@@ -20,18 +20,18 @@ export type WorkspaceSyncWorkspaceState = {
   snapshotsLoading: boolean
   snapshotsLoadingMore: boolean
   snapshotsError: string | null
-  restoringCommitId: string | null
+  restoringCommitId: CommitHash | null
 }
 
 type WorkspaceSyncStore = {
-  workspaces: Record<string, WorkspaceSyncWorkspaceState>
-  loadStatus: (workspaceId: string) => Promise<WorkspaceSyncStatus | null>
-  refresh: (workspaceId: string) => Promise<WorkspaceSyncStatus>
-  loadSnapshots: (workspaceId: string) => Promise<WorkspaceSnapshot[]>
-  loadMoreSnapshots: (workspaceId: string) => Promise<WorkspaceSnapshot[]>
+  workspaces: Record<WorkspaceID, WorkspaceSyncWorkspaceState>
+  loadStatus: (workspaceId: WorkspaceID) => Promise<WorkspaceSyncStatus | null>
+  refresh: (workspaceId: WorkspaceID) => Promise<WorkspaceSyncStatus>
+  loadSnapshots: (workspaceId: WorkspaceID) => Promise<WorkspaceSnapshot[]>
+  loadMoreSnapshots: (workspaceId: WorkspaceID) => Promise<WorkspaceSnapshot[]>
   restoreSnapshot: (
-    commitId: string,
-    workspaceId: string,
+    commitId: CommitHash,
+    workspaceId: WorkspaceID,
   ) => Promise<WorkspaceSyncStatus>
 }
 
@@ -50,21 +50,21 @@ const emptyWorkspaceSyncState: WorkspaceSyncWorkspaceState = {
 
 function workspaceState(
   state: WorkspaceSyncStore,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): WorkspaceSyncWorkspaceState {
   return state.workspaces[workspaceId] ?? emptyWorkspaceSyncState
 }
 
 export function selectWorkspaceSyncState(
   state: WorkspaceSyncStore,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
 ): WorkspaceSyncWorkspaceState {
   return workspaceState(state, workspaceId)
 }
 
 function patchWorkspaceState(
   current: WorkspaceSyncStore,
-  workspaceId: string,
+  workspaceId: WorkspaceID,
   patch: Partial<WorkspaceSyncWorkspaceState>,
 ) {
   return {
@@ -89,7 +89,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const status = await getWorkspaceSyncStatus(asWorkspaceID(workspaceId))
+      const status = await getWorkspaceSyncStatus(workspaceId)
       set((state) => patchWorkspaceState(state, workspaceId, { status }))
       return status
     } catch (err) {
@@ -115,7 +115,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const status = await refreshWorkspaceSync(asWorkspaceID(workspaceId))
+      const status = await refreshWorkspaceSync(workspaceId)
       set((state) =>
         patchWorkspaceState(state, workspaceId, {
           status,
@@ -148,7 +148,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
       }),
     )
     try {
-      const data = await listWorkspaceSnapshots(asWorkspaceID(workspaceId))
+      const data = await listWorkspaceSnapshots(workspaceId)
       set((state) =>
         patchWorkspaceState(state, workspaceId, {
           snapshots: data.snapshots,
@@ -186,7 +186,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
     )
     try {
       const data = await listWorkspaceSnapshots(
-        asWorkspaceID(workspaceId),
+        workspaceId,
         current.snapshotsNextCursor,
       )
       const latest = workspaceState(get(), workspaceId)
@@ -216,7 +216,7 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
     }
   },
 
-  restoreSnapshot: async (commitId: string, workspaceId: string) => {
+  restoreSnapshot: async (commitId, workspaceId) => {
     set((state) =>
       patchWorkspaceState(state, workspaceId, {
         restoringCommitId: commitId,
@@ -225,8 +225,8 @@ export const useWorkspaceSyncStore = create<WorkspaceSyncStore>((set, get) => ({
     )
     try {
       const status = await restoreWorkspaceSnapshot(
-        asCommitHash(commitId),
-        asWorkspaceID(workspaceId),
+        commitId,
+        workspaceId,
       )
       set((state) =>
         patchWorkspaceState(state, workspaceId, {

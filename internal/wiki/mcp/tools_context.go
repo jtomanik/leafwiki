@@ -12,6 +12,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/auth"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
@@ -19,6 +20,8 @@ import (
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	"github.com/perber/wiki/internal/workspacesync"
 )
+
+const errCodeMCPWorkspaceSyncFailed sharederrors.ErrorCode = "workspace_sync_failed"
 
 const (
 	contextSyncModeAuto  = "auto"
@@ -33,6 +36,19 @@ const (
 	defaultContextRecentChangesLimit = 20
 	maxContextRecentChangesLimit     = 50
 )
+
+type treeDisplayDepth int
+
+func (depth treeDisplayDepth) Int() int {
+	return int(depth)
+}
+
+func (depth treeDisplayDepth) ChildDepth() treeDisplayDepth {
+	if depth < 0 {
+		return depth
+	}
+	return depth - 1
+}
 
 func (r *Routes) registerContextTools(server *sdkmcp.Server, opts httpinternal.RouterOptions) {
 	addRequestTypedTool[getContextInput, contextOutput](server, toolGetContext, func(ctx context.Context, req *sdkmcp.CallToolRequest, in getContextInput) (contextOutput, error) {
@@ -161,7 +177,7 @@ func (r *Routes) activeSessionsForContext(viewer *auth.User) ([]wikipresence.Ses
 			for _, agentSession := range agentSessions {
 				sessions = append(sessions, wikipresence.Session{
 					Type:            wikipresence.SessionTypeAgent,
-					SessionID:       agentSession.SessionIDHash,
+					SessionID:       wikipresence.WebSessionIDFromString(agentSession.SessionIDHash),
 					Provider:        agentSession.Provider,
 					Model:           agentSession.Model,
 					Mode:            wikipresence.SessionModeUnknown,
@@ -205,14 +221,14 @@ func shouldRefreshForContext(syncMode string, status workspacesync.SyncStatus) b
 	return status.PendingEventCount > 0 || status.LastError != "" || (status.WatcherEnabled && !status.WatcherRunning)
 }
 
-func boundedContextTreeDepth(raw *int) int {
+func boundedContextTreeDepth(raw *int) treeDisplayDepth {
 	if raw == nil || *raw <= 0 {
 		return defaultContextTreeDepth
 	}
 	if *raw > maxContextTreeDepth {
 		return maxContextTreeDepth
 	}
-	return *raw
+	return treeDisplayDepth(*raw)
 }
 
 func boundedRecentChangesLimit(raw *int) int {
@@ -225,12 +241,12 @@ func boundedRecentChangesLimit(raw *int) int {
 	return *raw
 }
 
-func (r *Routes) contextTree(depth int) *dto.Node {
+func (r *Routes) contextTree(levels treeDisplayDepth) *dto.Node {
 	root := r.treeService.GetTree()
 	if root == nil {
 		return nil
 	}
-	out := dto.ToAPINodeWithDepth(root, "", r.userResolver, depth)
+	out := dto.ToAPINodeWithDepth(root, "", r.userResolver, levels.Int())
 	ensureNodeChildrenArray(out)
 	return out
 }
@@ -253,7 +269,7 @@ func (r *Routes) recentChanges(ctx context.Context, status workspacesync.SyncSta
 	}
 	changes := []recentChangeOutput{}
 	if r.listWorkspaceSnapshots != nil {
-		snapshots, err := r.listWorkspaceSnapshots(ctx, workspacesync.NewCommitHashUnchecked(""), limit)
+		snapshots, err := r.listWorkspaceSnapshots(ctx, workspacesync.CommitHashFromString(""), workspacesync.SnapshotLimit(limit))
 		if err == nil {
 			for _, snapshot := range snapshots.Snapshots {
 				changes = append(changes, r.recentChangeFromSnapshot(status, snapshot))
@@ -279,21 +295,21 @@ func (r *Routes) recentChanges(ctx context.Context, status workspacesync.SyncSta
 }
 
 func (r *Routes) changesSinceCommit(ctx context.Context, status workspacesync.SyncStatus, commitHash workspacesync.CommitHash) ([]recentChangeOutput, bool) {
-	if strings.TrimSpace(commitHash.String()) == "" {
+	if commitHash == "" {
 		return r.recentChanges(ctx, status, maxContextDeltaSnapshots), true
 	}
 	if r.listWorkspaceSnapshots == nil {
 		return nil, false
 	}
 	changes := []recentChangeOutput{}
-	cursor := workspacesync.NewCommitHashUnchecked("")
+	cursor := workspacesync.CommitHashFromString("")
 	for len(changes) < maxContextDeltaSnapshots {
 		remaining := maxContextDeltaSnapshots - len(changes)
 		pageSize := 50
 		if remaining < pageSize {
 			pageSize = remaining
 		}
-		page, err := r.listWorkspaceSnapshots(ctx, cursor, pageSize)
+		page, err := r.listWorkspaceSnapshots(ctx, cursor, workspacesync.SnapshotLimit(pageSize))
 		if err != nil {
 			return changes, false
 		}
@@ -387,7 +403,7 @@ func (r *Routes) pageIDForMarkdownPath(markdownPath string) tree.PageID {
 	if err != nil {
 		return ""
 	}
-	kind := wikipages.MarkdownPathInputKind(trimmed)
+	kind := wikipages.MarkdownPathInputKind(tree.MarkdownPathFromString(trimmed))
 	return r.pageIDForRecentChangeRoute(routePath, kind)
 }
 
@@ -430,7 +446,7 @@ func validationFromSyncStatusWithRedactor(status workspacesync.SyncStatus, redac
 	for _, err := range status.ValidationErrors {
 		severity := err.Severity.Normalize(wikivalidation.IssueSeverityError)
 		if severity == wikivalidation.IssueSeverityWarning {
-			summary.Warnings++
+			summary.WarningCount++
 		} else {
 			summary.Errors++
 		}
@@ -442,10 +458,11 @@ func validationFromSyncStatusWithRedactor(status workspacesync.SyncStatus, redac
 		}
 		code := err.Code.Normalize(wikivalidation.IssueCodeWorkspaceSyncValidation)
 		issues = append(issues, validationIssueOutput{
-			Severity: severity,
-			Code:     code,
-			Path:     path,
-			Message:  message,
+			Severity:  severity,
+			Code:      code,
+			MessageID: code.MessageID(),
+			Path:      path,
+			Message:   message,
 		})
 	}
 	return validationOutput{
@@ -523,11 +540,19 @@ func (r *Routes) syncStatusOutput(status workspacesync.SyncStatus) map[string]an
 		"watcherRunning":             status.WatcherRunning,
 		"pendingEventCount":          status.PendingEventCount,
 		"lastSyncTime":               status.LastSyncTime,
-		"lastError":                  r.redactWorkspacePaths(status.LastError),
-		"lastCommitHash":             status.LastCommitHash.String(),
+		"lastErrorDetail":            mcpWorkspaceSyncLastErrorDetail(r.redactWorkspacePaths(status.LastError)),
+		"lastCommitHash":             status.LastCommitHash,
 		"recentChangedMarkdownPaths": append([]string{}, status.RecentChangedMarkdownPaths...),
-		"validationErrors":           r.redactedValidationErrors(status.ValidationErrors),
+		"validationErrorDetails":     r.redactedValidationErrors(status.ValidationErrors),
 	}
+}
+
+func mcpWorkspaceSyncLastErrorDetail(lastError string) *sharederrors.LocalizedErrorDetail {
+	if strings.TrimSpace(lastError) == "" {
+		return nil
+	}
+	detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeMCPWorkspaceSyncFailed)
+	return &detail
 }
 
 func (r *Routes) redactedValidationErrors(errors []workspacesync.ValidationError) []workspacesync.ValidationError {

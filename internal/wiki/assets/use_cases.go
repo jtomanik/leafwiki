@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	coreassets "github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/shared"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -21,7 +22,7 @@ type UploadAssetInput struct {
 	PageID   tree.PageID
 	File     multipart.File
 	Filename tree.AssetName
-	MaxBytes int64
+	ByteCap  shared.MaxBytes
 }
 
 type UploadAssetOutput struct {
@@ -46,7 +47,7 @@ func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*
 		}
 		return nil, err
 	}
-	url, err := uc.asset.SaveAssetForPage(page, in.File, in.Filename, in.MaxBytes)
+	url, err := uc.asset.SaveAssetForPage(page, in.File, in.Filename, in.ByteCap)
 	if err != nil {
 		return nil, err
 	}

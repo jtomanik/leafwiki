@@ -4,6 +4,7 @@ import (
 	"context"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	coresearch "github.com/perber/wiki/internal/search"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 )
 
@@ -17,10 +18,10 @@ func (r *Routes) registerSearchTools(server *sdkmcp.Server) {
 			limit = 20
 		}
 		out, err := r.search.Execute(ctx, wikisearch.SearchInput{
-			Query:  in.Query,
-			Tags:   in.Tags,
-			Offset: in.Offset,
-			Limit:  limit,
+			Query:    in.Query,
+			Tags:     in.Tags,
+			StartAt:  coresearch.ResultOffset(in.Offset),
+			PageSize: coresearch.ResultLimit(limit),
 		})
 		if err != nil {
 			return searchPagesOutput{}, err
@@ -29,10 +30,10 @@ func (r *Routes) registerSearchTools(server *sdkmcp.Server) {
 		return searchPagesOutput{
 			Count:     result.Count,
 			Items:     result.Items,
-			Limit:     result.Limit,
-			Offset:    result.Offset,
+			Limit:     int(result.PageSize),
+			Offset:    int(result.StartAt),
 			TagFacets: result.TagFacets,
-			HasMore:   result.Offset+len(result.Items) < result.Count,
+			HasMore:   int(result.StartAt)+len(result.Items) < result.Count,
 		}, nil
 	})
 

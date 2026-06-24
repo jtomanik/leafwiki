@@ -201,12 +201,17 @@ async function getWorkspaceSyncValidationErrors(page: import('@playwright/test')
 
     const status = (await response.json()) as {
       validationErrors?: Array<{
-        message?: string;
+        code?: string;
+        path?: string;
+        severity?: string;
+      }>;
+      validationErrorDetails?: Array<{
+        code?: string;
         path?: string;
         severity?: string;
       }>;
     };
-    return status.validationErrors ?? [];
+    return status.validationErrorDetails ?? status.validationErrors ?? [];
   });
 }
 
@@ -271,6 +276,7 @@ function createCanonicalLinksZip() {
     homeSlug,
     missingSlug,
     referenceSlug,
+    sourcePath: `${homeSlug}.md`,
     zipPath,
   };
 }
@@ -445,7 +451,8 @@ test.describe('Importer', () => {
           .toEqual(
             expect.arrayContaining([
               expect.objectContaining({
-                message: expect.stringContaining(`/${fixture.missingSlug}`),
+                code: 'broken_link',
+                path: expect.stringContaining(fixture.sourcePath),
               }),
             ]),
           );

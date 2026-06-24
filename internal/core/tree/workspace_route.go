@@ -60,7 +60,7 @@ func (t *workspaceRouteConflictTracker) Record(route WorkspaceMarkdownRoute) *wo
 
 func MapWorkspaceMarkdownRoute(rootDir string, relPath string, isDir bool) (WorkspaceMarkdownRoute, error) {
 	sourcePath := cleanWorkspaceSourcePath(relPath)
-	route := WorkspaceMarkdownRoute{SourcePath: NewWorkspaceSourcePathUnchecked(sourcePath)}
+	route := WorkspaceMarkdownRoute{SourcePath: WorkspaceSourcePathFromString(sourcePath)}
 	if sourcePath == "" {
 		route.Kind = NodeKindSection
 		return route, nil
@@ -78,7 +78,7 @@ func MapWorkspaceMarkdownRoute(rootDir string, relPath string, isDir bool) (Work
 			return WorkspaceMarkdownRoute{}, err
 		}
 		route.Kind = NodeKindSection
-		route.RoutePath = NewRoutePathUnchecked(routePath)
+		route.RoutePath = RoutePathFromString(routePath)
 		return route, nil
 	}
 
@@ -101,8 +101,8 @@ func MapWorkspaceMarkdownRoute(rootDir string, relPath string, isDir bool) (Work
 
 	if strings.EqualFold(name, "index.md") || isActiveWorkspaceReadme(rootDir, dir, name) {
 		route.Kind = NodeKindSection
-		route.RoutePath = NewRoutePathUnchecked(dirRoute)
-		route.ContentPath = NewMarkdownPathUnchecked(sourcePath)
+		route.RoutePath = RoutePathFromString(dirRoute)
+		route.ContentPath = MarkdownPathFromString(sourcePath)
 		return route, nil
 	}
 
@@ -112,7 +112,7 @@ func MapWorkspaceMarkdownRoute(rootDir string, relPath string, isDir bool) (Work
 		return WorkspaceMarkdownRoute{}, err
 	}
 	route.Kind = NodeKindPage
-	route.RoutePath = NewRoutePathUnchecked(joinWorkspaceRoutePath(dirRoute, baseSlug))
+	route.RoutePath = RoutePathFromString(joinWorkspaceRoutePath(dirRoute, baseSlug))
 	return route, nil
 }
 
@@ -205,7 +205,7 @@ func nonDefaultWorkspaceSourcePath(route WorkspaceMarkdownRoute) WorkspaceSource
 		return ""
 	}
 	if route.Kind == NodeKindSection && route.ContentPath != "" {
-		sourcePath = NewWorkspaceSourcePathUnchecked(route.ContentPath.Clean().FilesystemPath()).Dir()
+		sourcePath = WorkspaceSourcePathFromString(route.ContentPath.Clean().FilesystemPath()).Dir()
 	}
 	if sourcePath == defaultWorkspaceSourcePath(route.RoutePath, route.Kind) {
 		return ""
@@ -228,5 +228,5 @@ func sectionSourceDir(route WorkspaceMarkdownRoute) WorkspaceSourcePath {
 	if route.ContentPath == "" {
 		return ""
 	}
-	return NewWorkspaceSourcePathUnchecked(route.ContentPath.Clean().FilesystemPath()).Dir()
+	return WorkspaceSourcePathFromString(route.ContentPath.Clean().FilesystemPath()).Dir()
 }

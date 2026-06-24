@@ -1,13 +1,14 @@
 import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { API_BASE_URL } from '../config'
+import type { UserID } from '../semanticTypes'
 import { ApiLocalizedError, isApiLocalizedErrorResponse } from './errors'
 
 export type AuthResponse = {
   accessTokenExpiresAt: number
   message: string
   user: {
-    id: string
+    id: UserID
     username: string
     email: string
     role: 'admin' | 'editor' | 'viewer'

@@ -1,7 +1,7 @@
 import { fetchTree, PageNode } from '@/lib/api/pages'
 import { HOME_WORKSPACE_ID } from '@/lib/api/workspaces'
 import { FlatPageSearchItem, buildFlatPageSearchItems } from '@/lib/pageSearch'
-import { asWorkspaceID } from '@/lib/semanticTypes'
+import type { PageID, PageVersion, RoutePath, WorkspaceID } from '@/lib/semanticTypes'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -14,7 +14,7 @@ type NodesByPathKind = Record<
 function buildIndexes(root: PageNode) {
   const byPath: Record<string, PageNode> = {}
   const byPathKind: NodesByPathKind = {}
-  const byId: Record<string, PageNode> = {}
+  const byId: Record<PageID, PageNode> = {}
 
   const walk = (n: PageNode) => {
     byId[n.id] = n
@@ -27,9 +27,9 @@ function buildIndexes(root: PageNode) {
   return { byPath, byPathKind, byId }
 }
 
-function collectExpandableNodeIds(root: PageNode | null): string[] {
+function collectExpandableNodeIds(root: PageNode | null): PageID[] {
   if (!root) return []
-  const out: string[] = []
+  const out: PageID[] = []
 
   const walk = (n: PageNode) => {
     const children = n.children || []
@@ -53,8 +53,8 @@ function assignParentIds(
   }
 }
 
-function toSetRecord(ids: string[]): Record<string, true> {
-  const rec: Record<string, true> = {}
+function toSetRecord(ids: PageID[]): Record<PageID, true> {
+  const rec: Record<PageID, true> = {}
   for (const id of ids) rec[id] = true
   return rec
 }
@@ -64,51 +64,55 @@ export type TreeWorkspaceState = {
   loading: boolean
   reloadRequestId: number
   error: string | null
-  activeNodeId: string | null
-  openNodeIds: string[]
-  openNodeIdSet: Record<string, true>
+  activeNodeId: PageID | null
+  openNodeIds: PageID[]
+  openNodeIdSet: Record<PageID, true>
   byPath: Record<string, PageNode>
   byPathKind: NodesByPathKind
-  byId: Record<string, PageNode>
+  byId: Record<PageID, PageNode>
   flatPages: FlatPageSearchItem[]
 }
 
 type TreeStore = {
-  workspaceTrees: Record<string, TreeWorkspaceState>
-  getWorkspaceState: (workspaceId?: string) => TreeWorkspaceState
-  expandAll: (workspaceId?: string) => void
-  collapseAll: (workspaceId?: string) => void
-  reloadTree: (workspaceId?: string) => Promise<void>
-  patchNodeVersion: (id: string, version: string, workspaceId?: string) => void
-  toggleNode: (id: string, workspaceId?: string) => void
-  openNode: (id: string, workspaceId?: string) => void
-  closeNode: (id: string, workspaceId?: string) => void
-  setActiveNodeId: (id: string | null, workspaceId?: string) => void
-  isNodeOpen: (id: string, workspaceId?: string) => boolean
-  getPageById: (id: string, workspaceId?: string) => PageNode | null
+  workspaceTrees: Record<WorkspaceID, TreeWorkspaceState>
+  getWorkspaceState: (workspaceId?: WorkspaceID) => TreeWorkspaceState
+  expandAll: (workspaceId?: WorkspaceID) => void
+  collapseAll: (workspaceId?: WorkspaceID) => void
+  reloadTree: (workspaceId?: WorkspaceID) => Promise<void>
+  patchNodeVersion: (
+    id: PageID,
+    version: PageVersion,
+    workspaceId?: WorkspaceID,
+  ) => void
+  toggleNode: (id: PageID, workspaceId?: WorkspaceID) => void
+  openNode: (id: PageID, workspaceId?: WorkspaceID) => void
+  closeNode: (id: PageID, workspaceId?: WorkspaceID) => void
+  setActiveNodeId: (id: PageID | null, workspaceId?: WorkspaceID) => void
+  isNodeOpen: (id: PageID, workspaceId?: WorkspaceID) => boolean
+  getPageById: (id: PageID, workspaceId?: WorkspaceID) => PageNode | null
   getPageByPath: (
-    path: string,
+    path: RoutePath,
     kind?: PageNode['kind'],
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => PageNode | null
-  getPathById: (id: string, workspaceId?: string) => string | null
-  getAncestors: (id: string, workspaceId?: string) => string[]
+  getPathById: (id: PageID, workspaceId?: WorkspaceID) => RoutePath | null
+  getAncestors: (id: PageID, workspaceId?: WorkspaceID) => PageID[]
   openAncestorsForPath: (
-    path: string,
+    path: RoutePath,
     kind?: PageNode['kind'],
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => void
 }
 
-function normalizeWorkspaceId(workspaceId?: string): string {
+function normalizeWorkspaceId(workspaceId?: WorkspaceID): WorkspaceID {
   return (
-    workspaceId?.trim() ||
+    workspaceId ||
     useWorkspacesStore.getState().activeWorkspaceId ||
     HOME_WORKSPACE_ID
   )
 }
 
-function emptyTreeState(openNodeIds: string[] = []): TreeWorkspaceState {
+function emptyTreeState(openNodeIds: PageID[] = []): TreeWorkspaceState {
   return {
     tree: null,
     loading: false,
@@ -165,7 +169,7 @@ export const useTreeStore = create<TreeStore>()(
           workspaceTrees: { ...get().workspaceTrees, [normalized]: next },
         })
       },
-      toggleNode: (id: string, workspaceId) => {
+      toggleNode: (id: PageID, workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const state = get().getWorkspaceState(normalized)
         const current = new Set(state.openNodeIds)
@@ -183,7 +187,7 @@ export const useTreeStore = create<TreeStore>()(
         })
       },
 
-      openNode: (id: string, workspaceId) => {
+      openNode: (id: PageID, workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const state = get().getWorkspaceState(normalized)
         if (state.openNodeIdSet?.[id]) {
@@ -201,7 +205,7 @@ export const useTreeStore = create<TreeStore>()(
         })
       },
 
-      closeNode: (id: string, workspaceId) => {
+      closeNode: (id: PageID, workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const state = get().getWorkspaceState(normalized)
         if (!state.openNodeIdSet?.[id]) {
@@ -219,7 +223,7 @@ export const useTreeStore = create<TreeStore>()(
         })
       },
 
-      setActiveNodeId: (id: string | null, workspaceId) => {
+      setActiveNodeId: (id: PageID | null, workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const state = get().getWorkspaceState(normalized)
         if (state.activeNodeId === id) {
@@ -231,24 +235,24 @@ export const useTreeStore = create<TreeStore>()(
         })
       },
 
-      isNodeOpen: (id: string, workspaceId) =>
+      isNodeOpen: (id: PageID, workspaceId) =>
         !!get().getWorkspaceState(workspaceId).openNodeIdSet?.[id],
 
-      getPageByPath: (path: string, kind?: PageNode['kind'], workspaceId?) => {
+      getPageByPath: (path: RoutePath, kind?: PageNode['kind'], workspaceId?) => {
         const state = get().getWorkspaceState(workspaceId)
         if (kind) {
           return state.byPathKind?.[path]?.[kind] ?? null
         }
         return state.byPath?.[path] ?? null
       },
-      getPageById: (id: string, workspaceId) =>
+      getPageById: (id: PageID, workspaceId) =>
         get().getWorkspaceState(workspaceId).byId?.[id] ?? null,
-      getPathById: (id: string, workspaceId) =>
+      getPathById: (id: PageID, workspaceId) =>
         get().getWorkspaceState(workspaceId).byId?.[id]?.path ?? null,
 
-      getAncestors: (id: string, workspaceId) => {
+      getAncestors: (id: PageID, workspaceId) => {
         const byId = get().getWorkspaceState(workspaceId).byId
-        const out: string[] = []
+        const out: PageID[] = []
         let cur = byId?.[id]
         while (cur?.parentId) {
           out.unshift(cur.parentId)
@@ -258,7 +262,7 @@ export const useTreeStore = create<TreeStore>()(
       },
 
       openAncestorsForPath: (
-        path: string,
+        path: RoutePath,
         kind?: PageNode['kind'],
         workspaceId?,
       ) => {
@@ -293,7 +297,7 @@ export const useTreeStore = create<TreeStore>()(
         })
       },
 
-      patchNodeVersion: (id: string, version: string, workspaceId) => {
+      patchNodeVersion: (id: PageID, version: PageVersion, workspaceId) => {
         const normalized = normalizeWorkspaceId(workspaceId)
         const state = get().getWorkspaceState(normalized)
         const byId = state.byId
@@ -301,7 +305,7 @@ export const useTreeStore = create<TreeStore>()(
         const byPathKind = state.byPathKind
         const node = byId?.[id]
         if (!node) return
-        const updatedNode = { ...node, version: version as PageNode['version'] }
+        const updatedNode = { ...node, version }
         const currentPathKind = node.path ? (byPathKind[node.path] ?? {}) : {}
         const nextByPath =
           node.path && byPath[node.path]?.id === id
@@ -338,7 +342,7 @@ export const useTreeStore = create<TreeStore>()(
         })
 
         try {
-          const tree = await fetchTree(asWorkspaceID(normalized))
+          const tree = await fetchTree(normalized)
           if (
             get().getWorkspaceState(normalized).reloadRequestId !== requestId
           ) {
@@ -405,15 +409,13 @@ export const useTreeStore = create<TreeStore>()(
       }),
       merge: (persisted, current) => {
         const raw = persisted as
-          | { workspaceTrees?: Record<string, Partial<TreeWorkspaceState>> }
+          | { workspaceTrees?: Record<WorkspaceID, Partial<TreeWorkspaceState>> }
           | undefined
         const restored = Object.fromEntries(
-          Object.entries(raw?.workspaceTrees ?? {}).map(
-            ([workspaceId, tree]) => [
-              workspaceId,
-              emptyTreeState(tree.openNodeIds ?? []),
-            ],
-          ),
+          Object.entries(raw?.workspaceTrees ?? {}).map(([workspaceId, tree]) => [
+            workspaceId,
+            emptyTreeState(tree.openNodeIds ?? []),
+          ]),
         )
         return {
           ...current,

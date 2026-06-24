@@ -5,11 +5,12 @@ import { cn } from '@/lib/utils'
 import { useTreeStore } from '@/stores/tree'
 import { File, FolderTree } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PageID, WorkspaceID } from '@/lib/semanticTypes'
 
 const LISTBOX_ID = 'page-select-results'
 
 type FlatPage = {
-  id: string
+  id: PageID | 'root'
   title: string
   depth: number
   kind: 'page' | 'section'
@@ -31,10 +32,10 @@ export function PageSelect({
   autoFocus = false,
   workspaceId,
 }: {
-  pageID: string
-  onChange: (id: string) => void
+  pageID: PageID | 'root'
+  onChange: (id: PageID | 'root') => void
   autoFocus?: boolean
-  workspaceId?: string
+  workspaceId?: WorkspaceID
 }) {
   const tree = useTreeStore(
     (state) => state.getWorkspaceState(workspaceId).tree,

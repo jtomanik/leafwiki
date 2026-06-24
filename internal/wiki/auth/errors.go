@@ -76,7 +76,7 @@ type AuthErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithAuthStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, AuthErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

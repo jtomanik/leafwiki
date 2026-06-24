@@ -16,7 +16,7 @@ import (
 type GetTagsInput struct {
 	Filter   string
 	Selected []string
-	Limit    int
+	PageSize coretags.TagLimit
 }
 
 type GetTagsOutput struct {
@@ -32,12 +32,12 @@ func NewGetTagsUseCase(svc *coretags.TagsService) *GetTagsUseCase {
 }
 
 func (uc *GetTagsUseCase) Execute(_ context.Context, in GetTagsInput) (*GetTagsOutput, error) {
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 50
+	pageSize := in.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
 	}
-	if limit > 200 {
-		limit = 200
+	if pageSize > 200 {
+		pageSize = 200
 	}
 
 	filter := strings.ToLower(strings.TrimSpace(in.Filter))
@@ -48,9 +48,9 @@ func (uc *GetTagsUseCase) Execute(_ context.Context, in GetTagsInput) (*GetTagsO
 		err  error
 	)
 	if len(selected) == 0 {
-		tags, err = uc.svc.GetAllTags(filter, limit)
+		tags, err = uc.svc.GetAllTags(filter, pageSize)
 	} else {
-		tags, err = uc.svc.GetAllTagsForSelection(filter, selected, limit)
+		tags, err = uc.svc.GetAllTagsForSelection(filter, selected, pageSize)
 	}
 	if err != nil {
 		return nil, err

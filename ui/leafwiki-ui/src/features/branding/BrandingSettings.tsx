@@ -57,7 +57,9 @@ export default function BrandingSettings() {
   const handleLogoDelete = async () => {
     try {
       await deleteLogo()
-      toast.success('Logo deleted successfully')
+      toast.success('Logo deleted successfully', {
+        messageId: 'ui.toast.branding.logo_deleted',
+      })
     } catch (err) {
       toast.error(mapApiError(err, 'Failed to delete logo').message)
     }
@@ -66,7 +68,9 @@ export default function BrandingSettings() {
   const handleFaviconDelete = async () => {
     try {
       await deleteFavicon()
-      toast.success('Favicon deleted successfully')
+      toast.success('Favicon deleted successfully', {
+        messageId: 'ui.toast.branding.favicon_deleted',
+      })
     } catch (err) {
       toast.error(mapApiError(err, 'Failed to delete favicon').message)
     }
@@ -78,7 +82,9 @@ export default function BrandingSettings() {
       await updateBranding({
         siteName: localSiteName,
       })
-      toast.success('Branding settings saved')
+      toast.success('Branding settings saved', {
+        messageId: 'ui.toast.branding.saved',
+      })
     } catch (err) {
       toast.error(mapApiError(err, 'Failed to save branding settings').message)
     } finally {
@@ -92,7 +98,9 @@ export default function BrandingSettings() {
 
     try {
       await uploadLogo(file)
-      toast.success('Logo uploaded successfully')
+      toast.success('Logo uploaded successfully', {
+        messageId: 'ui.toast.branding.logo_uploaded',
+      })
     } catch (err) {
       toast.error(mapApiError(err, 'Failed to upload logo').message)
     }
@@ -106,7 +114,9 @@ export default function BrandingSettings() {
 
     try {
       await uploadFavicon(file)
-      toast.success('Favicon uploaded successfully')
+      toast.success('Favicon uploaded successfully', {
+        messageId: 'ui.toast.branding.favicon_uploaded',
+      })
     } catch (err) {
       toast.error(mapApiError(err, 'Failed to upload favicon').message)
     }

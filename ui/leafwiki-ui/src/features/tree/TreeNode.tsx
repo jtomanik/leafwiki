@@ -5,6 +5,7 @@ import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { useIsReadOnly } from '@/lib/useIsReadOnly'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useTreeStore } from '@/stores/tree'
@@ -17,7 +18,7 @@ import TreeNodeActionsMenu from './TreeNodeActionsMenu'
 
 type Props = {
   node: PageNode
-  workspaceId?: string
+  workspaceId?: WorkspaceID
 }
 
 export const TreeNode = React.memo(function TreeNode({

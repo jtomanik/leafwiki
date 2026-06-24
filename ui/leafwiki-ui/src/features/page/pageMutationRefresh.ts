@@ -7,6 +7,7 @@ import {
   type WikiNodeKind,
 } from '@/lib/wikiPath'
 import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
+import { asRoutePath, type WorkspaceID } from '@/lib/semanticTypes'
 import { useTreeStore } from '@/stores/tree'
 import { NavigateFunction } from 'react-router-dom'
 import { useLinkStatusStore } from '../links/linkstatus_store'
@@ -16,7 +17,7 @@ type RefreshAfterPageRefactorOptions = {
   preview: PageRefactorPreview
   currentPath: string
   navigate: NavigateFunction
-  workspaceId: string
+  workspaceId: WorkspaceID
 }
 
 function normalizeRoutePath(path: string) {
@@ -34,7 +35,7 @@ function buildRefactorRoutePath(
   currentPath: string,
   nextWikiPath: string,
   nextKind?: WikiNodeKind,
-  workspaceId?: string,
+  workspaceId?: WorkspaceID,
 ) {
   const normalizedCurrentPath = normalizeRoutePath(currentPath)
   const currentWorkspace = splitWorkspaceRoute(normalizedCurrentPath)
@@ -111,7 +112,7 @@ export async function refreshAfterPageRefactor({
   await useViewerStore
     .getState()
     .loadPageData(
-      toPageLookupPath(nextPath),
+      asRoutePath(toPageLookupPath(nextPath)),
       undefined,
       currentViewerPage?.kind,
       workspaceId,

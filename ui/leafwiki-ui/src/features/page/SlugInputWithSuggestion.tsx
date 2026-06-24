@@ -1,7 +1,12 @@
 import { FormInput, type FormInputError } from '@/components/FormInput'
 import { mapApiError } from '@/lib/api/errors'
 import { suggestSlug } from '@/lib/api/pages'
-import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useDebounce } from '@/lib/useDebounce'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { useEffect, useState } from 'react'
@@ -10,9 +15,9 @@ import { toast } from 'sonner'
 type Props = {
   title: string
   slug: string
-  parentId: string
+  parentId: PageID | 'root' | ''
   testid?: string
-  currentId?: string
+  currentId?: PageID | ''
   enableSlugSuggestion?: boolean
   onSlugChange: (slug: string) => void
   onSlugTouchedChange?: (touched: boolean) => void
@@ -20,7 +25,7 @@ type Props = {
   onLastSlugTitleChange?: (title: string) => void
   error?: string | FormInputError
   allowedHotkeys?: string
-  workspaceId?: string
+  workspaceId?: WorkspaceID
 }
 
 export function SlugInputWithSuggestion({
@@ -52,7 +57,7 @@ export function SlugInputWithSuggestion({
       try {
         onSlugLoadingChange?.(true)
         const suggestion = await suggestSlug(
-          parentId ? asPageID(parentId) : '',
+          parentId && parentId !== 'root' ? asPageID(parentId) : '',
           debouncedTitle,
           asWorkspaceID(workspaceId),
           currentId ? asPageID(currentId) : '',

@@ -7,8 +7,15 @@ import (
 
 type CommitHash = identity.CommitHash
 
+type SnapshotLimit int
+type PageRevisionLimit int
+
 func NewCommitHashUnchecked(raw string) CommitHash {
 	return identity.NewCommitHashUnchecked(raw)
+}
+
+func CommitHashFromString[T ~string](raw T) CommitHash {
+	return identity.CommitHashFromString(raw)
 }
 
 func CommitHashFromRevisionID(id revision.RevisionID) CommitHash {

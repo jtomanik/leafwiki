@@ -30,7 +30,7 @@ func (r *Routes) registerRevisionTools(server *sdkmcp.Server, _ httpinternal.Rou
 		if err != nil {
 			return listRevisionsOutput{}, err
 		}
-		out, err := r.listWorkspaceRevisions(ctx, page, strings.TrimSpace(in.Cursor), limit)
+		out, err := r.listWorkspaceRevisions(ctx, page, strings.TrimSpace(in.Cursor), workspacesync.PageRevisionLimit(limit))
 		if err != nil {
 			return listRevisionsOutput{}, err
 		}

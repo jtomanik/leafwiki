@@ -87,8 +87,8 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return suggestSlugOutput{}, err
 		}
 		out, err := r.suggestSlug.Execute(ctx, wikipages.SuggestSlugInput{
-			ParentID:  tree.NewPageIDUnchecked(strings.TrimSpace(in.ParentID)),
-			CurrentID: tree.NewPageIDUnchecked(strings.TrimSpace(in.CurrentID)),
+			ParentID:  tree.PageIDFromString(strings.TrimSpace(in.ParentID)),
+			CurrentID: tree.PageIDFromString(strings.TrimSpace(in.CurrentID)),
 			Title:     title,
 		})
 		if err != nil {
@@ -103,11 +103,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		out, err := r.createPage.Execute(ctx, wikipages.CreatePageInput{
-			UserID:   tree.NewUserIDUnchecked(actor.ID),
+			UserID:   tree.UserIDFromString(actor.ID),
 			Source:   pagesave.PageMutationSourceMCP,
 			ParentID: mcpPageIDPtr(in.ParentID),
 			Title:    in.Title,
-			Slug:     tree.NewSlugUnchecked(in.Slug),
+			Slug:     tree.SlugFromString(in.Slug),
 			Kind:     &kind,
 		})
 		if err != nil {
@@ -131,7 +131,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		contentToSave := in.Content
 		fromImport := false
 		if in.Content != nil || in.TagsPresent || in.PropertiesPresent {
-			pageID := tree.NewPageIDUnchecked(strings.TrimSpace(in.ID))
+			pageID := tree.PageIDFromString(strings.TrimSpace(in.ID))
 			currentRaw, err := r.treeService.ReadPageRaw(pageID)
 			if err != nil {
 				return pageOutput{}, err
@@ -160,12 +160,12 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		kind := tree.NodeKindPage
 		out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
-			UserID:     tree.NewUserIDUnchecked(actor.ID),
+			UserID:     tree.UserIDFromString(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
-			ID:         tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
-			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
+			ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
+			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
 			Title:      in.Title,
-			Slug:       tree.NewSlugUnchecked(in.Slug),
+			Slug:       tree.SlugFromString(in.Slug),
 			Content:    contentToSave,
 			Kind:       &kind,
 			FromImport: fromImport,
@@ -178,10 +178,10 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[deletePageInput, messageOutput](r, server, toolDeletePage, func(ctx context.Context, actor toolActor, in deletePageInput) (messageOutput, error) {
 		if err := r.deletePage.Execute(ctx, wikipages.DeletePageInput{
-			UserID:    tree.NewUserIDUnchecked(actor.ID),
+			UserID:    tree.UserIDFromString(actor.ID),
 			Source:    pagesave.PageMutationSourceMCP,
-			ID:        tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
-			Version:   tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
+			ID:        tree.PageIDFromString(strings.TrimSpace(in.ID)),
+			Version:   tree.PageVersionFromString(strings.TrimSpace(in.Version)),
 			Recursive: in.Recursive,
 		}); err != nil {
 			return messageOutput{}, err
@@ -195,11 +195,11 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			parentID = *in.ParentID
 		}
 		if err := r.movePage.Execute(ctx, wikipages.MovePageInput{
-			UserID:   tree.NewUserIDUnchecked(actor.ID),
+			UserID:   tree.UserIDFromString(actor.ID),
 			Source:   pagesave.PageMutationSourceMCP,
-			ID:       tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
-			Version:  tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
-			ParentID: tree.NewPageIDUnchecked(parentID),
+			ID:       tree.PageIDFromString(strings.TrimSpace(in.ID)),
+			Version:  tree.PageVersionFromString(strings.TrimSpace(in.Version)),
+			ParentID: tree.PageIDFromString(parentID),
 		}); err != nil {
 			return messageOutput{}, err
 		}
@@ -208,7 +208,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[sortPagesInput, messageOutput](r, server, toolSortPages, func(ctx context.Context, _ toolActor, in sortPagesInput) (messageOutput, error) {
 		if err := r.sortPages.Execute(ctx, wikipages.SortPagesInput{
-			ParentID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.ParentID)),
+			ParentID:   tree.PageIDFromString(strings.TrimSpace(in.ParentID)),
 			OrderedIDs: mcpPageIDs(in.OrderedIDs),
 		}); err != nil {
 			return messageOutput{}, err
@@ -226,7 +226,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
-			UserID:      tree.NewUserIDUnchecked(actor.ID),
+			UserID:      tree.UserIDFromString(actor.ID),
 			Source:      pagesave.PageMutationSourceMCP,
 			TargetPath:  targetPath,
 			TargetTitle: in.Title,
@@ -244,10 +244,10 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return messageOutput{}, err
 		}
 		if err := r.convertPage.Execute(ctx, wikipages.ConvertPageInput{
-			UserID:     tree.NewUserIDUnchecked(actor.ID),
+			UserID:     tree.UserIDFromString(actor.ID),
 			Source:     pagesave.PageMutationSourceMCP,
-			ID:         tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
-			Version:    tree.NewPageVersionUnchecked(strings.TrimSpace(in.Version)),
+			ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
+			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
 			TargetKind: targetKind,
 		}); err != nil {
 			return messageOutput{}, err
@@ -257,12 +257,12 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[copyPageInput, pageOutput](r, server, toolCopyPage, func(ctx context.Context, actor toolActor, in copyPageInput) (pageOutput, error) {
 		out, err := r.copyPage.Execute(ctx, wikipages.CopyPageInput{
-			UserID:         tree.NewUserIDUnchecked(actor.ID),
+			UserID:         tree.UserIDFromString(actor.ID),
 			Source:         pagesave.PageMutationSourceMCP,
-			SourcePageID:   tree.NewPageIDUnchecked(strings.TrimSpace(in.ID)),
+			SourcePageID:   tree.PageIDFromString(strings.TrimSpace(in.ID)),
 			TargetParentID: mcpPageIDPtr(in.TargetParentID),
 			Title:          in.Title,
-			Slug:           tree.NewSlugUnchecked(in.Slug),
+			Slug:           tree.SlugFromString(in.Slug),
 		})
 		if err != nil {
 			return pageOutput{}, err
@@ -304,14 +304,14 @@ func mcpPageIDPtr(id *string) *tree.PageID {
 	if id == nil {
 		return nil
 	}
-	typed := tree.NewPageIDUnchecked(*id)
+	typed := tree.PageIDFromString(*id)
 	return &typed
 }
 
 func mcpPageIDs(ids []string) []tree.PageID {
 	out := make([]tree.PageID, len(ids))
 	for i, id := range ids {
-		out[i] = tree.NewPageIDUnchecked(id)
+		out[i] = tree.PageIDFromString(id)
 	}
 	return out
 }

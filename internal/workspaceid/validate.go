@@ -35,18 +35,24 @@ func (id WorkspaceID) Validate() error {
 	raw := string(id)
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return &ValidationError{Code: ErrCodeWorkspaceIDRequired, Message: "workspace ID is required"}
+		return &ValidationError{
+			Code:      ErrCodeWorkspaceIDRequired,
+			MessageID: sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired),
+			Message:   "workspace ID is required",
+		}
 	}
 	if trimmed != raw {
 		return &ValidationError{
-			Code:    ErrCodeWorkspaceIDWhitespace,
-			Message: fmt.Sprintf("workspace ID %q must not contain leading or trailing whitespace", raw),
+			Code:      ErrCodeWorkspaceIDWhitespace,
+			MessageID: sharederrors.MessageIDForCode(ErrCodeWorkspaceIDWhitespace),
+			Message:   fmt.Sprintf("workspace ID %q must not contain leading or trailing whitespace", raw),
 		}
 	}
 	if !workspaceIDPattern.MatchString(raw) {
 		return &ValidationError{
-			Code:    ErrCodeWorkspaceIDInvalid,
-			Message: fmt.Sprintf("workspace ID %q must be URL-safe lowercase letters, numbers, and dashes", raw),
+			Code:      ErrCodeWorkspaceIDInvalid,
+			MessageID: sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid),
+			Message:   fmt.Sprintf("workspace ID %q must be URL-safe lowercase letters, numbers, and dashes", raw),
 		}
 	}
 	return nil
@@ -86,8 +92,9 @@ const (
 )
 
 type ValidationError struct {
-	Code    sharederrors.ErrorCode
-	Message string
+	Code      sharederrors.ErrorCode
+	MessageID sharederrors.MessageID
+	Message   string
 }
 
 func (e *ValidationError) Error() string {

@@ -40,7 +40,7 @@ func TestPageVersionBypassIsOwnedByTreeOperations(t *testing.T) {
 	if !pageVersionUnchecked.IsUnchecked() {
 		t.Fatalf("internal bypass sentinel should identify itself as unchecked")
 	}
-	if got := NewPageVersionUnchecked(versionUnchecked); got.IsUnchecked() || got != "" {
+	if got := newFixturePageVersion(versionUnchecked); got.IsUnchecked() || got != "" {
 		t.Fatalf("client parser leaked bypass sentinel: got %q", got)
 	}
 }
@@ -58,8 +58,8 @@ func TestTreeServiceVersionBypassUsesConstrainedOperations(t *testing.T) {
 func TestTreeIdentityAliasesNeutralIdentityTypes(t *testing.T) {
 	t.Parallel()
 
-	var _ identity.UserID = NewUserIDUnchecked("user-1")
-	var _ identity.RevisionID = NewRevisionIDUnchecked("rev-1")
+	var _ identity.UserID = newFixtureUserID("user-1")
+	var _ identity.RevisionID = newFixtureRevisionID("rev-1")
 	var _ identity.CommitHash = CommitHash("abc123")
 }
 
@@ -84,8 +84,8 @@ func TestCorePageIdentityUsesSemanticTypes(t *testing.T) {
 	node := PageNode{
 		ID: PageID("page-1"),
 		Metadata: PageMetadata{
-			CreatorID:    UserID("user-1"),
-			LastAuthorID: UserID("user-2"),
+			CreatorID:    newFixtureUserID("user-1"),
+			LastAuthorID: newFixtureUserID("user-2"),
 		},
 	}
 	var _ PageID = node.ID

@@ -66,7 +66,7 @@ func CSRFMiddleware(csrf *CSRFCookie) gin.HandlerFunc {
 }
 
 func abortCSRFError(c *gin.Context, code sharederrors.ErrorCode, message string) {
-	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-		"error": sharederrors.NewLocalizedErrorDetail(code, message, message),
+	c.AbortWithStatusJSON(http.StatusForbidden, securityErrorResponse{
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
 }

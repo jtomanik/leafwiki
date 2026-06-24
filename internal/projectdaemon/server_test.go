@@ -67,14 +67,14 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &handle); err != nil {
 		t.Fatalf("decode session handle: %v", err)
 	}
-	if strings.TrimSpace(handle.ID.String()) == "" {
+	if handle.ID == "" {
 		t.Fatalf("session id is empty")
 	}
 	if sessions.Count() != 1 || joinTestCounts(counts) != "1" {
 		t.Fatalf("session count/counts = %d/%s, want 1/1", sessions.Count(), joinTestCounts(counts))
 	}
 
-	resp = controlServerRequest(t, handler, http.MethodPost, "/sessions/"+handle.ID.String()+"/heartbeat", "control-token", nil)
+	resp = controlServerRequest(t, handler, http.MethodPost, sessionHeartbeatPath(handle.ID), "control-token", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("heartbeat status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
 	}
@@ -84,7 +84,7 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	}
 	assertControlStructuredError(t, resp, "daemon_session_not_found", "errors.daemon.session_not_found")
 
-	resp = controlServerRequest(t, handler, http.MethodDelete, "/sessions/"+handle.ID.String(), "control-token", nil)
+	resp = controlServerRequest(t, handler, http.MethodDelete, sessionPath(handle.ID), "control-token", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("release status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
 	}
@@ -312,7 +312,7 @@ func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 		t.Fatalf("verified key = %q, want lwk_valid", verifiedKey)
 	}
 
-	if err := client.HeartbeatSession(ctx, SessionID("missing")); err == nil {
+	if err := client.HeartbeatSession(ctx, newFixtureSessionID("missing")); err == nil {
 		t.Fatalf("missing heartbeat succeeded")
 	} else {
 		assertControlHTTPError(t, err, http.StatusNotFound, errCodeDaemonSessionNotFound)
@@ -399,13 +399,13 @@ func TestAuthRoundTripperAddsControlBearerAndActorContext(t *testing.T) {
 	}
 }
 
-func controlServerRequest(t *testing.T, handler http.Handler, method string, path string, token string, body io.Reader) *httptest.ResponseRecorder {
+func controlServerRequest(t *testing.T, handler http.Handler, method string, path controlPath, token string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
 	if body == nil {
 		body = bytes.NewReader(nil)
 	}
-	req := httptest.NewRequest(method, path, body)
+	req := httptest.NewRequest(method, path.String(), body)
 	if token != "" {
 		req.Header.Set(ControlTokenHeader, token)
 	}

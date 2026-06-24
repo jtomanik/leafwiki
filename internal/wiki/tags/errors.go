@@ -28,13 +28,13 @@ func respondWithTagsError(c *gin.Context, err error) {
 	}
 
 	c.JSON(http.StatusInternalServerError, tagsErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(ErrCodeTagsInternal, "", ""),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodeTagsInternal),
 	})
 }
 
 func respondWithTagsBadRequest(c *gin.Context, code sharederrors.ErrorCode, message, template string) {
 	c.JSON(http.StatusBadRequest, tagsErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
 }
 

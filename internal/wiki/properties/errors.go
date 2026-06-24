@@ -29,13 +29,13 @@ func respondWithPropertiesError(c *gin.Context, err error) {
 	}
 
 	c.JSON(http.StatusInternalServerError, propertiesErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(ErrCodePropertiesInternal, "", ""),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodePropertiesInternal),
 	})
 }
 
 func respondWithPropertiesBadRequest(c *gin.Context, code sharederrors.ErrorCode, message, template string) {
 	c.JSON(http.StatusBadRequest, propertiesErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code),
 	})
 }
 

@@ -513,14 +513,14 @@ leafwiki_title: Page B Duplicate Syntax
 	if err != nil {
 		t.Fatalf("GetPage page-a-duplicate-syntax: %v", err)
 	}
-	linkStatus, err := linkService.GetLinkStatusForPage(pageA.ID, pageA.CalculatePath())
+	linkStatus, err := linkService.GetLinkStatusForPage(pageA.ID, pageA.CalculateRoutePath())
 	if err != nil {
 		t.Fatalf("GetLinkStatusForPage: %v", err)
 	}
 	if linkStatus.Counts.Outgoings != 1 || linkStatus.Counts.BrokenOutgoings != 0 {
 		t.Fatalf("link status counts = %#v, want one healthy outgoing target", linkStatus.Counts)
 	}
-	if got := linkStatus.Outgoings[0].ToPageID; got != tree.NewPageIDUnchecked("page-b-duplicate-syntax") {
+	if got := linkStatus.Outgoings[0].ToPageID; got != newFixturePageID("page-b-duplicate-syntax") {
 		t.Fatalf("ToPageID = %q, want page-b-duplicate-syntax", got)
 	}
 }
@@ -1525,7 +1525,7 @@ func TestServiceListSnapshotPagePropagatesChangedMarkdownPathErrors(t *testing.T
 		t.Fatalf("NewService: %v", err)
 	}
 
-	_, err = service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 10)
+	_, err = service.ListSnapshotPage(context.Background(), CommitHash(""), 10)
 	if err == nil || !strings.Contains(err.Error(), "path trailer read failed") {
 		t.Fatalf("ListSnapshotPage error = %v, want changed path error", err)
 	}
@@ -1540,10 +1540,10 @@ func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *test
 				{Hash: "returned", ChangedMarkdownCount: 1},
 				{Hash: "sentinel", ChangedMarkdownCount: 1},
 			},
-			changedPaths: map[string][]string{
+			changedPaths: map[CommitHash][]string{
 				"returned": {"returned.md"},
 			},
-			changedPathsErrByHash: map[string]error{
+			changedPathsErrByHash: map[CommitHash]error{
 				"sentinel": errors.New("sentinel diff should not be read"),
 			},
 		},
@@ -1552,7 +1552,7 @@ func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *test
 		t.Fatalf("NewService: %v", err)
 	}
 
-	page, err := service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 1)
+	page, err := service.ListSnapshotPage(context.Background(), CommitHash(""), 1)
 	if err != nil {
 		t.Fatalf("ListSnapshotPage returned sentinel error: %v", err)
 	}
@@ -1570,7 +1570,7 @@ func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChan
 		commits: []gitrevisions.Commit{
 			{Hash: "slow-snapshot", ChangedMarkdownCount: 1},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"slow-snapshot": {"slow.md"},
 		},
 		changedPathsStarted: make(chan struct{}),
@@ -1587,7 +1587,7 @@ func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChan
 
 	listDone := make(chan error, 1)
 	go func() {
-		_, err := service.ListSnapshotPage(context.Background(), NewCommitHashUnchecked(""), 1)
+		_, err := service.ListSnapshotPage(context.Background(), CommitHash(""), 1)
 		listDone <- err
 	}()
 	<-store.changedPathsStarted
@@ -1800,7 +1800,7 @@ func TestServiceSyncNowRecordsAdditionalBatchActors(t *testing.T) {
 		t.Fatalf("SyncNow: %v", err)
 	}
 
-	commit, err := store.GetCommit(context.Background(), status.LastCommitHash.String())
+	commit, err := store.GetCommit(context.Background(), status.LastCommitHash)
 	if err != nil {
 		t.Fatalf("GetCommit: %v", err)
 	}
@@ -1856,10 +1856,10 @@ func TestServiceListPageRevisionsUsesCommitAuthorMetadata(t *testing.T) {
 			AuthorName: "Alice",
 			CreatedAt:  createdAt,
 		}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"commit-1": {"page-one.md": "# Page One\n"},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"commit-1": {"page-one.md"},
 		},
 	}
@@ -1902,7 +1902,7 @@ func TestServiceListPageRevisionsPaginatesMoreThanLimitPageCommits(t *testing.T)
 			{Hash: "page-a-change-2", AuthorID: "alice"},
 			{Hash: "page-a-change-1", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change-3": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v3\n",
 			},
@@ -1913,7 +1913,7 @@ func TestServiceListPageRevisionsPaginatesMoreThanLimitPageCommits(t *testing.T)
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change-3": {"page-a.md"},
 			"page-a-change-2": {"page-a.md"},
 			"page-a-change-1": {"page-a.md"},
@@ -1963,7 +1963,7 @@ func TestServiceListPageRevisionsOmitsNextCursorWhenMatchesEqualLimit(t *testing
 			{Hash: "page-a-change-2", AuthorID: "alice"},
 			{Hash: "page-a-change-1", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change-2": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v2\n",
 			},
@@ -1971,7 +1971,7 @@ func TestServiceListPageRevisionsOmitsNextCursorWhenMatchesEqualLimit(t *testing
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change-2": {"page-a.md"},
 			"page-a-change-1": {"page-a.md"},
 		},
@@ -2010,7 +2010,7 @@ func TestServiceListPageRevisionsFollowsMarkdownRenameByLeafWikiID(t *testing.T)
 			{Hash: "new-commit", AuthorID: "alice"},
 			{Hash: "old-commit", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"new-commit": {
 				"new-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: New Page\n---\n# New Page\n",
 			},
@@ -2018,7 +2018,7 @@ func TestServiceListPageRevisionsFollowsMarkdownRenameByLeafWikiID(t *testing.T)
 				"old-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: Old Page\n---\n# Old Page\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"new-commit": {"new-page.md"},
 			"old-commit": {"old-page.md"},
 		},
@@ -2058,12 +2058,12 @@ func TestServiceListPageRevisionsMatchesUppercaseMarkdownExtensionByLeafWikiID(t
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "uppercase-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"uppercase-commit": {
 				"Page.MD": "---\nleafwiki_id: page-1\nleafwiki_title: Page\n---\n# Page\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"uppercase-commit": {"Page.MD"},
 		},
 	}
@@ -2104,12 +2104,12 @@ func TestServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata(t *test
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "raw-normalized-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"raw-normalized-commit": {
 				"plans/agent_hooks.PLAN.md": "# Agent Hooks Plan\n\nRaw content before writeback.\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"raw-normalized-commit": {"plans/agent_hooks.PLAN.md"},
 		},
 	}
@@ -2154,12 +2154,12 @@ func TestServiceListPageRevisionsUsesHistoricalMarkdownMetadata(t *testing.T) {
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "old-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"old-commit": {
 				"old-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: Historical Title\n---\n# Historical Heading\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"old-commit": {"old-page.md"},
 		},
 	}
@@ -2204,12 +2204,12 @@ func TestServiceListPageRevisionsNormalizesSectionIndexPath(t *testing.T) {
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "section-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"section-commit": {
 				"docs/index.md": "---\nleafwiki_id: section-1\nleafwiki_title: Historical Docs\n---\n# Historical Docs\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"section-commit": {"docs/index.md"},
 		},
 	}
@@ -2254,12 +2254,12 @@ func TestServiceListPageRevisionsNormalizesReadmeFallbackSectionPath(t *testing.
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "readme-section-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"readme-section-commit": {
 				"guides/README.md": "---\nleafwiki_id: section-guides\nleafwiki_title: Historical Guides\n---\n# Historical Guides\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"readme-section-commit": {"guides/README.md"},
 		},
 	}
@@ -2317,12 +2317,12 @@ func TestServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex(t *tes
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "readme-page-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"readme-page-commit": {
 				"User Guides/README.md": "---\nleafwiki_id: readme-page\nleafwiki_title: Historical README\n---\n# Historical README\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"readme-page-commit": {"User Guides/README.md"},
 		},
 	}
@@ -2365,12 +2365,12 @@ func TestServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversion(t
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "page-commit", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-commit": {
 				"docs.md": "---\nleafwiki_id: docs-1\nleafwiki_title: Docs Page\n---\n# Docs Page\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-commit": {"docs.md"},
 		},
 	}
@@ -2412,7 +2412,7 @@ func TestServiceListPageRevisionsOnlyIncludesCommitsThatChangedDocument(t *testi
 			{Hash: "page-b-change", AuthorID: "bob"},
 			{Hash: "page-a-change", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-b-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
@@ -2421,7 +2421,7 @@ func TestServiceListPageRevisionsOnlyIncludesCommitsThatChangedDocument(t *testi
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-b-change": {"page-b.md"},
 			"page-a-change": {"page-a.md"},
 		},
@@ -2461,7 +2461,7 @@ func TestServiceListPageRevisionsScansPastUnrelatedHeadWhenLimitIsOne(t *testing
 			{Hash: "page-b-change", AuthorID: "bob"},
 			{Hash: "page-a-change", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-b-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
@@ -2470,7 +2470,7 @@ func TestServiceListPageRevisionsScansPastUnrelatedHeadWhenLimitIsOne(t *testing
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-b-change": {"page-b.md"},
 			"page-a-change": {"page-a.md"},
 		},
@@ -2506,17 +2506,17 @@ func TestServiceListPageRevisionsScansAllCommitsPastLargeUnrelatedHead(t *testin
 		Kind:  tree.NodeKindPage,
 	}}
 	store := &fakeRevisionStore{
-		filesAt:      map[string]map[string]string{},
-		changedPaths: map[string][]string{},
+		filesAt:      map[CommitHash]map[string]string{},
+		changedPaths: map[CommitHash][]string{},
 	}
 	for i := 0; i < 1005; i++ {
 		hash := "page-b-change-" + strconv.Itoa(i)
 		store.commits = append(store.commits, gitrevisions.Commit{Hash: hash, AuthorID: "bob"})
-		store.filesAt[hash] = map[string]string{
+		store.filesAt[CommitHashFromString(hash)] = map[string]string{
 			"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 			"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
 		}
-		store.changedPaths[hash] = []string{"page-b.md"}
+		store.changedPaths[CommitHashFromString(hash)] = []string{"page-b.md"}
 	}
 	store.commits = append(store.commits, gitrevisions.Commit{Hash: "page-a-change", AuthorID: "alice"})
 	store.filesAt["page-a-change"] = map[string]string{
@@ -2558,7 +2558,7 @@ func TestServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor(t *testin
 			{Hash: "page-a-change-2", AuthorID: "alice"},
 			{Hash: "page-a-change-1", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change-2": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed again\n",
 			},
@@ -2566,7 +2566,7 @@ func TestServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor(t *testin
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change-2": {"page-a.md"},
 			"page-a-change-1": {"page-a.md"},
 		},
@@ -2574,11 +2574,11 @@ func TestServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor(t *testin
 	for i := 0; i < 1005; i++ {
 		hash := "page-b-change-" + strconv.Itoa(i)
 		store.commits = append(store.commits, gitrevisions.Commit{Hash: hash, AuthorID: "bob"})
-		store.filesAt[hash] = map[string]string{
+		store.filesAt[CommitHashFromString(hash)] = map[string]string{
 			"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 			"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
 		}
-		store.changedPaths[hash] = []string{"page-b.md"}
+		store.changedPaths[CommitHashFromString(hash)] = []string{"page-b.md"}
 	}
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -2618,7 +2618,7 @@ func TestServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning(t *testing.T)
 			{Hash: "page-b-change", AuthorID: "bob"},
 			{Hash: "page-a-change", AuthorID: "alice"},
 		},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-b-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
@@ -2627,7 +2627,7 @@ func TestServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning(t *testing.T)
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-b-change": {"page-b.md"},
 			"page-a-change": {"page-a.md"},
 		},
@@ -2664,12 +2664,12 @@ func TestServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore(t *testing
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "page-a-change", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change": {"page-a.md"},
 		},
 		changedContentsStarted: make(chan struct{}),
@@ -2721,13 +2721,13 @@ func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "page-b-change"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-b-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-b-change": {"page-b.md"},
 		},
 	}
@@ -2740,7 +2740,7 @@ func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("page-b-change")); err == nil {
+	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("page-b-change")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot returned unrelated commit, want error")
 	}
 }
@@ -2754,12 +2754,12 @@ func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *te
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "page-a-change", AuthorID: "alice"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change": {"page-a.md"},
 		},
 		changedContentsStarted: make(chan struct{}),
@@ -2776,7 +2776,7 @@ func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *te
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("page-a-change"))
+		_, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("page-a-change"))
 		done <- err
 	}()
 	<-store.changedContentsStarted
@@ -2839,7 +2839,7 @@ func TestServiceRestoreDocumentRestoresPreRenameContentToCurrentPath(t *testing.
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from pre-rename commit: %v", err)
 	}
 
@@ -2889,7 +2889,7 @@ func TestServiceRestoreDocumentPreservesExistingUppercaseMarkdownPath(t *testing
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from uppercase path: %v", err)
 	}
 
@@ -2945,7 +2945,7 @@ func TestServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath(t *testi
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), section, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), section, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from section commit: %v", err)
 	}
 
@@ -2996,7 +2996,7 @@ func TestServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath(t *test
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), section, NewCommitHashUnchecked(oldCommit.Hash), PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), section, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument from README section commit: %v", err)
 	}
 
@@ -3021,13 +3021,13 @@ func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.
 	}}
 	store := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{Hash: "restore-commit"},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-b-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-b-change": {"page-b.md"},
 		},
 	}
@@ -3040,7 +3040,7 @@ func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-b-change"), PublicEditorActor()); err == nil {
+	if _, err := service.RestoreDocument(context.Background(), page, CommitHash("page-b-change"), PublicEditorActor()); err == nil {
 		t.Fatalf("RestoreDocument restored unrelated commit, want error")
 	}
 	if store.restoreDocumentToPathCalls != 0 {
@@ -3057,12 +3057,12 @@ func TestServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree(t *testi
 	}}
 	store := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{Hash: "restore-commit"},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change": {"page-a.md"},
 		},
 	}
@@ -3075,7 +3075,7 @@ func TestServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree(t *testi
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-a-change"), PublicEditorActor()); err != nil {
+	if _, err := service.RestoreDocument(context.Background(), page, CommitHash("page-a-change"), PublicEditorActor()); err != nil {
 		t.Fatalf("RestoreDocument: %v", err)
 	}
 
@@ -3100,12 +3100,12 @@ func TestServiceRestoreDocumentReturnsReconstructionError(t *testing.T) {
 	}}
 	store := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{Hash: "restore-commit"},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"page-a-change": {
 				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"page-a-change": {"page-a.md"},
 		},
 	}
@@ -3119,7 +3119,7 @@ func TestServiceRestoreDocumentReturnsReconstructionError(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked("page-a-change"), PublicEditorActor())
+	status, err := service.RestoreDocument(context.Background(), page, CommitHash("page-a-change"), PublicEditorActor())
 	if !errors.Is(err, reconstructErr) {
 		t.Fatalf("RestoreDocument error = %v, want %v", err, reconstructErr)
 	}
@@ -3159,12 +3159,12 @@ func TestServiceRestoreWorkspaceCapturesMetadataWriteback(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreWorkspace(context.Background(), NewCommitHashUnchecked(rawCommit.Hash), PublicEditorActor())
+	status, err := service.RestoreWorkspace(context.Background(), newFixtureCommitHash(rawCommit.Hash), PublicEditorActor())
 	if err != nil {
 		t.Fatalf("RestoreWorkspace: %v", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), status.LastCommitHash.String())
+	files, err := store.FilesAt(context.Background(), status.LastCommitHash)
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
@@ -3219,12 +3219,12 @@ current body`)
 		t.Fatalf("NewService: %v", err)
 	}
 
-	status, err := service.RestoreDocument(context.Background(), page, NewCommitHashUnchecked(rawCommit.Hash), PublicEditorActor())
+	status, err := service.RestoreDocument(context.Background(), page, newFixtureCommitHash(rawCommit.Hash), PublicEditorActor())
 	if err != nil {
 		t.Fatalf("RestoreDocument: %v", err)
 	}
 
-	files, err := store.FilesAt(context.Background(), status.LastCommitHash.String())
+	files, err := store.FilesAt(context.Background(), status.LastCommitHash)
 	if err != nil {
 		t.Fatalf("FilesAt restore head: %v", err)
 	}
@@ -3242,12 +3242,12 @@ func TestServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID(t
 	}}
 	store := &fakeRevisionStore{
 		commits: []gitrevisions.Commit{{Hash: "path-reuse"}},
-		filesAt: map[string]map[string]string{
+		filesAt: map[CommitHash]map[string]string{
 			"path-reuse": {
 				"page.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B\n",
 			},
 		},
-		changedPaths: map[string][]string{
+		changedPaths: map[CommitHash][]string{
 			"path-reuse": {"page.md"},
 		},
 	}
@@ -3260,7 +3260,7 @@ func TestServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID(t
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, NewCommitHashUnchecked("path-reuse")); err == nil {
+	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("path-reuse")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot accepted reused path with different leafwiki_id, want error")
 	}
 }
@@ -3301,7 +3301,7 @@ func TestServiceSyncNowCreatesNewCommitForWritebackOnlySync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncNow: %v", err)
 	}
-	if status.LastCommitHash == NewCommitHashUnchecked(firstCommit.Hash) {
+	if status.LastCommitHash == newFixtureCommitHash(firstCommit.Hash) {
 		t.Fatalf("writeback-only sync amended previous commit %s, want new commit", firstCommit.Hash)
 	}
 	snapshots, err := service.ListSnapshots(context.Background(), 10)
@@ -3698,10 +3698,10 @@ type fakeRevisionStore struct {
 	amendErr                          error
 	captureCalls                      int
 	commits                           []gitrevisions.Commit
-	filesAt                           map[string]map[string]string
-	changedPaths                      map[string][]string
+	filesAt                           map[CommitHash]map[string]string
+	changedPaths                      map[CommitHash][]string
 	changedPathsErr                   error
-	changedPathsErrByHash             map[string]error
+	changedPathsErrByHash             map[CommitHash]error
 	scannedCommits                    int
 	filesAtCalls                      int
 	restoreDocumentToPathCalls        int
@@ -3756,7 +3756,7 @@ func (f *fakeRevisionStore) ForEachCommit(_ context.Context, visit func(gitrevis
 	return nil
 }
 
-func (f *fakeRevisionStore) ChangedMarkdownPaths(_ context.Context, hash string) ([]string, error) {
+func (f *fakeRevisionStore) ChangedMarkdownPaths(_ context.Context, hash CommitHash) ([]string, error) {
 	if f.changedPathsStarted != nil {
 		close(f.changedPathsStarted)
 		f.changedPathsStarted = nil
@@ -3775,7 +3775,7 @@ func (f *fakeRevisionStore) ChangedMarkdownPaths(_ context.Context, hash string)
 	return f.changedPaths[hash], nil
 }
 
-func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash string) (map[string]string, error) {
+func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash CommitHash) (map[string]string, error) {
 	if f.changedContentsStarted != nil {
 		close(f.changedContentsStarted)
 		f.changedContentsStarted = nil
@@ -3793,27 +3793,27 @@ func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash stri
 	return contents, nil
 }
 
-func (f *fakeRevisionStore) GetCommit(_ context.Context, hash string) (gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) GetCommit(_ context.Context, hash CommitHash) (gitrevisions.Commit, error) {
 	for _, commit := range f.commits {
-		if commit.Hash == hash {
+		if CommitHashFromString(commit.Hash) == hash {
 			return commit, nil
 		}
 	}
-	if f.capture != nil && f.capture.Hash == hash {
+	if f.capture != nil && CommitHashFromString(f.capture.Hash) == hash {
 		return *f.capture, nil
 	}
 	return gitrevisions.Commit{}, errors.New("commit not found")
 }
 
-func (f *fakeRevisionStore) RestoreWorkspace(context.Context, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) RestoreWorkspace(context.Context, CommitHash, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	return f.capture, nil
 }
 
-func (f *fakeRevisionStore) RestoreDocument(context.Context, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) RestoreDocument(context.Context, string, CommitHash, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	return f.capture, nil
 }
 
-func (f *fakeRevisionStore) RestoreDocumentToPath(context.Context, string, string, string, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) RestoreDocumentToPath(context.Context, string, string, CommitHash, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	f.restoreDocumentToPathCalls++
 	return f.capture, nil
 }
@@ -3824,7 +3824,7 @@ func (f *fakeRevisionStore) RestoreDocumentContentToPath(_ context.Context, _ st
 	return f.capture, nil
 }
 
-func (f *fakeRevisionStore) FilesAt(_ context.Context, hash string) (map[string]string, error) {
+func (f *fakeRevisionStore) FilesAt(_ context.Context, hash CommitHash) (map[string]string, error) {
 	f.filesAtCalls++
 	if f.filesAt == nil {
 		return nil, nil

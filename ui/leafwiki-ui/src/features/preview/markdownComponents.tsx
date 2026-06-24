@@ -1,4 +1,5 @@
 import { withBasePath } from '@/lib/routePath'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { workspaceAssetPath } from '@/lib/workspaceAssets'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import {
@@ -36,7 +37,7 @@ type ShoutoutConfig = {
 type MarkdownComponentsOptions = {
   path?: string
   pageKind: WikiNodeKind
-  workspaceId?: string
+  workspaceId?: WorkspaceID
   resolveAssetUrl?: (src: string) => string
   enableHeadlineLinks: boolean
   resolvedMode: 'light' | 'dark'
@@ -429,6 +430,12 @@ export function useMarkdownComponents({
         )
       },
     }),
-    [enableHeadlineLinks, markdownLink, resolvePreviewAssetUrl, resolvedMode],
+    [
+      enableHeadlineLinks,
+      markdownLink,
+      resolvePreviewAssetUrl,
+      resolvedMode,
+      workspaceId,
+    ],
   )
 }

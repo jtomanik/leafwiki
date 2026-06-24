@@ -11,6 +11,8 @@ type TagsService struct {
 	store *TagsStore
 }
 
+type TagLimit int
+
 func NewTagsService(store *TagsStore) *TagsService {
 	return &TagsService{store: store}
 }
@@ -38,12 +40,12 @@ func (s *TagsService) DeletePageIndex(pageID tree.PageID) error {
 	return s.store.DeletePageIndex(pageID)
 }
 
-func (s *TagsService) GetAllTags(filter string, limit int) ([]TagCount, error) {
-	return s.store.GetAllTags(filter, limit)
+func (s *TagsService) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, error) {
+	return s.store.GetAllTags(filter, pageSize)
 }
 
-func (s *TagsService) GetAllTagsForSelection(filter string, selected []string, limit int) ([]TagCount, error) {
-	return s.store.GetAllTagsForSelection(filter, selected, limit)
+func (s *TagsService) GetAllTagsForSelection(filter string, selected []string, pageSize TagLimit) ([]TagCount, error) {
+	return s.store.GetAllTagsForSelection(filter, selected, pageSize)
 }
 
 func (s *TagsService) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {

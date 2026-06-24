@@ -4,6 +4,7 @@
 import { getPageByPath, Page } from '@/lib/api/pages'
 import { isPageNotFoundError } from '@/lib/api/errors'
 import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
+import type { RoutePath, WorkspaceID } from '@/lib/semanticTypes'
 import type { WikiNodeKind } from '@/lib/wikiPath'
 import { create } from 'zustand'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
@@ -12,15 +13,15 @@ interface ViewerState {
   error: string | null
   notFound: boolean
   page: Page | null
-  workspaceId: string | null
+  workspaceId: WorkspaceID | null
   activeRequestKey: string | null
   setError: (error: string | null) => void
   clear: () => void
   loadPageData: (
-    path: string,
-    fallbackPath?: string,
+    path: RoutePath,
+    fallbackPath?: RoutePath,
     kind?: WikiNodeKind,
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => Promise<void>
 }
 
@@ -40,10 +41,10 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       activeRequestKey: null,
     }),
   loadPageData: async (
-    path: string,
-    fallbackPath?: string,
+    path: RoutePath,
+    fallbackPath?: RoutePath,
     kind?: WikiNodeKind,
-    workspaceId?: string,
+    workspaceId?: WorkspaceID,
   ) => {
     if (!workspaceId) throw new Error('workspaceId is required')
     const requestKey = `${workspaceId}:${kind ?? ''}:${path}:${fallbackPath ?? ''}`

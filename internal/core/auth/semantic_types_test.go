@@ -9,5 +9,5 @@ import (
 func TestAuthUserIDUsesNeutralIdentityType(t *testing.T) {
 	t.Parallel()
 
-	var _ identity.UserID = NewUserIDUnchecked("user-1")
+	var _ identity.UserID = newFixtureUserID("user-1")
 }

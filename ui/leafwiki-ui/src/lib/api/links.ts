@@ -1,18 +1,19 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
+import type { PageID, WorkspaceID } from '../semanticTypes'
 
 export type Backlink = {
-  from_page_id: string
+  from_page_id: PageID
   from_path: string
   from_kind: 'page' | 'section'
-  to_page_id: string
+  to_page_id: PageID
   from_title: string
   broken: boolean
 }
 
 export type OutgoingLink = {
-  from_page_id: string
-  to_page_id: string
+  from_page_id: PageID
+  to_page_id: PageID
   to_path: string
   to_kind: 'page' | 'section' | 'unknown'
   to_page_title: string
@@ -35,8 +36,8 @@ export type LinkStatusResult = {
 }
 
 export async function fetchLinkStatus(
-  pageId: string,
-  workspaceId: string,
+  pageId: PageID,
+  workspaceId: WorkspaceID,
 ): Promise<LinkStatusResult> {
   if (!pageId) throw new Error('Page ID is required')
   return (await fetchWithAuth(

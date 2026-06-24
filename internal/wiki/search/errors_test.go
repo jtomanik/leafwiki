@@ -40,7 +40,7 @@ func TestRespondWithSearchError_InternalErrorIsSanitized(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 
-	if got, want := rec.Body.String(), `{"error":{"code":"search_internal_error","messageId":"errors.search.internal_error","message":"Failed to perform search","template":"failed to perform search"}}`; got != want {
+	if got, want := rec.Body.String(), `{"error":{"code":"search_internal_error","messageId":"errors.search.internal_error","message":"Failed to perform search","template":"Failed to perform search"}}`; got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
 }

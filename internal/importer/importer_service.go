@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -20,7 +21,7 @@ type ImporterService struct {
 	planStore               *PlanStore
 	extractor               *ZipExtractor
 	logger                  *slog.Logger
-	assetMaxUploadSizeBytes int64
+	assetMaxUploadSizeBytes shared.MaxBytes
 	workspaceBaseDir        string
 	markdownLinkRootPrefix  string
 }
@@ -43,17 +44,17 @@ type CurrentPlanState struct {
 
 // SetAssetMaxUploadSizeBytes overrides the asset upload size limit after construction.
 // Values <= 0 are ignored.
-func (is *ImporterService) SetAssetMaxUploadSizeBytes(n int64) {
+func (is *ImporterService) SetAssetMaxUploadSizeBytes(n shared.MaxBytes) {
 	if n > 0 {
 		is.assetMaxUploadSizeBytes = n
 	}
 }
 
-func NewImporterService(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes int64) *ImporterService {
+func NewImporterService(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes shared.MaxBytes) *ImporterService {
 	return NewImporterServiceWithOptions(planner, planStore, workspaceBaseDir, assetMaxUploadSizeBytes, ImporterServiceOptions{})
 }
 
-func NewImporterServiceWithOptions(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes int64, opts ImporterServiceOptions) *ImporterService {
+func NewImporterServiceWithOptions(planner *Planner, planStore *PlanStore, workspaceBaseDir string, assetMaxUploadSizeBytes shared.MaxBytes, opts ImporterServiceOptions) *ImporterService {
 	if assetMaxUploadSizeBytes <= 0 {
 		assetMaxUploadSizeBytes = assets.DefaultMaxUploadSizeBytes
 	}
@@ -225,7 +226,7 @@ func FindMarkdownEntries(sourceBasePath string) ([]ImportMDFile, error) {
 		}
 
 		out = append(out, ImportMDFile{
-			SourcePath: tree.NewWorkspaceSourcePathUnchecked(filepath.ToSlash(rel)),
+			SourcePath: tree.WorkspaceSourcePathFromString(filepath.ToSlash(rel)),
 		})
 		return nil
 	})
@@ -329,7 +330,7 @@ func (is *ImporterService) executeStoredPlan(sp *StoredPlan) (*ExecutionResult, 
 			return is.planStore.IsCancelRequested(sp.Plan.ID)
 		}).
 		WithResumeState(sp.ProcessedItems, sp.ExecutionResult)
-	return exec.Execute(tree.NewUserIDUnchecked(sp.ExecutionUserID))
+	return exec.Execute(tree.UserIDFromString(sp.ExecutionUserID))
 }
 
 func (is *ImporterService) cleanupWorkspace(workspaceRoot string) {

@@ -7,6 +7,7 @@ import {
   buildWorkspaceViewPath,
   splitWorkspaceRoute,
 } from '@/lib/workspaceRoute'
+import { asRoutePath } from '@/lib/semanticTypes'
 import {
   browserRoutePathForWikiNode,
   getWikiTargetRoutePath,
@@ -82,7 +83,12 @@ export default function PageEditor() {
   useEffect(() => {
     if (!path) return
     const lookup = wikiPageLookupInputForBrowserRoute(pathname)
-    loadPageData(lookup.path, lookup.fallbackPath, lookup.kind, workspaceId)
+    loadPageData(
+      asRoutePath(lookup.path),
+      lookup.fallbackPath ? asRoutePath(lookup.fallbackPath) : undefined,
+      lookup.kind,
+      workspaceId,
+    )
   }, [path, pathname, loadPageData, workspaceId])
 
   useEffect(() => {
@@ -156,7 +162,10 @@ export default function PageEditor() {
                     if (overwriteLocalized?.code === 'page_version_conflict') {
                       toast.error(
                         'The page was modified again while saving. Please reload the page and re-apply your changes.',
-                        { duration: 8000 },
+                        {
+                          duration: 8000,
+                          messageId: 'ui.toast.page.save_conflict_retry',
+                        },
                       )
                     } else {
                       const overwriteMapped = mapApiError(

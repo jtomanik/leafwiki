@@ -6,7 +6,13 @@ import { restoreRevision, type Revision } from '@/lib/api/revisions'
 import { formatRelativeTime } from '@/lib/formatDate'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildHistoryUrl } from '@/lib/routePath'
-import { asPageID, asRevisionID, asWorkspaceID } from '@/lib/semanticTypes'
+import {
+  asPageID,
+  asRevisionID,
+  asWorkspaceID,
+  type PageID,
+  type WorkspaceID,
+} from '@/lib/semanticTypes'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
 import { useTreeStore } from '@/stores/tree'
@@ -38,8 +44,8 @@ import {
 import { buildLineDiff } from './revisionDiff'
 
 export type PageHistoryContentProps = {
-  pageId: string
-  workspaceId: string
+  pageId: PageID
+  workspaceId: WorkspaceID
   pageTitle: string
   pageSlug?: string
   testidPrefix?: string
@@ -433,7 +439,9 @@ export function PageHistoryContent({
           state: createNavigationVisitState(),
         },
       )
-      toast.success('Document version restored')
+      toast.success('Document version restored', {
+        messageId: 'ui.toast.revision.restored',
+      })
     } catch (err) {
       const mapped = mapApiError(err, 'Failed to restore revision')
       toast.error(mapped.message)

@@ -31,6 +31,7 @@ import (
 	corebranding "github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	"github.com/perber/wiki/internal/core/shared"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tools"
 	"github.com/perber/wiki/internal/frontd"
@@ -395,7 +396,7 @@ func handleStartupPositionalCommand(args []string, agentHookRequested bool, data
 		printUsage()
 		return true
 	default:
-		fmt.Printf("Unknown command: %s\n\n", args[0])
+		fmt.Printf("%s\n\n", localization.English.Render(localization.MessageIDCLIStatusUnknownCommand, "", args[0]).Message)
 		printUsage()
 		return true
 	}
@@ -410,8 +411,8 @@ func resetAdminPasswordCommand(dataDir string) {
 	if err != nil {
 		fail(localization.MessageIDCLIErrorPasswordResetFailed, "error", err)
 	}
-	fmt.Println("Admin password reset successfully.")
-	fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
+	fmt.Println(localization.English.Render(localization.MessageIDCLIStatusAdminPasswordReset, "").Message)
+	fmt.Println(localization.English.Render(localization.MessageIDCLIStatusAdminPasswordValue, "", user.Username, user.Password).Message)
 }
 
 func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serviceModeRequested bool, transports mcpTransports, dataDir string) leafwikiRuntimeConfig {
@@ -1296,13 +1297,13 @@ func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath 
 			return desc, nil
 		}
 		if raw, err := os.ReadFile(errorPath); err == nil && len(raw) > 0 {
-			if startupErr.Message == "" {
+			if startupErr.RenderedMessage == "" {
 				startupErr = parseProjectDaemonStartupError(raw)
 			}
-			if startupErr.Message != "" && !startupErr.IsLock() {
+			if startupErr.RenderedMessage != "" && !startupErr.IsLock() {
 				return nil, formatProjectDaemonStartupError(startupErr)
 			}
-			if startupErr.Message != "" && startupErr.IsLock() {
+			if startupErr.RenderedMessage != "" && startupErr.IsLock() {
 				disjointRootOwner, lockErr := projectDaemonDataLockFreeRootLockHeld(ownerCfg.DataDir, ownerCfg.RootDir)
 				if lockErr != nil {
 					lastErr = lockErr
@@ -1316,7 +1317,7 @@ func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath 
 			if errors.Is(ctx.Err(), context.Canceled) {
 				return nil, ctx.Err()
 			}
-			if startupErr.Message != "" {
+			if startupErr.RenderedMessage != "" {
 				return nil, formatProjectDaemonStartupError(startupErr)
 			}
 			if lastErr != nil {
@@ -1334,8 +1335,9 @@ const (
 )
 
 type projectDaemonStartupError struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
+	Kind            string                 `json:"kind"`
+	MessageID       sharederrors.MessageID `json:"messageId,omitempty"`
+	RenderedMessage string                 `json:"message"`
 }
 
 func (e projectDaemonStartupError) IsLock() bool {
@@ -1345,10 +1347,13 @@ func (e projectDaemonStartupError) IsLock() bool {
 func parseProjectDaemonStartupError(raw []byte) projectDaemonStartupError {
 	trimmed := strings.TrimSpace(string(raw))
 	var structured projectDaemonStartupError
-	if err := json.Unmarshal(raw, &structured); err == nil && strings.TrimSpace(structured.Message) != "" {
-		structured.Message = strings.TrimSpace(structured.Message)
+	if err := json.Unmarshal(raw, &structured); err == nil && strings.TrimSpace(structured.RenderedMessage) != "" {
+		structured.RenderedMessage = strings.TrimSpace(structured.RenderedMessage)
 		if structured.Kind == "" {
 			structured.Kind = projectDaemonStartupErrorKindStartup
+		}
+		if structured.MessageID == "" {
+			structured.MessageID = localization.MessageIDCLIErrorProjectDaemonFailed
 		}
 		return structured
 	}
@@ -1356,14 +1361,18 @@ func parseProjectDaemonStartupError(raw []byte) projectDaemonStartupError {
 	if isLegacyProjectDaemonLockStartupMessage(trimmed) {
 		kind = projectDaemonStartupErrorKindLock
 	}
-	return projectDaemonStartupError{Kind: kind, Message: trimmed}
+	return projectDaemonStartupError{
+		Kind:            kind,
+		MessageID:       localization.MessageIDCLIErrorProjectDaemonFailed,
+		RenderedMessage: trimmed,
+	}
 }
 
 func formatProjectDaemonStartupError(startupErr projectDaemonStartupError) error {
 	if startupErr.IsLock() {
-		return fmt.Errorf("project is locked but no attachable daemon was found: %s", startupErr.Message)
+		return fmt.Errorf("project is locked but no attachable daemon was found: %s", startupErr.RenderedMessage)
 	}
-	return fmt.Errorf("project daemon failed to start: %s", startupErr.Message)
+	return fmt.Errorf("project daemon failed to start: %s", startupErr.RenderedMessage)
 }
 
 func writeProjectDaemonStartupError(path string, err error) {
@@ -1374,7 +1383,11 @@ func writeProjectDaemonStartupError(path string, err error) {
 	if locking.IsLockHeld(err) {
 		kind = projectDaemonStartupErrorKindLock
 	}
-	raw, marshalErr := json.Marshal(projectDaemonStartupError{Kind: kind, Message: err.Error()})
+	raw, marshalErr := json.Marshal(projectDaemonStartupError{
+		Kind:            kind,
+		MessageID:       localization.MessageIDCLIErrorProjectDaemonFailed,
+		RenderedMessage: err.Error(),
+	})
 	if marshalErr != nil {
 		raw = []byte(err.Error())
 	}
@@ -2435,7 +2448,7 @@ func (m *federatedWorkspaceManager) monitorWorkspaceProcess(workspaceID workspac
 func (m *federatedWorkspaceManager) removeDescriptors(paths []string) {
 	for _, path := range paths {
 		if err := m.removeDescriptor(path); err != nil {
-			fmt.Fprintf(os.Stderr, "leafwiki: remove workspace descriptor %s: %v\n", path, err)
+			fmt.Fprintln(os.Stderr, localization.English.Render(localization.MessageIDCLIStatusRemoveWorkspaceDescriptor, "", path, err.Error()).Message)
 		}
 	}
 }
@@ -3489,7 +3502,7 @@ func frontdMCPActorResolver(w *wiki.Wiki, cfg leafwikiRuntimeConfig) func(*http.
 		if w.UserService() == nil {
 			return projectdaemon.ActorContext{}, fmt.Errorf("authenticated MCP user service is unavailable")
 		}
-		user, err := w.UserService().GetUserByID(coreauth.NewUserIDUnchecked(tokenInfo.UserID))
+		user, err := w.UserService().GetUserByID(coreauth.UserIDFromString(tokenInfo.UserID))
 		if err != nil {
 			return projectdaemon.ActorContext{}, err
 		}
@@ -3523,7 +3536,7 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 		if err != nil {
 			return nil, "", err
 		}
-		user, err := w.UserService().GetUserByID(coreauth.NewUserIDUnchecked(info.UserID))
+		user, err := w.UserService().GetUserByID(coreauth.UserIDFromString(info.UserID))
 		if err != nil {
 			return nil, "", err
 		}
@@ -4564,14 +4577,14 @@ func validateMCPTransportOptions(opts mcpTransportOptions) error {
 		return nil
 	}
 	if opts.LogTarget == leaflogging.TargetStdout {
-		return fmt.Errorf("stdout is reserved for MCP STDIO")
+		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdoutReservedForMCPStdio, "").Message)
 	}
 	hasAPIKey := strings.TrimSpace(opts.APIKey) != ""
 	if opts.DisableAuth && hasAPIKey {
-		return fmt.Errorf("disabled auth and API-key STDIO identity cannot be combined")
+		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdioAuthAPIKeyConflict, "").Message)
 	}
 	if !opts.DisableAuth && !hasAPIKey {
-		return fmt.Errorf("native STDIO requires either disabled auth or an API key")
+		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdioAuthIdentityRequired, "").Message)
 	}
 	return nil
 }
@@ -4660,7 +4673,7 @@ func buildHTTPRouterOptions(in httpRouterOptionsInput) httpinternal.RouterOption
 		AuthDisabled:            in.authDisabled,
 		BasePath:                in.basePath,
 		MarkdownLinkRootPrefix:  in.markdownLinkRootPrefix,
-		MaxAssetUploadSizeBytes: in.maxAssetUploadSize,
+		MaxAssetUploadSizeBytes: shared.MaxBytes(in.maxAssetUploadSize),
 		EnableWorkspaceSync:     in.enableWorkspaceSync,
 		EnableLinkRefactor:      in.enableLinkRefactor,
 		MCPEnabled:              in.enableMCP,

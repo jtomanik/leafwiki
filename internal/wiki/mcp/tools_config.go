@@ -24,7 +24,7 @@ func configOutputForOptions(opts httpinternal.RouterOptions) configOutput {
 		AuthDisabled:            opts.AuthDisabled,
 		BasePath:                opts.BasePath,
 		MarkdownLinkRootPrefix:  opts.MarkdownLinkRootPrefix,
-		MaxAssetUploadSizeBytes: opts.MaxAssetUploadSizeBytes,
+		MaxAssetUploadSizeBytes: int64(opts.MaxAssetUploadSizeBytes),
 		EnableWorkspaceSync:     opts.EnableWorkspaceSync,
 		EnableLinkRefactor:      opts.EnableLinkRefactor,
 		HTTPRemoteUserEnabled:   opts.HTTPRemoteUser.Enabled,

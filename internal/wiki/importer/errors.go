@@ -27,7 +27,7 @@ type ImporterErrorDetail = sharederrors.LocalizedErrorDetail
 
 func respondWithImporterStatusError(c *gin.Context, status int, code sharederrors.ErrorCode, message, template string, args ...string) {
 	c.JSON(status, ImporterErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(code, args...),
 	})
 }
 

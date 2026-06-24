@@ -2014,10 +2014,10 @@ for the page edited at ${new Date().toISOString()}
       content: `# ${sectionTitle}\n\nCold README-backed section content`,
     });
 
-    let releaseTreeRequest: (() => void) | null = null;
+    const treeRequestGate: { release?: () => void } = {};
     await page.route('**/api/tree', async (route) => {
       await new Promise<void>((resolve) => {
-        releaseTreeRequest = resolve;
+        treeRequestGate.release = resolve;
       });
       await route.continue();
     });
@@ -2026,7 +2026,7 @@ for the page edited at ${new Date().toISOString()}
     const notfoundPage = new NotFoundPage(page);
     await notfoundPage.expectVisible();
     await expect(page.locator('article>h1')).toHaveCount(0);
-    releaseTreeRequest?.();
+    treeRequestGate.release?.();
   });
 
   test('direct-route-lowercase-readme-does-not-fallback-to-section', async ({ page }) => {

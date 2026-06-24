@@ -85,7 +85,9 @@ export function MCPAPIKeysDialog({
     } catch (err) {
       console.warn(err)
       setLoadError('Could not load API keys.')
-      toast.error('Error loading API keys')
+      toast.error('Error loading API keys', {
+        messageId: 'ui.toast.mcp_api_keys.load_failed',
+      })
     } finally {
       setLoadingKeys(false)
     }
@@ -117,7 +119,9 @@ export function MCPAPIKeysDialog({
       setName('')
       setCurrentPassword('')
       setFieldErrors({})
-      toast.success('API key created')
+      toast.success('API key created', {
+        messageId: 'ui.toast.mcp_api_keys.created',
+      })
       return false
     } catch (err) {
       console.warn(err)
@@ -135,9 +139,13 @@ export function MCPAPIKeysDialog({
           }
         }
         setFieldErrors(next)
-        toast.error('Validation failed')
+        toast.error('Validation failed', {
+          messageId: 'ui.toast.validation.failed',
+        })
       } else {
-        toast.error('Error creating API key')
+        toast.error('Error creating API key', {
+          messageId: 'ui.toast.mcp_api_keys.create_failed',
+        })
       }
       return false
     } finally {
@@ -154,10 +162,14 @@ export function MCPAPIKeysDialog({
         await revokeUserMCPAPIKey(asUserID(owner.id), keyId)
       }
       setKeys((prev) => prev.filter((key) => key.id !== keyId))
-      toast.success('API key revoked')
+      toast.success('API key revoked', {
+        messageId: 'ui.toast.mcp_api_keys.revoked',
+      })
     } catch (err) {
       console.warn(err)
-      toast.error('Error revoking API key')
+      toast.error('Error revoking API key', {
+        messageId: 'ui.toast.mcp_api_keys.revoke_failed',
+      })
     } finally {
       setRevokingKeyId(null)
     }
@@ -165,10 +177,14 @@ export function MCPAPIKeysDialog({
 
   const handleCopySecret = () => {
     if (!secret || !copy(secret)) {
-      toast.error('Could not copy API key')
+      toast.error('Could not copy API key', {
+        messageId: 'ui.toast.mcp_api_keys.copy_failed',
+      })
       return
     }
-    toast.success('API key copied')
+    toast.success('API key copied', {
+      messageId: 'ui.toast.mcp_api_keys.copied',
+    })
   }
 
   return (
@@ -246,7 +262,10 @@ export function MCPAPIKeysDialog({
           </div>
         )}
         {!canCreate && (
-          <p className="text-muted text-sm">
+          <p
+            className="text-muted text-sm"
+            data-testid="mcp-api-keys-dialog-remote-user-notice"
+          >
             Creating keys is unavailable for HTTP remote-user sign-in.
           </p>
         )}

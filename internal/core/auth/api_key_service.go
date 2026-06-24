@@ -74,7 +74,7 @@ func (s *APIKeyService) CreateAPIKey(userID UserID, name string, createdByUserID
 	}
 	raw := APIKeyPrefix + id + "_" + secretPart
 	key := &APIKey{
-		ID:              NewAPIKeyIDUnchecked(id),
+		ID:              APIKeyIDFromString(id),
 		UserID:          userID,
 		Name:            name,
 		Prefix:          APIKeyPrefix + id,
@@ -193,7 +193,7 @@ func parseAPIKeyID(raw string) (APIKeyID, error) {
 	if !ok || id == "" || secret == "" {
 		return "", fmt.Errorf("malformed api key")
 	}
-	return NewAPIKeyIDUnchecked(id), nil
+	return APIKeyIDFromString(id), nil
 }
 
 func hashAPIKey(raw string) string {

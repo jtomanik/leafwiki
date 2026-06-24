@@ -22,6 +22,8 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/storer"
 	gitstorage "github.com/go-git/go-git/v6/storage"
 	"github.com/go-git/go-git/v6/storage/filesystem"
+
+	"github.com/perber/wiki/internal/core/identity"
 )
 
 type Reason string
@@ -96,7 +98,7 @@ type Commit struct {
 }
 
 type ListRequest struct {
-	Cursor string
+	Cursor identity.CommitHash
 	Limit  int
 }
 
@@ -572,7 +574,7 @@ func (s *Store) ListCommits(ctx context.Context, req ListRequest) ([]Commit, err
 		limit = 50
 	}
 	commits := make([]Commit, 0, limit)
-	cursor := strings.TrimSpace(req.Cursor)
+	cursor := strings.TrimSpace(fmt.Sprint(req.Cursor))
 	foundCursor := cursor == ""
 	err := s.ForEachCommit(ctx, func(commit Commit) (bool, error) {
 		if !foundCursor {
@@ -628,32 +630,32 @@ func (s *Store) ForEachCommit(ctx context.Context, visit func(Commit) (bool, err
 	return nil
 }
 
-func (s *Store) GetCommit(ctx context.Context, commitHash string) (Commit, error) {
+func (s *Store) GetCommit(ctx context.Context, commitHash identity.CommitHash) (Commit, error) {
 	if err := ctx.Err(); err != nil {
 		return Commit{}, err
 	}
-	commit, err := s.repo.CommitObject(plumbing.NewHash(commitHash))
+	commit, err := s.repo.CommitObject(plumbing.NewHash(fmt.Sprint(commitHash)))
 	if err != nil {
 		return Commit{}, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
 	return commitFromObject(commit), nil
 }
 
-func (s *Store) ChangedMarkdownPaths(ctx context.Context, commitHash string) ([]string, error) {
+func (s *Store) ChangedMarkdownPaths(ctx context.Context, commitHash identity.CommitHash) ([]string, error) {
 	paths, _, err := s.changedMarkdownEntries(ctx, commitHash)
 	return paths, err
 }
 
-func (s *Store) ChangedMarkdownContents(ctx context.Context, commitHash string) (map[string]string, error) {
+func (s *Store) ChangedMarkdownContents(ctx context.Context, commitHash identity.CommitHash) (map[string]string, error) {
 	_, contents, err := s.changedMarkdownEntries(ctx, commitHash)
 	return contents, err
 }
 
-func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash string) ([]string, map[string]string, error) {
+func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.CommitHash) ([]string, map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	commit, err := s.repo.CommitObject(plumbing.NewHash(commitHash))
+	commit, err := s.repo.CommitObject(plumbing.NewHash(fmt.Sprint(commitHash)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
@@ -785,7 +787,7 @@ func parseCommitMessage(message string) (string, map[string]string, []ActorID) {
 	return title, trailers, actorIDs
 }
 
-func (s *Store) RestoreWorkspace(ctx context.Context, commitHash string, req CommitRequest) (*Commit, error) {
+func (s *Store) RestoreWorkspace(ctx context.Context, commitHash identity.CommitHash, req CommitRequest) (*Commit, error) {
 	files, err := s.FilesAt(ctx, commitHash)
 	if err != nil {
 		return nil, err
@@ -828,11 +830,11 @@ func (s *Store) RestoreWorkspace(ctx context.Context, commitHash string, req Com
 	return s.Capture(ctx, req)
 }
 
-func (s *Store) RestoreDocument(ctx context.Context, relPath string, commitHash string, req CommitRequest) (*Commit, error) {
+func (s *Store) RestoreDocument(ctx context.Context, relPath string, commitHash identity.CommitHash, req CommitRequest) (*Commit, error) {
 	return s.RestoreDocumentToPath(ctx, relPath, relPath, commitHash, req)
 }
 
-func (s *Store) RestoreDocumentToPath(ctx context.Context, targetRelPath string, sourceRelPath string, commitHash string, req CommitRequest) (*Commit, error) {
+func (s *Store) RestoreDocumentToPath(ctx context.Context, targetRelPath string, sourceRelPath string, commitHash identity.CommitHash, req CommitRequest) (*Commit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -875,11 +877,11 @@ func (s *Store) RestoreDocumentContentToPath(ctx context.Context, targetRelPath 
 	return s.Capture(ctx, req)
 }
 
-func (s *Store) fileContentAt(ctx context.Context, commitHash string, relPath string) (string, error) {
+func (s *Store) fileContentAt(ctx context.Context, commitHash identity.CommitHash, relPath string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	hash := plumbing.NewHash(commitHash)
+	hash := plumbing.NewHash(fmt.Sprint(commitHash))
 	commit, err := s.repo.CommitObject(hash)
 	if err != nil {
 		return "", fmt.Errorf("load commit %s: %w", commitHash, err)
@@ -899,11 +901,11 @@ func (s *Store) fileContentAt(ctx context.Context, commitHash string, relPath st
 	return content, nil
 }
 
-func (s *Store) FilesAt(ctx context.Context, commitHash string) (map[string]string, error) {
+func (s *Store) FilesAt(ctx context.Context, commitHash identity.CommitHash) (map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	hash := plumbing.NewHash(commitHash)
+	hash := plumbing.NewHash(fmt.Sprint(commitHash))
 	commit, err := s.repo.CommitObject(hash)
 	if err != nil {
 		return nil, fmt.Errorf("load commit %s: %w", commitHash, err)

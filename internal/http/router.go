@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/shared"
 	auth_middleware "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
 )
@@ -93,7 +94,7 @@ type RouterOptions struct {
 	AuthDisabled            bool                 // Whether authentication is disabled
 	BasePath                string               // URL prefix when served behind a reverse proxy (e.g. "/wiki")
 	MarkdownLinkRootPrefix  string               // Repository-root prefix for absolute Markdown links
-	MaxAssetUploadSizeBytes int64                // Maximum allowed size in bytes for asset uploads
+	MaxAssetUploadSizeBytes shared.MaxBytes      // Maximum allowed size in bytes for asset uploads
 	EnableWorkspaceSync     bool                 // Whether workspace sync capability is exposed to clients
 	EnableLinkRefactor      bool                 // Whether the link refactoring feature is enabled in the frontend
 	MCPEnabled              bool                 // Whether the local MCP endpoint is enabled

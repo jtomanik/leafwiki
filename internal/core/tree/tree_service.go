@@ -270,17 +270,17 @@ func collectRelativeFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func filesHaveSameContent(sourcePath string, targetPath string) (bool, error) {
-	sourceData, err := os.ReadFile(sourcePath)
+func filesHaveSameContent(sourceFile string, targetFile string) (bool, error) {
+	sourceData, err := os.ReadFile(sourceFile)
 	if err != nil {
-		return false, fmt.Errorf("read legacy content path %s: %w", sourcePath, err)
+		return false, fmt.Errorf("read legacy content path %s: %w", sourceFile, err)
 	}
-	targetData, err := os.ReadFile(targetPath)
+	targetData, err := os.ReadFile(targetFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
-		return false, fmt.Errorf("read configured legacy content path %s: %w", targetPath, err)
+		return false, fmt.Errorf("read configured legacy content path %s: %w", targetFile, err)
 	}
 	return string(sourceData) == string(targetData), nil
 }
@@ -363,7 +363,7 @@ func legacyTargetMatchesNode(path legacyContentPath) (bool, error) {
 		return false, fmt.Errorf("load configured legacy content path %s: %w", path.targetFile, err)
 	}
 	metadata := mdFile.GetMetadata()
-	return NewPageIDUnchecked(strings.TrimSpace(metadata.Page.ID)) == path.nodeID &&
+	return PageIDFromString(strings.TrimSpace(metadata.Page.ID)) == path.nodeID &&
 		strings.TrimSpace(metadata.Page.Title) == strings.TrimSpace(path.nodeTitle), nil
 }
 
@@ -617,7 +617,7 @@ func (t *TreeService) createNodeLocked(userID UserID, parentID *PageID, title st
 		if err != nil {
 			return nil, fmt.Errorf("could not generate unique ID: %w", err)
 		}
-		id = NewPageIDUnchecked(rawID)
+		id = PageIDFromString(rawID)
 	} else if existing := t.getNodeByIDLocked(id); existing != nil {
 		return nil, fmt.Errorf("page id already exists: %s", id)
 	}

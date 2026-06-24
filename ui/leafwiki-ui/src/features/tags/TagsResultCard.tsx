@@ -2,6 +2,7 @@ import { TaggedPage } from '@/lib/api/tags'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { buildViewUrl } from '@/lib/routePath'
 import { splitWorkspaceRoute } from '@/lib/workspaceRoute'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import {
   browserRoutePathForWikiNode,
   getWikiTargetRoutePath,
@@ -16,7 +17,7 @@ import { usePageEditorStore } from '../editor/pageEditorStore'
 type TagsResultCardProps = {
   item: TaggedPage
   activeTags: string[]
-  workspaceId?: string
+  workspaceId?: WorkspaceID
   isSelected?: boolean
   onMouseEnter?: () => void
   onFocus?: () => void

@@ -66,7 +66,7 @@ func (b *LinkService) IndexAllPages() error {
 			return errs[i]
 		}
 		links := extractLinksFromMarkdown(page.Content)
-		targets := resolveTargetLinksWithIndex(b.treeService, markdownIndex, page.CalculatePath(), page.Kind, links)
+		targets := resolveTargetLinksWithIndex(b.treeService, markdownIndex, page.CalculateRoutePath(), page.Kind, links)
 		if err := b.store.AddLinks(page.ID, page.Title, targets); err != nil {
 			return err
 		}
@@ -125,7 +125,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
-			ToPath:     pageRoutePath.WikiPath(),
+			ToPath:     pageRoutePath,
 			ToKind:     string(page.Kind),
 			Targets:    targets,
 		})
@@ -138,8 +138,8 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 	return b.store.ReplaceLinksAndHeal(updates)
 }
 
-func (b *LinkService) GetLinkStatusForPage(pageID tree.PageID, pagePath string) (*LinkStatusResult, error) {
-	pagePath = normalizeWikiPath(pagePath)
+func (b *LinkService) GetLinkStatusForPage(pageID tree.PageID, pagePath tree.RoutePath) (*LinkStatusResult, error) {
+	pagePath = tree.RoutePathFromString(normalizeWikiPath(pagePath.WikiPath())).Clean()
 	pageKind := tree.NodeKindPage
 	if b.treeService != nil {
 		if page, err := b.treeService.GetPage(pageID); err == nil && page != nil {
@@ -196,7 +196,7 @@ func (b *LinkService) GetLinkStatusForPage(pageID tree.PageID, pagePath string) 
 func (b *LinkService) UpdateLinksForPage(page *tree.Page, content string) error {
 	links := extractLinksFromMarkdown(content)
 
-	targets := resolveTargetLinksWithIndex(b.treeService, b.markdownLinkIndexForTree(), page.CalculatePath(), page.Kind, links)
+	targets := resolveTargetLinksWithIndex(b.treeService, b.markdownLinkIndexForTree(), page.CalculateRoutePath(), page.Kind, links)
 
 	err := b.store.AddLinks(page.ID, page.Title, targets)
 	if err != nil {
@@ -216,7 +216,7 @@ func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 		if markdownIndex == nil {
 			markdownIndex = b.markdownLinkIndexForTree()
 		}
-		pagePath := normalizeWikiPath(page.CalculatePath())
+		pagePath := page.CalculateRoutePath()
 		links := extractLinksFromMarkdown(page.Content)
 		targets := resolveTargetLinksWithIndex(b.treeService, markdownIndex, pagePath, page.Kind, links)
 		updates = append(updates, PageLinkUpdate{
@@ -246,14 +246,14 @@ func (b *LinkService) MarkIncomingLinksBrokenForPage(pageID tree.PageID) error {
 }
 
 // MarkLinksBrokenForPath marks links pointing to an exact path as broken.
-func (b *LinkService) MarkLinksBrokenForPath(toPath string) error {
-	toPath = normalizeWikiPath(toPath)
+func (b *LinkService) MarkLinksBrokenForPath(toPath tree.RoutePath) error {
+	toPath = tree.RoutePathFromString(normalizeWikiPath(toPath.WikiPath())).Clean()
 	return b.store.MarkLinksBrokenForPath(toPath)
 }
 
 // MarkLinksBrokenForPathAndKind marks links pointing to an exact path and kind as broken.
-func (b *LinkService) MarkLinksBrokenForPathAndKind(toPath string, toKind tree.NodeKind) error {
-	toPath = normalizeWikiPath(toPath)
+func (b *LinkService) MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind tree.NodeKind) error {
+	toPath = tree.RoutePathFromString(normalizeWikiPath(toPath.WikiPath())).Clean()
 	return b.store.MarkLinksBrokenForPathAndKind(toPath, string(toKind))
 }
 
@@ -299,14 +299,14 @@ func rewriteResolvedTargets(currentPath tree.RoutePath, sourceKind tree.NodeKind
 
 	paths := make([]string, 0, len(outgoings))
 	for _, outgoing := range outgoings {
-		targetPath := tree.NewRoutePathUnchecked(outgoing.ToPath).Clean()
+		targetPath := outgoing.ToPath.Clean()
 		if rewritten, ok := applyRewriteRulesForKind(targetPath, outgoing.ToKind, rules); ok {
 			targetPath = rewritten
 		}
 		paths = append(paths, storedTargetMarkdownHref(targetPath, outgoing.ToKind))
 	}
 
-	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath.WikiPath(), sourceKind, paths)
+	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath, sourceKind, paths)
 }
 
 func storedTargetMarkdownHref(targetPath tree.RoutePath, targetKind string) string {

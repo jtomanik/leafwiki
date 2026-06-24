@@ -1,5 +1,6 @@
 import TreeView from '@/features/tree/TreeView'
 import { HOME_WORKSPACE_ID } from '@/lib/api/workspaces'
+import type { WorkspaceID } from '@/lib/semanticTypes'
 import { buildWorkspaceViewPath } from '@/lib/workspaceRoute'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
@@ -36,12 +37,12 @@ export default function WorkspaceAccordion() {
           },
         ]
 
-  const activateWorkspace = (workspaceId: string) => {
+  const activateWorkspace = (workspaceId: WorkspaceID) => {
     setActiveWorkspaceId(workspaceId)
     navigate(buildWorkspaceViewPath(workspaceId, '/'))
   }
 
-  const toggleWorkspace = async (workspaceId: string) => {
+  const toggleWorkspace = async (workspaceId: WorkspaceID) => {
     try {
       await toggleWorkspaceExpanded(workspaceId)
     } catch (err) {

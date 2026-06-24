@@ -23,7 +23,7 @@ func NewFieldError(field, message string) *FieldError {
 		Field:     field,
 		Code:      FieldValidationErrorCode,
 		MessageID: FieldValidationErrorMessageID,
-		Message:   message,
+		Message:   renderMessage(FieldValidationErrorMessageID, message),
 	}
 }
 

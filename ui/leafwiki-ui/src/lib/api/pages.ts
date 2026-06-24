@@ -1,6 +1,7 @@
 import { fetchWithAuth } from './auth'
 import { workspaceApiPath } from './workspaces'
 import type {
+  MessageID,
   PageID,
   PageVersion,
   RoutePath,
@@ -63,12 +64,17 @@ export type PermalinkTarget = {
 
 export type PageRefactorKind = 'rename' | 'move'
 
+export type PageRefactorWarning = {
+  messageId: MessageID
+  message: string
+}
+
 export type PageRefactorAffectedPage = {
   fromPageId: PageID
   fromTitle: string
   fromPath: RoutePath
   matchedPaths: string[]
-  warnings: string[]
+  warnings: PageRefactorWarning[]
 }
 
 export type PageRefactorPreview = {
@@ -81,7 +87,7 @@ export type PageRefactorPreview = {
     affectedPages: number
     matchedLinks: number
   }
-  warnings: string[]
+  warnings: PageRefactorWarning[]
 }
 
 export async function fetchTree(workspaceId: WorkspaceID): Promise<PageNode> {

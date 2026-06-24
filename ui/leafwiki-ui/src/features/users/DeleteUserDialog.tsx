@@ -20,7 +20,9 @@ export function DeleteUserDialog({ userId, username }: DeleteUserDialogProps) {
     setLoading(true)
     try {
       await deleteUser(userId)
-      toast.success('User deleted successfully')
+      toast.success('User deleted successfully', {
+        messageId: 'ui.toast.user.deleted',
+      })
       return true // Close the dialog
     } catch (err) {
       console.error('Error deleting user:', err)

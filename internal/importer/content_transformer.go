@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -30,7 +31,7 @@ type assetUploadKey struct {
 
 type contentTransformer struct {
 	sourceBasePath         string
-	assetMaxBytes          int64
+	assetMaxBytes          shared.MaxBytes
 	markdownLinkRootPrefix string
 	slugger                *tree.SlugService
 	pagesBySource          map[string]importTarget
@@ -47,11 +48,11 @@ var importerMarkdownParser = goldmark.New()
 
 // newContentTransformer precomputes source->target lookups from the import plan.
 // We resolve links against planned imports so we only rewrite destinations we can actually create.
-func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxBytes int64) *contentTransformer {
+func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxBytes shared.MaxBytes) *contentTransformer {
 	return newContentTransformerWithOptions(plan, sourceBasePath, assetMaxBytes, ContentTransformerOptions{})
 }
 
-func newContentTransformerWithOptions(plan *PlanResult, sourceBasePath string, assetMaxBytes int64, opts ContentTransformerOptions) *contentTransformer {
+func newContentTransformerWithOptions(plan *PlanResult, sourceBasePath string, assetMaxBytes shared.MaxBytes, opts ContentTransformerOptions) *contentTransformer {
 	pagesBySource := make(map[string]importTarget, len(plan.Items))
 	pagesByBasename := make(map[string][]importTarget, len(plan.Items))
 	pagesBySuffix := make(map[string][]importTarget, len(plan.Items))
@@ -586,7 +587,7 @@ func (t *contentTransformer) resolveAndUploadAsset(
 		_ = file.Close()
 	}()
 
-	publicPath, err := wiki.UploadAsset(userID, page.ID, multipart.File(file), tree.NewAssetNameUnchecked(filepath.Base(assetAbs)), t.assetMaxBytes)
+	publicPath, err := wiki.UploadAsset(userID, page.ID, multipart.File(file), tree.AssetNameFromString(filepath.Base(assetAbs)), t.assetMaxBytes)
 	if err != nil {
 		return "", fmt.Errorf("upload asset %q: %w", assetAbs, err)
 	}
