@@ -180,5 +180,5 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		respondWithAssetError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAssetDeleteSuccess, "message": "asset deleted"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAssetDeleteSuccess, "message": apiSuccessMessage(MessageIDAssetDeleteSuccess)})
 }

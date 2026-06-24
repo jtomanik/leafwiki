@@ -160,6 +160,41 @@ func TestPresenceHeartbeatRouteReturnsStableErrorDetails(t *testing.T) {
 	}
 }
 
+func TestPresenceHeartbeatRouteReturnsStructuredInvalidRequestError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := NewWebPresenceRegistry(time.Minute, nil)
+	routes := NewRoutes(RoutesConfig{Registry: registry})
+	router := gin.New()
+	router.POST("/heartbeat", func(c *gin.Context) {
+		c.Set("user", &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor})
+		routes.handleHeartbeat(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/heartbeat", strings.NewReader(`{"sessionId":`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var body struct {
+		Error sharederrors.LocalizedErrorDetail `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if body.Error.Code != ErrCodePresenceInvalidRequest {
+		t.Fatalf("error.code = %q, want %q; body=%s", body.Error.Code, ErrCodePresenceInvalidRequest, rec.Body.String())
+	}
+	if body.Error.MessageID != "errors.presence.invalid_request" {
+		t.Fatalf("error.messageId = %q, want errors.presence.invalid_request", body.Error.MessageID)
+	}
+	if body.Error.Message != "Invalid presence request" {
+		t.Fatalf("error.message = %q, want catalog-rendered invalid request", body.Error.Message)
+	}
+}
+
 func TestWebPresenceRegistryBindsSessionIDToUser(t *testing.T) {
 	registry := NewWebPresenceRegistry(time.Minute, nil)
 	editor := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}

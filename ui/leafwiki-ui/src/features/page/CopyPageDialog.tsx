@@ -1,7 +1,7 @@
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { copyPage, NODE_KIND_PAGE, PageNode } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_COPY_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
 import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
@@ -31,7 +31,7 @@ export function CopyPageDialog({
   const [slugLoading, setSlugLoading] = useState<boolean>(false)
   const [slugTouched, setSlugTouched] = useState<boolean>(false)
   const [lastSlugTitle, setLastSlugTitle] = useState<string>('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const parentPath = useTreeStore(
     (s) => s.getPathById(targetParentID, workspaceId) || '',
   )
@@ -45,12 +45,12 @@ export function CopyPageDialog({
 
   const handleTitleChange = (val: string) => {
     setTitle(val)
-    setFieldErrors((prev) => ({ ...prev, title: '' }))
+    setFieldErrors((prev) => ({ ...prev, title: undefined }))
   }
 
   const handleSlugChange = useCallback((val: string) => {
     setSlug(val)
-    setFieldErrors((prev) => ({ ...prev, slug: '' }))
+    setFieldErrors((prev) => ({ ...prev, slug: undefined }))
   }, [])
 
   const resetForm = () => {

@@ -9,10 +9,15 @@ import (
 	corelinks "github.com/perber/wiki/internal/links"
 )
 
-var ErrLinkServiceUnavailable = sharederrors.NewLocalizedError(
+const (
+	linkServiceUnavailableMessage  = "Link service is unavailable"
+	linkServiceUnavailableTemplate = "link service is unavailable"
+)
+
+var ErrLinkServiceUnavailable = sharederrors.NewLocalizedErrorFromCodeWithFallback(
 	ErrCodeLinkUnavailable,
-	"Link service is unavailable",
-	"link service is unavailable",
+	linkServiceUnavailableMessage,
+	linkServiceUnavailableTemplate,
 	nil,
 )
 
@@ -42,12 +47,7 @@ func (uc *GetLinkStatusUseCase) Execute(_ context.Context, in GetLinkStatusInput
 	page, err := uc.tree.GetPage(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError(
-				ErrCodeLinkPageNotFound,
-				"Page not found",
-				"page not found",
-				err,
-			)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeLinkPageNotFound, err)
 		}
 		return nil, err
 	}

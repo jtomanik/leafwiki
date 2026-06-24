@@ -2,12 +2,12 @@ package pages
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/localization"
 )
 
 // Error codes for the pages domain.
@@ -52,18 +52,19 @@ const (
 )
 
 const (
-	MessageIDPageTitleRequired         sharederrors.MessageID = "validation.page.title_required"
-	MessageIDPageKindRequired          sharederrors.MessageID = "validation.page.kind_required"
-	MessageIDPageKindInvalid           sharederrors.MessageID = "validation.page.kind_invalid"
-	MessageIDPageSlugInvalid           sharederrors.MessageID = "validation.page.slug_invalid"
-	MessageIDPagePathRequired          sharederrors.MessageID = "validation.page.path_required"
-	MessageIDPagePathInvalid           sharederrors.MessageID = "validation.page.path_invalid"
-	MessageIDPageTagRequired           sharederrors.MessageID = "validation.page.tag_required"
-	MessageIDPageTagWhitespace         sharederrors.MessageID = "validation.page.tag_whitespace"
-	MessageIDPageTagDuplicate          sharederrors.MessageID = "validation.page.tag_duplicate"
-	MessageIDPagePropertyKeyRequired   sharederrors.MessageID = "validation.page.property_key_required"
-	MessageIDPagePropertyKeyWhitespace sharederrors.MessageID = "validation.page.property_key_whitespace"
-	MessageIDPagePropertyKeyReserved   sharederrors.MessageID = "validation.page.property_key_reserved"
+	MessageIDPageTitleRequired             sharederrors.MessageID = "validation.page.title_required"
+	MessageIDPageKindRequired              sharederrors.MessageID = "validation.page.kind_required"
+	MessageIDPageKindInvalid               sharederrors.MessageID = "validation.page.kind_invalid"
+	MessageIDPageSlugInvalid               sharederrors.MessageID = "validation.page.slug_invalid"
+	MessageIDPagePathRequired              sharederrors.MessageID = "validation.page.path_required"
+	MessageIDPagePathInvalid               sharederrors.MessageID = "validation.page.path_invalid"
+	MessageIDPageTagRequired               sharederrors.MessageID = "validation.page.tag_required"
+	MessageIDPageTagWhitespace             sharederrors.MessageID = "validation.page.tag_whitespace"
+	MessageIDPageTagDuplicate              sharederrors.MessageID = "validation.page.tag_duplicate"
+	MessageIDPagePropertyKeyRequired       sharederrors.MessageID = "validation.page.property_key_required"
+	MessageIDPagePropertyKeyWhitespace     sharederrors.MessageID = "validation.page.property_key_whitespace"
+	MessageIDPagePropertyKeyReserved       sharederrors.MessageID = "validation.page.property_key_reserved"
+	MessageIDPagePropertyKeyReservedPrefix sharederrors.MessageID = "validation.page.property_key_reserved_prefix"
 )
 
 const (
@@ -75,12 +76,7 @@ const (
 const pageValidationErrorCode = "validation_error"
 
 func newPageRootOperationError(operation string) *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(
-		ErrCodePageRootOperation,
-		fmt.Sprintf("cannot %s root page", operation),
-		"cannot %s root page",
-		nil, operation,
-	)
+	return sharederrors.NewLocalizedErrorFromCode(ErrCodePageRootOperation, nil, operation)
 }
 
 // PageErrorResponse is the structured JSON error body returned by page endpoints.
@@ -93,6 +89,10 @@ type PageErrorDetail = sharederrors.LocalizedErrorDetail
 
 func newPageErrorDetail(code sharederrors.ErrorCode, message, template string, args ...string) PageErrorDetail {
 	return sharederrors.NewLocalizedErrorDetail(code, message, template, args...)
+}
+
+func apiSuccessMessage(messageID sharederrors.MessageID) string {
+	return localization.English.Render(messageID, "").Message
 }
 
 // PageErrorDetailForError maps page-domain errors to the same localization-ready

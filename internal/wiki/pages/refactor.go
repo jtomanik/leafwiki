@@ -143,10 +143,10 @@ func (uc *PreviewPageRefactorUseCase) computeTargetPath(page *tree.Page, in Refa
 	case RefactorKindRename:
 		ve := sharederrors.NewValidationErrors()
 		if in.Title == "" {
-			ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
+			ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 		}
 		if err := in.Slug.Validate(); err != nil {
-			ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
+			ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid)
 		}
 		if ve.HasErrors() {
 			return "", ve
@@ -168,7 +168,7 @@ func (uc *PreviewPageRefactorUseCase) computeTargetPath(page *tree.Page, in Refa
 		return parentRoutePath.Child(page.Slug), nil
 
 	default:
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidRefactorKind, "Invalid refactor kind", "invalid refactor kind", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRefactorKind, nil)
 	}
 }
 
@@ -391,7 +391,7 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 		return uc.tree.GetPage(in.PageID)
 
 	default:
-		return nil, sharederrors.NewLocalizedError(ErrCodePageInvalidRefactorKind, "Invalid refactor kind", "invalid refactor kind", nil)
+		return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRefactorKind, nil)
 	}
 }
 

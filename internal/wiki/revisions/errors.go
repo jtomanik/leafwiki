@@ -46,19 +46,11 @@ func respondWithRevisionStatusError(c *gin.Context, status int, code sharederror
 }
 
 func NewRevisionNotFoundError(message, template string, args ...string) *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(ErrCodeRevisionNotFound, message, template, nil, args...)
+	return sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionNotFound, nil, args...)
 }
 
 func NewRevisionAssetBlobUnavailableError(assetName, pageID, revisionID string, cause error) *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(
-		ErrCodeRevisionPreviewAssetBlobUnavailable,
-		"Revision asset blob is unavailable",
-		"revision asset blob %s for page %s revision %s is unavailable",
-		cause,
-		assetName,
-		pageID,
-		revisionID,
-	)
+	return sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionPreviewAssetBlobUnavailable, cause, assetName, pageID, revisionID)
 }
 
 func mapRevisionNotFoundError(err error, message, template string, args ...string) error {

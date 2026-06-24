@@ -2,12 +2,14 @@ import { mapApiError } from './api/errors'
 import type { FieldErrorCode, MessageID } from './semanticTypes'
 import { toast } from 'sonner'
 
-type FieldError = {
+export type FieldError = {
   field: string
   code?: FieldErrorCode
   messageId?: MessageID
   message: string
 }
+
+export type FieldErrorMap = Partial<Record<string, Omit<FieldError, 'field'>>>
 
 type APIError = {
   error?: string
@@ -19,7 +21,7 @@ type APIError = {
  */
 export function handleFieldErrors(
   err: unknown,
-  setFieldErrors?: (errors: Record<string, string>) => void,
+  setFieldErrors?: (errors: FieldErrorMap) => void,
   fallbackMessage = 'Something went wrong',
 ) {
   const error = err as APIError
@@ -27,9 +29,13 @@ export function handleFieldErrors(
   console.warn('Error:', error)
 
   if (error.error === 'validation_error' && Array.isArray(error.fields)) {
-    const errorMap: Record<string, string> = {}
+    const errorMap: FieldErrorMap = {}
     for (const e of error.fields) {
-      errorMap[e.field] = e.message
+      errorMap[e.field] = {
+        code: e.code,
+        messageId: e.messageId,
+        message: e.message,
+      }
     }
     setFieldErrors?.(errorMap)
     toast.error('Validation failed')

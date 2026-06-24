@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
+
+const ErrCodeRateLimitExceeded sharederrors.ErrorCode = "rate_limit_exceeded"
 
 type rateLimiter struct {
 	mu             sync.Mutex
@@ -76,7 +79,7 @@ func NewRateLimiter(limit int, window time.Duration, resetOnSuccess bool) gin.Ha
 		if len(events) >= rl.limit {
 			rl.mu.Unlock()
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "Too many requests, please try again later",
+				"error": sharederrors.NewLocalizedErrorDetail(ErrCodeRateLimitExceeded, "", ""),
 			})
 			return
 		}

@@ -2,7 +2,6 @@ package pages
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -54,13 +53,13 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 				ve.Errors = append(ve.Errors, fieldErr)
 			}
 		} else {
-			ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, routePathErr.Error())
+			ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid)
 		}
 	}
 
 	cleanTitle := strings.TrimSpace(in.TargetTitle)
 	if cleanTitle == "" {
-		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 	}
 
 	if ve.HasErrors() {
@@ -88,7 +87,7 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 	for _, segment := range lookup.Segments {
 		if !segment.Exists {
 			if err := uc.slug.IsValidSlug(segment.Slug.FilesystemPath()); err != nil {
-				ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, fmt.Sprintf("Invalid slug '%s': %s", segment.Slug, err.Error()))
+				ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid)
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_CHANGE_OWN_PASSWORD } from '@/lib/registries'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/users'
@@ -13,7 +13,7 @@ export function ChangeOwnPasswordDialog() {
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const [loading, setLoading] = useState(false)
 
   const { user } = useSessionStore()
@@ -31,7 +31,7 @@ export function ChangeOwnPasswordDialog() {
 
   const handleOldPasswordChange = (val: string) => {
     setOldPassword(val)
-    setFieldErrors((prev) => ({ ...prev, oldPassword: '' }))
+    setFieldErrors((prev) => ({ ...prev, oldPassword: undefined }))
   }
 
   const handleNewPasswordChange = (val: string) => {
@@ -39,19 +39,22 @@ export function ChangeOwnPasswordDialog() {
     if (val.length < 8) {
       setFieldErrors((prev) => ({
         ...prev,
-        newPassword: 'Password must be at least 8 characters long',
+        newPassword: { message: 'Password must be at least 8 characters long' },
       }))
     } else {
-      setFieldErrors((prev) => ({ ...prev, newPassword: '' }))
+      setFieldErrors((prev) => ({ ...prev, newPassword: undefined }))
     }
   }
 
   const handleConfirmChange = (val: string) => {
     setConfirm(val)
     if (val !== newPassword) {
-      setFieldErrors((prev) => ({ ...prev, confirm: 'Passwords do not match' }))
+      setFieldErrors((prev) => ({
+        ...prev,
+        confirm: { message: 'Passwords do not match' },
+      }))
     } else {
-      setFieldErrors((prev) => ({ ...prev, confirm: '' }))
+      setFieldErrors((prev) => ({ ...prev, confirm: undefined }))
     }
   }
 
@@ -96,8 +99,8 @@ export function ChangeOwnPasswordDialog() {
             !oldPassword ||
             !newPassword ||
             newPassword !== confirm ||
-            fieldErrors.newPassword !== '' ||
-            fieldErrors.confirm !== '',
+            fieldErrors.newPassword?.message !== undefined ||
+            fieldErrors.confirm?.message !== undefined,
         },
       ]}
       onClose={resetForm}

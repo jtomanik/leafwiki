@@ -191,20 +191,10 @@ func (r *Routes) resolveValidationPage(ctx context.Context, in validatePageInput
 	pageID := strings.TrimSpace(in.PageID)
 	routePath := normalizeToolRoutePath(in.Path)
 	if pageID != "" && routePath != "" {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeMCPPageTargetAmbiguous,
-			"pageId and path cannot both be supplied",
-			"pageId and path cannot both be supplied",
-			nil,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageTargetAmbiguous, nil)
 	}
 	if pageID == "" && routePath == "" {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeMCPPageTargetRequired,
-			"pageId or path is required",
-			"pageId or path is required",
-			nil,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageTargetRequired, nil)
 	}
 	if pageID != "" {
 		return r.treeService.GetPage(tree.NewPageIDUnchecked(pageID))

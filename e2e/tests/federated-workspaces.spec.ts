@@ -1447,7 +1447,7 @@ test('workspace importer ignores stale plan loads after creating a plan', async 
 
   await page.locator('input[type="file"]').setInputFiles(importMetadataZipPath);
   await page.getByRole('button', { name: 'Import from Zip' }).click();
-  await expect(page.getByText('Import plan created successfully').last()).toBeVisible({
+  await expect(page.locator('.importer__status-title[data-import-status="planned"]')).toBeVisible({
     timeout: 15000,
   });
   await expect(page.getByRole('heading', { name: 'Import Plan' })).toBeVisible();

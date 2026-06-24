@@ -1,5 +1,7 @@
 package mcp
 
+import "github.com/perber/wiki/internal/localization"
+
 type ToolID string
 
 func (id ToolID) String() string {
@@ -82,50 +84,50 @@ const (
 )
 
 var (
-	toolGetConfig          = newToolDescriptor(ToolGetConfig, "Return local MCP-visible LeafWiki configuration")
-	toolGetCurrentUser     = newToolDescriptor(ToolGetCurrentUser, "Return the effective MCP user")
-	toolGetContext         = newToolDescriptor(ToolGetContext, "Return agent-ready wiki context, sync state, recent changes, and presence")
-	toolRefresh            = newToolDescriptor(ToolRefresh, "Synchronize direct Markdown changes into LeafWiki state")
-	toolGetSubtree         = newToolDescriptor(ToolGetSubtree, "Return a compact subtree rooted at a page, path, or the wiki root")
-	toolValidatePage       = newToolDescriptor(ToolValidatePage, "Validate an existing page by page ID or path")
-	toolValidateContent    = newToolDescriptor(ToolValidateContent, "Validate proposed Markdown content without writing it")
-	toolValidateWiki       = newToolDescriptor(ToolValidateWiki, "Validate the current wiki state")
-	toolUpdatePageMetadata = newToolDescriptor(ToolUpdatePageMetadata, "Safely patch page tags and properties without changing body content")
-	toolReplacePageSection = newToolDescriptor(ToolReplacePageSection, "Safely replace Markdown under a target heading")
-	toolGetTree            = newToolDescriptor(ToolGetTree, "Return the wiki page tree")
-	toolGetPage            = newToolDescriptor(ToolGetPage, "Return a page by ID with link status context")
-	toolGetPageByPath      = newToolDescriptor(ToolGetPageByPath, "Return a page by route path with link status context")
-	toolLookupPath         = newToolDescriptor(ToolLookupPath, "Resolve a route path into existing and missing path segments; pass kind page or section to disambiguate same-route twins")
-	toolResolvePermalink   = newToolDescriptor(ToolResolvePermalink, "Resolve a stable page ID to its current route path")
-	toolSuggestSlug        = newToolDescriptor(ToolSuggestSlug, "Suggest a unique child slug for a title")
-	toolCreatePage         = newToolDescriptor(ToolCreatePage, "Create a wiki page or section")
-	toolUpdatePage         = newToolDescriptor(ToolUpdatePage, "Update page title, slug, content, tags, and properties")
-	toolDeletePage         = newToolDescriptor(ToolDeletePage, "Delete a page")
-	toolMovePage           = newToolDescriptor(ToolMovePage, "Move a page to a new parent")
-	toolSortPages          = newToolDescriptor(ToolSortPages, "Sort a parent's child pages")
-	toolEnsurePage         = newToolDescriptor(ToolEnsurePage, "Ensure a page exists at a route path")
-	toolConvertPage        = newToolDescriptor(ToolConvertPage, "Convert a page between page and section kinds")
-	toolCopyPage           = newToolDescriptor(ToolCopyPage, "Copy a page and its assets")
-	toolSearchPages        = newToolDescriptor(ToolSearchPages, "Search pages using LeafWiki offset and limit pagination")
-	toolGetSearchStatus    = newToolDescriptor(ToolGetSearchStatus, "Return the search indexing status")
-	toolListTags           = newToolDescriptor(ToolListTags, "List tag counts")
-	toolGetPagesByTags     = newToolDescriptor(ToolGetPagesByTags, "List pages matching all tags")
-	toolListPropertyKeys   = newToolDescriptor(ToolListPropertyKeys, "List property key counts")
-	toolGetPagesByProperty = newToolDescriptor(ToolGetPagesByProperty, "List pages with a property value")
-	toolGetLinkStatus      = newToolDescriptor(ToolGetLinkStatus, "Return link status for a page")
-	toolUploadAsset        = newToolDescriptor(ToolUploadAsset, "Upload an asset from base64 content")
-	toolGetAsset           = newToolDescriptor(ToolGetAsset, "Read an asset as base64 content")
-	toolListAssets         = newToolDescriptor(ToolListAssets, "List page assets")
-	toolRenameAsset        = newToolDescriptor(ToolRenameAsset, "Rename a page asset")
-	toolDeleteAsset        = newToolDescriptor(ToolDeleteAsset, "Delete a page asset")
-	toolListRevisions      = newToolDescriptor(ToolListRevisions, "List page revisions")
-	toolGetLatestRevision  = newToolDescriptor(ToolGetLatestRevision, "Get the latest page revision")
-	toolGetRevision        = newToolDescriptor(ToolGetRevision, "Get a page revision snapshot")
-	toolCompareRevisions   = newToolDescriptor(ToolCompareRevisions, "Compare two page revisions")
-	toolGetRevisionAsset   = newToolDescriptor(ToolGetRevisionAsset, "Read a revision asset as base64 content")
-	toolRestoreRevision    = newToolDescriptor(ToolRestoreRevision, "Restore a page revision")
-	toolPreviewRefactor    = newToolDescriptor(ToolPreviewRefactor, "Preview a page rename or move refactor")
-	toolApplyRefactor      = newToolDescriptor(ToolApplyRefactor, "Apply a page rename or move refactor")
+	toolGetConfig          = newToolDescriptor(ToolGetConfig)
+	toolGetCurrentUser     = newToolDescriptor(ToolGetCurrentUser)
+	toolGetContext         = newToolDescriptor(ToolGetContext)
+	toolRefresh            = newToolDescriptor(ToolRefresh)
+	toolGetSubtree         = newToolDescriptor(ToolGetSubtree)
+	toolValidatePage       = newToolDescriptor(ToolValidatePage)
+	toolValidateContent    = newToolDescriptor(ToolValidateContent)
+	toolValidateWiki       = newToolDescriptor(ToolValidateWiki)
+	toolUpdatePageMetadata = newToolDescriptor(ToolUpdatePageMetadata)
+	toolReplacePageSection = newToolDescriptor(ToolReplacePageSection)
+	toolGetTree            = newToolDescriptor(ToolGetTree)
+	toolGetPage            = newToolDescriptor(ToolGetPage)
+	toolGetPageByPath      = newToolDescriptor(ToolGetPageByPath)
+	toolLookupPath         = newToolDescriptor(ToolLookupPath)
+	toolResolvePermalink   = newToolDescriptor(ToolResolvePermalink)
+	toolSuggestSlug        = newToolDescriptor(ToolSuggestSlug)
+	toolCreatePage         = newToolDescriptor(ToolCreatePage)
+	toolUpdatePage         = newToolDescriptor(ToolUpdatePage)
+	toolDeletePage         = newToolDescriptor(ToolDeletePage)
+	toolMovePage           = newToolDescriptor(ToolMovePage)
+	toolSortPages          = newToolDescriptor(ToolSortPages)
+	toolEnsurePage         = newToolDescriptor(ToolEnsurePage)
+	toolConvertPage        = newToolDescriptor(ToolConvertPage)
+	toolCopyPage           = newToolDescriptor(ToolCopyPage)
+	toolSearchPages        = newToolDescriptor(ToolSearchPages)
+	toolGetSearchStatus    = newToolDescriptor(ToolGetSearchStatus)
+	toolListTags           = newToolDescriptor(ToolListTags)
+	toolGetPagesByTags     = newToolDescriptor(ToolGetPagesByTags)
+	toolListPropertyKeys   = newToolDescriptor(ToolListPropertyKeys)
+	toolGetPagesByProperty = newToolDescriptor(ToolGetPagesByProperty)
+	toolGetLinkStatus      = newToolDescriptor(ToolGetLinkStatus)
+	toolUploadAsset        = newToolDescriptor(ToolUploadAsset)
+	toolGetAsset           = newToolDescriptor(ToolGetAsset)
+	toolListAssets         = newToolDescriptor(ToolListAssets)
+	toolRenameAsset        = newToolDescriptor(ToolRenameAsset)
+	toolDeleteAsset        = newToolDescriptor(ToolDeleteAsset)
+	toolListRevisions      = newToolDescriptor(ToolListRevisions)
+	toolGetLatestRevision  = newToolDescriptor(ToolGetLatestRevision)
+	toolGetRevision        = newToolDescriptor(ToolGetRevision)
+	toolCompareRevisions   = newToolDescriptor(ToolCompareRevisions)
+	toolGetRevisionAsset   = newToolDescriptor(ToolGetRevisionAsset)
+	toolRestoreRevision    = newToolDescriptor(ToolRestoreRevision)
+	toolPreviewRefactor    = newToolDescriptor(ToolPreviewRefactor)
+	toolApplyRefactor      = newToolDescriptor(ToolApplyRefactor)
 )
 
 var baseToolDescriptors = []ToolDescriptor{
@@ -169,6 +171,15 @@ func LinkRefactorToolNames() []string {
 	return toolNames(linkRefactorToolDescriptors)
 }
 
+func allToolDescriptors() []ToolDescriptor {
+	descriptors := make([]ToolDescriptor, 0, len(baseToolDescriptors)+len(workspaceSyncToolDescriptors)+len(revisionToolDescriptors)+len(linkRefactorToolDescriptors))
+	descriptors = append(descriptors, baseToolDescriptors...)
+	descriptors = append(descriptors, workspaceSyncToolDescriptors...)
+	descriptors = append(descriptors, revisionToolDescriptors...)
+	descriptors = append(descriptors, linkRefactorToolDescriptors...)
+	return descriptors
+}
+
 func toolNames(descriptors []ToolDescriptor) []string {
 	names := make([]string, 0, len(descriptors))
 	for _, descriptor := range descriptors {
@@ -177,11 +188,12 @@ func toolNames(descriptors []ToolDescriptor) []string {
 	return names
 }
 
-func newToolDescriptor(name ToolID, description string) ToolDescriptor {
+func newToolDescriptor(name ToolID) ToolDescriptor {
+	descriptionID := ToolDescriptionIDForTool(name)
 	return ToolDescriptor{
 		Name:          name,
-		DescriptionID: ToolDescriptionIDForTool(name),
-		Description:   description,
+		DescriptionID: descriptionID,
+		Description:   localization.English.Render(descriptionID, "").Message,
 	}
 }
 

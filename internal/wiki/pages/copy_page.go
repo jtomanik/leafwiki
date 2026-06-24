@@ -50,10 +50,10 @@ func NewCopyPageUseCase(
 func (uc *CopyPageUseCase) Execute(_ context.Context, in CopyPageInput) (*CopyPageOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Title == "" {
-		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 	}
 	if err := uc.slug.IsValidSlug(in.Slug.FilesystemPath()); err != nil {
-		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
+		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid)
 	}
 	if ve.HasErrors() {
 		return nil, ve

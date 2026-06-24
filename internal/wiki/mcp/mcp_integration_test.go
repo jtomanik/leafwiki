@@ -1464,11 +1464,11 @@ func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
 	if errText := callToolError(t, session, "wiki_get_subtree", map[string]any{"path": "missing-subtree"}); !strings.Contains(strings.ToLower(errText), "not found") {
 		t.Fatalf("missing subtree error = %q, want not found detail", errText)
 	}
-	negativeDepthErr := callToolError(t, session, "wiki_get_subtree", map[string]any{
+	negativeDepthErr := callToolStructuredError(t, session, "wiki_get_subtree", map[string]any{
 		"path":  "docs",
 		"depth": float64(-1),
 	})
-	assertErrorContainsAny(t, "wiki_get_subtree negative depth", negativeDepthErr, "depth must be zero or greater")
+	assertGenericToolErrorArgContainsAny(t, "wiki_get_subtree negative depth", negativeDepthErr, "depth must be zero or greater")
 	hugeDepth := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
 		"path":  "docs",
 		"depth": float64(999),
@@ -2253,12 +2253,12 @@ func TestLocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody(t *testin
 	beforeReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
-	reservedErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+	reservedErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
 		"pageId":        stringField(t, updated, "id"),
 		"version":       stringField(t, beforeReserved, "version"),
 		"setProperties": map[string]any{"leafwiki_private": "true"},
 	})
-	assertErrorContainsAny(t, "wiki_update_page_metadata reserved key", reservedErr, "reserved", "validation")
+	assertGenericToolErrorArgContainsAny(t, "wiki_update_page_metadata reserved key", reservedErr, "reserved", "validation")
 	afterReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2697,13 +2697,13 @@ func TestLocalMCPReplacePageSection_FailuresDoNotMutate(t *testing.T) {
 		"content": body,
 	}), "page")
 
-	ambiguousErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+	ambiguousErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
 		"pageId":      stringField(t, updated, "id"),
 		"version":     stringField(t, updated, "version"),
 		"headingPath": []any{"Notes"},
 		"content":     "ambiguous mutation",
 	})
-	assertErrorContainsAny(t, "wiki_replace_page_section ambiguous heading", ambiguousErr, "ambiguous_heading")
+	assertGenericToolErrorArgContainsAny(t, "wiki_replace_page_section ambiguous heading", ambiguousErr, "ambiguous_heading")
 	afterAmbiguous := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2711,13 +2711,13 @@ func TestLocalMCPReplacePageSection_FailuresDoNotMutate(t *testing.T) {
 		t.Fatalf("page after ambiguous heading = %#v, want unchanged %#v", afterAmbiguous, updated)
 	}
 
-	missingErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+	missingErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
 		"pageId":      stringField(t, updated, "id"),
 		"version":     stringField(t, updated, "version"),
 		"headingPath": []any{"Missing"},
 		"content":     "missing mutation",
 	})
-	assertErrorContainsAny(t, "wiki_replace_page_section missing heading", missingErr, "heading_not_found")
+	assertGenericToolErrorArgContainsAny(t, "wiki_replace_page_section missing heading", missingErr, "heading_not_found")
 	afterMissing := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2981,7 +2981,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	}
 	recordHTTPMCPParity(t, "wiki_update_page", "PUT /api/pages/:id")
 
-	metadataErr := callToolError(t, session, "wiki_update_page", map[string]any{
+	metadataErr := callToolStructuredError(t, session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": stringField(t, updatedPage, "version"),
 		"title":   "MCP Draft Updated",
@@ -2992,9 +2992,7 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 			"leafwiki_hidden": "forbidden",
 		},
 	})
-	if !strings.Contains(strings.ToLower(metadataErr), "validation") && !strings.Contains(strings.ToLower(metadataErr), "reserved") {
-		t.Fatalf("MCP metadata validation error = %q, want validation detail", metadataErr)
-	}
+	assertGenericToolErrorArgContainsAny(t, "MCP metadata validation error", metadataErr, "validation", "reserved")
 
 	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
 	staleHTTPBody := strings.NewReader(`{"version":"` + version + `","title":"MCP Draft Stale","slug":"mcp-draft","content":"stale"}`)
@@ -4908,6 +4906,7 @@ type mcpToolErrorResult struct {
 	Code      string
 	MessageID string
 	Message   string
+	Args      []string
 }
 
 func callToolError(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) string {
@@ -4973,6 +4972,16 @@ func callToolErrorResult(t *testing.T, session *sdkmcp.ClientSession, name strin
 		out.Code, _ = errorPayload["code"].(string)
 		out.MessageID, _ = errorPayload["messageId"].(string)
 		out.Message, _ = errorPayload["message"].(string)
+		switch args := errorPayload["args"].(type) {
+		case []string:
+			out.Args = append(out.Args, args...)
+		case []any:
+			for _, arg := range args {
+				if text, ok := arg.(string); ok {
+					out.Args = append(out.Args, text)
+				}
+			}
+		}
 	}
 	return out
 }
@@ -5521,6 +5530,20 @@ func assertErrorContainsAny(t *testing.T, label, errText string, wants ...string
 		}
 	}
 	t.Fatalf("%s error = %q, want one of %q", label, errText, wants)
+}
+
+func assertGenericToolErrorArgContainsAny(t *testing.T, label string, result mcpToolErrorResult, wants ...string) {
+	t.Helper()
+
+	assertMCPStructuredError(t, label, result, sharederrors.ErrorCode("mcp_tool_error"), "errors.mcp.tool_error", "MCP tool failed")
+	joinedArgs := strings.Join(result.Args, "\n")
+	lower := strings.ToLower(joinedArgs)
+	for _, want := range wants {
+		if strings.Contains(lower, strings.ToLower(want)) {
+			return
+		}
+	}
+	t.Fatalf("%s args = %#v, want one of %q", label, result.Args, wants)
 }
 
 func assertErrorContainsAll(t *testing.T, label, errText string, wants []string) {

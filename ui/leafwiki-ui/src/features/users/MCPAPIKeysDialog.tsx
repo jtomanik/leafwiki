@@ -11,9 +11,13 @@ import {
   revokeOwnMCPAPIKey,
   revokeUserMCPAPIKey,
 } from '@/lib/api/users'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_MCP_API_KEYS } from '@/lib/registries'
-import { asUserID, type MCPAPIKeyID } from '@/lib/semanticTypes'
+import {
+  asUserID,
+  type FieldErrorCode,
+  type MCPAPIKeyID,
+  type MessageID,
+} from '@/lib/semanticTypes'
 import { useSessionStore } from '@/stores/session'
 import copy from 'copy-to-clipboard'
 import { Copy, KeyRound, Trash2 } from 'lucide-react'
@@ -21,6 +25,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
+
+type DialogFieldError = {
+  code?: FieldErrorCode
+  messageId?: MessageID
+  message: string
+}
+
+type ValidationFieldError = DialogFieldError & {
+  field: string
+}
+
+type ValidationErrorResponse = {
+  error?: string
+  fields?: ValidationFieldError[]
+}
 
 type MCPAPIKeysDialogProps = {
   mode: 'admin' | 'self'
@@ -44,7 +63,9 @@ export function MCPAPIKeysDialog({
   const [revokingKeyId, setRevokingKeyId] = useState<MCPAPIKeyID | null>(null)
   const [name, setName] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<string, DialogFieldError>>
+  >({})
   const [secret, setSecret] = useState('')
 
   const title = useMemo(() => {
@@ -100,7 +121,24 @@ export function MCPAPIKeysDialog({
       return false
     } catch (err) {
       console.warn(err)
-      handleFieldErrors(err, setFieldErrors, 'Error creating API key')
+      const validation = err as ValidationErrorResponse
+      if (
+        validation.error === 'validation_error' &&
+        Array.isArray(validation.fields)
+      ) {
+        const next: Partial<Record<string, DialogFieldError>> = {}
+        for (const field of validation.fields) {
+          next[field.field] = {
+            code: field.code,
+            messageId: field.messageId,
+            message: field.message,
+          }
+        }
+        setFieldErrors(next)
+        toast.error('Validation failed')
+      } else {
+        toast.error('Error creating API key')
+      }
       return false
     } finally {
       setCreating(false)
@@ -177,10 +215,11 @@ export function MCPAPIKeysDialog({
               testid="mcp-api-keys-dialog-name-input"
               onChange={(val) => {
                 setName(val)
-                setFieldErrors((prev) => ({ ...prev, name: '' }))
+                setFieldErrors((prev) => ({ ...prev, name: undefined }))
               }}
               placeholder="Codex desktop"
               error={fieldErrors.name}
+              errorTestId="mcp-api-keys-dialog-name-error"
               allowedHotkeys={DIALOG_INPUT_ALLOWED_HOTKEYS}
             />
             {isSelf && (
@@ -192,11 +231,15 @@ export function MCPAPIKeysDialog({
                 testid="mcp-api-keys-dialog-current-password-input"
                 onChange={(val) => {
                   setCurrentPassword(val)
-                  setFieldErrors((prev) => ({ ...prev, currentPassword: '' }))
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    currentPassword: undefined,
+                  }))
                 }}
                 placeholder="Current password"
                 autoComplete="current-password"
                 error={fieldErrors.currentPassword}
+                errorTestId="mcp-api-keys-dialog-current-password-error"
                 allowedHotkeys={DIALOG_INPUT_ALLOWED_HOTKEYS}
               />
             )}

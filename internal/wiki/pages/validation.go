@@ -17,9 +17,9 @@ func ValidatePageRoutePath(routePath string) (tree.RoutePath, error) {
 	}
 	trimmed := strings.TrimSpace(routePath)
 	if trimmed == "" {
-		return "", sharederrors.NewLocalizedError(ErrCodePageMissingPath, "Missing path", "missing path", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageMissingPath, nil)
 	}
-	return "", sharederrors.NewLocalizedError(ErrCodePageInvalidPath, "Invalid path", "invalid path %s", nil, trimmed)
+	return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidPath, nil, trimmed)
 }
 
 func ValidatePageKind(kind *string) (tree.NodeKind, error) {
@@ -30,7 +30,7 @@ func ValidatePageKind(kind *string) (tree.NodeKind, error) {
 	case string(tree.NodeKindPage), string(tree.NodeKindSection):
 		return tree.NodeKind(*kind), nil
 	default:
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidKind, "Invalid kind", "invalid kind", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidKind, nil)
 	}
 }
 
@@ -51,7 +51,7 @@ func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tre
 	if derivedKind := MarkdownPathInputKind(routePath); derivedKind != "" {
 		routePath = tree.MarkdownPathToRoutePath(routePath)
 		if kind != "" && kind != derivedKind {
-			return "", "", sharederrors.NewLocalizedError(ErrCodePageInvalidKind, "Invalid kind", "kind does not match markdown path", nil)
+			return "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidKind, nil)
 		}
 		kind = derivedKind
 	}
@@ -217,7 +217,7 @@ func ValidateRefactorKind(kind string) (string, error) {
 	case RefactorKindRename, RefactorKindMove:
 		return kind, nil
 	default:
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidRefactorKind, "Invalid refactor kind", "invalid refactor kind", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRefactorKind, nil)
 	}
 }
 
@@ -226,7 +226,7 @@ func ValidateMoveParentID(parentID string) (string, error) {
 		return parentID, nil
 	}
 	if strings.TrimSpace(parentID) != parentID {
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidParentID, "Invalid parentId", "invalid parent id", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidParentID, nil)
 	}
 	return parentID, nil
 }
@@ -237,7 +237,7 @@ func ValidateSemanticMoveParentID(parentID tree.PageID) (tree.PageID, error) {
 	}
 	raw := parentID.MetadataValue()
 	if raw != parentID.HashPayload() {
-		return "", sharederrors.NewLocalizedError(ErrCodePageInvalidParentID, "Invalid parentId", "invalid parent id", nil)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidParentID, nil)
 	}
 	return tree.NewPageIDUnchecked(raw), nil
 }
@@ -268,12 +268,12 @@ func ValidateSemanticRoutePath(rawPath string) (tree.RoutePath, error) {
 	ve := sharederrors.NewValidationErrors()
 	cleanPath := strings.Trim(strings.TrimSpace(rawPath), "/")
 	if cleanPath == "" {
-		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired, "Path must not be empty")
+		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired)
 		return "", ve
 	}
 	routePath, err := tree.ParseRoutePath(cleanPath)
 	if err != nil {
-		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, err.Error())
+		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid)
 		return "", ve
 	}
 	return routePath, nil
@@ -283,13 +283,13 @@ func ValidateRoutePathValue(path tree.RoutePath) (tree.RoutePath, error) {
 	routePath := path.Clean()
 	if routePath.IsRoot() {
 		ve := sharederrors.NewValidationErrors()
-		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired, "Path must not be empty")
+		ve.AddWithCode("path", FieldCodePagePathRequired, MessageIDPagePathRequired)
 		return "", ve
 	}
 	routePath, err := routePath.Validate()
 	if err != nil {
 		ve := sharederrors.NewValidationErrors()
-		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid, err.Error())
+		ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid)
 		return "", ve
 	}
 	return routePath, nil

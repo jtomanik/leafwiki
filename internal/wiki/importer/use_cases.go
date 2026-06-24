@@ -58,7 +58,7 @@ func (uc *GetImportPlanUseCase) Execute(_ context.Context) (*GetImportPlanOutput
 	plan, err := uc.svc.GetCurrentPlan()
 	if err != nil {
 		if errors.Is(err, coreimporter.ErrNoPlan) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeImporterNoPlan, "No import plan available", "no import plan available", err)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterNoPlan, err)
 		}
 		return nil, err
 	}
@@ -88,13 +88,13 @@ func (uc *ExecuteImportUseCase) Execute(_ context.Context, in ExecuteImportInput
 	state, started, err := uc.svc.StartCurrentPlanExecution(in.UserID)
 	if err != nil {
 		if errors.Is(err, coreimporter.ErrImportExecutionRunning) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeImporterExecutionRunning, "Import is already running", "import is already running", err)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterExecutionRunning, err)
 		}
 		if errors.Is(err, coreimporter.ErrNoPlan) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeImporterNoPlan, "No import plan available", "no import plan available", err)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterNoPlan, err)
 		}
 		if errors.Is(err, coreimporter.ErrImportStateUnavailable) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeImporterStateUnavailable, "Import state is unavailable", "import state is unavailable", err)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterStateUnavailable, err)
 		}
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (uc *ClearImportPlanUseCase) Execute(_ context.Context) (*coreimporter.Curr
 	}
 	if err != nil && !errors.Is(err, coreimporter.ErrNoPlan) {
 		if errors.Is(err, coreimporter.ErrImportStateUnavailable) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeImporterStateUnavailable, "Import state is unavailable", "import state is unavailable", err)
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterStateUnavailable, err)
 		}
 		return nil, err
 	}

@@ -14,6 +14,14 @@ import (
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
+const (
+	pageVersionConflictMessage           = "Page was changed by another request"
+	pageVersionConflictTemplate          = "page was changed by another request"
+	pageVersionRequiredMessage           = "Page version is required"
+	pageVersionRequiredTemplate          = "page version is required"
+	partialEditVersionDiagnosticTemplate = "currentPageId=%s currentPath=%s currentTitle=%s currentVersion=%s"
+)
+
 func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 	addEditorTool[updatePageMetadataInput, partialEditOutput](r, server, toolUpdatePageMetadata, func(ctx context.Context, actor toolActor, in updatePageMetadataInput) (partialEditOutput, error) {
 		page, err := r.resolveValidationPage(ctx, validatePageInput{PageID: in.PageID, Path: in.Path})
@@ -123,28 +131,27 @@ func partialEditWriteError(err error, page *tree.Page) error {
 	}
 	var code sharederrors.ErrorCode
 	message := ""
+	template := ""
 	switch {
 	case errors.Is(err, tree.ErrVersionConflict):
 		code = pages.ErrCodePageVersionConflict
-		message = "Page was changed by another request"
+		message = pageVersionConflictMessage
+		template = pageVersionConflictTemplate
 	case errors.Is(err, tree.ErrVersionRequired):
 		code = pages.ErrCodePageVersionRequired
-		message = "Page version is required"
+		message = pageVersionRequiredMessage
+		template = pageVersionRequiredTemplate
 	default:
 		return err
 	}
-	return sharederrors.NewLocalizedError(
-		code,
-		message,
-		strings.ToLower(message),
-		fmt.Errorf(
-			"currentPageId=%s currentPath=%s currentTitle=%s currentVersion=%s",
-			page.ID,
-			strings.Trim(page.CalculatePath(), "/"),
-			page.Title,
-			page.Version(),
-		),
+	cause := fmt.Errorf(
+		partialEditVersionDiagnosticTemplate,
+		page.ID,
+		strings.Trim(page.CalculatePath(), "/"),
+		page.Title,
+		page.Version(),
 	)
+	return sharederrors.NewLocalizedErrorFromCodeWithFallback(code, message, template, cause)
 }
 
 func (r *Routes) partialEditOutput(ctx context.Context, page *tree.Page, includePage bool, includeValidationValue *bool, includeLinkStatus bool) (partialEditOutput, error) {

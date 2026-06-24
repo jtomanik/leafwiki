@@ -89,7 +89,14 @@ test('self-service api key works with the official mcp typescript client and fai
   await page.getByTestId('mcp-api-keys-dialog-name-input').fill('x'.repeat(81));
   await page.getByTestId('mcp-api-keys-dialog-current-password-input').fill(password);
   await page.getByTestId('mcp-api-keys-dialog-button-create').click();
-  await expect(page.getByText('Name must be at most 80 characters long')).toBeVisible();
+  await expect(page.getByTestId('mcp-api-keys-dialog-name-error')).toHaveAttribute(
+    'data-error-code',
+    'auth_api_key_name_too_long',
+  );
+  await expect(page.getByTestId('mcp-api-keys-dialog-name-error')).toHaveAttribute(
+    'data-l10n-id',
+    'validation.auth.api_key_name_too_long',
+  );
   await expect(secretInput).toBeVisible();
   await expect(secretInput).toHaveValue(apiKey);
 
@@ -237,7 +244,14 @@ test('self-service dialog reports a wrong current password without showing a sec
   await page.getByTestId('mcp-api-keys-dialog-current-password-input').fill('wrong-password');
   await page.getByTestId('mcp-api-keys-dialog-button-create').click();
 
-  await expect(page.getByText('Current password is incorrect')).toBeVisible();
+  await expect(page.getByTestId('mcp-api-keys-dialog-current-password-error')).toHaveAttribute(
+    'data-error-code',
+    'auth_current_password_incorrect',
+  );
+  await expect(page.getByTestId('mcp-api-keys-dialog-current-password-error')).toHaveAttribute(
+    'data-l10n-id',
+    'validation.auth.current_password_incorrect',
+  );
   await expect(page.getByTestId('mcp-api-keys-dialog-secret-input')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'MCP API Keys' })).toBeVisible();
 });
@@ -322,7 +336,14 @@ test('admin api key dialog validates names from user management', async ({ page 
 
   await page.getByTestId('mcp-api-keys-dialog-name-input').fill('x'.repeat(81));
   await page.getByTestId('mcp-api-keys-dialog-button-create').click();
-  await expect(page.getByText('Name must be at most 80 characters long')).toBeVisible();
+  await expect(page.getByTestId('mcp-api-keys-dialog-name-error')).toHaveAttribute(
+    'data-error-code',
+    'auth_api_key_name_too_long',
+  );
+  await expect(page.getByTestId('mcp-api-keys-dialog-name-error')).toHaveAttribute(
+    'data-l10n-id',
+    'validation.auth.api_key_name_too_long',
+  );
   await expect(page.getByRole('heading', { name: /MCP API Keys:/ })).toBeVisible();
 });
 

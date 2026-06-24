@@ -1,3 +1,6 @@
 [submodule "references/go-sdk"]
 	path = references/go-sdk
 	url = https://github.com/modelcontextprotocol/go-sdk.git
+[submodule "references/go-i18n"]
+	path = references/go-i18n
+	url = https://github.com/nicksnyder/go-i18n.git

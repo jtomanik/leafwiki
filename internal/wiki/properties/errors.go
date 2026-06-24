@@ -29,7 +29,7 @@ func respondWithPropertiesError(c *gin.Context, err error) {
 	}
 
 	c.JSON(http.StatusInternalServerError, propertiesErrorResponse{
-		Error: sharederrors.NewLocalizedErrorDetail(ErrCodePropertiesInternal, "Internal server error", "internal server error"),
+		Error: sharederrors.NewLocalizedErrorDetail(ErrCodePropertiesInternal, "", ""),
 	})
 }
 

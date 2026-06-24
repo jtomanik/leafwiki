@@ -22,7 +22,9 @@ export default class LoginPage {
   }
 
   async expectInvalidCredentialsError() {
-    await expect(this.page.getByText('Invalid credentials')).toBeVisible();
+    const message = this.page.getByTestId('login-error-message');
+    await expect(message).toHaveAttribute('data-error-code', 'auth_invalid_credentials');
+    await expect(message).toHaveAttribute('data-l10n-id', 'errors.auth.invalid_credentials');
   }
 
   async login(identifier: string, password: string) {

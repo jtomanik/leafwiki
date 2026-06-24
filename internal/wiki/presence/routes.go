@@ -55,16 +55,22 @@ func (r *Routes) handleHeartbeat(c *gin.Context) {
 	}
 	var heartbeat Heartbeat
 	if err := c.ShouldBindJSON(&heartbeat); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": sharederrors.NewLocalizedErrorDetail(ErrCodePresenceInvalidRequest, "", "", err.Error()),
+		})
 		return
 	}
 	page := r.resolvePage(heartbeat.PageID, heartbeat.Path)
 	if err := r.registry.Record(heartbeat, user, page); err != nil {
 		if loc, ok := sharederrors.AsLocalizedError(err); ok {
-			c.JSON(http.StatusBadRequest, gin.H{"error": sharederrors.LocalizedErrorDetailFromError(loc)})
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": sharederrors.LocalizedErrorDetailFromError(loc),
+			})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": sharederrors.NewLocalizedErrorDetail(ErrCodePresenceInvalidRequest, "", "", err.Error()),
+		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

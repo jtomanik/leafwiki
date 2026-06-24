@@ -19,6 +19,7 @@ const (
 
 const (
 	ErrCodePresenceRegistryUnavailable sharederrors.ErrorCode = "presence_registry_unavailable"
+	ErrCodePresenceInvalidRequest      sharederrors.ErrorCode = "presence_invalid_request"
 	ErrCodePresenceUserRequired        sharederrors.ErrorCode = "presence_user_required"
 	ErrCodePresenceSessionUserMismatch sharederrors.ErrorCode = "presence_session_user_mismatch"
 	ErrCodePresenceSessionIDRequired   sharederrors.ErrorCode = "presence_session_id_required"
@@ -135,14 +136,14 @@ func NewWebPresenceRegistry(ttl time.Duration, now func() time.Time) *WebPresenc
 
 func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, page *PageRef) error {
 	if r == nil {
-		return sharederrors.NewLocalizedError(ErrCodePresenceRegistryUnavailable, "web presence registry unavailable", "web presence registry unavailable", nil)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceRegistryUnavailable, nil)
 	}
 	normalized, err := normalizeHeartbeat(heartbeat)
 	if err != nil {
 		return err
 	}
 	if user == nil {
-		return sharederrors.NewLocalizedError(ErrCodePresenceUserRequired, "user is required", "user is required", nil)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceUserRequired, nil)
 	}
 	seenAt := r.now().UTC()
 
@@ -152,7 +153,7 @@ func (r *WebPresenceRegistry) Record(heartbeat Heartbeat, user *coreauth.User, p
 	current := r.sessions[normalized.SessionID]
 	userID := coreauth.NewUserIDUnchecked(user.ID)
 	if current.userID != "" && current.userID != userID {
-		return sharederrors.NewLocalizedError(ErrCodePresenceSessionUserMismatch, "sessionId belongs to a different user", "sessionId belongs to a different user", nil)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionUserMismatch, nil)
 	}
 	firstSeenAt := current.session.FirstSeenAt
 	if firstSeenAt.IsZero() {
@@ -226,17 +227,17 @@ func (r *WebPresenceRegistry) List(viewer *coreauth.User) []Session {
 func normalizeHeartbeat(heartbeat Heartbeat) (Heartbeat, error) {
 	heartbeat.SessionID = strings.TrimSpace(heartbeat.SessionID)
 	if heartbeat.SessionID == "" {
-		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceSessionIDRequired, "sessionId is required", "sessionId is required", nil)
+		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDRequired, nil)
 	}
 	if len(heartbeat.SessionID) > 256 {
-		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceSessionIDTooLong, "sessionId is too long", "sessionId is too long", nil)
+		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDTooLong, nil)
 	}
 	heartbeat.Mode = SessionMode(strings.TrimSpace(string(heartbeat.Mode)))
 	if heartbeat.Mode == "" {
 		heartbeat.Mode = SessionModeUnknown
 	}
 	if _, ok := validModes[heartbeat.Mode]; !ok {
-		return Heartbeat{}, sharederrors.NewLocalizedError(ErrCodePresenceModeInvalid, "mode must be view, edit, history, assets, settings, import, or unknown", "mode must be view, edit, history, assets, settings, import, or unknown", nil)
+		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceModeInvalid, nil)
 	}
 	heartbeat.PageID = tree.NewPageIDUnchecked(strings.TrimSpace(heartbeat.PageID.MetadataValue()))
 	heartbeat.Path = normalizePagePath(heartbeat.Path)

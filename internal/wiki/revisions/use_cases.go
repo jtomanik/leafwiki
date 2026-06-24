@@ -142,13 +142,7 @@ func NormalizeRevisionListLimit(limit *int, pageID tree.PageID) (int, error) {
 		return DefaultRevisionListLimit, nil
 	}
 	if *limit <= 0 || *limit > MaxRevisionListLimit {
-		return 0, sharederrors.NewLocalizedError(
-			ErrCodeRevisionInvalidLimit,
-			"Revision list limit is invalid",
-			"revision list limit for page %s is invalid",
-			nil,
-			pageID.MetadataValue(),
-		)
+		return 0, sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidLimit, nil, pageID.MetadataValue())
 	}
 	return *limit, nil
 }

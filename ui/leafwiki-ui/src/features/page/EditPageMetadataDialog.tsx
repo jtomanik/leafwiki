@@ -2,6 +2,7 @@ import { NODE_KIND_PAGE, type Page } from '@/lib/api/pages'
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { DIALOG_EDIT_PAGE_METADATA } from '@/lib/registries'
+import type { FieldErrorMap } from '@/lib/handleFieldErrors'
 import { useCallback, useState } from 'react'
 import { SlugInputWithSuggestion } from './SlugInputWithSuggestion'
 
@@ -36,7 +37,7 @@ export function EditPageMetadataDialog({
   const [slugTouched, setSlugTouched] = useState(false)
   const [slugLoading, setSlugLoading] = useState(false)
   const [lastSlugTitle, setLastSlugTitle] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
 
   const isSaveDisabled =
     !title ||
@@ -45,12 +46,12 @@ export function EditPageMetadataDialog({
 
   const handleTitleChange = (val: string) => {
     setTitle(val)
-    setFieldErrors((prev) => ({ ...prev, title: '' }))
+    setFieldErrors((prev) => ({ ...prev, title: undefined }))
   }
 
   const handleSlugChange = useCallback((val: string) => {
     setSlug(val)
-    setFieldErrors((prev) => ({ ...prev, slug: '' }))
+    setFieldErrors((prev) => ({ ...prev, slug: undefined }))
   }, [])
 
   const resetForm = () => {

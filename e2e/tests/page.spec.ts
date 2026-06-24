@@ -940,7 +940,10 @@ async function expectEditAndSaveShortcutWorks(
     code: 'KeyS',
     ctrlKey: true,
   });
-  await page.getByText('Page saved successfully').waitFor({ state: 'visible' });
+  await expect(page.getByTestId('page-save-success-toast-message').last()).toHaveAttribute(
+    'data-l10n-id',
+    'ui.page.save.success',
+  );
 
   await editPage.closeEditor();
 
@@ -1457,9 +1460,10 @@ for the page edited at ${new Date().toISOString()}
     await expect(conflictAction).toHaveAttribute('data-error-code', 'page_version_conflict');
     await expect(conflictAction).toHaveAttribute('data-l10n-id', 'errors.page.version_conflict');
     await conflictAction.click();
-    await page.getByText('Page saved successfully').last().waitFor({
-      state: 'visible',
-    });
+    await expect(page.getByTestId('page-save-success-toast-message').last()).toHaveAttribute(
+      'data-l10n-id',
+      'ui.page.save.success',
+    );
 
     await editPage.closeEditor();
 
@@ -4054,7 +4058,8 @@ Paragraph outside the list.
     const deletePageDialog = new DeletePageDialog(page);
     test.expect(await deletePageDialog.dialogTextVisible()).toBeTruthy();
     await deletePageDialog.confirmDeletion();
-    await page.getByText('Page deleted successfully').waitFor({ state: 'visible' });
+    const deleteSuccessMessage = page.getByTestId('page-delete-success-toast-message').last();
+    await expect(deleteSuccessMessage).toHaveAttribute('data-l10n-id', 'ui.page.delete.success');
     // After a successful delete the app performs a SPA navigation to the parent page.
     // We verify the delete worked by checking we are no longer on the deleted page URL.
     // Avoid a full page.goto() here: that triggers auth bootstrap again and the

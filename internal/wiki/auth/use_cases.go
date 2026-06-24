@@ -119,20 +119,20 @@ func NewCreateUserUseCase(u *coreauth.UserService, r *coreauth.UserResolver, log
 func (uc *CreateUserUseCase) Execute(_ context.Context, in CreateUserInput) (*CreateUserOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Username == "" {
-		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired, "Username must not be empty")
+		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired)
 	}
 	if in.Email == "" {
-		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired, "Email must not be empty")
+		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired)
 	} else if !emailRegex.MatchString(in.Email) {
-		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid, "Email is not valid")
+		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid)
 	}
 	if in.Password == "" {
-		ve.AddWithCode("password", FieldCodeAuthPasswordRequired, MessageIDAuthPasswordRequired, "Password must not be empty")
+		ve.AddWithCode("password", FieldCodeAuthPasswordRequired, MessageIDAuthPasswordRequired)
 	} else if len(in.Password) < 8 {
-		ve.AddWithCode("password", FieldCodeAuthPasswordTooShort, MessageIDAuthPasswordTooShort, "Password must be at least 8 characters long")
+		ve.AddWithCode("password", FieldCodeAuthPasswordTooShort, MessageIDAuthPasswordTooShort)
 	}
 	if !coreauth.IsValidRole(in.Role) {
-		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid, "Invalid role")
+		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid)
 	}
 	if ve.HasErrors() {
 		return nil, ve
@@ -176,17 +176,17 @@ func NewUpdateUserUseCase(u *coreauth.UserService, r *coreauth.UserResolver, log
 func (uc *UpdateUserUseCase) Execute(_ context.Context, in UpdateUserInput) (*UpdateUserOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Username == "" {
-		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired, "Username must not be empty")
+		ve.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired)
 	}
 	if in.Email == "" {
-		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired, "Email must not be empty")
+		ve.AddWithCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired)
 	} else if !emailRegex.MatchString(in.Email) {
-		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid, "Email is not valid")
+		ve.AddWithCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid)
 	}
 	role := in.Role
 	roleProvided := strings.TrimSpace(in.Role) != ""
 	if in.RequesterIsAdmin && roleProvided && !coreauth.IsValidRole(in.Role) {
-		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid, "Invalid role")
+		ve.AddWithCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid)
 	}
 	if ve.HasErrors() {
 		return nil, ve
@@ -229,12 +229,12 @@ func NewChangeOwnPasswordUseCase(u *coreauth.UserService) *ChangeOwnPasswordUseC
 func (uc *ChangeOwnPasswordUseCase) Execute(_ context.Context, in ChangeOwnPasswordInput) error {
 	ve := sharederrors.NewValidationErrors()
 	if in.NewPassword == "" {
-		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordRequired, MessageIDAuthNewPasswordRequired, "New password must not be empty")
+		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordRequired, MessageIDAuthNewPasswordRequired)
 	} else if len(in.NewPassword) < 8 {
-		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordTooShort, MessageIDAuthNewPasswordTooShort, "New password must be at least 8 characters long")
+		ve.AddWithCode("newPassword", FieldCodeAuthNewPasswordTooShort, MessageIDAuthNewPasswordTooShort)
 	}
 	if _, err := uc.user.DoesIDAndPasswordMatch(in.UserID, in.OldPassword); err != nil {
-		ve.AddWithCode("oldPassword", FieldCodeAuthOldPasswordIncorrect, MessageIDAuthOldPasswordIncorrect, "Old password is incorrect")
+		ve.AddWithCode("oldPassword", FieldCodeAuthOldPasswordIncorrect, MessageIDAuthOldPasswordIncorrect)
 	}
 	if ve.HasErrors() {
 		return ve
@@ -342,15 +342,15 @@ func (uc *CreateAPIKeyUseCase) Execute(_ context.Context, in CreateAPIKeyInput) 
 	ve := sharederrors.NewValidationErrors()
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired, "Name must not be empty")
+		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired)
 	} else if len(name) > maxAPIKeyNameLength {
-		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong, "Name must be at most 80 characters long")
+		ve.AddWithCode("name", FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong)
 	}
 	if in.RequireCurrentPassword {
 		if in.CurrentPassword == "" {
-			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordRequired, MessageIDAuthCurrentPasswordRequired, "Current password must not be empty")
+			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordRequired, MessageIDAuthCurrentPasswordRequired)
 		} else if _, err := uc.users.DoesIDAndPasswordMatch(in.UserID, in.CurrentPassword); err != nil {
-			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordIncorrect, MessageIDAuthCurrentPasswordIncorrect, "Current password is incorrect")
+			ve.AddWithCode("currentPassword", FieldCodeAuthCurrentPasswordIncorrect, MessageIDAuthCurrentPasswordIncorrect)
 		}
 	}
 	if ve.HasErrors() {

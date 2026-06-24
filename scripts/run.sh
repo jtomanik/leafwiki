@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/run_messages.sh"
+
 for removed_env in \
   LEAFWIKI_RUNTIME_STACK \
   LEAFWIKI_RUN_MCP_RUNTIME_STACK \
@@ -8,7 +11,7 @@ for removed_env in \
   LEAFWIKI_RUN_MCP_SERVER_LOG
 do
   if [[ ${!removed_env+x} ]]; then
-    printf 'Error: unknown environment variable: %s\n' "$removed_env" >&2
+    printf '%s unknown environment variable: %s\n' "$LEAFWIKI_RUN_MSG_ERROR_PREFIX" "$removed_env" >&2
     exit 1
   fi
 done
@@ -37,39 +40,9 @@ server_extra_args=()
 
 usage() {
   cat <<EOF
-Usage: scripts/run.sh <mcp|agent-hook> [options]
+${LEAFWIKI_RUN_MSG_USAGE}
 
-Modes:
-  mcp                     Run native LeafWiki MCP STDIO frontend
-  agent-hook <provider>   Run one LeafWiki agent hook invocation
-
-Options:
-  --leafwiki-bin <path>     LeafWiki executable (default: leafwiki)
-  --scheme <scheme>         Informational URL scheme for dry-run output (default: http)
-  --host <host>             LeafWiki bind host (default: 127.0.0.1)
-  --port <port>             LeafWiki port (default: 8080)
-  --base-path <path>        LeafWiki base path, if any
-  --data-dir <path>         LeafWiki data directory (default: ./.wiki)
-  --root-dir <path>         LeafWiki root markdown directory (default: ./wiki)
-  --markdown-link-root-prefix <path>
-                            Repository-root Markdown href prefix, such as /docs
-  --jwt-secret <secret>     JWT secret only when this run must bootstrap an auth-enabled owner
-  --admin-password <pass>   Admin password only when this run must bootstrap an auth-enabled owner
-  --disable-auth            Force disabled-auth STDIO identity
-  --allow-insecure          Pass --allow-insecure to LeafWiki (default)
-  --no-allow-insecure       Do not pass --allow-insecure
-  --request-log             Keep LeafWiki request logs enabled
-  --disable-request-log     Pass --disable-request-log to LeafWiki (default)
-  --daemon-idle-timeout <d> Federated runtime idle timeout after the last session or presence record exits (default: 10m)
-  --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY
-  --config <path>           Pass a LeafWiki YAML config file without wrapper defaults
-  --server-arg <arg>        Extra argument passed to leafwiki; repeatable
-  --dry-run                 Print the planned command without starting anything
-  -h, --help                Show this help
-
-Environment overrides use LEAFWIKI_RUN_MCP_* names matching the option names.
-Use LEAFWIKI_RUN_MCP_API_KEY or LEAFWIKI_MCP_API_KEY to provide the native
-STDIO API key without putting the secret in the child command line.
+${LEAFWIKI_RUN_MSG_HELP_BODY}
 EOF
 }
 
@@ -78,7 +51,7 @@ log() {
 }
 
 fail_error() {
-  printf 'Error: %s\n' "$1" >&2
+  printf '%s %s\n' "$LEAFWIKI_RUN_MSG_ERROR_PREFIX" "$1" >&2
   exit 1
 }
 
@@ -104,6 +77,18 @@ fail_config_argument_error() {
   fail "$1"
 }
 
+error_with_detail() {
+  printf '%s: %s\n' "$1" "$2"
+}
+
+option_requires() {
+  printf '%s %s\n' "$1" "$2"
+}
+
+config_conflict_error() {
+  option_requires "$LEAFWIKI_RUN_MSG_ERROR_CONFIG_CANNOT_COMBINE" "$1"
+}
+
 record_config_conflict() {
   if [[ -z "$config_conflict" ]]; then
     config_conflict="$1"
@@ -114,7 +99,7 @@ fail_missing_config_conflict_value() {
   local flag="$1"
   local message="$2"
   if [[ "${config_mode_requested:-0}" == "1" || -n "$config_path" ]]; then
-    fail_error "--config cannot be combined with $flag"
+    fail_error "$(config_conflict_error "$flag")"
   fi
   fail "$message"
 }
@@ -203,9 +188,9 @@ command_exists() {
 require_executable() {
   local executable="$1"
   if [[ "$executable" == */* ]]; then
-    [[ -x "$executable" ]] || fail "executable not found or not executable: $executable"
+    [[ -x "$executable" ]] || fail "$(error_with_detail "$LEAFWIKI_RUN_MSG_ERROR_EXECUTABLE_NOT_FOUND" "$executable")"
   else
-    command_exists "$executable" || fail "executable not found on PATH: $executable"
+    command_exists "$executable" || fail "$(error_with_detail "$LEAFWIKI_RUN_MSG_ERROR_EXECUTABLE_NOT_FOUND_ON_PATH" "$executable")"
   fi
 }
 
@@ -239,10 +224,10 @@ case "$mode" in
   agent-hook)
     shift
     detect_config_mode_requested "$@"
-    [[ $# -ge 1 ]] || fail "agent-hook requires a provider"
+    [[ $# -ge 1 ]] || fail "$LEAFWIKI_RUN_MSG_ERROR_AGENT_HOOK_REQUIRES_PROVIDER"
     hook_provider="$1"
     if [[ "$config_mode_requested" == "1" && "$hook_provider" == --* ]]; then
-      fail_error "agent-hook requires a provider"
+      fail_error "$LEAFWIKI_RUN_MSG_ERROR_AGENT_HOOK_REQUIRES_PROVIDER"
     fi
     shift
     ;;
@@ -251,13 +236,13 @@ case "$mode" in
     exit 0
     ;;
   *)
-    fail "first argument must be mcp or agent-hook"
+    fail "$LEAFWIKI_RUN_MSG_ERROR_RUN_MODE_REQUIRED"
     ;;
 esac
 
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == --*" "* ]]; then
-    fail_config_argument_error "argument '$1' contains a space; MCP JSON args must split flags and values into separate args, for example \"--root-dir\", \"./wiki\", or use --root-dir=./wiki"
+    fail_config_argument_error "$(error_with_detail "$LEAFWIKI_RUN_MSG_ERROR_ARGUMENT_CONTAINS_SPACE" "$1")"
   fi
 
   case "$1" in
@@ -266,7 +251,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --leafwiki-bin)
-      [[ $# -ge 2 ]] || fail "--leafwiki-bin requires a path"
+      [[ $# -ge 2 ]] || fail "$LEAFWIKI_RUN_MSG_ERROR_LEAFWIKI_BIN_REQUIRES_PATH"
       leafwiki_bin="$2"
       shift 2
       ;;
@@ -276,7 +261,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --scheme)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--scheme" "--scheme requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--scheme" "$(option_requires "--scheme" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_VALUE")"
       scheme="$2"
       record_config_conflict "--scheme"
       shift 2
@@ -287,7 +272,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --host)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--host" "--host requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--host" "$(option_requires "--host" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_VALUE")"
       host="$2"
       record_config_conflict "--host"
       shift 2
@@ -298,7 +283,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --port)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--port" "--port requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--port" "$(option_requires "--port" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_VALUE")"
       port="$2"
       record_config_conflict "--port"
       shift 2
@@ -309,7 +294,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --base-path)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--base-path" "--base-path requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--base-path" "$(option_requires "--base-path" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_PATH")"
       base_path="$2"
       record_config_conflict "--base-path"
       shift 2
@@ -320,7 +305,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --data-dir)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--data-dir" "--data-dir requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--data-dir" "$(option_requires "--data-dir" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_PATH")"
       data_dir="$2"
       record_config_conflict "--data-dir"
       shift 2
@@ -331,7 +316,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --root-dir)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--root-dir" "--root-dir requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--root-dir" "$(option_requires "--root-dir" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_PATH")"
       root_dir="$2"
       record_config_conflict "--root-dir"
       shift 2
@@ -342,7 +327,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --markdown-link-root-prefix)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--markdown-link-root-prefix" "--markdown-link-root-prefix requires a path"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--markdown-link-root-prefix" "$(option_requires "--markdown-link-root-prefix" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_PATH")"
       markdown_link_root_prefix="$2"
       record_config_conflict "--markdown-link-root-prefix"
       shift 2
@@ -353,7 +338,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --jwt-secret)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--jwt-secret" "--jwt-secret requires a secret"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--jwt-secret" "$(option_requires "--jwt-secret" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_SECRET")"
       jwt_secret="$2"
       record_config_conflict "--jwt-secret"
       shift 2
@@ -364,7 +349,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --admin-password)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--admin-password" "--admin-password requires a password"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--admin-password" "$(option_requires "--admin-password" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_PASSWORD")"
       admin_password="$2"
       record_config_conflict "--admin-password"
       shift 2
@@ -400,7 +385,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --daemon-idle-timeout)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--daemon-idle-timeout" "--daemon-idle-timeout requires a duration"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--daemon-idle-timeout" "$(option_requires "--daemon-idle-timeout" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_DURATION")"
       daemon_idle_timeout="$2"
       record_config_conflict "--daemon-idle-timeout"
       shift 2
@@ -411,18 +396,18 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --api-key)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--api-key" "--api-key requires a value"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--api-key" "$(option_requires "--api-key" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_VALUE")"
       api_key="$2"
       record_config_conflict "--api-key"
       shift 2
       ;;
     --config=*)
       config_path="${1#*=}"
-      is_config_path_value "$config_path" || fail_config_argument_error "--config requires a path"
+      is_config_path_value "$config_path" || fail_config_argument_error "$LEAFWIKI_RUN_MSG_ERROR_CONFIG_REQUIRES_PATH"
       shift
       ;;
     --config)
-      [[ $# -ge 2 ]] && is_config_path_value "$2" || fail_config_argument_error "--config requires a path"
+      [[ $# -ge 2 ]] && is_config_path_value "$2" || fail_config_argument_error "$LEAFWIKI_RUN_MSG_ERROR_CONFIG_REQUIRES_PATH"
       config_path="$2"
       shift 2
       ;;
@@ -432,7 +417,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --server-arg)
-      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--server-arg" "--server-arg requires an argument"
+      [[ $# -ge 2 ]] || fail_missing_config_conflict_value "--server-arg" "$(option_requires "--server-arg" "$LEAFWIKI_RUN_MSG_ERROR_OPTION_REQUIRES_ARGUMENT")"
       server_extra_args+=("$2")
       record_config_conflict "--server-arg"
       shift 2
@@ -443,19 +428,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       if [[ "$config_mode_requested" == "1" || -n "$config_path" ]]; then
-        fail_error "--config cannot be combined with --help"
+        fail_error "$(config_conflict_error "--help")"
       fi
       usage
       exit 0
       ;;
     *)
-      fail_config_argument_error "unknown option: $1"
+      fail_config_argument_error "$(error_with_detail "$LEAFWIKI_RUN_MSG_ERROR_UNKNOWN_OPTION" "$1")"
       ;;
   esac
 done
 
 if [[ "$config_mode_requested" == "1" && -n "$config_conflict" ]]; then
-  fail_error "--config cannot be combined with $config_conflict"
+  fail_error "$(config_conflict_error "$config_conflict")"
 fi
 
 base_path="$(normalize_base_path "$base_path")"
@@ -478,7 +463,7 @@ if [[ -z "$config_path" ]]; then
     fi
   fi
   if truthy "$disable_auth" && [[ -n "$api_key" ]]; then
-    fail "--disable-auth cannot be combined with --api-key or LEAFWIKI_MCP_API_KEY"
+    fail "$LEAFWIKI_RUN_MSG_ERROR_DISABLE_AUTH_API_KEY_CONFLICT"
   fi
 fi
 
@@ -542,18 +527,18 @@ fi
 if [[ "$dry_run" -eq 1 ]]; then
   if [[ "$mode" == "mcp" ]]; then
     if [[ -n "$config_path" ]]; then
-      log "Would run LeafWiki with YAML config for MCP"
+      log "$LEAFWIKI_RUN_MSG_DRY_RUN_MCP_CONFIG"
     else
-      log "Would run LeafWiki native MCP STDIO"
-      log "STDIO attach: descriptor-first attach via <data-dir>/.leafwiki/project-daemon.json; wikid ensure/control for missing or stale descriptors"
+      log "$LEAFWIKI_RUN_MSG_DRY_RUN_MCP_NATIVE"
+      log "$LEAFWIKI_RUN_MSG_DRY_RUN_STDIO_ATTACH"
     fi
   else
-    log "Would run LeafWiki agent hook"
+    log "$LEAFWIKI_RUN_MSG_DRY_RUN_AGENT_HOOK"
   fi
   if [[ -n "$config_path" ]]; then
-    log "HTTP UI: configured by $config_path"
+    log "$LEAFWIKI_RUN_MSG_DRY_RUN_HTTP_CONFIG $config_path"
   else
-    log "HTTP UI: $http_url"
+    log "$LEAFWIKI_RUN_MSG_DRY_RUN_HTTP_URL $http_url"
   fi
   if [[ "${#print_env[@]}" -gt 0 ]]; then
     print_command_with_env "${#print_env[@]}" "${print_env[@]}" "${leafwiki_cmd[@]}"

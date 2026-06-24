@@ -1,0 +1,1263 @@
+["api.assets.delete.success"]
+description = "Returned after an asset is deleted through the API."
+other = "Asset deleted"
+
+["api.auth.login.success"]
+description = "Returned after an auth login succeeds through the API."
+other = "Login successful"
+
+["api.auth.logout.success"]
+description = "Returned after an auth logout succeeds through the API."
+other = "Logout successful"
+
+["api.auth.refresh_token.success"]
+description = "Returned after an auth token refresh succeeds through the API."
+other = "Token refreshed"
+
+["api.pages.delete.success"]
+description = "Returned after a page is deleted through the API."
+other = "Page deleted"
+
+["api.pages.move.success"]
+description = "Returned after a page is moved through the API."
+other = "Page moved"
+
+["api.pages.sort.success"]
+description = "Returned after child pages are sorted through the API."
+other = "Pages sorted successfully"
+
+["cli.error.byte_size_must_be_positive"]
+description = "Printed when a byte-size CLI setting is zero or negative."
+other = "Byte size value must be greater than zero"
+
+["cli.error.byte_size_too_large"]
+description = "Printed when a byte-size CLI setting is too large."
+other = "Byte size value is too large"
+
+["cli.error.invalid_agent_hook_arguments"]
+description = "Printed when agent-hook CLI arguments are invalid."
+other = "Invalid agent hook arguments"
+
+["cli.error.invalid_byte_size_value"]
+description = "Printed when a byte-size CLI setting cannot be parsed."
+other = "Invalid byte size value"
+
+["cli.error.invalid_config_arguments"]
+description = "Printed when YAML config mode is combined with incompatible CLI arguments."
+other = "Invalid config arguments"
+
+["cli.error.invalid_config_file"]
+description = "Printed when the configured YAML file cannot be used."
+other = "Invalid config file"
+
+["cli.error.invalid_environment"]
+description = "Printed when LeafWiki startup rejects the process environment."
+other = "Invalid environment"
+
+["cli.error.invalid_environment_variable_value"]
+description = "Printed when a LeafWiki environment variable has an invalid value."
+other = "Invalid environment variable value"
+
+["cli.error.invalid_http_remote_user_config"]
+description = "Printed when HTTP remote-user authentication config is invalid."
+other = "Invalid HTTP remote user configuration"
+
+["cli.error.invalid_logging_config"]
+description = "Printed when logging config is invalid."
+other = "Invalid logging configuration"
+
+["cli.error.invalid_markdown_link_root_prefix"]
+description = "Printed when markdown link root prefix config is invalid."
+other = "Invalid markdown link root prefix"
+
+["cli.error.invalid_mcp_config"]
+description = "Printed when MCP config is invalid."
+other = "Invalid MCP configuration"
+
+["cli.error.invalid_native_stdio_config"]
+description = "Printed when native STDIO config is invalid."
+other = "Invalid native STDIO configuration"
+
+["cli.error.invalid_service_config_file"]
+description = "Printed when service-mode config is invalid."
+other = "Invalid service config file"
+
+["cli.error.invalid_trusted_proxy_ips"]
+description = "Printed when trusted proxy IP config is invalid."
+other = "invalid --trusted-proxy-ips value"
+
+["cli.error.invalid_workspace_config"]
+description = "Printed when workspace config is invalid."
+other = "Invalid workspace configuration"
+
+["cli.error.leafwiki_daemon_failed"]
+description = "Printed when daemon startup fails."
+other = "LeafWiki daemon failed"
+
+["cli.error.leafwiki_startup_failed"]
+description = "Printed when LeafWiki startup fails."
+other = "LeafWiki startup failed"
+
+["cli.error.password_reset_failed"]
+description = "Printed when admin password reset fails."
+other = "Password reset failed"
+
+["cli.error.project_daemon_failed"]
+description = "Printed when the project daemon command fails."
+other = "Project daemon failed"
+
+["cli.error.runtime_role_failed"]
+description = "Printed when a runtime role command fails."
+other = "Runtime role failed"
+
+["cli.error.service_config_required"]
+description = "Printed when service mode requires a config file."
+other = "Service config file is required for service mode"
+
+["cli.help.body"]
+description = "Top-level LeafWiki CLI help body."
+other = "LeafWiki – lightweight selfhosted wiki 🌿\n\n\tUsage:\n\tleafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki --mcp=stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki agent-hook <codex|claude|cursor|unknown> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]\n\tleafwiki daemon\n\tleafwiki reset-admin-password\n\tleafwiki --help\n\n\tService mode:\n\tleafwiki daemon reads ~/.leafwiki/leafwiki.yml and runs the install-wide wikid/frontd/workspaced runtime in the foreground.\n\n\tOptions:\n\t--host             Host/IP address to bind the server to (default: 127.0.0.1)\n\t--port             Port to run the server on (default: 8080)\n\t--data-dir         Path to data directory (default: ./data)\n\t--root-dir         Path to managed markdown content directory (default: <data-dir>/root)\n\t--markdown-link-root-prefix Repository-root prefix for absolute Markdown links (for example /docs) (default: \"\")\n\t--admin-password   Initial admin password (used only if no admin exists)\n\t--jwt-secret       Secret for signing auth tokens (JWT) (required)\n\t--public-access    Allow public access to the wiki only with read access (default: false)\n\t--allow-insecure   Allow insecure HTTP connections (default: false)\n\t--access-token-timeout  Access token timeout duration (e.g. 24h, 15m) (default: 15m)\n\t--refresh-token-timeout Refresh token timeout duration (e.g. 168h, 7d) (default: 7d)\n\t--inject-code-in-header  Raw HTML/JS code injected into <head> tag (e.g., analytics, custom CSS) (default: \"\")\n\t                         WARNING: Use only with trusted code to avoid XSS vulnerabilities. No sanitization is performed.\n\t--custom-stylesheet      Path to a .css file inside the data dir, served publicly as /custom.css\n\t                         (or <base-path>/custom.css when --base-path is set) (default: \"\")\n\t--log-target             Log target: file, stderr, or stdout (default: file)\n\t--log-file               Log file path when --log-target=file; relative paths resolve under --data-dir\n\t                         (default: <data-dir>/.leafwiki/logs/leafwiki.log)\n\t--disable-auth                Disable authentication completely (default: false) (WARNING: only use in trusted networks!)\n\t--hide-link-metadata-section  Hide link metadata section in the frontend UI (default: false)\n\t--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: \"\")\n\t--max-asset-upload-size       Maximum size for asset uploads (for example 50MiB, 50MB, 52428800) (default: 50MiB)\n\t--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)\n\t--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)\n\t--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY\n\t--daemon-idle-timeout         Federated runtime idle timeout after the last session or presence record exits; 0 stops immediately (default: 10m)\n\t--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)\n\t--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)\n\t--trusted-proxy-ips             Comma-separated trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)\n\t--http-remote-user-logout-url   URL the frontend redirects to after logout in proxy-auth mode (default: \"\")\n\t--disable-request-log           Suppress per-request HTTP access log lines (default: false)\n\t--config                        Path to flat YAML config file; mutually exclusive with other CLI flags\n\n\tEnvironment variables:\n\tLEAFWIKI_HOST\n\tLEAFWIKI_PORT\n\tLEAFWIKI_DATA_DIR\n\tLEAFWIKI_ROOT_DIR\n\tLEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX\n\tLEAFWIKI_JWT_SECRET\n\tLEAFWIKI_LOG_LEVEL\n\tLEAFWIKI_ADMIN_PASSWORD\n\tLEAFWIKI_PUBLIC_ACCESS\n\tLEAFWIKI_ALLOW_INSECURE\n\tLEAFWIKI_INJECT_CODE_IN_HEADER\n\tLEAFWIKI_CUSTOM_STYLESHEET\n\tLEAFWIKI_LOG_TARGET\n\tLEAFWIKI_LOG_FILE\n\tLEAFWIKI_ACCESS_TOKEN_TIMEOUT\n\tLEAFWIKI_REFRESH_TOKEN_TIMEOUT\n\tLEAFWIKI_DISABLE_AUTH\n\tLEAFWIKI_HIDE_LINK_METADATA_SECTION\n\tLEAFWIKI_BASE_PATH\n\tLEAFWIKI_MAX_ASSET_UPLOAD_SIZE\n\tLEAFWIKI_ENABLE_LINK_REFACTOR\n\tLEAFWIKI_MCP\n\tLEAFWIKI_MCP_API_KEY\n\tLEAFWIKI_DAEMON_IDLE_TIMEOUT\n\tLEAFWIKI_ENABLE_HTTP_REMOTE_USER\n\tLEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME\n\tLEAFWIKI_TRUSTED_PROXY_IPS\n\tLEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL\n\tLEAFWIKI_DISABLE_REQUEST_LOG\n\t"
+
+["cli.help.usage"]
+description = "Top-level LeafWiki CLI usage line."
+other = "Usage: leafwiki [command]"
+
+["errors.asset.already_exists"]
+description = "Derived from ErrorCode asset_already_exists."
+other = "Asset already exists"
+
+["errors.asset.blob_hash_mismatch"]
+description = "Derived from ErrorCode asset_blob_hash_mismatch."
+other = "Asset blob hash mismatch"
+
+["errors.asset.blob_size_mismatch"]
+description = "Derived from ErrorCode asset_blob_size_mismatch."
+other = "Asset blob size mismatch"
+
+["errors.asset.delete_failed"]
+description = "Derived from ErrorCode asset_delete_failed."
+other = "Failed to delete asset"
+
+["errors.asset.file_too_large"]
+description = "Derived from ErrorCode asset_file_too_large."
+other = "File is too large"
+
+["errors.asset.internal_error"]
+description = "Derived from ErrorCode asset_internal_error."
+other = "Asset request failed"
+
+["errors.asset.invalid_extension"]
+description = "Derived from ErrorCode asset_invalid_extension."
+other = "Asset extension must not change"
+
+["errors.asset.invalid_name"]
+description = "Derived from ErrorCode asset_invalid_name."
+other = "Invalid asset name"
+
+["errors.asset.invalid_payload"]
+description = "Derived from ErrorCode asset_invalid_payload."
+other = "Invalid asset payload"
+
+["errors.asset.missing_file"]
+description = "Derived from ErrorCode asset_missing_file."
+other = "Missing file"
+
+["errors.asset.missing_name"]
+description = "Derived from ErrorCode asset_missing_name."
+other = "Missing filename"
+
+["errors.asset.not_found"]
+description = "Derived from ErrorCode asset_not_found."
+other = "Asset not found"
+
+["errors.asset.page_not_found"]
+description = "Derived from ErrorCode asset_page_not_found."
+other = "Page not found"
+
+["errors.asset.read_failed"]
+description = "Derived from ErrorCode asset_read_failed."
+other = "Failed to read asset"
+
+["errors.asset.rename_failed"]
+description = "Derived from ErrorCode asset_rename_failed."
+other = "Failed to rename asset"
+
+["errors.asset.upload_failed"]
+description = "Derived from ErrorCode asset_upload_failed."
+other = "Failed to upload asset"
+
+["errors.auth.access_token_missing"]
+description = "Derived from ErrorCode auth_access_token_missing."
+other = "Missing or invalid access token"
+
+["errors.auth.account_locked"]
+description = "Derived from ErrorCode auth_account_locked."
+other = "Account temporarily locked due to too many failed login attempts"
+
+["errors.auth.admin_cannot_delete"]
+description = "Derived from ErrorCode auth_admin_cannot_delete."
+other = "Admin user cannot be deleted"
+
+["errors.auth.admin_disabled"]
+description = "Derived from ErrorCode auth_admin_disabled."
+other = "Admin operations are not available when authentication is disabled"
+
+["errors.auth.admin_privileges_required"]
+description = "Derived from ErrorCode auth_admin_privileges_required."
+other = "Admin privileges required"
+
+["errors.auth.cookie_failed"]
+description = "Derived from ErrorCode auth_cookie_failed."
+other = "HTTPS is required for auth cookies. Use HTTPS or start LeafWiki with --allow-insecure for trusted plain HTTP setups."
+
+["errors.auth.csrf_failed"]
+description = "Derived from ErrorCode auth_csrf_failed."
+other = "Failed to clear CSRF cookie"
+
+["errors.auth.disabled"]
+description = "Derived from ErrorCode auth_disabled."
+other = "Authentication is disabled"
+
+["errors.auth.disabled_missing_user"]
+description = "Derived from ErrorCode auth_disabled_missing_user."
+other = "User not authenticated and auth is disabled"
+
+["errors.auth.editor_privileges_required"]
+description = "Derived from ErrorCode auth_editor_privileges_required."
+other = "Editor or Admin role required"
+
+["errors.auth.forbidden"]
+description = "Derived from ErrorCode auth_forbidden."
+other = "MCP API key self-creation is disabled for HTTP remote-user authentication"
+
+["errors.auth.internal_error"]
+description = "Derived from ErrorCode auth_internal_error."
+other = "Authentication request failed"
+
+["errors.auth.invalid_credentials"]
+description = "Returned when login credentials are not accepted."
+other = "Invalid credentials"
+
+["errors.auth.invalid_payload"]
+description = "Derived from ErrorCode auth_invalid_payload."
+other = "Invalid login payload"
+
+["errors.auth.invalid_refresh_token"]
+description = "Derived from ErrorCode auth_invalid_refresh_token."
+other = "Missing or invalid refresh token"
+
+["errors.auth.invalid_request"]
+description = "Derived from ErrorCode auth_invalid_request."
+other = "Invalid request"
+
+["errors.auth.invalid_role"]
+description = "Derived from ErrorCode auth_invalid_role."
+other = "Invalid role"
+
+["errors.auth.invalid_user"]
+description = "Derived from ErrorCode auth_invalid_user."
+other = "Invalid user"
+
+["errors.auth.invalid_user_context"]
+description = "Derived from ErrorCode auth_invalid_user_context."
+other = "Invalid user context"
+
+["errors.auth.last_admin_cannot_be_demoted"]
+description = "Derived from ErrorCode auth_last_admin_cannot_be_demoted."
+other = "Cannot remove admin role from the last admin user"
+
+["errors.auth.remote_user_not_found"]
+description = "Derived from ErrorCode auth_remote_user_not_found."
+other = "reverse proxy auth: user not found"
+
+["errors.auth.reverse_proxy_misconfigured"]
+description = "Derived from ErrorCode auth_reverse_proxy_misconfigured."
+other = "Reverse proxy authentication misconfigured"
+
+["errors.auth.self_required"]
+description = "Derived from ErrorCode auth_self_required."
+other = "You can only access your own account"
+
+["errors.auth.service_unavailable"]
+description = "Derived from ErrorCode auth_service_unavailable."
+other = "Authentication service unavailable"
+
+["errors.auth.token_expired"]
+description = "Derived from ErrorCode auth_token_expired."
+other = "Auth token expired"
+
+["errors.auth.token_invalid"]
+description = "Derived from ErrorCode auth_token_invalid."
+other = "Invalid or expired token"
+
+["errors.auth.user_already_exists"]
+description = "Derived from ErrorCode auth_user_already_exists."
+other = "User already exists"
+
+["errors.auth.user_not_authenticated"]
+description = "Derived from ErrorCode auth_user_not_authenticated."
+other = "User not authenticated"
+
+["errors.auth.user_not_found"]
+description = "Derived from ErrorCode auth_user_not_found."
+other = "User not found"
+
+["errors.branding.config_unavailable"]
+description = "Derived from ErrorCode branding_config_unavailable."
+other = "Failed to load branding config"
+
+["errors.branding.favicon_delete_failed"]
+description = "Derived from ErrorCode branding_favicon_delete_failed."
+other = "Failed to delete favicon"
+
+["errors.branding.favicon_invalid_type"]
+description = "Derived from ErrorCode branding_favicon_invalid_type."
+other = "Invalid favicon file type"
+
+["errors.branding.favicon_missing"]
+description = "Derived from ErrorCode branding_favicon_missing."
+other = "Missing file"
+
+["errors.branding.favicon_too_large"]
+description = "Derived from ErrorCode branding_favicon_too_large."
+other = "File too large"
+
+["errors.branding.favicon_upload_failed"]
+description = "Derived from ErrorCode branding_favicon_upload_failed."
+other = "Failed to save favicon file"
+
+["errors.branding.internal_error"]
+description = "Derived from ErrorCode branding_internal_error."
+other = "Branding request failed"
+
+["errors.branding.invalid_payload"]
+description = "Derived from ErrorCode branding_invalid_payload."
+other = "Invalid payload"
+
+["errors.branding.logo_delete_failed"]
+description = "Derived from ErrorCode branding_logo_delete_failed."
+other = "Failed to delete logo"
+
+["errors.branding.logo_invalid_type"]
+description = "Derived from ErrorCode branding_logo_invalid_type."
+other = "Invalid logo file type"
+
+["errors.branding.logo_missing"]
+description = "Derived from ErrorCode branding_logo_missing."
+other = "Missing file"
+
+["errors.branding.logo_too_large"]
+description = "Derived from ErrorCode branding_logo_too_large."
+other = "File too large"
+
+["errors.branding.logo_upload_failed"]
+description = "Derived from ErrorCode branding_logo_upload_failed."
+other = "Failed to save logo file"
+
+["errors.branding.update_failed"]
+description = "Derived from ErrorCode branding_update_failed."
+other = "Failed to update branding"
+
+["errors.csrf.token_invalid"]
+description = "Derived from ErrorCode csrf_token_invalid."
+other = "Invalid CSRF token"
+
+["errors.csrf.token_missing"]
+description = "Derived from ErrorCode csrf_token_missing."
+other = "CSRF token missing"
+
+["errors.daemon.agent_presence_invalid_request"]
+description = "Derived from ErrorCode daemon_agent_presence_invalid_request."
+other = "Daemon agent presence invalid request"
+
+["errors.daemon.control_unauthorized"]
+description = "Derived from ErrorCode daemon_control_unauthorized."
+other = "Daemon control unauthorized"
+
+["errors.daemon.session_not_found"]
+description = "Derived from ErrorCode daemon_session_not_found."
+other = "Daemon session not found"
+
+["errors.daemon.session_register_failed"]
+description = "Derived from ErrorCode daemon_session_register_failed."
+other = "Daemon session register failed"
+
+["errors.importer.execution_running"]
+description = "Derived from ErrorCode importer_execution_running."
+other = "Import is already running"
+
+["errors.importer.file_open_failed"]
+description = "Derived from ErrorCode importer_file_open_failed."
+other = "Failed to open uploaded file"
+
+["errors.importer.internal_error"]
+description = "Derived from ErrorCode importer_internal_error."
+other = "Importer request failed"
+
+["errors.importer.missing_file"]
+description = "Derived from ErrorCode importer_missing_file."
+other = "Missing file"
+
+["errors.importer.no_plan"]
+description = "Derived from ErrorCode importer_no_plan."
+other = "No import plan available"
+
+["errors.importer.state_unavailable"]
+description = "Derived from ErrorCode importer_state_unavailable."
+other = "Import state is unavailable"
+
+["errors.importer.upload_too_large"]
+description = "Derived from ErrorCode importer_upload_too_large."
+other = "Upload exceeds maximum size limit of 500 MiB"
+
+["errors.link.internal_error"]
+description = "Derived from ErrorCode link_internal_error."
+other = "Failed to load link status"
+
+["errors.link.page_not_found"]
+description = "Derived from ErrorCode link_page_not_found."
+other = "Page not found"
+
+["errors.link.service_unavailable"]
+description = "Derived from ErrorCode link_service_unavailable."
+other = "Link service is unavailable"
+
+["errors.mcp.actor_context_invalid"]
+description = "Derived from ErrorCode mcp_actor_context_invalid."
+other = "MCP actor context invalid"
+
+["errors.mcp.actor_context_missing"]
+description = "Derived from ErrorCode mcp_actor_context_missing."
+other = "MCP actor context missing"
+
+["errors.mcp.authenticated_user_lookup_failed"]
+description = "Derived from ErrorCode mcp_authenticated_user_lookup_failed."
+other = "MCP authenticated user lookup failed"
+
+["errors.mcp.authenticated_user_not_found"]
+description = "Derived from ErrorCode mcp_authenticated_user_not_found."
+other = "MCP authenticated user not found"
+
+["errors.mcp.authenticated_user_service_unavailable"]
+description = "Derived from ErrorCode mcp_authenticated_user_service_unavailable."
+other = "MCP authenticated user service unavailable"
+
+["errors.mcp.editor_role_required"]
+description = "Derived from ErrorCode mcp_editor_role_required."
+other = "editor or admin role required"
+
+["errors.mcp.page_identifier_ambiguous"]
+description = "Derived from ErrorCode mcp_page_identifier_ambiguous."
+other = "id and pageId cannot both be supplied"
+
+["errors.mcp.page_identifier_required"]
+description = "Derived from ErrorCode mcp_page_identifier_required."
+other = "id or pageId is required"
+
+["errors.mcp.page_target_ambiguous"]
+description = "Derived from ErrorCode mcp_page_target_ambiguous."
+other = "pageId and path cannot both be supplied"
+
+["errors.mcp.page_target_required"]
+description = "Derived from ErrorCode mcp_page_target_required."
+other = "pageId or path is required"
+
+["errors.mcp.session_workspace_mismatch"]
+description = "Derived from ErrorCode mcp_session_workspace_mismatch."
+other = "MCP session workspace mismatch"
+
+["errors.mcp.token_info_missing"]
+description = "Derived from ErrorCode mcp_token_info_missing."
+other = "MCP token info missing"
+
+["errors.mcp.tool_error"]
+description = "Derived from ErrorCode mcp_tool_error."
+other = "MCP tool failed"
+
+["errors.mcp.workspace_router_unavailable"]
+description = "Derived from ErrorCode mcp_workspace_router_unavailable."
+other = "MCP workspace router unavailable"
+
+["errors.mcp.workspace_unavailable"]
+description = "Returned when a workspace MCP endpoint is unavailable."
+other = "Workspace MCP unavailable"
+
+["errors.missing.asset_blob"]
+description = "Derived from ErrorCode missing_asset_blob."
+other = "Missing asset blob"
+
+["errors.missing.asset_manifest"]
+description = "Derived from ErrorCode missing_asset_manifest."
+other = "Missing asset manifest"
+
+["errors.missing.content_blob"]
+description = "Derived from ErrorCode missing_content_blob."
+other = "Missing content blob"
+
+["errors.page.cannot_move_to_self"]
+description = "Derived from ErrorCode page_cannot_move_to_self."
+other = "Page cannot move to self"
+
+["errors.page.circular_move"]
+description = "Derived from ErrorCode page_circular_move."
+other = "Page circular move"
+
+["errors.page.convert_not_allowed"]
+description = "Derived from ErrorCode page_convert_not_allowed."
+other = "Page convert not allowed"
+
+["errors.page.has_children"]
+description = "Derived from ErrorCode page_has_children."
+other = "Page has children"
+
+["errors.page.internal_error"]
+description = "Derived from ErrorCode page_internal_error."
+other = "Failed to parse metadata"
+
+["errors.page.invalid_kind"]
+description = "Derived from ErrorCode page_invalid_kind."
+other = "Invalid kind"
+
+["errors.page.invalid_parent_id"]
+description = "Derived from ErrorCode page_invalid_parent_id."
+other = "Invalid parentId"
+
+["errors.page.invalid_path"]
+description = "Derived from ErrorCode page_invalid_path."
+other = "Invalid path"
+
+["errors.page.invalid_payload"]
+description = "Derived from ErrorCode page_invalid_payload."
+other = "Invalid payload"
+
+["errors.page.invalid_refactor_kind"]
+description = "Derived from ErrorCode page_invalid_refactor_kind."
+other = "Invalid refactor kind"
+
+["errors.page.invalid_request"]
+description = "Derived from ErrorCode page_invalid_request."
+other = "Invalid request"
+
+["errors.page.invalid_target_kind"]
+description = "Derived from ErrorCode page_invalid_target_kind."
+other = "Invalid targetKind"
+
+["errors.page.invalid_title"]
+description = "Derived from ErrorCode page_invalid_title."
+other = "Title must include at least one slug character"
+
+["errors.page.missing_id"]
+description = "Derived from ErrorCode page_missing_id."
+other = "Page ID is required"
+
+["errors.page.missing_path"]
+description = "Derived from ErrorCode page_missing_path."
+other = "Missing path"
+
+["errors.page.missing_title"]
+description = "Derived from ErrorCode page_missing_title."
+other = "Title query param is required"
+
+["errors.page.not_found"]
+description = "Derived from ErrorCode page_not_found."
+other = "Page not found"
+
+["errors.page.parent_not_found"]
+description = "Derived from ErrorCode page_parent_not_found."
+other = "Page parent not found"
+
+["errors.page.root_operation"]
+description = "Derived from ErrorCode page_root_operation."
+other = "Page root operation"
+
+["errors.page.slug_conflict"]
+description = "Derived from ErrorCode page_slug_conflict."
+other = "Page slug conflict"
+
+["errors.page.version_conflict"]
+description = "Returned when a page update uses an outdated version."
+other = "Page {{.Arg0}} was changed by another request before {{.Arg1}} could be saved."
+
+["errors.page.version_required"]
+description = "Derived from ErrorCode page_version_required."
+other = "Page version required"
+
+["errors.presence.invalid_request"]
+description = "Derived from ErrorCode presence_invalid_request."
+other = "Invalid presence request"
+
+["errors.presence.mode_invalid"]
+description = "Derived from ErrorCode presence_mode_invalid."
+other = "mode must be view, edit, history, assets, settings, import, or unknown"
+
+["errors.presence.registry_unavailable"]
+description = "Derived from ErrorCode presence_registry_unavailable."
+other = "web presence registry unavailable"
+
+["errors.presence.session_id_required"]
+description = "Derived from ErrorCode presence_session_id_required."
+other = "sessionId is required"
+
+["errors.presence.session_id_too_long"]
+description = "Derived from ErrorCode presence_session_id_too_long."
+other = "sessionId is too long"
+
+["errors.presence.session_user_mismatch"]
+description = "Derived from ErrorCode presence_session_user_mismatch."
+other = "sessionId belongs to a different user"
+
+["errors.presence.user_required"]
+description = "Derived from ErrorCode presence_user_required."
+other = "user is required"
+
+["errors.private.actor_context_invalid"]
+description = "Derived from ErrorCode private_actor_context_invalid."
+other = "Private actor context invalid"
+
+["errors.private.control_token_invalid"]
+description = "Derived from ErrorCode private_control_token_invalid."
+other = "Private control token invalid"
+
+["errors.private.mcp_control_token_invalid"]
+description = "Returned when a private MCP control token is invalid."
+other = "Unauthorized"
+
+["errors.properties.internal_error"]
+description = "Derived from ErrorCode properties_internal_error."
+other = "Internal server error"
+
+["errors.properties.invalid_limit"]
+description = "Derived from ErrorCode properties_invalid_limit."
+other = "Properties invalid limit"
+
+["errors.properties.missing_key"]
+description = "Derived from ErrorCode properties_missing_key."
+other = "Query parameter 'key' is required"
+
+["errors.properties.missing_value"]
+description = "Derived from ErrorCode properties_missing_value."
+other = "Query parameter 'value' is required"
+
+["errors.rate.limit_exceeded"]
+description = "Derived from ErrorCode rate_limit_exceeded."
+other = "Too many requests, please try again later"
+
+["errors.revision.compare_invalid_request"]
+description = "Derived from ErrorCode revision_compare_invalid_request."
+other = "Revision compare request is invalid"
+
+["errors.revision.internal_error"]
+description = "Derived from ErrorCode revision_internal_error."
+other = "Failed to list revisions"
+
+["errors.revision.invalid_limit"]
+description = "Derived from ErrorCode revision_invalid_limit."
+other = "Revision list limit is invalid"
+
+["errors.revision.invalid_page_id"]
+description = "Derived from ErrorCode revision_invalid_page_id."
+other = "Page ID is required"
+
+["errors.revision.invalid_revision_id"]
+description = "Derived from ErrorCode revision_invalid_revision_id."
+other = "Revision ID is required"
+
+["errors.revision.not_found"]
+description = "Derived from ErrorCode revision_not_found."
+other = "Revision asset not found"
+
+["errors.revision.preview_asset_blob_unavailable"]
+description = "Derived from ErrorCode revision_preview_asset_blob_unavailable."
+other = "Revision asset blob is unavailable"
+
+["errors.revision.preview_asset_invalid_name"]
+description = "Derived from ErrorCode revision_preview_asset_invalid_name."
+other = "Revision asset name is invalid"
+
+["errors.revision.preview_asset_not_found"]
+description = "Derived from ErrorCode revision_preview_asset_not_found."
+other = "Revision asset not found"
+
+["errors.revision.preview_assets_unavailable"]
+description = "Derived from ErrorCode revision_preview_assets_unavailable."
+other = "Revision assets are unavailable"
+
+["errors.revision.preview_content_unavailable"]
+description = "Derived from ErrorCode revision_preview_content_unavailable."
+other = "Revision content is unavailable"
+
+["errors.revision.restore_assets_missing"]
+description = "Derived from ErrorCode revision_restore_assets_missing."
+other = "Restore assets are unavailable"
+
+["errors.revision.restore_content_missing"]
+description = "Derived from ErrorCode revision_restore_content_missing."
+other = "Restore content is unavailable"
+
+["errors.revision.restore_failed"]
+description = "Derived from ErrorCode revision_restore_failed."
+other = "Failed to restore page"
+
+["errors.revision.restore_invalid_page_id"]
+description = "Derived from ErrorCode revision_restore_invalid_page_id."
+other = "Failed to restore page"
+
+["errors.revision.restore_invalid_revision"]
+description = "Derived from ErrorCode revision_restore_invalid_revision."
+other = "Restore revision is invalid"
+
+["errors.revision.restore_page_not_found"]
+description = "Derived from ErrorCode revision_restore_page_not_found."
+other = "Page not found"
+
+["errors.revision.restore_revision_not_found"]
+description = "Derived from ErrorCode revision_restore_revision_not_found."
+other = "Restore revision not found"
+
+["errors.revision.service_unavailable"]
+description = "Derived from ErrorCode revision_service_unavailable."
+other = "Revision service unavailable"
+
+["errors.search.internal_error"]
+description = "Derived from ErrorCode search_internal_error."
+other = "Failed to perform search"
+
+["errors.search.invalid_limit"]
+description = "Derived from ErrorCode search_invalid_limit."
+other = "Invalid limit value"
+
+["errors.search.invalid_offset"]
+description = "Derived from ErrorCode search_invalid_offset."
+other = "Invalid offset value"
+
+["errors.search.missing_query"]
+description = "Derived from ErrorCode search_missing_query."
+other = "Query parameter 'q' is required"
+
+["errors.search.unavailable"]
+description = "Derived from ErrorCode search_unavailable."
+other = "Search is currently unavailable"
+
+["errors.stdio.auth_api_key_invalid"]
+description = "Derived from ErrorCode stdio_auth_api_key_invalid."
+other = "STDIO auth API key invalid"
+
+["errors.stdio.auth_api_key_rejected"]
+description = "Derived from ErrorCode stdio_auth_api_key_rejected."
+other = "STDIO auth API key rejected"
+
+["errors.stdio.auth_api_key_required"]
+description = "Derived from ErrorCode stdio_auth_api_key_required."
+other = "STDIO auth API key required"
+
+["errors.stdio.auth_api_key_verifier_failed"]
+description = "Derived from ErrorCode stdio_auth_api_key_verifier_failed."
+other = "STDIO auth API key verifier failed"
+
+["errors.stdio.auth_api_key_verifier_unavailable"]
+description = "Derived from ErrorCode stdio_auth_api_key_verifier_unavailable."
+other = "STDIO auth API key verifier unavailable"
+
+["errors.stdio.auth_invalid_request"]
+description = "Derived from ErrorCode stdio_auth_invalid_request."
+other = "STDIO auth invalid request"
+
+["errors.tags.internal_error"]
+description = "Derived from ErrorCode tags_internal_error."
+other = "Internal server error"
+
+["errors.tags.invalid_limit"]
+description = "Derived from ErrorCode tags_invalid_limit."
+other = "Tags invalid limit"
+
+["errors.tags.missing_param"]
+description = "Derived from ErrorCode tags_missing_param."
+other = "Query parameter 'tags' is required"
+
+["errors.workspace.actor_context_encode_failed"]
+description = "Derived from ErrorCode workspace_actor_context_encode_failed."
+other = "Workspace actor context encode failed"
+
+["errors.workspace.actor_context_failed"]
+description = "Derived from ErrorCode workspace_actor_context_failed."
+other = "Workspace actor context failed"
+
+["errors.workspace.actor_context_unavailable"]
+description = "Derived from ErrorCode workspace_actor_context_unavailable."
+other = "Workspace actor context unavailable"
+
+["errors.workspace.ambiguous"]
+description = "Derived from ErrorCode workspace_ambiguous."
+other = "Workspace ambiguous"
+
+["errors.workspace.forbidden"]
+description = "Derived from ErrorCode workspace_forbidden."
+other = "Workspace forbidden"
+
+["errors.workspace.grant_denied"]
+description = "Returned when a user lacks a workspace grant."
+other = "workspace access denied"
+
+["errors.workspace.id_invalid"]
+description = "Derived from ErrorCode workspace_id_invalid."
+other = "Workspace ID invalid"
+
+["errors.workspace.id_required"]
+description = "Derived from ErrorCode workspace_id_required."
+other = "Workspace ID required"
+
+["errors.workspace.id_whitespace"]
+description = "Derived from ErrorCode workspace_id_whitespace."
+other = "Workspace ID whitespace"
+
+["errors.workspace.not_found"]
+description = "Derived from ErrorCode workspace_not_found."
+other = "Workspace not found"
+
+["errors.workspace.resolver_unavailable"]
+description = "Derived from ErrorCode workspace_resolver_unavailable."
+other = "Workspace resolver unavailable"
+
+["errors.workspace.sync_disabled"]
+description = "Derived from ErrorCode workspace_sync_disabled."
+other = "workspace sync is not enabled"
+
+["errors.workspace.sync_failed"]
+description = "Derived from ErrorCode workspace_sync_failed."
+other = "Workspace sync failed"
+
+["errors.workspace.sync_invalid_cursor"]
+description = "Derived from ErrorCode workspace_sync_invalid_cursor."
+other = "invalid snapshot cursor"
+
+["errors.workspace.sync_invalid_limit"]
+description = "Derived from ErrorCode workspace_sync_invalid_limit."
+other = "invalid snapshot limit"
+
+["errors.workspace.unavailable"]
+description = "Derived from ErrorCode workspace_unavailable."
+other = "Workspace unavailable"
+
+["errors.workspaced.unavailable"]
+description = "Derived from ErrorCode workspaced_unavailable."
+other = "Workspaced unavailable"
+
+["mcp.tools.wiki_apply_page_refactor.description"]
+description = "Descriptor for the MCP refactor apply tool."
+other = "Apply a page rename or move refactor"
+
+["mcp.tools.wiki_compare_revisions.description"]
+description = "Descriptor for the MCP revision comparison tool."
+other = "Compare two page revisions"
+
+["mcp.tools.wiki_convert_page.description"]
+description = "Descriptor for the MCP page conversion tool."
+other = "Convert a page between page and section kinds"
+
+["mcp.tools.wiki_convert_page.success"]
+description = "Returned after a page is converted through MCP."
+other = "Page converted"
+
+["mcp.tools.wiki_copy_page.description"]
+description = "Descriptor for the MCP page copy tool."
+other = "Copy a page and its assets"
+
+["mcp.tools.wiki_create_page.description"]
+description = "Descriptor for the MCP page creation tool."
+other = "Create a wiki page or section"
+
+["mcp.tools.wiki_delete_asset.description"]
+description = "Descriptor for the MCP asset deletion tool."
+other = "Delete a page asset"
+
+["mcp.tools.wiki_delete_asset.success"]
+description = "Returned after an asset is deleted through MCP."
+other = "Asset deleted"
+
+["mcp.tools.wiki_delete_page.description"]
+description = "Descriptor for the MCP page deletion tool."
+other = "Delete a page"
+
+["mcp.tools.wiki_delete_page.success"]
+description = "Returned after a page is deleted through MCP."
+other = "Page deleted"
+
+["mcp.tools.wiki_ensure_page.description"]
+description = "Descriptor for the MCP ensure-page tool."
+other = "Ensure a page exists at a route path"
+
+["mcp.tools.wiki_get_asset.description"]
+description = "Descriptor for the MCP get-asset tool."
+other = "Read an asset as base64 content"
+
+["mcp.tools.wiki_get_config.description"]
+description = "Descriptor for the MCP configuration tool."
+other = "Return local MCP-visible LeafWiki configuration"
+
+["mcp.tools.wiki_get_context.description"]
+description = "Descriptor for the MCP context tool."
+other = "Return agent-ready wiki context, sync state, recent changes, and presence"
+
+["mcp.tools.wiki_get_current_user.description"]
+description = "Descriptor for the MCP current-user tool."
+other = "Return the effective MCP user"
+
+["mcp.tools.wiki_get_latest_revision.description"]
+description = "Descriptor for the MCP latest-revision tool."
+other = "Get the latest page revision"
+
+["mcp.tools.wiki_get_link_status.description"]
+description = "Descriptor for the MCP link status tool."
+other = "Return link status for a page"
+
+["mcp.tools.wiki_get_page.description"]
+description = "Descriptor for the MCP get-page tool."
+other = "Return a page by ID with link status context"
+
+["mcp.tools.wiki_get_page_by_path.description"]
+description = "Descriptor for the MCP get-page-by-path tool."
+other = "Return a page by route path with link status context"
+
+["mcp.tools.wiki_get_pages_by_property.description"]
+description = "Descriptor for the MCP pages-by-property tool."
+other = "List pages with a property value"
+
+["mcp.tools.wiki_get_pages_by_tags.description"]
+description = "Descriptor for the MCP pages-by-tags tool."
+other = "List pages matching all tags"
+
+["mcp.tools.wiki_get_revision.description"]
+description = "Descriptor for the MCP get-revision tool."
+other = "Get a page revision snapshot"
+
+["mcp.tools.wiki_get_revision_asset.description"]
+description = "Descriptor for the MCP revision asset tool."
+other = "Read a revision asset as base64 content"
+
+["mcp.tools.wiki_get_search_status.description"]
+description = "Descriptor for the MCP search status tool."
+other = "Return the search indexing status"
+
+["mcp.tools.wiki_get_subtree.description"]
+description = "Descriptor for the MCP subtree tool."
+other = "Return a compact subtree rooted at a page, path, or the wiki root"
+
+["mcp.tools.wiki_get_tree.description"]
+description = "Descriptor for the MCP tree tool."
+other = "Return the wiki page tree"
+
+["mcp.tools.wiki_list_assets.description"]
+description = "Descriptor for the MCP asset-listing tool."
+other = "List page assets"
+
+["mcp.tools.wiki_list_property_keys.description"]
+description = "Descriptor for the MCP property-key listing tool."
+other = "List property key counts"
+
+["mcp.tools.wiki_list_revisions.description"]
+description = "Descriptor for the MCP revision-listing tool."
+other = "List page revisions"
+
+["mcp.tools.wiki_list_tags.description"]
+description = "Descriptor for the MCP tag-listing tool."
+other = "List tag counts"
+
+["mcp.tools.wiki_lookup_path.description"]
+description = "Descriptor for the MCP path lookup tool."
+other = "Resolve a route path into existing and missing path segments; pass kind page or section to disambiguate same-route twins"
+
+["mcp.tools.wiki_move_page.description"]
+description = "Descriptor for the MCP page move tool."
+other = "Move a page to a new parent"
+
+["mcp.tools.wiki_move_page.success"]
+description = "Returned after a page is moved through MCP."
+other = "Page moved"
+
+["mcp.tools.wiki_preview_page_refactor.description"]
+description = "Descriptor for the MCP refactor preview tool."
+other = "Preview a page rename or move refactor"
+
+["mcp.tools.wiki_refresh.description"]
+description = "Descriptor for the MCP refresh tool."
+other = "Synchronize direct Markdown changes into LeafWiki state"
+
+["mcp.tools.wiki_rename_asset.description"]
+description = "Descriptor for the MCP asset rename tool."
+other = "Rename a page asset"
+
+["mcp.tools.wiki_replace_page_section.description"]
+description = "Descriptor for the MCP section replacement tool."
+other = "Safely replace Markdown under a target heading"
+
+["mcp.tools.wiki_resolve_permalink.description"]
+description = "Descriptor for the MCP permalink resolver."
+other = "Resolve a stable page ID to its current route path"
+
+["mcp.tools.wiki_restore_revision.description"]
+description = "Descriptor for the MCP restore-revision tool."
+other = "Restore a page revision"
+
+["mcp.tools.wiki_search_pages.description"]
+description = "Descriptor for the MCP page search tool."
+other = "Search pages using LeafWiki offset and limit pagination"
+
+["mcp.tools.wiki_sort_pages.description"]
+description = "Descriptor for the MCP page sorting tool."
+other = "Sort a parent's child pages"
+
+["mcp.tools.wiki_sort_pages.success"]
+description = "Returned after child pages are sorted through MCP."
+other = "Pages sorted successfully"
+
+["mcp.tools.wiki_suggest_slug.description"]
+description = "Descriptor for the MCP slug suggestion tool."
+other = "Suggest a unique child slug for a title"
+
+["mcp.tools.wiki_update_page.description"]
+description = "Descriptor for the MCP page update tool."
+other = "Update page title, slug, content, tags, and properties"
+
+["mcp.tools.wiki_update_page_metadata.description"]
+description = "Descriptor for the MCP metadata update tool."
+other = "Safely patch page tags and properties without changing body content"
+
+["mcp.tools.wiki_upload_asset.description"]
+description = "Descriptor for the MCP asset upload tool."
+other = "Upload an asset from base64 content"
+
+["mcp.tools.wiki_validate_content.description"]
+description = "Descriptor for the MCP content validation tool."
+other = "Validate proposed Markdown content without writing it"
+
+["mcp.tools.wiki_validate_page.description"]
+description = "Descriptor for the MCP page validation tool."
+other = "Validate an existing page by page ID or path"
+
+["mcp.tools.wiki_validate_wiki.description"]
+description = "Descriptor for the MCP wiki validation tool."
+other = "Validate the current wiki state"
+
+["shell.run.dry_run.agent_hook"]
+description = "Dry-run status when scripts/run.sh starts an agent hook."
+other = "Would run LeafWiki agent hook"
+
+["shell.run.dry_run.http_config"]
+description = "Dry-run HTTP UI status for YAML-configured scripts/run.sh."
+other = "HTTP UI: configured by"
+
+["shell.run.dry_run.http_url"]
+description = "Dry-run HTTP UI status for URL-configured scripts/run.sh."
+other = "HTTP UI:"
+
+["shell.run.dry_run.mcp_config"]
+description = "Dry-run status when scripts/run.sh starts MCP from YAML config."
+other = "Would run LeafWiki with YAML config for MCP"
+
+["shell.run.dry_run.mcp_native"]
+description = "Dry-run status when scripts/run.sh starts native MCP STDIO."
+other = "Would run LeafWiki native MCP STDIO"
+
+["shell.run.dry_run.stdio_attach"]
+description = "Dry-run detail for native MCP STDIO descriptor attach."
+other = "STDIO attach: descriptor-first attach via <data-dir>/.leafwiki/project-daemon.json; wikid ensure/control for missing or stale descriptors"
+
+["shell.run.error.agent_hook_requires_provider"]
+description = "Printed when scripts/run.sh agent-hook mode is missing a provider."
+other = "agent-hook requires a provider"
+
+["shell.run.error.argument_contains_space"]
+description = "Printed when scripts/run.sh receives a combined MCP JSON argument containing a space."
+other = "argument contains a space; MCP JSON args must split flags and values into separate args, for example \"--root-dir\", \"./wiki\", or use --root-dir=./wiki"
+
+["shell.run.error.config_cannot_combine"]
+description = "Printed when scripts/run.sh --config is combined with another wrapper option."
+other = "--config cannot be combined with"
+
+["shell.run.error.config_requires_path"]
+description = "Printed when scripts/run.sh --config is missing a path."
+other = "--config requires a path"
+
+["shell.run.error.disable_auth_api_key_conflict"]
+description = "Printed when disabled auth is combined with an MCP API key."
+other = "--disable-auth cannot be combined with --api-key or LEAFWIKI_MCP_API_KEY"
+
+["shell.run.error.executable_not_found"]
+description = "Printed when scripts/run.sh receives a non-executable binary path."
+other = "executable not found or not executable"
+
+["shell.run.error.executable_not_found_on_path"]
+description = "Printed when scripts/run.sh cannot find a binary on PATH."
+other = "executable not found on PATH"
+
+["shell.run.error.leafwiki_bin_requires_path"]
+description = "Printed when scripts/run.sh --leafwiki-bin is missing a path."
+other = "--leafwiki-bin requires a path"
+
+["shell.run.error.option_requires_argument"]
+description = "Printed when scripts/run.sh option is missing a generic argument."
+other = "requires an argument"
+
+["shell.run.error.option_requires_duration"]
+description = "Printed when scripts/run.sh option is missing a duration."
+other = "requires a duration"
+
+["shell.run.error.option_requires_password"]
+description = "Printed when scripts/run.sh option is missing a password."
+other = "requires a password"
+
+["shell.run.error.option_requires_path"]
+description = "Printed when scripts/run.sh option is missing a path."
+other = "requires a path"
+
+["shell.run.error.option_requires_secret"]
+description = "Printed when scripts/run.sh option is missing a secret."
+other = "requires a secret"
+
+["shell.run.error.option_requires_value"]
+description = "Printed when scripts/run.sh option is missing a value."
+other = "requires a value"
+
+["shell.run.error.run_mode_required"]
+description = "Printed when scripts/run.sh is called without mcp or agent-hook mode."
+other = "first argument must be mcp or agent-hook"
+
+["shell.run.error.unknown_option"]
+description = "Printed when scripts/run.sh receives an unknown option."
+other = "unknown option"
+
+["shell.run.error_prefix"]
+description = "Error prefix for scripts/run.sh."
+other = "Error:"
+
+["shell.run.help_body"]
+description = "Help body for scripts/run.sh."
+other = "Modes:\n  mcp                     Run native LeafWiki MCP STDIO frontend\n  agent-hook <provider>   Run one LeafWiki agent hook invocation\n\nOptions:\n  --leafwiki-bin <path>     LeafWiki executable (default: leafwiki)\n  --scheme <scheme>         Informational URL scheme for dry-run output (default: http)\n  --host <host>             LeafWiki bind host (default: 127.0.0.1)\n  --port <port>             LeafWiki port (default: 8080)\n  --base-path <path>        LeafWiki base path, if any\n  --data-dir <path>         LeafWiki data directory (default: ./.wiki)\n  --root-dir <path>         LeafWiki root markdown directory (default: ./wiki)\n  --markdown-link-root-prefix <path>\n                            Repository-root Markdown href prefix, such as /docs\n  --jwt-secret <secret>     JWT secret only when this run must bootstrap an auth-enabled owner\n  --admin-password <pass>   Admin password only when this run must bootstrap an auth-enabled owner\n  --disable-auth            Force disabled-auth STDIO identity\n  --allow-insecure          Pass --allow-insecure to LeafWiki (default)\n  --no-allow-insecure       Do not pass --allow-insecure\n  --request-log             Keep LeafWiki request logs enabled\n  --disable-request-log     Pass --disable-request-log to LeafWiki (default)\n  --daemon-idle-timeout <d> Federated runtime idle timeout after the last session or presence record exits (default: 10m)\n  --api-key <key>           Native STDIO API key; passed as LEAFWIKI_MCP_API_KEY\n  --config <path>           Pass a LeafWiki YAML config file without wrapper defaults\n  --server-arg <arg>        Extra argument passed to leafwiki; repeatable\n  --dry-run                 Print the planned command without starting anything\n  -h, --help                Show this help\n\nEnvironment overrides use LEAFWIKI_RUN_MCP_* names matching the option names.\nUse LEAFWIKI_RUN_MCP_API_KEY or LEAFWIKI_MCP_API_KEY to provide the native\nSTDIO API key without putting the secret in the child command line."
+
+["shell.run.usage"]
+description = "Usage line for scripts/run.sh."
+other = "Usage: scripts/run.sh <mcp|agent-hook> [options]"
+
+["ui.page.save.success"]
+description = "Displayed after a page is saved in the browser editor."
+other = "Page saved successfully"
+
+["validation.auth.api_key_name_required"]
+description = "Returned when API key name is empty."
+other = "Name must not be empty"
+
+["validation.auth.api_key_name_too_long"]
+description = "Returned when API key name is too long."
+other = "Name must be at most 80 characters long"
+
+["validation.auth.current_password_incorrect"]
+description = "Returned when current password is incorrect."
+other = "Current password is incorrect"
+
+["validation.auth.current_password_required"]
+description = "Returned when current password is empty."
+other = "Current password must not be empty"
+
+["validation.auth.email_invalid"]
+description = "Returned when an auth email field is not syntactically valid."
+other = "Email is not valid"
+
+["validation.auth.email_required"]
+description = "Returned when email is empty."
+other = "Email must not be empty"
+
+["validation.auth.new_password_required"]
+description = "Returned when new password is empty."
+other = "New password must not be empty"
+
+["validation.auth.new_password_too_short"]
+description = "Returned when new password is too short."
+other = "New password must be at least 8 characters long"
+
+["validation.auth.old_password_incorrect"]
+description = "Returned when old password is incorrect."
+other = "Old password is incorrect"
+
+["validation.auth.password_required"]
+description = "Returned when password is empty."
+other = "Password must not be empty"
+
+["validation.auth.password_too_short"]
+description = "Returned when password is too short."
+other = "Password must be at least 8 characters long"
+
+["validation.auth.role_invalid"]
+description = "Returned when auth role is invalid."
+other = "Invalid role"
+
+["validation.auth.username_required"]
+description = "Returned when username is empty."
+other = "Username must not be empty"
+
+["validation.branding.site_name_control_characters"]
+description = "Returned when branding site name has control characters."
+other = "Site name contains invalid control characters"
+
+["validation.branding.site_name_required"]
+description = "Returned when branding site name is empty."
+other = "Site name must not be empty"
+
+["validation.branding.site_name_too_long"]
+description = "Returned when branding site name is too long."
+other = "Site name must not exceed the maximum length"
+
+["validation.field.validation_error"]
+description = "Fallback field validation message."
+other = "Validation error"
+
+["validation.page.kind_invalid"]
+description = "Returned when a page kind is invalid."
+other = "Kind must be either 'page' or 'section'"
+
+["validation.page.kind_required"]
+description = "Returned when a page kind is missing."
+other = "Kind must be specified"
+
+["validation.page.path_invalid"]
+description = "Returned when a page path is invalid."
+other = "Path is invalid"
+
+["validation.page.path_required"]
+description = "Returned when a page path is empty."
+other = "Path must not be empty"
+
+["validation.page.property_key_required"]
+description = "Returned when a page property key is empty."
+other = "Property key must not be empty"
+
+["validation.page.property_key_reserved"]
+description = "Returned when a page property key is reserved."
+other = "Property key is reserved"
+
+["validation.page.property_key_reserved_prefix"]
+description = "Returned when a page property key uses a reserved prefix."
+other = "Property key uses a reserved prefix"
+
+["validation.page.property_key_whitespace"]
+description = "Returned when a page property key has leading or trailing whitespace."
+other = "Property key must not contain leading or trailing whitespace"
+
+["validation.page.slug_invalid"]
+description = "Returned when a page slug is invalid."
+other = "Slug is invalid"
+
+["validation.page.tag_duplicate"]
+description = "Returned when a page tag is duplicated."
+other = "Tag must be unique"
+
+["validation.page.tag_required"]
+description = "Returned when a page tag is empty."
+other = "Tag must not be empty"
+
+["validation.page.tag_whitespace"]
+description = "Returned when a page tag has leading or trailing whitespace."
+other = "Tag must not contain leading or trailing whitespace"
+
+["validation.page.title_required"]
+description = "Returned when a page title is empty."
+other = "Title must not be empty"

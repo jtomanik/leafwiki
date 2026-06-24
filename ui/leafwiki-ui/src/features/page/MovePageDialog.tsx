@@ -7,7 +7,7 @@ import {
   PageRefactorPreview,
   previewPageRefactor,
 } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_MOVE_PAGE } from '@/lib/registries'
 import { asPageID, asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
 import { useConfigStore } from '@/stores/config'
@@ -28,7 +28,7 @@ export function MovePageDialog({
 }) {
   const tree = useTreeStore((s) => s.workspaceTrees[workspaceId]?.tree ?? null)
   const [loading, setLoading] = useState(false)
-  const [, setFieldErrors] = useState<Record<string, string>>({})
+  const [, setFieldErrors] = useState<FieldErrorMap>({})
   const page = useTreeStore((s) => s.getPageById(pageId, workspaceId))
   const enableLinkRefactor = useConfigStore((s) => s.enableLinkRefactor)
   // get opened route from react router

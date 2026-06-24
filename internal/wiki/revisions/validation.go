@@ -15,10 +15,10 @@ func ValidateRevisionLookupInput(rawPageID, rawRevisionID string) (tree.PageID, 
 func ValidateRevisionLookup(pageID tree.PageID, rawRevisionID string) (tree.PageID, revision.RevisionID, error) {
 	revisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawRevisionID))
 	if pageID == "" {
-		return "", "", sharederrors.NewLocalizedError(ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required", nil)
+		return "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidPageID, nil)
 	}
 	if revisionID == "" {
-		return "", "", sharederrors.NewLocalizedError(ErrCodeRevisionInvalidRevisionID, "Revision ID is required", "revision id is required", nil)
+		return "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidRevisionID, nil)
 	}
 	return pageID, revisionID, nil
 }
@@ -31,10 +31,10 @@ func ValidateRevisionCompare(pageID tree.PageID, rawBaseRevisionID, rawTargetRev
 	baseRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawBaseRevisionID))
 	targetRevisionID := revision.NewRevisionIDUnchecked(strings.TrimSpace(rawTargetRevisionID))
 	if pageID == "" {
-		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionInvalidPageID, "Page ID is required", "page id is required", nil)
+		return "", "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidPageID, nil)
 	}
 	if baseRevisionID == "" || targetRevisionID == "" {
-		return "", "", "", sharederrors.NewLocalizedError(ErrCodeRevisionCompareInvalidRequest, "Revision compare request is invalid", "revision compare request for page %s is invalid", nil, pageID.MetadataValue())
+		return "", "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionCompareInvalidRequest, nil, pageID.MetadataValue())
 	}
 	return pageID, baseRevisionID, targetRevisionID, nil
 }
@@ -50,14 +50,7 @@ func ValidateRevisionAsset(pageID tree.PageID, rawRevisionID string, rawAssetNam
 	}
 	assetName := tree.NewAssetNameUnchecked(strings.TrimSpace(strings.TrimPrefix(rawAssetName, "/")))
 	if assetName == "" {
-		return "", "", "", sharederrors.NewLocalizedError(
-			ErrCodeRevisionPreviewAssetInvalidName,
-			"Revision asset name is invalid",
-			"revision asset name for page %s revision %s is invalid",
-			nil,
-			pageID.MetadataValue(),
-			revisionID.CommitID(),
-		)
+		return "", "", "", sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionPreviewAssetInvalidName, nil, pageID.MetadataValue(), revisionID.CommitID())
 	}
 	return pageID, revisionID, assetName, nil
 }

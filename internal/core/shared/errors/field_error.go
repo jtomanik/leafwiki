@@ -19,20 +19,20 @@ type FieldError struct {
 }
 
 func NewFieldError(field, message string) *FieldError {
-	return NewFieldErrorWithCode(
-		field,
-		FieldValidationErrorCode,
-		FieldValidationErrorMessageID,
-		message,
-	)
+	return &FieldError{
+		Field:     field,
+		Code:      FieldValidationErrorCode,
+		MessageID: FieldValidationErrorMessageID,
+		Message:   message,
+	}
 }
 
-func NewFieldErrorWithCode(field string, code FieldErrorCode, messageID MessageID, message string) *FieldError {
+func NewFieldErrorWithCode(field string, code FieldErrorCode, messageID MessageID) *FieldError {
 	return &FieldError{
 		Field:     field,
 		Code:      code,
 		MessageID: messageID,
-		Message:   message,
+		Message:   renderMessage(messageID, ""),
 	}
 }
 
@@ -48,8 +48,8 @@ func (v *ValidationErrors) Add(field, message string) {
 	v.Errors = append(v.Errors, NewFieldError(field, message))
 }
 
-func (v *ValidationErrors) AddWithCode(field string, code FieldErrorCode, messageID MessageID, message string) {
-	v.Errors = append(v.Errors, NewFieldErrorWithCode(field, code, messageID, message))
+func (v *ValidationErrors) AddWithCode(field string, code FieldErrorCode, messageID MessageID) {
+	v.Errors = append(v.Errors, NewFieldErrorWithCode(field, code, messageID))
 }
 
 func (v *ValidationErrors) Error() string {

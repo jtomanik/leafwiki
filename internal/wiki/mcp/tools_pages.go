@@ -186,7 +186,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return newMessageOutput(ToolMessageDeletePageSuccess, "Page deleted"), nil
+		return newMessageOutput(ToolMessageDeletePageSuccess), nil
 	})
 
 	addEditorTool[movePageInput, messageOutput](r, server, toolMovePage, func(ctx context.Context, actor toolActor, in movePageInput) (messageOutput, error) {
@@ -203,7 +203,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return newMessageOutput(ToolMessageMovePageSuccess, "Page moved"), nil
+		return newMessageOutput(ToolMessageMovePageSuccess), nil
 	})
 
 	addEditorTool[sortPagesInput, messageOutput](r, server, toolSortPages, func(ctx context.Context, _ toolActor, in sortPagesInput) (messageOutput, error) {
@@ -213,7 +213,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return newMessageOutput(ToolMessageSortPagesSuccess, "Pages sorted successfully"), nil
+		return newMessageOutput(ToolMessageSortPagesSuccess), nil
 	})
 
 	addEditorTool[ensurePageInput, pageOutput](r, server, toolEnsurePage, func(ctx context.Context, actor toolActor, in ensurePageInput) (pageOutput, error) {
@@ -252,7 +252,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return newMessageOutput(ToolMessageConvertPageSuccess, "Page converted"), nil
+		return newMessageOutput(ToolMessageConvertPageSuccess), nil
 	})
 
 	addEditorTool[copyPageInput, pageOutput](r, server, toolCopyPage, func(ctx context.Context, actor toolActor, in copyPageInput) (pageOutput, error) {

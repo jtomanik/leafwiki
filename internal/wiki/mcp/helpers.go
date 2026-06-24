@@ -35,7 +35,7 @@ const (
 )
 
 func newMCPHelperError(code sharederrors.ErrorCode, message string, cause error) *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(code, message, message, cause)
+	return sharederrors.NewLocalizedErrorFromCode(code, cause)
 }
 
 func (r *Routes) apiPage(page *tree.Page, depth int) *dto.Page {
@@ -168,8 +168,9 @@ func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 	}
 	detail := sharederrors.NewLocalizedErrorDetail(
 		errCodeMCPToolError,
+		"",
+		"",
 		err.Error(),
-		"mcp tool error",
 	)
 	return &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{
@@ -197,20 +198,10 @@ func exactlyOneIDOrPageID(id string, pageID string) (tree.PageID, error) {
 	id = strings.TrimSpace(id)
 	pageID = strings.TrimSpace(pageID)
 	if id != "" && pageID != "" {
-		return "", sharederrors.NewLocalizedError(
-			errCodeMCPPageIdentifierAmbiguous,
-			"id and pageId cannot both be supplied",
-			"id and pageId cannot both be supplied",
-			nil,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageIdentifierAmbiguous, nil)
 	}
 	if id == "" && pageID == "" {
-		return "", sharederrors.NewLocalizedError(
-			errCodeMCPPageIdentifierRequired,
-			"id or pageId is required",
-			"id or pageId is required",
-			nil,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageIdentifierRequired, nil)
 	}
 	if pageID != "" {
 		return tree.NewPageIDUnchecked(pageID), nil

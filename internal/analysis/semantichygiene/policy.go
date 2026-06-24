@@ -725,6 +725,7 @@ func fieldHasWireTag(field *ast.Field) bool {
 func isStableLiteralAllowed(ctx *analysisContext, lit *ast.BasicLit) bool {
 	filename := ctx.filename(lit.Pos())
 	if isTestFile(filename) ||
+		strings.Contains(filename, "/internal/localization/") ||
 		strings.Contains(filename, "/docs/") ||
 		strings.HasSuffix(filename, ".json") {
 		return true
@@ -732,10 +733,123 @@ func isStableLiteralAllowed(ctx *analysisContext, lit *ast.BasicLit) bool {
 	return isConstOrTypeDefinition(ctx, lit)
 }
 
+func isLocalizedProseLiteralAllowed(ctx *analysisContext, lit *ast.BasicLit) bool {
+	filename := ctx.filename(lit.Pos())
+	if isTestFile(filename) ||
+		isGeneratedOrVendored(filename) ||
+		strings.Contains(filename, "/docs/") ||
+		strings.HasSuffix(filename, ".json") {
+		return true
+	}
+	return isConstOrTypeDefinition(ctx, lit)
+}
+
+func looksLikeLocalizedProse(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || messageIDPattern.MatchString(value) || toolIDPattern.MatchString(value) || errorCodePattern.MatchString(value) {
+		return false
+	}
+	return strings.ContainsAny(value, " \t\n")
+}
+
+var localizedProseContractCalls = map[string]bool{
+	"apiSuccessMessage": true,
+	"newMessageOutput":  true,
+	"newToolDescriptor": true,
+	"Render":            true,
+	"writeRuntimeError": true,
+}
+
+var localizedProseFirstArgContractCalls = map[string]bool{
+	"fail":                 true,
+	"failWithoutAgentHook": true,
+}
+
+var localizedProseConstructorCalls = map[string]bool{
+	"NewLocalizedError":                     true,
+	"NewLocalizedErrorFromCodeWithFallback": true,
+	"NewLocalizedErrorDetail":               true,
+	"NewFieldErrorWithCode":                 true,
+	"AddWithCode":                           true,
+}
+
+func isRawLocalizedProseContractLiteral(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			name := callName(n)
+			if localizedProseContractCalls[name] && callContainsArg(n, lit) {
+				return true
+			}
+			if localizedProseFirstArgContractCalls[name] && callContainsFirstArg(n, lit) {
+				return true
+			}
+			if localizedProseConstructorCalls[name] && callContainsArg(n, lit) && localizedProseConstructorRequiresCatalogOnly(name, ctx, n) {
+				return true
+			}
+		case *ast.KeyValueExpr:
+			if keyName(n.Key) == "message" && containsNode(n.Value, lit) && isGinHPayloadLiteral(ctx, n) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func localizedProseConstructorRequiresCatalogOnly(name string, ctx *analysisContext, call *ast.CallExpr) bool {
+	switch name {
+	case "NewLocalizedError", "NewLocalizedErrorFromCodeWithFallback", "NewLocalizedErrorDetail", "NewFieldErrorWithCode", "AddWithCode":
+		return true
+	default:
+		return callHasRawStableContractArg(ctx, call)
+	}
+}
+
+func callHasRawStableContractArg(ctx *analysisContext, call *ast.CallExpr) bool {
+	for _, arg := range call.Args {
+		lit, ok := arg.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			continue
+		}
+		value, err := strconv.Unquote(lit.Value)
+		if err == nil && isStableContractLiteral(ctx, lit, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func callContainsArg(call *ast.CallExpr, target ast.Node) bool {
+	for _, arg := range call.Args {
+		if containsNode(arg, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func callContainsFirstArg(call *ast.CallExpr, target ast.Node) bool {
+	return len(call.Args) > 0 && containsNode(call.Args[0], target)
+}
+
+func isGinHPayloadLiteral(ctx *analysisContext, node ast.Node) bool {
+	for current := node; current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CompositeLit:
+			return exprName(n.Type) == "H"
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
 var (
 	errorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+){1,}$`)
 	toolIDPattern    = regexp.MustCompile(`^wiki_[a-z0-9_]+$`)
-	messageIDPattern = regexp.MustCompile(`^(errors|validation|api|mcp)(\.[a-z0-9]+(?:_[a-z0-9]+)*)+$`)
+	messageIDPattern = regexp.MustCompile(`^(errors|validation|api|mcp|cli|shell|ui)(\.[a-z0-9]+(?:_[a-z0-9]+)*)+$`)
 )
 
 func isStableContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value string) bool {

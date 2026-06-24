@@ -2,7 +2,7 @@
 import BaseDialog from '@/components/BaseDialog'
 import { Button } from '@/components/ui/button'
 import { NODE_KIND_PAGE, PageNode, sortPages } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_SORT_PAGES } from '@/lib/registries'
 import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
 import { useTreeStore } from '@/stores/tree'
@@ -112,7 +112,7 @@ export function SortPagesDialog({
     parent.kind === NODE_KIND_PAGE ? 'Page' : 'Section'
   const [order, setOrder] = useState(parent.children?.map((c) => c.id) || [])
   const [loading, setLoading] = useState(false)
-  const [, setFieldErrors] = useState<Record<string, string>>({})
+  const [, setFieldErrors] = useState<FieldErrorMap>({})
   const reloadTree = useTreeStore((s) => s.reloadTree)
 
   const nodeMap = useMemo(

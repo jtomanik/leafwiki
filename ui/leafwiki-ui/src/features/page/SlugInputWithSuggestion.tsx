@@ -1,4 +1,4 @@
-import { FormInput } from '@/components/FormInput'
+import { FormInput, type FormInputError } from '@/components/FormInput'
 import { mapApiError } from '@/lib/api/errors'
 import { suggestSlug } from '@/lib/api/pages'
 import { asPageID, asWorkspaceID } from '@/lib/semanticTypes'
@@ -18,7 +18,7 @@ type Props = {
   onSlugTouchedChange?: (touched: boolean) => void
   onSlugLoadingChange?: (loading: boolean) => void
   onLastSlugTitleChange?: (title: string) => void
-  error?: string
+  error?: string | FormInputError
   allowedHotkeys?: string
   workspaceId?: string
 }

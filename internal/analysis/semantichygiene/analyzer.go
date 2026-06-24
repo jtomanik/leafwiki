@@ -38,6 +38,7 @@ func run(pass *analysis.Pass) (any, error) {
 			checkStructFields(ctx, n)
 		case *ast.BasicLit:
 			checkStableLiteral(ctx, n)
+			checkLocalizedProseLiteral(ctx, n)
 		}
 	})
 	return nil, nil

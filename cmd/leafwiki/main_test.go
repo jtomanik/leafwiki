@@ -34,6 +34,7 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
+	"github.com/perber/wiki/internal/localization"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -49,6 +50,9 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 	writeUsage(&buf)
 
 	output := buf.String()
+	if !strings.Contains(output, "Usage: leafwiki [command]") {
+		t.Fatalf("expected usage output to include catalog-backed usage line, got %q", output)
+	}
 	if !strings.Contains(output, "leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]") {
 		t.Fatalf("expected authenticated startup usage to include --root-dir, got %q", output)
 	}
@@ -92,6 +96,28 @@ func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
 		if strings.Contains(output, removed) {
 			t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
 		}
+	}
+}
+
+func TestWriteUsage_RendersHelpBodyFromCatalog(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeUsage(&buf)
+
+	rendered := localization.English.Render("cli.help.body", "").Message
+	if rendered == "" {
+		t.Fatalf("cli.help.body rendered empty")
+	}
+	if !strings.Contains(buf.String(), rendered) {
+		t.Fatalf("usage output did not include catalog help body")
+	}
+}
+
+func TestFailureMessageRendersCatalogBackedErrorBody(t *testing.T) {
+	got := failureMessage("cli.error.invalid_environment", "error", "bad env")
+	want := "Invalid environment error=bad env"
+	if got != want {
+		t.Fatalf("failureMessage = %q, want %q", got, want)
 	}
 }
 
@@ -657,7 +683,7 @@ func TestEnsureFederatedWorkspacePreservesStructuredGrantDenial(t *testing.T) {
 		if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
 			t.Fatalf("control token = %q, want control-token", req.Header.Get(projectdaemon.ControlTokenHeader))
 		}
-		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
+		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
 	}))
 	t.Cleanup(control.Close)
 
@@ -681,6 +707,30 @@ func TestEnsureFederatedWorkspacePreservesStructuredGrantDenial(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ensure workspace") || !strings.Contains(endpointErr.Message, "workspace access denied") {
 		t.Fatalf("ensure error = %v, want workspace access diagnostic", err)
+	}
+}
+
+func TestWriteRuntimeErrorRendersMessageFromCatalog(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	writeRuntimeError(rec, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want forbidden", rec.Code)
+	}
+	var body runtimeErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode runtime error: %v", err)
+	}
+	if body.Error.Code != runtimeErrorCodeWorkspaceGrantDenied {
+		t.Fatalf("code = %q, want %q", body.Error.Code, runtimeErrorCodeWorkspaceGrantDenied)
+	}
+	if body.Error.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+		t.Fatalf("messageId = %q, want %q", body.Error.MessageID, sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied))
+	}
+	if body.Error.Message != "workspace access denied" {
+		t.Fatalf("message = %q, want catalog-rendered workspace access denied", body.Error.Message)
 	}
 }
 
@@ -5701,7 +5751,7 @@ func TestDaemonStdioActorContextPreservesWorkspaceGrantDenial(t *testing.T) {
 			http.NotFound(w, req)
 			return
 		}
-		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
+		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
 	}))
 	t.Cleanup(control.Close)
 

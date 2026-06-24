@@ -235,7 +235,8 @@ func (r *Routes) handleLogin(rctx httpinternal.RouterContext) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"message":              "Login successful",
+			"messageId":            MessageIDAuthLoginSuccess,
+			"message":              apiSuccessMessage(MessageIDAuthLoginSuccess),
 			"user":                 out.Token.User,
 			"accessTokenExpiresAt": out.Token.AccessTokenExpiresAt,
 		})
@@ -260,7 +261,7 @@ func (r *Routes) handleLogout(rctx httpinternal.RouterContext) gin.HandlerFunc {
 			respondWithAuthStatusError(c, http.StatusBadRequest, ErrCodeAuthCsrfFailed, "Failed to clear CSRF cookie", "failed to clear csrf cookie")
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "Logout successful"})
+		c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAuthLogoutSuccess, "message": apiSuccessMessage(MessageIDAuthLogoutSuccess)})
 	}
 }
 
@@ -295,7 +296,8 @@ func (r *Routes) handleRefreshToken(rctx httpinternal.RouterContext) gin.Handler
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"message":              "Token refreshed",
+			"messageId":            MessageIDAuthRefreshTokenSuccess,
+			"message":              apiSuccessMessage(MessageIDAuthRefreshTokenSuccess),
 			"user":                 out.Token.User,
 			"accessTokenExpiresAt": out.Token.AccessTokenExpiresAt,
 		})

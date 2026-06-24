@@ -14,6 +14,11 @@ type ZipExtractor struct {
 	log *slog.Logger
 }
 
+const (
+	zipExtractInvalidEntryFormat = "invalid zip entry %q: %w"
+	zipExtractMkdirFormat        = "mkdir: %w"
+)
+
 func NewZipExtractor() *ZipExtractor {
 	return &ZipExtractor{
 		log: slog.Default().With("component", "ZipExtractor"),
@@ -67,11 +72,11 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 
 		destPath, err := safeJoin(ws.Root, name)
 		if err != nil {
-			return fail(fmt.Errorf("invalid zip entry %q: %w", f.Name, err))
+			return fail(fmt.Errorf(zipExtractInvalidEntryFormat, f.Name, err))
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-			return fail(fmt.Errorf("mkdir: %w", err))
+			return fail(fmt.Errorf(zipExtractMkdirFormat, err))
 		}
 
 		// Extract single file in inner scope to ensure deterministic cleanup per iteration

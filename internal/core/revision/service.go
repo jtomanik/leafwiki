@@ -311,26 +311,12 @@ func (s *Service) GetRevisionSnapshot(pageID tree.PageID, revisionID RevisionID)
 
 	content, err := s.store.ReadContentBlob(rev.ContentHash)
 	if err != nil {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeRevisionPreviewContentUnavailable,
-			"Revision content is unavailable",
-			"revision content for page %s revision %s is unavailable",
-			err,
-			pageIDString,
-			revisionIDString,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewContentUnavailable, err, pageIDString, revisionIDString)
 	}
 
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeRevisionPreviewAssetsUnavailable,
-			"Revision assets are unavailable",
-			"revision assets for page %s revision %s are unavailable",
-			err,
-			pageIDString,
-			revisionIDString,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewAssetsUnavailable, err, pageIDString, revisionIDString)
 	}
 
 	return &RevisionSnapshot{
@@ -362,14 +348,7 @@ func (s *Service) GetRevisionAsset(pageID tree.PageID, revisionID RevisionID, as
 	revisionIDString := revisionID.CommitID()
 	assetNameString := strings.TrimSpace(strings.TrimPrefix(assetName.Filename(), "/"))
 	if assetNameString == "" {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeRevisionPreviewAssetInvalidName,
-			"Revision asset name is invalid",
-			"revision asset name for page %s revision %s is invalid",
-			fmt.Errorf("asset name is required"),
-			pageIDString,
-			revisionIDString,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewAssetInvalidName, fmt.Errorf("asset name is required"), pageIDString, revisionIDString)
 	}
 
 	rev, err := s.store.GetRevision(pageID, revisionID)
@@ -379,14 +358,7 @@ func (s *Service) GetRevisionAsset(pageID tree.PageID, revisionID RevisionID, as
 
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
-		return nil, sharederrors.NewLocalizedError(
-			errCodeRevisionPreviewAssetsUnavailable,
-			"Revision assets are unavailable",
-			"revision assets for page %s revision %s are unavailable",
-			err,
-			pageIDString,
-			revisionIDString,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewAssetsUnavailable, err, pageIDString, revisionIDString)
 	}
 
 	for _, asset := range assets {
@@ -396,15 +368,7 @@ func (s *Service) GetRevisionAsset(pageID tree.PageID, revisionID RevisionID, as
 
 		blobPath := s.store.AssetBlobPath(asset.SHA256)
 		if _, err := os.Stat(blobPath); err != nil {
-			return nil, sharederrors.NewLocalizedError(
-				errCodeRevisionPreviewAssetBlobMissing,
-				"Revision asset is unavailable",
-				"revision asset %s for page %s revision %s is unavailable",
-				err,
-				assetNameString,
-				pageIDString,
-				revisionIDString,
-			)
+			return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewAssetBlobMissing, err, assetNameString, pageIDString, revisionIDString)
 		}
 
 		return &RevisionAssetContent{
@@ -413,15 +377,7 @@ func (s *Service) GetRevisionAsset(pageID tree.PageID, revisionID RevisionID, as
 		}, nil
 	}
 
-	return nil, sharederrors.NewLocalizedError(
-		errCodeRevisionPreviewAssetNotFound,
-		"Revision asset not found",
-		"revision asset %s for page %s revision %s not found",
-		fmt.Errorf("asset %q not found in revision manifest", assetNameString),
-		assetNameString,
-		pageIDString,
-		revisionIDString,
-	)
+	return nil, sharederrors.NewLocalizedErrorFromCode(errCodeRevisionPreviewAssetNotFound, fmt.Errorf("asset %q not found in revision manifest", assetNameString), assetNameString, pageIDString, revisionIDString)
 }
 
 func compareRevisionAssets(baseAssets, targetAssets []AssetRef) []RevisionAssetDelta {
@@ -520,116 +476,48 @@ func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, aut
 	pageIDString := pageID.MetadataValue()
 	revisionIDString := revisionID.CommitID()
 	if pageIDString == "" {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreInvalidPageID,
-			"Failed to restore page",
-			"failed to restore page %s",
-			nil,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreInvalidPageID, nil, pageIDString)
 	}
 	if revisionIDString == "" {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreInvalidRevision,
-			"Restore revision is invalid",
-			"restore revision %s for page %s is invalid",
-			nil,
-			revisionIDString,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreInvalidRevision, nil, revisionIDString, pageIDString)
 	}
 
 	if _, err := s.pages.GetPage(pageID); err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return sharederrors.NewLocalizedError(
-				errCodeRevisionRestorePageNotFound,
-				"Page not found",
-				"page %s not found",
-				err,
-				pageIDString,
-			)
+			return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestorePageNotFound, err, pageIDString)
 		}
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	rev, err := s.store.GetRevision(pageID, revisionID)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return sharederrors.NewLocalizedError(
-				errCodeRevisionRestoreRevisionNotFound,
-				"Restore revision not found",
-				"restore revision %s for page %s not found",
-				err,
-				revisionIDString,
-				pageIDString,
-			)
+			return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreRevisionNotFound, err, revisionIDString, pageIDString)
 		}
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	content, err := s.store.ReadContentBlob(rev.ContentHash)
 	if err != nil {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreContentMissing,
-			"Restore content is unavailable",
-			"restore content for page %s is unavailable",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreContentMissing, err, pageIDString)
 	}
 
 	assets, err := s.store.LoadAssetManifest(rev.AssetManifestHash)
 	if err != nil {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreAssetsMissing,
-			"Restore assets are unavailable",
-			"restore assets for page %s are unavailable",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreAssetsMissing, err, pageIDString)
 	}
 
 	beforeState, err := s.capturePageState(pageID, true)
 	if err != nil {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	restoredContent, restoreFromImport, err := buildRestoredRawContent(pageID, rev.Title, rev.PageMetadata, rev.ExtraFrontmatter, string(content))
 	if err != nil {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 	if err := s.updateRestoredContent(authorID, pageID, rev.Title, beforeState.Slug, &restoredContent, restoreFromImport); err != nil {
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	if err := s.restoreAssets(pageID, assets); err != nil {
@@ -645,13 +533,7 @@ func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, aut
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
 			s.log.Warn("failed to rollback restored assets", "pageID", pageIDString, "error", rollbackErr)
 		}
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	if err := s.recordRestoreRevision(pageID, authorID); err != nil {
@@ -667,13 +549,7 @@ func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, aut
 		if rollbackErr := s.restoreAssets(pageID, beforeState.Assets); rollbackErr != nil {
 			s.log.Warn("failed to rollback restored assets", "pageID", pageIDString, "error", rollbackErr)
 		}
-		return sharederrors.NewLocalizedError(
-			errCodeRevisionRestoreFailed,
-			"Failed to restore page",
-			"failed to restore page %s",
-			err,
-			pageIDString,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreFailed, err, pageIDString)
 	}
 
 	return nil

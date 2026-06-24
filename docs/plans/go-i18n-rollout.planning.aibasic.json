@@ -1,0 +1,87 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "go-i18n-rollout",
+  "createdAt": "2026-06-23T21:20:00Z",
+  "status": "planned",
+  "artifacts": {
+    "observe": "docs/plans/go-i18n-rollout.OBSERVE.md",
+    "context": "docs/plans/go-i18n-rollout.CONTEXT.md",
+    "decision": "docs/plans/go-i18n-rollout.DECISION.md",
+    "plan": "docs/plans/go-i18n-rollout.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/semantic-types-and-ids.PLAN.md",
+    "docs/plans/semantic-types-and-ids.OBSERVE.md",
+    "docs/plans/semantic-types-and-ids.CONTEXT.md",
+    "docs/plans/semantic-types-and-ids.DECISION.md",
+    "docs/typed-ids.md",
+    "docs/mcp.md",
+    "references/go-i18n/README.md",
+    "references/go-i18n/i18n/localizer.go",
+    "references/go-i18n/i18n/bundlefs.go",
+    "references/go-i18n/goi18n/extract_command.go",
+    "internal/core/shared/errors/localized_error.go",
+    "internal/core/shared/errors/field_error.go",
+    "internal/wiki/mcp/tool_descriptors.go",
+    "internal/wiki/mcp/types.go",
+    "internal/wiki/mcp/helpers.go",
+    "cmd/leafwiki/main.go",
+    "scripts/run.sh",
+    "ui/leafwiki-ui/src/lib/api/errors.ts",
+    "internal/analysis/semantichygiene"
+  ],
+  "subagents": [
+    {
+      "id": "019ef646-5c22-7e01-be0b-8dceacc577bb",
+      "role": "Explorer1",
+      "focus": "CLI/API/MCP user-facing message surfaces",
+      "status": "completed"
+    },
+    {
+      "id": "019ef646-72ea-7ec1-b523-a9004b0a0285",
+      "role": "Explorer2",
+      "focus": "prose assertions and test migration policy",
+      "status": "completed"
+    },
+    {
+      "id": "019ef646-862f-7a73-b5b1-4c84aaba9850",
+      "role": "Explorer3",
+      "focus": "semantic hygiene analyzer enforcement",
+      "status": "completed"
+    },
+    {
+      "id": "019ef646-a304-7652-a3e0-376c8a711f22",
+      "role": "Explorer4",
+      "focus": "planning artifact conventions and semantic-types lessons",
+      "status": "completed"
+    }
+  ],
+  "decisions": [
+    "Backend-originated messages are localized by backend code.",
+    "Scope includes CLI, API, and MCP user/agent-facing messages.",
+    "English is the only runtime locale in this phase.",
+    "Code remains the source of emitted IDs.",
+    "The message registry must contain real i18n.Message literals for goi18n extract.",
+    "active.en.toml is generated/checked from Go source and embedded at runtime.",
+    "Existing message, template, args, code, and messageId compatibility fields remain.",
+    "Existing positional args are bridged to Arg0/Arg1 template data.",
+    "Frontend API error rendering trusts backend-rendered message.",
+    "Shell wrapper messages use generated English shell catalog data from the Go registry.",
+    "Semantic hygiene and catalog coverage are enforced.",
+    "Behavior tests assert IDs/codes/semantic attrs/typed IDs, not prose, except explicit allowed cases."
+  ],
+  "validationPlanned": {
+    "artifactChecks": [
+      "rtk jq . docs/plans/go-i18n-rollout.planning.aibasic.json",
+      "rtk git diff --check -- docs/plans/go-i18n-rollout.OBSERVE.md docs/plans/go-i18n-rollout.CONTEXT.md docs/plans/go-i18n-rollout.DECISION.md docs/plans/go-i18n-rollout.PLAN.md docs/plans/go-i18n-rollout.planning.aibasic.json"
+    ],
+    "implementationGates": [
+      "rtk bash scripts/check-semantic-hygiene.sh",
+      "rtk bash scripts/check-i18n-catalog.sh",
+      "rtk go test ./internal/localization ./internal/core/shared/errors ./internal/wiki/mcp ./cmd/leafwiki ./internal/analysis/semantichygiene",
+      "rtk bash scripts/test-run.sh",
+      "targeted API/MCP/E2E tests listed in the plan"
+    ]
+  }
+}

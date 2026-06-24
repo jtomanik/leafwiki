@@ -3,7 +3,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { fetchLinkStatus, type Backlink } from '@/lib/api/links'
 import { asApiLocalizedError } from '@/lib/api/errors'
 import { deletePage, NODE_KIND_PAGE } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { asPageID, asPageVersion, asWorkspaceID } from '@/lib/semanticTypes'
 import { browserRoutePathForWikiNode } from '@/lib/wikiPath'
@@ -22,6 +22,22 @@ export type DeletePageDialogProps = {
   workspaceId: string
 }
 
+function deleteSuccessToast(itemLabelCapitalized: 'Page' | 'Section') {
+  const messageId =
+    itemLabelCapitalized === 'Page'
+      ? 'ui.page.delete.success'
+      : 'ui.section.delete.success'
+
+  return (
+    <span
+      data-testid="page-delete-success-toast-message"
+      data-l10n-id={messageId}
+    >
+      {itemLabelCapitalized} deleted successfully
+    </span>
+  )
+}
+
 export function DeletePageDialog({
   pageId,
   redirectTo,
@@ -38,7 +54,7 @@ export function DeletePageDialog({
   const [backlinksLoading, setBacklinksLoading] = useState(false)
   const [backlinksError, setBacklinksError] = useState<string | null>(null)
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
-  const [, setFieldErrors] = useState<Record<string, string>>({})
+  const [, setFieldErrors] = useState<FieldErrorMap>({})
 
   useEffect(() => {
     if (!enableLinkRefactor) {
@@ -92,7 +108,9 @@ export function DeletePageDialog({
         asPageVersion(page?.version ?? ''),
         asWorkspaceID(workspaceId),
       )
-      toast.success(`${itemLabelCapitalized} deleted successfully`)
+      toast.success(deleteSuccessToast(itemLabelCapitalized), {
+        testId: 'page-delete-success-toast',
+      })
       navigate(redirectTo, { state: createNavigationVisitState() })
       reloadTree(workspaceId).catch(console.error)
       return true

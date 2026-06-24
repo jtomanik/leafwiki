@@ -5,20 +5,14 @@ import (
 	"testing"
 )
 
-const (
-	testPageSlugRequiredCode      FieldErrorCode = "page_slug_required"
-	testPageSlugRequiredMessageID MessageID      = "validation.page.slug_required"
-)
-
 func TestValidationErrorsAddWithCodeSerializesStableFieldContract(t *testing.T) {
 	t.Parallel()
 
 	validation := NewValidationErrors()
 	validation.AddWithCode(
 		"slug",
-		testPageSlugRequiredCode,
-		testPageSlugRequiredMessageID,
-		"Slug is required",
+		"auth_email_invalid",
+		"validation.auth.email_invalid",
 	)
 
 	encoded, err := json.Marshal(validation)
@@ -26,7 +20,7 @@ func TestValidationErrorsAddWithCodeSerializesStableFieldContract(t *testing.T) 
 		t.Fatalf("marshal validation errors: %v", err)
 	}
 
-	want := `{"fields":[{"field":"slug","code":"page_slug_required","messageId":"validation.page.slug_required","message":"Slug is required"}]}`
+	want := `{"fields":[{"field":"slug","code":"auth_email_invalid","messageId":"validation.auth.email_invalid","message":"Email is not valid"}]}`
 	if string(encoded) != want {
 		t.Fatalf("json = %s, want %s", encoded, want)
 	}
@@ -50,5 +44,27 @@ func TestValidationErrorsLegacyAddKeepsMessageAndProvidesDefaultCode(t *testing.
 	}
 	if field.Field != "siteName" || field.Message != "site name is required" {
 		t.Fatalf("field error = %#v", field)
+	}
+}
+
+func TestValidationErrorsAddWithCodeRendersFromCatalog(t *testing.T) {
+	t.Parallel()
+
+	validation := NewValidationErrors()
+	validation.AddWithCode(
+		"email",
+		"auth_email_invalid",
+		"validation.auth.email_invalid",
+	)
+
+	field := validation.Errors[0]
+	if field.Message != "Email is not valid" {
+		t.Fatalf("Message = %q, want catalog-rendered validation message", field.Message)
+	}
+	if field.Code != "auth_email_invalid" {
+		t.Fatalf("Code = %q, want stable field code", field.Code)
+	}
+	if field.MessageID != "validation.auth.email_invalid" {
+		t.Fatalf("MessageID = %q, want stable message ID", field.MessageID)
 	}
 }

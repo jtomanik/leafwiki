@@ -79,11 +79,11 @@ func (s *BrandingService) UpdateBranding(siteName string) error {
 	trimmedSiteName := strings.TrimSpace(siteName)
 
 	if trimmedSiteName == "" {
-		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired, "Site name must not be empty")
+		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired)
 	} else if len(trimmedSiteName) > s.brandingConfig.BrandingConstraints.MaxSiteNameLength {
-		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong, fmt.Sprintf("Site name must not exceed %d characters", s.brandingConfig.BrandingConstraints.MaxSiteNameLength))
+		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong)
 	} else if containsControlCharacters(trimmedSiteName) {
-		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters, "Site name contains invalid control characters")
+		ve.AddWithCode("siteName", FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters)
 	}
 
 	if ve.HasErrors() {
@@ -93,12 +93,7 @@ func (s *BrandingService) UpdateBranding(siteName string) error {
 	s.brandingConfig.SiteName = trimmedSiteName
 
 	if err := s.store.Save(s.brandingConfig); err != nil {
-		return sharederrors.NewLocalizedError(
-			ErrCodeBrandingUpdateFailed,
-			"Failed to update branding",
-			"failed to update branding",
-			err,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingUpdateFailed, err)
 	}
 
 	return nil
@@ -132,26 +127,14 @@ func (s *BrandingService) UploadLogo(file multipart.File, filename string) (stri
 
 	if !s.brandingConfig.IsAllowedLogoExt(filename) {
 		allowedExts := s.brandingConfig.AllowedLogoExtsAsString()
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingLogoInvalidType,
-			"Invalid logo file type",
-			"invalid logo file type %s (allowed: %s)",
-			nil,
-			ext,
-			allowedExts,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoInvalidType, nil, ext, allowedExts)
 	}
 
 	targetPath := filepath.Join(assetsDir, "logo"+ext)
 
 	// Write new logo atomically first
 	if err := shared.WriteStreamAtomic(targetPath, file, s.brandingConfig.BrandingConstraints.MaxLogoSize); err != nil {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingLogoUploadFailed,
-			"Failed to save logo file",
-			"failed to save logo file",
-			err,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoUploadFailed, err)
 	}
 
 	// Cleanup other logo.* after success
@@ -160,12 +143,7 @@ func (s *BrandingService) UploadLogo(file multipart.File, filename string) (stri
 	// Update in-memory config + persist
 	s.brandingConfig.LogoFile = "logo" + ext
 	if err := s.store.Save(s.brandingConfig); err != nil {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingLogoUploadFailed,
-			"Failed to save logo file",
-			"failed to save logo file",
-			err,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoUploadFailed, err)
 	}
 
 	return s.brandingConfig.LogoFile, nil
@@ -182,22 +160,12 @@ func (s *BrandingService) DeleteLogo() error {
 
 	logoPath := filepath.Join(s.store.brandingAssetsDir(), s.brandingConfig.LogoFile)
 	if err := os.Remove(logoPath); err != nil && !os.IsNotExist(err) {
-		return sharederrors.NewLocalizedError(
-			ErrCodeBrandingLogoDeleteFailed,
-			"Failed to delete logo",
-			"failed to delete logo",
-			err,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoDeleteFailed, err)
 	}
 
 	s.brandingConfig.LogoFile = ""
 	if err := s.store.Save(s.brandingConfig); err != nil {
-		return sharederrors.NewLocalizedError(
-			ErrCodeBrandingLogoDeleteFailed,
-			"Failed to delete logo",
-			"failed to delete logo",
-			err,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingLogoDeleteFailed, err)
 	}
 
 	return nil
@@ -213,26 +181,14 @@ func (s *BrandingService) UploadFavicon(file multipart.File, filename string) (s
 
 	if !s.brandingConfig.IsAllowedFaviconExt(filename) {
 		allowedExts := s.brandingConfig.AllowedFaviconExtsAsString()
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingFaviconInvalidType,
-			"Invalid favicon file type",
-			"invalid favicon file type %s (allowed: %s)",
-			nil,
-			ext,
-			allowedExts,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconInvalidType, nil, ext, allowedExts)
 	}
 
 	targetPath := filepath.Join(assetsDir, "favicon"+ext)
 
 	// Write new favicon atomically first
 	if err := shared.WriteStreamAtomic(targetPath, file, s.brandingConfig.BrandingConstraints.MaxFaviconSize); err != nil {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingFaviconUploadFailed,
-			"Failed to save favicon file",
-			"failed to save favicon file",
-			err,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconUploadFailed, err)
 	}
 
 	// Cleanup other favicon.* after success
@@ -241,12 +197,7 @@ func (s *BrandingService) UploadFavicon(file multipart.File, filename string) (s
 	// Update in-memory config + persist
 	s.brandingConfig.FaviconFile = "favicon" + ext
 	if err := s.store.Save(s.brandingConfig); err != nil {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodeBrandingFaviconUploadFailed,
-			"Failed to save favicon file",
-			"failed to save favicon file",
-			err,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconUploadFailed, err)
 	}
 
 	return s.brandingConfig.FaviconFile, nil
@@ -263,22 +214,12 @@ func (s *BrandingService) DeleteFavicon() error {
 
 	faviconPath := filepath.Join(s.store.brandingAssetsDir(), s.brandingConfig.FaviconFile)
 	if err := os.Remove(faviconPath); err != nil && !os.IsNotExist(err) {
-		return sharederrors.NewLocalizedError(
-			ErrCodeBrandingFaviconDeleteFailed,
-			"Failed to delete favicon",
-			"failed to delete favicon",
-			err,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconDeleteFailed, err)
 	}
 
 	s.brandingConfig.FaviconFile = ""
 	if err := s.store.Save(s.brandingConfig); err != nil {
-		return sharederrors.NewLocalizedError(
-			ErrCodeBrandingFaviconDeleteFailed,
-			"Failed to delete favicon",
-			"failed to delete favicon",
-			err,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingFaviconDeleteFailed, err)
 	}
 
 	return nil

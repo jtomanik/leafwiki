@@ -228,6 +228,7 @@ func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
 		[]string{" tag ", "unique", "UNIQUE"},
 		map[string]string{
 			" leafwiki_custom": "reserved",
+			"leafwiki_custom":  "reserved prefix",
 			"tags":             "reserved",
 			"":                 "empty",
 		},
@@ -240,6 +241,7 @@ func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
 	assertFieldErrorCode(t, ve, "tags[0]", "page_tag_whitespace", "validation.page.tag_whitespace")
 	assertFieldErrorCode(t, ve, "tags[2]", "page_tag_duplicate", "validation.page.tag_duplicate")
 	assertFieldErrorCode(t, ve, "properties. leafwiki_custom", "page_property_key_whitespace", "validation.page.property_key_whitespace")
+	assertFieldErrorCode(t, ve, "properties.leafwiki_custom", "page_property_key_reserved", "validation.page.property_key_reserved_prefix")
 	assertFieldErrorCode(t, ve, "properties.tags", "page_property_key_reserved", "validation.page.property_key_reserved")
 	assertFieldErrorCode(t, ve, "properties.", "page_property_key_required", "validation.page.property_key_required")
 }

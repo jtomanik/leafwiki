@@ -36,6 +36,7 @@ import (
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	"github.com/perber/wiki/internal/localization"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -57,85 +58,12 @@ const (
 )
 
 func writeUsage(w io.Writer) {
-	if _, err := fmt.Fprintln(w, `LeafWiki – lightweight selfhosted wiki 🌿
-
-	Usage:
-	leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
-	leafwiki --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
-	leafwiki --mcp=stdio --disable-auth [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
-	leafwiki agent-hook <codex|claude|cursor|unknown> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]
-	leafwiki daemon
-	leafwiki reset-admin-password
-	leafwiki --help
-
-	Service mode:
-	leafwiki daemon reads ~/.leafwiki/leafwiki.yml and runs the install-wide wikid/frontd/workspaced runtime in the foreground.
-
-	Options:
-	--host             Host/IP address to bind the server to (default: 127.0.0.1)
-	--port             Port to run the server on (default: 8080)
-	--data-dir         Path to data directory (default: ./data)
-	--root-dir         Path to managed markdown content directory (default: <data-dir>/root)
-	--markdown-link-root-prefix Repository-root prefix for absolute Markdown links (for example /docs) (default: "")
-	--admin-password   Initial admin password (used only if no admin exists)
-	--jwt-secret       Secret for signing auth tokens (JWT) (required)
-	--public-access    Allow public access to the wiki only with read access (default: false)
-	--allow-insecure   Allow insecure HTTP connections (default: false)                      
-	--access-token-timeout  Access token timeout duration (e.g. 24h, 15m) (default: 15m)
-	--refresh-token-timeout Refresh token timeout duration (e.g. 168h, 7d) (default: 7d)
-	--inject-code-in-header  Raw HTML/JS code injected into <head> tag (e.g., analytics, custom CSS) (default: "")
-	                         WARNING: Use only with trusted code to avoid XSS vulnerabilities. No sanitization is performed.
-	--custom-stylesheet      Path to a .css file inside the data dir, served publicly as /custom.css
-	                         (or <base-path>/custom.css when --base-path is set) (default: "")
-	--log-target             Log target: file, stderr, or stdout (default: file)
-	--log-file               Log file path when --log-target=file; relative paths resolve under --data-dir
-	                         (default: <data-dir>/.leafwiki/logs/leafwiki.log)
-	--disable-auth                Disable authentication completely (default: false) (WARNING: only use in trusted networks!)
-	--hide-link-metadata-section  Hide link metadata section in the frontend UI (default: false)
-	--base-path                   URL prefix when served behind a reverse proxy (e.g. /wiki) (default: "")
-	--max-asset-upload-size       Maximum size for asset uploads (for example 50MiB, 50MB, 52428800) (default: 50MiB)
-	--enable-link-refactor        Enable the link refactoring dialog and rewrite flow (default: false)
-	--mcp                         MCP transports: none, http, stdio, http,stdio, or stdio,http (default: none)
-	--api-key                     Native STDIO MCP API key convenience flag; prefer LEAFWIKI_MCP_API_KEY
-	--daemon-idle-timeout         Federated runtime idle timeout after the last session or presence record exits; 0 stops immediately (default: 10m)
-	--enable-http-remote-user       Enable reverse-proxy authentication via HTTP header (default: false)
-	--http-remote-user-header-name  HTTP header carrying the username from a trusted proxy (default: Remote-User)
-	--trusted-proxy-ips             Comma-separated trusted proxy IPs/CIDRs (e.g. 127.0.0.1,172.18.0.0/16)
-	--http-remote-user-logout-url   URL the frontend redirects to after logout in proxy-auth mode (default: "")
-	--disable-request-log           Suppress per-request HTTP access log lines (default: false)
-	--config                        Path to flat YAML config file; mutually exclusive with other CLI flags
-
-	Environment variables:
-	LEAFWIKI_HOST
-	LEAFWIKI_PORT
-	LEAFWIKI_DATA_DIR
-	LEAFWIKI_ROOT_DIR
-	LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX
-	LEAFWIKI_JWT_SECRET
-	LEAFWIKI_LOG_LEVEL
-	LEAFWIKI_ADMIN_PASSWORD
-	LEAFWIKI_PUBLIC_ACCESS
-	LEAFWIKI_ALLOW_INSECURE
-	LEAFWIKI_INJECT_CODE_IN_HEADER
-	LEAFWIKI_CUSTOM_STYLESHEET
-	LEAFWIKI_LOG_TARGET
-	LEAFWIKI_LOG_FILE
-	LEAFWIKI_ACCESS_TOKEN_TIMEOUT
-	LEAFWIKI_REFRESH_TOKEN_TIMEOUT
-	LEAFWIKI_DISABLE_AUTH
-	LEAFWIKI_HIDE_LINK_METADATA_SECTION
-	LEAFWIKI_BASE_PATH
-	LEAFWIKI_MAX_ASSET_UPLOAD_SIZE
-	LEAFWIKI_ENABLE_LINK_REFACTOR
-	LEAFWIKI_MCP
-	LEAFWIKI_MCP_API_KEY
-	LEAFWIKI_DAEMON_IDLE_TIMEOUT
-	LEAFWIKI_ENABLE_HTTP_REMOTE_USER
-	LEAFWIKI_HTTP_REMOTE_USER_HEADER_NAME
-	LEAFWIKI_TRUSTED_PROXY_IPS
-	LEAFWIKI_HTTP_REMOTE_USER_LOGOUT_URL
-	LEAFWIKI_DISABLE_REQUEST_LOG
-	`); err != nil {
+	usageLine := localization.English.Render(localization.MessageIDCLIHelpUsage, "").Message
+	if _, err := fmt.Fprintln(w, usageLine); err != nil {
+		panic(err)
+	}
+	helpBody := localization.English.Render(localization.MessageIDCLIHelpBody, "").Message
+	if _, err := fmt.Fprintln(w, helpBody); err != nil {
 		panic(err)
 	}
 }
@@ -189,9 +117,9 @@ func failInvalidConfigFile(err error) {
 	var mixErr configFlagMixError
 	var usageErr configUsageError
 	if errors.As(err, &mixErr) || errors.As(err, &usageErr) {
-		failWithoutAgentHook("Invalid config file", "error", err)
+		failWithoutAgentHook(localization.MessageIDCLIErrorInvalidConfigFile, "error", err)
 	}
-	fail("Invalid config file", "error", err)
+	fail(localization.MessageIDCLIErrorInvalidConfigFile, "error", err)
 }
 
 func failWithoutAgentHook(msg string, args ...any) {
@@ -202,7 +130,7 @@ func failWithoutAgentHook(msg string, args ...any) {
 
 func failureMessage(msg string, args ...any) string {
 	var b strings.Builder
-	b.WriteString(msg)
+	b.WriteString(localization.English.Render(msg, msg).Message)
 	for i := 0; i+1 < len(args); i += 2 {
 		b.WriteByte(' ')
 		b.WriteString(fmt.Sprint(args[i]))
@@ -297,7 +225,7 @@ func main() {
 		return
 	}
 	if err := rejectRemovedLeafWikiEnv(); err != nil {
-		fail("Invalid environment", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidEnvironment, "error", err)
 	}
 	if runInternalStartupCommand(startup.flags) {
 		return
@@ -347,10 +275,10 @@ func parseStartupCLI(rawArgs []string) (startupCLI, bool) {
 	flags := registerFlags(flag.CommandLine)
 	if err := flag.CommandLine.Parse(rawArgs); err != nil {
 		if configModeRequested {
-			failWithoutAgentHook("Invalid config arguments", "error", err)
+			failWithoutAgentHook(localization.MessageIDCLIErrorInvalidConfigArguments, "error", err)
 		}
 		if failOpenAgentHookProvider != "" {
-			fail("Invalid agent hook arguments", "error", err)
+			fail(localization.MessageIDCLIErrorInvalidAgentHookArguments, "error", err)
 		}
 		os.Exit(2)
 	}
@@ -387,22 +315,22 @@ func applyStartupConfig(fs *flag.FlagSet, flags *cliFlags, visited map[string]bo
 	if err := applyDaemonServiceConfig(fs, flags, visited, args); err != nil {
 		var missingConfig daemonServiceConfigMissingError
 		if errors.As(err, &missingConfig) {
-			failWithoutAgentHook("Service config file is required for service mode", "error", err)
+			failWithoutAgentHook(localization.MessageIDCLIErrorServiceConfigRequired, "error", err)
 		}
-		failWithoutAgentHook("Invalid service config file", "error", err)
+		failWithoutAgentHook(localization.MessageIDCLIErrorInvalidServiceConfigFile, "error", err)
 	}
 }
 
 func runInternalStartupCommand(flags *cliFlags) bool {
 	if strings.TrimSpace(*flags.internalProjectDaemon) != "" {
 		if err := runInternalProjectDaemon(context.Background(), *flags.internalProjectDaemon); err != nil {
-			fail("Project daemon failed", "error", err)
+			fail(localization.MessageIDCLIErrorProjectDaemonFailed, "error", err)
 		}
 		return true
 	}
 	if strings.TrimSpace(*flags.internalRuntimeRole) != "" {
 		if err := runInternalRuntimeRole(context.Background(), *flags.internalRuntimeRole); err != nil {
-			fail("Runtime role failed", "error", err)
+			fail(localization.MessageIDCLIErrorRuntimeRoleFailed, "error", err)
 		}
 		return true
 	}
@@ -414,7 +342,7 @@ func resolveStartupDataDir(flags *cliFlags, visited map[string]bool, serviceMode
 	if serviceModeRequested && !visited["data-dir"] {
 		serviceDataDir, err := defaultDaemonServiceDataDir()
 		if err != nil {
-			failWithoutAgentHook("Service config file is required for service mode", "error", err)
+			failWithoutAgentHook(localization.MessageIDCLIErrorServiceConfigRequired, "error", err)
 		}
 		defaultDataDir = serviceDataDir
 	}
@@ -439,17 +367,17 @@ func resolveStartupMCPTransports(flags *cliFlags, visited map[string]bool, agent
 	}
 	transports, err := resolveMCPTransports(flags, visited)
 	if err != nil {
-		fail("Invalid MCP configuration", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidMCPConfig, "error", err)
 	}
 	return transports
 }
 
 func validateStartupCommandTransport(serviceModeRequested bool, transports mcpTransports, args []string) {
 	if serviceModeRequested && transports.Stdio {
-		failWithoutAgentHook("Invalid service config file", "error", fmt.Errorf("leafwiki daemon does not support mcp: stdio; use scripts/run.sh mcp for native STDIO clients"))
+		failWithoutAgentHook(localization.MessageIDCLIErrorInvalidServiceConfigFile, "error", fmt.Errorf("leafwiki daemon does not support mcp: stdio; use scripts/run.sh mcp for native STDIO clients"))
 	}
 	if transports.Stdio && len(args) > 0 {
-		fail("Invalid native STDIO configuration", "error", fmt.Errorf("native STDIO does not support positional commands"))
+		fail(localization.MessageIDCLIErrorInvalidNativeSTDIOConfig, "error", fmt.Errorf("native STDIO does not support positional commands"))
 	}
 }
 
@@ -476,11 +404,11 @@ func handleStartupPositionalCommand(args []string, agentHookRequested bool, data
 func resetAdminPasswordCommand(dataDir string) {
 	resetDataDir := authStorageDirForRuntime(dataDir)
 	if err := wikid.CleanupLegacyAuthDBs(dataDir); err != nil {
-		fail("Password reset failed", "error", err)
+		fail(localization.MessageIDCLIErrorPasswordResetFailed, "error", err)
 	}
 	user, err := tools.ResetAdminPassword(resetDataDir)
 	if err != nil {
-		fail("Password reset failed", "error", err)
+		fail(localization.MessageIDCLIErrorPasswordResetFailed, "error", err)
 	}
 	fmt.Println("Admin password reset successfully.")
 	fmt.Printf("New password for user %s: %s\n", user.Username, user.Password)
@@ -495,7 +423,7 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 	}
 	markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
 	if err != nil {
-		fail("Invalid markdown link root prefix", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidMarkdownLinkRootPrefix, "error", err)
 	}
 	apiKey := ""
 	if transports.Stdio {
@@ -545,24 +473,24 @@ func buildRuntimeConfigForStartup(flags *cliFlags, visited map[string]bool, serv
 func resolveWorkspaceForStartup(flags *cliFlags, visited map[string]bool) wiki.Workspace {
 	workspace, _, err := resolveStartupWorkspace(flags, visited, flag.Args())
 	if err != nil {
-		fail("Invalid workspace configuration", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidWorkspaceConfig, "error", err)
 	}
 	return workspace
 }
 
 func validateProxyAuthSettings(trustedProxyIPsRaw string, enableHTTPRemoteUser bool) {
 	if _, err := authmw.ParseTrustedProxies(trustedProxyIPsRaw); err != nil {
-		fail("invalid --trusted-proxy-ips value", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidTrustedProxyIPs, "error", err)
 	}
 	if err := validateHTTPRemoteUserConfig(enableHTTPRemoteUser, trustedProxyIPsRaw); err != nil {
-		fail("Invalid HTTP remote user configuration", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidHTTPRemoteUserConfig, "error", err)
 	}
 }
 
 func resolveLoggingConfigForStartup(flags *cliFlags, visited map[string]bool, dataDir string) leaflogging.Config {
 	loggingConfig, err := resolveLoggingConfig(flags, visited, dataDir)
 	if err != nil {
-		fail("Invalid logging configuration", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidLoggingConfig, "error", err)
 	}
 	return loggingConfig
 }
@@ -575,14 +503,14 @@ func validateMCPSettings(transports mcpTransports, disableAuth bool, logTarget l
 		Host:        host,
 		APIKey:      apiKey,
 	}); err != nil {
-		fail("Invalid MCP configuration", "error", err)
+		fail(localization.MessageIDCLIErrorInvalidMCPConfig, "error", err)
 	}
 }
 
 func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookRequested bool, cfg leafwikiRuntimeConfig) {
 	if serviceModeRequested {
 		if err := runDaemonService(context.Background(), cfg); err != nil {
-			failWithoutAgentHook("LeafWiki daemon failed", "error", err)
+			failWithoutAgentHook(localization.MessageIDCLIErrorLeafWikiDaemonFailed, "error", err)
 		}
 		return
 	}
@@ -597,7 +525,7 @@ func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookR
 		return
 	}
 	if err := runProjectDaemonLauncher(context.Background(), cfg); err != nil {
-		fail("LeafWiki startup failed", "error", err)
+		fail(localization.MessageIDCLIErrorLeafWikiStartupFailed, "error", err)
 	}
 }
 
@@ -3818,7 +3746,7 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 				}
 			}
 			if role == "" {
-				writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, "workspace access denied")
+				writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
 				return
 			}
 		}
@@ -3856,14 +3784,15 @@ func writeRuntimeJSON(w http.ResponseWriter, value any) {
 	}
 }
 
-func writeRuntimeError(w http.ResponseWriter, status int, code sharederrors.ErrorCode, message string) {
+func writeRuntimeError(w http.ResponseWriter, status int, code sharederrors.ErrorCode) {
+	detail := sharederrors.NewLocalizedErrorDetail(code, "", "")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(runtimeErrorResponse{
 		Error: runtimeError{
-			Code:      code,
-			MessageID: sharederrors.MessageIDForCode(code),
-			Message:   message,
+			Code:      detail.Code,
+			MessageID: detail.MessageID,
+			Message:   detail.Message,
 		},
 	}); err != nil {
 		http.Error(w, "encode response", http.StatusInternalServerError)
@@ -3872,12 +3801,12 @@ func writeRuntimeError(w http.ResponseWriter, status int, code sharederrors.Erro
 
 func workspaceMCPUnavailableHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeRuntimeError(w, http.StatusServiceUnavailable, runtimeErrorCodeMCPWorkspaceUnavailable, "workspace mcp unavailable")
+		writeRuntimeError(w, http.StatusServiceUnavailable, runtimeErrorCodeMCPWorkspaceUnavailable)
 	})
 }
 
 func writePrivateMCPUnauthorized(w http.ResponseWriter) {
-	writeRuntimeError(w, http.StatusUnauthorized, runtimeErrorCodePrivateMCPControlTokenInvalid, "unauthorized")
+	writeRuntimeError(w, http.StatusUnauthorized, runtimeErrorCodePrivateMCPControlTokenInvalid)
 }
 
 type runtimeErrorResponse struct {
@@ -4578,7 +4507,7 @@ func resolveBool(flagName string, flagVal bool, visited map[string]bool, envVar 
 			return b
 		}
 		// If env var is set but invalid, fail fast (helps operators)
-		fail("Invalid environment variable value", "variable", envVar, "value", env, "expected", "true/false/1/0/yes/no")
+		fail(localization.MessageIDCLIErrorInvalidEnvironmentVariableValue, "variable", envVar, "value", env, "expected", "true/false/1/0/yes/no")
 	}
 	return flagVal // default from flag
 }
@@ -4592,7 +4521,7 @@ func resolveInt(flagName string, flagVal int, visited map[string]bool, envVar st
 		if _, err := fmt.Sscanf(env, "%d", &n); err == nil {
 			return n
 		}
-		fail("Invalid environment variable value", "variable", envVar, "value", env, "expected", "integer")
+		fail(localization.MessageIDCLIErrorInvalidEnvironmentVariableValue, "variable", envVar, "value", env, "expected", "integer")
 	}
 	return def
 }
@@ -4606,7 +4535,7 @@ func resolveDuration(flagName string, flagVal time.Duration, visited map[string]
 			return d
 		}
 		// If env var is set but invalid, fail fast (helps operators)
-		fail("Invalid environment variable value", "variable", envVar, "value", env, "expected", "duration like 24h, 15m")
+		fail(localization.MessageIDCLIErrorInvalidEnvironmentVariableValue, "variable", envVar, "value", env, "expected", "duration like 24h, 15m")
 	}
 	return flagVal // default from flag
 }
@@ -4650,13 +4579,13 @@ func validateMCPTransportOptions(opts mcpTransportOptions) error {
 func parseByteSize(raw string, label string) int64 {
 	size, err := humanize.ParseBytes(strings.TrimSpace(raw))
 	if err != nil {
-		fail("Invalid byte size value", "setting", label, "value", raw, "error", err)
+		fail(localization.MessageIDCLIErrorInvalidByteSizeValue, "setting", label, "value", raw, "error", err)
 	}
 	if size == 0 {
-		fail("Byte size value must be greater than zero", "setting", label, "value", raw)
+		fail(localization.MessageIDCLIErrorByteSizeMustBePositive, "setting", label, "value", raw)
 	}
 	if size > math.MaxInt64 {
-		fail("Byte size value is too large", "setting", label, "value", raw)
+		fail(localization.MessageIDCLIErrorByteSizeTooLarge, "setting", label, "value", raw)
 	}
 	return int64(size)
 }

@@ -4,6 +4,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"strings"
+
+	"github.com/perber/wiki/internal/localization"
 )
 
 type ErrorCode string
@@ -70,6 +72,31 @@ func NewLocalizedError(code ErrorCode, message, template string, cause error, ar
 	}
 }
 
+func NewLocalizedErrorFromCode(code ErrorCode, cause error, args ...string) *LocalizedError {
+	messageID := MessageIDForCode(code)
+	message := renderMessage(messageID, "", args...)
+	return &LocalizedError{
+		Code:      code,
+		MessageID: messageID,
+		Message:   message,
+		Template:  message,
+		Args:      append([]string(nil), args...),
+		Cause:     cause,
+	}
+}
+
+func NewLocalizedErrorFromCodeWithFallback(code ErrorCode, message, template string, cause error, args ...string) *LocalizedError {
+	messageID := MessageIDForCode(code)
+	return &LocalizedError{
+		Code:      code,
+		MessageID: messageID,
+		Message:   renderMessage(messageID, message, args...),
+		Template:  template,
+		Args:      append([]string(nil), args...),
+		Cause:     cause,
+	}
+}
+
 func NewDefinedLocalizedError(definition ErrorDefinition, cause error, args ...string) *LocalizedError {
 	messageID := definition.MessageID
 	if messageID == "" {
@@ -86,10 +113,11 @@ func NewDefinedLocalizedError(definition ErrorDefinition, cause error, args ...s
 }
 
 func NewLocalizedErrorDetail(code ErrorCode, message, template string, args ...string) LocalizedErrorDetail {
+	messageID := MessageIDForCode(code)
 	return LocalizedErrorDetail{
 		Code:      code,
-		MessageID: MessageIDForCode(code),
-		Message:   message,
+		MessageID: messageID,
+		Message:   renderMessage(messageID, message, args...),
 		Template:  template,
 		Args:      append([]string(nil), args...),
 	}
@@ -106,10 +134,15 @@ func LocalizedErrorDetailFromError(err *LocalizedError) LocalizedErrorDetail {
 	return LocalizedErrorDetail{
 		Code:      err.Code,
 		MessageID: messageID,
-		Message:   err.Message,
+		Message:   renderMessage(messageID, err.Message, err.Args...),
 		Template:  err.Template,
 		Args:      append([]string(nil), err.Args...),
 	}
+}
+
+func renderMessage(messageID MessageID, defaultEnglish string, args ...string) string {
+	rendered := localization.English.Render(messageID, defaultEnglish, args...)
+	return rendered.Message
 }
 
 func MessageIDForCode(code ErrorCode) MessageID {

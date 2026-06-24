@@ -341,6 +341,7 @@ test.describe('Importer', () => {
     await importerPage.uploadZip(importZipPath, importZipFileName);
     await importerPage.createImportPlan();
     await importerPage.executeImportPlan();
+    await importerPage.expectPlanStatus('Completed');
 
     await importerPage.startNewImport();
   });

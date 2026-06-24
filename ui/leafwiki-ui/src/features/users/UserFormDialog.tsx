@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { User } from '@/lib/api/users'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_USER_FORM } from '@/lib/registries'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/users'
@@ -29,7 +29,7 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
   const [role, setRole] = useState<'admin' | 'editor' | 'viewer'>(
     user?.role || 'editor',
   )
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const [loading, setLoading] = useState(false)
 
   const { createUser, updateUser } = useUserStore()
@@ -96,7 +96,7 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
           value={username}
           onChange={(val) => {
             setUsername(val)
-            setFieldErrors((prev) => ({ ...prev, username: '' }))
+            setFieldErrors((prev) => ({ ...prev, username: undefined }))
           }}
           placeholder="username"
           autoComplete="username"
@@ -109,7 +109,7 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
           value={email}
           onChange={(val) => {
             setEmail(val)
-            setFieldErrors((prev) => ({ ...prev, email: '' }))
+            setFieldErrors((prev) => ({ ...prev, email: undefined }))
           }}
           placeholder="email"
           autoComplete="email"
@@ -123,7 +123,7 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
             value={password}
             onChange={(val) => {
               setPassword(val)
-              setFieldErrors((prev) => ({ ...prev, password: '' }))
+              setFieldErrors((prev) => ({ ...prev, password: undefined }))
             }}
             placeholder="password"
             autoComplete="new-password"
@@ -137,7 +137,7 @@ export function UserFormDialog({ user }: UserFormDialogProps) {
           value={role}
           onValueChange={(role) => {
             setRole(role as 'admin' | 'editor' | 'viewer')
-            setFieldErrors((prev) => ({ ...prev, role: '' }))
+            setFieldErrors((prev) => ({ ...prev, role: undefined }))
           }}
         >
           <SelectTrigger>

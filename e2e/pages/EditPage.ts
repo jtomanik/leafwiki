@@ -38,7 +38,10 @@ export default class EditPage {
     const saveButton = this.page.locator('button[data-testid="save-page-button"]');
     await saveButton.waitFor({ state: 'visible' });
     await saveButton.click();
-    await this.page.getByText('Page saved successfully').last().waitFor({ state: 'visible' });
+    await expect(this.page.getByTestId('page-save-success-toast-message').last()).toHaveAttribute(
+      'data-l10n-id',
+      'ui.page.save.success',
+    );
     await expect(saveButton).toBeDisabled();
   }
 

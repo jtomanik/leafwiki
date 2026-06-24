@@ -17,4 +17,6 @@ trap 'rm -rf "$tmpdir"' EXIT
     "$repo_root/e2e-proxy/..."
 )
 
+rtk bash "$repo_root/scripts/check-i18n-catalog.sh"
+
 echo "Semantic hygiene analyzer passed."

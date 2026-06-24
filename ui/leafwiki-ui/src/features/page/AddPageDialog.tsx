@@ -1,7 +1,7 @@
 import BaseDialog, { BaseDialogConfirmButton } from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { createPage, NODE_KIND_PAGE } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
 import { asPageID, asSlug, asWorkspaceID } from '@/lib/semanticTypes'
@@ -31,7 +31,7 @@ export function AddPageDialog({
   const [slugLoading, setSlugLoading] = useState(false)
   const [lastSlugTitle, setLastSlugTitle] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const reloadTree = useTreeStore((s) => s.reloadTree)
   const parentPath = useTreeStore(
     (s) => s.getPathById(parentId, workspaceId) || '',
@@ -48,7 +48,7 @@ export function AddPageDialog({
 
   const handleTitleChange = (val: string) => {
     setTitle(val)
-    setFieldErrors((prev) => ({ ...prev, title: '' }))
+    setFieldErrors((prev) => ({ ...prev, title: undefined }))
   }
 
   const resetForm = useCallback(() => {
@@ -62,7 +62,7 @@ export function AddPageDialog({
 
   const handleSlugChange = useCallback((val: string) => {
     setSlug(val)
-    setFieldErrors((prev) => ({ ...prev, slug: '' }))
+    setFieldErrors((prev) => ({ ...prev, slug: undefined }))
   }, [])
 
   const handleCreate = useCallback(
@@ -190,7 +190,7 @@ export function AddPageDialog({
           value={title}
           onChange={(val) => {
             handleTitleChange(val)
-            setFieldErrors((prev) => ({ ...prev, title: '' }))
+            setFieldErrors((prev) => ({ ...prev, title: undefined }))
           }}
           testid="add-page-title-input"
           placeholder={`${itemLabelCapitalized} title`}

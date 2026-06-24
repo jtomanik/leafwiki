@@ -379,3 +379,85 @@ func respondMessageID(messageID string) {}
 func MessageIDForCode(code ErrorCode) MessageID {
 	return MessageID("errors." + string(code))
 }
+
+const (
+	fixtureErrorCodeValidationTitleRequired FieldErrorCode = "page_title_required"
+	fixtureErrorCodePageNotFound            ErrorCode      = "page_not_found"
+	fixtureMessageIDValidationTitleRequired MessageID      = "validation.page.title_required"
+	fixtureToolMessageIDMovePageSuccess     MessageID      = "mcp.tools.wiki_move_page.success"
+)
+
+func forbiddenLocalizedErrorDetailLiteral() {
+	NewLocalizedErrorDetail(
+		"page_not_found", // want "raw stable contract literal \"page_not_found\" used in production code; use the typed constant or definition"
+		"Page not found", // want "raw localized prose \"Page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+		"page not found", // want "raw localized prose \"page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+	)
+}
+
+func NewLocalizedErrorDetail(code ErrorCode, message string, template string) {}
+
+func forbiddenLocalizedErrorWithTypedCodeLiteral() {
+	NewLocalizedError(
+		fixtureErrorCodePageNotFound,
+		"Page not found", // want "raw localized prose \"Page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+		"page not found", // want "raw localized prose \"page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+	)
+}
+
+func NewLocalizedError(code ErrorCode, message string, template string) {}
+
+func forbiddenLocalizedErrorFallbackLiteral() {
+	NewLocalizedErrorFromCodeWithFallback(
+		fixtureErrorCodePageNotFound,
+		"Page not found", // want "raw localized prose \"Page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+		"page not found", // want "raw localized prose \"page not found\" used in Go contract code; use a catalog-backed message ID or definition"
+		nil,
+	)
+}
+
+func NewLocalizedErrorFromCodeWithFallback(code ErrorCode, message string, template string, cause any) {
+}
+
+func forbiddenFieldValidationLiteral() {
+	NewFieldErrorWithCode(
+		"title",
+		fixtureErrorCodeValidationTitleRequired,
+		fixtureMessageIDValidationTitleRequired,
+		"Page title is required", // want "raw localized prose \"Page title is required\" used in Go contract code; use a catalog-backed message ID or definition"
+	)
+}
+
+func NewFieldErrorWithCode(field string, code FieldErrorCode, messageID MessageID, message string) {}
+
+func forbiddenToolDescriptionLiteral() {
+	newToolDescriptor(ToolGetPage, "Return a page by ID") // want "raw localized prose \"Return a page by ID\" used in Go contract code; use a catalog-backed message ID or definition"
+}
+
+func newToolDescriptor(name ToolID, description string) {}
+
+func forbiddenMCPMessageOutputLiteral() {
+	newMessageOutput(fixtureToolMessageIDMovePageSuccess, "Page moved") // want "raw localized prose \"Page moved\" used in Go contract code; use a catalog-backed message ID or definition"
+}
+
+func newMessageOutput(messageID MessageID, message string) {}
+
+type H map[string]any
+
+func forbiddenDirectAPIMessageLiteral() H {
+	return H{"message": "Page moved"} // want "raw localized prose \"Page moved\" used in Go contract code; use a catalog-backed message ID or definition"
+}
+
+func forbiddenCLIRenderBypass() string {
+	return Render("cli.help.usage", "Usage: leafwiki [command]") // want "raw stable contract literal \"cli.help.usage\" used in production code; use the typed constant or definition" "raw localized prose .*Usage: leafwiki"
+}
+
+func Render(messageID string, defaultEnglish string) string {
+	return defaultEnglish
+}
+
+func forbiddenCLIFailLiteral() {
+	fail("Invalid environment") // want "raw localized prose \"Invalid environment\" used in Go contract code; use a catalog-backed message ID or definition"
+}
+
+func fail(messageID string) {}

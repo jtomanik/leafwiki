@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/localization"
 )
 
 const (
@@ -60,6 +61,9 @@ const (
 	MessageIDAuthAPIKeyNameTooLong        sharederrors.MessageID = "validation.auth.api_key_name_too_long"
 	MessageIDAuthCurrentPasswordRequired  sharederrors.MessageID = "validation.auth.current_password_required"
 	MessageIDAuthCurrentPasswordIncorrect sharederrors.MessageID = "validation.auth.current_password_incorrect"
+	MessageIDAuthLoginSuccess             sharederrors.MessageID = "api.auth.login.success"
+	MessageIDAuthLogoutSuccess            sharederrors.MessageID = "api.auth.logout.success"
+	MessageIDAuthRefreshTokenSuccess      sharederrors.MessageID = "api.auth.refresh_token.success"
 )
 
 // AuthErrorResponse is the structured JSON error body returned by auth endpoints.
@@ -74,6 +78,10 @@ func respondWithAuthStatusError(c *gin.Context, status int, code sharederrors.Er
 	c.JSON(status, AuthErrorResponse{
 		Error: sharederrors.NewLocalizedErrorDetail(code, message, template, args...),
 	})
+}
+
+func apiSuccessMessage(messageID sharederrors.MessageID) string {
+	return localization.English.Render(messageID, "").Message
 }
 
 // respondWithAuthError is the central error handler for auth endpoints.

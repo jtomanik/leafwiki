@@ -29,4 +29,19 @@ describe('API localized errors', () => {
 
     expect(err.messageId).toBe('errors.page.version_conflict')
   })
+
+  it('uses backend-rendered message instead of translating the compatibility template', () => {
+    const err = new ApiLocalizedError({
+      code: asApiErrorCode('page_version_conflict'),
+      messageId: asMessageID('errors.page.version_conflict'),
+      message: 'Backend catalog copy for this response.',
+      template: 'page was changed by another request',
+    })
+
+    expect(mapApiError(err, 'fallback')).toMatchObject({
+      message: 'Backend catalog copy for this response.',
+      code: 'page_version_conflict',
+      messageId: 'errors.page.version_conflict',
+    })
+  })
 })

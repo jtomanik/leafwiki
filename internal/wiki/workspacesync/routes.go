@@ -8,10 +8,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
 	"github.com/perber/wiki/internal/workspacesync"
+)
+
+const (
+	errCodeWorkspaceSyncDisabled      sharederrors.ErrorCode = "workspace_sync_disabled"
+	errCodeWorkspaceSyncInvalidCursor sharederrors.ErrorCode = "workspace_sync_invalid_cursor"
+	errCodeWorkspaceSyncInvalidLimit  sharederrors.ErrorCode = "workspace_sync_invalid_limit"
+	errCodeWorkspaceSyncFailed        sharederrors.ErrorCode = "workspace_sync_failed"
 )
 
 type Routes struct {
@@ -69,14 +77,14 @@ func (r *Routes) handleStatus(c *gin.Context) {
 
 func (r *Routes) handleSnapshots(c *gin.Context) {
 	if r.listSnapshots == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace sync is not enabled"})
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
 		return
 	}
 	rawCursor := strings.TrimSpace(c.Query("cursor"))
 	cursor := workspacesync.NewCommitHashUnchecked(rawCursor)
 	if cursor.String() != "" {
 		if len(cursor.String()) > 256 || strings.ContainsAny(cursor.String(), " \t\r\n") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot cursor"})
+			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidCursor, "invalid snapshot cursor")
 			return
 		}
 	}
@@ -84,14 +92,14 @@ func (r *Routes) handleSnapshots(c *gin.Context) {
 	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
 		parsed, err := strconv.Atoi(rawLimit)
 		if err != nil || parsed <= 0 || parsed > 200 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot limit"})
+			abortWorkspaceSyncError(c, http.StatusBadRequest, errCodeWorkspaceSyncInvalidLimit, "invalid snapshot limit")
 			return
 		}
 		limit = parsed
 	}
 	out, err := r.listSnapshots(c.Request.Context(), cursor, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"snapshots": out.Snapshots, "nextCursor": out.NextCursor})
@@ -99,7 +107,7 @@ func (r *Routes) handleSnapshots(c *gin.Context) {
 
 func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 	if r.restoreWorkspace == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace sync is not enabled"})
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
 		return
 	}
 	user := authmw.MustGetUser(c)
@@ -113,7 +121,7 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 		workspacesync.SourceWeb,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, statusResponse(status))
@@ -121,7 +129,7 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 
 func (r *Routes) handleRefresh(c *gin.Context) {
 	if r.refresh == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace sync is not enabled"})
+		abortWorkspaceSyncError(c, http.StatusNotFound, errCodeWorkspaceSyncDisabled, "workspace sync is not enabled")
 		return
 	}
 	status, err := r.refresh(c.Request.Context(), workspacesync.SyncRequest{
@@ -130,10 +138,16 @@ func (r *Routes) handleRefresh(c *gin.Context) {
 		Actor:  workspacesync.PublicEditorActor(),
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		abortWorkspaceSyncError(c, http.StatusInternalServerError, errCodeWorkspaceSyncFailed, err.Error(), err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, statusResponse(status))
+}
+
+func abortWorkspaceSyncError(c *gin.Context, status int, code sharederrors.ErrorCode, message string, args ...string) {
+	c.JSON(status, gin.H{
+		"error": sharederrors.NewLocalizedErrorDetail(code, message, message, args...),
+	})
 }
 
 func statusResponse(status workspacesync.SyncStatus) gin.H {

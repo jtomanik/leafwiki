@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/localization"
 )
 
 const (
@@ -25,6 +26,10 @@ const (
 
 const MessageIDAssetDeleteSuccess sharederrors.MessageID = "api.assets.delete.success"
 
+func apiSuccessMessage(messageID sharederrors.MessageID) string {
+	return localization.English.Render(messageID, "").Message
+}
+
 // AssetErrorResponse is the structured JSON error body returned by asset endpoints.
 type AssetErrorResponse struct {
 	Error AssetErrorDetail `json:"error"`
@@ -40,11 +45,11 @@ func respondWithAssetStatusError(c *gin.Context, status int, code sharederrors.E
 }
 
 func NewAssetFileTooLargeError() *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(ErrCodeAssetFileTooLarge, "File is too large", "file is too large", nil)
+	return sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetFileTooLarge, nil)
 }
 
 func NewAssetInvalidPayloadError(err error) *sharederrors.LocalizedError {
-	return sharederrors.NewLocalizedError(ErrCodeAssetInvalidPayload, "Invalid asset payload", "asset payload is invalid", err)
+	return sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetInvalidPayload, err)
 }
 
 // respondWithAssetError maps errors to JSON responses for asset endpoints.

@@ -1,7 +1,7 @@
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
 import { ensurePage, lookupPath, PathLookupResult } from '@/lib/api/pages'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_CREATE_PAGE_BY_PATH } from '@/lib/registries'
 import { buildEditUrl } from '@/lib/routePath'
 import { asRoutePath, asWorkspaceID } from '@/lib/semanticTypes'
@@ -38,7 +38,7 @@ export function CreatePageByPathDialog({
 
   const [title, setTitle] = useState(initialTitle)
   const [path, setPath] = useState(initialPath || '')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const [lookup, setLookup] = useState<PathLookupResult | null>(null)
   const [loading, setLoading] = useState(false)
   const reloadTree = useTreeStore((s) => s.reloadTree)
@@ -194,7 +194,7 @@ export function CreatePageByPathDialog({
           value={title}
           onChange={(val) => {
             handleTitleChange(val)
-            setFieldErrors((prev) => ({ ...prev, title: '' }))
+            setFieldErrors((prev) => ({ ...prev, title: undefined }))
           }}
           placeholder="Page title"
           error={fieldErrors.title}
@@ -207,7 +207,7 @@ export function CreatePageByPathDialog({
           readOnly={readOnlyPath}
           onChange={(val) => {
             setPath(val)
-            setFieldErrors((prev) => ({ ...prev, path: '' }))
+            setFieldErrors((prev) => ({ ...prev, path: undefined }))
           }}
           placeholder="Page path"
           error={fieldErrors.path}

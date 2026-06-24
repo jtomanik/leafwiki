@@ -49,10 +49,10 @@ func NewUpdatePageUseCase(
 func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*UpdatePageOutput, error) {
 	ve := sharederrors.NewValidationErrors()
 	if in.Title == "" {
-		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 	}
 	if err := in.Slug.Validate(); err != nil {
-		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
+		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid)
 	}
 	if ve.HasErrors() {
 		return nil, ve

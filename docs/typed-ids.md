@@ -15,6 +15,10 @@ LeafWiki uses stable semantic identifiers for machine-facing contracts and seman
 
 This document covers the typed-ID implementation from `docs/plans/semantic-types-and-ids.PLAN.md` and the originating thread `codex://threads/019ea755-a3e3-7571-a8cf-c70a33fea656`.
 
+The backend i18n layer built on these IDs is documented in `docs/i18n.md`.
+It renders English messages from stable IDs while preserving the typed-ID
+contract and compatibility fields described here.
+
 ## Rules
 
 - Add stable IDs for errors, validation issues, MCP tools, MCP result messages, and state/status UI that agents or tests consume.

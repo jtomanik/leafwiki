@@ -46,7 +46,16 @@ export default function LoginForm() {
       navigate('/')
     } catch (err) {
       const mapped = mapApiError(err, 'Login failed')
-      toast.error(mapped.message)
+      toast.error(
+        <span
+          data-testid="login-error-message"
+          data-error-code={mapped.code}
+          data-l10n-id={mapped.messageId}
+        >
+          {mapped.message}
+        </span>,
+        { testId: 'login-error-toast' },
+      )
     } finally {
       setLoading(false)
     }

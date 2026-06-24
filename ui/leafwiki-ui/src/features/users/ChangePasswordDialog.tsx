@@ -1,6 +1,6 @@
 import BaseDialog from '@/components/BaseDialog'
 import { FormInput } from '@/components/FormInput'
-import { handleFieldErrors } from '@/lib/handleFieldErrors'
+import { handleFieldErrors, type FieldErrorMap } from '@/lib/handleFieldErrors'
 import { DIALOG_CHANGE_USER_PASSWORD } from '@/lib/registries'
 import { useUserStore } from '@/stores/users'
 import { useCallback, useState } from 'react'
@@ -19,7 +19,7 @@ export function ChangePasswordDialog({
 }: ChangePasswordDialogProps) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({})
   const [loading, setLoading] = useState(false)
 
   const { users, updateUser } = useUserStore()
@@ -39,27 +39,30 @@ export function ChangePasswordDialog({
     loading ||
     password.length < 8 ||
     password !== confirm ||
-    fieldErrors.password !== '' ||
-    fieldErrors.confirm !== ''
+    fieldErrors.password?.message !== undefined ||
+    fieldErrors.confirm?.message !== undefined
 
   const handlePasswordChange = (val: string) => {
     setPassword(val)
     if (val.length < 8) {
       setFieldErrors((prev) => ({
         ...prev,
-        password: 'Password must be at least 8 characters long',
+        password: { message: 'Password must be at least 8 characters long' },
       }))
     } else {
-      setFieldErrors((prev) => ({ ...prev, password: '' }))
+      setFieldErrors((prev) => ({ ...prev, password: undefined }))
     }
   }
 
   const handleConfirmChange = (val: string) => {
     setConfirm(val)
     if (val !== password) {
-      setFieldErrors((prev) => ({ ...prev, confirm: 'Passwords do not match' }))
+      setFieldErrors((prev) => ({
+        ...prev,
+        confirm: { message: 'Passwords do not match' },
+      }))
     } else {
-      setFieldErrors((prev) => ({ ...prev, confirm: '' }))
+      setFieldErrors((prev) => ({ ...prev, confirm: undefined }))
     }
   }
 

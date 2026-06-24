@@ -424,19 +424,22 @@ export default function Importer() {
             </p>
             <div
               className="importer__status-banner"
-              data-import-status={importStatus ?? "idle"}
+              data-import-status={importStatus ?? 'idle'}
             >
               <div className="importer__status-header">
                 <div>
                   <div className="settings__preview-label">Current Status</div>
                   <div
                     className="importer__status-title"
-                    data-import-status={importStatus ?? "idle"}
+                    data-import-status={importStatus ?? 'idle'}
                   >
                     {statusLabel}
                   </div>
                 </div>
-                <span className={statusPillClass} data-import-status={importStatus ?? "idle"}>
+                <span
+                  className={statusPillClass}
+                  data-import-status={importStatus ?? 'idle'}
+                >
                   {statusLabel}
                 </span>
               </div>
@@ -657,7 +660,7 @@ export default function Importer() {
               <>
                 <div
                   className="importer__status-banner"
-                  data-import-status={importStatus ?? "idle"}
+                  data-import-status={importStatus ?? 'idle'}
                 >
                   <div className="importer__status-header">
                     <div>
@@ -666,12 +669,15 @@ export default function Importer() {
                       </div>
                       <div
                         className="importer__status-title"
-                        data-import-status={importStatus ?? "idle"}
+                        data-import-status={importStatus ?? 'idle'}
                       >
                         {statusLabel}
                       </div>
                     </div>
-                    <span className={statusPillClass} data-import-status={importStatus ?? "idle"}>
+                    <span
+                      className={statusPillClass}
+                      data-import-status={importStatus ?? 'idle'}
+                    >
                       {statusLabel}
                     </span>
                   </div>
@@ -749,7 +755,11 @@ export default function Importer() {
           </div>
         )}
         {importResult && showResultStep && (
-          <div className="settings__section">
+          <div
+            className="settings__section"
+            data-testid="import-result"
+            data-import-status={importStatus ?? 'completed'}
+          >
             <h2 className="settings__section-title">Import Result</h2>
             <p className="settings__section-description">
               This is the final outcome of the import. Skipped items usually

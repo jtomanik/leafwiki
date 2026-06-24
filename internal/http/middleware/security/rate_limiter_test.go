@@ -1,12 +1,14 @@
 package security
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
 func TestRateLimiter_NewKey(t *testing.T) {
@@ -67,6 +69,46 @@ func TestRateLimiter_ExceedsLimit(t *testing.T) {
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected status 429, got %d", w.Code)
+	}
+}
+
+func TestRateLimiter_ExceedsLimitReturnsStructuredLocalizedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	limiter := NewRateLimiter(1, time.Minute, false)
+
+	router := gin.New()
+	router.Use(limiter)
+	router.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.6:1234"
+	router.ServeHTTP(httptest.NewRecorder(), req)
+
+	req = httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.6:1234"
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusTooManyRequests, w.Body.String())
+	}
+	var body struct {
+		Error sharederrors.LocalizedErrorDetail `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+	if body.Error.Code != ErrCodeRateLimitExceeded {
+		t.Fatalf("error.code = %q, want %q; body=%s", body.Error.Code, ErrCodeRateLimitExceeded, w.Body.String())
+	}
+	if body.Error.MessageID != "errors.rate.limit_exceeded" {
+		t.Fatalf("error.messageId = %q, want errors.rate.limit_exceeded", body.Error.MessageID)
+	}
+	if body.Error.Message != "Too many requests, please try again later" {
+		t.Fatalf("error.message = %q, want catalog-rendered rate-limit message", body.Error.Message)
 	}
 }
 

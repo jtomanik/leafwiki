@@ -650,7 +650,10 @@ test.describe('Editor', () => {
 
     // Accepting the conflict resolves successfully
     await conflictAction.click();
-    await page.getByText('Page saved successfully').last().waitFor({ state: 'visible' });
+    await expect(page.getByTestId('page-save-success-toast-message').last()).toHaveAttribute(
+      'data-l10n-id',
+      'ui.page.save.success',
+    );
   });
 
   test('editor-validation-error-blocks-save-with-reserved-property-key', async ({ page }) => {
@@ -684,7 +687,7 @@ test.describe('Editor', () => {
     );
 
     // No success toast
-    await expect(page.getByText('Page saved successfully')).not.toBeVisible();
+    await expect(page.getByTestId('page-save-success-toast-message')).not.toBeVisible();
   });
 
   test('editor-validation-error-blocks-save-with-empty-property-key', async ({ page }) => {
@@ -715,7 +718,7 @@ test.describe('Editor', () => {
     await expect(keyError).toContainText('empty');
 
     // No success toast
-    await expect(page.getByText('Page saved successfully')).not.toBeVisible();
+    await expect(page.getByTestId('page-save-success-toast-message')).not.toBeVisible();
   });
 
   test('editor-clicking-several-headings-does-not-jump-preview-to-top', async ({ page }) => {

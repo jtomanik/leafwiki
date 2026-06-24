@@ -13,19 +13,9 @@ import (
 
 // ─── Sentinel errors ─────────────────────────────────────────────────────────
 
-var ErrPropertiesMissingKey = sharederrors.NewLocalizedError(
-	ErrCodePropertiesMissingKey,
-	"Query parameter 'key' is required",
-	"query parameter key is required",
-	nil,
-)
+var ErrPropertiesMissingKey = sharederrors.NewLocalizedErrorFromCode(ErrCodePropertiesMissingKey, nil)
 
-var ErrPropertiesMissingValue = sharederrors.NewLocalizedError(
-	ErrCodePropertiesMissingValue,
-	"Query parameter 'value' is required",
-	"query parameter value is required",
-	nil,
-)
+var ErrPropertiesMissingValue = sharederrors.NewLocalizedErrorFromCode(ErrCodePropertiesMissingValue, nil)
 
 // ─── GetPropertyKeysUseCase ──────────────────────────────────────────────────
 

@@ -12,10 +12,15 @@ import (
 	coretags "github.com/perber/wiki/internal/tags"
 )
 
-var ErrSearchUnavailable = sharederrors.NewLocalizedError(
+const (
+	searchUnavailableMessage  = "Search is currently unavailable"
+	searchUnavailableTemplate = "search is currently unavailable"
+)
+
+var ErrSearchUnavailable = sharederrors.NewLocalizedErrorFromCodeWithFallback(
 	ErrCodeSearchUnavailable,
-	"Search is currently unavailable",
-	"search is currently unavailable",
+	searchUnavailableMessage,
+	searchUnavailableTemplate,
 	nil,
 )
 
@@ -34,12 +39,7 @@ type SearchOutput struct {
 
 func ValidateSearchRequest(query string, tags []string) error {
 	if query == "" && len(normalizeTags(tags)) == 0 {
-		return sharederrors.NewLocalizedError(
-			ErrCodeSearchMissingQuery,
-			"Query parameter 'q' is required",
-			"query parameter q is required",
-			nil,
-		)
+		return sharederrors.NewLocalizedErrorFromCode(ErrCodeSearchMissingQuery, nil)
 	}
 	return nil
 }

@@ -25,6 +25,19 @@ import { isDirtyState } from './pageEditorStore'
 import useNavigationGuard from './useNavigationGuard'
 import { useToolbarActions } from './useToolbarActions'
 
+const pageSaveSuccessMessageId = 'ui.page.save.success'
+
+function pageSaveSuccessToast() {
+  return (
+    <span
+      data-testid="page-save-success-toast-message"
+      data-l10n-id={pageSaveSuccessMessageId}
+    >
+      Page saved successfully
+    </span>
+  )
+}
+
 export default function PageEditor() {
   const { '*': path } = useParams()
 
@@ -96,7 +109,9 @@ export default function PageEditor() {
               browserRoutePathForWikiNode(page.path, page.kind, workspaceId),
             ),
           )
-          toast.success('Page saved successfully')
+          toast.success(pageSaveSuccessToast(), {
+            testId: 'page-save-success-toast',
+          })
         }
       })
       .catch((err) => {
@@ -131,7 +146,9 @@ export default function PageEditor() {
                           ),
                         ),
                       )
-                      toast.success('Page saved successfully')
+                      toast.success(pageSaveSuccessToast(), {
+                        testId: 'page-save-success-toast',
+                      })
                     }
                   })
                   .catch((overwriteErr) => {

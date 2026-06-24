@@ -18,8 +18,8 @@ export default class ImporterPage {
 
   async createImportPlan() {
     await this.page.getByRole('button', { name: 'Import from Zip' }).click();
-    await expect(this.page.getByText('Import plan created successfully').last()).toBeVisible();
     await expect(this.page.getByRole('heading', { name: 'Import Plan' })).toBeVisible();
+    await this.expectPlanStatus('Planned');
   }
 
   async executeImportPlan() {
@@ -30,7 +30,16 @@ export default class ImporterPage {
   }
 
   async expectPlanStatus(status: 'Planned' | 'Running' | 'Completed' | 'Canceled' | 'Failed') {
-    await expect(this.page.locator(`.importer__status-title[data-import-status="${status.toLowerCase()}"]`)).toBeVisible();
+    if (status === 'Completed') {
+      await expect(
+        this.page.locator('[data-testid="import-result"][data-import-status="completed"]'),
+      ).toBeVisible();
+      return;
+    }
+
+    await expect(
+      this.page.locator(`.importer__status-title[data-import-status="${status.toLowerCase()}"]`),
+    ).toBeVisible();
   }
 
   async expectPlanItemCount(count: number) {

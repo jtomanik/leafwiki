@@ -42,7 +42,7 @@ func (uc *UploadAssetUseCase) Execute(_ context.Context, in UploadAssetInput) (*
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetPageNotFound, err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func (uc *ListAssetsUseCase) Execute(_ context.Context, in ListAssetsInput) (*Li
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetPageNotFound, err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (uc *GetAssetUseCase) Execute(_ context.Context, in GetAssetInput) (*GetAss
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetPageNotFound, err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (uc *RenameAssetUseCase) Execute(_ context.Context, in RenameAssetInput) (*
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return nil, sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
+			return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetPageNotFound, err, in.PageID.MetadataValue())
 		}
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (uc *DeleteAssetUseCase) Execute(_ context.Context, in DeleteAssetInput) er
 	page, err := uc.tree.FindPageByID(in.PageID)
 	if err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
-			return sharederrors.NewLocalizedError(ErrCodeAssetPageNotFound, "Page not found", "page %s not found", err, in.PageID.MetadataValue())
+			return sharederrors.NewLocalizedErrorFromCode(ErrCodeAssetPageNotFound, err, in.PageID.MetadataValue())
 		}
 		return err
 	}

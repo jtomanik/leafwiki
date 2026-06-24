@@ -8,6 +8,7 @@ import (
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
+	"github.com/perber/wiki/internal/localization"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 )
 
@@ -356,8 +357,8 @@ const (
 	ToolMessageDeleteAssetSuccess ToolMessageID = "mcp.tools.wiki_delete_asset.success"
 )
 
-func newMessageOutput(messageID ToolMessageID, message string) messageOutput {
-	return messageOutput{MessageID: messageID, Message: message}
+func newMessageOutput(messageID ToolMessageID) messageOutput {
+	return messageOutput{MessageID: messageID, Message: localization.English.Render(messageID, "").Message}
 }
 
 type searchPagesInput struct {

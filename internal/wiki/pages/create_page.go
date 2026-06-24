@@ -47,16 +47,16 @@ func (uc *CreatePageUseCase) Execute(_ context.Context, in CreatePageInput) (*Cr
 	ve := sharederrors.NewValidationErrors()
 
 	if in.Title == "" {
-		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired, "Title must not be empty")
+		ve.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 	}
 	if in.Kind == nil {
-		ve.AddWithCode("kind", FieldCodePageKindRequired, MessageIDPageKindRequired, "Kind must be specified")
+		ve.AddWithCode("kind", FieldCodePageKindRequired, MessageIDPageKindRequired)
 	}
 	if in.Kind != nil && *in.Kind != tree.NodeKindPage && *in.Kind != tree.NodeKindSection {
-		ve.AddWithCode("kind", FieldCodePageKindInvalid, MessageIDPageKindInvalid, "Kind must be either 'page' or 'section'")
+		ve.AddWithCode("kind", FieldCodePageKindInvalid, MessageIDPageKindInvalid)
 	}
 	if err := in.Slug.Validate(); err != nil {
-		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid, err.Error())
+		ve.AddWithCode("slug", FieldCodePageSlugInvalid, MessageIDPageSlugInvalid)
 	}
 	if ve.HasErrors() {
 		return nil, ve

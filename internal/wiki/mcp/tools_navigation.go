@@ -22,12 +22,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 	pageID := strings.TrimSpace(in.PageID)
 	routePath := normalizeToolRoutePath(in.Path)
 	if pageID != "" && routePath != "" {
-		return subtreeOutput{}, sharederrors.NewLocalizedError(
-			errCodeMCPPageTargetAmbiguous,
-			"pageId and path cannot both be supplied",
-			"pageId and path cannot both be supplied",
-			nil,
-		)
+		return subtreeOutput{}, sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageTargetAmbiguous, nil)
 	}
 	depth, err := boundedSubtreeDepth(in.Depth)
 	if err != nil {

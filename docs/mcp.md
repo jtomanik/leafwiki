@@ -13,6 +13,15 @@ page:
 
 LeafWiki can expose MCP through a local Streamable HTTP endpoint, native STDIO, or both through the federated local runtime. MCP is disabled by default.
 
+MCP tool descriptions, LeafWiki-owned structured tool errors, and message-only
+tool outputs are backend-rendered from the English i18n catalog documented in
+`docs/i18n.md`. Tool names remain stable `wiki_*` protocol IDs; tests and
+agents should prefer `messageId` and `_meta.error.code/messageId` over English
+copy when asserting behavior. Generic tool failures use stable catalog prose in
+the rendered `message`; raw exception or use-case details are carried as
+structured error metadata instead of being interpolated into the localized
+message.
+
 Use the transport selector:
 
 ```bash

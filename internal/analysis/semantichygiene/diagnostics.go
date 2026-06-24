@@ -41,3 +41,7 @@ func parameterDiagnostic(paramName string, funcName string, semanticType string)
 func stableLiteralDiagnostic(value string) string {
 	return fmt.Sprintf("raw stable contract literal %q used in production code; use the typed constant or definition", value)
 }
+
+func rawLocalizedProseDiagnostic(value string) string {
+	return fmt.Sprintf("raw localized prose %q used in Go contract code; use a catalog-backed message ID or definition", value)
+}

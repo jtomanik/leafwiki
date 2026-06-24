@@ -83,6 +83,6 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 		}); err != nil {
 			return messageOutput{}, err
 		}
-		return newMessageOutput(ToolMessageDeleteAssetSuccess, "asset deleted"), nil
+		return newMessageOutput(ToolMessageDeleteAssetSuccess), nil
 	})
 }

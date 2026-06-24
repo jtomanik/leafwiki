@@ -158,7 +158,7 @@ func (r *Routes) handleGetPage(c *gin.Context) {
 func (r *Routes) handleGetByPath(c *gin.Context) {
 	rawPath, hasPath := c.GetQuery("path")
 	if !hasPath {
-		respondWithPageError(c, sharederrors.NewLocalizedError(ErrCodePageMissingPath, "Missing path", "missing path", nil))
+		respondWithPageError(c, sharederrors.NewLocalizedErrorFromCode(ErrCodePageMissingPath, nil))
 		return
 	}
 	out, err := r.findByPathInput(c.Request.Context(), rawPath, c.Query("kind"))
@@ -270,20 +270,10 @@ func (r *Routes) handleSuggestSlug(c *gin.Context) {
 func ValidateSuggestSlugTitle(title string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodePageMissingTitle,
-			"Title query param is required",
-			"title query param is required",
-			nil,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageMissingTitle, nil)
 	}
 	if tree.NewSlugService().GenerateValidSlug(title) == "" {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodePageInvalidTitle,
-			"Title must include at least one slug character",
-			"title must include at least one slug character",
-			nil,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidTitle, nil)
 	}
 	return title, nil
 }
@@ -430,7 +420,7 @@ func (r *Routes) handleDelete(c *gin.Context) {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesDeleteSuccess, "message": "Page deleted"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesDeleteSuccess, "message": apiSuccessMessage(MessageIDAPIPagesDeleteSuccess)})
 }
 
 func (r *Routes) handleMove(c *gin.Context) {
@@ -453,7 +443,7 @@ func (r *Routes) handleMove(c *gin.Context) {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesMoveSuccess, "message": "Page moved"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesMoveSuccess, "message": apiSuccessMessage(MessageIDAPIPagesMoveSuccess)})
 }
 
 func (r *Routes) handleSort(c *gin.Context) {
@@ -471,7 +461,7 @@ func (r *Routes) handleSort(c *gin.Context) {
 		respondWithPageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesSortSuccess, "message": "Pages sorted successfully"})
+	c.JSON(http.StatusOK, gin.H{"messageId": MessageIDAPIPagesSortSuccess, "message": apiSuccessMessage(MessageIDAPIPagesSortSuccess)})
 }
 
 func (r *Routes) handleEnsurePath(c *gin.Context) {
@@ -538,12 +528,7 @@ func (r *Routes) handleConvert(c *gin.Context) {
 
 func ValidateConvertTargetKind(kind string) (tree.NodeKind, error) {
 	if kind != string(tree.NodeKindPage) && kind != string(tree.NodeKindSection) {
-		return "", sharederrors.NewLocalizedError(
-			ErrCodePageInvalidTargetKind,
-			"Invalid targetKind",
-			"invalid target kind",
-			nil,
-		)
+		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidTargetKind, nil)
 	}
 	return tree.NodeKind(kind), nil
 }
@@ -674,16 +659,16 @@ func ValidatePageMetadataInput(tags []string, properties map[string]string) erro
 		trimmed := strings.TrimSpace(tag)
 		field := "tags[" + strconv.Itoa(index) + "]"
 		if trimmed == "" {
-			ve.AddWithCode(field, FieldCodePageTagRequired, MessageIDPageTagRequired, "Tag must not be empty")
+			ve.AddWithCode(field, FieldCodePageTagRequired, MessageIDPageTagRequired)
 			continue
 		}
 		if trimmed != tag {
-			ve.AddWithCode(field, FieldCodePageTagWhitespace, MessageIDPageTagWhitespace, "Tag must not contain leading or trailing whitespace")
+			ve.AddWithCode(field, FieldCodePageTagWhitespace, MessageIDPageTagWhitespace)
 			continue
 		}
 		key := strings.ToLower(trimmed)
 		if _, exists := seenTags[key]; exists {
-			ve.AddWithCode(field, FieldCodePageTagDuplicate, MessageIDPageTagDuplicate, "Tag must be unique")
+			ve.AddWithCode(field, FieldCodePageTagDuplicate, MessageIDPageTagDuplicate)
 			continue
 		}
 		seenTags[key] = struct{}{}
@@ -694,13 +679,13 @@ func ValidatePageMetadataInput(tags []string, properties map[string]string) erro
 		field := "properties." + rawKey
 		switch {
 		case key == "":
-			ve.AddWithCode(field, FieldCodePagePropertyKeyRequired, MessageIDPagePropertyKeyRequired, "Property key must not be empty")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyRequired, MessageIDPagePropertyKeyRequired)
 		case key != rawKey:
-			ve.AddWithCode(field, FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace, "Property key must not contain leading or trailing whitespace")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace)
 		case markdown.IsReservedMetadataKey(key):
-			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key uses a reserved prefix")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReservedPrefix)
 		case strings.ToLower(key) == "tags" || strings.ToLower(key) == "title":
-			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved, "Property key is reserved")
+			ve.AddWithCode(field, FieldCodePagePropertyKeyReserved, MessageIDPagePropertyKeyReserved)
 		}
 	}
 

@@ -56,6 +56,33 @@ func TestNewLocalizedErrorKeepsLegacyConstructorButAddsDefaultMessageID(t *testi
 	}
 }
 
+func TestNewLocalizedErrorFromCodeRendersCatalogMessage(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("storage failed")
+
+	err := NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
+
+	if err.Code != testPageVersionConflictCode {
+		t.Fatalf("Code = %q, want %q", err.Code, testPageVersionConflictCode)
+	}
+	if err.MessageID != testPageVersionConflictMessageID {
+		t.Fatalf("MessageID = %q, want %q", err.MessageID, testPageVersionConflictMessageID)
+	}
+	if err.Message != "Page docs.md was changed by another request before README.md could be saved." {
+		t.Fatalf("Message = %q, want catalog-rendered conflict message", err.Message)
+	}
+	if err.Template != err.Message {
+		t.Fatalf("Template = %q, want rendered catalog message", err.Template)
+	}
+	if len(err.Args) != 2 || err.Args[0] != "docs.md" || err.Args[1] != "README.md" {
+		t.Fatalf("Args = %#v, want preserved args", err.Args)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("localized error does not unwrap cause")
+	}
+}
+
 func TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields(t *testing.T) {
 	t.Parallel()
 
@@ -74,5 +101,48 @@ func TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields(t *testi
 	want := `{"code":"page_version_conflict","messageId":"errors.page.version_conflict","message":"Page was changed by another request","template":"page was changed by another request","args":["page-1"]}`
 	if string(encoded) != want {
 		t.Fatalf("json = %s, want %s", encoded, want)
+	}
+}
+
+func TestLocalizedErrorDetailRendersMessageFromCatalog(t *testing.T) {
+	t.Parallel()
+
+	detail := NewLocalizedErrorDetail(
+		testAuthInvalidCredentialsCode,
+		"legacy fallback",
+		"legacy fallback",
+	)
+
+	if detail.Message != "Invalid credentials" {
+		t.Fatalf("Message = %q, want catalog-rendered Invalid credentials", detail.Message)
+	}
+	if detail.Template != "legacy fallback" {
+		t.Fatalf("Template = %q, want compatibility template", detail.Template)
+	}
+	if detail.MessageID != testAuthInvalidCredentialsMsgID {
+		t.Fatalf("MessageID = %q, want %q", detail.MessageID, testAuthInvalidCredentialsMsgID)
+	}
+}
+
+func TestLocalizedErrorDetailUsesArgNBridgeAndPreservesArgs(t *testing.T) {
+	t.Parallel()
+
+	err := NewDefinedLocalizedError(ErrorDefinition{
+		Code:      testPageVersionConflictCode,
+		MessageID: testPageVersionConflictMessageID,
+		Message:   "legacy fallback",
+		Template:  "page %s could not be saved before %s",
+	}, nil, "docs.md", "README.md")
+
+	detail := LocalizedErrorDetailFromError(err)
+
+	if detail.Message != "Page docs.md was changed by another request before README.md could be saved." {
+		t.Fatalf("Message = %q, want catalog-rendered page conflict", detail.Message)
+	}
+	if len(detail.Args) != 2 || detail.Args[0] != "docs.md" || detail.Args[1] != "README.md" {
+		t.Fatalf("Args = %#v, want compatibility args preserved", detail.Args)
+	}
+	if detail.Template != "page %s could not be saved before %s" {
+		t.Fatalf("Template = %q, want compatibility template preserved", detail.Template)
 	}
 }

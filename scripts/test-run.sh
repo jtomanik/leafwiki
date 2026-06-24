@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 script="$repo_root/scripts/run.sh"
+messages="$repo_root/scripts/run_messages.sh"
 old_script="$repo_root/scripts/run-""mcp.sh"
 
 fail() {
@@ -26,11 +27,26 @@ assert_not_contains() {
 }
 
 [[ -f "$script" ]] || fail "missing scripts/run.sh"
+[[ -f "$messages" ]] || fail "missing scripts/run_messages.sh"
 [[ ! -e "$old_script" ]] || fail "old wrapper compatibility shim must not exist"
 
 bash -n "$script"
+bash -n "$messages"
+source "$messages"
+
+[[ -n "${LEAFWIKI_RUN_MSG_HELP_BODY:-}" ]] || fail "missing generated shell help body message"
+[[ -n "${LEAFWIKI_RUN_MSG_ERROR_PREFIX:-}" ]] || fail "missing generated shell error prefix message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_MCP_CONFIG:-}" ]] || fail "missing generated shell config dry-run message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_MCP_NATIVE:-}" ]] || fail "missing generated shell native dry-run message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_STDIO_ATTACH:-}" ]] || fail "missing generated shell stdio attach message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_AGENT_HOOK:-}" ]] || fail "missing generated shell agent-hook dry-run message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_HTTP_CONFIG:-}" ]] || fail "missing generated shell config HTTP message"
+[[ -n "${LEAFWIKI_RUN_MSG_DRY_RUN_HTTP_URL:-}" ]] || fail "missing generated shell URL HTTP message"
+[[ -n "${LEAFWIKI_RUN_MSG_ERROR_UNKNOWN_OPTION:-}" ]] || fail "missing generated shell unknown-option error message"
 
 help_output="$("$script" --help)"
+assert_contains "$help_output" "Usage: scripts/run.sh <mcp|agent-hook> [options]" "help"
+assert_contains "$help_output" "$LEAFWIKI_RUN_MSG_HELP_BODY" "help"
 assert_contains "$help_output" "mcp" "help"
 assert_contains "$help_output" "agent-hook" "help"
 assert_contains "$help_output" "--leafwiki-bin" "help"

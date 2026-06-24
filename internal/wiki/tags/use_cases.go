@@ -84,12 +84,7 @@ func NewGetPagesByTagsUseCase(svc *coretags.TagsService, treeService *tree.TreeS
 func ValidatePagesByTagsInput(tags []string) ([]string, error) {
 	normalized := normalizeTags(tags)
 	if len(normalized) == 0 {
-		return nil, sharederrors.NewLocalizedError(
-			ErrCodeTagsMissingParam,
-			"Query parameter 'tags' is required",
-			"query parameter tags is required",
-			nil,
-		)
+		return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodeTagsMissingParam, nil)
 	}
 	return normalized, nil
 }
