@@ -54,7 +54,9 @@ internal/http/dist/*
 .cache
 
 # Local agent/editor configuration and research checkouts are user-specific.
-/.agents/
+/.agents/*
+!/.agents/skills/
+!/.agents/skills/**
 /.codex/
 /.cursor/
 /references/

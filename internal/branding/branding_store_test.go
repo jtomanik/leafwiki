@@ -1,13 +1,14 @@
 package branding
 
 import (
+	. "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 )
 
-func TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault(t *testing.T) {
+var _ = It("TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault", func() {
+	t := GinkgoT()
 	dir := t.TempDir()
 	store := NewBrandingStore(dir)
 
@@ -38,9 +39,11 @@ func TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault(t *testing.T) {
 	if len(cfg.BrandingConstraints.LogoExts) == 0 || len(cfg.BrandingConstraints.FaviconExts) == 0 {
 		t.Fatalf("expected non-empty constraints maps, got logo=%d favicon=%d", len(cfg.BrandingConstraints.LogoExts), len(cfg.BrandingConstraints.FaviconExts))
 	}
-}
 
-func TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields(t *testing.T) {
+})
+
+var _ = It("TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields", func() {
+	t := GinkgoT()
 	dir := t.TempDir()
 	store := NewBrandingStore(dir)
 
@@ -77,9 +80,11 @@ func TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields(t *testing.T) {
 	if got.BrandingConstraints.MaxFaviconSize != def.BrandingConstraints.MaxFaviconSize {
 		t.Fatalf("expected injected MaxFaviconSize %d, got %d", def.BrandingConstraints.MaxFaviconSize, got.BrandingConstraints.MaxFaviconSize)
 	}
-}
 
-func TestBrandingStore_Save_WritesFileToExpectedLocation(t *testing.T) {
+})
+
+var _ = It("TestBrandingStore_Save_WritesFileToExpectedLocation", func() {
+	t := GinkgoT()
 	dir := t.TempDir()
 	store := NewBrandingStore(dir)
 
@@ -107,9 +112,11 @@ func TestBrandingStore_Save_WritesFileToExpectedLocation(t *testing.T) {
 	if !strings.Contains(string(b), `"siteName": "CheckFile"`) {
 		t.Fatalf("expected branding.json to contain siteName, got:\n%s", string(b))
 	}
-}
 
-func TestBrandingStore_Load_WhenInvalidJSON_ReturnsError(t *testing.T) {
+})
+
+var _ = It("TestBrandingStore_Load_WhenInvalidJSON_ReturnsError", func() {
+	t := GinkgoT()
 	dir := t.TempDir()
 	store := NewBrandingStore(dir)
 
@@ -125,9 +132,11 @@ func TestBrandingStore_Load_WhenInvalidJSON_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to parse branding config") {
 		t.Fatalf("expected parse error wrapper, got: %v", err)
 	}
-}
 
-func TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile(t *testing.T) {
+})
+
+var _ = It("TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile", func() {
+	t := GinkgoT()
 	dir := t.TempDir()
 	store := NewBrandingStore(dir)
 
@@ -155,4 +164,5 @@ func TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile(t *testing.T) {
 	if got.BrandingConstraints.LogoExts[".png"] != def.BrandingConstraints.LogoExts[".png"] {
 		t.Fatalf("expected injected LogoExts to match default")
 	}
-}
+
+})

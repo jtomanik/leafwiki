@@ -21,6 +21,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -198,7 +199,7 @@ func resetHTTPMCPParityCoverage() {
 	parityCoverage.seen = map[string]map[string]struct{}{}
 }
 
-func hasHTTPMCPParityRecorded(t *testing.T) bool {
+func hasHTTPMCPParityRecorded(t testing.TB) bool {
 	t.Helper()
 
 	seenCases, expected := expectedHTTPMCPParityCases(t)
@@ -213,7 +214,7 @@ func hasHTTPMCPParityRecorded(t *testing.T) bool {
 	return true
 }
 
-func recordHTTPMCPParity(t *testing.T, tool, httpRoute string) {
+func recordHTTPMCPParity(t testing.TB, tool, httpRoute string) {
 	t.Helper()
 	found := false
 	for _, tc := range mcpHTTPParityCases {
@@ -239,7 +240,7 @@ func recordHTTPMCPParity(t *testing.T, tool, httpRoute string) {
 	routes[httpRoute] = struct{}{}
 }
 
-func assertHTTPMCPParityRecorded(t *testing.T) {
+func assertHTTPMCPParityRecorded(t testing.TB) {
 	t.Helper()
 
 	seenCases, expected := expectedHTTPMCPParityCases(t)
@@ -253,7 +254,7 @@ func assertHTTPMCPParityRecorded(t *testing.T) {
 	}
 }
 
-func expectedHTTPMCPParityCases(t *testing.T) (map[string]httpMCPParityCase, []string) {
+func expectedHTTPMCPParityCases(t testing.TB) (map[string]httpMCPParityCase, []string) {
 	t.Helper()
 
 	seenCases := make(map[string]httpMCPParityCase, len(mcpHTTPParityCases))
@@ -394,7 +395,8 @@ var toolOutputOptionalProperties = map[string][]string{
 	"wiki_replace_page_section": {"validation", "page", "linkStatus"},
 }
 
-func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing.T) {
+var _ = It("LocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 
 	embedFrontendOrig := httpinternal.EmbedFrontend
@@ -600,51 +602,42 @@ func TestLocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan(t *testing
 			t.Fatalf("forbidden tool %q was registered in MCP tool list", forbidden)
 		}
 	}
-}
+})
 
-func TestLocalMCPRegistration_FeatureGatedTools(t *testing.T) {
-	refactorTools := wikimcp.LinkRefactorToolNames()
-
-	tests := []struct {
-		name               string
-		enableLinkRefactor bool
-		extraTools         []string
-	}{
-		{name: "federated runtime"},
-		{name: "link refactor", enableLinkRefactor: true, extraTools: refactorTools},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-				AuthDisabled: true,
-			})
-			router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-				AuthDisabled:            true,
-				PublicAccess:            true,
-				AllowInsecure:           true,
-				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-				EnableLinkRefactor:      tt.enableLinkRefactor,
-				MCPEnabled:              true,
-				MCPToolListPageSize:     200,
-			})
-			session := connectLocalMCP(t, router, "/mcp")
-
-			want := federatedToolNames(tt.extraTools)
-			assertToolNames(t, listAllToolNames(t, session), want)
-			contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
-			server := nestedMap(t, contextOut, "server")
-			assertStringSet(t, "wiki_get_context server.tools", stringSliceField(t, server, "tools"), want)
-
-			tools := listAllTools(t, session)
-			assertInputSchemasMatch(t, tools, federatedInputProperties(tt.extraTools), federatedRequiredProperties(tt.extraTools))
-			assertOutputSchemasMatch(t, tools, federatedOutputProperties(tt.extraTools))
+var _ = DescribeTable("LocalMCPRegistration_FeatureGatedTools",
+	func(enableLinkRefactor bool, extraTools []string) {
+		t := GinkgoTB()
+		w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+			AuthDisabled: true,
 		})
-	}
-}
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableLinkRefactor:      enableLinkRefactor,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(t, router, "/mcp")
+
+		want := federatedToolNames(extraTools)
+		assertToolNames(t, listAllToolNames(t, session), want)
+		contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
+		server := nestedMap(t, contextOut, "server")
+		assertStringSet(t, "wiki_get_context server.tools", stringSliceField(t, server, "tools"), want)
+
+		tools := listAllTools(t, session)
+		assertInputSchemasMatch(t, tools, federatedInputProperties(extraTools), federatedRequiredProperties(extraTools))
+		assertOutputSchemasMatch(t, tools, federatedOutputProperties(extraTools))
+	},
+	Entry("federated runtime", false, []string(nil)),
+	Entry("link refactor", true, wikimcp.LinkRefactorToolNames()),
+)
 
 // - MCP agent context returns canonical examples
-func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
+var _ = It("LocalMCPGetContext_ReturnsAgentReadyContext", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -738,9 +731,10 @@ func TestLocalMCPGetContext_ReturnsAgentReadyContext(t *testing.T) {
 	if !strings.Contains(exampleText, "](/docs)") {
 		t.Fatalf("canonicalLinkExamples = %q, want extensionless section link example", exampleText)
 	}
-}
+})
 
-func TestLocalMCPGetContext_RecommendsRefreshInFederatedRuntime(t *testing.T) {
+var _ = It("LocalMCPGetContext_RecommendsRefreshInFederatedRuntime", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -761,9 +755,10 @@ func TestLocalMCPGetContext_RecommendsRefreshInFederatedRuntime(t *testing.T) {
 	if !arrayContainsString(recommended, "wiki_refresh") {
 		t.Fatalf("recommendedTools = %#v, want wiki_refresh in federated runtime", recommended)
 	}
-}
+})
 
-func TestLocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly(t *testing.T) {
+var _ = It("LocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -808,9 +803,10 @@ func TestLocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly(t *testin
 	if history := arrayField(t, firstB, "contextHistory"); len(history) != 1 {
 		t.Fatalf("session B contextHistory len = %d, want isolated first checkpoint", len(history))
 	}
-}
+})
 
-func TestLocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousContext(t *testing.T) {
+var _ = It("LocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousContext", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -850,9 +846,10 @@ func TestLocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousCo
 	if stringField(t, first, "contextToken") != firstToken {
 		t.Fatalf("first context token changed unexpectedly")
 	}
-}
+})
 
-func TestLocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit(t *testing.T) {
+var _ = It("LocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -953,9 +950,10 @@ func TestLocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit(t 
 			t.Fatalf("changesSincePreviousContext after token B paths = %#v, did not expect old path %s", changedPathsAfterB, oldPath)
 		}
 	}
-}
+})
 
-func TestLocalMCPGetContext_IncludesWebHeartbeatPresence(t *testing.T) {
+var _ = It("LocalMCPGetContext_IncludesWebHeartbeatPresence", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1011,9 +1009,10 @@ func TestLocalMCPGetContext_IncludesWebHeartbeatPresence(t *testing.T) {
 	if webSession["lastSeenAt"] == "" {
 		t.Fatalf("web session = %#v, want lastSeenAt", webSession)
 	}
-}
+})
 
-func TestLocalMCPGetContext_MergesAgentHookPresence(t *testing.T) {
+var _ = It("LocalMCPGetContext_MergesAgentHookPresence", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	agentPresence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
 	sessionHash := "sha256:" + strings.Repeat("a", 64)
@@ -1064,9 +1063,10 @@ func TestLocalMCPGetContext_MergesAgentHookPresence(t *testing.T) {
 	if agentSession["model"] != "gpt-5" || agentSession["source"] != "hook" || agentSession["lastEvent"] != "SubagentStart" || agentSession["activeSubagents"] != float64(1) {
 		t.Fatalf("agent session = %#v, want hook metadata", agentSession)
 	}
-}
+})
 
-func TestPresenceHeartbeatRequiresAuthWhenAuthEnabled(t *testing.T) {
+var _ = It("PresenceHeartbeatRequiresAuthWhenAuthEnabled", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            false,
@@ -1082,9 +1082,10 @@ func TestPresenceHeartbeatRequiresAuthWhenAuthEnabled(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /api/presence/heartbeat without auth = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestPresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoning(t *testing.T) {
+var _ = It("PresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoning", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1130,9 +1131,10 @@ func TestPresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoni
 	if _, exists := missingPageSession["page"]; exists {
 		t.Fatalf("missing-page session = %#v, did not expect unresolved page details", missingPageSession)
 	}
-}
+})
 
-func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
+var _ = It("LocalMCPRefresh_SyncsDirectMarkdownCreate", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1196,9 +1198,10 @@ func TestLocalMCPRefresh_SyncsDirectMarkdownCreate(t *testing.T) {
 	if !arrayContainsString(pageIDs, "direct") {
 		t.Fatalf("recent change pageIds = %#v, want direct", pageIDs)
 	}
-}
+})
 
-func TestLocalMCPValidateAndRefreshNormalizeWorkspaceRoutes(t *testing.T) {
+var _ = It("LocalMCPValidateAndRefreshNormalizeWorkspaceRoutes", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1243,9 +1246,10 @@ func TestLocalMCPValidateAndRefreshNormalizeWorkspaceRoutes(t *testing.T) {
 	if page["id"] != "agent-hooks-plan" || page["title"] != "Agent Hooks Plan" {
 		t.Fatalf("readBack page = %#v, want normalized plan page", page)
 	}
-}
+})
 
-func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
+var _ = It("LocalMCPRefresh_ValidateFalseOmitsValidation", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1270,9 +1274,10 @@ func TestLocalMCPRefresh_ValidateFalseOmitsValidation(t *testing.T) {
 	if _, exists := out["validation"]; exists {
 		t.Fatalf("wiki_refresh validate=false output = %#v, did not expect validation", out)
 	}
-}
+})
 
-func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t *testing.T) {
+var _ = It("LocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1309,9 +1314,10 @@ func TestLocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable(t
 	if user["username"] == "" {
 		t.Fatalf("wiki_get_current_user after failed refresh = %#v, want MCP still available", currentUser)
 	}
-}
+})
 
-func TestLocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths(t *testing.T) {
+var _ = It("LocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1360,9 +1366,10 @@ func TestLocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths(t *test
 	if paths := arrayFieldFromMap(t, change, "changedPaths"); len(paths) != 20 {
 		t.Fatalf("changedPaths len = %d, want cap 20 in %#v", len(paths), paths)
 	}
-}
+})
 
-func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
+var _ = It("LocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1476,9 +1483,10 @@ func TestLocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs(t *testing.T) {
 	if hugeDepth["depth"] != float64(4) {
 		t.Fatalf("huge subtree depth = %#v, want clamped depth 4", hugeDepth["depth"])
 	}
-}
+})
 
-func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
+var _ = It("LocalMCPValidateWikiUsesCurrentFilesystemSnapshot", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1520,9 +1528,10 @@ func TestLocalMCPValidateWikiUsesCurrentFilesystemSnapshot(t *testing.T) {
 	if ok, _ := validation["ok"].(bool); !ok {
 		t.Fatalf("wiki_validate_wiki = %#v, want current filesystem snapshot to validate without stale loaded-tree link", validation)
 	}
-}
+})
 
-func TestLocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree(t *testing.T) {
+var _ = It("LocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -1557,9 +1566,10 @@ func TestLocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree(t *testin
 	}
 	validation := out
 	assertValidationIssueCodes(t, validation, []string{"broken_link"})
-}
+})
 
-func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) {
+var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -1748,9 +1758,10 @@ func TestLocalMCPValidationTools_ValidateStoredAndProposedContent(t *testing.T) 
 		"content": "---\nleafwiki_id: draft-conflict\nleafwiki_title: Draft Conflict\n---\n# Draft\n",
 	})
 	assertValidationIssueCodes(t, pathConflict, []string{"path_conflict"})
-}
+})
 
-func TestLocalMCPPathToolsResolveCanonicalSameBasenameTwins(t *testing.T) {
+var _ = It("LocalMCPPathToolsResolveCanonicalSameBasenameTwins", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -1848,9 +1859,10 @@ leafwiki_title: MCP Section Only
 		t.Fatalf("wiki_validate_content draft page beside section = %#v, want ok", draftPageBesideSection)
 	}
 	assertValidationIssueCodesAbsent(t, draftPageBesideSection, []string{"path_conflict"})
-}
+})
 
-func TestLocalMCPPathToolsResolveReadmeFallbackMarkdownPath(t *testing.T) {
+var _ = It("LocalMCPPathToolsResolveReadmeFallbackMarkdownPath", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -1977,9 +1989,10 @@ func TestLocalMCPPathToolsResolveReadmeFallbackMarkdownPath(t *testing.T) {
 	if explicitFallbackDraftValidation["ok"] != true {
 		t.Fatalf("wiki_validate_content explicit README fallback section = %#v, want ok", explicitFallbackDraftValidation)
 	}
-}
+})
 
-func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
+var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -2128,9 +2141,10 @@ func TestLocalMCPValidateWikiScansUnsyncedMarkdownFiles(t *testing.T) {
 	if got := validationIssueCodeCount(t, duplicated, "broken_link", "broken-link"); got != 1 {
 		t.Fatalf("broken_link issue count for broken-link = %d, want 1 in %#v", got, duplicated["issues"])
 	}
-}
+})
 
-func TestLocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles(t *testing.T) {
+var _ = It("LocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace:    wiki.Workspace{RootDir: rootDir},
@@ -2172,9 +2186,10 @@ func TestLocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles(t *testin
 
 	out := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
 	assertValidationIssueCodesAbsent(t, out, []string{"broken_link"})
-}
+})
 
-func TestLocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody(t *testing.T) {
+var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2302,9 +2317,10 @@ func TestLocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody(t *testin
 	if afterStale["content"] != "Original body" {
 		t.Fatalf("content after stale metadata edit = %#v, want unchanged body", afterStale["content"])
 	}
-}
+})
 
-func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) {
+var _ = It("LocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -2398,9 +2414,10 @@ func TestLocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter(t *testing.T) 
 		"recentChangesLimit": float64(5),
 	})
 	assertRecentChangesIncludePath(t, contextOut, "metadata-preserve.md")
-}
+})
 
-func TestLocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty(t *testing.T) {
+var _ = It("LocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2488,9 +2505,10 @@ func TestLocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenEx
 	if len(clearDoc.Metadata.Tags) != 0 || len(clearDoc.Metadata.Fields) != 0 {
 		t.Fatalf("clear raw metadata = tags %#v fields %#v, want both empty", clearDoc.Metadata.Tags, clearDoc.Metadata.Fields)
 	}
-}
+})
 
-func TestLocalMCPReplacePageSection_PreservesFrontmatter(t *testing.T) {
+var _ = It("LocalMCPReplacePageSection_PreservesFrontmatter", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
 		AuthDisabled: true,
 	})
@@ -2565,9 +2583,10 @@ func TestLocalMCPReplacePageSection_PreservesFrontmatter(t *testing.T) {
 	if strings.Contains(raw, "old api") {
 		t.Fatalf("raw section replacement markdown kept old section body:\n%s", raw)
 	}
-}
+})
 
-func TestLocalMCPReplacePageSection_ReplacesTargetSectionOnly(t *testing.T) {
+var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2669,9 +2688,10 @@ func TestLocalMCPReplacePageSection_ReplacesTargetSectionOnly(t *testing.T) {
 	if strings.Contains(afterContent, "late change") || strings.Contains(afterContent, "old api") {
 		t.Fatalf("content after stale section edit = %q, want previously successful edit only", afterContent)
 	}
-}
+})
 
-func TestLocalMCPReplacePageSection_FailuresDoNotMutate(t *testing.T) {
+var _ = It("LocalMCPReplacePageSection_FailuresDoNotMutate", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2738,9 +2758,10 @@ func TestLocalMCPReplacePageSection_FailuresDoNotMutate(t *testing.T) {
 	if !strings.Contains(replacedContent, "## Notes\n\nfirst") || !strings.Contains(replacedContent, "## Notes\nsecond updated") {
 		t.Fatalf("content after occurrence replace = %q, want second Notes replaced only", replacedContent)
 	}
-}
+})
 
-func TestLocalMCPRegistration_RespectsBasePath(t *testing.T) {
+var _ = It("LocalMCPRegistration_RespectsBasePath", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -2772,13 +2793,14 @@ func TestLocalMCPRegistration_RespectsBasePath(t *testing.T) {
 
 	session := connectLocalMCP(t, router, "/wiki/mcp")
 	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
-}
+})
 
-func TestLocalMCPProtocol_PageMutationParity(t *testing.T) {
+var _ = It("LocalMCPProtocol_PageMutationParity", func() {
+	t := GinkgoTB()
 	runLocalMCPProtocolPageMutationParity(t)
-}
+})
 
-func runLocalMCPProtocolPageMutationParity(t *testing.T) {
+func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 	w, _ := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3087,11 +3109,12 @@ func runLocalMCPProtocolPageMutationParity(t *testing.T) {
 	recordHTTPMCPParity(t, "wiki_search_pages", "GET /api/search")
 }
 
-func TestLocalMCPProtocol_PageOperationParity(t *testing.T) {
+var _ = It("LocalMCPProtocol_PageOperationParity", func() {
+	t := GinkgoTB()
 	runLocalMCPProtocolPageOperationParity(t)
-}
+})
 
-func runLocalMCPProtocolPageOperationParity(t *testing.T) {
+func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3651,11 +3674,12 @@ func runLocalMCPProtocolPageOperationParity(t *testing.T) {
 	recordHTTPMCPParity(t, "wiki_delete_page", "DELETE /api/pages/:id")
 }
 
-func TestLocalMCPProtocol_IndexAndAssetParity(t *testing.T) {
+var _ = It("LocalMCPProtocol_IndexAndAssetParity", func() {
+	t := GinkgoTB()
 	runLocalMCPProtocolIndexAndAssetParity(t)
-}
+})
 
-func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
+func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3904,7 +3928,8 @@ func runLocalMCPProtocolIndexAndAssetParity(t *testing.T) {
 	recordHTTPMCPParity(t, "wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")
 }
 
-func TestLocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup(t *testing.T) {
+var _ = It("LocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3924,9 +3949,10 @@ func TestLocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup(t *te
 	if !strings.Contains(errText, "asset_file_too_large") && !strings.Contains(strings.ToLower(errText), "too large") {
 		t.Fatalf("oversized upload error = %q, want asset_file_too_large before page lookup", errText)
 	}
-}
+})
 
-func TestLocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload(t *testing.T) {
+var _ = It("LocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload", func() {
+	t := GinkgoTB()
 	w := newLocalMCPTestWiki(t, false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3952,9 +3978,10 @@ func TestLocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload(t *tes
 	if !strings.Contains(errText, wikiassets.ErrCodeAssetInvalidPayload.String()) && !strings.Contains(strings.ToLower(errText), "invalid asset payload") {
 		t.Fatalf("malformed base64 upload error = %q, want %s", errText, wikiassets.ErrCodeAssetInvalidPayload.String())
 	}
-}
+})
 
-func TestLocalMCPProtocol_GetAssetUsesPageBoundaryValidation(t *testing.T) {
+var _ = It("LocalMCPProtocol_GetAssetUsesPageBoundaryValidation", func() {
+	t := GinkgoTB()
 	w, storageDir := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -3978,13 +4005,14 @@ func TestLocalMCPProtocol_GetAssetUsesPageBoundaryValidation(t *testing.T) {
 	if !strings.Contains(errText, "asset_page_not_found") && !strings.Contains(strings.ToLower(errText), "page not found") {
 		t.Fatalf("orphan get_asset error = %q, want page boundary validation", errText)
 	}
-}
+})
 
-func TestLocalMCPProtocol_FeatureGatedToolParity(t *testing.T) {
+var _ = It("LocalMCPProtocol_FeatureGatedToolParity", func() {
+	t := GinkgoTB()
 	runLocalMCPProtocolFeatureGatedToolParity(t)
-}
+})
 
-func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
+func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	w, _ := newLocalMCPTestWikiWithStorage(t)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
@@ -4440,31 +4468,32 @@ func runLocalMCPProtocolFeatureGatedToolParity(t *testing.T) {
 	recordHTTPMCPParity(t, "wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
 }
 
-func TestLocalMCPProtocol_HTTPParityCoverageRecordedForPlanTools(t *testing.T) {
+var _ = It("LocalMCPProtocol_HTTPParityCoverageRecordedForPlanTools", func() {
+	t := GinkgoTB()
 	runHTTPMCPParityCoverage(t)
-}
+})
 
-func runHTTPMCPParityCoverage(t *testing.T) {
+func runHTTPMCPParityCoverage(t testing.TB) {
 	t.Helper()
 
 	if !hasHTTPMCPParityRecorded(t) {
 		resetHTTPMCPParityCoverage()
-		t.Run("page mutation", runLocalMCPProtocolPageMutationParity)
-		t.Run("page operation", runLocalMCPProtocolPageOperationParity)
-		t.Run("index and asset", runLocalMCPProtocolIndexAndAssetParity)
-		t.Run("feature gated", runLocalMCPProtocolFeatureGatedToolParity)
+		runLocalMCPProtocolPageMutationParity(t)
+		runLocalMCPProtocolPageOperationParity(t)
+		runLocalMCPProtocolIndexAndAssetParity(t)
+		runLocalMCPProtocolFeatureGatedToolParity(t)
 	}
 	assertHTTPMCPParityRecorded(t)
 }
 
-func newLocalMCPTestWiki(t *testing.T, _ bool) *wiki.Wiki {
+func newLocalMCPTestWiki(t testing.TB, _ bool) *wiki.Wiki {
 	t.Helper()
 
 	w, _ := newLocalMCPTestWikiWithStorage(t)
 	return w
 }
 
-func newLocalMCPTestWikiWithStorage(t *testing.T) (*wiki.Wiki, string) {
+func newLocalMCPTestWikiWithStorage(t testing.TB) (*wiki.Wiki, string) {
 	t.Helper()
 
 	return newLocalMCPTestWikiWithOptionsAndStorage(t, wiki.WikiOptions{
@@ -4472,14 +4501,14 @@ func newLocalMCPTestWikiWithStorage(t *testing.T) (*wiki.Wiki, string) {
 	})
 }
 
-func newLocalMCPTestWikiWithOptions(t *testing.T, opts wiki.WikiOptions) *wiki.Wiki {
+func newLocalMCPTestWikiWithOptions(t testing.TB, opts wiki.WikiOptions) *wiki.Wiki {
 	t.Helper()
 
 	w, _ := newLocalMCPTestWikiWithOptionsAndStorage(t, opts)
 	return w
 }
 
-func newLocalMCPTestWikiWithOptionsAndStorage(t *testing.T, opts wiki.WikiOptions) (*wiki.Wiki, string) {
+func newLocalMCPTestWikiWithOptionsAndStorage(t testing.TB, opts wiki.WikiOptions) (*wiki.Wiki, string) {
 	t.Helper()
 
 	storageDir := filepath.Join(t.TempDir(), "data")
@@ -4531,7 +4560,7 @@ func newLocalMCPTestRouter(w *wiki.Wiki, opts httpinternal.RouterOptions) http.H
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), opts)
 }
 
-func connectLocalMCP(t *testing.T, handler http.Handler, path string) *sdkmcp.ClientSession {
+func connectLocalMCP(t testing.TB, handler http.Handler, path string) *sdkmcp.ClientSession {
 	t.Helper()
 
 	server := httptest.NewServer(handler)
@@ -4550,7 +4579,7 @@ func connectLocalMCP(t *testing.T, handler http.Handler, path string) *sdkmcp.Cl
 	return session
 }
 
-func listAllToolNames(t *testing.T, session *sdkmcp.ClientSession) []string {
+func listAllToolNames(t testing.TB, session *sdkmcp.ClientSession) []string {
 	t.Helper()
 
 	tools := listAllTools(t, session)
@@ -4562,7 +4591,7 @@ func listAllToolNames(t *testing.T, session *sdkmcp.ClientSession) []string {
 	return names
 }
 
-func listAllTools(t *testing.T, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
+func listAllTools(t testing.TB, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
 	t.Helper()
 
 	var tools []*sdkmcp.Tool
@@ -4586,7 +4615,7 @@ func listAllTools(t *testing.T, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
 	return tools
 }
 
-func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) {
+func assertInputSchemasMatch(t testing.TB, tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) {
 	t.Helper()
 
 	for _, tool := range tools {
@@ -4621,7 +4650,7 @@ func assertInputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected, expec
 	}
 }
 
-func assertOutputSchemasMatch(t *testing.T, tools []*sdkmcp.Tool, expected map[string][]string) {
+func assertOutputSchemasMatch(t testing.TB, tools []*sdkmcp.Tool, expected map[string][]string) {
 	t.Helper()
 
 	for _, tool := range tools {
@@ -4668,7 +4697,7 @@ func outputRequiredProperties(props, optional []string) []string {
 	return required
 }
 
-func findTool(t *testing.T, tools []*sdkmcp.Tool, name string) *sdkmcp.Tool {
+func findTool(t testing.TB, tools []*sdkmcp.Tool, name string) *sdkmcp.Tool {
 	t.Helper()
 
 	for _, tool := range tools {
@@ -4680,7 +4709,7 @@ func findTool(t *testing.T, tools []*sdkmcp.Tool, name string) *sdkmcp.Tool {
 	return nil
 }
 
-func decodeToolSchema(t *testing.T, kind, name string, schemaValue any) map[string]any {
+func decodeToolSchema(t testing.TB, kind, name string, schemaValue any) map[string]any {
 	t.Helper()
 
 	raw, err := json.Marshal(schemaValue)
@@ -4697,7 +4726,7 @@ func decodeToolSchema(t *testing.T, kind, name string, schemaValue any) map[stri
 	return schema
 }
 
-func schemaProperties(t *testing.T, kind, name string, schema map[string]any) map[string]any {
+func schemaProperties(t testing.TB, kind, name string, schema map[string]any) map[string]any {
 	t.Helper()
 
 	properties, ok := schema["properties"].(map[string]any)
@@ -4707,7 +4736,7 @@ func schemaProperties(t *testing.T, kind, name string, schema map[string]any) ma
 	return properties
 }
 
-func assertSchemaPropertyOrderSorted(t *testing.T, kind, name string, schema map[string]any) {
+func assertSchemaPropertyOrderSorted(t testing.TB, kind, name string, schema map[string]any) {
 	t.Helper()
 
 	order := schemaStringSlice(schema["propertyOrder"])
@@ -4721,7 +4750,7 @@ func assertSchemaPropertyOrderSorted(t *testing.T, kind, name string, schema map
 	}
 }
 
-func assertSchemaPropertyHasType(t *testing.T, kind, toolName, prop string, property any) {
+func assertSchemaPropertyHasType(t testing.TB, kind, toolName, prop string, property any) {
 	t.Helper()
 
 	schema, ok := property.(map[string]any)
@@ -4739,7 +4768,7 @@ func assertSchemaPropertyHasType(t *testing.T, kind, toolName, prop string, prop
 	t.Fatalf("%s schema for %s.%s has no type/ref/union: %#v", kind, toolName, prop, schema)
 }
 
-func assertNoRootSchemaCombinators(t *testing.T, kind, name string, schema map[string]any) {
+func assertNoRootSchemaCombinators(t testing.TB, kind, name string, schema map[string]any) {
 	t.Helper()
 
 	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
@@ -4749,7 +4778,7 @@ func assertNoRootSchemaCombinators(t *testing.T, kind, name string, schema map[s
 	}
 }
 
-func assertPreciseInputPropertySchemas(t *testing.T, toolName string, properties map[string]any) {
+func assertPreciseInputPropertySchemas(t testing.TB, toolName string, properties map[string]any) {
 	t.Helper()
 
 	switch toolName {
@@ -4763,7 +4792,7 @@ func assertPreciseInputPropertySchemas(t *testing.T, toolName string, properties
 	}
 }
 
-func assertStringArrayPropertySchema(t *testing.T, toolName, prop string, raw any) {
+func assertStringArrayPropertySchema(t testing.TB, toolName, prop string, raw any) {
 	t.Helper()
 
 	schema, ok := raw.(map[string]any)
@@ -4782,7 +4811,7 @@ func assertStringArrayPropertySchema(t *testing.T, toolName, prop string, raw an
 	}
 }
 
-func assertStringMapPropertySchema(t *testing.T, toolName, prop string, raw any) {
+func assertStringMapPropertySchema(t testing.TB, toolName, prop string, raw any) {
 	t.Helper()
 
 	schema, ok := raw.(map[string]any)
@@ -4801,7 +4830,7 @@ func assertStringMapPropertySchema(t *testing.T, toolName, prop string, raw any)
 	}
 }
 
-func assertContextHistoryOpaque(t *testing.T, contextOut map[string]any) {
+func assertContextHistoryOpaque(t testing.TB, contextOut map[string]any) {
 	t.Helper()
 
 	for _, raw := range arrayField(t, contextOut, "contextHistory") {
@@ -4832,7 +4861,7 @@ func schemaStringSlice(value any) []string {
 	return items
 }
 
-func assertStringSet(t *testing.T, label string, got, want []string) {
+func assertStringSet(t testing.TB, label string, got, want []string) {
 	t.Helper()
 
 	got = append([]string{}, got...)
@@ -4852,7 +4881,7 @@ func copyToolInputProperties(src map[string][]string) map[string][]string {
 	return out
 }
 
-func assertToolNames(t *testing.T, got []string, want []string) {
+func assertToolNames(t testing.TB, got []string, want []string) {
 	t.Helper()
 
 	sortedWant := append([]string{}, want...)
@@ -4880,7 +4909,7 @@ func containsToolProtocolName(values []string, want wikimcp.ToolProtocolName) bo
 	return false
 }
 
-func callToolStructured(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
+func callToolStructured(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
 	t.Helper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
@@ -4909,13 +4938,13 @@ type mcpToolErrorResult struct {
 	Args      []string
 }
 
-func callToolError(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) string {
+func callToolError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) string {
 	t.Helper()
 
 	return callToolErrorResult(t, session, name, args).Text
 }
 
-func callToolStructuredError(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
+func callToolStructuredError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
 	t.Helper()
 
 	result := callToolErrorResult(t, session, name, args)
@@ -4925,7 +4954,7 @@ func callToolStructuredError(t *testing.T, session *sdkmcp.ClientSession, name s
 	return result
 }
 
-func assertMCPStructuredError(t *testing.T, label string, result mcpToolErrorResult, code sharederrors.ErrorCode, messageID string, message string) {
+func assertMCPStructuredError(t testing.TB, label string, result mcpToolErrorResult, code sharederrors.ErrorCode, messageID string, message string) {
 	t.Helper()
 
 	if result.Code != fmt.Sprintf("%s", code) {
@@ -4945,7 +4974,7 @@ func assertMCPStructuredError(t *testing.T, label string, result mcpToolErrorRes
 	}
 }
 
-func callToolErrorResult(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
+func callToolErrorResult(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
 	t.Helper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
@@ -4986,7 +5015,7 @@ func callToolErrorResult(t *testing.T, session *sdkmcp.ClientSession, name strin
 	return out
 }
 
-func callToolProtocolError(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) string {
+func callToolProtocolError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) string {
 	t.Helper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
@@ -4999,7 +5028,7 @@ func callToolProtocolError(t *testing.T, session *sdkmcp.ClientSession, name str
 	return err.Error()
 }
 
-func getHTTPPageByPath(t *testing.T, router http.Handler, path string) map[string]any {
+func getHTTPPageByPath(t testing.TB, router http.Handler, path string) map[string]any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5014,13 +5043,13 @@ func getHTTPPageByPath(t *testing.T, router http.Handler, path string) map[strin
 	return out
 }
 
-func getHTTPPageByID(t *testing.T, router http.Handler, pageID string) map[string]any {
+func getHTTPPageByID(t testing.TB, router http.Handler, pageID string) map[string]any {
 	t.Helper()
 
 	return getHTTPMap(t, router, "/api/pages/"+pageID)
 }
 
-func getHTTPValue(t *testing.T, router http.Handler, path string) any {
+func getHTTPValue(t testing.TB, router http.Handler, path string) any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5031,7 +5060,7 @@ func getHTTPValue(t *testing.T, router http.Handler, path string) any {
 	return decodeJSONValue(t, "GET "+path, rec.Body.Bytes())
 }
 
-func getHTTPStatus(t *testing.T, router http.Handler, path string, wantStatus int) string {
+func getHTTPStatus(t testing.TB, router http.Handler, path string, wantStatus int) string {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5042,7 +5071,7 @@ func getHTTPStatus(t *testing.T, router http.Handler, path string, wantStatus in
 	return rec.Body.String()
 }
 
-func getHTTPMap(t *testing.T, router http.Handler, path string) map[string]any {
+func getHTTPMap(t testing.TB, router http.Handler, path string) map[string]any {
 	t.Helper()
 
 	value := getHTTPValue(t, router, path)
@@ -5053,7 +5082,7 @@ func getHTTPMap(t *testing.T, router http.Handler, path string) map[string]any {
 	return out
 }
 
-func updateHTTPPage(t *testing.T, router http.Handler, pageID string, payload map[string]any) map[string]any {
+func updateHTTPPage(t testing.TB, router http.Handler, pageID string, payload map[string]any) map[string]any {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -5079,31 +5108,31 @@ func updateHTTPPage(t *testing.T, router http.Handler, pageID string, payload ma
 	return out
 }
 
-func putHTTPJSON(t *testing.T, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
+func putHTTPJSON(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
 	t.Helper()
 
 	return requestHTTPJSON(t, router, http.MethodPut, path, payload, wantStatus)
 }
 
-func putHTTPJSONBody(t *testing.T, router http.Handler, path string, payload map[string]any, wantStatus int) string {
+func putHTTPJSONBody(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) string {
 	t.Helper()
 
 	return requestHTTPJSONBody(t, router, http.MethodPut, path, payload, wantStatus)
 }
 
-func postHTTPJSON(t *testing.T, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
+func postHTTPJSON(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
 	t.Helper()
 
 	return requestHTTPJSON(t, router, http.MethodPost, path, payload, wantStatus)
 }
 
-func postHTTPJSONBody(t *testing.T, router http.Handler, path string, payload map[string]any, wantStatus int) string {
+func postHTTPJSONBody(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) string {
 	t.Helper()
 
 	return requestHTTPJSONBody(t, router, http.MethodPost, path, payload, wantStatus)
 }
 
-func postHTTPJSONNoContent(t *testing.T, router http.Handler, path string, payload map[string]any, wantStatus int) {
+func postHTTPJSONNoContent(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) {
 	t.Helper()
 
 	body := postHTTPJSONBody(t, router, path, payload, wantStatus)
@@ -5112,14 +5141,14 @@ func postHTTPJSONNoContent(t *testing.T, router http.Handler, path string, paylo
 	}
 }
 
-func requestHTTPJSON(t *testing.T, router http.Handler, method, path string, payload map[string]any, wantStatus int) map[string]any {
+func requestHTTPJSON(t testing.TB, router http.Handler, method, path string, payload map[string]any, wantStatus int) map[string]any {
 	t.Helper()
 
 	raw := requestHTTPJSONBody(t, router, method, path, payload, wantStatus)
 	return decodeJSONMap(t, method+" "+path, []byte(raw))
 }
 
-func requestHTTPJSONBody(t *testing.T, router http.Handler, method, path string, payload map[string]any, wantStatus int) string {
+func requestHTTPJSONBody(t testing.TB, router http.Handler, method, path string, payload map[string]any, wantStatus int) string {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -5141,7 +5170,7 @@ func requestHTTPJSONBody(t *testing.T, router http.Handler, method, path string,
 	return rec.Body.String()
 }
 
-func decodeJSONMap(t *testing.T, label string, raw []byte) map[string]any {
+func decodeJSONMap(t testing.TB, label string, raw []byte) map[string]any {
 	t.Helper()
 
 	value := decodeJSONValue(t, label, raw)
@@ -5152,7 +5181,7 @@ func decodeJSONMap(t *testing.T, label string, raw []byte) map[string]any {
 	return out
 }
 
-func deleteHTTPStatus(t *testing.T, router http.Handler, path string, wantStatus int) string {
+func deleteHTTPStatus(t testing.TB, router http.Handler, path string, wantStatus int) string {
 	t.Helper()
 
 	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
@@ -5169,7 +5198,7 @@ func deleteHTTPStatus(t *testing.T, router http.Handler, path string, wantStatus
 	return rec.Body.String()
 }
 
-func getHTTPSearch(t *testing.T, router http.Handler, values url.Values) map[string]any {
+func getHTTPSearch(t testing.TB, router http.Handler, values url.Values) map[string]any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5184,7 +5213,7 @@ func getHTTPSearch(t *testing.T, router http.Handler, values url.Values) map[str
 	return out
 }
 
-func uploadHTTPAsset(t *testing.T, router http.Handler, pageID, filename string, content []byte, wantStatus int) map[string]any {
+func uploadHTTPAsset(t testing.TB, router http.Handler, pageID, filename string, content []byte, wantStatus int) map[string]any {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -5215,7 +5244,7 @@ func uploadHTTPAsset(t *testing.T, router http.Handler, pageID, filename string,
 	return decodeJSONMap(t, "POST asset "+pageID+"/"+filename, rec.Body.Bytes())
 }
 
-func getHTTPAssets(t *testing.T, router http.Handler, pageID string) map[string]any {
+func getHTTPAssets(t testing.TB, router http.Handler, pageID string) map[string]any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5230,14 +5259,14 @@ func getHTTPAssets(t *testing.T, router http.Handler, pageID string) map[string]
 	return out
 }
 
-func getHTTPAsset(t *testing.T, router http.Handler, pageID, filename string) string {
+func getHTTPAsset(t testing.TB, router http.Handler, pageID, filename string) string {
 	t.Helper()
 
 	body, _ := getHTTPAssetWithContentType(t, router, pageID, filename)
 	return body
 }
 
-func getHTTPAssetWithContentType(t *testing.T, router http.Handler, pageID, filename string) (string, string) {
+func getHTTPAssetWithContentType(t testing.TB, router http.Handler, pageID, filename string) (string, string) {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5248,7 +5277,7 @@ func getHTTPAssetWithContentType(t *testing.T, router http.Handler, pageID, file
 	return rec.Body.String(), rec.Header().Get("Content-Type")
 }
 
-func getHTTPLatestRevision(t *testing.T, router http.Handler, pageID string) map[string]any {
+func getHTTPLatestRevision(t testing.TB, router http.Handler, pageID string) map[string]any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5263,7 +5292,7 @@ func getHTTPLatestRevision(t *testing.T, router http.Handler, pageID string) map
 	return out
 }
 
-func getHTTPRevision(t *testing.T, router http.Handler, pageID, revisionID string) map[string]any {
+func getHTTPRevision(t testing.TB, router http.Handler, pageID, revisionID string) map[string]any {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5278,7 +5307,7 @@ func getHTTPRevision(t *testing.T, router http.Handler, pageID, revisionID strin
 	return out
 }
 
-func assertSearchResultsMatch(t *testing.T, mcpSearch, httpSearch map[string]any) {
+func assertSearchResultsMatch(t testing.TB, mcpSearch, httpSearch map[string]any) {
 	t.Helper()
 
 	for _, field := range []string{"count", "offset", "limit"} {
@@ -5314,7 +5343,7 @@ func assertSearchResultsMatch(t *testing.T, mcpSearch, httpSearch map[string]any
 	}
 }
 
-func assertMapFieldsEqual(t *testing.T, label string, got, want map[string]any, fields []string) {
+func assertMapFieldsEqual(t testing.TB, label string, got, want map[string]any, fields []string) {
 	t.Helper()
 
 	for _, field := range fields {
@@ -5324,7 +5353,7 @@ func assertMapFieldsEqual(t *testing.T, label string, got, want map[string]any, 
 	}
 }
 
-func assertRestoredMetadata(t *testing.T, label string, page map[string]any) {
+func assertRestoredMetadata(t testing.TB, label string, page map[string]any) {
 	t.Helper()
 
 	if got := page["content"]; got != "metadata revision\n" {
@@ -5339,14 +5368,14 @@ func assertRestoredMetadata(t *testing.T, label string, page map[string]any) {
 	}
 }
 
-func assertPageVersionConflictParity(t *testing.T, label string, mcpErr mcpToolErrorResult, httpBody string) {
+func assertPageVersionConflictParity(t testing.TB, label string, mcpErr mcpToolErrorResult, httpBody string) {
 	t.Helper()
 
 	assertMCPPageError(t, label+" MCP", mcpErr, wikipages.ErrCodePageVersionConflict, "Page was changed by another request")
 	assertHTTPPageError(t, label+" HTTP", httpBody, wikipages.ErrCodePageVersionConflict.String(), "errors.page.version_conflict", "Page was changed by another request", "page was changed by another request")
 }
 
-func assertMCPPageError(t *testing.T, label string, errResult mcpToolErrorResult, code sharederrors.ErrorCode, message string) {
+func assertMCPPageError(t testing.TB, label string, errResult mcpToolErrorResult, code sharederrors.ErrorCode, message string) {
 	t.Helper()
 
 	want := fmt.Sprintf("%s: %s", code, message)
@@ -5364,7 +5393,7 @@ func assertMCPPageError(t *testing.T, label string, errResult mcpToolErrorResult
 	}
 }
 
-func assertHTTPPageError(t *testing.T, label, body, code, messageID, message, template string) {
+func assertHTTPPageError(t testing.TB, label, body, code, messageID, message, template string) {
 	t.Helper()
 
 	payload := decodeJSONMap(t, label, []byte(body))
@@ -5383,7 +5412,7 @@ func assertHTTPPageError(t *testing.T, label, body, code, messageID, message, te
 	}
 }
 
-func assertRestorePayloadsMatch(t *testing.T, mcpRestored, httpRestored map[string]any) {
+func assertRestorePayloadsMatch(t testing.TB, mcpRestored, httpRestored map[string]any) {
 	t.Helper()
 
 	assertRestoreVolatileFieldsPresent(t, "MCP wiki_restore_revision", mcpRestored)
@@ -5391,7 +5420,7 @@ func assertRestorePayloadsMatch(t *testing.T, mcpRestored, httpRestored map[stri
 	assertJSONEqual(t, "wiki_restore_revision response payload", normalizeRestorePayload(t, mcpRestored), normalizeRestorePayload(t, httpRestored))
 }
 
-func assertRestoreVolatileFieldsPresent(t *testing.T, label string, page map[string]any) {
+func assertRestoreVolatileFieldsPresent(t testing.TB, label string, page map[string]any) {
 	t.Helper()
 
 	_ = stringField(t, page, "version")
@@ -5402,7 +5431,7 @@ func assertRestoreVolatileFieldsPresent(t *testing.T, label string, page map[str
 	}
 }
 
-func normalizeRestorePayload(t *testing.T, page map[string]any) map[string]any {
+func normalizeRestorePayload(t testing.TB, page map[string]any) map[string]any {
 	t.Helper()
 
 	normalizedValue := normalizeJSON(t, page)
@@ -5417,7 +5446,7 @@ func normalizeRestorePayload(t *testing.T, page map[string]any) map[string]any {
 	return normalized
 }
 
-func assertPageState(t *testing.T, label string, page map[string]any, id, title, slug, pathValue, kind, parentID string) {
+func assertPageState(t testing.TB, label string, page map[string]any, id, title, slug, pathValue, kind, parentID string) {
 	t.Helper()
 
 	want := map[string]string{
@@ -5443,7 +5472,7 @@ func assertPageState(t *testing.T, label string, page map[string]any, id, title,
 	}
 }
 
-func assertChildrenDoNotContain(t *testing.T, label string, page map[string]any, childIDs ...string) {
+func assertChildrenDoNotContain(t testing.TB, label string, page map[string]any, childIDs ...string) {
 	t.Helper()
 
 	disallowed := map[string]struct{}{}
@@ -5463,7 +5492,7 @@ func assertChildrenDoNotContain(t *testing.T, label string, page map[string]any,
 	}
 }
 
-func assertChildOrder(t *testing.T, label string, page map[string]any, childIDs ...string) {
+func assertChildOrder(t testing.TB, label string, page map[string]any, childIDs ...string) {
 	t.Helper()
 
 	children, ok := page["children"].([]any)
@@ -5484,7 +5513,7 @@ func assertChildOrder(t *testing.T, label string, page map[string]any, childIDs 
 	}
 }
 
-func readPageMarkdownByRoutePath(t *testing.T, rootDir, routePath string) string {
+func readPageMarkdownByRoutePath(t testing.TB, rootDir, routePath string) string {
 	t.Helper()
 
 	path := filepath.Join(append([]string{rootDir}, strings.Split(routePath, "/")...)...) + ".md"
@@ -5495,7 +5524,7 @@ func readPageMarkdownByRoutePath(t *testing.T, rootDir, routePath string) string
 	return string(raw)
 }
 
-func assertCanonicalPageMarkdown(t *testing.T, label, raw string) markdown.PageDocument {
+func assertCanonicalPageMarkdown(t testing.TB, label, raw string) markdown.PageDocument {
 	t.Helper()
 
 	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
@@ -5511,7 +5540,7 @@ func assertCanonicalPageMarkdown(t *testing.T, label, raw string) markdown.PageD
 	return doc
 }
 
-func assertMCPToolErrorContains(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any, want string) {
+func assertMCPToolErrorContains(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any, want string) {
 	t.Helper()
 
 	errText := callToolError(t, session, name, args)
@@ -5520,7 +5549,7 @@ func assertMCPToolErrorContains(t *testing.T, session *sdkmcp.ClientSession, nam
 	}
 }
 
-func assertErrorContainsAny(t *testing.T, label, errText string, wants ...string) {
+func assertErrorContainsAny(t testing.TB, label, errText string, wants ...string) {
 	t.Helper()
 
 	lower := strings.ToLower(errText)
@@ -5532,7 +5561,7 @@ func assertErrorContainsAny(t *testing.T, label, errText string, wants ...string
 	t.Fatalf("%s error = %q, want one of %q", label, errText, wants)
 }
 
-func assertGenericToolErrorArgContainsAny(t *testing.T, label string, result mcpToolErrorResult, wants ...string) {
+func assertGenericToolErrorArgContainsAny(t testing.TB, label string, result mcpToolErrorResult, wants ...string) {
 	t.Helper()
 
 	assertMCPStructuredError(t, label, result, sharederrors.ErrorCode("mcp_tool_error"), "errors.mcp.tool_error", "MCP tool failed")
@@ -5546,7 +5575,7 @@ func assertGenericToolErrorArgContainsAny(t *testing.T, label string, result mcp
 	t.Fatalf("%s args = %#v, want one of %q", label, result.Args, wants)
 }
 
-func assertErrorContainsAll(t *testing.T, label, errText string, wants []string) {
+func assertErrorContainsAll(t testing.TB, label, errText string, wants []string) {
 	t.Helper()
 
 	for _, want := range wants {
@@ -5556,7 +5585,7 @@ func assertErrorContainsAll(t *testing.T, label, errText string, wants []string)
 	}
 }
 
-func assertErrorDoesNotContainAny(t *testing.T, label, errText string, rejects ...string) {
+func assertErrorDoesNotContainAny(t testing.TB, label, errText string, rejects ...string) {
 	t.Helper()
 
 	lower := strings.ToLower(errText)
@@ -5577,7 +5606,7 @@ func stringValue(v any) string {
 	return strings.TrimSpace(fmt.Sprint(v))
 }
 
-func assertAssetURLResult(t *testing.T, label string, result map[string]any, field, pageID string) {
+func assertAssetURLResult(t testing.TB, label string, result map[string]any, field, pageID string) {
 	t.Helper()
 
 	raw, ok := result[field].(string)
@@ -5593,7 +5622,7 @@ func assertAssetURLResult(t *testing.T, label string, result map[string]any, fie
 	}
 }
 
-func assertJSONEqual(t *testing.T, label string, got, want any) {
+func assertJSONEqual(t testing.TB, label string, got, want any) {
 	t.Helper()
 
 	normalizedGot := normalizeJSON(t, got)
@@ -5605,7 +5634,7 @@ func assertJSONEqual(t *testing.T, label string, got, want any) {
 	}
 }
 
-func assertScopedSuccessPayloadsEqual(t *testing.T, label string, mcpPayload, httpPayload map[string]any, mcpMessageID, httpMessageID string) {
+func assertScopedSuccessPayloadsEqual(t testing.TB, label string, mcpPayload, httpPayload map[string]any, mcpMessageID, httpMessageID string) {
 	t.Helper()
 
 	assertMapStringField(t, label+" MCP", mcpPayload, "messageId", mcpMessageID)
@@ -5615,7 +5644,7 @@ func assertScopedSuccessPayloadsEqual(t *testing.T, label string, mcpPayload, ht
 	assertJSONEqual(t, label, mcpComparable, httpComparable)
 }
 
-func assertMapStringField(t *testing.T, label string, payload map[string]any, field string, want string) {
+func assertMapStringField(t testing.TB, label string, payload map[string]any, field string, want string) {
 	t.Helper()
 
 	got, ok := payload[field].(string)
@@ -5638,7 +5667,7 @@ func mapWithoutField(payload map[string]any, field string) map[string]any {
 	return out
 }
 
-func normalizeJSON(t *testing.T, value any) any {
+func normalizeJSON(t testing.TB, value any) any {
 	t.Helper()
 
 	raw, err := json.Marshal(value)
@@ -5648,7 +5677,7 @@ func normalizeJSON(t *testing.T, value any) any {
 	return decodeJSONValue(t, "normalize JSON", raw)
 }
 
-func decodeJSONValue(t *testing.T, label string, raw []byte) any {
+func decodeJSONValue(t testing.TB, label string, raw []byte) any {
 	t.Helper()
 
 	var out any
@@ -5658,7 +5687,7 @@ func decodeJSONValue(t *testing.T, label string, raw []byte) any {
 	return out
 }
 
-func issueHTTPCSRF(t *testing.T, router http.Handler) (string, []*http.Cookie) {
+func issueHTTPCSRF(t testing.TB, router http.Handler) (string, []*http.Cookie) {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -5683,7 +5712,7 @@ func issueHTTPCSRF(t *testing.T, router http.Handler) (string, []*http.Cookie) {
 	return token, result.Cookies()
 }
 
-func nestedMap(t *testing.T, value map[string]any, key string) map[string]any {
+func nestedMap(t testing.TB, value map[string]any, key string) map[string]any {
 	t.Helper()
 
 	nested, ok := value[key].(map[string]any)
@@ -5693,7 +5722,7 @@ func nestedMap(t *testing.T, value map[string]any, key string) map[string]any {
 	return nested
 }
 
-func stringField(t *testing.T, value map[string]any, key string) string {
+func stringField(t testing.TB, value map[string]any, key string) string {
 	t.Helper()
 
 	s, ok := value[key].(string)
@@ -5703,7 +5732,7 @@ func stringField(t *testing.T, value map[string]any, key string) string {
 	return s
 }
 
-func assertLookupFinalID(t *testing.T, label string, lookup map[string]any, wantID string, wantKind string) {
+func assertLookupFinalID(t testing.TB, label string, lookup map[string]any, wantID string, wantKind string) {
 	t.Helper()
 
 	segmentsRaw, ok := lookup["segments"].([]any)
@@ -5722,13 +5751,13 @@ func assertLookupFinalID(t *testing.T, label string, lookup map[string]any, want
 	}
 }
 
-func arrayField(t *testing.T, value map[string]any, key string) []any {
+func arrayField(t testing.TB, value map[string]any, key string) []any {
 	t.Helper()
 
 	return arrayFieldFromMap(t, value, key)
 }
 
-func arrayFieldFromMap(t *testing.T, value map[string]any, key string) []any {
+func arrayFieldFromMap(t testing.TB, value map[string]any, key string) []any {
 	t.Helper()
 
 	raw, ok := value[key].([]any)
@@ -5738,7 +5767,7 @@ func arrayFieldFromMap(t *testing.T, value map[string]any, key string) []any {
 	return raw
 }
 
-func stringSliceField(t *testing.T, value map[string]any, key string) []string {
+func stringSliceField(t testing.TB, value map[string]any, key string) []string {
 	t.Helper()
 
 	raw, ok := value[key].([]any)
@@ -5770,7 +5799,7 @@ func arrayContainsObjectField(value any, field string, want any) bool {
 	return false
 }
 
-func objectWithField(t *testing.T, value any, field string, want any) map[string]any {
+func objectWithField(t testing.TB, value any, field string, want any) map[string]any {
 	t.Helper()
 
 	items, ok := value.([]any)
@@ -5787,7 +5816,7 @@ func objectWithField(t *testing.T, value any, field string, want any) map[string
 	return nil
 }
 
-func changedPathsFromContext(t *testing.T, output map[string]any) map[string]bool {
+func changedPathsFromContext(t testing.TB, output map[string]any) map[string]bool {
 	t.Helper()
 
 	paths := map[string]bool{}
@@ -5807,7 +5836,7 @@ func changedPathsFromContext(t *testing.T, output map[string]any) map[string]boo
 	return paths
 }
 
-func assertValidationIssueCodes(t *testing.T, output map[string]any, wantCodes []string) {
+func assertValidationIssueCodes(t testing.TB, output map[string]any, wantCodes []string) {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5833,7 +5862,7 @@ func assertValidationIssueCodes(t *testing.T, output map[string]any, wantCodes [
 	}
 }
 
-func validationIssueByCode(t *testing.T, output map[string]any, wantCode string) map[string]any {
+func validationIssueByCode(t testing.TB, output map[string]any, wantCode string) map[string]any {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5853,7 +5882,7 @@ func validationIssueByCode(t *testing.T, output map[string]any, wantCode string)
 	return nil
 }
 
-func assertNoValidationIssuePath(t *testing.T, output map[string]any, unwantedPath string) {
+func assertNoValidationIssuePath(t testing.TB, output map[string]any, unwantedPath string) {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5871,7 +5900,7 @@ func assertNoValidationIssuePath(t *testing.T, output map[string]any, unwantedPa
 	}
 }
 
-func assertValidationIssueCodesAbsent(t *testing.T, output map[string]any, absentCodes []string) {
+func assertValidationIssueCodesAbsent(t testing.TB, output map[string]any, absentCodes []string) {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5893,7 +5922,7 @@ func assertValidationIssueCodesAbsent(t *testing.T, output map[string]any, absen
 	}
 }
 
-func validationIssueCodeCount(t *testing.T, output map[string]any, wantCode string, wantPath string) int {
+func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode string, wantPath string) int {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5913,7 +5942,7 @@ func validationIssueCodeCount(t *testing.T, output map[string]any, wantCode stri
 	return count
 }
 
-func assertRecentChangesIncludePath(t *testing.T, output map[string]any, wantPath string) {
+func assertRecentChangesIncludePath(t testing.TB, output map[string]any, wantPath string) {
 	t.Helper()
 
 	for _, rawChange := range arrayField(t, output, "recentChanges") {

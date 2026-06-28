@@ -4,19 +4,35 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"testing"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/perber/wiki/internal/core/tree"
-	"github.com/perber/wiki/internal/test_utils"
 )
 
-func newTestStore(t *testing.T) *PropertiesStore {
+type propertiesTestT interface {
+	Helper()
+	TempDir() string
+	Cleanup(func())
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Error(args ...any)
+	Errorf(format string, args ...any)
+}
+
+func closeStoreForTest(t propertiesTestT, store *PropertiesStore) {
+	t.Helper()
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func newTestStore(t propertiesTestT) *PropertiesStore {
 	t.Helper()
 	store, err := NewPropertiesStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
+	t.Cleanup(func() { closeStoreForTest(t, store) })
 	return store
 }
 
@@ -44,20 +60,22 @@ func props(kv ...string) map[string]PropertyEntry {
 
 // ─── DB lifecycle ────────────────────────────────────────────────────────────
 
-func TestPropertiesStore_CreatesDatabaseInStorageDir(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_CreatesDatabaseInStorageDir", func() {
+	t := ginkgo.GinkgoT()
 	tmp := t.TempDir()
 	store, err := NewPropertiesStore(tmp)
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(store.Close, t)
+	defer closeStoreForTest(t, store)
 
 	if _, err := os.Stat(filepath.Join(tmp, "properties.db")); err != nil {
 		t.Fatalf("expected properties.db to exist: %v", err)
 	}
-}
+})
 
-func TestPropertiesStore_IdempotentSchema(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_IdempotentSchema", func() {
+	t := ginkgo.GinkgoT()
 	tmp := t.TempDir()
 	for i := 0; i < 3; i++ {
 		store, err := NewPropertiesStore(tmp)
@@ -68,11 +86,12 @@ func TestPropertiesStore_IdempotentSchema(t *testing.T) {
 			t.Fatalf("Close (run %d): %v", i, err)
 		}
 	}
-}
+})
 
 // ─── SetPropertiesForPage ────────────────────────────────────────────────────
 
-func TestPropertiesStore_SetPropertiesForPage_StoresEntries(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_StoresEntries", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	input := props("status", "draft", "author", "alice", "environment", "staging")
@@ -95,9 +114,10 @@ func TestPropertiesStore_SetPropertiesForPage_StoresEntries(t *testing.T) {
 	if p["environment"] != (PropertyEntry{Value: "staging", Type: "text"}) {
 		t.Errorf("environment = %+v", p["environment"])
 	}
-}
+})
 
-func TestPropertiesStore_SetPropertiesForPage_ReplacesOnSecondCall(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_ReplacesOnSecondCall", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "author", "alice"))
@@ -114,9 +134,10 @@ func TestPropertiesStore_SetPropertiesForPage_ReplacesOnSecondCall(t *testing.T)
 	if p["status"].Value != "published" {
 		t.Errorf("status = %q, want 'published'", p["status"].Value)
 	}
-}
+})
 
-func TestPropertiesStore_SetPropertiesForPage_EmptyMapClearsExisting(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_EmptyMapClearsExisting", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -131,9 +152,10 @@ func TestPropertiesStore_SetPropertiesForPage_EmptyMapClearsExisting(t *testing.
 	if len(got["page-1"]) != 0 {
 		t.Errorf("expected empty props, got %v", got["page-1"])
 	}
-}
+})
 
-func TestPropertiesStore_SetPropertiesForPage_NilMapClearsExisting(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_NilMapClearsExisting", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -148,11 +170,12 @@ func TestPropertiesStore_SetPropertiesForPage_NilMapClearsExisting(t *testing.T)
 	if len(got["page-1"]) != 0 {
 		t.Errorf("expected empty props after nil set, got %v", got["page-1"])
 	}
-}
+})
 
 // ─── DeletePropertiesForPage ─────────────────────────────────────────────────
 
-func TestPropertiesStore_DeletePropertiesForPage_RemovesEntries(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_RemovesEntries", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -167,16 +190,18 @@ func TestPropertiesStore_DeletePropertiesForPage_RemovesEntries(t *testing.T) {
 	if len(got["page-1"]) != 0 {
 		t.Errorf("expected empty after delete, got %v", got["page-1"])
 	}
-}
+})
 
-func TestPropertiesStore_DeletePropertiesForPage_NonExistentIsNoop(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_NonExistentIsNoop", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 	if err := store.DeletePropertiesForPage("does-not-exist"); err != nil {
 		t.Fatalf("DeletePropertiesForPage on unknown page: %v", err)
 	}
-}
+})
 
-func TestPropertiesStore_DeletePropertiesForPage_DoesNotAffectOtherPages(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_DoesNotAffectOtherPages", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -191,11 +216,12 @@ func TestPropertiesStore_DeletePropertiesForPage_DoesNotAffectOtherPages(t *test
 	if got["page-2"]["status"].Value != "published" {
 		t.Errorf("page-2 status should be unaffected, got %v", got["page-2"])
 	}
-}
+})
 
 // ─── GetAllPropertyKeys ──────────────────────────────────────────────────────
 
-func TestPropertiesStore_GetAllPropertyKeys_EmptyDB(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_EmptyDB", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 	keys, err := store.GetAllPropertyKeys("", 50)
 	if err != nil {
@@ -204,9 +230,10 @@ func TestPropertiesStore_GetAllPropertyKeys_EmptyDB(t *testing.T) {
 	if len(keys) != 0 {
 		t.Errorf("expected empty result, got %v", keys)
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_ReturnsDistinctKeysWithCount(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_ReturnsDistinctKeysWithCount", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "priority", "high"))
@@ -232,9 +259,10 @@ func TestPropertiesStore_GetAllPropertyKeys_ReturnsDistinctKeysWithCount(t *test
 	if byKey["author"] != 1 {
 		t.Errorf("author count = %d, want 1", byKey["author"])
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_OrderByCountDescThenKeyAsc(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_OrderByCountDescThenKeyAsc", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("alpha", "x", "beta", "x", "gamma", "x"))
@@ -258,9 +286,10 @@ func TestPropertiesStore_GetAllPropertyKeys_OrderByCountDescThenKeyAsc(t *testin
 	if keys[2].Key != "gamma" || keys[2].Count != 1 {
 		t.Errorf("keys[2] = %+v, want {gamma 1}", keys[2])
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_FilterByPrefix(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_FilterByPrefix", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "x", "stage", "x", "score", "x", "author", "x"))
@@ -278,9 +307,10 @@ func TestPropertiesStore_GetAllPropertyKeys_FilterByPrefix(t *testing.T) {
 	if len(keys) != 2 {
 		t.Errorf("expected 2 keys matching 'st', got %d: %v", len(keys), keys)
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_RespectsLimit(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_RespectsLimit", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("a", "1", "b", "2", "c", "3", "d", "4", "e", "5"))
@@ -292,9 +322,10 @@ func TestPropertiesStore_GetAllPropertyKeys_RespectsLimit(t *testing.T) {
 	if len(keys) != 3 {
 		t.Errorf("expected 3 keys (limit), got %d", len(keys))
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_ZeroLimitReturnsAll(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_ZeroLimitReturnsAll", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("a", "1", "b", "2", "c", "3"))
@@ -306,9 +337,10 @@ func TestPropertiesStore_GetAllPropertyKeys_ZeroLimitReturnsAll(t *testing.T) {
 	if len(keys) != 3 {
 		t.Errorf("expected all 3 keys, got %d", len(keys))
 	}
-}
+})
 
-func TestPropertiesStore_GetAllPropertyKeys_FilterEscapesLikeWildcards(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_FilterEscapesLikeWildcards", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "stage", "alpha"))
@@ -330,11 +362,12 @@ func TestPropertiesStore_GetAllPropertyKeys_FilterEscapesLikeWildcards(t *testin
 	if len(keys) != 0 {
 		t.Errorf("filter '_tatus' should match no keys (literal), got %v", keys)
 	}
-}
+})
 
 // ─── GetPageIDsByProperty ─────────────────────────────────────────────────────
 
-func TestPropertiesStore_GetPageIDsByProperty_ExactMatch(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_ExactMatch", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -356,9 +389,10 @@ func TestPropertiesStore_GetPageIDsByProperty_ExactMatch(t *testing.T) {
 			t.Errorf("[%d] = %q, want %q", i, ids[i], w)
 		}
 	}
-}
+})
 
-func TestPropertiesStore_GetPageIDsByProperty_NoMatch(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_NoMatch", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -370,9 +404,10 @@ func TestPropertiesStore_GetPageIDsByProperty_NoMatch(t *testing.T) {
 	if len(ids) != 0 {
 		t.Errorf("expected no matches, got %v", ids)
 	}
-}
+})
 
-func TestPropertiesStore_GetPageIDsByProperty_KeyNotExistsReturnsEmpty(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_KeyNotExistsReturnsEmpty", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -384,9 +419,10 @@ func TestPropertiesStore_GetPageIDsByProperty_KeyNotExistsReturnsEmpty(t *testin
 	if len(ids) != 0 {
 		t.Errorf("expected empty for unknown key, got %v", ids)
 	}
-}
+})
 
-func TestPropertiesStore_GetPageIDsByProperty_ValueIsCaseSensitive(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_ValueIsCaseSensitive", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "Draft"))
@@ -399,11 +435,12 @@ func TestPropertiesStore_GetPageIDsByProperty_ValueIsCaseSensitive(t *testing.T)
 	if len(ids) != 0 {
 		t.Errorf("value matching should be case-sensitive, got %v", ids)
 	}
-}
+})
 
 // ─── GetPropertiesForPages ────────────────────────────────────────────────────
 
-func TestPropertiesStore_GetPropertiesForPages_MultiplePages(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_MultiplePages", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "score", "10"))
@@ -424,9 +461,10 @@ func TestPropertiesStore_GetPropertiesForPages_MultiplePages(t *testing.T) {
 	if got["page-3"]["status"].Value != "published" {
 		t.Errorf("page-3 status = %v", got["page-3"]["status"])
 	}
-}
+})
 
-func TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	got, err := store.GetPropertiesForPages(testPageIDs())
@@ -439,9 +477,10 @@ func TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap(t *test
 	if len(got) != 0 {
 		t.Errorf("expected empty map, got %v", got)
 	}
-}
+})
 
-func TestPropertiesStore_GetPropertiesForPages_UnknownIDReturnsNoEntry(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_UnknownIDReturnsNoEntry", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	got, err := store.GetPropertiesForPages(testPageIDs("does-not-exist"))
@@ -451,11 +490,12 @@ func TestPropertiesStore_GetPropertiesForPages_UnknownIDReturnsNoEntry(t *testin
 	if len(got) != 0 {
 		t.Errorf("expected empty map for unknown ID, got %v", got)
 	}
-}
+})
 
 // ─── Clear ───────────────────────────────────────────────────────────────────
 
-func TestPropertiesStore_Clear_RemovesAllEntries(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesStore_Clear_RemovesAllEntries", func() {
+	t := ginkgo.GinkgoT()
 	store := newTestStore(t)
 
 	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
@@ -472,4 +512,4 @@ func TestPropertiesStore_Clear_RemovesAllEntries(t *testing.T) {
 	if len(keys) != 0 {
 		t.Errorf("expected empty after Clear, got %v", keys)
 	}
-}
+})

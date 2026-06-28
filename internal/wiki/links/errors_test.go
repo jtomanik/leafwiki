@@ -4,67 +4,68 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 
 	"github.com/gin-gonic/gin"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
-func TestRespondWithLinkError_PageNotFound(t *testing.T) {
-	t.Parallel()
+var _ = ginkgo.Describe("link errors", func() {
+	ginkgo.It("TestRespondWithLinkError_PageNotFound", func() {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
 
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+		respondWithLinkError(c, sharederrors.NewLocalizedError(
+			ErrCodeLinkPageNotFound,
+			"Page not found",
+			"page not found",
+			nil,
+		))
 
-	respondWithLinkError(c, sharederrors.NewLocalizedError(
-		ErrCodeLinkPageNotFound,
-		"Page not found",
-		"page not found",
-		nil,
-	))
+		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_page_not_found","messageId":"errors.link.page_not_found","message":"Page not found","template":"page not found"}}`))
+	})
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
+	ginkgo.It("TestRespondWithLinkError_ServiceUnavailable", func() {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_page_not_found","messageId":"errors.link.page_not_found","message":"Page not found","template":"page not found"}}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
-}
+		respondWithLinkError(c, ErrLinkServiceUnavailable)
 
-func TestRespondWithLinkError_ServiceUnavailable(t *testing.T) {
-	t.Parallel()
+		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_service_unavailable","messageId":"errors.link.service_unavailable","message":"Link service is unavailable","template":"link service is unavailable"}}`))
+	})
 
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	ginkgo.It("TestRespondWithLinkError_InternalErrorIsSanitized", func() {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
 
-	respondWithLinkError(c, ErrLinkServiceUnavailable)
+		respondWithLinkError(c, errors.New("sql: database is closed"))
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
-	}
+		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"Failed to load link status"}}`))
+	})
 
-	if got, want := rec.Body.String(), `{"error":{"code":"link_service_unavailable","messageId":"errors.link.service_unavailable","message":"Link service is unavailable","template":"link service is unavailable"}}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
-}
+	ginkgo.It("linkErrorStatus maps known link error codes", func() {
+		Expect(linkErrorStatus(ErrCodeLinkPageNotFound)).To(Equal(http.StatusNotFound))
+		Expect(linkErrorStatus(ErrCodeLinkUnavailable)).To(Equal(http.StatusServiceUnavailable))
+		Expect(linkErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
+	})
 
-func TestRespondWithLinkError_InternalErrorIsSanitized(t *testing.T) {
-	t.Parallel()
+	ginkgo.It("respondWithLinkStatusError emits structured localized detail", func() {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
 
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+		respondWithLinkStatusError(c, http.StatusServiceUnavailable, ErrCodeLinkUnavailable, "ignored", "ignored")
 
-	respondWithLinkError(c, errors.New("sql: database is closed"))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-
-	if got, want := rec.Body.String(), `{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"Failed to load link status"}}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
-}
+		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+		Expect(rec.Body.String()).To(ContainSubstring(string(ErrCodeLinkUnavailable)))
+		Expect(rec.Body.String()).To(ContainSubstring("errors.link.service_unavailable"))
+	})
+})

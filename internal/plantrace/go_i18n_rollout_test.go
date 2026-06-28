@@ -1,13 +1,14 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 )
 
-func TestGoI18nRolloutPlanScenarioEvidence(t *testing.T) {
+var _ = ginkgo.It("TestGoI18nRolloutPlanScenarioEvidence", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	planPath := filepath.Join(repoRoot, "docs", "plans", "go-i18n-rollout.PLAN.md")
 	titles := goI18nScenarioTitles(t, planPath)
@@ -21,9 +22,11 @@ func TestGoI18nRolloutPlanScenarioEvidence(t *testing.T) {
 		}
 		assertCanonicalPlanEvidenceExists(t, repoRoot, title, evidence)
 	}
-}
 
-func TestGoI18nRolloutCLIStartupEvidenceUsesCLIStderrTest(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestGoI18nRolloutCLIStartupEvidenceUsesCLIStderrTest", func() {
+	t := ginkgo.GinkgoT()
 	evidence, ok := goI18nRolloutEvidence("CLI startup error renders catalog-backed text to stderr")
 	if !ok {
 		t.Fatalf("CLI startup scenario has no evidence mapping")
@@ -31,9 +34,11 @@ func TestGoI18nRolloutCLIStartupEvidenceUsesCLIStderrTest(t *testing.T) {
 	if evidence.file != "cmd/leafwiki/main_test.go" || evidence.text != "TestFailureMessageRendersCatalogBackedErrorBody" {
 		t.Fatalf("CLI startup evidence = %#v, want cmd/leafwiki/main_test.go TestFailureMessageRendersCatalogBackedErrorBody", evidence)
 	}
-}
 
-func TestGoI18nCatalogGateRunsCLIStderrEvidence(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestGoI18nCatalogGateRunsCLIStderrEvidence", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-i18n-catalog.sh"))
 	if err != nil {
@@ -42,9 +47,10 @@ func TestGoI18nCatalogGateRunsCLIStderrEvidence(t *testing.T) {
 	if !strings.Contains(string(raw), "TestFailureMessageRendersCatalogBackedErrorBody") {
 		t.Fatalf("check-i18n-catalog.sh does not run CLI stderr catalog evidence test")
 	}
-}
 
-func goI18nScenarioTitles(t *testing.T, planPath string) []string {
+})
+
+func goI18nScenarioTitles(t plantraceTestT, planPath string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(planPath)
 	if err != nil {
@@ -88,7 +94,7 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	case "MCP tool descriptor description renders from catalog",
 		"MCP message-only output uses catalog-backed message",
 		"MCP unknown tool protocol errors are not over-wrapped":
-		return evidence("internal/wiki/mcp/tool_contracts_test.go", "catalog-rendered"), true
+		return evidence("internal/wiki/mcp/tool_contracts_test.go", "renders descriptions from the catalog"), true
 	case "MCP structured error keeps _meta.error compatibility":
 		return evidence("internal/wiki/mcp/mcp_integration_test.go", "assertMCPStructuredError"), true
 	case "CLI help renders catalog-backed text to stdout":
@@ -134,7 +140,8 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	}
 }
 
-func TestGoI18nDocsPreserveEnglishOnlyLimit(t *testing.T) {
+var _ = ginkgo.It("TestGoI18nDocsPreserveEnglishOnlyLimit", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "i18n.md"))
 	if err != nil {
@@ -152,4 +159,5 @@ func TestGoI18nDocsPreserveEnglishOnlyLimit(t *testing.T) {
 			t.Fatalf("docs/i18n.md missing %q", want)
 		}
 	}
-}
+
+})

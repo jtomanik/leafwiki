@@ -35,7 +35,7 @@ func extractLinksFromMarkdown(content string) []string {
 	reader := text.NewReader([]byte(content))
 	doc := markdownParser.Parser().Parse(reader)
 
-	err := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if link, ok := n.(*ast.Link); ok && entering {
 			// ignore external links
 			dest := string(link.Destination)
@@ -59,9 +59,6 @@ func extractLinksFromMarkdown(content string) []string {
 		}
 		return ast.WalkContinue, nil
 	})
-	if err != nil {
-		return []string{}
-	}
 
 	return links
 }

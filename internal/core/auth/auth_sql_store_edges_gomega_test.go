@@ -1,0 +1,612 @@
+package auth
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+const authScriptedDriverName = "leafwiki_auth_scripted"
+
+var (
+	authScriptedDriverOnce sync.Once
+	authScriptedScriptsMu  sync.Mutex
+	authScriptedScriptSeq  int
+	authScriptedScripts    = map[string]*authScriptedDBScript{}
+)
+
+type authScriptedDBScript struct {
+	exec  func(string, []driver.NamedValue) (driver.Result, error)
+	query func(string, []driver.NamedValue) (driver.Rows, error)
+	close func() error
+}
+
+type authScriptedDriver struct{}
+
+func (authScriptedDriver) Open(name string) (driver.Conn, error) {
+	authScriptedScriptsMu.Lock()
+	defer authScriptedScriptsMu.Unlock()
+
+	script, ok := authScriptedScripts[name]
+	if !ok {
+		return nil, fmt.Errorf("missing scripted database %q", name)
+	}
+	return &authScriptedConn{script: script}, nil
+}
+
+type authScriptedConn struct {
+	script *authScriptedDBScript
+}
+
+func (c *authScriptedConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("scripted statements are not supported")
+}
+
+func (c *authScriptedConn) Close() error {
+	if c.script.close != nil {
+		return c.script.close()
+	}
+	return nil
+}
+
+func (c *authScriptedConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("scripted transactions are not supported")
+}
+
+func (c *authScriptedConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if c.script.exec != nil {
+		return c.script.exec(query, args)
+	}
+	return authScriptedResult{rowsAffected: 1}, nil
+}
+
+func (c *authScriptedConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if c.script.query != nil {
+		return c.script.query(query, args)
+	}
+	return &authScriptedRows{}, nil
+}
+
+type authScriptedResult struct {
+	rowsAffected    int64
+	rowsAffectedErr error
+}
+
+func (r authScriptedResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r authScriptedResult) RowsAffected() (int64, error) {
+	if r.rowsAffectedErr != nil {
+		return 0, r.rowsAffectedErr
+	}
+	return r.rowsAffected, nil
+}
+
+type authScriptedRows struct {
+	columns  []string
+	values   [][]driver.Value
+	nextErr  error
+	closeErr error
+	index    int
+}
+
+func (r authScriptedRows) Columns() []string {
+	return r.columns
+}
+
+func (r authScriptedRows) Close() error {
+	return r.closeErr
+}
+
+func (r *authScriptedRows) Next(dest []driver.Value) error {
+	if r.nextErr != nil {
+		err := r.nextErr
+		r.nextErr = nil
+		return err
+	}
+	if r.index >= len(r.values) {
+		return io.EOF
+	}
+	copy(dest, r.values[r.index])
+	r.index++
+	return nil
+}
+
+type authFakeScanner struct {
+	values []any
+	err    error
+}
+
+func (s authFakeScanner) Scan(dest ...any) error {
+	if s.err != nil {
+		return s.err
+	}
+	for i, value := range s.values {
+		switch target := dest[i].(type) {
+		case *APIKeyID:
+			*target = NewAPIKeyIDUnchecked(value.(string))
+		case *UserID:
+			*target = UserIDFromString(value.(string))
+		case *string:
+			*target = value.(string)
+		case *int64:
+			*target = value.(int64)
+		case *sql.NullInt64:
+			*target = value.(sql.NullInt64)
+		default:
+			return fmt.Errorf("unsupported fake scan target %T", target)
+		}
+	}
+	return nil
+}
+
+var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
+	ginkgo.Describe("API key store", func() {
+		ginkgo.It("covers connection, construction, close, and scanner failures", func() {
+			openErr := errors.New("api key open failed")
+			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return nil, openErr
+			})
+			_, err := NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+			Expect(err).To(MatchError(openErr))
+			Expect((&APIKeyStore{}).Connect()).To(MatchError(openErr))
+			restoreOpen()
+
+			schemaErr := errors.New("api key schema failed")
+			closed := false
+			restoreOpen = setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return openAuthScriptedDB(&authScriptedDBScript{
+					exec: func(string, []driver.NamedValue) (driver.Result, error) {
+						return nil, schemaErr
+					},
+					close: func() error {
+						closed = true
+						return nil
+					},
+				}), nil
+			})
+			_, err = NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+			Expect(err).To(MatchError(schemaErr))
+			Expect(closed).To(BeTrue())
+			restoreOpen()
+
+			Expect((&APIKeyStore{}).Close()).To(Succeed())
+
+			store := &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				close: func() error {
+					return errors.New("api key close failed")
+				},
+			})}
+			Expect(store.db.Ping()).To(Succeed())
+			Expect(store.Close()).To(MatchError("api key close failed"))
+
+			_, err = scanAPIKey(authFakeScanner{err: errors.New("api key scan failed")})
+			Expect(err).To(MatchError("api key scan failed"))
+			_, err = scanAPIKey(newAPIKeyScannerWithScopes("{not-json"))
+			Expect(err).To(HaveOccurred())
+			_, _, err = scanStoredAPIKey(newStoredAPIKeyScannerWithScopes("{not-json"))
+			Expect(err).To(HaveOccurred())
+		})
+
+		ginkgo.It("covers store method SQL error paths", func() {
+			key := fixtureAPIKey()
+
+			openErr := errors.New("api key method open failed")
+			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return nil, openErr
+			})
+			Expect((&APIKeyStore{}).CreateAPIKey(key, "hash")).To(MatchError(openErr))
+			_, err := (&APIKeyStore{}).ListActiveAPIKeys(key.UserID)
+			Expect(err).To(MatchError(openErr))
+			_, err = (&APIKeyStore{}).GetAPIKeyByID(key.ID)
+			Expect(err).To(MatchError(openErr))
+			Expect((&APIKeyStore{}).RevokeAPIKey(key.UserID, key.ID, time.Now())).To(MatchError(openErr))
+			Expect((&APIKeyStore{}).MarkAPIKeyUsed(key.ID, time.Now())).To(MatchError(openErr))
+			restoreOpen()
+
+			createErr := errors.New("api key insert failed")
+			store := &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				exec: func(string, []driver.NamedValue) (driver.Result, error) {
+					return nil, createErr
+				},
+			})}
+			Expect(store.CreateAPIKey(key, "hash")).To(MatchError(createErr))
+
+			queryErr := errors.New("api key query failed")
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				query: func(string, []driver.NamedValue) (driver.Rows, error) {
+					return nil, queryErr
+				},
+			})}
+			_, err = store.ListActiveAPIKeys(key.UserID)
+			Expect(err).To(MatchError(queryErr))
+
+			restoreCloseRows := setAuthSeam(&authCloseRows, func(interface{ Close() error }) error {
+				return errors.New("api key rows close failed")
+			})
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				query: func(string, []driver.NamedValue) (driver.Rows, error) {
+					return &authScriptedRows{
+						columns: apiKeyColumns(),
+					}, nil
+				},
+			})}
+			Expect(store.ListActiveAPIKeys(key.UserID)).To(BeEmpty())
+			restoreCloseRows()
+
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				query: func(string, []driver.NamedValue) (driver.Rows, error) {
+					return &authScriptedRows{
+						columns: apiKeyColumns(),
+						values:  [][]driver.Value{{nil}},
+					}, nil
+				},
+			})}
+			_, err = store.ListActiveAPIKeys(key.UserID)
+			Expect(err).To(HaveOccurred())
+
+			rowsErr := errors.New("api key rows failed")
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				query: func(string, []driver.NamedValue) (driver.Rows, error) {
+					return &authScriptedRows{columns: apiKeyColumns(), nextErr: rowsErr}, nil
+				},
+			})}
+			_, err = store.ListActiveAPIKeys(key.UserID)
+			Expect(err).To(MatchError(rowsErr))
+
+			revokeErr := errors.New("api key revoke failed")
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				exec: func(string, []driver.NamedValue) (driver.Result, error) {
+					return nil, revokeErr
+				},
+			})}
+			Expect(store.RevokeAPIKey(key.UserID, key.ID, time.Now())).To(MatchError(revokeErr))
+
+			rowsAffectedErr := errors.New("api key rows affected failed")
+			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				exec: func(string, []driver.NamedValue) (driver.Result, error) {
+					return authScriptedResult{rowsAffectedErr: rowsAffectedErr}, nil
+				},
+			})}
+			Expect(store.RevokeAPIKey(key.UserID, key.ID, time.Now())).To(MatchError(rowsAffectedErr))
+			Expect(store.MarkAPIKeyUsed(key.ID, time.Now())).To(MatchError(rowsAffectedErr))
+		})
+	})
+
+	ginkgo.Describe("session store", func() {
+		ginkgo.It("covers database open, close, and active-check errors", func() {
+			openErr := errors.New("session open failed")
+			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return nil, openErr
+			})
+			store := &SessionStore{}
+			Expect(store.withDB(func(*sql.DB) error { return nil })).To(MatchError(openErr))
+			restoreOpen()
+
+			store = &SessionStore{
+				db:     openAuthScriptedDB(&authScriptedDBScript{close: func() error { return errors.New("session close failed") }}),
+				cancel: func() {},
+				done:   make(chan struct{}),
+			}
+			close(store.done)
+			Expect(store.db.Ping()).To(Succeed())
+			Expect(store.Close()).To(MatchError("session close failed"))
+
+			store = &SessionStore{
+				db: openAuthScriptedDB(&authScriptedDBScript{
+					query: func(string, []driver.NamedValue) (driver.Rows, error) {
+						return &authScriptedRows{
+							columns: []string{"expires_at", "revoked_at"},
+							values:  [][]driver.Value{{nil}},
+						}, nil
+					},
+				}),
+			}
+			active, err := store.IsActive(NewSessionIDUnchecked("session-1"), UserIDFromString("user-1"), "refresh", time.Now())
+			Expect(active).To(BeFalse())
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	ginkgo.Describe("user resolver", func() {
+		ginkgo.It("covers preload, double-check, and reload errors", func() {
+			service := NewUserService(&UserStore{})
+			listErr := errors.New("list users failed")
+			restoreUsers := setAuthSeam(&authUserStoreGetAllUsers, func(*UserStore) ([]*User, error) {
+				return nil, listErr
+			})
+			_, err := NewUserResolver(service)
+			Expect(err).To(MatchError(listErr))
+			resolver := &UserResolver{userService: service, resolved: map[UserID]*UserLabel{}}
+			Expect(resolver.Reload()).To(MatchError(listErr))
+			restoreUsers()
+
+			userID := UserIDFromString("user-1")
+			existing := &UserLabel{ID: userID.String(), Username: "cached"}
+			resolver = &UserResolver{userService: service, resolved: map[UserID]*UserLabel{}}
+			restoreGet := setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
+				resolver.mu.Lock()
+				resolver.resolved[userID] = existing
+				resolver.mu.Unlock()
+				return &User{ID: userID.String(), Username: "fresh"}, nil
+			})
+			label, err := resolver.ResolveUserLabel(userID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(label).To(BeIdenticalTo(existing))
+			restoreGet()
+		})
+	})
+
+	ginkgo.Describe("user store", func() {
+		ginkgo.It("covers connection, schema, close, and connect-failure branches", func() {
+			openErr := errors.New("user open failed")
+			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return nil, openErr
+			})
+			_, err := NewUserStore(ginkgo.GinkgoT().TempDir())
+			Expect(err).To(MatchError(openErr))
+			Expect((&UserStore{}).Connect()).To(MatchError(openErr))
+			Expect((&UserStore{}).ensureSchema()).To(MatchError(openErr))
+			Expect((&UserStore{}).CreateUser(fixtureUser())).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetUserByID(UserIDFromString("user-1"))
+			Expect(err).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetUserByUsername("editor")
+			Expect(err).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetUserByEmail("editor@example.com")
+			Expect(err).To(MatchError(openErr))
+			Expect((&UserStore{}).UpdateUser(fixtureUser())).To(MatchError(openErr))
+			Expect((&UserStore{}).DeleteUser(UserIDFromString("user-1"))).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetAdminUser()
+			Expect(err).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetAllUsers()
+			Expect(err).To(MatchError(openErr))
+			_, err = (&UserStore{}).CountAdminUsers()
+			Expect(err).To(MatchError(openErr))
+			_, err = (&UserStore{}).GetUserCount()
+			Expect(err).To(MatchError(openErr))
+			Expect((&UserStore{}).UpdatePassword(UserIDFromString("user-1"), "password")).To(MatchError(openErr))
+			restoreOpen()
+
+			schemaErr := errors.New("user schema failed")
+			store := &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				exec: func(string, []driver.NamedValue) (driver.Result, error) {
+					return nil, schemaErr
+				},
+			})}
+			Expect(store.ensureSchema()).To(MatchError(schemaErr))
+
+			store = &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				close: func() error {
+					return errors.New("user close failed")
+				},
+			})}
+			Expect(store.db.Ping()).To(Succeed())
+			Expect(store.Close()).To(MatchError("user close failed"))
+
+			Expect((&UserStore{}).mapConstraintViolationToError(errors.New("plain error"))).To(MatchError("plain error"))
+		})
+
+		ginkgo.It("covers query, scan, result, and exec errors", func() {
+			user := fixtureUser()
+
+			insertErr := errors.New("user insert failed")
+			store := &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				exec: func(string, []driver.NamedValue) (driver.Result, error) {
+					return nil, insertErr
+				},
+			})}
+			Expect(store.CreateUser(user)).To(MatchError(insertErr))
+
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
+			_, err := store.GetUserByID(UserIDFromString(user.ID))
+			Expect(err).To(HaveOccurred())
+			_, err = store.GetUserByUsername(user.Username)
+			Expect(err).To(HaveOccurred())
+			_, err = store.GetUserByEmail(user.Email)
+			Expect(err).To(HaveOccurred())
+			_, err = store.GetAdminUser()
+			Expect(err).To(HaveOccurred())
+
+			queryErr := errors.New("users query failed")
+			store = &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+				query: func(string, []driver.NamedValue) (driver.Rows, error) {
+					return nil, queryErr
+				},
+			})}
+			_, err = store.GetAllUsers()
+			Expect(err).To(MatchError(queryErr))
+
+			restoreCloseRows := setAuthSeam(&authCloseRows, func(interface{ Close() error }) error {
+				return errors.New("users rows close failed")
+			})
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns()})
+			Expect(store.GetAllUsers()).To(BeEmpty())
+			restoreCloseRows()
+
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
+			_, err = store.GetAllUsers()
+			Expect(err).To(HaveOccurred())
+
+			store = userStoreReturningRows(&authScriptedRows{columns: []string{"count"}, values: [][]driver.Value{{nil}}})
+			_, err = store.CountAdminUsers()
+			Expect(err).To(HaveOccurred())
+			_, err = store.GetUserCount()
+			Expect(err).To(HaveOccurred())
+
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
+			Expect(store.UpdateUser(user)).To(HaveOccurred())
+			Expect(store.DeleteUser(UserIDFromString(user.ID))).To(HaveOccurred())
+			Expect(store.UpdatePassword(UserIDFromString(user.ID), "new-password")).To(HaveOccurred())
+
+			rowsAffectedErr := errors.New("user rows affected failed")
+			store = userStoreWithUserAndExec(user, func(string, []driver.NamedValue) (driver.Result, error) {
+				return authScriptedResult{rowsAffectedErr: rowsAffectedErr}, nil
+			})
+			Expect(store.UpdateUser(user)).To(MatchError(rowsAffectedErr))
+
+			deleteErr := errors.New("delete failed")
+			store = userStoreWithUserAndExec(user, func(string, []driver.NamedValue) (driver.Result, error) {
+				return nil, deleteErr
+			})
+			Expect(store.DeleteUser(UserIDFromString(user.ID))).To(MatchError(deleteErr))
+
+			passwordErr := errors.New("password update failed")
+			store = userStoreWithUserAndExec(user, func(string, []driver.NamedValue) (driver.Result, error) {
+				return nil, passwordErr
+			})
+			Expect(store.UpdatePassword(UserIDFromString(user.ID), "new-password")).To(MatchError(passwordErr))
+
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns()})
+			Expect(store.UpdatePassword(UserIDFromString("missing"), "new-password")).To(Equal(ErrUserNotFound))
+		})
+	})
+})
+
+func openAuthScriptedDB(script *authScriptedDBScript) *sql.DB {
+	ginkgo.GinkgoHelper()
+
+	authScriptedDriverOnce.Do(func() {
+		sql.Register(authScriptedDriverName, authScriptedDriver{})
+	})
+
+	authScriptedScriptsMu.Lock()
+	authScriptedScriptSeq++
+	dsn := fmt.Sprintf("script-%d", authScriptedScriptSeq)
+	authScriptedScripts[dsn] = script
+	authScriptedScriptsMu.Unlock()
+
+	db, err := sql.Open(authScriptedDriverName, dsn)
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(func() {
+		_ = db.Close()
+		authScriptedScriptsMu.Lock()
+		delete(authScriptedScripts, dsn)
+		authScriptedScriptsMu.Unlock()
+	})
+	return db
+}
+
+func fixtureAPIKey() *APIKey {
+	ginkgo.GinkgoHelper()
+
+	return &APIKey{
+		ID:              NewAPIKeyIDUnchecked("api-key-1"),
+		UserID:          UserIDFromString("user-1"),
+		Name:            "automation",
+		Prefix:          "lwk",
+		Last4:           "1234",
+		Scopes:          []string{"read", "write"},
+		CreatedByUserID: UserIDFromString("user-1"),
+		CreatedAt:       time.Unix(1700000000, 0).UTC(),
+	}
+}
+
+func fixtureUser() *User {
+	ginkgo.GinkgoHelper()
+
+	return &User{
+		ID:       "user-1",
+		Username: "editor",
+		Password: "password",
+		Email:    "editor@example.com",
+		Role:     RoleEditor,
+	}
+}
+
+func newAPIKeyScannerWithScopes(scopes string) authFakeScanner {
+	return authFakeScanner{values: []any{
+		"api-key-1",
+		"user-1",
+		"automation",
+		"lwk",
+		"1234",
+		scopes,
+		"user-1",
+		int64(1700000000),
+		sql.NullInt64{},
+		sql.NullInt64{},
+	}}
+}
+
+func newStoredAPIKeyScannerWithScopes(scopes string) authFakeScanner {
+	return authFakeScanner{values: []any{
+		"api-key-1",
+		"user-1",
+		"automation",
+		"secret-hash",
+		"lwk",
+		"1234",
+		scopes,
+		"user-1",
+		int64(1700000000),
+		sql.NullInt64{},
+		sql.NullInt64{},
+	}}
+}
+
+func apiKeyColumns() []string {
+	return []string{
+		"id",
+		"user_id",
+		"name",
+		"prefix",
+		"last4",
+		"scopes",
+		"created_by_user_id",
+		"created_at",
+		"last_used_at",
+		"revoked_at",
+	}
+}
+
+func userColumns() []string {
+	return []string{"id", "username", "password", "email", "role"}
+}
+
+func userStoreReturningRows(rows *authScriptedRows) *UserStore {
+	ginkgo.GinkgoHelper()
+
+	return &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+		query: func(string, []driver.NamedValue) (driver.Rows, error) {
+			return cloneAuthScriptedRows(rows), nil
+		},
+	})}
+}
+
+func cloneAuthScriptedRows(rows *authScriptedRows) *authScriptedRows {
+	ginkgo.GinkgoHelper()
+
+	values := make([][]driver.Value, len(rows.values))
+	for i := range rows.values {
+		values[i] = append([]driver.Value(nil), rows.values[i]...)
+	}
+	return &authScriptedRows{
+		columns:  append([]string(nil), rows.columns...),
+		values:   values,
+		nextErr:  rows.nextErr,
+		closeErr: rows.closeErr,
+	}
+}
+
+func userStoreWithUserAndExec(user *User, exec func(string, []driver.NamedValue) (driver.Result, error)) *UserStore {
+	ginkgo.GinkgoHelper()
+
+	return &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
+		query: func(string, []driver.NamedValue) (driver.Rows, error) {
+			return &authScriptedRows{
+				columns: userColumns(),
+				values:  [][]driver.Value{{user.ID, user.Username, user.Password, user.Email, string(user.Role)}},
+			}, nil
+		},
+		exec: exec,
+	})}
+}

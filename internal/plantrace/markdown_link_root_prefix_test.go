@@ -1,11 +1,11 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"testing"
 )
 
 type markdownLinkRootPrefixEvidence struct {
@@ -20,11 +20,11 @@ type markdownLinkRootPrefixScenarioCoverage struct {
 
 var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenarioCoverage{
 	{"Prefixed absolute page link resolves inside wiki root", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot")},
-	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_test.go", "TestServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix")},
+	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_test.go", "ServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix")},
 	{"Configured prefix root resolves to the wiki root section", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot")},
 	{"Configured prefix distinguishes section and page syntax", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax")},
-	{"Relative links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeExternalAndHashLinksUnchanged")},
-	{"External and hash links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeExternalAndHashLinksUnchanged")},
+	{"Relative links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged")},
+	{"External and hash links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesExternalAndHashLinksUnchanged")},
 	{"Prefixed asset links resolve as workspace assets", mlrpEvidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateMarkdownContent_ResolvesPrefixedAssetWithMarkdownLinkRootPrefix")},
 	{"Workspace sync coerces absolute links to the configured prefix", mlrpEvidence("e2e/tests/workspace-sync.spec.ts", "markdown link root prefix rewrites unprefixed absolute links")},
 	{"Generated editor links include the configured prefix", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix autocomplete inserts prefixed page links")},
@@ -51,7 +51,8 @@ func mlrpEvidence(file string, text string) markdownLinkRootPrefixEvidence {
 	return markdownLinkRootPrefixEvidence{file: file, text: text}
 }
 
-func TestMarkdownLinkRootPrefixPlanScenarioTitleAuditIndex(t *testing.T) {
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixPlanScenarioTitleAuditIndex", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	planTitles := markdownLinkRootPrefixPlanScenarioTitles(t, filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if len(planTitles) != len(markdownLinkRootPrefixPlanScenarioCoverage) {
@@ -89,9 +90,11 @@ func TestMarkdownLinkRootPrefixPlanScenarioTitleAuditIndex(t *testing.T) {
 			t.Fatalf("scenario coverage %q is not present in the plan", title)
 		}
 	}
-}
 
-func TestMarkdownLinkRootPrefixFocusedE2ECommandsSetFeatureEnv(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixFocusedE2ECommandsSetFeatureEnv", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if err != nil {
@@ -111,9 +114,11 @@ func TestMarkdownLinkRootPrefixFocusedE2ECommandsSetFeatureEnv(t *testing.T) {
 	if found == 0 {
 		t.Fatal("no focused markdown link root prefix E2E commands found in plan")
 	}
-}
 
-func TestMarkdownLinkRootPrefixPlanIncludesBasePathSeparationE2ECommand(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixPlanIncludesBasePathSeparationE2ECommand", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if err != nil {
@@ -129,9 +134,11 @@ func TestMarkdownLinkRootPrefixPlanIncludesBasePathSeparationE2ECommand(t *testi
 		}
 	}
 	t.Fatal("plan lacks a focused E2E command that runs the base-path separation scenario without skipping")
-}
 
-func TestMarkdownLinkRootPrefixPlanIncludesSeparateRootE2EEnv(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixPlanIncludesSeparateRootE2EEnv", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if err != nil {
@@ -147,9 +154,11 @@ func TestMarkdownLinkRootPrefixPlanIncludesSeparateRootE2EEnv(t *testing.T) {
 		}
 	}
 	t.Fatal("plan lacks E2E_ENABLE_SEPARATE_ROOT_DIR=1 on the root-dir markdown link root prefix command")
-}
 
-func TestMarkdownLinkRootPrefixPlanUsesDefaultWorkspaceSyncE2E(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixPlanUsesDefaultWorkspaceSyncE2E", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 	if err != nil {
@@ -166,9 +175,11 @@ func TestMarkdownLinkRootPrefixPlanUsesDefaultWorkspaceSyncE2E(t *testing.T) {
 		}
 	}
 	t.Fatal("plan should run the MCP markdown link root prefix command with default workspace sync and without E2E_ENABLE_WORKSPACE_SYNC=1")
-}
 
-func TestMarkdownLinkRootPrefixMCPDocsKeepRoutePathsSeparateFromMarkdownHrefs(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixMCPDocsKeepRoutePathsSeparateFromMarkdownHrefs", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	docChecks := []struct {
 		path     string
@@ -204,9 +215,11 @@ func TestMarkdownLinkRootPrefixMCPDocsKeepRoutePathsSeparateFromMarkdownHrefs(t 
 			t.Fatalf("%s does not contain expected route-prefix separation evidence %q", docCheck.path, docCheck.required)
 		}
 	}
-}
 
-func TestMarkdownLinkRootPrefixRootReadmeDocumentsPublicConfigSurface(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestMarkdownLinkRootPrefixRootReadmeDocumentsPublicConfigSurface", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
 	if err != nil {
@@ -224,9 +237,11 @@ func TestMarkdownLinkRootPrefixRootReadmeDocumentsPublicConfigSurface(t *testing
 			t.Fatalf("root README does not document markdown link root prefix config surface: missing %q", required)
 		}
 	}
-}
 
-func TestRepoLocalLLMWikiSkillArtifactExposesInstallableSkill(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestRepoLocalLLMWikiSkillArtifactExposesInstallableSkill", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "skills", "llmwiki", "SKILL.md"))
 	if err != nil {
@@ -235,13 +250,14 @@ func TestRepoLocalLLMWikiSkillArtifactExposesInstallableSkill(t *testing.T) {
 	if !strings.HasPrefix(string(raw), "---\nname: llmwiki\n") {
 		t.Fatalf("tracked llmwiki skill does not expose installable skill frontmatter")
 	}
-}
+
+})
 
 func markdownLinkRootPrefixExtraEvidenceForTitle(title string) []markdownLinkRootPrefixEvidence {
 	return markdownLinkRootPrefixPlanExtraEvidence[title]
 }
 
-func markdownLinkRootPrefixPlanRepoRoot(t *testing.T) string {
+func markdownLinkRootPrefixPlanRepoRoot(t plantraceTestT) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -250,7 +266,7 @@ func markdownLinkRootPrefixPlanRepoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-func markdownLinkRootPrefixPlanScenarioTitles(t *testing.T, planPath string) []string {
+func markdownLinkRootPrefixPlanScenarioTitles(t plantraceTestT, planPath string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(planPath)
 	if err != nil {
@@ -266,7 +282,7 @@ func markdownLinkRootPrefixPlanScenarioTitles(t *testing.T, planPath string) []s
 	return titles
 }
 
-func assertMarkdownLinkRootPrefixEvidenceExists(t *testing.T, repoRoot string, title string, evidence markdownLinkRootPrefixEvidence) {
+func assertMarkdownLinkRootPrefixEvidenceExists(t plantraceTestT, repoRoot string, title string, evidence markdownLinkRootPrefixEvidence) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(repoRoot, evidence.file))
 	if err != nil {

@@ -250,7 +250,7 @@ func rewriteLinkDestination(currentPath tree.RoutePath, sourceKind MarkdownSourc
 	canonicalPageLink := strings.EqualFold(path.Ext(strings.TrimSpace(baseDest)), ".md")
 	targetKind := markdownLinkTargetKind(canonicalPageLink)
 	resolutionDest := stripMarkdownLinkRootPrefix(baseDest, markdownLinkRootPrefix)
-	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(currentPath, sourceKind), resolutionDest)
+	resolvedPath, err := linksResolveMarkdownRoutePath(sourceMarkdownFileForKind(currentPath, sourceKind), resolutionDest)
 	if err != nil || resolvedPath.IsRoot() && strings.TrimSpace(resolutionDest) == "" {
 		return destination, false, &RewriteWarning{
 			MessageID: rewriteWarningUnresolved,
@@ -328,7 +328,7 @@ func stripMarkdownLinkRootPrefix(destination string, prefix string) string {
 func relativeMarkdownFileLinkPath(currentPath tree.RoutePath, targetPath tree.RoutePath) string {
 	sourceFile := sourceMarkdownFileForKind(currentPath, MarkdownSourceKindPage)
 	targetFile := targetPath.MarkdownPagePath()
-	rel, err := filepath.Rel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(targetFile.FilesystemPath()))
+	rel, err := linksFilepathRel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(targetFile.FilesystemPath()))
 	if err != nil {
 		return targetFile.FilesystemPath()
 	}
@@ -343,7 +343,7 @@ func rewriteRelativeLinkForPathChange(oldCurrentPath tree.RoutePath, newCurrentP
 
 	canonicalPageLink := strings.EqualFold(path.Ext(strings.TrimSpace(baseDest)), ".md")
 	targetKind := markdownLinkTargetKind(canonicalPageLink)
-	resolvedPath, err := resolveMarkdownRoutePathForSource(sourceMarkdownFileForKind(oldCurrentPath, sourceKind), baseDest)
+	resolvedPath, err := linksResolveMarkdownRoutePath(sourceMarkdownFileForKind(oldCurrentPath, sourceKind), baseDest)
 	if err != nil || resolvedPath.IsRoot() && strings.TrimSpace(baseDest) == "" {
 		return destination, false, &RewriteWarning{
 			MessageID: rewriteWarningUnresolved,
@@ -424,7 +424,7 @@ func relativeMarkdownDestinationForSource(currentPath tree.RoutePath, sourceKind
 	if target.Clean() == "" {
 		return ""
 	}
-	rel, err := filepath.Rel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(target.FilesystemPath()))
+	rel, err := linksFilepathRel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(target.FilesystemPath()))
 	if err != nil {
 		return target.FilesystemPath()
 	}

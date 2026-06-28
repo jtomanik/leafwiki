@@ -4,18 +4,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
-func TestValidateWorkspace_AllowsDefaultRootUnderDataDir(t *testing.T) {
+var _ = ginkgo.It("TestValidateWorkspace_AllowsDefaultRootUnderDataDir", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 
 	if err := ValidateWorkspace(DefaultWorkspace(dataDir)); err != nil {
 		t.Fatalf("ValidateWorkspace default root failed: %v", err)
 	}
-}
+})
 
-func TestValidateWorkspace_RejectsRootDirContainingDataDir(t *testing.T) {
+var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirContainingDataDir", func() {
+	t := ginkgo.GinkgoT()
 	rootDir := filepath.Join(t.TempDir(), "wiki")
 	dataDir := filepath.Join(rootDir, "data")
 
@@ -26,9 +29,10 @@ func TestValidateWorkspace_RejectsRootDirContainingDataDir(t *testing.T) {
 	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
+})
 
-func TestValidateWorkspace_RejectsRootDirInsideReservedDataDirState(t *testing.T) {
+var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirInsideReservedDataDirState", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(dataDir, "assets", "pages")
 
@@ -39,26 +43,28 @@ func TestValidateWorkspace_RejectsRootDirInsideReservedDataDirState(t *testing.T
 	if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
+})
 
-func TestValidateWorkspace_RejectsRootDirInsideFederatedControlDirs(t *testing.T) {
-	for _, reserved := range []string{"wikid", "runtime"} {
-		t.Run(reserved, func(t *testing.T) {
-			dataDir := filepath.Join(t.TempDir(), ".leafwiki")
-			rootDir := filepath.Join(dataDir, reserved, "workspace")
+var _ = ginkgo.DescribeTable("TestValidateWorkspace_RejectsRootDirInsideFederatedControlDirs",
+	func(reserved string) {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), ".leafwiki")
+		rootDir := filepath.Join(dataDir, reserved, "workspace")
 
-			err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-			if err == nil {
-				t.Fatalf("expected root dir inside %s control state to be rejected", reserved)
-			}
-			if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
+		err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		if err == nil {
+			t.Fatalf("expected root dir inside %s control state to be rejected", reserved)
+		}
+		if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	},
+	ginkgo.Entry("wikid", "wikid"),
+	ginkgo.Entry("runtime", "runtime"),
+)
 
-func TestValidateWorkspace_RejectsRootDirSymlinkContainingDataDir(t *testing.T) {
+var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirSymlinkContainingDataDir", func() {
+	t := ginkgo.GinkgoT()
 	baseDir := t.TempDir()
 	rootTarget := filepath.Join(baseDir, "wiki")
 	dataDir := filepath.Join(rootTarget, "data")
@@ -77,9 +83,10 @@ func TestValidateWorkspace_RejectsRootDirSymlinkContainingDataDir(t *testing.T) 
 	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
+})
 
-func TestValidateWorkspace_RejectsRootDirSymlinkInsideReservedDataDirState(t *testing.T) {
+var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirSymlinkInsideReservedDataDirState", func() {
+	t := ginkgo.GinkgoT()
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootTarget := filepath.Join(dataDir, "assets", "pages")
@@ -98,4 +105,4 @@ func TestValidateWorkspace_RejectsRootDirSymlinkInsideReservedDataDirState(t *te
 	if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
+})

@@ -31,6 +31,12 @@ var Environment = "development"
 
 const DefaultFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌿</text></svg>`
 
+var (
+	frontendSubFS             = fs.Sub
+	frontendReadFile          = fs.ReadFile
+	customStylesheetRelPathFn = filepath.Rel
+)
+
 // slogWriter forwards gin debug output (e.g. route registration) to slog at Debug level.
 type slogWriter struct{ logger *slog.Logger }
 
@@ -228,11 +234,11 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 
 	// Serve the embedded frontend SPA on all unknown routes.
 	if EmbedFrontend == "true" && !opts.DisableFrontendRoutes {
-		fsys, err := fs.Sub(frontend, "dist")
+		fsys, err := frontendSubFS(frontend, "dist")
 		if err != nil {
 			panic("failed to create sub FS: " + err.Error())
 		}
-		staticFS, err := fs.Sub(frontend, "dist/static")
+		staticFS, err := frontendSubFS(frontend, "dist/static")
 		if err != nil {
 			panic("failed to create sub FS: " + err.Error())
 		}
@@ -276,7 +282,7 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 					c.Header("X-Frame-Options", "DENY")
 				}
 				c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-				data, err := fs.ReadFile(fsys, "index.html")
+				data, err := frontendReadFile(fsys, "index.html")
 				if err != nil {
 					c.Status(http.StatusNotFound)
 					return
@@ -345,7 +351,7 @@ func NormalizeCustomStylesheetPath(storageDir, customStylesheet string) (string,
 	cleanStorageDir := filepath.Clean(storageDir)
 	cleanCSSPath := filepath.Clean(cssPath)
 
-	relPath, err := filepath.Rel(cleanStorageDir, cleanCSSPath)
+	relPath, err := customStylesheetRelPathFn(cleanStorageDir, cleanCSSPath)
 	if err != nil {
 		return "", err
 	}

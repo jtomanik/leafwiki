@@ -11,6 +11,11 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
+var (
+	wikidFilepathAbs  = filepath.Abs
+	wikidEvalSymlinks = filepath.EvalSymlinks
+)
+
 const RegistrySchemaVersion = 1
 
 type RegistryDocument struct {
@@ -87,11 +92,11 @@ func normalizeWorkspaceRecord(workspace WorkspaceRecord) WorkspaceRecord {
 }
 
 func canonicalRegistryPath(path string) (string, error) {
-	absPath, err := filepath.Abs(filepath.Clean(strings.TrimSpace(path)))
+	absPath, err := wikidFilepathAbs(filepath.Clean(strings.TrimSpace(path)))
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absPath)
+	resolved, err := wikidEvalSymlinks(absPath)
 	if err == nil {
 		return filepath.Clean(resolved), nil
 	}
@@ -107,7 +112,7 @@ func canonicalRegistryPath(path string) (string, error) {
 		}
 		suffix = append([]string{filepath.Base(current)}, suffix...)
 		current = parent
-		resolved, err := filepath.EvalSymlinks(current)
+		resolved, err := wikidEvalSymlinks(current)
 		if err == nil {
 			parts := append([]string{resolved}, suffix...)
 			return filepath.Clean(filepath.Join(parts...)), nil

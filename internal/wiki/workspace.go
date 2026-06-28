@@ -34,6 +34,11 @@ var reservedDataDirEntries = []string{
 	"branding.json",
 }
 
+var (
+	resolveWorkspaceAbs          = filepath.Abs
+	resolveWorkspaceEvalSymlinks = filepath.EvalSymlinks
+)
+
 func DefaultWorkspace(dataDir string) Workspace {
 	return NormalizeWorkspace(Workspace{ID: "default", DataDir: dataDir})
 }
@@ -71,9 +76,6 @@ func ValidateWorkspace(workspace Workspace) error {
 	if strings.TrimSpace(workspace.DataDir) == "" {
 		return fmt.Errorf("data dir must not be empty")
 	}
-	if strings.TrimSpace(workspace.RootDir) == "" {
-		return fmt.Errorf("root dir must not be empty")
-	}
 	cleanData, err := resolveWorkspacePath(workspace.DataDir)
 	if err != nil {
 		return fmt.Errorf("resolve data dir: %w", err)
@@ -98,11 +100,11 @@ func ValidateWorkspace(workspace Workspace) error {
 }
 
 func resolveWorkspacePath(path string) (string, error) {
-	absPath, err := filepath.Abs(filepath.Clean(path))
+	absPath, err := resolveWorkspaceAbs(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absPath)
+	resolved, err := resolveWorkspaceEvalSymlinks(absPath)
 	if err == nil {
 		return filepath.Clean(resolved), nil
 	}
@@ -119,7 +121,7 @@ func resolveWorkspacePath(path string) (string, error) {
 		}
 		suffix = append([]string{filepath.Base(current)}, suffix...)
 		current = parent
-		resolved, err := filepath.EvalSymlinks(current)
+		resolved, err := resolveWorkspaceEvalSymlinks(current)
 		if err == nil {
 			parts := append([]string{resolved}, suffix...)
 			return filepath.Clean(filepath.Join(parts...)), nil

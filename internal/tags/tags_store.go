@@ -24,29 +24,50 @@ type TagCount struct {
 	Count int    `json:"count"`
 }
 
+type tagCountScanner interface {
+	Scan(dest ...any) error
+}
+
+var (
+	openTagsDB = func(dbPath string) (*sql.DB, error) {
+		return sql.Open("sqlite", dbPath)
+	}
+	ensureTagsSchema = func(s *TagsStore) error {
+		return s.ensureSchema()
+	}
+	isRecoverableTagsDBError = sqliteutil.IsSQLiteRecoverableError
+	removeTagsSQLiteFiles    = sqliteutil.RemoveSQLiteFiles
+	scanTagCount             = func(scanner tagCountScanner, tc *TagCount) error {
+		return scanner.Scan(&tc.Tag, &tc.Count)
+	}
+	closeTagsDB = func(db *sql.DB) error {
+		return db.Close()
+	}
+)
+
 func NewTagsStore(storageDir string) (*TagsStore, error) {
 	normalized := filepath.FromSlash(strings.ReplaceAll(storageDir, `\`, `/`))
 	dbPath := filepath.Join(normalized, "tags.db")
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := openTagsDB(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tags database: %w", err)
 	}
 
 	s := &TagsStore{db: db}
-	if err := s.ensureSchema(); err != nil {
+	if err := ensureTagsSchema(s); err != nil {
 		_ = db.Close()
-		if !sqliteutil.IsSQLiteRecoverableError(err) {
+		if !isRecoverableTagsDBError(err) {
 			return nil, err
 		}
 		slog.Default().Warn("tags database corrupt, removing and retrying", "error", err)
-		sqliteutil.RemoveSQLiteFiles(dbPath)
-		db, err = sql.Open("sqlite", dbPath)
+		removeTagsSQLiteFiles(dbPath)
+		db, err = openTagsDB(dbPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reopen tags database after recovery: %w", err)
 		}
 		s = &TagsStore{db: db}
-		if err = s.ensureSchema(); err != nil {
+		if err = ensureTagsSchema(s); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -259,7 +280,7 @@ func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, er
 	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
-		if err := rows.Scan(&tc.Tag, &tc.Count); err != nil {
+		if err := scanTagCount(rows, &tc); err != nil {
 			return nil, err
 		}
 		result = append(result, tc)
@@ -318,7 +339,7 @@ func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pag
 	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
-		if err := rows.Scan(&tc.Tag, &tc.Count); err != nil {
+		if err := scanTagCount(rows, &tc); err != nil {
 			return nil, err
 		}
 		result = append(result, tc)
@@ -386,7 +407,7 @@ func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) ([]TagCou
 	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
-		if err := rows.Scan(&tc.Tag, &tc.Count); err != nil {
+		if err := scanTagCount(rows, &tc); err != nil {
 			return nil, err
 		}
 		result = append(result, tc)
@@ -445,7 +466,7 @@ func (s *TagsStore) Close() error {
 	defer s.mu.Unlock()
 
 	if s.db != nil {
-		if err := s.db.Close(); err != nil {
+		if err := closeTagsDB(s.db); err != nil {
 			return err
 		}
 		s.db = nil

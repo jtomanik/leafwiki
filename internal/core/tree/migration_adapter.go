@@ -1,13 +1,11 @@
 package tree
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/treemigration"
 )
 
@@ -168,7 +166,7 @@ func (t *TreeService) migrationDependencies() treemigration.Dependencies {
 		CurrentSchemaVersion: CurrentSchemaVersion,
 		SaveTree:             t.persistLegacyTreeSnapshotLocked,
 		SaveSchema: func(version int) error {
-			return saveSchema(t.dataDir, version)
+			return treeSaveSchema(t.dataDir, version)
 		},
 		IsMissingContentErr: func(err error) bool {
 			return errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrFileNotFound)
@@ -181,13 +179,13 @@ func (t *TreeService) persistLegacyTreeSnapshotLocked() error {
 		return fmt.Errorf("legacy migration snapshot requires loaded tree")
 	}
 
-	raw, err := json.Marshal(t.tree)
+	raw, err := treeJSONMarshal(t.tree)
 	if err != nil {
 		return fmt.Errorf("marshal legacy migration snapshot: %w", err)
 	}
 	raw = append(raw, byte(10))
 
-	if err := shared.WriteFileAtomic(filepath.Join(t.dataDir, legacyTreeFilename), raw, 0o644); err != nil {
+	if err := treeWriteFileAtomic(filepath.Join(t.dataDir, legacyTreeFilename), raw, 0o644); err != nil {
 		return fmt.Errorf("write legacy migration snapshot: %w", err)
 	}
 

@@ -3,16 +3,17 @@ package wikid
 import (
 	"context"
 	"encoding/json"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestPrivateWorkspaceAPIListsGrantedWorkspaces(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIListsGrantedWorkspaces", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	home, err := registry.BootstrapHome()
@@ -63,9 +64,10 @@ func TestPrivateWorkspaceAPIListsGrantedWorkspaces(t *testing.T) {
 	if len(out.Workspaces) != 1 || out.Workspaces[0].ID != home.ID || out.Workspaces[0].Role != GrantRoleViewer {
 		t.Fatalf("workspaces = %#v, want only granted home", out.Workspaces)
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIListsWorkspaceMarkdownLinkRootPrefix(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIListsWorkspaceMarkdownLinkRootPrefix", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
@@ -107,9 +109,10 @@ func TestPrivateWorkspaceAPIListsWorkspaceMarkdownLinkRootPrefix(t *testing.T) {
 	if out.Workspaces[0].MarkdownLinkRootPrefix != "/docs" {
 		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspaces[0].MarkdownLinkRootPrefix)
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStoredGrants(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStoredGrants", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	home, err := registry.BootstrapHome()
@@ -181,9 +184,10 @@ func TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStore
 	if len(stored) != 0 {
 		t.Fatalf("stored admin grants = %#v, want none", stored)
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
@@ -241,9 +245,10 @@ func TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace(t *testing.T) {
 	if out.Workspace.MarkdownLinkRootPrefix != "/docs" {
 		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspace.MarkdownLinkRootPrefix)
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIRejectsUngrantedWorkspace(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIRejectsUngrantedWorkspace", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
@@ -286,9 +291,10 @@ func TestPrivateWorkspaceAPIRejectsUngrantedWorkspace(t *testing.T) {
 	if !strings.Contains(body.Error.Message, "workspace access denied") {
 		t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIReturnsNotFoundForUnknownWorkspace(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIReturnsNotFoundForUnknownWorkspace", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	if _, err := registry.BootstrapHome(); err != nil {
@@ -310,9 +316,10 @@ func TestPrivateWorkspaceAPIReturnsNotFoundForUnknownWorkspace(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestPrivateWorkspaceAPIRejectsInvalidWorkspaceIDBeforeLookup(t *testing.T) {
+var _ = ginkgo.It("TestPrivateWorkspaceAPIRejectsInvalidWorkspaceIDBeforeLookup", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	home, err := registry.BootstrapHome()
@@ -343,4 +350,4 @@ func TestPrivateWorkspaceAPIRejectsInvalidWorkspaceIDBeforeLookup(t *testing.T) 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 for invalid workspace ID: %s", rec.Code, rec.Body.String())
 	}
-}
+})

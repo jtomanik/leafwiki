@@ -6,125 +6,103 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/assets"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/wiki"
 )
 
-func TestRouterExcludesPublicIdentityAndGlobalRoutes(t *testing.T) {
-	w := newTestWiki(t)
-	defer w.Close()
-	router := NewRouter(w, httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+var _ = ginkgo.Describe("workspaced routers", func() {
+	ginkgo.DescribeTable("TestRouterExcludesPublicIdentityAndGlobalRoutes",
+		func(method string, path string) {
+			w := newTestWiki()
+			ginkgo.DeferCleanup(func() {
+				Expect(w.Close()).To(Succeed())
+			})
+			router := NewRouter(w, httpinternal.RouterOptions{
+				PublicAccess:            true,
+				AllowInsecure:           true,
+				AuthDisabled:            true,
+				AccessTokenTimeout:      15 * time.Minute,
+				RefreshTokenTimeout:     7 * 24 * time.Hour,
+				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			})
+
+			rec := request(router, method, path)
+			Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
+		},
+		ginkgo.Entry("config", http.MethodGet, "/api/config"),
+		ginkgo.Entry("auth me", http.MethodGet, "/api/auth/me"),
+		ginkgo.Entry("login", http.MethodPost, "/api/auth/login"),
+		ginkgo.Entry("users", http.MethodGet, "/api/users"),
+		ginkgo.Entry("branding", http.MethodGet, "/api/branding"),
+		ginkgo.Entry("oauth token", http.MethodPost, "/oauth/token"),
+		ginkgo.Entry("oauth metadata", http.MethodGet, "/.well-known/oauth-protected-resource/mcp"),
+	)
+
+	ginkgo.It("TestRouterExcludesPublicIdentityAndGlobalRoutes keeps workspace routes available", func() {
+		w := newTestWiki()
+		ginkgo.DeferCleanup(func() {
+			Expect(w.Close()).To(Succeed())
+		})
+		router := NewRouter(w, httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+
+		rec := request(router, http.MethodGet, "/api/tree")
+		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 	})
 
-	for _, tc := range []struct {
-		name   string
-		method string
-		path   string
-	}{
-		{name: "config", method: http.MethodGet, path: "/api/config"},
-		{name: "auth me", method: http.MethodGet, path: "/api/auth/me"},
-		{name: "login", method: http.MethodPost, path: "/api/auth/login"},
-		{name: "users", method: http.MethodGet, path: "/api/users"},
-		{name: "branding", method: http.MethodGet, path: "/api/branding"},
-		{name: "oauth token", method: http.MethodPost, path: "/oauth/token"},
-		{name: "oauth metadata", method: http.MethodGet, path: "/.well-known/oauth-protected-resource/mcp"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := request(router, tc.method, tc.path)
-			if rec.Code != http.StatusNotFound {
-				t.Fatalf("%s %s status = %d, want 404: %s", tc.method, tc.path, rec.Code, rec.Body.String())
-			}
-		})
-	}
+	ginkgo.DescribeTable("TestRoutersDoNotExposeEmbeddedFrontendRoutes",
+		func(routerFactory func(*wiki.Wiki) http.Handler, path string) {
+			embedFrontendOrig := httpinternal.EmbedFrontend
+			httpinternal.EmbedFrontend = "true"
+			ginkgo.DeferCleanup(func() {
+				httpinternal.EmbedFrontend = embedFrontendOrig
+			})
+			stylesheetDir := ginkgo.GinkgoT().TempDir()
+			Expect(os.WriteFile(filepath.Join(stylesheetDir, "custom.css"), []byte("body { color: red; }\n"), 0o644)).To(Succeed())
+			ginkgo.GinkgoT().Chdir(stylesheetDir)
 
-	rec := request(router, http.MethodGet, "/api/tree")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/tree status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-}
+			w := newTestWiki()
+			ginkgo.DeferCleanup(func() {
+				Expect(w.Close()).To(Succeed())
+			})
+			router := routerFactory(w)
 
-func TestRoutersDoNotExposeEmbeddedFrontendRoutes(t *testing.T) {
-	embedFrontendOrig := httpinternal.EmbedFrontend
-	httpinternal.EmbedFrontend = "true"
-	t.Cleanup(func() {
-		httpinternal.EmbedFrontend = embedFrontendOrig
-	})
-	stylesheetDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stylesheetDir, "custom.css"), []byte("body { color: red; }\n"), 0o644); err != nil {
-		t.Fatalf("write custom stylesheet: %v", err)
-	}
-	t.Chdir(stylesheetDir)
-
-	routerOptions := func() httpinternal.RouterOptions {
-		opts := workspacedRouterOptions()
-		opts.CustomStylesheet = "custom.css"
-		return opts
-	}
-
-	for _, tc := range []struct {
-		name   string
-		router func(*wiki.Wiki) http.Handler
-	}{
-		{
-			name: "workspaced",
-			router: func(w *wiki.Wiki) http.Handler {
-				return NewRouter(w, routerOptions())
-			},
+			rec := request(router, http.MethodGet, path)
+			Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
 		},
-		{
-			name: "authenticated workspaced",
-			router: func(w *wiki.Wiki) http.Handler {
-				return NewAuthenticatedRouter(w, routerOptions(), PrivateAuthOptions{
-					DaemonToken: "private-token",
-					WorkspaceID: "current",
-					Now:         func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) },
-				})
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			w := newTestWiki(t)
-			defer w.Close()
-			router := tc.router(w)
+		ginkgo.Entry("workspaced custom stylesheet", workspacedRouterFactory, "/custom.css"),
+		ginkgo.Entry("workspaced favicon", workspacedRouterFactory, "/favicon.svg"),
+		ginkgo.Entry("workspaced static asset", workspacedRouterFactory, "/static/index-DYW7NERi.js"),
+		ginkgo.Entry("workspaced spa route", workspacedRouterFactory, "/workspace-spa-route"),
+		ginkgo.Entry("authenticated workspaced custom stylesheet", authenticatedWorkspacedRouterFactory, "/custom.css"),
+		ginkgo.Entry("authenticated workspaced favicon", authenticatedWorkspacedRouterFactory, "/favicon.svg"),
+		ginkgo.Entry("authenticated workspaced static asset", authenticatedWorkspacedRouterFactory, "/static/index-DYW7NERi.js"),
+		ginkgo.Entry("authenticated workspaced spa route", authenticatedWorkspacedRouterFactory, "/workspace-spa-route"),
+	)
+})
 
-			for _, path := range []string{
-				"/custom.css",
-				"/favicon.svg",
-				"/static/index-DYW7NERi.js",
-				"/workspace-spa-route",
-			} {
-				rec := request(router, http.MethodGet, path)
-				if rec.Code != http.StatusNotFound {
-					t.Fatalf("GET %s status = %d, want 404 route absence: %s", path, rec.Code, rec.Body.String())
-				}
-			}
-		})
-	}
-}
-
-func newTestWiki(t *testing.T) *wiki.Wiki {
-	t.Helper()
+func newTestWiki() *wiki.Wiki {
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		StorageDir:          t.TempDir(),
+		StorageDir:          ginkgo.GinkgoT().TempDir(),
 		AdminPassword:       "admin",
 		JWTSecret:           "secret",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
 	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return w
 }
 
@@ -137,6 +115,22 @@ func workspacedRouterOptions() httpinternal.RouterOptions {
 		RefreshTokenTimeout:     7 * 24 * time.Hour,
 		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 	}
+}
+
+func workspacedRouterFactory(w *wiki.Wiki) http.Handler {
+	opts := workspacedRouterOptions()
+	opts.CustomStylesheet = "custom.css"
+	return NewRouter(w, opts)
+}
+
+func authenticatedWorkspacedRouterFactory(w *wiki.Wiki) http.Handler {
+	opts := workspacedRouterOptions()
+	opts.CustomStylesheet = "custom.css"
+	return NewAuthenticatedRouter(w, opts, PrivateAuthOptions{
+		DaemonToken: "private-token",
+		WorkspaceID: "current",
+		Now:         func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) },
+	})
 }
 
 func request(router http.Handler, method, path string) *httptest.ResponseRecorder {

@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/markdownlinks"
@@ -39,7 +41,8 @@ func gitRevisionActorIDStrings(ids []gitrevisions.ActorID) []string {
 // - Migration writeback is captured in revision history
 // - Migration write failure reports sync validation state without losing raw content
 
-func TestServiceSyncNowCommitsAndReconstructsDirectMarkdownCreate(t *testing.T) {
+var _ = It("ServiceSyncNowCommitsAndReconstructsDirectMarkdownCreate", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -87,9 +90,10 @@ content`)
 	if !strings.Contains(page.RawContent, "content") {
 		t.Fatalf("page raw content = %q, want synced content", page.RawContent)
 	}
-}
+})
 
-func TestServiceSyncNowImportsNormalizableWorkspaceRoutes(t *testing.T) {
+var _ = It("ServiceSyncNowImportsNormalizableWorkspaceRoutes", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -141,9 +145,10 @@ content`)
 	if page.Title != "Agent Hooks Plan" || !strings.Contains(page.Content, "content") {
 		t.Fatalf("page = %#v, want imported normalized plan content", page)
 	}
-}
+})
 
-func TestServiceSyncNowTracksUppercaseSectionIndexHistory(t *testing.T) {
+var _ = It("ServiceSyncNowTracksUppercaseSectionIndexHistory", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -224,9 +229,10 @@ section content`)
 	if !strings.HasPrefix(older.Content, "---\n") || !strings.Contains(older.Content, "section content") {
 		t.Fatalf("older snapshot content = %q, want raw uppercase section index content", older.Content)
 	}
-}
+})
 
-func TestServiceSyncNowAmendsMetadataWritebacksIntoSameBatchCommit(t *testing.T) {
+var _ = It("ServiceSyncNowAmendsMetadataWritebacksIntoSameBatchCommit", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -271,10 +277,11 @@ func TestServiceSyncNowAmendsMetadataWritebacksIntoSameBatchCommit(t *testing.T)
 	if !strings.Contains(snapshot.Content, "<!-- leafwiki\n") || !strings.Contains(snapshot.Content, "  id:") {
 		t.Fatalf("snapshot content was not amended with canonical metadata: %q", snapshot.Content)
 	}
-}
+})
 
 // - Old extensionless page link migrates to .md
-func TestServiceSyncNowRewritesResolvableLegacyPageLinkBeforeValidation(t *testing.T) {
+var _ = It("ServiceSyncNowRewritesResolvableLegacyPageLinkBeforeValidation", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -331,9 +338,10 @@ leafwiki_title: Page B
 	if !strings.Contains(page.RawContent, "[B](/docs/b.md)") {
 		t.Fatalf("page raw content = %q, want canonical .md page link after first sync", page.RawContent)
 	}
-}
+})
 
-func TestServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix(t *testing.T) {
+var _ = It("ServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	repoRoot := t.TempDir()
 	rootDir := filepath.Join(repoRoot, "docs")
@@ -393,11 +401,12 @@ leafwiki_title: Glossary
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshot count = %d, want raw commit plus one prefixed canonical migration: %#v", len(snapshots), snapshots)
 	}
-}
+})
 
 // - Relative old page link migrates to relative .md
 // - Existing canonical .md page link is not rewritten
-func TestServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical(t *testing.T) {
+var _ = It("ServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -449,10 +458,11 @@ leafwiki_title: Page B Relative
 	if strings.Count(content, "../b.md") != 2 || strings.Contains(content, "](../b)") {
 		t.Fatalf("source/a.md = %q, want legacy relative link migrated and canonical link unchanged", content)
 	}
-}
+})
 
 // - Duplicate syntaxes do not create duplicate target identities after migration
-func TestServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity(t *testing.T) {
+var _ = It("ServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -523,10 +533,11 @@ leafwiki_title: Page B Duplicate Syntax
 	if got := linkStatus.Outgoings[0].ToPageID; got != newFixturePageID("page-b-duplicate-syntax") {
 		t.Fatalf("ToPageID = %q, want page-b-duplicate-syntax", got)
 	}
-}
+})
 
 // - Migration writeback is captured in revision history
-func TestServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions(t *testing.T) {
+var _ = It("ServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -594,9 +605,10 @@ leafwiki_title: Page B
 	if !sawRaw || !sawCanonical {
 		t.Fatalf("revision history raw=%v canonical=%v, want both raw incoming and canonical writeback", sawRaw, sawCanonical)
 	}
-}
+})
 
-func TestServiceSyncNowCanonicalizesCompleteLegacyMetadataAndKeepsRawRevision(t *testing.T) {
+var _ = It("ServiceSyncNowCanonicalizesCompleteLegacyMetadataAndKeepsRawRevision", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -699,9 +711,10 @@ Fully populated legacy metadata.
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshot count = %d, want raw commit plus canonical writeback and no repeat revisions: %#v", len(snapshots), snapshots)
 	}
-}
+})
 
-func TestServiceCanonicalMigrationRollsBackWhenLaterWriteFails(t *testing.T) {
+var _ = It("ServiceCanonicalMigrationRollsBackWhenLaterWriteFails", func() {
+	t := GinkgoT()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	service := &Service{rootDir: rootDir}
 
@@ -767,9 +780,10 @@ leafwiki_title: Second Target
 	if got := readFileString(t, secondPath); got != secondOriginal {
 		t.Fatalf("second source = %q, want original content after failed write", got)
 	}
-}
+})
 
-func TestWriteCanonicalMarkdownRewritesAtomicallyRollsBackCommittedRename(t *testing.T) {
+var _ = It("WriteCanonicalMarkdownRewritesAtomicallyRollsBackCommittedRename", func() {
+	t := GinkgoT()
 	rootDir := t.TempDir()
 	firstPath := filepath.Join(rootDir, "first.md")
 	blockingDir := filepath.Join(rootDir, "blocking")
@@ -800,9 +814,10 @@ func TestWriteCanonicalMarkdownRewritesAtomicallyRollsBackCommittedRename(t *tes
 	if got := readFileString(t, firstPath); got != firstOriginal {
 		t.Fatalf("first source = %q, want original content after committed rename rollback", got)
 	}
-}
+})
 
-func TestServiceSyncNowRollsBackCanonicalMigrationWhenWritebackCaptureFails(t *testing.T) {
+var _ = It("ServiceSyncNowRollsBackCanonicalMigrationWhenWritebackCaptureFails", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -863,10 +878,11 @@ leafwiki_title: Page B
 	if !strings.Contains(page.RawContent, "[B](/docs/b)") || strings.Contains(page.RawContent, "[B](/docs/b.md)") {
 		t.Fatalf("page raw content = %q, want reconstructed non-canonical content after rollback", page.RawContent)
 	}
-}
+})
 
 // - Migration write failure reports sync validation state without losing raw content
-func TestServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails(t *testing.T) {
+var _ = It("ServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -940,9 +956,10 @@ leafwiki_title: Page B
 	if derivedRebuilds != 0 {
 		t.Fatalf("derived rebuilds = %d, want none after migration write failure", derivedRebuilds)
 	}
-}
+})
 
-func TestServiceSyncNowReportsMetadataWritebackFailureDuringReconstruction(t *testing.T) {
+var _ = It("ServiceSyncNowReportsMetadataWritebackFailureDuringReconstruction", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1008,10 +1025,11 @@ body
 	if raw := readFileString(t, sourcePath); strings.HasPrefix(raw, "<!-- leafwiki\n") {
 		t.Fatalf("source file was canonicalized despite writeback failure: %q", raw)
 	}
-}
+})
 
 // - Migration is idempotent
-func TestServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision(t *testing.T) {
+var _ = It("ServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1059,10 +1077,11 @@ leafwiki_title: Page B
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshot count = %d, want raw commit plus canonical migration writeback and no repeat revisions: %#v", len(snapshots), snapshots)
 	}
-}
+})
 
 // - Unresolved old extensionless page link becomes validation error
-func TestServiceSyncNowLeavesUnresolvedLegacyPageLinkAndReportsValidationError(t *testing.T) {
+var _ = It("ServiceSyncNowLeavesUnresolvedLegacyPageLinkAndReportsValidationError", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1109,10 +1128,11 @@ leafwiki_title: Page A
 	if status.ValidationErrors[0].Path != "docs/a" || !strings.Contains(status.ValidationErrors[0].Message, "/docs/missing") {
 		t.Fatalf("ValidationErrors = %#v, want source path and missing link detail", status.ValidationErrors)
 	}
-}
+})
 
 // - Relative link cannot escape the workspace root
-func TestServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation(t *testing.T) {
+var _ = It("ServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	workspaceParent := t.TempDir()
 	rootDir := filepath.Join(workspaceParent, "workspace")
@@ -1175,10 +1195,11 @@ leafwiki_title: Page A
 			t.Fatalf("ValidationErrors = %#v, want invalid_link details for docs/a", status.ValidationErrors)
 		}
 	}
-}
+})
 
 // - Ambiguous extensionless link is left as validation error
-func TestServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite(t *testing.T) {
+var _ = It("ServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1242,9 +1263,10 @@ leafwiki_title: Sync Section
 		!strings.Contains(status.ValidationErrors[0].Message, "/docs/sync") {
 		t.Fatalf("ValidationErrors = %#v, want ambiguous legacy link detail", status.ValidationErrors)
 	}
-}
+})
 
-func TestServiceSyncNowPreservesMigrationAmbiguityWhenNormalValidationAlsoFails(t *testing.T) {
+var _ = It("ServiceSyncNowPreservesMigrationAmbiguityWhenNormalValidationAlsoFails", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1303,9 +1325,10 @@ leafwiki_title: Sync Section
 	}
 	assertValidationErrorContains("ambiguous_legacy_link")
 	assertValidationErrorContains("/docs/missing")
-}
+})
 
-func TestCanonicalMigrationValidationErrorsUseNormalizedRoutePath(t *testing.T) {
+var _ = It("CanonicalMigrationValidationErrorsUseNormalizedRoutePath", func() {
+	t := GinkgoT()
 	validationErrors := canonicalMigrationValidationErrors(t.TempDir(), "plans/agent_hooks.PLAN.md", []markdownlinks.Issue{{
 		Code:        "ambiguous_legacy_link",
 		Destination: "/plans/sync",
@@ -1317,10 +1340,11 @@ func TestCanonicalMigrationValidationErrorsUseNormalizedRoutePath(t *testing.T) 
 	if validationErrors[0].Path != "plans/agent-hooks-plan" {
 		t.Fatalf("validation error path = %q, want plans/agent-hooks-plan", validationErrors[0].Path)
 	}
-}
+})
 
 // - Old extensionless section link remains extensionless
-func TestServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop(t *testing.T) {
+var _ = It("ServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1375,9 +1399,10 @@ leafwiki_title: Sync
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshot count = %d, want raw sync plus canonical writeback with no repeat canonicalization revision: %#v", len(snapshots), snapshots)
 	}
-}
+})
 
-func TestServiceSyncNowPreservesOriginalChangedMarkdownCountWhenAmendingMetadataWritebacks(t *testing.T) {
+var _ = It("ServiceSyncNowPreservesOriginalChangedMarkdownCountWhenAmendingMetadataWritebacks", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1425,9 +1450,10 @@ page:
 	if snapshots[0].ChangedMarkdownCount != 2 {
 		t.Fatalf("ChangedMarkdownCount = %d, want original two-file snapshot count", snapshots[0].ChangedMarkdownCount)
 	}
-}
+})
 
-func TestServiceSyncNowRecordsChangedMarkdownPaths(t *testing.T) {
+var _ = It("ServiceSyncNowRecordsChangedMarkdownPaths", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -1462,9 +1488,10 @@ func TestServiceSyncNowRecordsChangedMarkdownPaths(t *testing.T) {
 	if got := fakeTree.reconstructCount(); got != 1 {
 		t.Fatalf("reconstructs = %d, want 1", got)
 	}
-}
+})
 
-func TestServiceSyncNowLogsStartupPhases(t *testing.T) {
+var _ = It("ServiceSyncNowLogsStartupPhases", func() {
+	t := GinkgoT()
 	var logs bytes.Buffer
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -1508,9 +1535,10 @@ func TestServiceSyncNowLogsStartupPhases(t *testing.T) {
 	if !strings.Contains(logText, "workspace sync startup phase completed") {
 		t.Fatalf("startup sync logs missing phase completion message:\n%s", logText)
 	}
-}
+})
 
-func TestServiceListSnapshotPagePropagatesChangedMarkdownPathErrors(t *testing.T) {
+var _ = It("ServiceListSnapshotPagePropagatesChangedMarkdownPathErrors", func() {
+	t := GinkgoT()
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
 		Tree:    &fakeTreeReconstructor{},
@@ -1529,9 +1557,10 @@ func TestServiceListSnapshotPagePropagatesChangedMarkdownPathErrors(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "path trailer read failed") {
 		t.Fatalf("ListSnapshotPage error = %v, want changed path error", err)
 	}
-}
+})
 
-func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *testing.T) {
+var _ = It("ServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit", func() {
+	t := GinkgoT()
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
 		Tree:    &fakeTreeReconstructor{},
@@ -1562,9 +1591,10 @@ func TestServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit(t *test
 	if page.NextCursor != "returned" {
 		t.Fatalf("NextCursor = %q, want returned", page.NextCursor)
 	}
-}
+})
 
-func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChangedPaths(t *testing.T) {
+var _ = It("ServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChangedPaths", func() {
+	t := GinkgoT()
 	store := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{Hash: "sync-commit"},
 		commits: []gitrevisions.Commit{
@@ -1630,9 +1660,10 @@ func TestServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingChan
 	if err := <-syncDone; err != nil {
 		t.Fatalf("SyncNow: %v", err)
 	}
-}
+})
 
-func TestServiceSyncNowRunsAfterSyncWhenValidationWarningsExist(t *testing.T) {
+var _ = It("ServiceSyncNowRunsAfterSyncWhenValidationWarningsExist", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1677,9 +1708,10 @@ leafwiki_title: Valid Page
 	if len(status.ValidationErrors) == 0 {
 		t.Fatalf("ValidationErrors empty, want invalid slug warning")
 	}
-}
+})
 
-func TestServiceSyncNowRecordsValidationErrorsWithMarkdownPaths(t *testing.T) {
+var _ = It("ServiceSyncNowRecordsValidationErrorsWithMarkdownPaths", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{err: errors.New(`duplicate leafwiki_id "dup" in /workspace/a.md and /workspace/docs/b.md`)}
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -1707,9 +1739,10 @@ func TestServiceSyncNowRecordsValidationErrorsWithMarkdownPaths(t *testing.T) {
 	if strings.Join(got, ",") != "a.md,docs/b.md" {
 		t.Fatalf("ValidationError paths = %#v, want a.md and docs/b.md", got)
 	}
-}
+})
 
-func TestServiceSyncNowReportsDuplicateCanonicalPageIDAsTypedValidationError(t *testing.T) {
+var _ = It("ServiceSyncNowReportsDuplicateCanonicalPageIDAsTypedValidationError", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1766,9 +1799,10 @@ page:
 		return
 	}
 	t.Fatalf("ValidationErrors = %#v, want duplicate_leafwiki_id", status.ValidationErrors)
-}
+})
 
-func TestServiceSyncNowRecordsAdditionalBatchActors(t *testing.T) {
+var _ = It("ServiceSyncNowRecordsAdditionalBatchActors", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -1810,9 +1844,10 @@ func TestServiceSyncNowRecordsAdditionalBatchActors(t *testing.T) {
 	if strings.Join(gitRevisionActorIDStrings(commit.ActorIDs), ",") != "alice,bob" {
 		t.Fatalf("ActorIDs = %#v, want alice,bob", commit.ActorIDs)
 	}
-}
+})
 
-func TestServiceSyncNowStopsBeforeRebuildWhenGitCaptureFails(t *testing.T) {
+var _ = It("ServiceSyncNowStopsBeforeRebuildWhenGitCaptureFails", func() {
+	t := GinkgoT()
 	captureErr := errors.New("git storage read-only")
 	fakeTree := &fakeTreeReconstructor{}
 	service, err := NewService(ServiceOptions{
@@ -1838,9 +1873,10 @@ func TestServiceSyncNowStopsBeforeRebuildWhenGitCaptureFails(t *testing.T) {
 	if !strings.Contains(status.LastError, "git storage read-only") {
 		t.Fatalf("LastError = %q, want git error", status.LastError)
 	}
-}
+})
 
-func TestServiceListPageRevisionsUsesCommitAuthorMetadata(t *testing.T) {
+var _ = It("ServiceListPageRevisionsUsesCommitAuthorMetadata", func() {
+	t := GinkgoT()
 	createdAt := time.Date(2026, 6, 7, 10, 0, 0, 0, time.UTC)
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
@@ -1887,9 +1923,10 @@ func TestServiceListPageRevisionsUsesCommitAuthorMetadata(t *testing.T) {
 	if !revisions[0].CreatedAt.Equal(createdAt) {
 		t.Fatalf("CreatedAt = %v, want %v", revisions[0].CreatedAt, createdAt)
 	}
-}
+})
 
-func TestServiceListPageRevisionsPaginatesMoreThanLimitPageCommits(t *testing.T) {
+var _ = It("ServiceListPageRevisionsPaginatesMoreThanLimitPageCommits", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -1949,9 +1986,10 @@ func TestServiceListPageRevisionsPaginatesMoreThanLimitPageCommits(t *testing.T)
 	if secondPage.NextCursor != "" {
 		t.Fatalf("second page next cursor = %q, want empty final cursor", secondPage.NextCursor)
 	}
-}
+})
 
-func TestServiceListPageRevisionsOmitsNextCursorWhenMatchesEqualLimit(t *testing.T) {
+var _ = It("ServiceListPageRevisionsOmitsNextCursorWhenMatchesEqualLimit", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -1996,9 +2034,10 @@ func TestServiceListPageRevisionsOmitsNextCursorWhenMatchesEqualLimit(t *testing
 	if result.NextCursor != "" {
 		t.Fatalf("next cursor = %q, want empty cursor when matches equal limit", result.NextCursor)
 	}
-}
+})
 
-func TestServiceListPageRevisionsFollowsMarkdownRenameByLeafWikiID(t *testing.T) {
+var _ = It("ServiceListPageRevisionsFollowsMarkdownRenameByLeafWikiID", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
 		Title: "New Page",
@@ -2047,9 +2086,10 @@ func TestServiceListPageRevisionsFollowsMarkdownRenameByLeafWikiID(t *testing.T)
 	if revisions[1].Path != "old-page" {
 		t.Fatalf("renamed revision path = %q, want old-page", revisions[1].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsMatchesUppercaseMarkdownExtensionByLeafWikiID(t *testing.T) {
+var _ = It("ServiceListPageRevisionsMatchesUppercaseMarkdownExtensionByLeafWikiID", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
 		Title: "Page",
@@ -2087,9 +2127,10 @@ func TestServiceListPageRevisionsMatchesUppercaseMarkdownExtensionByLeafWikiID(t
 	if result.Revisions[0].Path != "Page" {
 		t.Fatalf("revision path = %q, want Page", result.Revisions[0].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata(t *testing.T) {
+var _ = It("ServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
 		Title: "Agent Hooks Plan",
@@ -2143,9 +2184,10 @@ func TestServiceListPageRevisionsMatchesNormalizedRawPathWithoutMetadata(t *test
 	if !strings.Contains(snapshot.Content, "Raw content before writeback.") {
 		t.Fatalf("snapshot content = %q, want raw content", snapshot.Content)
 	}
-}
+})
 
-func TestServiceListPageRevisionsUsesHistoricalMarkdownMetadata(t *testing.T) {
+var _ = It("ServiceListPageRevisionsUsesHistoricalMarkdownMetadata", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-1",
 		Title: "Current Title",
@@ -2193,9 +2235,10 @@ func TestServiceListPageRevisionsUsesHistoricalMarkdownMetadata(t *testing.T) {
 	if revisions[0].Path != "old-page" {
 		t.Fatalf("revision path = %q, want old-page", revisions[0].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsNormalizesSectionIndexPath(t *testing.T) {
+var _ = It("ServiceListPageRevisionsNormalizesSectionIndexPath", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "section-1",
 		Title: "Docs",
@@ -2243,9 +2286,10 @@ func TestServiceListPageRevisionsNormalizesSectionIndexPath(t *testing.T) {
 	if revisions[0].Path != "docs" {
 		t.Fatalf("revision path = %q, want docs", revisions[0].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsNormalizesReadmeFallbackSectionPath(t *testing.T) {
+var _ = It("ServiceListPageRevisionsNormalizesReadmeFallbackSectionPath", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "section-guides",
 		Title: "Guides",
@@ -2293,9 +2337,10 @@ func TestServiceListPageRevisionsNormalizesReadmeFallbackSectionPath(t *testing.
 	if revisions[0].Path != "guides" {
 		t.Fatalf("revision path = %q, want guides", revisions[0].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex(t *testing.T) {
+var _ = It("ServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex", func() {
+	t := GinkgoT()
 	rootDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(rootDir, "User Guides"), 0o755); err != nil {
 		t.Fatalf("create workspace section: %v", err)
@@ -2354,9 +2399,10 @@ func TestServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex(t *tes
 	if revisions[0].Slug != "README" {
 		t.Fatalf("revision slug = %q, want README", revisions[0].Slug)
 	}
-}
+})
 
-func TestServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversion(t *testing.T) {
+var _ = It("ServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversion", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "docs-1",
 		Title: "Docs",
@@ -2398,9 +2444,10 @@ func TestServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversion(t
 	if revisions[0].Path != "docs" {
 		t.Fatalf("revision path = %q, want docs", revisions[0].Path)
 	}
-}
+})
 
-func TestServiceListPageRevisionsOnlyIncludesCommitsThatChangedDocument(t *testing.T) {
+var _ = It("ServiceListPageRevisionsOnlyIncludesCommitsThatChangedDocument", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2447,9 +2494,10 @@ func TestServiceListPageRevisionsOnlyIncludesCommitsThatChangedDocument(t *testi
 	if revisions[0].ID != "page-a-change" {
 		t.Fatalf("revision id = %q, want page-a-change", revisions[0].ID)
 	}
-}
+})
 
-func TestServiceListPageRevisionsScansPastUnrelatedHeadWhenLimitIsOne(t *testing.T) {
+var _ = It("ServiceListPageRevisionsScansPastUnrelatedHeadWhenLimitIsOne", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2496,9 +2544,10 @@ func TestServiceListPageRevisionsScansPastUnrelatedHeadWhenLimitIsOne(t *testing
 	if revisions[0].ID != "page-a-change" {
 		t.Fatalf("revision id = %q, want page-a-change", revisions[0].ID)
 	}
-}
+})
 
-func TestServiceListPageRevisionsScansAllCommitsPastLargeUnrelatedHead(t *testing.T) {
+var _ = It("ServiceListPageRevisionsScansAllCommitsPastLargeUnrelatedHead", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2544,9 +2593,10 @@ func TestServiceListPageRevisionsScansAllCommitsPastLargeUnrelatedHead(t *testin
 	if revisions[0].ID != "page-a-change" {
 		t.Fatalf("revision id = %q, want page-a-change", revisions[0].ID)
 	}
-}
+})
 
-func TestServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor(t *testing.T) {
+var _ = It("ServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2604,9 +2654,10 @@ func TestServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor(t *testin
 	if store.scannedCommits != 2 {
 		t.Fatalf("scannedCommits = %d, want 2", store.scannedCommits)
 	}
-}
+})
 
-func TestServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning(t *testing.T) {
+var _ = It("ServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2653,9 +2704,10 @@ func TestServiceListPageRevisionsDoesNotLoadFullTreesWhileScanning(t *testing.T)
 	if store.filesAtCalls != 0 {
 		t.Fatalf("FilesAt calls = %d, want document history scan to avoid full-tree loads", store.filesAtCalls)
 	}
-}
+})
 
-func TestServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore(t *testing.T) {
+var _ = It("ServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2710,9 +2762,10 @@ func TestServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore(t *testing
 	if err := <-done; err != nil {
 		t.Fatalf("ListPageRevisions: %v", err)
 	}
-}
+})
 
-func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
+var _ = It("ServiceGetPageRevisionSnapshotRejectsUnrelatedCommit", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2743,9 +2796,10 @@ func TestServiceGetPageRevisionSnapshotRejectsUnrelatedCommit(t *testing.T) {
 	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("page-b-change")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot returned unrelated commit, want error")
 	}
-}
+})
 
-func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *testing.T) {
+var _ = It("ServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -2800,9 +2854,10 @@ func TestServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore(t *te
 	if err := <-done; err != nil {
 		t.Fatalf("GetPageRevisionSnapshot: %v", err)
 	}
-}
+})
 
-func TestServiceRestoreDocumentRestoresPreRenameContentToCurrentPath(t *testing.T) {
+var _ = It("ServiceRestoreDocumentRestoresPreRenameContentToCurrentPath", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -2851,9 +2906,10 @@ func TestServiceRestoreDocumentRestoresPreRenameContentToCurrentPath(t *testing.
 	if !strings.Contains(raw, "old content") {
 		t.Fatalf("current path content after restore = %q, want old content", raw)
 	}
-}
+})
 
-func TestServiceRestoreDocumentPreservesExistingUppercaseMarkdownPath(t *testing.T) {
+var _ = It("ServiceRestoreDocumentPreservesExistingUppercaseMarkdownPath", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -2909,9 +2965,10 @@ func TestServiceRestoreDocumentPreservesExistingUppercaseMarkdownPath(t *testing
 			t.Fatalf("found lowercase duplicate Page.md in directory entries")
 		}
 	}
-}
+})
 
-func TestServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath(t *testing.T) {
+var _ = It("ServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -2959,9 +3016,10 @@ func TestServiceRestoreDocumentRestoresSectionIndexToCurrentSectionPath(t *testi
 	if _, err := os.Stat(filepath.Join(rootDir, "docs.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("docs.md exists after section restore, want no page file; err=%v", err)
 	}
-}
+})
 
-func TestServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath(t *testing.T) {
+var _ = It("ServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -3010,9 +3068,10 @@ func TestServiceRestoreDocumentRestoresReadmeFallbackSectionToReadmePath(t *test
 	if _, err := os.Stat(filepath.Join(rootDir, "docs", "index.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("index.md exists after README section restore, want no new index; err=%v", err)
 	}
-}
+})
 
-func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.T) {
+var _ = It("ServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -3046,9 +3105,10 @@ func TestServiceRestoreDocumentRejectsCommitThatDidNotChangeDocument(t *testing.
 	if store.restoreDocumentToPathCalls != 0 {
 		t.Fatalf("restoreDocumentToPathCalls = %d, want 0", store.restoreDocumentToPathCalls)
 	}
-}
+})
 
-func TestServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree(t *testing.T) {
+var _ = It("ServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -3088,9 +3148,10 @@ func TestServiceRestoreDocumentUsesChangedContentWithoutLoadingFullTree(t *testi
 	if !strings.Contains(store.restoredContent, "Page A restored") {
 		t.Fatalf("restoredContent = %q, want selected historical content", store.restoredContent)
 	}
-}
+})
 
-func TestServiceRestoreDocumentReturnsReconstructionError(t *testing.T) {
+var _ = It("ServiceRestoreDocumentReturnsReconstructionError", func() {
+	t := GinkgoT()
 	reconstructErr := errors.New(`duplicate leafwiki_id "page-a" in /workspace/page-a.md and /workspace/other.md`)
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
@@ -3129,9 +3190,10 @@ func TestServiceRestoreDocumentReturnsReconstructionError(t *testing.T) {
 	if len(status.ValidationErrors) != 2 {
 		t.Fatalf("ValidationErrors = %#v, want path-specific reconstruct errors", status.ValidationErrors)
 	}
-}
+})
 
-func TestServiceRestoreWorkspaceCapturesMetadataWriteback(t *testing.T) {
+var _ = It("ServiceRestoreWorkspaceCapturesMetadataWriteback", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -3171,9 +3233,10 @@ func TestServiceRestoreWorkspaceCapturesMetadataWriteback(t *testing.T) {
 	if !strings.Contains(files["needs-metadata.md"], "<!-- leafwiki\n") || !strings.Contains(files["needs-metadata.md"], "  id:") {
 		t.Fatalf("restore commit did not include reconstructed canonical metadata writeback: %q", files["needs-metadata.md"])
 	}
-}
+})
 
-func TestServiceRestoreDocumentCapturesMetadataWriteback(t *testing.T) {
+var _ = It("ServiceRestoreDocumentCapturesMetadataWriteback", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := gitrevisions.Open(gitrevisions.StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -3231,9 +3294,10 @@ current body`)
 	if !strings.Contains(files["needs-metadata.md"], "<!-- leafwiki\n") || !strings.Contains(files["needs-metadata.md"], "  id:") {
 		t.Fatalf("document restore commit did not include reconstructed canonical metadata writeback: %q", files["needs-metadata.md"])
 	}
-}
+})
 
-func TestServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID(t *testing.T) {
+var _ = It("ServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID", func() {
+	t := GinkgoT()
 	page := &tree.Page{PageNode: &tree.PageNode{
 		ID:    "page-a",
 		Title: "Page A",
@@ -3263,9 +3327,10 @@ func TestServiceGetPageRevisionSnapshotRejectsPathReuseWithDifferentLeafWikiID(t
 	if _, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("path-reuse")); err == nil {
 		t.Fatalf("GetPageRevisionSnapshot accepted reused path with different leafwiki_id, want error")
 	}
-}
+})
 
-func TestServiceSyncNowCreatesNewCommitForWritebackOnlySync(t *testing.T) {
+var _ = It("ServiceSyncNowCreatesNewCommitForWritebackOnlySync", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeMarkdown(t, filepath.Join(rootDir, "needs-metadata.md"), "# Needs Metadata\n\nbody")
@@ -3311,9 +3376,10 @@ func TestServiceSyncNowCreatesNewCommitForWritebackOnlySync(t *testing.T) {
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshot count = %d, want raw commit plus writeback commit: %#v", len(snapshots), snapshots)
 	}
-}
+})
 
-func TestServiceSyncNowReportsValidationForSkippedInvalidSlugMarkdown(t *testing.T) {
+var _ = It("ServiceSyncNowReportsValidationForSkippedInvalidSlugMarkdown", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -3343,9 +3409,10 @@ func TestServiceSyncNowReportsValidationForSkippedInvalidSlugMarkdown(t *testing
 	if status.ValidationErrors[0].Path != "!!!.md" {
 		t.Fatalf("validation error path = %q, want !!!.md", status.ValidationErrors[0].Path)
 	}
-}
+})
 
-func TestServiceSyncNowReportsNormalizedRouteConflictsAsPathConflict(t *testing.T) {
+var _ = It("ServiceSyncNowReportsNormalizedRouteConflictsAsPathConflict", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
@@ -3379,9 +3446,10 @@ func TestServiceSyncNowReportsNormalizedRouteConflictsAsPathConflict(t *testing.
 		}
 	}
 	t.Fatalf("ValidationErrors = %#v, want path_conflict for normalized collision", status.ValidationErrors)
-}
+})
 
-func TestServiceStartWatcherSyncsMarkdownEvents(t *testing.T) {
+var _ = It("ServiceStartWatcherSyncsMarkdownEvents", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{
@@ -3424,9 +3492,10 @@ func TestServiceStartWatcherSyncsMarkdownEvents(t *testing.T) {
 	if fakeStore.captureCalls != 1 {
 		t.Fatalf("captureCalls = %d, want 1", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStartWatcherSyncsUppercaseMarkdownEvents(t *testing.T) {
+var _ = It("ServiceStartWatcherSyncsUppercaseMarkdownEvents", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{
@@ -3459,9 +3528,10 @@ func TestServiceStartWatcherSyncsUppercaseMarkdownEvents(t *testing.T) {
 	if fakeStore.captureCalls != 1 {
 		t.Fatalf("captureCalls = %d, want uppercase Markdown event to trigger sync", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStartWatcherCoalescesDuplicateMarkdownEvents(t *testing.T) {
+var _ = It("ServiceStartWatcherCoalescesDuplicateMarkdownEvents", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{
 		capture: &gitrevisions.Commit{
@@ -3496,9 +3566,10 @@ func TestServiceStartWatcherCoalescesDuplicateMarkdownEvents(t *testing.T) {
 	if fakeStore.captureCalls != 1 {
 		t.Fatalf("captureCalls = %d, want duplicate watcher events coalesced into one sync", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStartWatcherDroppedEventRecordsStatusAndSyncs(t *testing.T) {
+var _ = It("ServiceStartWatcherDroppedEventRecordsStatusAndSyncs", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "drop-commit"}}
 	fakeWatcher := newFakeWatcher()
@@ -3530,9 +3601,10 @@ func TestServiceStartWatcherDroppedEventRecordsStatusAndSyncs(t *testing.T) {
 	if fakeStore.captureCalls != 1 {
 		t.Fatalf("captureCalls = %d, want 1", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStartWatcherErrorRecordsStatusAndSyncs(t *testing.T) {
+var _ = It("ServiceStartWatcherErrorRecordsStatusAndSyncs", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "error-commit"}}
 	fakeWatcher := newFakeWatcher()
@@ -3564,9 +3636,10 @@ func TestServiceStartWatcherErrorRecordsStatusAndSyncs(t *testing.T) {
 	if fakeStore.captureCalls != 1 {
 		t.Fatalf("captureCalls = %d, want 1", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStartWatcherIgnoresTemporaryFiles(t *testing.T) {
+var _ = It("ServiceStartWatcherIgnoresTemporaryFiles", func() {
+	t := GinkgoT()
 	fakeTree := &fakeTreeReconstructor{}
 	fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "temp-commit"}}
 	fakeWatcher := newFakeWatcher()
@@ -3595,9 +3668,10 @@ func TestServiceStartWatcherIgnoresTemporaryFiles(t *testing.T) {
 	if fakeStore.captureCalls != 0 {
 		t.Fatalf("captureCalls = %d, want temporary files ignored", fakeStore.captureCalls)
 	}
-}
+})
 
-func TestServiceStopWatcherClosesUnderlyingWatcher(t *testing.T) {
+var _ = It("ServiceStopWatcherClosesUnderlyingWatcher", func() {
+	t := GinkgoT()
 	fakeWatcher := newFakeWatcher()
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
@@ -3620,9 +3694,49 @@ func TestServiceStopWatcherClosesUnderlyingWatcher(t *testing.T) {
 	if got := fakeWatcher.closeCount(); got != 1 {
 		t.Fatalf("watcher Close calls = %d, want 1", got)
 	}
+})
+
+var _ = It("normalizes workspace markdown path helpers", func() {
+	Expect(cleanWorkspaceMarkdownPath(" /docs/section/index.md ")).To(Equal("docs/section/index.md"))
+	Expect(cleanWorkspaceMarkdownPath("./docs/page.md")).To(Equal("./docs/page.md"))
+	Expect(joinWorkspaceMarkdownPath("", "/docs/", " section ", "index.md")).To(Equal("docs/section/index.md"))
+	Expect(joinWorkspaceMarkdownPath("docs", "", "/page.md/")).To(Equal("docs/page.md"))
+})
+
+var _ = It("currentSectionContentPath prefers index markdown before README fallback", func() {
+	t := GinkgoT()
+	rootDir := t.TempDir()
+	service := &Service{rootDir: rootDir}
+	Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "README.md"), "# Readme\n")
+
+	Expect(service.currentSectionContentPath("docs", "docs.md")).To(Equal("docs/README.md"))
+
+	writeMarkdown(t, filepath.Join(rootDir, "docs", "Index.MD"), "# Index\n")
+	Expect(service.currentSectionContentPath("docs", "docs.md")).To(Equal("docs/Index.MD"))
+	Expect(service.currentSectionContentPath("missing", "fallback.md")).To(Equal("fallback.md"))
+})
+
+var _ = It("normalizes validation paths and rejects workspace escapes", func() {
+	t := GinkgoT()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	Expect(normalizeValidationPath(rootDir, filepath.Join(rootDir, "docs", "page.md"))).To(Equal("docs/page.md"))
+	Expect(normalizeValidationPath(rootDir, "./docs/page.md")).To(Equal("docs/page.md"))
+	Expect(normalizeValidationPath(rootDir, "../outside.md")).To(Equal(""))
+	Expect(normalizeValidationPath(rootDir, filepath.Join(filepath.Dir(rootDir), "outside.md"))).To(Equal(filepath.ToSlash(filepath.Join(filepath.Dir(rootDir), "outside.md"))))
+})
+
+var _ = It("firstNonEmpty trims values and returns the first non-blank value", func() {
+	Expect(firstNonEmpty("", " \t ", " value ", "later")).To(Equal("value"))
+	Expect(firstNonEmpty("", " ")).To(Equal(""))
+})
+
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }
 
-func writeMarkdown(t *testing.T, path string, content string) {
+func writeMarkdown(t testHelper, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("create parent for %s: %v", path, err)
@@ -3632,7 +3746,7 @@ func writeMarkdown(t *testing.T, path string, content string) {
 	}
 }
 
-func readFileString(t *testing.T, path string) string {
+func readFileString(t testHelper, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -3641,7 +3755,7 @@ func readFileString(t *testing.T, path string) string {
 	return string(raw)
 }
 
-func mustGetPage(t *testing.T, treeService *tree.TreeService, id tree.PageID) *tree.Page {
+func mustGetPage(t testHelper, treeService *tree.TreeService, id tree.PageID) *tree.Page {
 	t.Helper()
 	page, err := treeService.GetPage(id)
 	if err != nil {
@@ -3650,7 +3764,7 @@ func mustGetPage(t *testing.T, treeService *tree.TreeService, id tree.PageID) *t
 	return page
 }
 
-func mustGetOnlyPage(t *testing.T, treeService *tree.TreeService) *tree.Page {
+func mustGetOnlyPage(t testHelper, treeService *tree.TreeService) *tree.Page {
 	t.Helper()
 	var ids []tree.PageID
 	if err := treeService.WalkNodes(func(id tree.PageID) error {
@@ -3680,10 +3794,14 @@ func revisionIDs(revisions []*revision.Revision) []string {
 type fakeTreeReconstructor struct {
 	reconstructs int32
 	err          error
+	errs         []error
 }
 
 func (f *fakeTreeReconstructor) ReconstructTreeFromFS() error {
-	atomic.AddInt32(&f.reconstructs, 1)
+	call := int(atomic.AddInt32(&f.reconstructs, 1))
+	if call <= len(f.errs) {
+		return f.errs[call-1]
+	}
 	return f.err
 }
 
@@ -3696,7 +3814,12 @@ type fakeRevisionStore struct {
 	captureErr                        error
 	captureErrCall                    int
 	amendErr                          error
+	listErr                           error
+	getCommitErr                      error
+	restoreWorkspaceErr               error
+	restoreDocumentContentErr         error
 	captureCalls                      int
+	amendCalls                        int
 	commits                           []gitrevisions.Commit
 	filesAt                           map[CommitHash]map[string]string
 	changedPaths                      map[CommitHash][]string
@@ -3709,12 +3832,19 @@ type fakeRevisionStore struct {
 	restoredContent                   string
 	changedPathsStarted               chan struct{}
 	unblockChangedPaths               chan struct{}
+	changedContents                   map[CommitHash]map[string]string
+	changedContentsErr                error
 	changedContentsStarted            chan struct{}
 	unblockChangedContents            chan struct{}
+	captureRequests                   []gitrevisions.CommitRequest
+	amendRequests                     []gitrevisions.CommitRequest
+	restoreWorkspaceRequests          []gitrevisions.CommitRequest
+	restoreDocumentContentRequests    []gitrevisions.CommitRequest
 }
 
-func (f *fakeRevisionStore) Capture(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) Capture(_ context.Context, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	f.captureCalls++
+	f.captureRequests = append(f.captureRequests, req)
 	if f.captureErr != nil && (f.captureErrCall == 0 || f.captureCalls == f.captureErrCall) {
 		return nil, f.captureErr
 	}
@@ -3728,7 +3858,9 @@ func (f *fakeRevisionStore) Capture(context.Context, gitrevisions.CommitRequest)
 	return &commit, nil
 }
 
-func (f *fakeRevisionStore) Amend(context.Context, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) Amend(_ context.Context, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+	f.amendCalls++
+	f.amendRequests = append(f.amendRequests, req)
 	if f.amendErr != nil {
 		return nil, f.amendErr
 	}
@@ -3736,6 +3868,9 @@ func (f *fakeRevisionStore) Amend(context.Context, gitrevisions.CommitRequest) (
 }
 
 func (f *fakeRevisionStore) ListCommits(_ context.Context, req gitrevisions.ListRequest) ([]gitrevisions.Commit, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	if req.Limit <= 0 || req.Limit >= len(f.commits) {
 		return f.commits, nil
 	}
@@ -3783,6 +3918,12 @@ func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash Comm
 	if f.unblockChangedContents != nil {
 		<-f.unblockChangedContents
 	}
+	if f.changedContentsErr != nil {
+		return nil, f.changedContentsErr
+	}
+	if f.changedContents != nil {
+		return f.changedContents[hash], nil
+	}
 	contents := make(map[string]string)
 	files := f.filesAt[hash]
 	for _, path := range f.changedPaths[hash] {
@@ -3794,6 +3935,9 @@ func (f *fakeRevisionStore) ChangedMarkdownContents(_ context.Context, hash Comm
 }
 
 func (f *fakeRevisionStore) GetCommit(_ context.Context, hash CommitHash) (gitrevisions.Commit, error) {
+	if f.getCommitErr != nil {
+		return gitrevisions.Commit{}, f.getCommitErr
+	}
 	for _, commit := range f.commits {
 		if CommitHashFromString(commit.Hash) == hash {
 			return commit, nil
@@ -3805,7 +3949,11 @@ func (f *fakeRevisionStore) GetCommit(_ context.Context, hash CommitHash) (gitre
 	return gitrevisions.Commit{}, errors.New("commit not found")
 }
 
-func (f *fakeRevisionStore) RestoreWorkspace(context.Context, CommitHash, gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) RestoreWorkspace(_ context.Context, _ CommitHash, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+	f.restoreWorkspaceRequests = append(f.restoreWorkspaceRequests, req)
+	if f.restoreWorkspaceErr != nil {
+		return nil, f.restoreWorkspaceErr
+	}
 	return f.capture, nil
 }
 
@@ -3818,9 +3966,13 @@ func (f *fakeRevisionStore) RestoreDocumentToPath(context.Context, string, strin
 	return f.capture, nil
 }
 
-func (f *fakeRevisionStore) RestoreDocumentContentToPath(_ context.Context, _ string, content string, _ gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
+func (f *fakeRevisionStore) RestoreDocumentContentToPath(_ context.Context, _ string, content string, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
 	f.restoreDocumentContentToPathCalls++
+	f.restoreDocumentContentRequests = append(f.restoreDocumentContentRequests, req)
 	f.restoredContent = content
+	if f.restoreDocumentContentErr != nil {
+		return nil, f.restoreDocumentContentErr
+	}
 	return f.capture, nil
 }
 
@@ -3870,7 +4022,7 @@ func (f *fakeWatcher) closeCount() int {
 	return int(atomic.LoadInt32(&f.closes))
 }
 
-func waitUntil(t *testing.T, condition func() bool) {
+func waitUntil(t testHelper, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

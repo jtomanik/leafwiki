@@ -1,13 +1,14 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 )
 
-func TestHistoricalPlansWithRemovedWorkspaceSyncEnvWarnReaders(t *testing.T) {
+var _ = ginkgo.It("TestHistoricalPlansWithRemovedWorkspaceSyncEnvWarnReaders", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := markdownLinkRootPrefixPlanRepoRoot(t)
 	plans, err := filepath.Glob(filepath.Join(repoRoot, "docs", "plans", "*.PLAN.md"))
 	if err != nil {
@@ -32,4 +33,5 @@ func TestHistoricalPlansWithRemovedWorkspaceSyncEnvWarnReaders(t *testing.T) {
 			t.Fatalf("%s contains removed E2E_ENABLE_WORKSPACE_SYNC=1 examples without a federated-runtime cleanup historical warning", rel)
 		}
 	}
-}
+
+})

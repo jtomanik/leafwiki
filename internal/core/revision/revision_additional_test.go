@@ -1,0 +1,102 @@
+package revision
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = ginkgo.Describe("revision store additional coverage", func() {
+	ginkgo.It("NewRevisionIDUnchecked preserves the raw commit identifier", func() {
+		id := NewRevisionIDUnchecked(" rev-raw ")
+
+		Expect(id.String()).To(Equal(" rev-raw "))
+		Expect(id.CommitID()).To(Equal(" rev-raw "))
+	})
+
+	ginkgo.It("PruneRevisions keeps the newest revisions and removes pruned IDs from the index", func() {
+		store := NewFSStore(ginkgo.GinkgoT().TempDir())
+		pageID := newFixturePageID("page-prune")
+		createdAt := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+
+		for i, revisionID := range []RevisionID{
+			newFixtureRevisionID("rev-1"),
+			newFixtureRevisionID("rev-2"),
+			newFixtureRevisionID("rev-3"),
+			newFixtureRevisionID("rev-4"),
+		} {
+			err := store.SaveRevision(&Revision{
+				ID:        revisionID,
+				PageID:    pageID,
+				CreatedAt: createdAt.Add(time.Duration(i) * time.Minute),
+				Type:      RevisionTypeContentUpdate,
+				Title:     "Page",
+				Slug:      "page",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		Expect(store.PruneRevisions(pageID, 2)).To(Succeed())
+
+		revisions, err := store.ListRevisions(pageID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions).To(HaveLen(2))
+		Expect(revisions[0].ID).To(Equal(newFixtureRevisionID("rev-4")))
+		Expect(revisions[1].ID).To(Equal(newFixtureRevisionID("rev-3")))
+
+		_, err = store.GetRevision(pageID, newFixtureRevisionID("rev-1"))
+		Expect(errors.Is(err, os.ErrNotExist)).To(BeTrue())
+		_, err = store.GetRevision(pageID, newFixtureRevisionID("rev-2"))
+		Expect(errors.Is(err, os.ErrNotExist)).To(BeTrue())
+
+		index, err := store.loadRevisionIndex(pageID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(index).NotTo(HaveKey(newFixtureRevisionID("rev-1").CommitID()))
+		Expect(index).NotTo(HaveKey(newFixtureRevisionID("rev-2").CommitID()))
+		Expect(index).To(HaveKey(newFixtureRevisionID("rev-3").CommitID()))
+		Expect(index).To(HaveKey(newFixtureRevisionID("rev-4").CommitID()))
+	})
+
+	ginkgo.It("PruneRevisions keep count boundaries are no-ops for zero and already-small histories", func() {
+		store := NewFSStore(ginkgo.GinkgoT().TempDir())
+		pageID := newFixturePageID("page-prune-boundary")
+		revisionID := newFixtureRevisionID("rev-only")
+		Expect(store.SaveRevision(&Revision{
+			ID:        revisionID,
+			PageID:    pageID,
+			CreatedAt: time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC),
+			Type:      RevisionTypeContentUpdate,
+			Title:     "Page",
+			Slug:      "page",
+		})).To(Succeed())
+
+		Expect(store.PruneRevisions(pageID, 0)).To(Succeed())
+		Expect(store.PruneRevisions(pageID, 5)).To(Succeed())
+
+		rev, err := store.GetRevision(pageID, revisionID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev.ID).To(Equal(revisionID))
+	})
+
+	ginkgo.It("CopyAssetBlobToPath restores a stored asset blob with matching hash and size", func() {
+		tmp := ginkgo.GinkgoT().TempDir()
+		store := NewFSStore(tmp)
+		sourcePath := filepath.Join(tmp, "asset.txt")
+		Expect(os.WriteFile(sourcePath, []byte("asset-data"), 0o644)).To(Succeed())
+
+		hash, size, err := store.SaveAssetBlobFromPath(sourcePath)
+		Expect(err).NotTo(HaveOccurred())
+
+		dstPath := filepath.Join(tmp, "restored", "asset.txt")
+		Expect(os.MkdirAll(filepath.Dir(dstPath), 0o755)).To(Succeed())
+		Expect(store.CopyAssetBlobToPath(hash, size, dstPath)).To(Succeed())
+
+		raw, err := os.ReadFile(dstPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(Equal("asset-data"))
+	})
+})

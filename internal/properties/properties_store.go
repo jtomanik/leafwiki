@@ -31,29 +31,50 @@ type PropertiesStore struct {
 	db *sql.DB
 }
 
+type propertyKeyCountScanner interface {
+	Scan(dest ...any) error
+}
+
+var (
+	openPropertiesDB = func(dbPath string) (*sql.DB, error) {
+		return sql.Open("sqlite", dbPath)
+	}
+	ensurePropertiesSchema = func(s *PropertiesStore) error {
+		return s.ensureSchema()
+	}
+	isRecoverablePropertiesDBError = sqliteutil.IsSQLiteRecoverableError
+	removePropertiesSQLiteFiles    = sqliteutil.RemoveSQLiteFiles
+	scanPropertyKeyCount           = func(scanner propertyKeyCountScanner, kc *PropertyKeyCount) error {
+		return scanner.Scan(&kc.Key, &kc.Count)
+	}
+	closePropertiesDB = func(db *sql.DB) error {
+		return db.Close()
+	}
+)
+
 func NewPropertiesStore(storageDir string) (*PropertiesStore, error) {
 	normalized := filepath.FromSlash(strings.ReplaceAll(storageDir, `\`, `/`))
 	dbPath := filepath.Join(normalized, "properties.db")
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := openPropertiesDB(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open properties database: %w", err)
 	}
 
 	s := &PropertiesStore{db: db}
-	if err := s.ensureSchema(); err != nil {
+	if err := ensurePropertiesSchema(s); err != nil {
 		_ = db.Close()
-		if !sqliteutil.IsSQLiteRecoverableError(err) {
+		if !isRecoverablePropertiesDBError(err) {
 			return nil, err
 		}
 		slog.Default().Warn("properties database corrupt, removing and retrying", "error", err)
-		sqliteutil.RemoveSQLiteFiles(dbPath)
-		db, err = sql.Open("sqlite", dbPath)
+		removePropertiesSQLiteFiles(dbPath)
+		db, err = openPropertiesDB(dbPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reopen properties database after recovery: %w", err)
 		}
 		s = &PropertiesStore{db: db}
-		if err = s.ensureSchema(); err != nil {
+		if err = ensurePropertiesSchema(s); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -155,7 +176,7 @@ func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKey
 	var result []PropertyKeyCount
 	for rows.Next() {
 		var kc PropertyKeyCount
-		if err := rows.Scan(&kc.Key, &kc.Count); err != nil {
+		if err := scanPropertyKeyCount(rows, &kc); err != nil {
 			return nil, err
 		}
 		result = append(result, kc)
@@ -233,7 +254,7 @@ func (s *PropertiesStore) Close() error {
 	defer s.mu.Unlock()
 
 	if s.db != nil {
-		if err := s.db.Close(); err != nil {
+		if err := closePropertiesDB(s.db); err != nil {
 			return err
 		}
 		s.db = nil

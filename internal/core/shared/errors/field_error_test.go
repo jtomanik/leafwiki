@@ -2,69 +2,65 @@ package errors
 
 import (
 	"encoding/json"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestValidationErrorsAddWithCodeSerializesStableFieldContract(t *testing.T) {
-	t.Parallel()
+var _ = Describe("field validation errors", func() {
+	It("TestValidationErrorsAddWithCodeSerializesStableFieldContract", func() {
+		validation := NewValidationErrors()
+		validation.AddWithCode(
+			"slug",
+			"auth_email_invalid",
+			"validation.auth.email_invalid",
+		)
 
-	validation := NewValidationErrors()
-	validation.AddWithCode(
-		"slug",
-		"auth_email_invalid",
-		"validation.auth.email_invalid",
-	)
+		encoded, err := json.Marshal(validation)
 
-	encoded, err := json.Marshal(validation)
-	if err != nil {
-		t.Fatalf("marshal validation errors: %v", err)
-	}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(encoded)).To(Equal(`{"fields":[{"field":"slug","code":"auth_email_invalid","messageId":"validation.auth.email_invalid","message":"Email is not valid"}]}`))
+	})
 
-	want := `{"fields":[{"field":"slug","code":"auth_email_invalid","messageId":"validation.auth.email_invalid","message":"Email is not valid"}]}`
-	if string(encoded) != want {
-		t.Fatalf("json = %s, want %s", encoded, want)
-	}
-}
+	It("TestValidationErrorsLegacyAddRendersCatalogBackedDefaultCode", func() {
+		validation := NewValidationErrors()
+		validation.Add("siteName", "site name is required")
 
-func TestValidationErrorsLegacyAddRendersCatalogBackedDefaultCode(t *testing.T) {
-	t.Parallel()
+		Expect(validation.Errors).To(HaveLen(1))
+		field := validation.Errors[0]
+		Expect(field.Code).To(Equal(FieldValidationErrorCode))
+		Expect(field.MessageID).To(Equal(FieldValidationErrorMessageID))
+		Expect(field.Field).To(Equal("siteName"))
+		Expect(field.Message).To(Equal("Validation error"))
+	})
 
-	validation := NewValidationErrors()
-	validation.Add("siteName", "site name is required")
+	It("TestValidationErrorsAddWithCodeRendersFromCatalog", func() {
+		validation := NewValidationErrors()
+		validation.AddWithCode(
+			"email",
+			"auth_email_invalid",
+			"validation.auth.email_invalid",
+		)
 
-	if len(validation.Errors) != 1 {
-		t.Fatalf("fields = %d, want 1", len(validation.Errors))
-	}
-	field := validation.Errors[0]
-	if field.Code != FieldValidationErrorCode {
-		t.Fatalf("Code = %q, want field_validation_error", field.Code)
-	}
-	if field.MessageID != FieldValidationErrorMessageID {
-		t.Fatalf("MessageID = %q, want validation.field.validation_error", field.MessageID)
-	}
-	if field.Field != "siteName" || field.Message != "Validation error" {
-		t.Fatalf("field error = %#v", field)
-	}
-}
+		field := validation.Errors[0]
+		Expect(field.Message).To(Equal("Email is not valid"))
+		Expect(field.Code).To(Equal(FieldErrorCode("auth_email_invalid")))
+		Expect(field.MessageID).To(Equal(MessageID("validation.auth.email_invalid")))
+	})
+})
 
-func TestValidationErrorsAddWithCodeRendersFromCatalog(t *testing.T) {
-	t.Parallel()
+var _ = Describe("field validation edge coverage", func() {
+	It("ValidationErrors reports empty and populated state", func() {
+		validation := NewValidationErrors()
 
-	validation := NewValidationErrors()
-	validation.AddWithCode(
-		"email",
-		"auth_email_invalid",
-		"validation.auth.email_invalid",
-	)
+		Expect(validation.HasErrors()).To(BeFalse())
+		Expect(validation.Error()).To(Equal("validation error"))
 
-	field := validation.Errors[0]
-	if field.Message != "Email is not valid" {
-		t.Fatalf("Message = %q, want catalog-rendered validation message", field.Message)
-	}
-	if field.Code != "auth_email_invalid" {
-		t.Fatalf("Code = %q, want stable field code", field.Code)
-	}
-	if field.MessageID != "validation.auth.email_invalid" {
-		t.Fatalf("MessageID = %q, want stable message ID", field.MessageID)
-	}
-}
+		validation.Add("siteName", "site name is required")
+		Expect(validation.HasErrors()).To(BeTrue())
+	})
+
+	It("typed field error codes stringify to their stable value", func() {
+		Expect(FieldErrorCode("auth_email_invalid").String()).To(Equal("auth_email_invalid"))
+	})
+})

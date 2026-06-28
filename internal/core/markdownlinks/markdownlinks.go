@@ -79,6 +79,12 @@ type InlineDestination struct {
 
 var markdownParser = goldmark.New()
 
+var (
+	mapWorkspaceMarkdownRoute = tree.MapWorkspaceMarkdownRoute
+	relMarkdownLinkPath       = filepath.Rel
+	walkMarkdownLinkRoot      = filepath.WalkDir
+)
+
 type RewriteResult struct {
 	Content string
 	Changed bool
@@ -174,14 +180,14 @@ func NewIndexFromRoot(rootDir string) (*Index, error) {
 
 func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 	entries := []Entry{{Kind: EntryKindSection}}
-	err := filepath.WalkDir(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+	err := walkMarkdownLinkRoot(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if filePath == rootDir {
 			return nil
 		}
-		relPath, err := filepath.Rel(rootDir, filePath)
+		relPath, err := relMarkdownLinkPath(rootDir, filePath)
 		if err != nil {
 			return err
 		}
@@ -190,7 +196,7 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 			if strings.HasPrefix(entry.Name(), ".") {
 				return filepath.SkipDir
 			}
-			route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, true)
+			route, err := mapWorkspaceMarkdownRoute(rootDir, relPath, true)
 			if err != nil {
 				return filepath.SkipDir
 			}
@@ -203,7 +209,7 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 		if !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
 			return nil
 		}
-		route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false)
+		route, err := mapWorkspaceMarkdownRoute(rootDir, relPath, false)
 		if err != nil || route.Skip {
 			return nil
 		}
@@ -360,10 +366,7 @@ func (idx *Index) RewriteMarkdown(sourceFile tree.MarkdownPath, content string) 
 	if len(replacements) == 0 {
 		return RewriteResult{Content: content, Issues: issues}
 	}
-	rewritten, changed := applyReplacements(content, replacements)
-	if !changed {
-		return RewriteResult{Content: content, Issues: issues}
-	}
+	rewritten, _ := applyReplacements(content, replacements)
 	return RewriteResult{
 		Content: rewritten,
 		Changed: true,
@@ -946,7 +949,7 @@ func formatHref(sourceFile tree.MarkdownPath, targetPath tree.MarkdownPath, page
 		}
 		return "/" + targetPathString + suffix
 	}
-	rel, err := filepath.Rel(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(targetPathString))
+	rel, err := relMarkdownLinkPath(filepath.FromSlash(sourceFile.SourceDir().FilesystemPath()), filepath.FromSlash(targetPathString))
 	if err != nil {
 		rel = targetPathString
 	}

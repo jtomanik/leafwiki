@@ -172,9 +172,6 @@ func ApplyYAMLConfigFile(fs *flag.FlagSet, configPath string, visited map[string
 	if IsInvalidBareConfigPathValue(path) {
 		return newConfigUsageError("--config requires a path")
 	}
-	if name, _, ok := RawFlagName(path); ok {
-		return ConfigFlagMixError{Flag: configModeFlagDisplay(path, name)}
-	}
 	for name := range visited {
 		if name == "config" {
 			continue

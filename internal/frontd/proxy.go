@@ -26,6 +26,8 @@ type IngressOptions struct {
 
 const ControlPlanePrefix = "/__leafwiki/control-plane"
 
+var encodeActorContext = projectdaemon.EncodeActorContext
+
 func NewIngressHandler(public http.Handler, opts IngressOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if opts.ControlPlane != nil && isWellKnownPath(req.URL.Path) {
@@ -105,7 +107,7 @@ func NewWorkspaceProxy(opts WorkspaceProxyOptions) (http.Handler, error) {
 			writeFrontdError(w, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed)
 			return
 		}
-		encoded, err := projectdaemon.EncodeActorContext(actor)
+		encoded, err := encodeActorContext(actor)
 		if err != nil {
 			writeFrontdError(w, http.StatusInternalServerError, errCodeWorkspaceActorContextEncodeFailed)
 			return

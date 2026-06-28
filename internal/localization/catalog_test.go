@@ -5,72 +5,65 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestCommittedCatalogCoversProductionMessageIDConstants(t *testing.T) {
-	t.Parallel()
-
-	repoRoot := repoRoot(t)
-	catalog, err := committedCatalog()
-	if err != nil {
-		t.Fatalf("committedCatalog: %v", err)
-	}
-	missing := []string{}
-	for _, id := range productionMessageIDConstants(t, repoRoot) {
-		if _, ok := catalog[id]; !ok {
-			missing = append(missing, id)
+var _ = Describe("committed localization catalog", func() {
+	It("TestCommittedCatalogCoversProductionMessageIDConstants", func() {
+		t := GinkgoT()
+		repoRoot := repoRoot(t)
+		catalog, err := committedCatalog()
+		Expect(err).NotTo(HaveOccurred())
+		missing := []string{}
+		for _, id := range productionMessageIDConstants(t, repoRoot) {
+			if _, ok := catalog[id]; !ok {
+				missing = append(missing, id)
+			}
 		}
-	}
-	if len(missing) > 0 {
-		t.Fatalf("catalog missing production MessageID constants: %s", strings.Join(missing, ", "))
-	}
-}
+		Expect(missing).To(BeEmpty(), "catalog missing production MessageID constants: %s", strings.Join(missing, ", "))
+	})
 
-func TestProductionMessageIDConstantsIncludesMCPToolMessageIDs(t *testing.T) {
-	t.Parallel()
-
-	ids := map[string]struct{}{}
-	for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
-		ids[id] = struct{}{}
-	}
-	if _, ok := ids["mcp.tools.wiki_move_page.success"]; !ok {
-		t.Fatalf("productionMessageIDConstants missed MCP ToolMessageID constant")
-	}
-}
-
-func TestProductionMessageIDConstantsIncludesMCPToolDescriptionIDs(t *testing.T) {
-	t.Parallel()
-
-	ids := map[string]struct{}{}
-	for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
-		ids[id] = struct{}{}
-	}
-	if _, ok := ids["mcp.tools.wiki_move_page.description"]; !ok {
-		t.Fatalf("productionMessageIDConstants missed MCP ToolDescriptionID constant")
-	}
-}
-
-func TestCommittedCatalogCoversProductionErrorCodeMessageIDs(t *testing.T) {
-	t.Parallel()
-
-	repoRoot := repoRoot(t)
-	catalog, err := committedCatalog()
-	if err != nil {
-		t.Fatalf("committedCatalog: %v", err)
-	}
-	missing := []string{}
-	for _, id := range productionErrorCodeMessageIDs(t, repoRoot) {
-		if _, ok := catalog[id]; !ok {
-			missing = append(missing, id)
+	It("TestProductionMessageIDConstantsIncludesMCPToolMessageIDs", func() {
+		t := GinkgoT()
+		ids := map[string]struct{}{}
+		for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
+			ids[id] = struct{}{}
 		}
-	}
-	if len(missing) > 0 {
-		t.Fatalf("catalog missing derived ErrorCode message IDs: %s", strings.Join(missing, ", "))
-	}
+		Expect(ids).To(HaveKey("mcp.tools.wiki_move_page.success"))
+	})
+
+	It("TestProductionMessageIDConstantsIncludesMCPToolDescriptionIDs", func() {
+		t := GinkgoT()
+		ids := map[string]struct{}{}
+		for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
+			ids[id] = struct{}{}
+		}
+		Expect(ids).To(HaveKey("mcp.tools.wiki_move_page.description"))
+	})
+
+	It("TestCommittedCatalogCoversProductionErrorCodeMessageIDs", func() {
+		t := GinkgoT()
+		repoRoot := repoRoot(t)
+		catalog, err := committedCatalog()
+		Expect(err).NotTo(HaveOccurred())
+		missing := []string{}
+		for _, id := range productionErrorCodeMessageIDs(t, repoRoot) {
+			if _, ok := catalog[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+		Expect(missing).To(BeEmpty(), "catalog missing derived ErrorCode message IDs: %s", strings.Join(missing, ", "))
+	})
+})
+
+type catalogTestTB interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }
 
-func productionMessageIDConstants(t *testing.T, repoRoot string) []string {
+func productionMessageIDConstants(t catalogTestTB, repoRoot string) []string {
 	t.Helper()
 	re := regexp.MustCompile(`(?m)(?:MessageID|ToolMessage|ToolDescription)[A-Za-z0-9_]*\s+[^=\n]*=\s+"([^"]+)"`)
 	ids := map[string]struct{}{}
@@ -107,7 +100,7 @@ func productionMessageIDConstants(t *testing.T, repoRoot string) []string {
 	return out
 }
 
-func productionErrorCodeMessageIDs(t *testing.T, repoRoot string) []string {
+func productionErrorCodeMessageIDs(t catalogTestTB, repoRoot string) []string {
 	t.Helper()
 	re := regexp.MustCompile(`(?m)(?:ErrCode|errCode|runtimeErrorCode)[A-Za-z0-9_]*\s+sharederrors\.ErrorCode\s*=\s*"([^"]+)"`)
 	ids := map[string]struct{}{}
@@ -154,7 +147,7 @@ func messageIDForErrorCode(code string) string {
 	return "errors." + head + "." + tail
 }
 
-func repoRoot(t *testing.T) string {
+func repoRoot(t catalogTestTB) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {

@@ -3,16 +3,47 @@ package test_utils
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
-	"testing"
+)
+
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+type multipartFormWriter interface {
+	CreateFormFile(fieldname string, filename string) (io.Writer, error)
+	Boundary() string
+	Close() error
+}
+
+type multipartFormReader interface {
+	ReadForm(maxMemory int64) (*multipart.Form, error)
+}
+
+var (
+	newMultipartWriter = func(w io.Writer) multipartFormWriter {
+		return multipart.NewWriter(w)
+	}
+	newMultipartReader = func(r io.Reader, boundary string) multipartFormReader {
+		return multipart.NewReader(r, boundary)
+	}
+	openMultipartFile = func(header *multipart.FileHeader) (multipart.File, error) {
+		return header.Open()
+	}
+	mkdirAll  = os.MkdirAll
+	writeFile = os.WriteFile
+	getwd     = os.Getwd
+	stat      = os.Stat
 )
 
 // CreateMultipartFile simulates a real file upload using multipart encoding
 func CreateMultipartFile(filename string, content []byte) (multipart.File, string, error) {
 	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+	writer := newMultipartWriter(body)
 
 	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
@@ -25,7 +56,7 @@ func CreateMultipartFile(filename string, content []byte) (multipart.File, strin
 		return nil, "", err
 	}
 
-	reader := multipart.NewReader(body, writer.Boundary())
+	reader := newMultipartReader(body, writer.Boundary())
 	form, err := reader.ReadForm(10 << 20)
 	if err != nil {
 		return nil, "", err
@@ -36,33 +67,33 @@ func CreateMultipartFile(filename string, content []byte) (multipart.File, strin
 		return nil, "", fmt.Errorf("no file found in form")
 	}
 
-	f, err := files[0].Open()
+	f, err := openMultipartFile(files[0])
 	return f, files[0].Filename, err
 }
 
-func WriteFile(t *testing.T, base, rel, content string) string {
+func WriteFile(t testHelper, base, rel, content string) string {
 	t.Helper()
 	abs := filepath.Join(base, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := mkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+	if err := writeFile(abs, []byte(content), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	return abs
 }
 
-func FixturePath(t *testing.T, rel string, candidates ...string) string {
+func FixturePath(t testHelper, rel string, candidates ...string) string {
 	t.Helper()
 
-	wd, err := os.Getwd()
+	wd, err := getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 
 	for _, candidate := range candidates {
 		abs := filepath.Join(wd, candidate, rel)
-		if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		if info, err := stat(abs); err == nil && info.IsDir() {
 			return abs
 		}
 	}
@@ -71,7 +102,7 @@ func FixturePath(t *testing.T, rel string, candidates ...string) string {
 	return ""
 }
 
-func WrapCloseWithErrorCheck(closer func() error, t *testing.T) {
+func WrapCloseWithErrorCheck(closer func() error, t testHelper) {
 	t.Helper()
 	err := closer()
 	if err != nil {

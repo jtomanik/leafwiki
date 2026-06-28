@@ -17,6 +17,7 @@ import (
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -31,128 +32,95 @@ const (
 	oauthScope    = "leafwiki:mcp"
 )
 
-func TestLocalMCPOAuthMetadata(t *testing.T) {
-	w := newLocalMCPAuthTestWiki(t)
-
-	tests := []struct {
-		name              string
-		basePath          string
-		authMetadataPaths []string
-		prMetadataPaths   []string
-		issuer            string
-		resource          string
-	}{
-		{
-			name:              "root",
-			authMetadataPaths: []string{"/.well-known/oauth-authorization-server"},
-			prMetadataPaths:   []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"},
-			issuer:            "http://leafwiki.local",
-			resource:          "http://leafwiki.local/mcp",
-		},
-		{
-			name:              "base path",
-			basePath:          "/wiki",
-			authMetadataPaths: []string{"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/wiki"},
-			prMetadataPaths:   []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource/wiki/mcp"},
-			issuer:            "http://leafwiki.local/wiki",
-			resource:          "http://leafwiki.local/wiki/mcp",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-				AllowInsecure:           true,
-				BasePath:                tt.basePath,
-				AccessTokenTimeout:      15 * time.Minute,
-				RefreshTokenTimeout:     7 * 24 * time.Hour,
-				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-				MCPEnabled:              true,
-			})
-
-			for _, path := range tt.authMetadataPaths {
-				authMeta := getJSONMap(t, router, "http://leafwiki.local"+path)
-				assertStringField(t, authMeta, "issuer", tt.issuer)
-				assertStringField(t, authMeta, "authorization_endpoint", tt.issuer+"/oauth/authorize")
-				assertStringField(t, authMeta, "token_endpoint", tt.issuer+"/oauth/token")
-				assertStringField(t, authMeta, "registration_endpoint", tt.issuer+"/oauth/register")
-				assertStringSliceField(t, authMeta, "response_types_supported", []string{"code"})
-				assertStringSliceField(t, authMeta, "grant_types_supported", []string{"authorization_code", "refresh_token"})
-				assertStringSliceField(t, authMeta, "code_challenge_methods_supported", []string{"S256"})
-				assertStringSliceField(t, authMeta, "scopes_supported", []string{oauthScope})
-				assertStringSliceField(t, authMeta, "token_endpoint_auth_methods_supported", []string{"none"})
-				if _, exists := authMeta["revocation_endpoint"]; exists {
-					t.Fatalf("authorization metadata advertised revocation_endpoint: %#v", authMeta)
-				}
-				if _, exists := authMeta["introspection_endpoint"]; exists {
-					t.Fatalf("authorization metadata advertised introspection_endpoint: %#v", authMeta)
-				}
-			}
-
-			for _, path := range tt.prMetadataPaths {
-				rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local"+path, nil, nil)
-				if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
-					t.Fatalf("GET %s content-type = %q, want JSON; body=%s", path, contentType, rec.Body.String())
-				}
-				prMeta := decodeJSONResponse(t, rec, http.StatusOK)
-				assertStringField(t, prMeta, "resource", tt.resource)
-				assertStringSliceField(t, prMeta, "authorization_servers", []string{tt.issuer})
-				assertStringSliceField(t, prMeta, "scopes_supported", []string{oauthScope})
-
-				optionsRec := performRequest(t, router, http.MethodOptions, "http://leafwiki.local"+path, nil, nil)
-				if optionsRec.Code != http.StatusNoContent {
-					t.Fatalf("OPTIONS protected resource metadata = %d, want 204: %s", optionsRec.Code, optionsRec.Body.String())
-				}
-			}
+var _ = DescribeTable("LocalMCPOAuthMetadata",
+	func(basePath string, authMetadataPaths, prMetadataPaths []string, issuer, resource string) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWiki(t)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AllowInsecure:           true,
+			BasePath:                basePath,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
 		})
-	}
-}
 
-func TestLocalMCPOAuthDynamicClientRegistration(t *testing.T) {
+		for _, path := range authMetadataPaths {
+			authMeta := getJSONMap(t, router, "http://leafwiki.local"+path)
+			assertStringField(t, authMeta, "issuer", issuer)
+			assertStringField(t, authMeta, "authorization_endpoint", issuer+"/oauth/authorize")
+			assertStringField(t, authMeta, "token_endpoint", issuer+"/oauth/token")
+			assertStringField(t, authMeta, "registration_endpoint", issuer+"/oauth/register")
+			assertStringSliceField(t, authMeta, "response_types_supported", []string{"code"})
+			assertStringSliceField(t, authMeta, "grant_types_supported", []string{"authorization_code", "refresh_token"})
+			assertStringSliceField(t, authMeta, "code_challenge_methods_supported", []string{"S256"})
+			assertStringSliceField(t, authMeta, "scopes_supported", []string{oauthScope})
+			assertStringSliceField(t, authMeta, "token_endpoint_auth_methods_supported", []string{"none"})
+			if _, exists := authMeta["revocation_endpoint"]; exists {
+				t.Fatalf("authorization metadata advertised revocation_endpoint: %#v", authMeta)
+			}
+			if _, exists := authMeta["introspection_endpoint"]; exists {
+				t.Fatalf("authorization metadata advertised introspection_endpoint: %#v", authMeta)
+			}
+		}
+
+		for _, path := range prMetadataPaths {
+			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local"+path, nil, nil)
+			if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+				t.Fatalf("GET %s content-type = %q, want JSON; body=%s", path, contentType, rec.Body.String())
+			}
+			prMeta := decodeJSONResponse(t, rec, http.StatusOK)
+			assertStringField(t, prMeta, "resource", resource)
+			assertStringSliceField(t, prMeta, "authorization_servers", []string{issuer})
+			assertStringSliceField(t, prMeta, "scopes_supported", []string{oauthScope})
+
+			optionsRec := performRequest(t, router, http.MethodOptions, "http://leafwiki.local"+path, nil, nil)
+			if optionsRec.Code != http.StatusNoContent {
+				t.Fatalf("OPTIONS protected resource metadata = %d, want 204: %s", optionsRec.Code, optionsRec.Body.String())
+			}
+		}
+	},
+	Entry(
+		"root",
+		"",
+		[]string{"/.well-known/oauth-authorization-server"},
+		[]string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"},
+		"http://leafwiki.local",
+		"http://leafwiki.local/mcp",
+	),
+	Entry(
+		"base path",
+		"/wiki",
+		[]string{"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/wiki"},
+		[]string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource/wiki/mcp"},
+		"http://leafwiki.local/wiki",
+		"http://leafwiki.local/wiki/mcp",
+	),
+)
+
+var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrations",
+	func(body string) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWiki(t)
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+
+		rec := performJSON(t, router, "http://leafwiki.local/oauth/register", body)
+		payload := decodeJSONResponse(t, rec, http.StatusBadRequest)
+		assertStringField(t, payload, "error", "invalid_client_metadata")
+	},
+	Entry("missing redirect uris", `{"token_endpoint_auth_method":"none"}`),
+	Entry("non loopback redirect uri", `{"redirect_uris":["http://example.com/callback"],"token_endpoint_auth_method":"none"}`),
+	Entry("confidential token auth method", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"token_endpoint_auth_method":"client_secret_basic"}`),
+	Entry("client secret", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"token_endpoint_auth_method":"none","client_secret":"secret"}`),
+	Entry("unsupported grant", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"grant_types":["client_credentials"],"token_endpoint_auth_method":"none"}`),
+	Entry("unsupported response type", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"response_types":["token"],"token_endpoint_auth_method":"none"}`),
+	Entry("unsupported scope", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"scope":"leafwiki:mcp other","token_endpoint_auth_method":"none"}`),
+)
+
+var _ = It("LocalMCPOAuthDynamicClientRegistration", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-
-	invalidRegistrations := []struct {
-		name string
-		body string
-	}{
-		{
-			name: "missing redirect uris",
-			body: `{"token_endpoint_auth_method":"none"}`,
-		},
-		{
-			name: "non loopback redirect uri",
-			body: `{"redirect_uris":["http://example.com/callback"],"token_endpoint_auth_method":"none"}`,
-		},
-		{
-			name: "confidential token auth method",
-			body: `{"redirect_uris":["http://127.0.0.1:49152/callback"],"token_endpoint_auth_method":"client_secret_basic"}`,
-		},
-		{
-			name: "client secret",
-			body: `{"redirect_uris":["http://127.0.0.1:49152/callback"],"token_endpoint_auth_method":"none","client_secret":"secret"}`,
-		},
-		{
-			name: "unsupported grant",
-			body: `{"redirect_uris":["http://127.0.0.1:49152/callback"],"grant_types":["client_credentials"],"token_endpoint_auth_method":"none"}`,
-		},
-		{
-			name: "unsupported response type",
-			body: `{"redirect_uris":["http://127.0.0.1:49152/callback"],"response_types":["token"],"token_endpoint_auth_method":"none"}`,
-		},
-		{
-			name: "unsupported scope",
-			body: `{"redirect_uris":["http://127.0.0.1:49152/callback"],"scope":"leafwiki:mcp other","token_endpoint_auth_method":"none"}`,
-		},
-	}
-
-	for _, tt := range invalidRegistrations {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := performJSON(t, router, "http://leafwiki.local/oauth/register", tt.body)
-			payload := decodeJSONResponse(t, rec, http.StatusBadRequest)
-			assertStringField(t, payload, "error", "invalid_client_metadata")
-		})
-	}
 
 	registration := registerOAuthClient(t, router, "", `{
 		"client_name":"codex",
@@ -207,9 +175,10 @@ func TestLocalMCPOAuthDynamicClientRegistration(t *testing.T) {
 	if stringFromMap(t, token, "access_token") == "" || stringFromMap(t, token, "refresh_token") == "" {
 		t.Fatalf("dynamic client token response missing tokens: %#v", token)
 	}
-}
+})
 
-func TestLocalMCPOAuthDynamicClientRegistrationDefaultsRefreshAndBindsRefreshClient(t *testing.T) {
+var _ = It("LocalMCPOAuthDynamicClientRegistrationDefaultsRefreshAndBindsRefreshClient", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	redirectURI := "http://127.0.0.1:49152/callback"
@@ -270,9 +239,10 @@ func TestLocalMCPOAuthDynamicClientRegistrationDefaultsRefreshAndBindsRefreshCli
 	if stringFromMap(t, refreshed, "access_token") == "" {
 		t.Fatalf("dynamic default client refresh response missing access token: %#v", refreshed)
 	}
-}
+})
 
-func TestLocalMCPOAuthDynamicClientRegistrationOmittedScopeCanRequestAdvertisedScope(t *testing.T) {
+var _ = It("LocalMCPOAuthDynamicClientRegistrationOmittedScopeCanRequestAdvertisedScope", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	redirectURI := "http://127.0.0.1:49152/callback"
@@ -315,9 +285,10 @@ func TestLocalMCPOAuthDynamicClientRegistrationOmittedScopeCanRequestAdvertisedS
 	if stringFromMap(t, token, "access_token") == "" || stringFromMap(t, token, "refresh_token") == "" {
 		t.Fatalf("omitted-scope DCR token response missing tokens: %#v", token)
 	}
-}
+})
 
-func TestLocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGrant(t *testing.T) {
+var _ = It("LocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGrant", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	redirectURI := "http://127.0.0.1:49152/callback"
@@ -357,77 +328,110 @@ func TestLocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGrant(
 	if refreshToken, ok := token["refresh_token"]; ok {
 		t.Fatalf("auth-code-only client token response included refresh_token %#v; payload=%#v", refreshToken, token)
 	}
-}
+})
 
-func TestLocalMCPOAuthAuthorizeValidationAndLoginRedirect(t *testing.T) {
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requests",
+	func(override func(url.Values)) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWiki(t)
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQuery("http://localhost:49152/callback", "state-1", pkceS256(verifier), "http://leafwiki.local/mcp")
+		override(q)
+
+		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("authorize = %d, want 400: %s", rec.Code, rec.Body.String())
+		}
+	},
+	Entry("unknown client", func(q url.Values) { q.Set("client_id", "unknown-client") }),
+	Entry("non loopback redirect", func(q url.Values) { q.Set("redirect_uri", "http://example.com/callback") }),
+	Entry("unsupported loopback redirect", func(q url.Values) { q.Set("redirect_uri", "http://127.0.0.2:49152/callback") }),
+	Entry("redirect fragment", func(q url.Values) { q.Set("redirect_uri", "http://localhost:49152/callback#frag") }),
+)
+
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect errors",
+	func(override func(url.Values), wantError string, wantState string) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWiki(t)
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		validRedirect := "http://localhost:49152/callback"
+		q := validAuthorizeQuery(validRedirect, "redirect-error-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		override(q)
+
+		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("authorize = %d, want 302: %s", rec.Code, rec.Body.String())
+		}
+		redirected, err := url.Parse(rec.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse authorize error redirect: %v", err)
+		}
+		if got := redirected.Scheme + "://" + redirected.Host + redirected.Path; got != validRedirect {
+			t.Fatalf("authorize error redirect target = %q, want %q", got, validRedirect)
+		}
+		if got := redirected.Query().Get("state"); got != wantState {
+			t.Fatalf("authorize error redirect state = %q, want %q", got, wantState)
+		}
+		if got := redirected.Query().Get("error"); got != wantError {
+			t.Fatalf("authorize error = %q, want %q in %s", got, wantError, redirected.String())
+		}
+		if code := redirected.Query().Get("code"); code != "" {
+			t.Fatalf("authorize error redirect included code %q", code)
+		}
+	},
+	Entry("missing state redirects to client", func(q url.Values) { q.Del("state") }, "invalid_state", ""),
+	Entry("short state redirects to client", func(q url.Values) { q.Set("state", "short") }, "invalid_state", "short"),
+	Entry("missing pkce redirects to client", func(q url.Values) { q.Del("code_challenge") }, "invalid_request", "redirect-error-state"),
+	Entry("plain pkce redirects to client", func(q url.Values) { q.Set("code_challenge_method", "plain") }, "invalid_request", "redirect-error-state"),
+	Entry("resource mismatch redirects to client", func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, "invalid_request", "redirect-error-state"),
+	Entry("mixed duplicate resource redirects to client", func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, "invalid_request", "redirect-error-state"),
+	Entry("unsupported scope redirects to client", func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, "invalid_scope", "redirect-error-state"),
+)
+
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenticated approval",
+	func(redirectURI string) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWiki(t)
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		challenge := pkceS256(verifier)
+		cookies := loginCookies(t, router, "admin", "admin")
+		q := validAuthorizeQuery(redirectURI, "roundtrip-state", challenge, "")
+
+		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(t, rec, "")
+		approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+
+		if approved.Code != http.StatusFound {
+			t.Fatalf("approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
+		}
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		if err != nil {
+			t.Fatalf("parse approved authorize redirect: %v", err)
+		}
+		if got := redirected.Query().Get("state"); got != "roundtrip-state" {
+			t.Fatalf("redirect state = %q, want roundtrip-state", got)
+		}
+		if redirected.Query().Get("code") == "" {
+			t.Fatalf("authorize redirect did not include code: %s", redirected.String())
+		}
+	},
+	Entry("authenticated approval http://localhost:49152/callback", "http://localhost:49152/callback"),
+	Entry("authenticated approval http://127.0.0.1:49152/callback", "http://127.0.0.1:49152/callback"),
+	Entry("authenticated approval http://[::1]:49152/callback", "http://[::1]:49152/callback"),
+)
+
+var _ = It("LocalMCPOAuthAuthorizeValidationAndLoginRedirect", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 	challenge := pkceS256(verifier)
 	validRedirect := "http://localhost:49152/callback"
-
-	invalidRequests := []struct {
-		name     string
-		override func(url.Values)
-	}{
-		{name: "unknown client", override: func(q url.Values) { q.Set("client_id", "unknown-client") }},
-		{name: "non loopback redirect", override: func(q url.Values) { q.Set("redirect_uri", "http://example.com/callback") }},
-		{name: "unsupported loopback redirect", override: func(q url.Values) { q.Set("redirect_uri", "http://127.0.0.2:49152/callback") }},
-		{name: "redirect fragment", override: func(q url.Values) { q.Set("redirect_uri", "http://localhost:49152/callback#frag") }},
-	}
-
-	for _, tt := range invalidRequests {
-		t.Run(tt.name, func(t *testing.T) {
-			q := validAuthorizeQuery(validRedirect, "state-1", challenge, "http://leafwiki.local/mcp")
-			tt.override(q)
-			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("authorize %s = %d, want 400: %s", tt.name, rec.Code, rec.Body.String())
-			}
-		})
-	}
-
-	redirectedErrors := []struct {
-		name      string
-		override  func(url.Values)
-		wantError string
-		wantState string
-	}{
-		{name: "missing state", override: func(q url.Values) { q.Del("state") }, wantError: "invalid_state", wantState: ""},
-		{name: "short state", override: func(q url.Values) { q.Set("state", "short") }, wantError: "invalid_state", wantState: "short"},
-		{name: "missing pkce", override: func(q url.Values) { q.Del("code_challenge") }, wantError: "invalid_request", wantState: "redirect-error-state"},
-		{name: "plain pkce", override: func(q url.Values) { q.Set("code_challenge_method", "plain") }, wantError: "invalid_request", wantState: "redirect-error-state"},
-		{name: "resource mismatch", override: func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request", wantState: "redirect-error-state"},
-		{name: "mixed duplicate resource", override: func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, wantError: "invalid_request", wantState: "redirect-error-state"},
-		{name: "unsupported scope", override: func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, wantError: "invalid_scope", wantState: "redirect-error-state"},
-	}
-
-	for _, tt := range redirectedErrors {
-		t.Run(tt.name+" redirects to client", func(t *testing.T) {
-			q := validAuthorizeQuery(validRedirect, "redirect-error-state", challenge, "http://leafwiki.local/mcp")
-			tt.override(q)
-			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
-			if rec.Code != http.StatusFound {
-				t.Fatalf("authorize %s = %d, want 302: %s", tt.name, rec.Code, rec.Body.String())
-			}
-			redirected, err := url.Parse(rec.Header().Get("Location"))
-			if err != nil {
-				t.Fatalf("parse authorize error redirect: %v", err)
-			}
-			if got := redirected.Scheme + "://" + redirected.Host + redirected.Path; got != validRedirect {
-				t.Fatalf("authorize error redirect target = %q, want %q", got, validRedirect)
-			}
-			if got := redirected.Query().Get("state"); got != tt.wantState {
-				t.Fatalf("authorize error redirect state = %q, want %q", got, tt.wantState)
-			}
-			if got := redirected.Query().Get("error"); got != tt.wantError {
-				t.Fatalf("authorize error = %q, want %q in %s", got, tt.wantError, redirected.String())
-			}
-			if code := redirected.Query().Get("code"); code != "" {
-				t.Fatalf("authorize error redirect included code %q", code)
-			}
-		})
-	}
 
 	q := validAuthorizeQuery(validRedirect, "login-state", challenge, "http://leafwiki.local/mcp")
 	authorizeURL := "http://leafwiki.local/oauth/authorize?" + q.Encode()
@@ -446,36 +450,10 @@ func TestLocalMCPOAuthAuthorizeValidationAndLoginRedirect(t *testing.T) {
 	if got := loginURL.Query().Get("returnTo"); got != authorizeURL {
 		t.Fatalf("login returnTo = %q, want %q", got, authorizeURL)
 	}
+})
 
-	cookies := loginCookies(t, router, "admin", "admin")
-	for _, redirectURI := range []string{
-		"http://localhost:49152/callback",
-		"http://127.0.0.1:49152/callback",
-		"http://[::1]:49152/callback",
-	} {
-		t.Run("authenticated approval "+redirectURI, func(t *testing.T) {
-			q := validAuthorizeQuery(redirectURI, "roundtrip-state", challenge, "")
-			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-			form := approvalFormFromAuthorizeRedirect(t, rec, "")
-			approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
-			if approved.Code != http.StatusFound {
-				t.Fatalf("approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-			}
-			redirected, err := url.Parse(approved.Header().Get("Location"))
-			if err != nil {
-				t.Fatalf("parse approved authorize redirect: %v", err)
-			}
-			if got := redirected.Query().Get("state"); got != "roundtrip-state" {
-				t.Fatalf("redirect state = %q, want roundtrip-state", got)
-			}
-			if redirected.Query().Get("code") == "" {
-				t.Fatalf("authorize redirect did not include code: %s", redirected.String())
-			}
-		})
-	}
-}
-
-func TestLocalMCPOAuthRemoteUserAuthorizeRequiresApproval(t *testing.T) {
+var _ = It("LocalMCPOAuthRemoteUserAuthorizeRequiresApproval", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
 	if err != nil {
@@ -513,9 +491,10 @@ func TestLocalMCPOAuthRemoteUserAuthorizeRequiresApproval(t *testing.T) {
 	if redirected.Query().Get("code") == "" {
 		t.Fatalf("remote-user authorize redirect missing code: %s", redirected.String())
 	}
-}
+})
 
-func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
+var _ = It("LocalMCPOAuthTokenExchangeAndRefresh", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	cookies := loginCookies(t, router, "admin", "admin")
@@ -635,9 +614,10 @@ func TestLocalMCPOAuthTokenExchangeAndRefresh(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("POST /oauth/introspect = %d, want 404", rec.Code)
 	}
-}
+})
 
-func TestLocalMCPOAuthTokenLifetimesComeFromWikiOptions(t *testing.T) {
+var _ = It("LocalMCPOAuthTokenLifetimesComeFromWikiOptions", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
@@ -659,9 +639,10 @@ func TestLocalMCPOAuthTokenLifetimesComeFromWikiOptions(t *testing.T) {
 	if expiresIn < float64((14 * time.Minute).Seconds()) {
 		t.Fatalf("expires_in = %v seconds, want wiki-configured lifetime near 15m", expiresIn)
 	}
-}
+})
 
-func TestLocalMCPOAuthExpiredBearerTokenRejected(t *testing.T) {
+var _ = It("LocalMCPOAuthExpiredBearerTokenRejected", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{AccessTokenTimeout: -time.Minute})
 	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
 	if err != nil {
@@ -704,9 +685,10 @@ func TestLocalMCPOAuthExpiredBearerTokenRejected(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /mcp with expired bearer = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestLocalMCPRegistration_AuthEnabledWritesCSRFAndAuthorParity(t *testing.T) {
+var _ = It("LocalMCPRegistration_AuthEnabledWritesCSRFAndAuthorParity", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 	admin, err := w.UserService().GetUserByUsername("admin")
@@ -740,9 +722,9 @@ func TestLocalMCPRegistration_AuthEnabledWritesCSRFAndAuthorParity(t *testing.T)
 	editorToken := oauthAccessTokenWithCookies(t, router, editorCookies, "editor-crud-state")
 	editorSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
 	_ = exerciseOAuthWriterCRUD(t, router, editorSession, editorCookies, "editor", editor.ID)
-}
+})
 
-func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label, userID string) map[string]any {
+func exerciseOAuthWriterCRUD(t testing.TB, router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label, userID string) map[string]any {
 	t.Helper()
 
 	titlePrefix := strings.ToUpper(label[:1]) + label[1:]
@@ -790,7 +772,8 @@ func exerciseOAuthWriterCRUD(t *testing.T, router http.Handler, session *sdkmcp.
 	return updatedPage
 }
 
-func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
+var _ = It("LocalMCPRegistration_AuthEnabledOAuthBearerProtection", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 	opts := oauthRouterOptions("")
 	opts.EnableLinkRefactor = true
@@ -828,73 +811,6 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	expectedTools = append(expectedTools, wikimcp.LinkRefactorToolNames()...)
 	assertToolNames(t, listAllToolNames(t, adminSession), expectedTools)
 
-	viewer, err := w.UserService().CreateUser("viewer", "viewer@example.com", "viewerpass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("create viewer user: %v", err)
-	}
-	viewerToken := oauthAccessTokenForUser(t, router, "viewer", "viewerpass", "viewer-state")
-	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerToken)
-	_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
-
-	page := nestedMap(t, callToolStructured(t, adminSession, "wiki_create_page", map[string]any{
-		"title": "Viewer Gate Fixture",
-		"slug":  "viewer-gate-fixture",
-		"kind":  "page",
-	}), "page")
-	pageID := stringField(t, page, "id")
-	pageVersion := stringField(t, page, "version")
-	updatedContent := "viewer gate fixture revision"
-	updated := nestedMap(t, callToolStructured(t, adminSession, "wiki_update_page", map[string]any{
-		"id":      pageID,
-		"version": pageVersion,
-		"title":   "Viewer Gate Fixture",
-		"slug":    "viewer-gate-fixture",
-		"content": updatedContent,
-	}), "page")
-	currentVersion := stringField(t, updated, "version")
-	_ = callToolStructured(t, adminSession, "wiki_upload_asset", map[string]any{
-		"pageId":        pageID,
-		"filename":      "viewer-gate.txt",
-		"contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer gate asset")),
-	})
-	latestRevision := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
-	latestRevisionID := stringField(t, latestRevision, "id")
-
-	editorOnlyTools := []struct {
-		name string
-		args map[string]any
-	}{
-		{name: "wiki_suggest_slug", args: map[string]any{"title": "Viewer Slug"}},
-		{name: "wiki_refresh", args: map[string]any{"source": "filesystem"}},
-		{name: "wiki_create_page", args: map[string]any{"title": "Viewer Write", "slug": "viewer-write"}},
-		{name: "wiki_update_page", args: map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}},
-		{name: "wiki_update_page_metadata", args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
-		{name: "wiki_replace_page_section", args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
-		{name: "wiki_delete_page", args: map[string]any{"id": pageID, "version": currentVersion, "recursive": false}},
-		{name: "wiki_move_page", args: map[string]any{"id": pageID, "version": currentVersion}},
-		{name: "wiki_sort_pages", args: map[string]any{"parentId": "", "orderedIds": []any{pageID}}},
-		{name: "wiki_ensure_page", args: map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}},
-		{name: "wiki_convert_page", args: map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}},
-		{name: "wiki_copy_page", args: map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}},
-		{name: "wiki_upload_asset", args: map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}},
-		{name: "wiki_rename_asset", args: map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}},
-		{name: "wiki_delete_asset", args: map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}},
-		{name: "wiki_restore_revision", args: map[string]any{"pageId": pageID, "revisionId": latestRevisionID}},
-		{name: "wiki_preview_page_refactor", args: map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}},
-		{name: "wiki_apply_page_refactor", args: map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}},
-	}
-	for _, tt := range editorOnlyTools {
-		t.Run("viewer denied "+tt.name, func(t *testing.T) {
-			errResult := callToolStructuredError(t, viewerSession, tt.name, tt.args)
-			assertMCPStructuredError(t, "viewer "+tt.name+" denied", errResult, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
-		})
-	}
-	afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
-	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != updatedContent {
-		t.Fatalf("page after viewer-denied tools = %#v, want version %q and content %q", afterViewerDenied, currentVersion, updatedContent)
-	}
-	_ = viewer
-
 	editor, err := w.UserService().CreateUser("editor", "editor@example.com", "editorpass", coreauth.RoleEditor)
 	if err != nil {
 		t.Fatalf("create editor user: %v", err)
@@ -930,9 +846,117 @@ func TestLocalMCPRegistration_AuthEnabledOAuthBearerProtection(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /mcp with deleted user token = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
+var _ = DescribeTable("LocalMCPRegistration_AuthEnabledOAuthBearerProtection viewer denied",
+	func(toolName string, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
+		t := GinkgoTB()
+		w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
+		opts := oauthRouterOptions("")
+		opts.EnableLinkRefactor = true
+		opts.EnableWorkspaceSync = true
+		router := newLocalMCPTestRouter(w, opts)
+
+		adminToken := oauthAccessTokenForUser(t, router, "admin", "admin", "admin-state")
+		adminSession := connectLocalMCPWithToken(t, router, "/mcp", adminToken)
+
+		if _, err := w.UserService().CreateUser("viewer", "viewer@example.com", "viewerpass", coreauth.RoleViewer); err != nil {
+			t.Fatalf("create viewer user: %v", err)
+		}
+		viewerToken := oauthAccessTokenForUser(t, router, "viewer", "viewerpass", "viewer-state")
+		viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerToken)
+		_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
+
+		page := nestedMap(t, callToolStructured(t, adminSession, "wiki_create_page", map[string]any{
+			"title": "Viewer Gate Fixture",
+			"slug":  "viewer-gate-fixture",
+			"kind":  "page",
+		}), "page")
+		pageID := stringField(t, page, "id")
+		pageVersion := stringField(t, page, "version")
+		updatedContent := "viewer gate fixture revision"
+		updated := nestedMap(t, callToolStructured(t, adminSession, "wiki_update_page", map[string]any{
+			"id":      pageID,
+			"version": pageVersion,
+			"title":   "Viewer Gate Fixture",
+			"slug":    "viewer-gate-fixture",
+			"content": updatedContent,
+		}), "page")
+		currentVersion := stringField(t, updated, "version")
+		_ = callToolStructured(t, adminSession, "wiki_upload_asset", map[string]any{
+			"pageId":        pageID,
+			"filename":      "viewer-gate.txt",
+			"contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer gate asset")),
+		})
+		latestRevision := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
+		latestRevisionID := stringField(t, latestRevision, "id")
+
+		errResult := callToolStructuredError(t, viewerSession, toolName, buildArgs(pageID, currentVersion, latestRevisionID))
+		assertMCPStructuredError(t, "viewer "+toolName+" denied", errResult, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
+
+		afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
+		if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != updatedContent {
+			t.Fatalf("page after viewer-denied %s = %#v, want version %q and content %q", toolName, afterViewerDenied, currentVersion, updatedContent)
+		}
+	},
+	Entry("wiki_suggest_slug", "wiki_suggest_slug", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"title": "Viewer Slug"}
+	}),
+	Entry("wiki_refresh", "wiki_refresh", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"source": "filesystem"}
+	}),
+	Entry("wiki_create_page", "wiki_create_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"title": "Viewer Write", "slug": "viewer-write"}
+	}),
+	Entry("wiki_update_page", "wiki_update_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}
+	}),
+	Entry("wiki_update_page_metadata", "wiki_update_page_metadata", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}
+	}),
+	Entry("wiki_replace_page_section", "wiki_replace_page_section", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}
+	}),
+	Entry("wiki_delete_page", "wiki_delete_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"id": pageID, "version": currentVersion, "recursive": false}
+	}),
+	Entry("wiki_move_page", "wiki_move_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"id": pageID, "version": currentVersion}
+	}),
+	Entry("wiki_sort_pages", "wiki_sort_pages", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"parentId": "", "orderedIds": []any{pageID}}
+	}),
+	Entry("wiki_ensure_page", "wiki_ensure_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}
+	}),
+	Entry("wiki_convert_page", "wiki_convert_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}
+	}),
+	Entry("wiki_copy_page", "wiki_copy_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}
+	}),
+	Entry("wiki_upload_asset", "wiki_upload_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}
+	}),
+	Entry("wiki_rename_asset", "wiki_rename_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}
+	}),
+	Entry("wiki_delete_asset", "wiki_delete_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}
+	}),
+	Entry("wiki_restore_revision", "wiki_restore_revision", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "revisionId": latestRevisionID}
+	}),
+	Entry("wiki_preview_page_refactor", "wiki_preview_page_refactor", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}
+	}),
+	Entry("wiki_apply_page_refactor", "wiki_apply_page_refactor", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+		return map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}
+	}),
+)
+
+var _ = It("LocalMCPRegistration_AuthEnabledAPIKeyBearerProtection", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 	opts := oauthRouterOptions("")
 	opts.EnableWorkspaceSync = true
@@ -1034,9 +1058,10 @@ func TestLocalMCPRegistration_AuthEnabledAPIKeyBearerProtection(t *testing.T) {
 	}
 	assertMCPBearerUnauthorized(t, router, "/mcp", deletedKey.Secret)
 	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID.String()+"_wrongsecret")
-}
+})
 
-func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
+var _ = It("LocalMCPGetContext_ViewerCannotForceWorkspaceRefresh", func() {
+	t := GinkgoTB()
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
 		Workspace: wiki.Workspace{RootDir: rootDir},
@@ -1075,9 +1100,10 @@ func TestLocalMCPGetContext_ViewerCannotForceWorkspaceRefresh(t *testing.T) {
 			t.Fatalf("viewer recommendedTools = %#v, did not expect %s", recommended, forbidden)
 		}
 	}
-}
+})
 
-func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testing.T) {
+var _ = It("PrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 
 	editor, err := w.UserService().CreateUser("private-stdio-editor", "private-stdio-editor@example.com", "editorpass", coreauth.RoleEditor)
@@ -1102,9 +1128,10 @@ func TestPrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools(t *testin
 	if err == nil && !result.IsError {
 		t.Fatalf("revoked private STDIO API key %s succeeded: %#v", strings.Join([]string{"get", "tree"}, "_"), result.StructuredContent)
 	}
-}
+})
 
-func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
+var _ = It("LocalMCPRegistration_AuthEnabledBasePathAPIKeySession", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
 
@@ -1124,9 +1151,10 @@ func TestLocalMCPRegistration_AuthEnabledBasePathAPIKeySession(t *testing.T) {
 
 	config := callToolStructured(t, session, "wiki_get_config", nil)
 	assertStringField(t, config, "basePath", "/wiki")
-}
+})
 
-func TestLocalMCPRegistration_AuthEnabledBasePathMetadataChallenge(t *testing.T) {
+var _ = It("LocalMCPRegistration_AuthEnabledBasePathMetadataChallenge", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
 
@@ -1137,9 +1165,10 @@ func TestLocalMCPRegistration_AuthEnabledBasePathMetadataChallenge(t *testing.T)
 	if got := rec.Header().Get("WWW-Authenticate"); !strings.Contains(got, `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/wiki/mcp"`) {
 		t.Fatalf("base-path WWW-Authenticate = %q, want base-path resource metadata", got)
 	}
-}
+})
 
-func TestLocalMCPRegistration_AuthEnabledBasePathOAuthSession(t *testing.T) {
+var _ = It("LocalMCPRegistration_AuthEnabledBasePathOAuthSession", func() {
+	t := GinkgoTB()
 	w := newLocalMCPAuthTestWiki(t)
 	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
 	cookies := loginCookiesAt(t, router, "/wiki", "admin", "admin")
@@ -1153,7 +1182,7 @@ func TestLocalMCPRegistration_AuthEnabledBasePathOAuthSession(t *testing.T) {
 	config := callToolStructured(t, session, "wiki_get_config", nil)
 	assertStringField(t, config, "basePath", "/wiki")
 	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
-}
+})
 
 type staticOAuthHandler struct {
 	token string
@@ -1167,13 +1196,13 @@ func (h staticOAuthHandler) Authorize(context.Context, *http.Request, *http.Resp
 	return fmt.Errorf("unexpected oauth authorize callback")
 }
 
-func newLocalMCPAuthTestWiki(t *testing.T) *wiki.Wiki {
+func newLocalMCPAuthTestWiki(t testing.TB) *wiki.Wiki {
 	t.Helper()
 
 	return newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 }
 
-func newLocalMCPAuthTestWikiWithOptions(t *testing.T, overrides wiki.WikiOptions) *wiki.Wiki {
+func newLocalMCPAuthTestWikiWithOptions(t testing.TB, overrides wiki.WikiOptions) *wiki.Wiki {
 	t.Helper()
 
 	options := wiki.WikiOptions{
@@ -1215,13 +1244,13 @@ func oauthRouterOptions(basePath string) httpinternal.RouterOptions {
 	}
 }
 
-func getJSONMap(t *testing.T, router http.Handler, target string) map[string]any {
+func getJSONMap(t testing.TB, router http.Handler, target string) map[string]any {
 	t.Helper()
 
 	return decodeJSONResponse(t, performRequest(t, router, http.MethodGet, target, nil, nil), http.StatusOK)
 }
 
-func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int) map[string]any {
+func decodeJSONResponse(t testing.TB, rec *httptest.ResponseRecorder, wantStatus int) map[string]any {
 	t.Helper()
 
 	if rec.Code != wantStatus {
@@ -1234,13 +1263,13 @@ func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus
 	return out
 }
 
-func performRequest(t *testing.T, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader) *httptest.ResponseRecorder {
+func performRequest(t testing.TB, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
 	return performRequestWithHeaders(t, router, method, target, cookies, body, nil)
 }
 
-func performRequestWithHeaders(t *testing.T, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
+func performRequestWithHeaders(t testing.TB, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	req := httptest.NewRequest(method, target, body)
@@ -1266,7 +1295,7 @@ func markLoopbackMCPTestRequest(req *http.Request) {
 	}
 }
 
-func performJSON(t *testing.T, router http.Handler, target, body string) *httptest.ResponseRecorder {
+func performJSON(t testing.TB, router http.Handler, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
@@ -1276,19 +1305,19 @@ func performJSON(t *testing.T, router http.Handler, target, body string) *httpte
 	return rec
 }
 
-func registerOAuthClient(t *testing.T, router http.Handler, basePath, body string) map[string]any {
+func registerOAuthClient(t testing.TB, router http.Handler, basePath, body string) map[string]any {
 	t.Helper()
 
 	return decodeJSONResponse(t, performJSON(t, router, "http://leafwiki.local"+basePath+"/oauth/register", body), http.StatusCreated)
 }
 
-func performForm(t *testing.T, router http.Handler, target string, form url.Values) *httptest.ResponseRecorder {
+func performForm(t testing.TB, router http.Handler, target string, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 
 	return performFormWithCookiesAndHeaders(t, router, target, form, nil, nil)
 }
 
-func performFormWithCookiesAndHeaders(t *testing.T, router http.Handler, target string, form url.Values, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
+func performFormWithCookiesAndHeaders(t testing.TB, router http.Handler, target string, form url.Values, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
@@ -1304,7 +1333,7 @@ func performFormWithCookiesAndHeaders(t *testing.T, router http.Handler, target 
 	return rec
 }
 
-func approvalFormFromAuthorizeRedirect(t *testing.T, rec *httptest.ResponseRecorder, basePath string) url.Values {
+func approvalFormFromAuthorizeRedirect(t testing.TB, rec *httptest.ResponseRecorder, basePath string) url.Values {
 	t.Helper()
 
 	if rec.Code != http.StatusFound {
@@ -1326,7 +1355,7 @@ func approvalFormFromAuthorizeRedirect(t *testing.T, rec *httptest.ResponseRecor
 	return form
 }
 
-func approvalDetails(t *testing.T, router http.Handler, basePath, token string, cookies []*http.Cookie, headers map[string]string) map[string]any {
+func approvalDetails(t testing.TB, router http.Handler, basePath, token string, cookies []*http.Cookie, headers map[string]string) map[string]any {
 	t.Helper()
 
 	target := "http://leafwiki.local" + basePath + "/oauth/approval?approval_token=" + url.QueryEscape(token)
@@ -1358,13 +1387,13 @@ func pkceS256(verifier string) string {
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(sum[:]), "=")
 }
 
-func loginCookies(t *testing.T, router http.Handler, identifier, password string) []*http.Cookie {
+func loginCookies(t testing.TB, router http.Handler, identifier, password string) []*http.Cookie {
 	t.Helper()
 
 	return loginCookiesAt(t, router, "", identifier, password)
 }
 
-func loginCookiesAt(t *testing.T, router http.Handler, basePath, identifier, password string) []*http.Cookie {
+func loginCookiesAt(t testing.TB, router http.Handler, basePath, identifier, password string) []*http.Cookie {
 	t.Helper()
 
 	body := fmt.Sprintf(`{"identifier":%q,"password":%q}`, identifier, password)
@@ -1378,13 +1407,13 @@ func loginCookiesAt(t *testing.T, router http.Handler, basePath, identifier, pas
 	return rec.Result().Cookies()
 }
 
-func authorizeCode(t *testing.T, router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) string {
+func authorizeCode(t testing.TB, router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) string {
 	t.Helper()
 
 	return authorizeCodeAt(t, router, cookies, "", redirectURI, state, verifier, resource)
 }
 
-func authorizeCodeAt(t *testing.T, router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) string {
+func authorizeCodeAt(t testing.TB, router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) string {
 	t.Helper()
 
 	q := validAuthorizeQuery(redirectURI, state, pkceS256(verifier), resource)
@@ -1409,19 +1438,19 @@ func authorizeCodeAt(t *testing.T, router http.Handler, cookies []*http.Cookie, 
 	return code
 }
 
-func exchangeCode(t *testing.T, router http.Handler, code, redirectURI, verifier string) map[string]any {
+func exchangeCode(t testing.TB, router http.Handler, code, redirectURI, verifier string) map[string]any {
 	t.Helper()
 
 	return exchangeCodeAt(t, router, "", code, redirectURI, verifier)
 }
 
-func exchangeCodeAt(t *testing.T, router http.Handler, basePath, code, redirectURI, verifier string) map[string]any {
+func exchangeCodeAt(t testing.TB, router http.Handler, basePath, code, redirectURI, verifier string) map[string]any {
 	t.Helper()
 
 	return exchangeCodeForClient(t, router, basePath, oauthClientID, code, redirectURI, verifier)
 }
 
-func exchangeCodeForClient(t *testing.T, router http.Handler, basePath, clientID, code, redirectURI, verifier string) map[string]any {
+func exchangeCodeForClient(t testing.TB, router http.Handler, basePath, clientID, code, redirectURI, verifier string) map[string]any {
 	t.Helper()
 
 	form := url.Values{
@@ -1434,20 +1463,20 @@ func exchangeCodeForClient(t *testing.T, router http.Handler, basePath, clientID
 	return decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local"+basePath+"/oauth/token", form), http.StatusOK)
 }
 
-func oauthAccessTokenForUser(t *testing.T, router http.Handler, username, password, state string) string {
+func oauthAccessTokenForUser(t testing.TB, router http.Handler, username, password, state string) string {
 	t.Helper()
 
 	cookies := loginCookies(t, router, username, password)
 	return oauthAccessTokenWithCookies(t, router, cookies, state)
 }
 
-func oauthAccessTokenWithCookies(t *testing.T, router http.Handler, cookies []*http.Cookie, state string) string {
+func oauthAccessTokenWithCookies(t testing.TB, router http.Handler, cookies []*http.Cookie, state string) string {
 	t.Helper()
 
 	return oauthAccessTokenWithCookiesAt(t, router, cookies, "", state, "http://leafwiki.local/mcp")
 }
 
-func oauthAccessTokenWithCookiesAt(t *testing.T, router http.Handler, cookies []*http.Cookie, basePath, state, resource string) string {
+func oauthAccessTokenWithCookiesAt(t testing.TB, router http.Handler, cookies []*http.Cookie, basePath, state, resource string) string {
 	t.Helper()
 
 	verifier := "oauth-access-verifier-" + state + "-abcdefghijklmnopqrstuvwxyz0123456789"
@@ -1455,7 +1484,7 @@ func oauthAccessTokenWithCookiesAt(t *testing.T, router http.Handler, cookies []
 	return stringFromMap(t, exchangeCodeAt(t, router, basePath, code, "http://localhost:49152/callback", verifier), "access_token")
 }
 
-func connectLocalMCPWithToken(t *testing.T, handler http.Handler, path, token string) *sdkmcp.ClientSession {
+func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token string) *sdkmcp.ClientSession {
 	t.Helper()
 
 	server := httptest.NewServer(handler)
@@ -1475,7 +1504,7 @@ func connectLocalMCPWithToken(t *testing.T, handler http.Handler, path, token st
 	return session
 }
 
-func assertMCPBearerUnauthorized(t *testing.T, router http.Handler, path, token string) {
+func assertMCPBearerUnauthorized(t testing.TB, router http.Handler, path, token string) {
 	t.Helper()
 
 	rec := performRequestWithHeaders(t, router, http.MethodPost, "http://leafwiki.local"+path, nil, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`), map[string]string{
@@ -1488,7 +1517,7 @@ func assertMCPBearerUnauthorized(t *testing.T, router http.Handler, path, token 
 	}
 }
 
-func assertStringField(t *testing.T, got map[string]any, field, want string) {
+func assertStringField(t testing.TB, got map[string]any, field, want string) {
 	t.Helper()
 
 	if value := stringFromMap(t, got, field); value != want {
@@ -1496,7 +1525,7 @@ func assertStringField(t *testing.T, got map[string]any, field, want string) {
 	}
 }
 
-func stringFromMap(t *testing.T, got map[string]any, field string) string {
+func stringFromMap(t testing.TB, got map[string]any, field string) string {
 	t.Helper()
 
 	value, ok := got[field].(string)
@@ -1506,7 +1535,7 @@ func stringFromMap(t *testing.T, got map[string]any, field string) string {
 	return value
 }
 
-func assertStringSliceField(t *testing.T, got map[string]any, field string, want []string) {
+func assertStringSliceField(t testing.TB, got map[string]any, field string, want []string) {
 	t.Helper()
 
 	raw, ok := got[field].([]any)

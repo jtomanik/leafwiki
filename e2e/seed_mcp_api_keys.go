@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -28,26 +29,80 @@ type seedOutput struct {
 	Deleted      seededUser `json:"deleted"`
 }
 
+type seedUserService interface {
+	InitDefaultAdmin(password string) error
+	GetUserByUsername(username string) (*coreauth.User, error)
+	CreateUser(username string, email string, password string, role string) (*coreauth.User, error)
+	DeleteUser(userID coreauth.UserID) error
+}
+
+type seedAPIKeyService interface {
+	CreateAPIKey(userID coreauth.UserID, name string, createdByUserID coreauth.UserID) (*coreauth.APIKeyCreateResult, error)
+	RevokeAPIKey(userID coreauth.UserID, keyID coreauth.APIKeyID) error
+}
+
+type seedServices struct {
+	users   seedUserService
+	apiKeys seedAPIKeyService
+	close   func() error
+}
+
+var (
+	seedArgs                    = func() []string { return os.Args[1:] }
+	seedStderr        io.Writer = os.Stderr
+	seedExit                    = os.Exit
+	seedMarshalIndent           = json.MarshalIndent
+	seedWriteFile               = os.WriteFile
+	openSeedServices            = func(dataDir string) (seedServices, error) {
+		stores, err := wikid.OpenAuthStores(dataDir)
+		if err != nil {
+			return seedServices{}, err
+		}
+		users := coreauth.NewUserService(stores.Users)
+		return seedServices{
+			users:   users,
+			apiKeys: coreauth.NewAPIKeyService(stores.APIKeys, users),
+			close:   stores.Close,
+		}, nil
+	}
+)
+
 func main() {
-	dataDir := flag.String("data-dir", "", "LeafWiki data directory")
-	outputPath := flag.String("output", "", "JSON output path")
-	flag.Parse()
+	seedExit(runSeedMCPAPIKeys(seedArgs(), seedStderr))
+}
+
+func runSeedMCPAPIKeys(args []string, stderr io.Writer) int {
+	flags := flag.NewFlagSet("seed-mcp-api-keys", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dataDir := flags.String("data-dir", "", "LeafWiki data directory")
+	outputPath := flags.String("output", "", "JSON output path")
+	if err := flags.Parse(args); err != nil {
+		return fatalf(stderr, "parse flags: %v", err)
+	}
 	if *dataDir == "" || *outputPath == "" {
-		fatalf("--data-dir and --output are required")
+		return fatalf(stderr, "--data-dir and --output are required")
 	}
 
-	out, err := seedMCPAPIKeys(*dataDir)
+	if err := writeSeedMCPAPIKeysOutput(*dataDir, *outputPath); err != nil {
+		return fatalf(stderr, "%v", err)
+	}
+	return 0
+}
+
+func writeSeedMCPAPIKeysOutput(dataDir string, outputPath string) error {
+	out, err := seedMCPAPIKeys(dataDir)
 	if err != nil {
-		fatalf("seed MCP API keys: %v", err)
+		return fmt.Errorf("seed MCP API keys: %w", err)
 	}
 
-	raw, err := json.MarshalIndent(out, "", "  ")
+	raw, err := seedMarshalIndent(out, "", "  ")
 	if err != nil {
-		fatalf("marshal output: %v", err)
+		return fmt.Errorf("marshal output: %w", err)
 	}
-	if err := os.WriteFile(*outputPath, raw, 0o600); err != nil {
-		fatalf("write output: %v", err)
+	if err := seedWriteFile(outputPath, raw, 0o600); err != nil {
+		return fmt.Errorf("write output: %w", err)
 	}
+	return nil
 }
 
 func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
@@ -55,17 +110,17 @@ func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
 		return seedOutput{}, err
 	}
 
-	stores, err := wikid.OpenAuthStores(dataDir)
+	services, err := openSeedServices(dataDir)
 	if err != nil {
 		return seedOutput{}, err
 	}
-	defer stores.Close()
-	users := coreauth.NewUserService(stores.Users)
+	defer services.close()
+	users := services.users
 	if err := users.InitDefaultAdmin("admin"); err != nil {
 		return seedOutput{}, fmt.Errorf("init admin: %w", err)
 	}
 
-	apiKeys := coreauth.NewAPIKeyService(stores.APIKeys, users)
+	apiKeys := services.apiKeys
 
 	admin, err := users.GetUserByUsername("admin")
 	if err != nil {
@@ -132,7 +187,7 @@ func rejectRemovedRuntimeStackEnv() error {
 	return nil
 }
 
-func createUser(users *coreauth.UserService, username, email, role string) (*coreauth.User, error) {
+func createUser(users seedUserService, username, email, role string) (*coreauth.User, error) {
 	user, err := users.CreateUser(username, email, "password", role)
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", username, err)
@@ -140,7 +195,7 @@ func createUser(users *coreauth.UserService, username, email, role string) (*cor
 	return user, nil
 }
 
-func createKey(apiKeys *coreauth.APIKeyService, user *coreauth.User, name string) (seededUser, error) {
+func createKey(apiKeys seedAPIKeyService, user *coreauth.User, name string) (seededUser, error) {
 	userID := coreauth.UserIDFromString(user.ID)
 	created, err := apiKeys.CreateAPIKey(userID, name, userID)
 	if err != nil {
@@ -156,7 +211,7 @@ func createKey(apiKeys *coreauth.APIKeyService, user *coreauth.User, name string
 	}, nil
 }
 
-func fatalf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
+func fatalf(stderr io.Writer, format string, args ...any) int {
+	fmt.Fprintf(stderr, format+"\n", args...)
+	return 1
 }

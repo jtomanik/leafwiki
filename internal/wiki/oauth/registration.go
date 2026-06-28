@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -119,7 +118,7 @@ func (s *Service) registerDynamicClient(client registeredClient) (string, error)
 
 func randomClientID() (string, error) {
 	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := oauthRandomRead(raw[:]); err != nil {
 		return "", fmt.Errorf("create oauth client id: %w", err)
 	}
 	return "leafwiki-dcr-" + base64.RawURLEncoding.EncodeToString(raw[:]), nil

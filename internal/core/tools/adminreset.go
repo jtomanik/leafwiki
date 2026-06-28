@@ -11,12 +11,14 @@ func ResetAdminPassword(storageDir string) (*auth.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			slog.Default().Error("could not close store", "error", err)
-		}
-	}()
+	defer logUserStoreClose(slog.Default(), store)
 
 	userService := auth.NewUserService(store)
 	return userService.ResetAdminUserPassword()
+}
+
+func logUserStoreClose(log *slog.Logger, store interface{ Close() error }) {
+	if err := store.Close(); err != nil {
+		log.Error("could not close store", "error", err)
+	}
 }

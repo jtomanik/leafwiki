@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -9,8 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/perber/wiki/internal/core/shared/sqliteutil"
 )
 
 const (
@@ -83,7 +80,7 @@ func (s *APIKeyService) CreateAPIKey(userID UserID, name string, createdByUserID
 		CreatedByUserID: createdByUserID,
 		CreatedAt:       s.now().UTC(),
 	}
-	if err := s.store.CreateAPIKey(key, hashAPIKey(raw)); err != nil {
+	if err := authAPIKeyStoreCreateAPIKey(s.store, key, hashAPIKey(raw)); err != nil {
 		return nil, err
 	}
 	return &APIKeyCreateResult{Key: key, Secret: raw}, nil
@@ -96,7 +93,7 @@ func (s *APIKeyService) ListAPIKeys(userID UserID) ([]*APIKey, error) {
 	if _, err := s.users.GetUserByID(userID); err != nil {
 		return nil, err
 	}
-	return s.store.ListActiveAPIKeys(userID)
+	return authAPIKeyStoreListActiveAPIKeys(s.store, userID)
 }
 
 func (s *APIKeyService) RevokeAPIKey(userID UserID, keyID APIKeyID) error {
@@ -106,7 +103,7 @@ func (s *APIKeyService) RevokeAPIKey(userID UserID, keyID APIKeyID) error {
 	if _, err := s.users.GetUserByID(userID); err != nil {
 		return err
 	}
-	return s.store.RevokeAPIKey(userID, keyID, s.now().UTC())
+	return authAPIKeyStoreRevokeAPIKey(s.store, userID, keyID, s.now().UTC())
 }
 
 func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
@@ -118,7 +115,7 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 		return nil, ErrInvalidToken
 	}
 	stored, err := retryAPIKeyTransientLocks(func() (*storedAPIKey, error) {
-		return s.store.GetAPIKeyByID(keyID)
+		return authAPIKeyStoreGetAPIKeyByID(s.store, keyID)
 	})
 	if err != nil {
 		if errors.Is(err, ErrAPIKeyNotFound) {
@@ -133,7 +130,7 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 		return nil, ErrInvalidToken
 	}
 	user, err := retryAPIKeyTransientLocks(func() (*User, error) {
-		return s.users.store.GetUserByID(stored.key.UserID)
+		return authUserStoreGetUserByID(s.users.store, stored.key.UserID)
 	})
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
@@ -154,28 +151,24 @@ func (s *APIKeyService) VerifyAPIKey(raw string) (*APIKeyVerification, error) {
 
 func (s *APIKeyService) markAPIKeyUsedWithRetry(keyID APIKeyID, usedAt time.Time) error {
 	_, err := retryAPIKeyTransientLocks(func() (struct{}, error) {
-		return struct{}{}, s.store.MarkAPIKeyUsed(keyID, usedAt)
+		return struct{}{}, authAPIKeyStoreMarkAPIKeyUsed(s.store, keyID, usedAt)
 	})
 	return err
 }
 
 func retryAPIKeyTransientLocks[T any](operation func() (T, error)) (T, error) {
-	const (
-		maxAttempts = 100
-		delay       = 20 * time.Millisecond
-	)
 	var zero T
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := 0; attempt < authAPIKeyRetryMaxAttempts; attempt++ {
 		result, err := operation()
 		if err == nil {
 			return result, nil
 		}
-		if !sqliteutil.IsSQLiteTransientLockError(err) {
+		if !authIsSQLiteTransientLock(err) {
 			return zero, err
 		}
 		lastErr = err
-		time.Sleep(delay)
+		time.Sleep(authAPIKeyRetryDelay)
 	}
 	return zero, lastErr
 }
@@ -203,7 +196,7 @@ func hashAPIKey(raw string) string {
 
 func randomHex(byteCount int) (string, error) {
 	buf := make([]byte, byteCount)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := authRandRead(buf); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil

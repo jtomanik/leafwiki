@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/perber/wiki/internal/core/shared"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -22,7 +21,7 @@ func NewUserService(store *UserStore) *UserService {
 func (s *UserService) InitDefaultAdmin(newPassword string) error {
 	// Check if admin user already exists
 
-	if _, err := s.store.GetAdminUser(); err == nil {
+	if _, err := authUserStoreGetAdminUser(s.store); err == nil {
 		// Admin user already exists, no need to create a new one
 		return nil
 	}
@@ -36,13 +35,13 @@ func (s *UserService) InitDefaultAdmin(newPassword string) error {
 
 func (s *UserService) CreateUser(username, email, password, role string) (*User, error) {
 	// Check if user already exists
-	_, err := s.store.GetUserByUsername(username)
+	_, err := authUserStoreGetUserByUsername(s.store, username)
 	if err == nil {
 		return nil, ErrUserAlreadyExists
 	}
 
 	// Check if email already exists
-	_, err = s.store.GetUserByEmail(email)
+	_, err = authUserStoreGetUserByEmail(s.store, email)
 	if err == nil {
 		return nil, ErrUserAlreadyExists
 	}
@@ -53,13 +52,13 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 	}
 
 	// hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPassword, err := authGeneratePasswordHash([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
 	// Generate unique ID
-	id, err := shared.GenerateUniqueID()
+	id, err := authGenerateUniqueID()
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +73,7 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 	}
 
 	// Save user to store
-	err = s.store.CreateUser(user)
+	err = authUserStoreCreateUser(s.store, user)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +82,7 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 }
 
 func (s *UserService) GetUserByID(id UserID) (*User, error) {
-	user, err := s.store.GetUserByID(id)
+	user, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		if !errors.Is(err, ErrUserNotFound) {
 			return nil, err
@@ -96,19 +95,19 @@ func (s *UserService) GetUserByID(id UserID) (*User, error) {
 
 func (s *UserService) UpdateUser(id UserID, username, email, password, role string) (*User, error) {
 	// Check if user exists
-	user, err := s.store.GetUserByID(id)
+	user, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
 
 	// Check if username already exists (but if it's the same user, ignore)
-	existingUser, err := s.store.GetUserByUsername(username)
+	existingUser, err := authUserStoreGetUserByUsername(s.store, username)
 	if err == nil && UserIDFromString(existingUser.ID) != id {
 		return nil, ErrUserAlreadyExists
 	}
 
 	// Check if email already exists (but if it's the same user, ignore)
-	existingUser, err = s.store.GetUserByEmail(email)
+	existingUser, err = authUserStoreGetUserByEmail(s.store, email)
 	if err == nil && UserIDFromString(existingUser.ID) != id {
 		return nil, ErrUserAlreadyExists
 	}
@@ -124,7 +123,7 @@ func (s *UserService) UpdateUser(id UserID, username, email, password, role stri
 
 	// Prevent demoting the last admin
 	if user.HasRole(RoleAdmin) && role != RoleAdmin {
-		count, err := s.store.CountAdminUsers()
+		count, err := authUserStoreCountAdminUsers(s.store)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +138,7 @@ func (s *UserService) UpdateUser(id UserID, username, email, password, role stri
 	user.Role = role
 
 	if password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := authGeneratePasswordHash([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +146,7 @@ func (s *UserService) UpdateUser(id UserID, username, email, password, role stri
 	}
 
 	// Save updated user to store
-	err = s.store.UpdateUser(user)
+	err = authUserStoreUpdateUser(s.store, user)
 	if err != nil {
 		return nil, err
 	}
@@ -157,19 +156,19 @@ func (s *UserService) UpdateUser(id UserID, username, email, password, role stri
 
 func (s *UserService) UpdatePassword(id UserID, newpassword string) error {
 	// Check if user exists
-	_, err := s.store.GetUserByID(id)
+	_, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		return err
 	}
 
 	// hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newpassword), bcrypt.DefaultCost)
+	hashedPassword, err := authGeneratePasswordHash([]byte(newpassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
 	// Save updated user to store
-	err = s.store.UpdatePassword(id, string(hashedPassword))
+	err = authUserStoreUpdatePassword(s.store, id, string(hashedPassword))
 	if err != nil {
 		return err
 	}
@@ -179,7 +178,7 @@ func (s *UserService) UpdatePassword(id UserID, newpassword string) error {
 
 func (s *UserService) DoesIDAndPasswordMatch(id UserID, password string) (bool, error) {
 	// Check if user exists
-	user, err := s.store.GetUserByID(id)
+	user, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		return false, ErrUserNotFound
 	}
@@ -195,7 +194,7 @@ func (s *UserService) DoesIDAndPasswordMatch(id UserID, password string) (bool, 
 
 func (s *UserService) DeleteUser(id UserID) error {
 	// Check if user exists
-	user, err := s.store.GetUserByID(id)
+	user, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		return ErrUserNotFound
 	}
@@ -204,7 +203,7 @@ func (s *UserService) DeleteUser(id UserID) error {
 		return ErrUserAdminCannotBeDeleted
 	}
 	// Delete user from store
-	err = s.store.DeleteUser(id)
+	err = authUserStoreDeleteUser(s.store, id)
 	if err != nil {
 		return err
 	}
@@ -212,7 +211,7 @@ func (s *UserService) DeleteUser(id UserID) error {
 }
 
 func (s *UserService) GetUsers() ([]*User, error) {
-	users, err := s.store.GetAllUsers()
+	users, err := authUserStoreGetAllUsers(s.store)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +219,7 @@ func (s *UserService) GetUsers() ([]*User, error) {
 }
 
 func (s *UserService) GetUserByUsername(username string) (*User, error) {
-	user, err := s.store.GetUserByUsername(username)
+	user, err := authUserStoreGetUserByUsername(s.store, username)
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
@@ -228,9 +227,9 @@ func (s *UserService) GetUserByUsername(username string) (*User, error) {
 }
 
 func (s *UserService) GetUserByIdentifier(identifier string) (*User, error) {
-	user, err := s.store.GetUserByUsername(identifier)
+	user, err := authUserStoreGetUserByUsername(s.store, identifier)
 	if err != nil {
-		user, err = s.store.GetUserByEmail(identifier)
+		user, err = authUserStoreGetUserByEmail(s.store, identifier)
 		if err != nil {
 			return nil, ErrUserNotFound
 		}
@@ -239,9 +238,9 @@ func (s *UserService) GetUserByIdentifier(identifier string) (*User, error) {
 }
 
 func (s *UserService) GetUserByEmailOrUsernameAndPassword(identifier, password string) (*User, error) {
-	user, err := s.store.GetUserByUsername(identifier)
+	user, err := authUserStoreGetUserByUsername(s.store, identifier)
 	if err != nil {
-		user, err = s.store.GetUserByEmail(identifier)
+		user, err = authUserStoreGetUserByEmail(s.store, identifier)
 		if err != nil {
 			return nil, ErrUserNotFound
 		}
@@ -257,7 +256,7 @@ func (s *UserService) GetUserByEmailOrUsernameAndPassword(identifier, password s
 
 func (s *UserService) ChangeOwnPassword(id UserID, oldPassword, newPassword string) error {
 	// Check if user exists
-	user, err := s.store.GetUserByID(id)
+	user, err := authUserStoreGetUserByID(s.store, id)
 	if err != nil {
 		return ErrUserNotFound
 	}
@@ -269,13 +268,13 @@ func (s *UserService) ChangeOwnPassword(id UserID, oldPassword, newPassword stri
 	}
 
 	// hash new password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hashedPassword, err := authGeneratePasswordHash([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
 	// Save updated user to store
-	err = s.store.UpdatePassword(id, string(hashedPassword))
+	err = authUserStoreUpdatePassword(s.store, id, string(hashedPassword))
 	if err != nil {
 		return err
 	}
@@ -285,13 +284,13 @@ func (s *UserService) ChangeOwnPassword(id UserID, oldPassword, newPassword stri
 
 func (s *UserService) ResetAdminUserPassword() (*User, error) {
 	// Generate a new password for the admin user
-	password, err := shared.GenerateRandomPassword(16)
+	password, err := authGenerateRandomPassword(16)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate password: %w", err)
 	}
 
 	// if the user is not found create a new one
-	adminUser, err := s.store.GetAdminUser()
+	adminUser, err := authUserStoreGetAdminUser(s.store)
 	if err != nil {
 		if err == ErrUserNotFound {
 			// Create default admin user

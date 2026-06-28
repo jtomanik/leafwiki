@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -22,7 +24,8 @@ func actorIDStrings(ids []ActorID) []string {
 	return out
 }
 
-func TestStoreInitialSnapshotTracksMarkdownOnly(t *testing.T) {
+var _ = It("StoreInitialSnapshotTracksMarkdownOnly", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	if err := os.MkdirAll(filepath.Join(rootDir, "nested"), 0o755); err != nil {
@@ -80,9 +83,10 @@ func TestStoreInitialSnapshotTracksMarkdownOnly(t *testing.T) {
 			t.Fatalf("ignored file %q was tracked: %#v", ignored, files)
 		}
 	}
-}
+})
 
-func TestStoreCaptureTracksUppercaseMarkdownExtension(t *testing.T) {
+var _ = It("StoreCaptureTracksUppercaseMarkdownExtension", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "Page.MD"), "# Page\n")
@@ -111,9 +115,10 @@ func TestStoreCaptureTracksUppercaseMarkdownExtension(t *testing.T) {
 	if files["Page.MD"] != "# Page\n" {
 		t.Fatalf("files = %#v, want Page.MD tracked", files)
 	}
-}
+})
 
-func TestStoreCaptureWritesRequiredTrailersAndChangedPaths(t *testing.T) {
+var _ = It("StoreCaptureWritesRequiredTrailersAndChangedPaths", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "a.md"), "# A\n")
@@ -160,9 +165,10 @@ func TestStoreCaptureWritesRequiredTrailersAndChangedPaths(t *testing.T) {
 	if !strings.Contains(headCommit.Message, "LeafWiki-Batch: ") {
 		t.Fatalf("commit message missing LeafWiki-Batch trailer:\n%s", headCommit.Message)
 	}
-}
+})
 
-func TestStoreAmendUsesRequestedChangedMarkdownPathsForTrailers(t *testing.T) {
+var _ = It("StoreAmendUsesRequestedChangedMarkdownPathsForTrailers", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "a.md"), "# A\n")
@@ -210,9 +216,10 @@ func TestStoreAmendUsesRequestedChangedMarkdownPathsForTrailers(t *testing.T) {
 	if !strings.Contains(headCommit.Message, "LeafWiki-Changed-Markdown: 2") {
 		t.Fatalf("amended commit message missing original changed count:\n%s", headCommit.Message)
 	}
-}
+})
 
-func TestStoreListCommitsResumesAfterCursorHash(t *testing.T) {
+var _ = It("StoreListCommitsResumesAfterCursorHash", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -257,9 +264,10 @@ func TestStoreListCommitsResumesAfterCursorHash(t *testing.T) {
 	if commits[0].Hash != oldest.Hash {
 		t.Fatalf("commit after cursor = %s, want %s", commits[0].Hash, oldest.Hash)
 	}
-}
+})
 
-func TestStoreListCommitsReturnsWorkspaceMetadata(t *testing.T) {
+var _ = It("StoreListCommitsReturnsWorkspaceMetadata", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "a.md"), "# A\n")
@@ -298,9 +306,10 @@ func TestStoreListCommitsReturnsWorkspaceMetadata(t *testing.T) {
 	if got.Message != "LeafWiki workspace sync" {
 		t.Fatalf("Message = %q, want title line", got.Message)
 	}
-}
+})
 
-func TestStoreCaptureRecordsAdditionalActorTrailers(t *testing.T) {
+var _ = It("StoreCaptureRecordsAdditionalActorTrailers", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "a.md"), "# A\n")
@@ -349,9 +358,10 @@ func TestStoreCaptureRecordsAdditionalActorTrailers(t *testing.T) {
 	if strings.Join(actorIDStrings(commits[0].ActorIDs), ",") != "alice,bob" {
 		t.Fatalf("ActorIDs = %#v, want alice,bob", commits[0].ActorIDs)
 	}
-}
+})
 
-func TestStoreForEachCommitStopsWhenVisitorReturnsFalse(t *testing.T) {
+var _ = It("StoreForEachCommitStopsWhenVisitorReturnsFalse", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -380,9 +390,10 @@ func TestStoreForEachCommitStopsWhenVisitorReturnsFalse(t *testing.T) {
 	if visited != 1 {
 		t.Fatalf("visited = %d, want 1", visited)
 	}
-}
+})
 
-func TestStoreChangedMarkdownContentsReturnsOnlyCurrentChangedMarkdownBlobs(t *testing.T) {
+var _ = It("StoreChangedMarkdownContentsReturnsOnlyCurrentChangedMarkdownBlobs", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -433,9 +444,10 @@ func TestStoreChangedMarkdownContentsReturnsOnlyCurrentChangedMarkdownBlobs(t *t
 	if _, ok := contents["unchanged.md"]; ok {
 		t.Fatalf("unchanged.md was loaded as changed content: %#v", contents)
 	}
-}
+})
 
-func TestStoreInternalGitDoesNotMutateContainingUserGitRepository(t *testing.T) {
+var _ = It("StoreInternalGitDoesNotMutateContainingUserGitRepository", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	userRepoDir := filepath.Join(t.TempDir(), "user-repo")
 	rootDir := filepath.Join(userRepoDir, "wiki")
@@ -466,9 +478,10 @@ func TestStoreInternalGitDoesNotMutateContainingUserGitRepository(t *testing.T) 
 	if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "git")); err != nil {
 		t.Fatalf("internal git dir missing: %v", err)
 	}
-}
+})
 
-func TestStoreOpenPreservesRootGitFile(t *testing.T) {
+var _ = It("StoreOpenPreservesRootGitFile", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -489,9 +502,10 @@ func TestStoreOpenPreservesRootGitFile(t *testing.T) {
 	}
 
 	assertFileContent(t, gitFile, gitFileContent)
-}
+})
 
-func TestStoreCapturePrunesPreviouslyTrackedDotDirectoryMarkdown(t *testing.T) {
+var _ = It("StoreCapturePrunesPreviouslyTrackedDotDirectoryMarkdown", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -561,9 +575,10 @@ func TestStoreCapturePrunesPreviouslyTrackedDotDirectoryMarkdown(t *testing.T) {
 		t.Fatalf("FilesAt exposed pruned dot markdown: %#v", files)
 	}
 	assertFileContent(t, filepath.Join(rootDir, ".obsidian", "local.md"), "# Local\n")
-}
+})
 
-func TestStoreCaptureRecordsMarkdownDeletes(t *testing.T) {
+var _ = It("StoreCaptureRecordsMarkdownDeletes", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "keep.md"), "# Keep\n")
@@ -603,9 +618,10 @@ func TestStoreCaptureRecordsMarkdownDeletes(t *testing.T) {
 	if files["keep.md"] != "# Keep\n" {
 		t.Fatalf("keep.md = %q, want current content", files["keep.md"])
 	}
-}
+})
 
-func TestStoreAmendRecordsMetadataWritebackInSameCommit(t *testing.T) {
+var _ = It("StoreAmendRecordsMetadataWritebackInSameCommit", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -650,9 +666,10 @@ func TestStoreAmendRecordsMetadataWritebackInSameCommit(t *testing.T) {
 	if files["page.md"] != "---\nleafwiki_id: page\n---\n# Page\n" {
 		t.Fatalf("page.md = %q, want amended metadata content", files["page.md"])
 	}
-}
+})
 
-func TestStoreRestoreWorkspaceRestoresMarkdownOnlyAndCreatesCommit(t *testing.T) {
+var _ = It("StoreRestoreWorkspaceRestoresMarkdownOnlyAndCreatesCommit", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "one.md"), "# One A\n")
@@ -701,9 +718,10 @@ func TestStoreRestoreWorkspaceRestoresMarkdownOnlyAndCreatesCommit(t *testing.T)
 	if files["one.md"] != "# One A\n" || files["two.md"] != "# Two A\n" {
 		t.Fatalf("restore files = %#v", files)
 	}
-}
+})
 
-func TestStoreRestoreDocumentWritesHistoricalContentToCurrentPath(t *testing.T) {
+var _ = It("StoreRestoreDocumentWritesHistoricalContentToCurrentPath", func() {
+	t := GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	writeFile(t, filepath.Join(rootDir, "docs", "page.md"), "# Previous\n")
@@ -749,9 +767,53 @@ func TestStoreRestoreDocumentWritesHistoricalContentToCurrentPath(t *testing.T) 
 	if files["docs/page.md"] != "# Previous\n" {
 		t.Fatalf("restore files = %#v, want previous content", files)
 	}
+})
+
+var _ = It("IsManagedMarkdownRelPath rejects hidden, temporary, and non-markdown paths", func() {
+	Expect(IsManagedMarkdownRelPath("docs/page.md")).To(BeTrue())
+	Expect(IsManagedMarkdownRelPath("docs/Page.MD")).To(BeTrue())
+	Expect(IsManagedMarkdownRelPath(".obsidian/page.md")).To(BeFalse())
+	Expect(IsManagedMarkdownRelPath("docs/.draft.md")).To(BeFalse())
+	Expect(IsManagedMarkdownRelPath("docs/page.md.swp")).To(BeFalse())
+	Expect(IsManagedMarkdownRelPath("docs/image.png")).To(BeFalse())
+})
+
+var _ = It("StoreGetCommit returns captured commit metadata and reports missing commits", func() {
+	t := GinkgoT()
+	dataDir := t.TempDir()
+	rootDir := filepath.Join(t.TempDir(), "workspace")
+	writeFile(t, filepath.Join(rootDir, "docs", "page.md"), "# Page\n")
+	store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
+	Expect(err).NotTo(HaveOccurred())
+
+	captured, err := store.Capture(context.Background(), CommitRequest{
+		Reason: ReasonExplicit,
+		Source: SourceMCP,
+		Actor: Actor{
+			ID:    NewActorIDUnchecked("agent-1"),
+			Name:  "Agent One",
+			Email: "agent-1@example.test",
+		},
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	commit, err := store.GetCommit(context.Background(), identity.CommitHashFromString(captured.Hash))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(commit.Hash).To(Equal(captured.Hash))
+	Expect(commit.AuthorID).To(Equal(NewActorIDUnchecked("agent-1")))
+	Expect(commit.Source).To(Equal(SourceMCP))
+	Expect(commit.Reason).To(Equal(ReasonExplicit))
+
+	_, err = store.GetCommit(context.Background(), identity.CommitHashFromString("0000000000000000000000000000000000000000"))
+	Expect(err).To(MatchError(ContainSubstring("load commit 0000000000000000000000000000000000000000")))
+})
+
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }
 
-func writeFile(t *testing.T, path string, content string) {
+func writeFile(t testHelper, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("create parent for %s: %v", path, err)
@@ -761,7 +823,7 @@ func writeFile(t *testing.T, path string, content string) {
 	}
 }
 
-func assertFileContent(t *testing.T, path string, want string) {
+func assertFileContent(t testHelper, path string, want string) {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {

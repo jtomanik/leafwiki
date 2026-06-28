@@ -1,8 +1,8 @@
 package treemigration
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"strings"
-	"testing"
 )
 
 type testNode struct{}
@@ -44,53 +44,59 @@ func validDependencies() Dependencies {
 	}
 }
 
-func TestRun_RejectsNegativeFromVersion(t *testing.T) {
-	deps := validDependencies()
+var _ = ginkgo.Describe("runner validation", func() {
+	ginkgo.It("TestRun_RejectsNegativeFromVersion", func() {
+		t := ginkgo.GinkgoT()
+		deps := validDependencies()
 
-	err := Run(-1, deps)
-	if err == nil {
-		t.Fatalf("expected error for negative schema version")
-	}
-	if !strings.Contains(err.Error(), "invalid schema version") {
-		t.Fatalf("expected invalid schema version error, got: %v", err)
-	}
-}
+		err := Run(-1, deps)
+		if err == nil {
+			t.Fatalf("expected error for negative schema version")
+		}
+		if !strings.Contains(err.Error(), "invalid schema version") {
+			t.Fatalf("expected invalid schema version error, got: %v", err)
+		}
+	})
 
-func TestRun_RejectsMissingRequiredDependencies(t *testing.T) {
-	tests := []struct {
-		name string
-		deps Dependencies
-		want string
-	}{
-		{name: "nil root", deps: func() Dependencies { d := validDependencies(); d.Root = nil; return d }(), want: "tree not loaded"},
-		{name: "nil store", deps: func() Dependencies { d := validDependencies(); d.Store = nil; return d }(), want: "migration store is required"},
-		{name: "nil log", deps: func() Dependencies { d := validDependencies(); d.Log = nil; return d }(), want: "migration logger is required"},
-		{name: "nil save tree", deps: func() Dependencies { d := validDependencies(); d.SaveTree = nil; return d }(), want: "save tree callback is required"},
-		{name: "nil save schema", deps: func() Dependencies { d := validDependencies(); d.SaveSchema = nil; return d }(), want: "save schema callback is required"},
-	}
+	ginkgo.Describe("TestRun_RejectsMissingRequiredDependencies", func() {
+		tests := []struct {
+			name string
+			deps Dependencies
+			want string
+		}{
+			{name: "nil root", deps: func() Dependencies { d := validDependencies(); d.Root = nil; return d }(), want: "tree not loaded"},
+			{name: "nil store", deps: func() Dependencies { d := validDependencies(); d.Store = nil; return d }(), want: "migration store is required"},
+			{name: "nil log", deps: func() Dependencies { d := validDependencies(); d.Log = nil; return d }(), want: "migration logger is required"},
+			{name: "nil save tree", deps: func() Dependencies { d := validDependencies(); d.SaveTree = nil; return d }(), want: "save tree callback is required"},
+			{name: "nil save schema", deps: func() Dependencies { d := validDependencies(); d.SaveSchema = nil; return d }(), want: "save schema callback is required"},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := Run(0, tt.deps)
-			if err == nil {
-				t.Fatalf("expected error")
-			}
-			if !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("expected error containing %q, got: %v", tt.want, err)
-			}
-		})
-	}
-}
+		for _, tt := range tests {
+			tt := tt
+			ginkgo.It(tt.name, func() {
+				t := ginkgo.GinkgoT()
+				err := Run(0, tt.deps)
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("expected error containing %q, got: %v", tt.want, err)
+				}
+			})
+		}
+	})
 
-func TestRun_RejectsUnsupportedMigrationVersion(t *testing.T) {
-	deps := validDependencies()
-	deps.CurrentSchemaVersion = 6
+	ginkgo.It("TestRun_RejectsUnsupportedMigrationVersion", func() {
+		t := ginkgo.GinkgoT()
+		deps := validDependencies()
+		deps.CurrentSchemaVersion = 6
 
-	err := Run(4, deps)
-	if err == nil {
-		t.Fatalf("expected error for unsupported migration version")
-	}
-	if !strings.Contains(err.Error(), "unsupported schema migration version: 5") {
-		t.Fatalf("expected unsupported migration version error, got: %v", err)
-	}
-}
+		err := Run(4, deps)
+		if err == nil {
+			t.Fatalf("expected error for unsupported migration version")
+		}
+		if !strings.Contains(err.Error(), "unsupported schema migration version: 5") {
+			t.Fatalf("expected unsupported migration version error, got: %v", err)
+		}
+	})
+})

@@ -39,28 +39,28 @@ type Routes struct {
 	oauthService *wikioauth.Service
 	authDisabled bool
 	stdioAPIKey  string
-	createPage   *wikipages.CreatePageUseCase
-	updatePage   *wikipages.UpdatePageUseCase
-	getPage      *wikipages.GetPageUseCase
-	findByPath   *wikipages.FindByPathUseCase
-	lookupPath   *wikipages.LookupPagePathUseCase
+	createPage   mcpCreatePageUseCase
+	updatePage   mcpUpdatePageUseCase
+	getPage      mcpGetPageUseCase
+	findByPath   mcpFindByPathUseCase
+	lookupPath   mcpLookupPathUseCase
 	resolveLink  *wikipages.ResolvePermalinkUseCase
 	suggestSlug  *wikipages.SuggestSlugUseCase
 	deletePage   *wikipages.DeletePageUseCase
 	movePage     *wikipages.MovePageUseCase
 	sortPages    *wikipages.SortPagesUseCase
-	ensurePath   *wikipages.EnsurePathUseCase
+	ensurePath   mcpEnsurePathUseCase
 	convertPage  *wikipages.ConvertPageUseCase
 	copyPage     *wikipages.CopyPageUseCase
-	previewRef   *wikipages.PreviewPageRefactorUseCase
-	applyRef     *wikipages.ApplyPageRefactorUseCase
-	search       *wikisearch.SearchUseCase
+	previewRef   mcpPreviewRefactorUseCase
+	applyRef     mcpApplyRefactorUseCase
+	search       mcpSearchUseCase
 	searchStatus *wikisearch.GetIndexingStatusUseCase
-	getTags      *wikitags.GetTagsUseCase
-	pagesByTags  *wikitags.GetPagesByTagsUseCase
-	propertyKeys *wikiproperties.GetPropertyKeysUseCase
-	pagesByProp  *wikiproperties.GetPagesByPropertyUseCase
-	linkStatus   *wikilinks.GetLinkStatusUseCase
+	getTags      mcpGetTagsUseCase
+	pagesByTags  mcpPagesByTagsUseCase
+	propertyKeys mcpPropertyKeysUseCase
+	pagesByProp  mcpPagesByPropertyUseCase
+	linkStatus   mcpLinkStatusUseCase
 	uploadAsset  *wikiassets.UploadAssetUseCase
 	getAsset     *wikiassets.GetAssetUseCase
 	getAssets    *wikiassets.ListAssetsUseCase
@@ -83,6 +83,62 @@ type Routes struct {
 	now                      func() time.Time
 	actorContextAllowed      bool
 	actorContextRequired     bool
+}
+
+type mcpCreatePageUseCase interface {
+	Execute(context.Context, wikipages.CreatePageInput) (*wikipages.CreatePageOutput, error)
+}
+
+type mcpUpdatePageUseCase interface {
+	Execute(context.Context, wikipages.UpdatePageInput) (*wikipages.UpdatePageOutput, error)
+}
+
+type mcpGetPageUseCase interface {
+	Execute(context.Context, wikipages.GetPageInput) (*wikipages.GetPageOutput, error)
+}
+
+type mcpFindByPathUseCase interface {
+	Execute(context.Context, wikipages.FindByPathInput) (*wikipages.FindByPathOutput, error)
+}
+
+type mcpLookupPathUseCase interface {
+	Execute(context.Context, wikipages.LookupPagePathInput) (*wikipages.LookupPagePathOutput, error)
+}
+
+type mcpEnsurePathUseCase interface {
+	Execute(context.Context, wikipages.EnsurePathInput) (*wikipages.EnsurePathOutput, error)
+}
+
+type mcpPreviewRefactorUseCase interface {
+	Execute(context.Context, wikipages.RefactorPreviewInput) (*wikipages.RefactorPreview, error)
+}
+
+type mcpApplyRefactorUseCase interface {
+	Execute(context.Context, wikipages.RefactorApplyInput) (*tree.Page, error)
+}
+
+type mcpSearchUseCase interface {
+	Execute(context.Context, wikisearch.SearchInput) (*wikisearch.SearchOutput, error)
+}
+
+type mcpGetTagsUseCase interface {
+	Execute(context.Context, wikitags.GetTagsInput) (*wikitags.GetTagsOutput, error)
+}
+
+type mcpPagesByTagsUseCase interface {
+	Execute(context.Context, wikitags.GetPagesByTagsInput) (*wikitags.GetPagesByTagsOutput, error)
+}
+
+type mcpPropertyKeysUseCase interface {
+	Execute(context.Context, wikiproperties.GetPropertyKeysInput) (*wikiproperties.GetPropertyKeysOutput, error)
+}
+
+type mcpPagesByPropertyUseCase interface {
+	Execute(context.Context, wikiproperties.GetPagesByPropertyInput) (*wikiproperties.GetPagesByPropertyOutput, error)
+}
+
+type mcpLinkStatusUseCase interface {
+	Execute(context.Context, wikilinks.GetLinkStatusInput) (*wikilinks.GetLinkStatusOutput, error)
 }
 
 type RoutesConfig struct {

@@ -13,6 +13,8 @@ import (
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 )
 
+var createImporterStateDir = os.MkdirAll
+
 func (w *Wiki) buildSearchRoutes() *wikisearch.Routes {
 	return wikisearch.NewRoutes(wikisearch.RoutesConfig{
 		Search:            wikisearch.NewSearchUseCase(w.searchIndex, w.tags, w.tree),
@@ -60,7 +62,7 @@ func (w *Wiki) buildBrandingRoutes() *wikibranding.Routes {
 
 func (w *Wiki) buildImporterRoutes(options *WikiOptions) *wikiimporter.Routes {
 	importerDir := filepath.Join(w.storageDir, ".importer")
-	if err := os.MkdirAll(importerDir, 0o755); err != nil {
+	if err := createImporterStateDir(importerDir, 0o755); err != nil {
 		w.log.Warn("failed to create importer state directory", "path", importerDir, "error", err)
 	}
 	adapter := NewWikiImportAdapter(w)

@@ -9,19 +9,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
-	"github.com/perber/wiki/internal/test_utils"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-func createWikiTestInstance(t *testing.T) *Wiki {
+type wikiTestT interface {
+	Helper()
+	TempDir() string
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Error(args ...any)
+	Errorf(format string, args ...any)
+}
+
+func closeWithErrorCheckForTest(t wikiTestT, closer func() error) {
+	t.Helper()
+	if err := closer(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+}
+
+func createWikiTestInstance(t wikiTestT) *Wiki {
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:          t.TempDir(),
 		AdminPassword:       "admin",
@@ -35,7 +50,7 @@ func createWikiTestInstance(t *testing.T) *Wiki {
 	return wikiInstance
 }
 
-func createWikiTestInstanceWithWorkspace(t *testing.T, workspace Workspace) *Wiki {
+func createWikiTestInstanceWithWorkspace(t wikiTestT, workspace Workspace) *Wiki {
 	t.Helper()
 	wikiInstance, err := NewWiki(&WikiOptions{
 		Workspace:           workspace,
@@ -59,7 +74,7 @@ func pageIDPtr(id tree.PageID) *tree.PageID {
 	return &id
 }
 
-func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
+func createPageForTest(t wikiTestT, w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
 	t.Helper()
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
@@ -72,7 +87,7 @@ func createPageForTest(t *testing.T, w *Wiki, userID string, parentID *tree.Page
 	return out.Page
 }
 
-func updatePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
+func updatePageForTest(t wikiTestT, w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
 	t.Helper()
 
 	current, err := w.tree.GetPage(id)
@@ -90,7 +105,7 @@ func updatePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, tit
 	return out.Page
 }
 
-func deletePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, recursive bool) {
+func deletePageForTest(t wikiTestT, w *Wiki, userID string, id tree.PageID, recursive bool) {
 	t.Helper()
 
 	current, err := w.tree.GetPage(id)
@@ -106,17 +121,19 @@ func deletePageForTest(t *testing.T, w *Wiki, userID string, id tree.PageID, rec
 	}
 }
 
-func TestWiki_DeletePage_Simple(t *testing.T) {
+var _ = ginkgo.It("TestWiki_DeletePage_Simple", func() {
+	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 	page := createPageForTest(t, w, "system", nil, "Trash", "trash", pageNodeKind())
 	deletePageForTest(t, w, "system", page.ID, false)
 	if _, err := w.tree.GetPage(page.ID); err == nil {
 		t.Fatalf("expected deleted page to be gone")
 	}
-}
+})
 
-func TestWiki_DefaultWorkspaceKeepsExistingStorageLayout(t *testing.T) {
+var _ = ginkgo.It("TestWiki_DefaultWorkspaceKeepsExistingStorageLayout", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := t.TempDir()
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:          dataDir,
@@ -128,7 +145,7 @@ func TestWiki_DefaultWorkspaceKeepsExistingStorageLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	if got := wikiInstance.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
@@ -142,9 +159,10 @@ func TestWiki_DefaultWorkspaceKeepsExistingStorageLayout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")); err != nil {
 		t.Fatalf("expected welcome page in default root dir: %v", err)
 	}
-}
+})
 
-func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testing.T) {
+var _ = ginkgo.It("TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := createWikiTestInstanceWithWorkspace(t, Workspace{
@@ -152,7 +170,7 @@ func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testin
 		DataDir: dataDir,
 		RootDir: rootDir,
 	})
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	if got := w.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
@@ -215,9 +233,10 @@ func TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir(t *testin
 			t.Fatalf("expected no branding state %s in root dir, got err=%v", rel, err)
 		}
 	}
-}
+})
 
-func TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores(t *testing.T) {
+var _ = ginkgo.It("TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -235,7 +254,7 @@ func TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores(t *testing
 	if err != nil {
 		t.Fatalf("NewWiki workspace-only failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	if w.UserService() != nil || w.AuthService() != nil || w.APIKeyService() != nil || w.OAuthService() != nil {
 		t.Fatalf("workspace-only wiki owns identity services: user=%v auth=%v apiKeys=%v oauth=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService())
@@ -266,9 +285,10 @@ func TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores(t *testing
 	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
 		t.Fatalf("expected workspace content in root dir: %v", err)
 	}
-}
+})
 
-func TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores(t *testing.T) {
+var _ = ginkgo.It("TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -286,7 +306,7 @@ func TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki control-plane-only failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	if w.UserService() == nil || w.AuthService() == nil || w.APIKeyService() == nil || w.OAuthService() == nil || w.branding == nil {
 		t.Fatalf("control-plane-only wiki did not own identity/branding services: user=%v auth=%v apiKeys=%v oauth=%v branding=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService(), w.branding)
@@ -309,9 +329,10 @@ func TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); !os.IsNotExist(err) {
 		t.Fatalf("control-plane-only root welcome stat err = %v, want not exist", err)
 	}
-}
+})
 
-func TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth(t *testing.T) {
+var _ = ginkgo.It("TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth", func() {
+	t := ginkgo.GinkgoT()
 	w, err := NewWiki(&WikiOptions{
 		Workspace: Workspace{
 			ID:      "current",
@@ -328,7 +349,7 @@ func TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki control-plane-only failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	w.SetRuntimeRoleHealth([]projectdaemon.RoleName{
@@ -360,9 +381,10 @@ func TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth(t *testing.T) {
 	if body.Checks["role_workspaced"] != "crashed" {
 		t.Fatalf("role_workspaced = %q, want crashed; checks=%#v", body.Checks["role_workspaced"], body.Checks)
 	}
-}
+})
 
-func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
+var _ = ginkgo.It("TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
@@ -390,7 +412,7 @@ func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki with invalid workspace sync state returned error: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	status := w.WorkspaceSyncStatus()
 	if status.LastCommitHash == "" {
@@ -409,9 +431,10 @@ func TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown(t *testing.T) {
 	if !hasPath {
 		t.Fatalf("workspace sync validation errors missing markdown path: %#v", status.ValidationErrors)
 	}
-}
+})
 
-func TestWiki_MarkdownLinkRootPrefixFlowsToWorkspaceSyncAndLinkIndex(t *testing.T) {
+var _ = ginkgo.It("TestWiki_MarkdownLinkRootPrefixFlowsToWorkspaceSyncAndLinkIndex", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "repo", "docs")
 	if err := os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755); err != nil {
@@ -461,10 +484,11 @@ leafwiki_title: Glossary
 	if outgoing.Count != 1 || outgoing.Outgoings[0].ToPath != "/sync/glossary" || outgoing.Outgoings[0].Broken {
 		t.Fatalf("outgoing = %#v, want resolved /sync/glossary", outgoing)
 	}
-	test_utils.WrapCloseWithErrorCheck(w.Close, t)
-}
+	closeWithErrorCheckForTest(t, w.Close)
+})
 
-func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
+var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsWebPageCreates", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -477,7 +501,7 @@ func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 	before := w.WorkspaceSyncStatus().LastCommitHash
 	if before == "" {
 		t.Fatalf("initial workspace sync commit hash is empty")
@@ -500,9 +524,10 @@ func TestWiki_WorkspaceSyncCommitsWebPageCreates(t *testing.T) {
 	if revisions[0].AuthorID != "alice" {
 		t.Fatalf("workspace sync revision author = %q, want alice", revisions[0].AuthorID)
 	}
-}
+})
 
-func TestWiki_WorkspaceSyncCommitsImportedPages(t *testing.T) {
+var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsImportedPages", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -515,7 +540,7 @@ func TestWiki_WorkspaceSyncCommitsImportedPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 	before := w.WorkspaceSyncStatus().LastCommitHash
 	if before == "" {
 		t.Fatalf("initial workspace sync commit hash is empty")
@@ -560,9 +585,10 @@ func TestWiki_WorkspaceSyncCommitsImportedPages(t *testing.T) {
 	if snapshots[0].Source != string(workspacesync.SourceWeb) {
 		t.Fatalf("latest workspace snapshot source = %q, want web", snapshots[0].Source)
 	}
-}
+})
 
-func TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes(t *testing.T) {
+var _ = ginkgo.It("TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -575,7 +601,7 @@ func TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	raw := `---
 leafwiki_id: indexed-page
@@ -713,9 +739,10 @@ workspace-sync-updated-token`
 	if result.Count != 0 {
 		t.Fatalf("deleted search result count = %d, want 0", result.Count)
 	}
-}
+})
 
-func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
+var _ = ginkgo.It("TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -729,7 +756,7 @@ func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -779,9 +806,10 @@ func TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
 	}
-}
+})
 
-func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.T) {
+var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w, err := NewWiki(&WikiOptions{
@@ -795,7 +823,7 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -881,7 +909,7 @@ func TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory(t *testing.
 	case <-ctx.Done():
 		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
 	}
-}
+})
 
 func mcpToolNamesContain(tools []*sdkmcp.Tool, name string) bool {
 	for _, tool := range tools {
@@ -892,7 +920,8 @@ func mcpToolNamesContain(tools []*sdkmcp.Tool, name string) bool {
 	return false
 }
 
-func TestWiki_RejectsWorkspaceWithSameDataAndRootDir(t *testing.T) {
+var _ = ginkgo.It("TestWiki_RejectsWorkspaceWithSameDataAndRootDir", func() {
+	t := ginkgo.GinkgoT()
 	dir := t.TempDir()
 
 	_, err := NewWiki(&WikiOptions{
@@ -908,9 +937,10 @@ func TestWiki_RejectsWorkspaceWithSameDataAndRootDir(t *testing.T) {
 	if !strings.Contains(err.Error(), "root dir must be different from data dir") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
+})
 
-func TestWiki_RejectsWorkspaceWhenRootDirContainsDataDir(t *testing.T) {
+var _ = ginkgo.It("TestWiki_RejectsWorkspaceWhenRootDirContainsDataDir", func() {
+	t := ginkgo.GinkgoT()
 	rootDir := filepath.Join(t.TempDir(), "wiki")
 	dataDir := filepath.Join(rootDir, "data")
 
@@ -930,9 +960,10 @@ func TestWiki_RejectsWorkspaceWhenRootDirContainsDataDir(t *testing.T) {
 	if _, statErr := os.Stat(rootDir); !os.IsNotExist(statErr) {
 		t.Fatalf("expected invalid root dir not to be created before startup, got err=%v", statErr)
 	}
-}
+})
 
-func TestWiki_NormalizesWorkspacePathsBeforeInitializingServices(t *testing.T) {
+var _ = ginkgo.It("TestWiki_NormalizesWorkspacePathsBeforeInitializingServices", func() {
+	t := ginkgo.GinkgoT()
 	baseDir := t.TempDir()
 	dataDir := filepath.Join(baseDir, "data")
 	rootDir := filepath.Join(baseDir, "content")
@@ -947,7 +978,7 @@ func TestWiki_NormalizesWorkspacePathsBeforeInitializingServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	if got := w.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want normalized %q", got, dataDir)
@@ -961,11 +992,12 @@ func TestWiki_NormalizesWorkspacePathsBeforeInitializingServices(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
 		t.Fatalf("expected content in normalized root dir: %v", err)
 	}
-}
+})
 
-func TestWiki_DeletePage_WithChildren(t *testing.T) {
+var _ = ginkgo.It("TestWiki_DeletePage_WithChildren", func() {
+	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
 	createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
@@ -976,11 +1008,12 @@ func TestWiki_DeletePage_WithChildren(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error when deleting parent with children")
 	}
-}
+})
 
-func TestWiki_DeletePage_Recursive(t *testing.T) {
+var _ = ginkgo.It("TestWiki_DeletePage_Recursive", func() {
+	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
 	child := createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
@@ -991,21 +1024,23 @@ func TestWiki_DeletePage_Recursive(t *testing.T) {
 	if _, err := w.tree.GetPage(child.ID); err == nil {
 		t.Fatalf("expected deleted child to be gone")
 	}
-}
+})
 
-func TestWiki_InitDefaultAdmin_UsesGivenPassword(t *testing.T) {
+var _ = ginkgo.It("TestWiki_InitDefaultAdmin_UsesGivenPassword", func() {
+	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	_, err := w.user.GetUserByEmailOrUsernameAndPassword("admin", "admin")
 	if err != nil {
 		t.Fatalf("Admin user not found: %v", err)
 	}
-}
+})
 
-func TestWiki_Login_SuccessAndFailure(t *testing.T) {
+var _ = ginkgo.It("TestWiki_Login_SuccessAndFailure", func() {
+	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer test_utils.WrapCloseWithErrorCheck(w.Close, t)
+	defer closeWithErrorCheckForTest(t, w.Close)
 
 	authSvc := w.auth
 	if authSvc == nil {
@@ -1021,9 +1056,10 @@ func TestWiki_Login_SuccessAndFailure(t *testing.T) {
 	if err == nil {
 		t.Error("Expected login to fail with wrong password")
 	}
-}
+})
 
-func TestWiki_AuthDisabled_Initialization(t *testing.T) {
+var _ = ginkgo.It("TestWiki_AuthDisabled_Initialization", func() {
+	t := ginkgo.GinkgoT()
 	// Create a wiki instance with AuthDisabled set to true
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:          t.TempDir(),
@@ -1036,15 +1072,16 @@ func TestWiki_AuthDisabled_Initialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	// Verify that the auth service is nil
 	if wikiInstance.auth != nil {
 		t.Error("Expected auth service to be nil when AuthDisabled is true")
 	}
-}
+})
 
-func TestWiki_AuthDisabled_LoginUnavailable(t *testing.T) {
+var _ = ginkgo.It("TestWiki_AuthDisabled_LoginUnavailable", func() {
+	t := ginkgo.GinkgoT()
 	// Create a wiki instance with AuthDisabled set to true
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:   t.TempDir(),
@@ -1053,15 +1090,16 @@ func TestWiki_AuthDisabled_LoginUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
 		t.Error("Expected auth service to be nil when AuthDisabled is true")
 	}
-}
+})
 
-func TestWiki_AuthDisabled_LogoutUnavailable(t *testing.T) {
+var _ = ginkgo.It("TestWiki_AuthDisabled_LogoutUnavailable", func() {
+	t := ginkgo.GinkgoT()
 	// Create a wiki instance with AuthDisabled set to true
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:   t.TempDir(),
@@ -1070,15 +1108,16 @@ func TestWiki_AuthDisabled_LogoutUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
 		t.Error("Expected auth service to be nil when AuthDisabled is true")
 	}
-}
+})
 
-func TestWiki_AuthDisabled_RefreshTokenUnavailable(t *testing.T) {
+var _ = ginkgo.It("TestWiki_AuthDisabled_RefreshTokenUnavailable", func() {
+	t := ginkgo.GinkgoT()
 	// Create a wiki instance with AuthDisabled set to true
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:   t.TempDir(),
@@ -1087,15 +1126,16 @@ func TestWiki_AuthDisabled_RefreshTokenUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
 		t.Error("Expected auth service to be nil when AuthDisabled is true")
 	}
-}
+})
 
-func TestWiki_AuthDisabled_CoreFunctionalityWorks(t *testing.T) {
+var _ = ginkgo.It("TestWiki_AuthDisabled_CoreFunctionalityWorks", func() {
+	t := ginkgo.GinkgoT()
 	// Create a wiki instance with AuthDisabled set to true
 	wikiInstance, err := NewWiki(&WikiOptions{
 		StorageDir:   t.TempDir(),
@@ -1104,7 +1144,7 @@ func TestWiki_AuthDisabled_CoreFunctionalityWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(wikiInstance.Close, t)
+	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
 
 	// Test creating a page
 	page := createPageForTest(t, wikiInstance, "system", nil, "Test Page", "test-page", pageNodeKind())
@@ -1133,4 +1173,4 @@ func TestWiki_AuthDisabled_CoreFunctionalityWorks(t *testing.T) {
 
 	// Test deleting a page
 	deletePageForTest(t, wikiInstance, "system", page.ID, false)
-}
+})

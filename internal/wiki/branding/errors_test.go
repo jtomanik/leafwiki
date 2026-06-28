@@ -1,77 +1,175 @@
 package branding
 
 import (
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"testing"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	corebranding "github.com/perber/wiki/internal/branding"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
+	httpinternal "github.com/perber/wiki/internal/http"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestRespondWithBrandingError_ValidationErrors(t *testing.T) {
-	t.Parallel()
+var _ = ginkgo.Describe("branding error responses", func() {
+	ginkgo.It("TestRespondWithBrandingError_ValidationErrors", func() {
+		ctx, rec := ginTestContext()
 
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+		ve := sharederrors.NewValidationErrors()
+		ve.Add("siteName", "site name is required")
 
-	ve := sharederrors.NewValidationErrors()
-	ve.Add("siteName", "site name is required")
+		respondWithBrandingError(ctx, ve)
 
-	respondWithBrandingError(c, ve)
+		Expect(rec.Code).To(Equal(http.StatusBadRequest))
+		Expect(rec.Body.String()).To(Equal(`{"error":"validation_error","fields":[{"field":"siteName","code":"field_validation_error","messageId":"validation.field.validation_error","message":"Validation error"}]}`))
+	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	ginkgo.It("TestRespondWithBrandingError_LocalizedError", func() {
+		ctx, rec := ginTestContext()
 
-	if got, want := rec.Body.String(), `{"error":"validation_error","fields":[{"field":"siteName","code":"field_validation_error","messageId":"validation.field.validation_error","message":"Validation error"}]}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
+		err := sharederrors.NewLocalizedError(
+			ErrCodeBrandingLogoInvalidType,
+			"Invalid logo file type",
+			"invalid logo file type %s (allowed: %s)",
+			nil,
+			".exe",
+			".png, .svg",
+		)
+
+		respondWithBrandingError(ctx, err)
+
+		Expect(rec.Code).To(Equal(http.StatusBadRequest))
+		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"branding_logo_invalid_type","messageId":"errors.branding.logo_invalid_type","message":"Invalid logo file type","template":"invalid logo file type %s (allowed: %s)","args":[".exe",".png, .svg"]}}`))
+	})
+
+	ginkgo.It("TestRespondWithBrandingError_InternalErrorIsSanitized", func() {
+		ctx, rec := ginTestContext()
+
+		respondWithBrandingError(ctx, errors.New("write config: permission denied"))
+
+		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"branding_internal_error","messageId":"errors.branding.internal_error","message":"Branding request failed","template":"Branding request failed"}}`))
+		Expect(rec.Body.String()).NotTo(ContainSubstring("permission denied"))
+	})
+
+	ginkgo.It("maps branding error codes to HTTP statuses", func() {
+		Expect(brandingErrorStatus(ErrCodeBrandingInvalidPayload)).To(Equal(http.StatusBadRequest))
+		Expect(brandingErrorStatus(ErrCodeBrandingLogoMissing)).To(Equal(http.StatusBadRequest))
+		Expect(brandingErrorStatus(ErrCodeBrandingFaviconMissing)).To(Equal(http.StatusBadRequest))
+		Expect(brandingErrorStatus(ErrCodeBrandingLogoInvalidType)).To(Equal(http.StatusBadRequest))
+		Expect(brandingErrorStatus(ErrCodeBrandingFaviconInvalidType)).To(Equal(http.StatusBadRequest))
+		Expect(brandingErrorStatus(ErrCodeBrandingLogoTooLarge)).To(Equal(http.StatusRequestEntityTooLarge))
+		Expect(brandingErrorStatus(ErrCodeBrandingFaviconTooLarge)).To(Equal(http.StatusRequestEntityTooLarge))
+		Expect(brandingErrorStatus(ErrCodeBrandingConfigUnavailable)).To(Equal(http.StatusInternalServerError))
+	})
+
+	ginkgo.It("renders explicit status errors as structured localized responses", func() {
+		ctx, rec := ginTestContext()
+
+		respondWithBrandingStatusError(ctx, http.StatusRequestEntityTooLarge, ErrCodeBrandingLogoTooLarge, "ignored", "ignored")
+
+		Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+		assertBrandingStructuredError(rec, "branding_logo_too_large", "errors.branding.logo_too_large")
+	})
+})
+
+var _ = ginkgo.Describe("branding routes", func() {
+	ginkgo.It("serves public branding configuration", func() {
+		svc := newBrandingTestService()
+		router := httpinternal.NewRouter(
+			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{
+				GetBranding:     NewGetBrandingUseCase(svc),
+				BrandingService: svc,
+				Log:             slog.Default(),
+			})},
+			httpinternal.FrontendConfig{},
+			httpinternal.RouterOptions{DisableFrontendRoutes: true},
+		)
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/branding", nil))
+
+		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		var body corebranding.BrandingConfigResponse
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		Expect(body.SiteName).To(Equal("LeafWiki"))
+		Expect(body.BrandingConstraints.MaxSiteNameLength).To(Equal(100))
+	})
+
+	ginkgo.It("rejects invalid update payload with a localized structured response", func() {
+		svc := newBrandingTestService()
+		routes := NewRoutes(RoutesConfig{
+			GetBranding:     NewGetBrandingUseCase(svc),
+			UpdateBranding:  NewUpdateBrandingUseCase(svc),
+			BrandingService: svc,
+			Log:             slog.Default(),
+		})
+		ctx, rec := ginTestContext()
+		ctx.Request = httptest.NewRequest(http.MethodPut, "/api/branding", strings.NewReader(`{`))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+
+		routes.handleUpdateBranding(ctx)
+
+		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
+		assertBrandingStructuredError(rec, "branding_invalid_payload", "errors.branding.invalid_payload")
+	})
+})
+
+var _ = ginkgo.Describe("branding asset paths", func() {
+	ginkgo.It("rejects traversal and invalid extensions", func() {
+		svc := newBrandingTestService()
+		routes := NewRoutes(RoutesConfig{BrandingService: svc, Log: slog.Default()})
+		cfg, err := svc.GetBranding()
+		Expect(err).NotTo(HaveOccurred())
+
+		_, status := routes.resolveBrandingAssetPath(tree.AssetNameFromString("../logo.png"), cfg)
+		Expect(status).To(Equal(http.StatusForbidden))
+
+		_, status = routes.resolveBrandingAssetPath(tree.AssetNameFromString("logo.exe"), cfg)
+		Expect(status).To(Equal(http.StatusForbidden))
+	})
+
+	ginkgo.It("returns not found for allowed missing assets and ok for existing assets", func() {
+		svc := newBrandingTestService()
+		routes := NewRoutes(RoutesConfig{BrandingService: svc, Log: slog.Default()})
+		cfg, err := svc.GetBranding()
+		Expect(err).NotTo(HaveOccurred())
+
+		_, status := routes.resolveBrandingAssetPath(tree.AssetNameFromString("logo.png"), cfg)
+		Expect(status).To(Equal(http.StatusNotFound))
+
+		path := filepath.Join(svc.GetBrandingAssetsDir(), "logo.png")
+		Expect(os.WriteFile(path, []byte("png"), 0o600)).To(Succeed())
+		got, status := routes.resolveBrandingAssetPath(tree.AssetNameFromString("logo.png"), cfg)
+		Expect(status).To(Equal(http.StatusOK))
+		Expect(got).To(Equal(path))
+	})
+})
+
+func newBrandingTestService() *corebranding.BrandingService {
+	svc, err := corebranding.NewBrandingService(ginkgo.GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	return svc
 }
 
-func TestRespondWithBrandingError_LocalizedError(t *testing.T) {
-	t.Parallel()
-
+func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-
-	err := sharederrors.NewLocalizedError(
-		ErrCodeBrandingLogoInvalidType,
-		"Invalid logo file type",
-		"invalid logo file type %s (allowed: %s)",
-		nil,
-		".exe",
-		".png, .svg",
-	)
-
-	respondWithBrandingError(c, err)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-
-	if got, want := rec.Body.String(), `{"error":{"code":"branding_logo_invalid_type","messageId":"errors.branding.logo_invalid_type","message":"Invalid logo file type","template":"invalid logo file type %s (allowed: %s)","args":[".exe",".png, .svg"]}}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
+	ctx, _ := gin.CreateTestContext(rec)
+	return ctx, rec
 }
 
-func TestRespondWithBrandingError_InternalErrorIsSanitized(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-
-	respondWithBrandingError(c, errors.New("write config: permission denied"))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-
-	if got, want := rec.Body.String(), `{"error":{"code":"branding_internal_error","messageId":"errors.branding.internal_error","message":"Branding request failed","template":"Branding request failed"}}`; got != want {
-		t.Fatalf("body = %s, want %s", got, want)
-	}
+func assertBrandingStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	var body BrandingErrorResponse
+	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
+	Expect(body.Error.Code.String()).To(Equal(code))
+	Expect(body.Error.MessageID.String()).To(Equal(messageID))
 }

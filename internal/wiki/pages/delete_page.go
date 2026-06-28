@@ -20,8 +20,8 @@ type DeletePageInput struct {
 
 // DeletePageUseCase removes a page (and optionally its subtree) including assets and links.
 type DeletePageUseCase struct {
-	tree         *tree.TreeService
-	assets       *assets.AssetService
+	tree         deletePageTree
+	assets       pageAssetDeleter
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
 }
@@ -50,17 +50,7 @@ func (uc *DeletePageUseCase) Execute(_ context.Context, in DeletePageInput) erro
 	}
 
 	if in.Recursive {
-		var subtreeIDs []tree.PageID
-
-		if uc.tree.IsLoaded() {
-			node, err := uc.tree.FindPageByID(in.ID)
-			if err == nil && node != nil {
-				subtreeIDs = collectSubtreeIDs(node)
-			}
-		}
-		if len(subtreeIDs) == 0 {
-			subtreeIDs = []tree.PageID{in.ID}
-		}
+		subtreeIDs := collectSubtreeIDs(page.PageNode)
 
 		// Build affected pages list before deletion (paths are no longer reachable after).
 		affectedPages := make([]*tree.Page, 0, len(subtreeIDs))

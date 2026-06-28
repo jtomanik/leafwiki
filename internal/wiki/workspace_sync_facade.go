@@ -9,6 +9,20 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+type workspaceSyncFacade interface {
+	Status() workspacesync.SyncStatus
+	SyncNow(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error)
+	ListSnapshots(context.Context, workspacesync.SnapshotLimit) ([]workspacesync.Snapshot, error)
+	ListSnapshotPage(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error)
+	RestoreWorkspaceWithSource(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
+	ListPageRevisions(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
+	GetPageRevisionSnapshot(context.Context, *tree.Page, workspacesync.CommitHash) (*revision.RevisionSnapshot, error)
+	RestoreDocumentWithSource(context.Context, *tree.Page, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error)
+	SetAfterSync(func() error)
+	StartWatcher(context.Context) error
+	StopWatcher()
+}
+
 func (w *Wiki) WorkspaceSyncStatus() workspacesync.SyncStatus {
 	if w.workspaceSync == nil {
 		return workspacesync.SyncStatus{Enabled: false}

@@ -2,15 +2,16 @@ package wikid
 
 import (
 	"fmt"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"path/filepath"
 	"strings"
 	"sync"
-	"testing"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestGrantStoreRejectsUnknownRole(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreRejectsUnknownRole", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	if _, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
 		t.Fatalf("BootstrapHome failed: %v", err)
@@ -24,9 +25,10 @@ func TestGrantStoreRejectsUnknownRole(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `unknown grant role "owner"`) {
 		t.Fatalf("Upsert error = %v, want unknown role validation", err)
 	}
-}
+})
 
-func TestGrantStoreRejectsNonURLSafeWorkspaceID(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreRejectsNonURLSafeWorkspaceID", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	err := NewGrantStore(layout.DBPath).Upsert(Grant{
 		Subject:     "user:1",
@@ -36,9 +38,10 @@ func TestGrantStoreRejectsNonURLSafeWorkspaceID(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "workspace ID") {
 		t.Fatalf("Upsert error = %v, want workspace ID validation", err)
 	}
-}
+})
 
-func TestGrantStoreRejectsWorkspaceIDWhitespaceBeforeNormalization(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreRejectsWorkspaceIDWhitespaceBeforeNormalization", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	err := NewGrantStore(layout.DBPath).Upsert(Grant{
 		Subject:     "user:1",
@@ -48,34 +51,33 @@ func TestGrantStoreRejectsWorkspaceIDWhitespaceBeforeNormalization(t *testing.T)
 	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDWhitespace {
 		t.Fatalf("Upsert error code = %q, want %q (err=%v)", code, workspaceid.ErrCodeWorkspaceIDWhitespace, err)
 	}
+})
+
+type roleCapabilitiesCase struct {
+	role      GrantRole
+	wantRead  bool
+	wantWrite bool
+	wantAdmin bool
 }
 
-func TestRoleCapabilities(t *testing.T) {
-	tests := []struct {
-		role      GrantRole
-		wantRead  bool
-		wantWrite bool
-		wantAdmin bool
-	}{
-		{role: GrantRoleViewer, wantRead: true},
-		{role: GrantRoleEditor, wantRead: true, wantWrite: true},
-		{role: GrantRoleAdmin, wantRead: true, wantWrite: true, wantAdmin: true},
-	}
+var _ = ginkgo.DescribeTable("TestRoleCapabilities",
+	func(tt roleCapabilitiesCase) {
+		t := ginkgo.GinkgoT()
+		caps, err := CapabilitiesForRole(tt.role)
+		if err != nil {
+			t.Fatalf("%s CapabilitiesForRole failed: %v", tt.role, err)
+		}
+		if caps.ReadContent != tt.wantRead || caps.WriteContent != tt.wantWrite || caps.AdministerGrants != tt.wantAdmin {
+			t.Fatalf("%s capabilities = %#v", tt.role, caps)
+		}
+	},
+	ginkgo.Entry("viewer", roleCapabilitiesCase{role: GrantRoleViewer, wantRead: true}),
+	ginkgo.Entry("editor", roleCapabilitiesCase{role: GrantRoleEditor, wantRead: true, wantWrite: true}),
+	ginkgo.Entry("admin", roleCapabilitiesCase{role: GrantRoleAdmin, wantRead: true, wantWrite: true, wantAdmin: true}),
+)
 
-	for _, tt := range tests {
-		t.Run(string(tt.role), func(t *testing.T) {
-			caps, err := CapabilitiesForRole(tt.role)
-			if err != nil {
-				t.Fatalf("CapabilitiesForRole failed: %v", err)
-			}
-			if caps.ReadContent != tt.wantRead || caps.WriteContent != tt.wantWrite || caps.AdministerGrants != tt.wantAdmin {
-				t.Fatalf("capabilities = %#v", caps)
-			}
-		})
-	}
-}
-
-func TestGrantStoreUpsertAndListSubjectGrants(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreUpsertAndListSubjectGrants", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	if _, err := registry.BootstrapHome(); err != nil {
@@ -117,9 +119,10 @@ func TestGrantStoreUpsertAndListSubjectGrants(t *testing.T) {
 	if grants[1].WorkspaceID != HomeWorkspaceID || grants[1].Role != GrantRoleAdmin {
 		t.Fatalf("second grant = %#v, want home admin update", grants[1])
 	}
-}
+})
 
-func TestGrantStoreUpsertPreservesConcurrentStoreInstanceUpdates(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreUpsertPreservesConcurrentStoreInstanceUpdates", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	if _, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
 		t.Fatalf("BootstrapHome failed: %v", err)
@@ -156,9 +159,10 @@ func TestGrantStoreUpsertPreservesConcurrentStoreInstanceUpdates(t *testing.T) {
 	if len(loaded.Grants) != count {
 		t.Fatalf("grants length = %d, want %d: %#v", len(loaded.Grants), count, loaded.Grants)
 	}
-}
+})
 
-func TestGrantStoreConcurrentUpsertsAcrossProcessesUseSQLiteAuthorityStore(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreConcurrentUpsertsAcrossProcessesUseSQLiteAuthorityStore", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	home, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome()
 	if err != nil {
@@ -196,9 +200,10 @@ func TestGrantStoreConcurrentUpsertsAcrossProcessesUseSQLiteAuthorityStore(t *te
 		t.Fatalf("grants length = %d, want %d: %#v", len(loaded.Grants), count, loaded.Grants)
 	}
 	assertSQLiteTableCount(t, layout.DBPath, "workspace_grants", count)
-}
+})
 
-func TestGrantStoreReplaceSubjectGrantsIsSubjectScoped(t *testing.T) {
+var _ = ginkgo.It("TestGrantStoreReplaceSubjectGrantsIsSubjectScoped", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	if _, err := registry.BootstrapHome(); err != nil {
@@ -249,4 +254,4 @@ func TestGrantStoreReplaceSubjectGrantsIsSubjectScoped(t *testing.T) {
 	if len(otherGrants) != 1 || otherGrants[0].WorkspaceID != beta.ID {
 		t.Fatalf("other grants = %#v, want preserved beta grant", otherGrants)
 	}
-}
+})

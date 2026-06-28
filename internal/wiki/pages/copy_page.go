@@ -28,9 +28,9 @@ type CopyPageOutput struct {
 
 // CopyPageUseCase duplicates a page and its assets under a new slug/title.
 type CopyPageUseCase struct {
-	tree         *tree.TreeService
+	tree         copyPageTree
 	slug         *tree.SlugService
-	assets       *assets.AssetService
+	assets       pageAssetCopier
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
 }

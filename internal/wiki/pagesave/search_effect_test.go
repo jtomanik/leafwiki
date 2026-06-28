@@ -1,14 +1,14 @@
 package pagesave
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/search"
 )
 
 // setupSearchTest creates a temp-dir-backed tree, SQLiteIndex and SearchIndexSideEffect.
-func setupSearchTest(t *testing.T) (*tree.TreeService, *search.SQLiteIndex, *SearchIndexSideEffect) {
+func setupSearchTest(t pagesaveTestT) (*tree.TreeService, *search.SQLiteIndex, *SearchIndexSideEffect) {
 	t.Helper()
 	tmp := t.TempDir()
 
@@ -32,7 +32,7 @@ func setupSearchTest(t *testing.T) (*tree.TreeService, *search.SQLiteIndex, *Sea
 }
 
 // createPageWithContent creates a page node and writes content to it via UpdateNode.
-func createPageWithContent(t *testing.T, treeSvc *tree.TreeService, title, slug, content string) *tree.Page {
+func createPageWithContent(t pagesaveTestT, treeSvc *tree.TreeService, title, slug, content string) *tree.Page {
 	t.Helper()
 	kind := tree.NodeKindPage
 	id, err := treeSvc.CreateNode("system", nil, title, newFixtureSlug(slug), &kind)
@@ -55,7 +55,8 @@ func createPageWithContent(t *testing.T, treeSvc *tree.TreeService, title, slug,
 
 // ─── IndexAllPages ────────────────────────────────────────────────────────────
 
-func TestSearchIndexSideEffect_IndexAllPages_IndexesExistingPages(t *testing.T) {
+var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_IndexesExistingPages", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	page := createPageWithContent(t, treeSvc, "Search Test Page", "search-test", "# Search Test Page\nThis is some uniquecontent for indexing.")
@@ -74,9 +75,11 @@ func TestSearchIndexSideEffect_IndexAllPages_IndexesExistingPages(t *testing.T) 
 	if result.Items[0].PageID != page.ID {
 		t.Errorf("expected pageID %q, got %q", page.ID, result.Items[0].PageID)
 	}
-}
 
-func TestSearchIndexSideEffect_IndexAllPages_ClearsStaleEntries(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_ClearsStaleEntries", func() {
+	t := ginkgo.GinkgoT()
 	_, index, effect := setupSearchTest(t)
 
 	// Pre-populate the index with a stale entry not present in the tree.
@@ -95,9 +98,11 @@ func TestSearchIndexSideEffect_IndexAllPages_ClearsStaleEntries(t *testing.T) {
 	if result.Count != 0 {
 		t.Errorf("expected stale entry to be cleared, got %d hits", result.Count)
 	}
-}
 
-func TestSearchIndexSideEffect_IndexAllPages_EmptyTree(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_EmptyTree", func() {
+	t := ginkgo.GinkgoT()
 	_, index, effect := setupSearchTest(t)
 
 	if err := effect.IndexAllPages(); err != nil {
@@ -111,11 +116,13 @@ func TestSearchIndexSideEffect_IndexAllPages_EmptyTree(t *testing.T) {
 	if result.Count != 0 {
 		t.Errorf("expected 0 hits on empty tree, got %d", result.Count)
 	}
-}
+
+})
 
 // ─── Apply ───────────────────────────────────────────────────────────────────
 
-func TestSearchIndexSideEffect_Apply_Create_IndexesPage(t *testing.T) {
+var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Create_IndexesPage", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	page := createPageWithContent(t, treeSvc, "Created Page", "created", "some uniqueterm_create content")
@@ -135,9 +142,11 @@ func TestSearchIndexSideEffect_Apply_Create_IndexesPage(t *testing.T) {
 	if result.Items[0].PageID != page.ID {
 		t.Errorf("expected pageID %q, got %q", page.ID, result.Items[0].PageID)
 	}
-}
 
-func TestSearchIndexSideEffect_Apply_Update_ReplacesContentAfterBootstrap(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Update_ReplacesContentAfterBootstrap", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	page := createPageWithContent(t, treeSvc, "My Page", "my-page", "initial uniqueword_before content")
@@ -183,9 +192,11 @@ func TestSearchIndexSideEffect_Apply_Update_ReplacesContentAfterBootstrap(t *tes
 	if fresh.Count == 0 {
 		t.Error("expected new content to be searchable after Update event")
 	}
-}
 
-func TestSearchIndexSideEffect_Apply_Delete_RemovesFromIndex(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Delete_RemovesFromIndex", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	page := createPageWithContent(t, treeSvc, "Delete Me", "delete-me", "deletable uniqueterm_delete content")
@@ -214,9 +225,11 @@ func TestSearchIndexSideEffect_Apply_Delete_RemovesFromIndex(t *testing.T) {
 	if after.Count != 0 {
 		t.Errorf("expected page to be removed from index after Delete event, got %d hits", after.Count)
 	}
-}
 
-func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	parent := createPageWithContent(t, treeSvc, "Parent Section", "parent", "parent uniqueterm_parent content")
@@ -290,9 +303,11 @@ func TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex(t
 			t.Errorf("expected %q to be removed after recursive delete, got %d hits", term, r.Count)
 		}
 	}
-}
 
-func TestSearchIndexSideEffect_Apply_Move_PageStillSearchableAtNewPath(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Move_PageStillSearchableAtNewPath", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, index, effect := setupSearchTest(t)
 
 	// Create a parent page (will auto-convert to section when child is added).
@@ -338,4 +353,5 @@ func TestSearchIndexSideEffect_Apply_Move_PageStillSearchableAtNewPath(t *testin
 	if result.Items[0].Path != wantPath {
 		t.Errorf("expected path %q after move, got %q", wantPath, result.Items[0].Path)
 	}
-}
+
+})

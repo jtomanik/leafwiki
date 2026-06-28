@@ -1,9 +1,9 @@
 package auth_test
 
 import (
+	. "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -15,7 +15,7 @@ type proxyFixture struct {
 	close       func() error
 }
 
-func cleanupWithErrorCheck(t *testing.T, name string, closeFn func() error) {
+func cleanupWithErrorCheck(t testTB, name string, closeFn func() error) {
 	t.Helper()
 
 	t.Cleanup(func() {
@@ -25,7 +25,7 @@ func cleanupWithErrorCheck(t *testing.T, name string, closeFn func() error) {
 	})
 }
 
-func createProxyFixture(t *testing.T) *proxyFixture {
+func createProxyFixture(t testTB) *proxyFixture {
 	t.Helper()
 
 	storageDir := t.TempDir()
@@ -46,7 +46,7 @@ func createProxyFixture(t *testing.T) *proxyFixture {
 	}
 }
 
-func mustParseTrustedProxies(t *testing.T, raw string) *authmw.TrustedProxies {
+func mustParseTrustedProxies(t testTB, raw string) *authmw.TrustedProxies {
 	t.Helper()
 	tp, err := authmw.ParseTrustedProxies(raw)
 	if err != nil {
@@ -71,7 +71,8 @@ func proxyRouter(cfg authmw.RemoteUserConfig) *gin.Engine {
 	return r
 }
 
-func TestInjectRemoteUser_Disabled(t *testing.T) {
+var _ = It("TestInjectRemoteUser_Disabled", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -93,9 +94,11 @@ func TestInjectRemoteUser_Disabled(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 when disabled, got %d", w.Code)
 	}
-}
 
-func TestInjectRemoteUser_UntrustedIP(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_UntrustedIP", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -117,9 +120,11 @@ func TestInjectRemoteUser_UntrustedIP(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 from untrusted IP, got %d", w.Code)
 	}
-}
 
-func TestInjectRemoteUser_TrustedIP_NoHeader(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_TrustedIP_NoHeader", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -141,9 +146,11 @@ func TestInjectRemoteUser_TrustedIP_NoHeader(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 when header absent, got %d", w.Code)
 	}
-}
 
-func TestInjectRemoteUser_TrustedIP_ValidUser(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_TrustedIP_ValidUser", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -167,9 +174,11 @@ func TestInjectRemoteUser_TrustedIP_ValidUser(t *testing.T) {
 	if body := w.Body.String(); body != `{"username":"admin"}` {
 		t.Errorf("unexpected body: %s", body)
 	}
-}
 
-func TestInjectRemoteUser_TrustedIP_UnknownUser(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_TrustedIP_UnknownUser", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -191,9 +200,11 @@ func TestInjectRemoteUser_TrustedIP_UnknownUser(t *testing.T) {
 		t.Errorf("expected 401 for unknown user, got %d", w.Code)
 	}
 	assertAuthMiddlewareError(t, w, "auth_remote_user_not_found", "errors.auth.remote_user_not_found", "reverse proxy auth: user not found")
-}
 
-func TestInjectRemoteUser_CustomHeaderName(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_CustomHeaderName", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -214,9 +225,11 @@ func TestInjectRemoteUser_CustomHeaderName(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-}
 
-func TestInjectRemoteUser_CIDRMatch(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_CIDRMatch", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -237,9 +250,11 @@ func TestInjectRemoteUser_CIDRMatch(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for CIDR-matched IP, got %d: %s", w.Code, w.Body.String())
 	}
-}
 
-func TestInjectRemoteUser_MisconfiguredTrustedProxies(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_MisconfiguredTrustedProxies", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -261,9 +276,11 @@ func TestInjectRemoteUser_MisconfiguredTrustedProxies(t *testing.T) {
 		t.Errorf("expected 500 for missing trusted proxies config, got %d", w.Code)
 	}
 	assertAuthMiddlewareError(t, w, "auth_reverse_proxy_misconfigured", "errors.auth.reverse_proxy_misconfigured", "Reverse proxy authentication misconfigured")
-}
 
-func TestInjectRemoteUser_MisconfiguredUserService(t *testing.T) {
+})
+
+var _ = It("TestInjectRemoteUser_MisconfiguredUserService", func() {
+	t := GinkgoT()
 	cfg := authmw.RemoteUserConfig{
 		Enabled:        true,
 		HeaderName:     "Remote-User",
@@ -282,11 +299,13 @@ func TestInjectRemoteUser_MisconfiguredUserService(t *testing.T) {
 		t.Errorf("expected 500 for missing user service config, got %d", w.Code)
 	}
 	assertAuthMiddlewareError(t, w, "auth_reverse_proxy_misconfigured", "errors.auth.reverse_proxy_misconfigured", "Reverse proxy authentication misconfigured")
-}
+
+})
 
 // TestInjectRemoteUser_WithRequireAuth verifies the full middleware chain:
 // InjectRemoteUser sets the user, then RequireAuth short-circuits JWT validation.
-func TestInjectRemoteUser_WithRequireAuth(t *testing.T) {
+var _ = It("TestInjectRemoteUser_WithRequireAuth", func() {
+	t := GinkgoT()
 	f := createProxyFixture(t)
 	cleanupWithErrorCheck(t, "proxy fixture", f.close)
 
@@ -327,4 +346,5 @@ func TestInjectRemoteUser_WithRequireAuth(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 with proxy auth + RequireAuth chain, got %d: %s", w.Code, w.Body.String())
 	}
-}
+
+})

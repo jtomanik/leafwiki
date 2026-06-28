@@ -5,18 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/perber/wiki/internal/agenthooks"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
-func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
+var _ = ginkgo.It("TestControlServerRejectsUnauthorizedBeforeRouting", func() {
+	t := ginkgo.GinkgoT()
 	sessions := NewSessionRegistry(time.Minute, nil)
 	var mcpCalled bool
 	handler := NewControlServer(ControlServerOptions{
@@ -46,9 +48,11 @@ func TestControlServerRejectsUnauthorizedBeforeRouting(t *testing.T) {
 	if mcpCalled {
 		t.Fatalf("private MCP handler was called for unauthorized request")
 	}
-}
 
-func TestControlServerSessionLifecycle(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestControlServerSessionLifecycle", func() {
+	t := ginkgo.GinkgoT()
 	var counts []int
 	sessions := NewSessionRegistry(time.Minute, func(count int) {
 		counts = append(counts, count)
@@ -96,9 +100,11 @@ func TestControlServerSessionLifecycle(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("missing release status = %d, want %d", resp.Code, http.StatusOK)
 	}
-}
 
-func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents", func() {
+	t := ginkgo.GinkgoT()
 	presence := NewAgentPresenceRegistry(time.Minute, nil)
 	handler := NewControlServer(ControlServerOptions{
 		Token:         "control-token",
@@ -156,9 +162,11 @@ func TestControlServerAgentPresenceRequiresTokenAndRecordsSanitizedEvents(t *tes
 	if strings.Contains(resp.Body.String(), "raw") || strings.Contains(resp.Body.String(), "session_id") {
 		t.Fatalf("presence response leaked raw-ish fields: %s", resp.Body.String())
 	}
-}
 
-func TestControlServerForwardsPrivateMCPAfterControlToken(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestControlServerForwardsPrivateMCPAfterControlToken", func() {
+	t := ginkgo.GinkgoT()
 	var seenPath, seenAuth, seenBody string
 	handler := NewControlServer(ControlServerOptions{
 		Token:    "control-token",
@@ -186,68 +194,64 @@ func TestControlServerForwardsPrivateMCPAfterControlToken(t *testing.T) {
 	if seenPath != "/mcp" || seenAuth != "Bearer session-api-key" || !strings.Contains(seenBody, "jsonrpc") {
 		t.Fatalf("forwarded request path/auth/body = %q/%q/%q", seenPath, seenAuth, seenBody)
 	}
+
+})
+
+type stdioAuthBoundaryCase struct {
+	name          string
+	authDisabled  bool
+	verify        func(string) error
+	body          string
+	wantStatus    int
+	wantCode      string
+	wantMessageID string
 }
 
-func TestControlServerVerifyStdioAuthBoundary(t *testing.T) {
-	tests := []struct {
-		name          string
-		authDisabled  bool
-		verify        func(string) error
-		body          string
-		wantStatus    int
-		wantCode      string
-		wantMessageID string
-	}{
-		{name: "malformed json", authDisabled: true, body: "{", wantStatus: http.StatusBadRequest, wantCode: "stdio_auth_invalid_request", wantMessageID: "errors.stdio.auth_invalid_request"},
-		{name: "disabled auth accepts empty key", authDisabled: true, body: `{}`, wantStatus: http.StatusOK},
-		{name: "disabled auth rejects api key", authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict, wantCode: "stdio_auth_api_key_rejected", wantMessageID: "errors.stdio.auth_api_key_rejected"},
-		{name: "enabled auth requires api key", body: `{}`, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_required", wantMessageID: "errors.stdio.auth_api_key_required"},
-		{name: "enabled auth requires verifier", body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError, wantCode: "stdio_auth_api_key_verifier_unavailable", wantMessageID: "errors.stdio.auth_api_key_verifier_unavailable"},
-		{name: "enabled auth rejects invalid api key", body: `{"apiKey":"lwk_key"}`, verify: func(string) error {
-			return ErrInvalidAPIKey
-		}, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_invalid", wantMessageID: "errors.stdio.auth_api_key_invalid"},
-		{name: "enabled auth reports verifier storage failure", body: `{"apiKey":"lwk_key"}`, verify: func(string) error {
-			return errors.New("database is locked")
-		}, wantStatus: http.StatusServiceUnavailable, wantCode: "stdio_auth_api_key_verifier_failed", wantMessageID: "errors.stdio.auth_api_key_verifier_failed"},
-		{name: "enabled auth accepts valid api key", body: `{"apiKey":"lwk_key"}`, verify: func(key string) error {
-			if key != "lwk_key" {
-				return errors.New("wrong key")
-			}
-			return nil
-		}, wantStatus: http.StatusOK},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := NewControlServer(ControlServerOptions{
-				Token:        "control-token",
-				Sessions:     NewSessionRegistry(time.Minute, nil),
-				AuthDisabled: tc.authDisabled,
-				VerifyAPIKey: tc.verify,
-			})
-			resp := controlServerRequest(t, handler, http.MethodPost, "/stdio-auth/verify", "control-token", strings.NewReader(tc.body))
-			if resp.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d; body=%q", resp.Code, tc.wantStatus, resp.Body.String())
-			}
-			if tc.wantCode != "" {
-				var body struct {
-					Error struct {
-						Code      string `json:"code"`
-						MessageID string `json:"messageId"`
-					} `json:"error"`
-				}
-				if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
-					t.Fatalf("decode error response: %v; body=%q", err, resp.Body.String())
-				}
-				if body.Error.Code != tc.wantCode || body.Error.MessageID != tc.wantMessageID {
-					t.Fatalf("error = %#v, want code=%q messageId=%q", body.Error, tc.wantCode, tc.wantMessageID)
-				}
-			}
+var _ = ginkgo.DescribeTable("TestControlServerVerifyStdioAuthBoundary",
+	func(tc stdioAuthBoundaryCase) {
+		t := ginkgo.GinkgoT()
+		handler := NewControlServer(ControlServerOptions{
+			Token:        "control-token",
+			Sessions:     NewSessionRegistry(time.Minute, nil),
+			AuthDisabled: tc.authDisabled,
+			VerifyAPIKey: tc.verify,
 		})
-	}
-}
+		resp := controlServerRequest(t, handler, http.MethodPost, "/stdio-auth/verify", "control-token", strings.NewReader(tc.body))
+		if resp.Code != tc.wantStatus {
+			t.Fatalf("status = %d, want %d; body=%q", resp.Code, tc.wantStatus, resp.Body.String())
+		}
+		if tc.wantCode != "" {
+			var body struct {
+				Error struct {
+					Code      string `json:"code"`
+					MessageID string `json:"messageId"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode error response: %v; body=%q", err, resp.Body.String())
+			}
+			if body.Error.Code != tc.wantCode || body.Error.MessageID != tc.wantMessageID {
+				t.Fatalf("error = %#v, want code=%q messageId=%q", body.Error, tc.wantCode, tc.wantMessageID)
+			}
+		}
+	},
+	ginkgo.Entry("malformed json", stdioAuthBoundaryCase{authDisabled: true, body: "{", wantStatus: http.StatusBadRequest, wantCode: "stdio_auth_invalid_request", wantMessageID: "errors.stdio.auth_invalid_request"}),
+	ginkgo.Entry("disabled auth accepts empty key", stdioAuthBoundaryCase{authDisabled: true, body: `{}`, wantStatus: http.StatusOK}),
+	ginkgo.Entry("disabled auth rejects api key", stdioAuthBoundaryCase{authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict, wantCode: "stdio_auth_api_key_rejected", wantMessageID: "errors.stdio.auth_api_key_rejected"}),
+	ginkgo.Entry("enabled auth requires api key", stdioAuthBoundaryCase{body: `{}`, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_required", wantMessageID: "errors.stdio.auth_api_key_required"}),
+	ginkgo.Entry("enabled auth requires verifier", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError, wantCode: "stdio_auth_api_key_verifier_unavailable", wantMessageID: "errors.stdio.auth_api_key_verifier_unavailable"}),
+	ginkgo.Entry("enabled auth rejects invalid api key", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return ErrInvalidAPIKey }, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_invalid", wantMessageID: "errors.stdio.auth_api_key_invalid"}),
+	ginkgo.Entry("enabled auth reports verifier storage failure", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return errors.New("database is locked") }, wantStatus: http.StatusServiceUnavailable, wantCode: "stdio_auth_api_key_verifier_failed", wantMessageID: "errors.stdio.auth_api_key_verifier_failed"}),
+	ginkgo.Entry("enabled auth accepts valid api key", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(key string) error {
+		if key != "lwk_key" {
+			return errors.New("wrong key")
+		}
+		return nil
+	}, wantStatus: http.StatusOK}),
+)
 
-func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
+var _ = ginkgo.It("TestClientCallsControlAPIAndPropagatesErrors", func() {
+	t := ginkgo.GinkgoT()
 	var verifiedKey string
 	handler := NewControlServer(ControlServerOptions{
 		Token:         "control-token",
@@ -323,9 +327,10 @@ func TestClientCallsControlAPIAndPropagatesErrors(t *testing.T) {
 	} else {
 		assertControlHTTPError(t, err, http.StatusUnauthorized, errCodeDaemonControlUnauthorized)
 	}
-}
 
-func assertControlHTTPError(t *testing.T, err error, wantStatus int, wantCode sharederrors.ErrorCode) {
+})
+
+func assertControlHTTPError(t projectdaemonTestT, err error, wantStatus int, wantCode sharederrors.ErrorCode) {
 	t.Helper()
 	var controlErr *ControlHTTPError
 	if !errors.As(err, &controlErr) {
@@ -337,7 +342,36 @@ func assertControlHTTPError(t *testing.T, err error, wantStatus int, wantCode sh
 	}
 }
 
-func TestClientReportsMalformedJSONResponses(t *testing.T) {
+var _ = ginkgo.It("ControlHTTPError and IsControlStatus expose structured status matching", func() {
+	t := ginkgo.GinkgoT()
+	err := &ControlHTTPError{
+		StatusCode: http.StatusConflict,
+		Code:       "daemon_control_conflict",
+		MessageID:  "errors.daemon.control_conflict",
+		Message:    "daemon already owns this project",
+	}
+	if got := err.Error(); !strings.Contains(got, "daemon already owns this project") {
+		t.Fatalf("Error() = %q, want message text", got)
+	}
+	if !IsControlStatus(err, http.StatusConflict) {
+		t.Fatalf("IsControlStatus returned false for direct control error")
+	}
+	if !IsControlStatus(fmt.Errorf("wrapped: %w", err), http.StatusConflict) {
+		t.Fatalf("IsControlStatus returned false for wrapped control error")
+	}
+	if IsControlStatus(err, http.StatusUnauthorized) {
+		t.Fatalf("IsControlStatus matched wrong status")
+	}
+	if IsControlStatus(errors.New("plain"), http.StatusConflict) {
+		t.Fatalf("IsControlStatus matched non-control error")
+	}
+	if got := (*ControlHTTPError)(nil).Error(); got != "" {
+		t.Fatalf("nil ControlHTTPError Error() = %q, want empty", got)
+	}
+})
+
+var _ = ginkgo.It("TestClientReportsMalformedJSONResponses", func() {
+	t := ginkgo.GinkgoT()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get(ControlTokenHeader) != "control-token" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -352,9 +386,11 @@ func TestClientReportsMalformedJSONResponses(t *testing.T) {
 	if _, err := client.Health(context.Background()); err == nil {
 		t.Fatalf("Health succeeded with malformed JSON response")
 	}
-}
 
-func TestAuthRoundTripperAddsControlBearerAndActorContext(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestAuthRoundTripperAddsControlBearerAndActorContext", func() {
+	t := ginkgo.GinkgoT()
 	var seenControlToken, seenBearerToken, seenActorContext string
 	client := &http.Client{
 		Transport: AuthRoundTripper{
@@ -397,9 +433,10 @@ func TestAuthRoundTripperAddsControlBearerAndActorContext(t *testing.T) {
 	if req.Header.Get(ControlTokenHeader) != "" || req.Header.Get("Authorization") != "" || req.Header.Get(ActorContextHeader) != "" {
 		t.Fatalf("original request headers were mutated: %#v", req.Header)
 	}
-}
 
-func controlServerRequest(t *testing.T, handler http.Handler, method string, path controlPath, token string, body io.Reader) *httptest.ResponseRecorder {
+})
+
+func controlServerRequest(t projectdaemonTestT, handler http.Handler, method string, path controlPath, token string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
 	if body == nil {
@@ -414,7 +451,7 @@ func controlServerRequest(t *testing.T, handler http.Handler, method string, pat
 	return resp
 }
 
-func assertControlStructuredError(t *testing.T, resp *httptest.ResponseRecorder, code string, messageID string) {
+func assertControlStructuredError(t projectdaemonTestT, resp *httptest.ResponseRecorder, code string, messageID string) {
 	t.Helper()
 	var body struct {
 		Error struct {

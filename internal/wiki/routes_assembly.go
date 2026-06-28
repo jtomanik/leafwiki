@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	corebranding "github.com/perber/wiki/internal/branding"
 	"github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -15,6 +16,10 @@ import (
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	wikiworkspacesync "github.com/perber/wiki/internal/wiki/workspacesync"
 )
+
+var frontendBrandingConfig = func(s *corebranding.BrandingService) (*corebranding.BrandingConfigResponse, error) {
+	return s.GetBranding()
+}
 
 func (w *Wiki) buildRoutes(options *WikiOptions) {
 	w.pagesRoutes = w.buildPagesRoutes()
@@ -168,7 +173,7 @@ func (w *Wiki) FrontendConfig() httpinternal.FrontendConfig {
 			if w.branding == nil {
 				return ""
 			}
-			cfg, err := w.branding.GetBranding()
+			cfg, err := frontendBrandingConfig(w.branding)
 			if err != nil || cfg == nil {
 				return ""
 			}
@@ -178,7 +183,7 @@ func (w *Wiki) FrontendConfig() httpinternal.FrontendConfig {
 			if w.branding == nil {
 				return ""
 			}
-			cfg, err := w.branding.GetBranding()
+			cfg, err := frontendBrandingConfig(w.branding)
 			if err != nil || cfg == nil {
 				return ""
 			}

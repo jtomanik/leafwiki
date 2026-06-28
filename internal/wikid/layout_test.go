@@ -1,11 +1,12 @@
 package wikid
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"path/filepath"
-	"testing"
 )
 
-func TestGlobalLayoutPaths(t *testing.T) {
+var _ = ginkgo.It("TestGlobalLayoutPaths", func() {
+	t := ginkgo.GinkgoT()
 	homeDir := filepath.Join(t.TempDir(), ".leafwiki")
 
 	layout := GlobalLayout(homeDir)
@@ -25,4 +26,4 @@ func TestGlobalLayoutPaths(t *testing.T) {
 	if layout.HomeRootDir != filepath.Join(homeDir, "root") {
 		t.Fatalf("HomeRootDir = %q", layout.HomeRootDir)
 	}
-}
+})

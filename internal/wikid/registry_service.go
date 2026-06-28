@@ -156,10 +156,7 @@ func (s *RegistryService) workspaceRecordForRequest(req RegisterWorkspaceRequest
 	if err != nil {
 		return WorkspaceRecord{}, fmt.Errorf("normalize markdown link root prefix: %w", err)
 	}
-	workspaceID, err := workspaceIDFor(displayName, dataDir, rootDir)
-	if err != nil {
-		return WorkspaceRecord{}, err
-	}
+	workspaceID := workspaceIDFor(displayName, dataDir, rootDir)
 	now := s.now()
 	return WorkspaceRecord{
 		ID:                     workspaceID,
@@ -177,14 +174,10 @@ func sameWorkspaceLocation(a WorkspaceRecord, b WorkspaceRecord) bool {
 		filepath.Clean(a.RootDir) == filepath.Clean(b.RootDir)
 }
 
-func workspaceIDFor(displayName string, dataDir string, rootDir string) (workspaceid.WorkspaceID, error) {
+func workspaceIDFor(displayName string, dataDir string, rootDir string) workspaceid.WorkspaceID {
 	slug := workspaceSlug(displayName)
 	sum := sha256.Sum256([]byte(filepath.Clean(dataDir) + "\x00" + filepath.Clean(rootDir)))
-	workspaceID, err := workspaceid.ParseWorkspaceID(slug + "-" + hex.EncodeToString(sum[:])[:10])
-	if err != nil {
-		return "", fmt.Errorf("derive workspace ID: %w", err)
-	}
-	return workspaceID, nil
+	return workspaceid.WorkspaceID(slug + "-" + hex.EncodeToString(sum[:])[:10])
 }
 
 var nonWorkspaceSlugChars = regexp.MustCompile(`[^a-z0-9]+`)

@@ -19,7 +19,7 @@ type MovePageInput struct {
 
 // MovePageUseCase moves a page to a new parent, updating links and recording revisions.
 type MovePageUseCase struct {
-	tree         *tree.TreeService
+	tree         movePageTree
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
 }
@@ -46,32 +46,13 @@ func (uc *MovePageUseCase) Execute(_ context.Context, in MovePageInput) error {
 	in.ParentID = parentID
 	in.Version = sanitizeSemanticClientVersion(in.Version)
 
-	var subtreeIDs []tree.PageID
-	var beforePage *tree.Page
+	beforePage, err := uc.tree.GetPage(in.ID)
+	if err != nil {
+		return err
+	}
+	subtreeIDs := collectSubtreeIDs(beforePage.PageNode)
 
-	if uc.tree.IsLoaded() {
-		if node, err := uc.tree.FindPageByID(in.ID); err == nil && node != nil {
-			subtreeIDs = collectSubtreeIDs(node)
-			if p, err := uc.tree.GetPage(in.ID); err == nil {
-				beforePage = p
-			}
-		}
-	}
-	if len(subtreeIDs) == 0 {
-		subtreeIDs = []tree.PageID{in.ID}
-	}
-	if beforePage == nil {
-		p, err := uc.tree.GetPage(in.ID)
-		if err != nil {
-			return err
-		}
-		beforePage = p
-	}
-
-	var oldPath tree.RoutePath
-	if beforePage != nil {
-		oldPath = beforePage.CalculateRoutePath()
-	}
+	oldPath := beforePage.CalculateRoutePath()
 
 	if err := uc.tree.MoveNode(in.UserID, in.ID, in.ParentID, in.Version); err != nil {
 		return err

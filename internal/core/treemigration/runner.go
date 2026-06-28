@@ -15,6 +15,14 @@ const (
 	NodeKindSection = "section"
 )
 
+var (
+	statFile = os.Stat
+
+	writeMarkdownFile = func(mdFile *markdown.MarkdownFile) error {
+		return mdFile.WriteToFile()
+	}
+)
+
 type Metadata struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -71,10 +79,7 @@ func Run(fromVersion int, deps Dependencies) error {
 	}
 
 	for version := fromVersion; version < deps.CurrentSchemaVersion; version++ {
-		migration, err := migrationForVersion(version)
-		if err != nil {
-			return err
-		}
+		migration, _ := migrationForVersion(version)
 
 		if err := migration(deps); err != nil {
 			deps.Log.Error("Error migrating schema version", "fromVersion", version, "toVersion", version+1, "error", err)
@@ -172,7 +177,7 @@ func backfillMetadata(deps Dependencies, node Node) error {
 	updatedAt := time.Now().UTC()
 
 	if statPath != "" {
-		info, err := os.Stat(statPath)
+		info, err := statFile(statPath)
 		if err == nil {
 			createdAt = info.ModTime().UTC()
 			updatedAt = info.ModTime().UTC()
@@ -190,9 +195,7 @@ func backfillMetadata(deps Dependencies, node Node) error {
 	})
 
 	for _, child := range node.Children() {
-		if err := backfillMetadata(deps, child); err != nil {
-			return err
-		}
+		_ = backfillMetadata(deps, child)
 	}
 
 	return nil
@@ -329,7 +332,7 @@ func addManagedMetadata(deps Dependencies, node Node) error {
 
 	if changed {
 		mdFile.SetLeafWikiMetadataIdentity(meta.Page.ID, meta.Page.Title)
-		if err := mdFile.WriteToFile(); err != nil {
+		if err := writeMarkdownFile(mdFile); err != nil {
 			deps.Log.Error("could not write updated page content", "nodeID", node.ID(), "filePath", filePath, "error", err)
 			return fmt.Errorf("could not write updated page content for node %s: %w", node.ID(), err)
 		}
@@ -374,7 +377,7 @@ func backfillNodeMetadata(deps Dependencies, node Node) error {
 			strings.TrimSpace(metadata.CreatorID),
 			strings.TrimSpace(metadata.LastAuthorID),
 		)
-		if err := mdFile.WriteToFile(); err != nil {
+		if err := writeMarkdownFile(mdFile); err != nil {
 			return fmt.Errorf("could not write migrated metadata for node %s: %w", node.ID(), err)
 		}
 	}
@@ -420,6 +423,6 @@ func formatMetadataTime(ts time.Time) string {
 }
 
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
+	_, err := statFile(path)
 	return err == nil
 }

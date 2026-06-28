@@ -45,13 +45,31 @@ func ValidateSearchRequest(query string, tags []string) error {
 }
 
 type SearchUseCase struct {
-	index *coresearch.SQLiteIndex
-	tags  *coretags.TagsService
+	index searchIndex
+	tags  searchTags
 	tree  *tree.TreeService
 }
 
+type searchIndex interface {
+	Search(query string, pageIDs []tree.PageID, startAt coresearch.ResultOffset, pageSize coresearch.ResultLimit) (*coresearch.SearchResult, error)
+	SearchPageIDs(query string, pageIDs []tree.PageID) ([]tree.PageID, error)
+}
+
+type searchTags interface {
+	GetPageIDsByTags(tags []string) ([]tree.PageID, error)
+	GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]string, error)
+	GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error)
+}
+
 func NewSearchUseCase(idx *coresearch.SQLiteIndex, tags *coretags.TagsService, tree *tree.TreeService) *SearchUseCase {
-	return &SearchUseCase{index: idx, tags: tags, tree: tree}
+	uc := &SearchUseCase{tree: tree}
+	if idx != nil {
+		uc.index = idx
+	}
+	if tags != nil {
+		uc.tags = tags
+	}
+	return uc
 }
 
 func (uc *SearchUseCase) Execute(_ context.Context, in SearchInput) (*SearchOutput, error) {

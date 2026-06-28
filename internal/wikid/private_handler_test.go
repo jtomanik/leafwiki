@@ -1,17 +1,18 @@
 package wikid
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 
 	"github.com/perber/wiki/internal/frontd"
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
-func TestPrivateHandlerRequiresDaemonTokenForWikidEndpoints(t *testing.T) {
+var _ = ginkgo.It("TestPrivateHandlerRequiresDaemonTokenForWikidEndpoints", func() {
+	t := ginkgo.GinkgoT()
 	handler := NewPrivateHandler(PrivateHandlerOptions{
 		DaemonToken: "private-token",
 		ActorContext: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -26,9 +27,10 @@ func TestPrivateHandlerRequiresDaemonTokenForWikidEndpoints(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestPrivateHandlerRequiresDaemonTokenForWorkspaceAPI(t *testing.T) {
+var _ = ginkgo.It("TestPrivateHandlerRequiresDaemonTokenForWorkspaceAPI", func() {
+	t := ginkgo.GinkgoT()
 	handler := NewPrivateHandler(PrivateHandlerOptions{
 		DaemonToken: "private-token",
 		WorkspaceAPI: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -43,9 +45,10 @@ func TestPrivateHandlerRequiresDaemonTokenForWorkspaceAPI(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-}
+})
 
-func TestPrivateHandlerForwardsWorkspaceAPIWithDaemonToken(t *testing.T) {
+var _ = ginkgo.It("TestPrivateHandlerForwardsWorkspaceAPIWithDaemonToken", func() {
+	t := ginkgo.GinkgoT()
 	var seenPath string
 	handler := NewPrivateHandler(PrivateHandlerOptions{
 		DaemonToken: "private-token",
@@ -66,9 +69,10 @@ func TestPrivateHandlerForwardsWorkspaceAPIWithDaemonToken(t *testing.T) {
 	if seenPath != "/__leafwiki/workspaces" {
 		t.Fatalf("seen path = %q", seenPath)
 	}
-}
+})
 
-func TestPrivateHandlerForwardsControlPlaneWithBasePathAndPrivateHeadersStripped(t *testing.T) {
+var _ = ginkgo.It("TestPrivateHandlerForwardsControlPlaneWithBasePathAndPrivateHeadersStripped", func() {
+	t := ginkgo.GinkgoT()
 	var seen struct {
 		path         string
 		token        string
@@ -114,9 +118,10 @@ func TestPrivateHandlerForwardsControlPlaneWithBasePathAndPrivateHeadersStripped
 	if seen.body != `{"siteName":"Runtime Wiki"}` {
 		t.Fatalf("body = %q", seen.body)
 	}
-}
+})
 
-func TestPrivateHandlerForwardsRootWellKnownControlPlanePathWithoutRebasing(t *testing.T) {
+var _ = ginkgo.It("TestPrivateHandlerForwardsRootWellKnownControlPlanePathWithoutRebasing", func() {
+	t := ginkgo.GinkgoT()
 	var seenPath string
 	controlPlane := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		seenPath = req.URL.Path
@@ -139,4 +144,4 @@ func TestPrivateHandlerForwardsRootWellKnownControlPlanePathWithoutRebasing(t *t
 	if seenPath != "/.well-known/oauth-protected-resource/wiki/mcp" {
 		t.Fatalf("forwarded path = %q, want root well-known path", seenPath)
 	}
-}
+})

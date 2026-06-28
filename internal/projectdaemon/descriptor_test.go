@@ -1,14 +1,15 @@
 package projectdaemon
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 )
 
-func TestWriteDescriptorAtomicUses0600AndOmitsSessionAPIKey(t *testing.T) {
+var _ = ginkgo.It("TestWriteDescriptorAtomicUses0600AndOmitsSessionAPIKey", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := t.TempDir()
 	desc := &Descriptor{
 		SchemaVersion:    DescriptorSchemaVersion,
@@ -58,9 +59,11 @@ func TestWriteDescriptorAtomicUses0600AndOmitsSessionAPIKey(t *testing.T) {
 	if loaded.ControlToken != "control-token" || loaded.Config.AuthDisabled {
 		t.Fatalf("descriptor round trip lost fields: %#v", loaded)
 	}
-}
 
-func TestDescriptorRoundTripIncludesRuntimeStackAndRoleHealth(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestDescriptorRoundTripIncludesRuntimeStackAndRoleHealth", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "root")
 	now := time.Now().UTC().Truncate(time.Second)
@@ -120,9 +123,11 @@ func TestDescriptorRoundTripIncludesRuntimeStackAndRoleHealth(t *testing.T) {
 	if len(loaded.Roles) != 3 || loaded.Roles[2].Name != RoleWorkspaced || !loaded.Roles[2].Private {
 		t.Fatalf("role health round trip = %#v", loaded.Roles)
 	}
-}
 
-func TestDescriptorRoundTripIncludesWorkspaceIdentityAndPrivateMCPAttach(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestDescriptorRoundTripIncludesWorkspaceIdentityAndPrivateMCPAttach", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := t.TempDir()
 	rootDir := filepath.Join(t.TempDir(), "root")
 	desc := &Descriptor{
@@ -178,9 +183,11 @@ func TestDescriptorRoundTripIncludesWorkspaceIdentityAndPrivateMCPAttach(t *test
 	if !strings.Contains(message, "private-mcp-token") || !strings.Contains(message, "redacted") {
 		t.Fatalf("mismatch message = %q, want redacted private MCP token field", message)
 	}
-}
 
-func TestGlobalDescriptorPath(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestGlobalDescriptorPath", func() {
+	t := ginkgo.GinkgoT()
 	runtimeDir := filepath.Join(t.TempDir(), ".leafwiki", "runtime")
 
 	got := GlobalDescriptorPath(runtimeDir, RoleWikid)
@@ -188,9 +195,55 @@ func TestGlobalDescriptorPath(t *testing.T) {
 	if got != filepath.Join(runtimeDir, "wikid.json") {
 		t.Fatalf("GlobalDescriptorPath = %q", got)
 	}
-}
 
-func TestReadTrustedDescriptorRejectsGroupReadableFile(t *testing.T) {
+})
+
+var _ = ginkgo.It("RemoveDescriptor is idempotent for missing and existing descriptor files", func() {
+	t := ginkgo.GinkgoT()
+	path := DescriptorPath(t.TempDir())
+	if err := RemoveDescriptor(path); err != nil {
+		t.Fatalf("RemoveDescriptor missing file failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create descriptor dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":1}`), 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+	if err := RemoveDescriptor(path); err != nil {
+		t.Fatalf("RemoveDescriptor existing file failed: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("descriptor stat err = %v, want not exist", err)
+	}
+})
+
+var _ = ginkgo.It("ConfigHash is deterministic and changes with canonical config values", func() {
+	t := ginkgo.GinkgoT()
+	base := Config{DataDir: "/data", RootDir: "/root", Port: "8080"}
+	first, err := ConfigHash(base)
+	if err != nil {
+		t.Fatalf("ConfigHash failed: %v", err)
+	}
+	second, err := ConfigHash(base)
+	if err != nil {
+		t.Fatalf("ConfigHash repeat failed: %v", err)
+	}
+	changed, err := ConfigHash(Config{DataDir: "/data", RootDir: "/root", Port: "8081"})
+	if err != nil {
+		t.Fatalf("ConfigHash changed failed: %v", err)
+	}
+
+	if first == "" || len(first) != 64 || first != second {
+		t.Fatalf("ConfigHash deterministic value = %q/%q, want matching sha256 hex", first, second)
+	}
+	if changed == first {
+		t.Fatalf("ConfigHash did not change after config value changed")
+	}
+})
+
+var _ = ginkgo.It("TestReadTrustedDescriptorRejectsGroupReadableFile", func() {
+	t := ginkgo.GinkgoT()
 	dataDir := t.TempDir()
 	path := DescriptorPath(dataDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -203,9 +256,11 @@ func TestReadTrustedDescriptorRejectsGroupReadableFile(t *testing.T) {
 	if _, err := ReadTrustedDescriptor(path); err == nil || !strings.Contains(err.Error(), "want 0600") {
 		t.Fatalf("ReadTrustedDescriptor error = %v, want 0600 rejection", err)
 	}
-}
 
-func TestCompareConfigReportsRedactedMismatch(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestCompareConfigReportsRedactedMismatch", func() {
+	t := ginkgo.GinkgoT()
 	owner := Config{
 		DataDir:                "/data",
 		RootDir:                "/root",
@@ -229,4 +284,5 @@ func TestCompareConfigReportsRedactedMismatch(t *testing.T) {
 	if !strings.Contains(message, "inject-code-in-header-hash") || !strings.Contains(message, "redacted") {
 		t.Fatalf("mismatch message = %q, want redacted hash field", message)
 	}
-}
+
+})

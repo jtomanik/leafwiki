@@ -2,6 +2,7 @@ package branding
 
 import (
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ type Routes struct {
 	deleteLogo      *DeleteLogoUseCase
 	uploadFavicon   *UploadFaviconUseCase
 	deleteFavicon   *DeleteFaviconUseCase
-	brandingService *corebanding.BrandingService
+	brandingService brandingServiceClient
 	authService     *coreauth.AuthService
 	log             *slog.Logger
 }
@@ -42,6 +43,13 @@ type RoutesConfig struct {
 	AuthService     *coreauth.AuthService
 	Log             *slog.Logger
 }
+
+var (
+	closeBrandingMultipartFile = func(file multipart.File) error {
+		return file.Close()
+	}
+	brandingRel = filepath.Rel
+)
 
 // NewRoutes constructs the branding RouteRegistrar.
 func NewRoutes(cfg RoutesConfig) *Routes {
@@ -130,7 +138,7 @@ func (r *Routes) handleUploadLogo(c *gin.Context) {
 		return
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
+		if err := closeBrandingMultipartFile(file); err != nil {
 			r.log.Error("could not close logo file", "error", err)
 		}
 	}()
@@ -169,7 +177,7 @@ func (r *Routes) handleUploadFavicon(c *gin.Context) {
 		return
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
+		if err := closeBrandingMultipartFile(file); err != nil {
 			r.log.Error("could not close favicon file", "error", err)
 		}
 	}()
@@ -261,7 +269,7 @@ func (r *Routes) resolveBrandingAssetPath(filename tree.AssetName, cfg *coreband
 	cleanPath := filepath.Clean(filePath)
 	cleanBrandingDir := filepath.Clean(brandingDir)
 
-	rel, err := filepath.Rel(cleanBrandingDir, cleanPath)
+	rel, err := brandingRel(cleanBrandingDir, cleanPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", http.StatusForbidden
 	}

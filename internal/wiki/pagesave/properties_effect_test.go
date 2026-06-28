@@ -1,14 +1,13 @@
 package pagesave
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/properties"
-	"github.com/perber/wiki/internal/test_utils"
 )
 
-func setupPropertiesEffectTest(t *testing.T) (*tree.TreeService, *properties.PropertiesService, *PropertiesSideEffect) {
+func setupPropertiesEffectTest(t pagesaveTestT) (*tree.TreeService, *properties.PropertiesService, *PropertiesSideEffect) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -21,7 +20,11 @@ func setupPropertiesEffectTest(t *testing.T) (*tree.TreeService, *properties.Pro
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("PropertiesStore.Close: %v", err)
+		}
+	})
 
 	svc := properties.NewPropertiesService(store)
 	effect := NewPropertiesSideEffect(svc, nil)
@@ -30,7 +33,8 @@ func setupPropertiesEffectTest(t *testing.T) (*tree.TreeService, *properties.Pro
 
 // ─── PropertiesSideEffect ─────────────────────────────────────────────────────
 
-func TestPropertiesSideEffect_Apply_Create_IndexesPropertiesFromRawContent(t *testing.T) {
+var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Create_IndexesPropertiesFromRawContent", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
 
 	raw := "---\nstatus: draft\nauthor: alice\n---\n\nPage body."
@@ -56,9 +60,11 @@ func TestPropertiesSideEffect_Apply_Create_IndexesPropertiesFromRawContent(t *te
 	if len(ids2) != 1 || ids2[0] != page.ID {
 		t.Errorf("expected page %q indexed under author=alice, got %v", page.ID, ids2)
 	}
-}
 
-func TestPropertiesSideEffect_Apply_Update_ReindexesProperties(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Update_ReindexesProperties", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
 
 	raw := "---\nstatus: draft\n---\n\nOriginal."
@@ -90,9 +96,11 @@ func TestPropertiesSideEffect_Apply_Update_ReindexesProperties(t *testing.T) {
 	if len(fresh) != 1 || fresh[0] != updated.ID {
 		t.Errorf("expected status=published to be indexed, got %v", fresh)
 	}
-}
 
-func TestPropertiesSideEffect_Apply_Delete_RemovesProperties(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Delete_RemovesProperties", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
 
 	raw := "---\nstatus: draft\n---\n\nBody."
@@ -111,4 +119,5 @@ func TestPropertiesSideEffect_Apply_Delete_RemovesProperties(t *testing.T) {
 	if len(ids) != 0 {
 		t.Errorf("expected properties removed after delete, got %v", ids)
 	}
-}
+
+})

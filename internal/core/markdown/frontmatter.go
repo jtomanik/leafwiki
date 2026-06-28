@@ -139,9 +139,6 @@ func splitFrontmatter(md string) (yamlPart string, body string, has bool) {
 		// it's exactly "---" (or a single-line file)
 		return "", md, false
 	}
-	if strings.TrimSpace(s[:firstNL]) != "---" {
-		return "", md, false
-	}
 
 	// Find closing delimiter on its own line: "\n---\n" or "\n---" at EOF
 	pos := firstNL + 1

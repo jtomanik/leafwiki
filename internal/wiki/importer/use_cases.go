@@ -21,8 +21,13 @@ type CreateImportPlanOutput struct {
 	Plan *coreimporter.CurrentPlanState
 }
 
+type importPlanCreator interface {
+	CreateImportPlanFromZipUpload(io.Reader, string) (*coreimporter.PlanResult, error)
+	GetCurrentPlan() (*coreimporter.CurrentPlanState, error)
+}
+
 type CreateImportPlanUseCase struct {
-	svc *coreimporter.ImporterService
+	svc importPlanCreator
 }
 
 func NewCreateImportPlanUseCase(svc *coreimporter.ImporterService) *CreateImportPlanUseCase {
@@ -46,8 +51,12 @@ type GetImportPlanOutput struct {
 	Plan *coreimporter.CurrentPlanState
 }
 
+type importPlanGetter interface {
+	GetCurrentPlan() (*coreimporter.CurrentPlanState, error)
+}
+
 type GetImportPlanUseCase struct {
-	svc *coreimporter.ImporterService
+	svc importPlanGetter
 }
 
 func NewGetImportPlanUseCase(svc *coreimporter.ImporterService) *GetImportPlanUseCase {
@@ -76,8 +85,12 @@ type ExecuteImportOutput struct {
 	Started bool
 }
 
+type importPlanExecutor interface {
+	StartCurrentPlanExecution(tree.UserID) (*coreimporter.CurrentPlanState, bool, error)
+}
+
 type ExecuteImportUseCase struct {
-	svc *coreimporter.ImporterService
+	svc importPlanExecutor
 }
 
 func NewExecuteImportUseCase(svc *coreimporter.ImporterService) *ExecuteImportUseCase {
@@ -104,11 +117,16 @@ func (uc *ExecuteImportUseCase) Execute(_ context.Context, in ExecuteImportInput
 // ─── ClearImportPlanUseCase ──────────────────────────────────────────────────
 
 type ClearImportPlanUseCase struct {
-	svc *coreimporter.ImporterService
+	svc importPlanClearer
 }
 
 func NewClearImportPlanUseCase(svc *coreimporter.ImporterService) *ClearImportPlanUseCase {
 	return &ClearImportPlanUseCase{svc: svc}
+}
+
+type importPlanClearer interface {
+	CancelCurrentPlan() (*coreimporter.CurrentPlanState, bool, error)
+	ClearCurrentPlan() error
 }
 
 func (uc *ClearImportPlanUseCase) Execute(_ context.Context) (*coreimporter.CurrentPlanState, error) {

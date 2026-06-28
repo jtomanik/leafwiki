@@ -1,10 +1,10 @@
 package pagesave
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"errors"
 	"log/slog"
-	"testing"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -12,7 +12,8 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-func TestNewLinkIndexSideEffect_DefaultsLogger(t *testing.T) {
+var _ = ginkgo.It("TestNewLinkIndexSideEffect_DefaultsLogger", func() {
+	t := ginkgo.GinkgoT()
 	treeService := tree.NewTreeService(t.TempDir())
 	store, err := links.NewLinksStore(t.TempDir())
 	if err != nil {
@@ -25,9 +26,49 @@ func TestNewLinkIndexSideEffect_DefaultsLogger(t *testing.T) {
 	if effect.log != slog.Default() {
 		t.Fatal("expected slog.Default() logger")
 	}
-}
 
-func TestNewSearchIndexSideEffect_DefaultsLogger(t *testing.T) {
+})
+
+var _ = ginkgo.It("LinkIndexSideEffect Apply create records outgoing markdown links", func() {
+	t := ginkgo.GinkgoT()
+	dir := t.TempDir()
+	treeService := tree.NewTreeService(dir)
+	if err := treeService.LoadTree(); err != nil {
+		t.Fatalf("LoadTree: %v", err)
+	}
+	store, err := links.NewLinksStore(dir)
+	if err != nil {
+		t.Fatalf("NewLinksStore failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("LinksStore.Close: %v", err)
+		}
+	})
+	linkService := links.NewLinkService(dir, treeService, store)
+	effect := NewLinkIndexSideEffect(linkService, nil)
+
+	source := createPageWithContent(t, treeService, "Source Page", "source-page", "[Target](/target-page)")
+
+	effect.Apply(PageSaveEvent{
+		Operation: PageOperationCreate,
+		After:     source,
+	})
+
+	outgoing, err := linkService.GetOutgoingLinksForPage(source.ID)
+	if err != nil {
+		t.Fatalf("GetOutgoingLinksForPage: %v", err)
+	}
+	if outgoing.Count != 1 {
+		t.Fatalf("outgoing count = %d, want 1", outgoing.Count)
+	}
+	if outgoing.Outgoings[0].FromPageID != source.ID || outgoing.Outgoings[0].ToPath != "/target-page" || !outgoing.Outgoings[0].Broken {
+		t.Fatalf("outgoing link = %#v, want broken /target-page record from %q", outgoing.Outgoings[0], source.ID)
+	}
+})
+
+var _ = ginkgo.It("TestNewSearchIndexSideEffect_DefaultsLogger", func() {
+	t := ginkgo.GinkgoT()
 	treeService := tree.NewTreeService(t.TempDir())
 	index, err := search.NewSQLiteIndex(t.TempDir())
 	if err != nil {
@@ -46,9 +87,11 @@ func TestNewSearchIndexSideEffect_DefaultsLogger(t *testing.T) {
 	if effect.log != slog.Default() {
 		t.Fatal("expected slog.Default() logger")
 	}
-}
 
-func TestNewTagsSideEffect_DefaultsLogger(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestNewTagsSideEffect_DefaultsLogger", func() {
+	t := ginkgo.GinkgoT()
 	effect := NewTagsSideEffect(nil, nil)
 	if effect.log == nil {
 		t.Fatal("expected default logger to be set")
@@ -56,9 +99,11 @@ func TestNewTagsSideEffect_DefaultsLogger(t *testing.T) {
 	if effect.log != slog.Default() {
 		t.Fatal("expected slog.Default() logger")
 	}
-}
 
-func TestNewPropertiesSideEffect_DefaultsLogger(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestNewPropertiesSideEffect_DefaultsLogger", func() {
+	t := ginkgo.GinkgoT()
 	effect := NewPropertiesSideEffect(nil, nil)
 	if effect.log == nil {
 		t.Fatal("expected default logger to be set")
@@ -66,9 +111,11 @@ func TestNewPropertiesSideEffect_DefaultsLogger(t *testing.T) {
 	if effect.log != slog.Default() {
 		t.Fatal("expected slog.Default() logger")
 	}
-}
 
-func TestPageSaveOrchestrator_ReturnsRequiredEffectErrorBeforeBestEffortEffects(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestPageSaveOrchestrator_ReturnsRequiredEffectErrorBeforeBestEffortEffects", func() {
+	t := ginkgo.GinkgoT()
 	expected := errors.New("required sync failed")
 	required := &failingRequiredEffect{err: expected}
 	bestEffort := &countingSideEffect{}
@@ -85,9 +132,11 @@ func TestPageSaveOrchestrator_ReturnsRequiredEffectErrorBeforeBestEffortEffects(
 	if bestEffort.calls != 0 {
 		t.Fatalf("expected best-effort effect to be skipped after required failure, got %d calls", bestEffort.calls)
 	}
-}
 
-func TestWorkspaceSyncSideEffect_UsesMCPSourceFromPageEvent(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestWorkspaceSyncSideEffect_UsesMCPSourceFromPageEvent", func() {
+	t := ginkgo.GinkgoT()
 	syncer := &captureWorkspaceSyncer{}
 	effect := NewWorkspaceSyncSideEffect(syncer, nil)
 
@@ -105,9 +154,11 @@ func TestWorkspaceSyncSideEffect_UsesMCPSourceFromPageEvent(t *testing.T) {
 	if syncer.req.Actor.ID != "alice" {
 		t.Fatalf("sync actor = %q, want alice", syncer.req.Actor.ID)
 	}
-}
 
-func TestWorkspaceSyncSideEffect_UsesResolvedActorMetadata(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestWorkspaceSyncSideEffect_UsesResolvedActorMetadata", func() {
+	t := ginkgo.GinkgoT()
 	syncer := &captureWorkspaceSyncer{}
 	effect := NewWorkspaceSyncSideEffectWithActorLookup(syncer, nil, func(userID tree.UserID) workspacesync.Actor {
 		if userID != "alice" {
@@ -127,9 +178,11 @@ func TestWorkspaceSyncSideEffect_UsesResolvedActorMetadata(t *testing.T) {
 	if syncer.req.Actor.ID != "alice" || syncer.req.Actor.Name != "Alice" || syncer.req.Actor.Email != "alice@example.test" {
 		t.Fatalf("sync actor = %#v, want resolved Alice metadata", syncer.req.Actor)
 	}
-}
 
-func TestWorkspaceSyncSideEffect_AllowsRetryAfterCaptureFailure(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestWorkspaceSyncSideEffect_AllowsRetryAfterCaptureFailure", func() {
+	t := ginkgo.GinkgoT()
 	expected := errors.New("git capture failed")
 	syncer := &retryWorkspaceSyncer{err: expected}
 	effect := NewWorkspaceSyncSideEffect(syncer, nil)
@@ -144,7 +197,28 @@ func TestWorkspaceSyncSideEffect_AllowsRetryAfterCaptureFailure(t *testing.T) {
 	if syncer.calls != 2 {
 		t.Fatalf("sync calls = %d, want failed call plus retry", syncer.calls)
 	}
-}
+
+})
+
+var _ = ginkgo.It("WorkspaceSyncSideEffect Apply logs and swallows sync errors", func() {
+	t := ginkgo.GinkgoT()
+	expected := errors.New("sync failed")
+	syncer := &retryWorkspaceSyncer{err: expected}
+	effect := NewWorkspaceSyncSideEffect(syncer, nil)
+
+	effect.Apply(PageSaveEvent{
+		Operation: PageOperationUpdate,
+		UserID:    "alice",
+		Source:    PageMutationSourceWeb,
+	})
+
+	if syncer.calls != 1 {
+		t.Fatalf("sync calls = %d, want 1", syncer.calls)
+	}
+	if syncer.err != expected {
+		t.Fatalf("syncer err = %v, want %v", syncer.err, expected)
+	}
+})
 
 type failingRequiredEffect struct {
 	err   error

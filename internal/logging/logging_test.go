@@ -8,270 +8,268 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestResolve_DefaultsToFileUnderDataDir(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
+var _ = Describe("logging configuration", func() {
+	It("TestResolve_DefaultsToFileUnderDataDir", func() {
+		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
 
-	cfg, err := Resolve(ConfigInput{DataDir: dataDir})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
+		cfg, err := Resolve(ConfigInput{DataDir: dataDir})
 
-	if cfg.Target != TargetFile {
-		t.Fatalf("Target = %q, want %q", cfg.Target, TargetFile)
-	}
-	if got, want := cfg.FilePath, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"); got != want {
-		t.Fatalf("FilePath = %q, want %q", got, want)
-	}
-	if cfg.Level != slog.LevelInfo {
-		t.Fatalf("Level = %v, want %v", cfg.Level, slog.LevelInfo)
-	}
-}
-
-func TestResolve_RelativeLogFileResolvesUnderDataDir(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-
-	cfg, err := Resolve(ConfigInput{
-		DataDir:         dataDir,
-		FilePath:        "logs/custom.log",
-		FilePathSet:     true,
-		Target:          "file",
-		TargetSet:       true,
-		LevelFromConfig: "debug",
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Target).To(Equal(TargetFile))
+		Expect(cfg.FilePath).To(Equal(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")))
+		Expect(cfg.Level).To(Equal(slog.LevelInfo))
 	})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
 
-	if got, want := cfg.FilePath, filepath.Join(dataDir, "logs", "custom.log"); got != want {
-		t.Fatalf("FilePath = %q, want %q", got, want)
-	}
-	if cfg.Level != slog.LevelDebug {
-		t.Fatalf("Level = %v, want %v", cfg.Level, slog.LevelDebug)
-	}
-}
+	It("TestResolve_RelativeLogFileResolvesUnderDataDir", func() {
+		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
 
-func TestResolve_RejectsRelativeLogFileEscapingDataDir(t *testing.T) {
-	_, err := Resolve(ConfigInput{
-		DataDir:     filepath.Join(t.TempDir(), "data"),
-		FilePath:    "../leafwiki.log",
-		FilePathSet: true,
-	})
-	if err == nil {
-		t.Fatalf("Resolve() error = nil, want traversal rejection")
-	}
-	if !strings.Contains(err.Error(), "log file path must stay within data dir") {
-		t.Fatalf("Resolve() error = %v, want containment error", err)
-	}
-}
-
-func TestResolve_AbsoluteLogFileIsUsedAsIs(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "leafwiki.log")
-
-	cfg, err := Resolve(ConfigInput{
-		DataDir:     filepath.Join(t.TempDir(), "data"),
-		FilePath:    logPath,
-		FilePathSet: true,
-	})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-
-	if cfg.FilePath != logPath {
-		t.Fatalf("FilePath = %q, want absolute path %q", cfg.FilePath, logPath)
-	}
-}
-
-func TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile(t *testing.T) {
-	tests := []struct {
-		name  string
-		input ConfigInput
-		want  string
-	}{
-		{
-			name: "invalid target",
-			input: ConfigInput{
-				DataDir:   t.TempDir(),
-				Target:    "system",
-				TargetSet: true,
-			},
-			want: "invalid log target",
-		},
-		{
-			name: "stderr with file",
-			input: ConfigInput{
-				DataDir:     t.TempDir(),
-				Target:      "stderr",
-				TargetSet:   true,
-				FilePath:    "custom.log",
-				FilePathSet: true,
-			},
-			want: "--log-file requires --log-target file",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := Resolve(tt.input)
-			if err == nil {
-				t.Fatalf("Resolve() error = nil, want %q", tt.want)
-			}
-			if !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Resolve() error = %v, want substring %q", err, tt.want)
-			}
+		cfg, err := Resolve(ConfigInput{
+			DataDir:         dataDir,
+			FilePath:        "logs/custom.log",
+			FilePathSet:     true,
+			Target:          "file",
+			TargetSet:       true,
+			LevelFromConfig: "debug",
 		})
-	}
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.FilePath).To(Equal(filepath.Join(dataDir, "logs", "custom.log")))
+		Expect(cfg.Level).To(Equal(slog.LevelDebug))
+	})
+
+	It("TestResolve_RejectsRelativeLogFileEscapingDataDir", func() {
+		_, err := Resolve(ConfigInput{
+			DataDir:     filepath.Join(GinkgoT().TempDir(), "data"),
+			FilePath:    "../leafwiki.log",
+			FilePathSet: true,
+		})
+
+		Expect(err).To(MatchError(ContainSubstring("log file path must stay within data dir")))
+	})
+
+	It("TestResolve_AbsoluteLogFileIsUsedAsIs", func() {
+		logPath := filepath.Join(GinkgoT().TempDir(), "leafwiki.log")
+
+		cfg, err := Resolve(ConfigInput{
+			DataDir:     filepath.Join(GinkgoT().TempDir(), "data"),
+			FilePath:    logPath,
+			FilePathSet: true,
+		})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.FilePath).To(Equal(logPath))
+	})
+})
+
+type resolveErrorCase struct {
+	input ConfigInput
+	want  string
 }
 
-func TestOpenLogger_FileCreatesParentAndAppendsJSON(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "nested", "leafwiki.log")
-	if err := os.WriteFile(logPath, []byte("previous line\n"), 0o600); !os.IsNotExist(err) {
-		t.Fatalf("precondition WriteFile error = %v, want not-exist", err)
-	}
+var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile",
+	func(tc resolveErrorCase) {
+		_, err := Resolve(tc.input)
 
-	logger, closer, err := Open(Config{
-		Target:   TargetFile,
-		FilePath: logPath,
-		Level:    slog.LevelInfo,
-	}, Streams{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer closer.Close()
+		Expect(err).To(MatchError(ContainSubstring(tc.want)))
+	},
+	Entry("invalid target", resolveErrorCase{
+		input: ConfigInput{
+			DataDir:   "data",
+			Target:    "system",
+			TargetSet: true,
+		},
+		want: "invalid log target",
+	}),
+	Entry("stderr with file", resolveErrorCase{
+		input: ConfigInput{
+			DataDir:     "data",
+			Target:      "stderr",
+			TargetSet:   true,
+			FilePath:    "custom.log",
+			FilePathSet: true,
+		},
+		want: "--log-file requires --log-target file",
+	}),
+)
 
-	logger.Info("Starting LeafWiki", "address", "127.0.0.1:0")
-	if err := closer.Close(); err != nil {
-		t.Fatalf("close logger sink: %v", err)
-	}
+var _ = Describe("opening loggers", func() {
+	It("TestOpenLogger_FileCreatesParentAndAppendsJSON", func() {
+		logPath := filepath.Join(GinkgoT().TempDir(), "nested", "leafwiki.log")
+		err := os.WriteFile(logPath, []byte("previous line\n"), 0o600)
+		Expect(os.IsNotExist(err)).To(BeTrue())
 
-	info, err := os.Stat(logPath)
-	if err != nil {
-		t.Fatalf("stat log file: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("log file mode = %v, want 0600", got)
-	}
+		logger, closer, err := Open(Config{
+			Target:   TargetFile,
+			FilePath: logPath,
+			Level:    slog.LevelInfo,
+		}, Streams{})
+		Expect(err).NotTo(HaveOccurred())
+		defer closer.Close()
 
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log file: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("log file lines = %q, want one JSON line", lines)
-	}
-	var entry map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
-		t.Fatalf("log line is not JSON: %v\n%s", err, lines[0])
-	}
-	for _, key := range []string{"time", "level", "msg", "source"} {
-		if _, ok := entry[key]; !ok {
-			t.Fatalf("log entry missing %q: %#v", key, entry)
+		logger.Info("Starting LeafWiki", "address", "127.0.0.1:0")
+		Expect(closer.Close()).To(Succeed())
+
+		info, err := os.Stat(logPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))
+
+		raw, err := os.ReadFile(logPath)
+		Expect(err).NotTo(HaveOccurred())
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		Expect(lines).To(HaveLen(1))
+		var entry map[string]any
+		Expect(json.Unmarshal([]byte(lines[0]), &entry)).To(Succeed())
+		for _, key := range []string{"time", "level", "msg", "source"} {
+			Expect(entry).To(HaveKey(key))
 		}
-	}
-	if entry["msg"] != "Starting LeafWiki" {
-		t.Fatalf("msg = %v, want Starting LeafWiki", entry["msg"])
-	}
-}
+		Expect(entry["msg"]).To(Equal("Starting LeafWiki"))
+	})
 
-func TestOpenLogger_AppendsExistingFile(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "leafwiki.log")
-	if err := os.WriteFile(logPath, []byte("previous line\n"), 0o600); err != nil {
-		t.Fatalf("write existing log file: %v", err)
-	}
+	It("TestOpenLogger_AppendsExistingFile", func() {
+		logPath := filepath.Join(GinkgoT().TempDir(), "leafwiki.log")
+		Expect(os.WriteFile(logPath, []byte("previous line\n"), 0o600)).To(Succeed())
 
-	logger, closer, err := Open(Config{
-		Target:   TargetFile,
-		FilePath: logPath,
-		Level:    slog.LevelInfo,
-	}, Streams{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	logger.Info("Starting LeafWiki")
-	if err := closer.Close(); err != nil {
-		t.Fatalf("close logger sink: %v", err)
-	}
+		logger, closer, err := Open(Config{
+			Target:   TargetFile,
+			FilePath: logPath,
+			Level:    slog.LevelInfo,
+		}, Streams{})
+		Expect(err).NotTo(HaveOccurred())
+		logger.Info("Starting LeafWiki")
+		Expect(closer.Close()).To(Succeed())
 
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log file: %v", err)
-	}
-	if !strings.Contains(string(raw), "previous line") || !strings.Contains(string(raw), "Starting LeafWiki") {
-		t.Fatalf("log file was not appended: %q", string(raw))
-	}
-}
+		raw, err := os.ReadFile(logPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring("previous line"))
+		Expect(string(raw)).To(ContainSubstring("Starting LeafWiki"))
+	})
 
-func TestOpenLogger_FileOpenFailureIsVisible(t *testing.T) {
-	parentFile := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(parentFile, []byte("file"), 0o600); err != nil {
-		t.Fatalf("write parent file: %v", err)
-	}
+	It("TestOpenLogger_FileOpenFailureIsVisible", func() {
+		parentFile := filepath.Join(GinkgoT().TempDir(), "not-a-directory")
+		Expect(os.WriteFile(parentFile, []byte("file"), 0o600)).To(Succeed())
 
-	_, _, err := Open(Config{
-		Target:   TargetFile,
-		FilePath: filepath.Join(parentFile, "leafwiki.log"),
-		Level:    slog.LevelInfo,
-	}, Streams{})
-	if err == nil {
-		t.Fatalf("Open() error = nil, want failure")
-	}
-	if !strings.Contains(err.Error(), "failed to open log file") {
-		t.Fatalf("Open() error = %v, want failed to open log file", err)
-	}
-}
+		_, _, err := Open(Config{
+			Target:   TargetFile,
+			FilePath: filepath.Join(parentFile, "leafwiki.log"),
+			Level:    slog.LevelInfo,
+		}, Streams{})
 
-func TestOpenLogger_StdoutStderrAndStdlibBridgeUseSelectedSink(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+		Expect(err).To(MatchError(ContainSubstring("failed to open log file")))
+	})
 
-	logger, closer, err := Open(Config{
-		Target: TargetStderr,
-		Level:  slog.LevelInfo,
-	}, Streams{Stdout: &stdout, Stderr: &stderr})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer closer.Close()
+	It("returns file open errors after parent creation succeeds", func() {
+		logPath := GinkgoT().TempDir()
 
-	previous := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(previous)
+		_, _, err := Open(Config{
+			Target:   TargetFile,
+			FilePath: logPath,
+			Level:    slog.LevelInfo,
+		}, Streams{})
 
-	slog.Default().Info("slog message")
-	log.Print("stdlib message")
+		Expect(err).To(MatchError(ContainSubstring("failed to open log file")))
+	})
 
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "slog message") || !strings.Contains(got, "stdlib message") {
-		t.Fatalf("stderr = %q, want slog and stdlib messages", got)
-	}
-}
+	It("TestOpenLogger_StdoutStderrAndStdlibBridgeUseSelectedSink", func() {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
 
-func TestOpenLogger_StreamTargetsRespectLevel(t *testing.T) {
-	var stdout bytes.Buffer
+		logger, closer, err := Open(Config{
+			Target: TargetStderr,
+			Level:  slog.LevelInfo,
+		}, Streams{Stdout: &stdout, Stderr: &stderr})
+		Expect(err).NotTo(HaveOccurred())
+		defer closer.Close()
 
-	logger, closer, err := Open(Config{
-		Target: TargetStdout,
-		Level:  slog.LevelError,
-	}, Streams{Stdout: &stdout})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer closer.Close()
+		previous := slog.Default()
+		slog.SetDefault(logger)
+		defer slog.SetDefault(previous)
 
-	logger.Info("info message")
-	logger.Error("error message")
+		slog.Default().Info("slog message")
+		log.Print("stdlib message")
 
-	got := stdout.String()
-	if strings.Contains(got, "info message") {
-		t.Fatalf("stdout contains filtered info message: %q", got)
-	}
-	if !strings.Contains(got, "error message") {
-		t.Fatalf("stdout = %q, want error message", got)
-	}
-}
+		Expect(stdout.String()).To(BeEmpty())
+		Expect(stderr.String()).To(ContainSubstring("slog message"))
+		Expect(stderr.String()).To(ContainSubstring("stdlib message"))
+	})
+
+	It("TestOpenLogger_StreamTargetsRespectLevel", func() {
+		var stdout bytes.Buffer
+
+		logger, closer, err := Open(Config{
+			Target: TargetStdout,
+			Level:  slog.LevelError,
+		}, Streams{Stdout: &stdout})
+		Expect(err).NotTo(HaveOccurred())
+		defer closer.Close()
+
+		logger.Info("info message")
+		logger.Error("error message")
+
+		Expect(stdout.String()).NotTo(ContainSubstring("info message"))
+		Expect(stdout.String()).To(ContainSubstring("error message"))
+	})
+})
+
+var _ = Describe("logging edge coverage", func() {
+	It("rejects blank data dir when file logging is required", func() {
+		_, err := Resolve(ConfigInput{Target: "file", TargetSet: true, DataDir: " \t\n "})
+
+		Expect(err).To(MatchError(ContainSubstring("data dir is required for file logging")))
+	})
+
+	It("trims and case-normalizes stream targets", func() {
+		cfg, err := Resolve(ConfigInput{Target: " StDeRr ", TargetSet: true})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Target).To(Equal(TargetStderr))
+		Expect(cfg.FilePath).To(BeEmpty())
+	})
+
+	It("trims and case-normalizes warning level config", func() {
+		cfg, err := Resolve(ConfigInput{Target: "stdout", TargetSet: true, LevelFromConfig: " WARN "})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Level).To(Equal(slog.LevelWarn))
+	})
+
+	It("trims and case-normalizes error level config", func() {
+		cfg, err := Resolve(ConfigInput{Target: "stdout", TargetSet: true, LevelFromConfig: " ERROR "})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Level).To(Equal(slog.LevelError))
+	})
+
+	It("falls back to info level for unknown level config", func() {
+		cfg, err := Resolve(ConfigInput{Target: "stdout", TargetSet: true, LevelFromConfig: "verbose"})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Level).To(Equal(slog.LevelInfo))
+	})
+
+	It("rejects an invalid already-resolved target in Open", func() {
+		_, _, err := Open(Config{Target: Target("system"), Level: slog.LevelInfo}, Streams{})
+
+		Expect(err).To(MatchError(ContainSubstring("invalid log target")))
+	})
+
+	It("uses default stdout writer for nil stdout stream", func() {
+		logger, closer, err := Open(Config{Target: TargetStdout, Level: slog.LevelInfo}, Streams{})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(logger).NotTo(BeNil())
+		Expect(closer.Close()).To(Succeed())
+	})
+
+	It("uses default stderr writer for nil stderr stream", func() {
+		logger, closer, err := Open(Config{Target: TargetStderr, Level: slog.LevelInfo}, Streams{})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(logger).NotTo(BeNil())
+		Expect(closer.Close()).To(Succeed())
+	})
+})

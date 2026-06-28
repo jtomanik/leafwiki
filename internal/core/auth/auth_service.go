@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"log/slog"
@@ -27,7 +26,7 @@ func NewAuthService(userService *UserService, sessionStore *SessionStore, secret
 	}
 	// Pre-compute a dummy hash to equalize Login() timing for non-existent users,
 	// preventing username enumeration via response-time differences.
-	dummyHash, _ := bcrypt.GenerateFromPassword([]byte("leafwiki-dummy-password"), bcrypt.DefaultCost)
+	dummyHash, _ := authGeneratePasswordHash([]byte("leafwiki-dummy-password"), bcrypt.DefaultCost)
 	return &AuthService{
 		userService:          userService,
 		sessionStore:         sessionStore,
@@ -75,7 +74,7 @@ func (a *AuthService) Login(identifier, password string) (*AuthToken, error) {
 	}
 
 	// store refresh token session
-	if err := a.sessionStore.CreateSession(
+	if err := authSessionStoreCreateSession(a.sessionStore,
 		SessionIDFromString(refreshJTI),
 		UserIDFromString(user.ID),
 		"refresh",
@@ -115,7 +114,7 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 
 	// Check if the refresh token session is active
 	typedUserID := UserIDFromString(userID)
-	active, err := a.sessionStore.IsActive(SessionIDFromString(jti), typedUserID, "refresh", time.Now())
+	active, err := authSessionStoreIsActive(a.sessionStore, SessionIDFromString(jti), typedUserID, "refresh", time.Now())
 	if err != nil || !active {
 		return nil, ErrInvalidToken
 	}
@@ -137,7 +136,7 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 		return nil, err
 	}
 
-	if err := a.sessionStore.CreateSession(
+	if err := authSessionStoreCreateSession(a.sessionStore,
 		SessionIDFromString(newRefreshJTI),
 		UserIDFromString(user.ID),
 		"refresh",
@@ -151,7 +150,7 @@ func (a *AuthService) RefreshToken(refreshToken string) (*AuthToken, error) {
 	// remains valid and the user can retry. If revocation fails, we log a warning but
 	// don't fail the refresh operation - the old token will expire naturally, and
 	// having two valid tokens temporarily is safer than logging the user out.
-	err = a.sessionStore.RevokeSession(SessionIDFromString(jti))
+	err = authSessionStoreRevokeSession(a.sessionStore, SessionIDFromString(jti))
 	if err != nil {
 		slog.Warn("failed to revoke used refresh token session", "error", err)
 	}
@@ -180,23 +179,23 @@ func (a *AuthService) RevokeRefreshToken(tokenString string) error {
 		return ErrInvalidToken
 	}
 
-	return a.sessionStore.RevokeSession(SessionIDFromString(jti))
+	return authSessionStoreRevokeSession(a.sessionStore, SessionIDFromString(jti))
 }
 
 func (a *AuthService) RevokeAllUserSessions(userID UserID) error {
-	return a.sessionStore.RevokeAllSessionsForUser(userID)
+	return authSessionStoreRevokeAllSessionsForUser(a.sessionStore, userID)
 }
 
 func generateJTI() (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := authRandRead(b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
 }
 
 func (a *AuthService) parseClaims(tokenString string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+	token, err := authJWTParse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
@@ -231,7 +230,7 @@ func (a *AuthService) generateToken(user *User, duration time.Duration, typ stri
 		"jti":   jti, // Unique identifier for the token
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(a.secretKey)
+	signed, err := authSignJWT(token, a.secretKey)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -239,7 +238,7 @@ func (a *AuthService) generateToken(user *User, duration time.Duration, typ stri
 }
 
 func (a *AuthService) ValidateToken(tokenString string) (*User, error) {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+	token, err := authJWTParse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		// Ensure signing method is correct
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")

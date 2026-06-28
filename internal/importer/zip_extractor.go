@@ -35,9 +35,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 		return nil, fmt.Errorf("open zip: %w", err)
 	}
 	defer func() {
-		if err := r.Close(); err != nil {
-			x.log.Error("close failed", "error", err)
-		}
+		_ = r.Close()
 	}()
 
 	parentDir := baseDir
@@ -55,9 +53,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 	ws := &ZipWorkspace{Root: root}
 	// Helper to clean up and return error
 	fail := func(e error) (*ZipWorkspace, error) {
-		if err = ws.Cleanup(); err != nil {
-			x.log.Error("cleanup failed", "error", err)
-		}
+		_ = ws.Cleanup()
 		return nil, e
 	}
 
@@ -86,9 +82,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 				return fmt.Errorf("open zip entry: %w", err)
 			}
 			defer func() {
-				if err := rc.Close(); err != nil {
-					x.log.Error("close failed", "error", err)
-				}
+				_ = rc.Close()
 			}()
 
 			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
@@ -96,9 +90,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 				return fmt.Errorf("create file: %w", err)
 			}
 			defer func() {
-				if err := out.Close(); err != nil {
-					x.log.Error("close failed", "error", err)
-				}
+				_ = out.Close()
 			}()
 
 			if _, err := io.Copy(out, rc); err != nil {

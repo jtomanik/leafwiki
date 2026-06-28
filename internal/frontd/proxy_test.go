@@ -3,17 +3,17 @@ package frontd
 import (
 	"encoding/json"
 	"errors"
+	. "github.com/onsi/ginkgo/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
-func assertFrontdProxyError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+func assertFrontdProxyError(t frontdTestTB, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
 	t.Helper()
 	if rec.Code != wantStatus {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
@@ -33,7 +33,8 @@ func assertFrontdProxyError(t *testing.T, rec *httptest.ResponseRecorder, wantSt
 	}
 }
 
-func TestWorkspaceProxyStripsPublicCredentialsAndInjectsPrivateActorContext(t *testing.T) {
+var _ = It("TestWorkspaceProxyStripsPublicCredentialsAndInjectsPrivateActorContext", func() {
+	t := GinkgoT()
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	var seen struct {
 		method        string
@@ -108,9 +109,11 @@ func TestWorkspaceProxyStripsPublicCredentialsAndInjectsPrivateActorContext(t *t
 	if decoded.Subject != "user:admin" || decoded.AuthMethod != "cookie" {
 		t.Fatalf("actor context = %#v", decoded)
 	}
-}
 
-func TestMCPProxyWithActorStripsPublicCredentialsAndInjectsPrivateActorContext(t *testing.T) {
+})
+
+var _ = It("TestMCPProxyWithActorStripsPublicCredentialsAndInjectsPrivateActorContext", func() {
+	t := GinkgoT()
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	var seen struct {
 		path          string
@@ -174,9 +177,11 @@ func TestMCPProxyWithActorStripsPublicCredentialsAndInjectsPrivateActorContext(t
 	if decoded.Subject != "user:editor-1" || decoded.AuthMethod != "oauth" {
 		t.Fatalf("actor context = %#v", decoded)
 	}
-}
 
-func TestWorkspaceProxyReturnsRetryableUnavailableWhenUpstreamIsDown(t *testing.T) {
+})
+
+var _ = It("TestWorkspaceProxyReturnsRetryableUnavailableWhenUpstreamIsDown", func() {
+	t := GinkgoT()
 	proxy, err := NewWorkspaceProxy(WorkspaceProxyOptions{
 		Upstream:    "http://127.0.0.1:1",
 		DaemonToken: "private-token",
@@ -206,9 +211,11 @@ func TestWorkspaceProxyReturnsRetryableUnavailableWhenUpstreamIsDown(t *testing.
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("Retry-After header missing")
 	}
-}
 
-func TestWorkspaceProxyReturnsStructuredActorResolutionError(t *testing.T) {
+})
+
+var _ = It("TestWorkspaceProxyReturnsStructuredActorResolutionError", func() {
+	t := GinkgoT()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("upstream should not be called")
 	}))
@@ -229,9 +236,11 @@ func TestWorkspaceProxyReturnsStructuredActorResolutionError(t *testing.T) {
 	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
 
 	assertFrontdProxyError(t, rec, http.StatusUnauthorized, "workspace_actor_context_failed", "errors.workspace.actor_context_failed")
-}
 
-func TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken(t *testing.T) {
+})
+
+var _ = It("TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken", func() {
+	t := GinkgoT()
 	var seen struct {
 		path          string
 		query         string
@@ -286,9 +295,11 @@ func TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken(t *testi
 	if seen.actorContext != "" {
 		t.Fatalf("spoofed actor context reached wikid: %q", seen.actorContext)
 	}
-}
 
-func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
+})
+
+var _ = It("TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter", func() {
+	t := GinkgoT()
 	var workspacePath string
 	var workspacesPath string
 	var mcpPath string
@@ -349,9 +360,11 @@ func TestIngressHandlerRoutesWorkspaceAndMCPBeforePublicRouter(t *testing.T) {
 	if rec.Body.String() != "control" || controlPath != "/api/config" {
 		t.Fatalf("control dispatch body/path = %q/%q", rec.Body.String(), controlPath)
 	}
-}
 
-func TestIngressHandlerRoutesRootWellKnownMetadataToControlPlaneBeforeBasePathStripping(t *testing.T) {
+})
+
+var _ = It("TestIngressHandlerRoutesRootWellKnownMetadataToControlPlaneBeforeBasePathStripping", func() {
+	t := GinkgoT()
 	var controlPath string
 	public := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		_, _ = w.Write([]byte("public:" + req.URL.Path))
@@ -375,4 +388,5 @@ func TestIngressHandlerRoutesRootWellKnownMetadataToControlPlaneBeforeBasePathSt
 	if controlPath != "/.well-known/oauth-protected-resource/wiki/mcp" {
 		t.Fatalf("control-plane path = %q, want root well-known path", controlPath)
 	}
-}
+
+})

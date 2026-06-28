@@ -15,31 +15,17 @@ func checkMessageFieldValue(ctx *analysisContext, kv *ast.KeyValueExpr) {
 	fieldName := keyName(kv.Key)
 	switch {
 	case messageFieldName(fieldName):
-		if isMessageFieldValueFreeFormPassthrough(ctx, kv) {
-			named, _, ok := enclosingNamedCompositeStruct(ctx, kv)
-			if !ok {
-				return
-			}
+		if named, ok := messageFieldValueFreeFormPassthroughNamed(ctx, kv); ok {
 			ctx.pass.Reportf(kv.Key.Pos(), "%s", messageFieldPassthroughDiagnostic(fieldName, named.Obj().Name()))
 			return
 		}
-		if !isMessageFieldValueMissingMessageID(ctx, kv) {
-			return
+		if named, ok := messageFieldValueMissingMessageIDNamed(ctx, kv); ok {
+			ctx.pass.Reportf(kv.Key.Pos(), "%s", messageFieldValueDiagnostic(fieldName, named.Obj().Name()))
 		}
-		named, _, ok := enclosingNamedCompositeStruct(ctx, kv)
-		if !ok {
-			return
-		}
-		ctx.pass.Reportf(kv.Key.Pos(), "%s", messageFieldValueDiagnostic(fieldName, named.Obj().Name()))
 	case warningStringsFieldName(fieldName):
-		if !isWarningFieldValueMissingMessageID(ctx, kv) {
-			return
+		if named, ok := warningFieldValueMissingMessageIDNamed(ctx, kv); ok {
+			ctx.pass.Reportf(kv.Key.Pos(), "%s", warningFieldValueDiagnostic(fieldName, named.Obj().Name()))
 		}
-		named, _, ok := enclosingNamedCompositeStruct(ctx, kv)
-		if !ok {
-			return
-		}
-		ctx.pass.Reportf(kv.Key.Pos(), "%s", warningFieldValueDiagnostic(fieldName, named.Obj().Name()))
 	default:
 		return
 	}
@@ -69,21 +55,45 @@ func checkResponseStatusForward(ctx *analysisContext, kv *ast.KeyValueExpr) bool
 }
 
 func isMessageFieldValueMissingMessageID(ctx *analysisContext, node ast.Node) bool {
+	_, ok := messageFieldValueMissingMessageIDNamed(ctx, node)
+	return ok
+}
+
+func messageFieldValueMissingMessageIDNamed(ctx *analysisContext, node ast.Node) (*types.Named, bool) {
 	named, strct, lit, ok := enclosingNamedCompositeStructLiteral(ctx, node)
-	return ok && namedStructIsMessageBearing(named, strct) && !compositeLiteralHasKey(lit, "messageID")
+	if ok && namedStructIsMessageBearing(named, strct) && !compositeLiteralHasKey(lit, "messageID") {
+		return named, true
+	}
+	return nil, false
 }
 
 func isMessageFieldValueFreeFormPassthrough(ctx *analysisContext, kv *ast.KeyValueExpr) bool {
+	_, ok := messageFieldValueFreeFormPassthroughNamed(ctx, kv)
+	return ok
+}
+
+func messageFieldValueFreeFormPassthroughNamed(ctx *analysisContext, kv *ast.KeyValueExpr) (*types.Named, bool) {
 	named, strct, lit, ok := enclosingNamedCompositeStructLiteral(ctx, kv)
-	return ok &&
+	if ok &&
 		namedStructIsMessageBearing(named, strct) &&
 		compositeLiteralHasKey(lit, "messageID") &&
-		exprIsFreeFormMessageParam(ctx, kv.Value)
+		exprIsFreeFormMessageParam(ctx, kv.Value) {
+		return named, true
+	}
+	return nil, false
 }
 
 func isWarningFieldValueMissingMessageID(ctx *analysisContext, node ast.Node) bool {
+	_, ok := warningFieldValueMissingMessageIDNamed(ctx, node)
+	return ok
+}
+
+func warningFieldValueMissingMessageIDNamed(ctx *analysisContext, node ast.Node) (*types.Named, bool) {
 	named, strct, lit, ok := enclosingNamedCompositeStructLiteral(ctx, node)
-	return ok && namedStructIsMessageBearing(named, strct) && !compositeLiteralHasKey(lit, "messageID")
+	if ok && namedStructIsMessageBearing(named, strct) && !compositeLiteralHasKey(lit, "messageID") {
+		return named, true
+	}
+	return nil, false
 }
 
 func compositeLiteralHasKey(lit *ast.CompositeLit, fieldName string) bool {

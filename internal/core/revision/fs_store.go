@@ -3,7 +3,6 @@ package revision
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -35,10 +33,10 @@ func (s *FSStore) SaveContentBlob(content []byte) (string, error) {
 	if fileExists(dst) {
 		return hash, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := revisionMkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", fmt.Errorf("ensure content blob dir: %w", err)
 	}
-	if err := shared.WriteFileAtomic(dst, content, 0o644); err != nil {
+	if err := revisionWriteFileAtomic(dst, content, 0o644); err != nil {
 		if fileExists(dst) {
 			return hash, nil
 		}
@@ -49,29 +47,29 @@ func (s *FSStore) SaveContentBlob(content []byte) (string, error) {
 }
 
 func (s *FSStore) SaveAssetBlobFromPath(srcPath string) (string, int64, error) {
-	src, err := os.Open(srcPath)
+	src, err := revisionOpen(srcPath)
 	if err != nil {
 		return "", 0, fmt.Errorf("open live asset %s: %w", srcPath, err)
 	}
-	defer func() { _ = src.Close() }()
+	defer func() { _ = revisionFileClose(src) }()
 
 	tmpDir := filepath.Join(s.baseDir(), "tmp")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := revisionMkdirAll(tmpDir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("ensure tmp dir: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(tmpDir, "asset-blob-*")
+	tmp, err := revisionCreateTemp(tmpDir, "asset-blob-*")
 	if err != nil {
 		return "", 0, fmt.Errorf("create temp asset blob: %w", err)
 	}
 
 	cleanupTmp := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		_ = revisionFileClose(tmp)
+		_ = revisionRemove(tmp.Name())
 	}
 
 	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(tmp, hasher), src)
+	written, err := revisionCopy(io.MultiWriter(tmp, hasher), src)
 	if err != nil {
 		cleanupTmp()
 		return "", 0, fmt.Errorf("copy asset to temp blob: %w", err)
@@ -80,31 +78,31 @@ func (s *FSStore) SaveAssetBlobFromPath(srcPath string) (string, int64, error) {
 	hash := hex.EncodeToString(hasher.Sum(nil))
 	dst := s.AssetBlobPath(hash)
 
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := revisionFileChmod(tmp, 0o644); err != nil {
 		cleanupTmp()
 		return "", 0, fmt.Errorf("chmod temp asset blob: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
+	if err := revisionFileClose(tmp); err != nil {
+		_ = revisionRemove(tmp.Name())
 		return "", 0, fmt.Errorf("close temp asset blob: %w", err)
 	}
 
 	if fileExists(dst) {
-		_ = os.Remove(tmp.Name())
+		_ = revisionRemove(tmp.Name())
 		return hash, written, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		_ = os.Remove(tmp.Name())
+	if err := revisionMkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		_ = revisionRemove(tmp.Name())
 		return "", 0, fmt.Errorf("ensure asset blob dir: %w", err)
 	}
 
-	if err := os.Rename(tmp.Name(), dst); err != nil {
+	if err := revisionRename(tmp.Name(), dst); err != nil {
 		if fileExists(dst) {
-			_ = os.Remove(tmp.Name())
+			_ = revisionRemove(tmp.Name())
 			return hash, written, nil
 		}
-		_ = os.Remove(tmp.Name())
+		_ = revisionRemove(tmp.Name())
 		return "", 0, fmt.Errorf("move asset blob into place: %w", err)
 	}
 
@@ -114,7 +112,7 @@ func (s *FSStore) SaveAssetBlobFromPath(srcPath string) (string, int64, error) {
 func (s *FSStore) SaveAssetManifest(items []AssetRef) (string, error) {
 	canonical := cloneAndSortAssetRefs(items)
 
-	raw, err := json.Marshal(assetManifest{Items: canonical})
+	raw, err := revisionJSONMarshal(assetManifest{Items: canonical})
 	if err != nil {
 		return "", fmt.Errorf("marshal asset manifest: %w", err)
 	}
@@ -125,10 +123,10 @@ func (s *FSStore) SaveAssetManifest(items []AssetRef) (string, error) {
 	if fileExists(dst) {
 		return hash, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := revisionMkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", fmt.Errorf("ensure manifest dir: %w", err)
 	}
-	if err := shared.WriteFileAtomic(dst, raw, 0o644); err != nil {
+	if err := revisionWriteFileAtomic(dst, raw, 0o644); err != nil {
 		if fileExists(dst) {
 			return hash, nil
 		}
@@ -156,7 +154,7 @@ func (s *FSStore) SaveRevision(rev *Revision) error {
 	}
 
 	dst := s.revisionFilePath(rev.PageID, rev.ID, rev.CreatedAt)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := revisionMkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("ensure revision dir: %w", err)
 	}
 	if err := writeJSONAtomic(dst, rev); err != nil {
@@ -319,7 +317,7 @@ func (s *FSStore) PruneRevisions(pageID tree.PageID, keepCount int) error {
 	indexChanged := false
 
 	for _, name := range toDelete {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+		if err := revisionRemove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("delete revision file %s: %w", name, err)
 		}
 		if id, ok := filenameToID[name]; ok {
@@ -336,7 +334,7 @@ func (s *FSStore) PruneRevisions(pageID tree.PageID, keepCount int) error {
 
 func (s *FSStore) revisionFileNames(pageID tree.PageID) ([]string, error) {
 	dir := s.revisionsPageDir(pageID)
-	entries, err := os.ReadDir(dir)
+	entries, err := revisionReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -361,7 +359,7 @@ func (s *FSStore) ReadContentBlob(hash string) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	raw, err := os.ReadFile(s.contentBlobPath(hash))
+	raw, err := revisionReadFile(s.contentBlobPath(hash))
 	if err != nil {
 		return nil, fmt.Errorf("read content blob: %w", err)
 	}
@@ -376,7 +374,7 @@ func (s *FSStore) OpenContentBlob(hash string) (io.ReadCloser, error) {
 	if hash == "" {
 		return io.NopCloser(strings.NewReader("")), nil
 	}
-	f, err := os.Open(s.contentBlobPath(hash))
+	f, err := revisionOpen(s.contentBlobPath(hash))
 	if err != nil {
 		return nil, fmt.Errorf("open content blob: %w", err)
 	}
@@ -402,7 +400,7 @@ func (s *FSStore) ReadAssetBlob(hash string) ([]byte, error) {
 		return nil, fmt.Errorf("asset hash is required")
 	}
 
-	raw, err := os.ReadFile(s.AssetBlobPath(hash))
+	raw, err := revisionReadFile(s.AssetBlobPath(hash))
 	if err != nil {
 		return nil, fmt.Errorf("read asset blob: %w", err)
 	}
@@ -416,7 +414,7 @@ func (s *FSStore) OpenAssetBlob(hash string) (*os.File, error) {
 	if hash == "" {
 		return nil, fmt.Errorf("asset hash is required")
 	}
-	f, err := os.Open(s.AssetBlobPath(hash))
+	f, err := revisionOpen(s.AssetBlobPath(hash))
 	if err != nil {
 		return nil, fmt.Errorf("open asset blob: %w", err)
 	}
@@ -431,40 +429,40 @@ func (s *FSStore) CopyAssetBlobToPath(hash string, expectedSize int64, dstPath s
 	if err != nil {
 		return err
 	}
-	defer func() { _ = src.Close() }()
+	defer func() { _ = revisionFileClose(src) }()
 
 	tmpDir := filepath.Dir(dstPath)
-	tmp, err := os.CreateTemp(tmpDir, "asset-restore-*")
+	tmp, err := revisionCreateTemp(tmpDir, "asset-restore-*")
 	if err != nil {
 		return fmt.Errorf("create temp restore file: %w", err)
 	}
 	tmpName := tmp.Name()
-	cleanup := func() { _ = tmp.Close(); _ = os.Remove(tmpName) }
+	cleanup := func() { _ = revisionFileClose(tmp); _ = revisionRemove(tmpName) }
 
 	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(tmp, hasher), src)
+	written, err := revisionCopy(io.MultiWriter(tmp, hasher), src)
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("stream asset blob to %s: %w", dstPath, err)
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := revisionFileChmod(tmp, 0o644); err != nil {
 		cleanup()
 		return fmt.Errorf("chmod restored asset: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
+	if err := revisionFileClose(tmp); err != nil {
+		_ = revisionRemove(tmpName)
 		return fmt.Errorf("close temp restore file: %w", err)
 	}
 	if computedHash := hex.EncodeToString(hasher.Sum(nil)); computedHash != hash {
-		_ = os.Remove(tmpName)
+		_ = revisionRemove(tmpName)
 		return fmt.Errorf("asset blob hash mismatch: computed %s, want %s", computedHash, hash)
 	}
 	if written != expectedSize {
-		_ = os.Remove(tmpName)
+		_ = revisionRemove(tmpName)
 		return fmt.Errorf("asset blob size mismatch: got %d, want %d", written, expectedSize)
 	}
-	if err := os.Rename(tmpName, dstPath); err != nil {
-		_ = os.Remove(tmpName)
+	if err := revisionRename(tmpName, dstPath); err != nil {
+		_ = revisionRemove(tmpName)
 		return fmt.Errorf("move restored asset into place: %w", err)
 	}
 	return nil
@@ -475,7 +473,7 @@ func (s *FSStore) DeletePageRevisions(pageID tree.PageID) error {
 		return nil
 	}
 
-	if err := os.RemoveAll(s.revisionsPageDir(pageID)); err != nil {
+	if err := revisionRemoveAll(s.revisionsPageDir(pageID)); err != nil {
 		return fmt.Errorf("delete page revisions: %w", err)
 	}
 	return nil
@@ -510,7 +508,7 @@ func (s *FSStore) AssetManifestExists(hash string) bool {
 	if hash == "" {
 		return false
 	}
-	_, err := os.Stat(s.assetManifestPath(hash))
+	_, err := revisionStat(s.assetManifestPath(hash))
 	return err == nil
 }
 
@@ -544,20 +542,20 @@ func revisionFileTimestamp(ts time.Time) string {
 }
 
 func writeJSONAtomic(dst string, value any) error {
-	raw, err := json.MarshalIndent(value, "", "  ")
+	raw, err := revisionJSONMarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
 	raw = append(raw, byte('\n'))
-	return shared.WriteFileAtomic(dst, raw, 0o644)
+	return revisionWriteFileAtomic(dst, raw, 0o644)
 }
 
 func readJSON(path string, out any) error {
-	raw, err := os.ReadFile(path)
+	raw, err := revisionReadFile(path)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
+	if err := revisionJSONUnmarshal(raw, out); err != nil {
 		return err
 	}
 	return nil
@@ -583,7 +581,7 @@ func cloneAndSortAssetRefs(items []AssetRef) []AssetRef {
 }
 
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
+	_, err := revisionStat(path)
 	return err == nil
 }
 
@@ -611,7 +609,7 @@ func (s *FSStore) saveRevisionIndex(pageID tree.PageID, index revisionIndex) err
 		index = revisionIndex{}
 	}
 	path := s.revisionIndexPath(pageID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := revisionMkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("ensure revision dir: %w", err)
 	}
 	if err := writeJSONAtomic(path, index); err != nil {

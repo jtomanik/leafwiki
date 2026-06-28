@@ -63,6 +63,8 @@ type Planner struct {
 	slugger *tree.SlugService
 }
 
+var importerGenerateUniqueID = shared.GenerateUniqueID
+
 // NewPlanner creates a new Planner
 func NewPlanner(wiki ImporterWiki, slugger *tree.SlugService) *Planner {
 	return &Planner{
@@ -75,7 +77,7 @@ func NewPlanner(wiki ImporterWiki, slugger *tree.SlugService) *Planner {
 // CreatePlan creates an import plan based on the provided entries and options
 func (p *Planner) CreatePlan(entries []ImportMDFile, options PlanOptions) (*PlanResult, error) {
 	// Generate a unique ID for the new page
-	id, err := shared.GenerateUniqueID()
+	id, err := importerGenerateUniqueID()
 	if err != nil {
 		return nil, fmt.Errorf("could not generate unique ID: %w", err)
 	}
@@ -171,18 +173,10 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	if wikiPath == "" {
 		// For root-level index.md or empty paths, use filename without extension
 		title = strings.TrimSuffix(filenameLower, path.Ext(filenameLower))
-		if title == "" {
-			title = "root"
-		}
 	}
 
 	if md != nil {
-		var titleErr error
-		title, titleErr = md.GetTitle()
-		if titleErr != nil {
-			notes = append(notes, fmt.Sprintf("Failed to extract title from file: %v", titleErr))
-			title = "unknown" // ensure title is set
-		}
+		title, _ = md.GetTitle()
 	}
 
 	if !result.Exists {

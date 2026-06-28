@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -16,6 +17,16 @@ const (
 )
 
 var ErrMetadataParse = errors.New("metadata parse error")
+
+type canonicalMetadataYAMLEncoder interface {
+	SetIndent(int)
+	Encode(interface{}) error
+	Close() error
+}
+
+var newCanonicalMetadataYAMLEncoder = func(w io.Writer) canonicalMetadataYAMLEncoder {
+	return yaml.NewEncoder(w)
+}
 
 type pageMetadataYAML struct {
 	Version int                    `yaml:"version"`
@@ -287,7 +298,7 @@ func renderCanonicalMetadataYAML(meta PageMetadata) (string, error) {
 	}
 
 	var b bytes.Buffer
-	encoder := yaml.NewEncoder(&b)
+	encoder := newCanonicalMetadataYAMLEncoder(&b)
 	encoder.SetIndent(2)
 	if err := encoder.Encode(mapping); err != nil {
 		_ = encoder.Close()

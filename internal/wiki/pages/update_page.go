@@ -29,7 +29,7 @@ type UpdatePageOutput struct {
 
 // UpdatePageUseCase updates an existing page's content and/or structure.
 type UpdatePageUseCase struct {
-	tree         *tree.TreeService
+	tree         updatePageTree
 	slug         *tree.SlugService
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
@@ -75,9 +75,6 @@ func (uc *UpdatePageUseCase) Execute(_ context.Context, in UpdatePageInput) (*Up
 	var subtreeIDs []tree.PageID
 	if slugChanged {
 		subtreeIDs = collectSubtreeIDs(before.PageNode)
-		if len(subtreeIDs) == 0 {
-			subtreeIDs = []tree.PageID{in.ID}
-		}
 	}
 
 	if err = uc.tree.UpdateNode(in.UserID, in.ID, in.Title, in.Slug, in.Content, in.Version, in.FromImport); err != nil {

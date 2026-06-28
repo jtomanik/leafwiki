@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -30,7 +29,7 @@ type approvalPageData struct {
 
 func (s *Service) issueApproval(userID coreauth.UserID, requestKey string, details approvalPageData) (string, error) {
 	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := oauthRandomRead(raw[:]); err != nil {
 		return "", fmt.Errorf("create oauth approval token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw[:])

@@ -33,6 +33,29 @@ func searchIndexDatabasePath(storageDir string, filename tree.AssetName) string 
 
 var headingParser = goldmark.New()
 
+var (
+	openSQLiteSearchDB = func(dbPath string) (*sql.DB, error) {
+		return sql.Open("sqlite", dbPath)
+	}
+	ensureSearchSchema = func(s *SQLiteIndex) error {
+		return s.ensureSchema()
+	}
+	isRecoverableSearchDBError = sqliteutil.IsSQLiteRecoverableError
+	removeSearchSQLiteFiles    = sqliteutil.RemoveSQLiteFiles
+	closeSQLiteSearchDB        = func(db *sql.DB) error {
+		return db.Close()
+	}
+	searchRowsAffected = func(result sql.Result) (int64, error) {
+		return result.RowsAffected()
+	}
+	closeSearchRows = func(rows *sql.Rows) error {
+		return rows.Close()
+	}
+	searchRowsErr = func(rows *sql.Rows) error {
+		return rows.Err()
+	}
+)
+
 func extractHeadings(src string) string {
 	srcBytes := []byte(src)
 	reader := text.NewReader(srcBytes)
@@ -92,10 +115,6 @@ func buildFuzzyQuery(q string) string {
 	// Append wildcard to each term
 	terms := strings.Fields(q)
 	for i, t := range terms {
-		// Skip if already has wildcard
-		if strings.Contains(t, "*") {
-			continue
-		}
 		terms[i] = t + "*"
 	}
 
@@ -108,19 +127,19 @@ func NewSQLiteIndex(storageDir string) (*SQLiteIndex, error) {
 		databaseFile: "search.db",
 	}
 
-	if err := s.ensureSchema(); err != nil {
+	if err := ensureSearchSchema(s); err != nil {
 		// Only attempt recovery for genuine SQLite I/O or corruption errors
 		// (SQLITE_IOERR=10, SQLITE_CORRUPT=11, SQLITE_NOTADB=26).
 		// Transient errors like SQLITE_BUSY are returned immediately.
-		if !sqliteutil.IsSQLiteRecoverableError(err) {
+		if !isRecoverableSearchDBError(err) {
 			return nil, err
 		}
 		slog.Default().Warn("search index initialization failed, removing corrupt database and retrying", "error", err)
 		if closeErr := s.Close(); closeErr != nil {
 			slog.Default().Warn("failed to close corrupt search database before recovery", "error", closeErr)
 		}
-		sqliteutil.RemoveSQLiteFiles(searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
-		if err2 := s.ensureSchema(); err2 != nil {
+		removeSearchSQLiteFiles(searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
+		if err2 := ensureSearchSchema(s); err2 != nil {
 			_ = s.Close()
 			return nil, err2
 		}
@@ -133,7 +152,7 @@ func (s *SQLiteIndex) withDB(fn func(db *sql.DB) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		db, err := sql.Open("sqlite", searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
+		db, err := openSQLiteSearchDB(searchIndexDatabasePath(s.storageDir, tree.AssetNameFromString(s.databaseFile)))
 		if err != nil {
 			return err
 		}
@@ -180,7 +199,7 @@ func (s *SQLiteIndex) Close() error {
 	defer s.mu.Unlock()
 
 	if s.db != nil {
-		err := s.db.Close()
+		err := closeSQLiteSearchDB(s.db)
 		s.db = nil
 		return err
 	}
@@ -230,7 +249,7 @@ func (s *SQLiteIndex) RemovePageByFilePath(filePath string) (int64, error) {
 		if err != nil {
 			return err
 		}
-		r, err := res.RowsAffected()
+		r, err := searchRowsAffected(res)
 		if err != nil {
 			return err
 		}
@@ -303,7 +322,7 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, startAt Result
 			return err
 		}
 		defer func() {
-			if err := rows.Close(); err != nil {
+			if err := closeSearchRows(rows); err != nil {
 				slog.Default().Error("could not close rows", "error", err)
 			}
 		}()
@@ -333,7 +352,7 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, startAt Result
 
 			results = append(results, r)
 		}
-		if err := rows.Err(); err != nil {
+		if err := searchRowsErr(rows); err != nil {
 			return err
 		}
 		sr.Items = results
@@ -373,7 +392,7 @@ func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []tree.PageID) ([]tree
 			return err
 		}
 		defer func() {
-			if err := rows.Close(); err != nil {
+			if err := closeSearchRows(rows); err != nil {
 				slog.Default().Error("could not close rows", "error", err)
 			}
 		}()
@@ -387,7 +406,7 @@ func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []tree.PageID) ([]tree
 			result = append(result, pageID)
 		}
 
-		return rows.Err()
+		return searchRowsErr(rows)
 	})
 
 	return result, err

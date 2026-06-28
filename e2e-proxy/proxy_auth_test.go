@@ -5,17 +5,21 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// doProxy makes a GET request through the nginx proxy.
-// Set testUser to non-empty to populate X-Test-User (nginx converts it to Remote-User).
-func doProxy(t *testing.T, path, testUser string, extraHeaders map[string]string) *http.Response {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, proxyURL+path, nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
+// doProxy makes a GET request through the reverse proxy.
+// Set testUser to non-empty to populate X-Test-User, which the proxy converts
+// to Remote-User.
+func doProxy(path, testUser string, extraHeaders map[string]string) *http.Response {
+	return doProxyRequest(http.MethodGet, path, testUser, nil, extraHeaders)
+}
+
+func doProxyRequest(method, path, testUser string, body io.Reader, extraHeaders map[string]string) *http.Response {
+	req, err := http.NewRequest(method, proxyURL+path, body)
+	Expect(err).NotTo(HaveOccurred())
 	if testUser != "" {
 		req.Header.Set("X-Test-User", testUser)
 	}
@@ -23,177 +27,146 @@ func doProxy(t *testing.T, path, testUser string, extraHeaders map[string]string
 		req.Header.Set(k, v)
 	}
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do request: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return resp
 }
 
-func readBody(t *testing.T, r *http.Response) string {
-	t.Helper()
+func readBody(r *http.Response) string {
 	defer r.Body.Close()
 	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return strings.TrimSpace(string(b))
 }
 
-func assertStatus(t *testing.T, resp *http.Response, want int) {
-	t.Helper()
-	body := readBody(t, resp)
-	if resp.StatusCode != want {
-		t.Errorf("expected HTTP %d, got %d — body: %s", want, resp.StatusCode, body)
-	}
+func assertStatus(resp *http.Response, want int) string {
+	body := readBody(resp)
+	Expect(resp.StatusCode).To(Equal(want), "body: %s", body)
+	return body
 }
 
 // loginAdmin obtains an access-token cookie by logging in as admin directly
-// via the proxy (the login endpoint is public and unaffected by proxy auth).
-func loginAdmin(t *testing.T) string {
-	t.Helper()
+// via the proxy. The login endpoint is public and unaffected by proxy auth.
+func loginAdmin() string {
 	payload := `{"identifier":"admin","password":"admin"}`
 	req, err := http.NewRequest(http.MethodPost, proxyURL+"/api/auth/login", strings.NewReader(payload))
-	if err != nil {
-		t.Fatalf("build login request: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("login request: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("login failed %d: %s", resp.StatusCode, b)
+		Fail("login failed " + resp.Status + ": " + string(b))
 	}
 	for _, c := range resp.Cookies() {
 		if c.Name == "leafwiki_at" {
 			return c.Value
 		}
 	}
-	t.Fatal("no leafwiki_at cookie in login response")
+	Fail("no leafwiki_at cookie in login response")
 	return ""
 }
 
-// TestProxyAuth_ValidUser_Admin verifies that a request with X-Test-User: admin
-// (converted to Remote-User: admin by nginx) authenticates successfully.
-func TestProxyAuth_ValidUser_Admin(t *testing.T) {
-	// Use an authenticated endpoint: GET /api/users requires auth.
-	resp := doProxy(t, "/api/users", "admin", nil)
-	assertStatus(t, resp, http.StatusOK)
+var _ = Describe("proxy authentication", func() {
+	It("ProxyAuth_ValidUser_Admin", func() {
+		resp := doProxy("/api/users", "admin", nil)
+		assertStatus(resp, http.StatusOK)
+	})
+
+	It("ProxyAuth_UnknownUser", func() {
+		resp := doProxy("/api/users", "no-such-user-xyz", nil)
+		assertStatus(resp, http.StatusUnauthorized)
+	})
+
+	It("ProxyAuth_NoHeader_ProtectedRoute", func() {
+		resp := doProxy("/api/users", "", nil)
+		assertStatus(resp, http.StatusUnauthorized)
+	})
+
+	It("ProxyAuth_PublicRoute_NoHeader", func() {
+		resp := doProxy("/api/config", "", nil)
+		assertStatus(resp, http.StatusOK)
+	})
+
+	It("ProxyAuth_PublicRoute_WithUser", func() {
+		resp := doProxy("/api/config", "admin", nil)
+		assertStatus(resp, http.StatusOK)
+	})
+
+	It("ProxyAuth_ConfigResponse_Roundtrip", func() {
+		resp := doProxy("/api/config", "", nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		defer resp.Body.Close()
+		var body map[string]any
+		Expect(json.NewDecoder(resp.Body).Decode(&body)).To(Succeed())
+		Expect(body).To(HaveKey("authDisabled"))
+	})
+
+	It("ProxyAuth_FallbackToJWT", func() {
+		token := loginAdmin()
+
+		req, err := http.NewRequest(http.MethodGet, proxyURL+"/api/users", nil)
+		Expect(err).NotTo(HaveOccurred())
+		req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: token})
+
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		assertStatus(resp, http.StatusOK)
+	})
+
+	It("RefreshToken_NoSession_Returns422", func() {
+		body := assertRefreshTokenWithoutSession("", nil)
+		assertInvalidRefreshTokenBody(body)
+	})
+
+	It("ProxyAuth_DirectRemoteUserInjection", func() {
+		resp := doProxy("/api/users", "", map[string]string{
+			"Remote-User": "admin",
+		})
+		assertStatus(resp, http.StatusUnauthorized)
+	})
+
+	It("ProxyAuth_RemoteUserInjectionIgnoredWhenProxyUserIsAdmin", func() {
+		resp := doProxy("/api/users", "admin", map[string]string{
+			"Remote-User": "no-such-user-xyz",
+		})
+		assertStatus(resp, http.StatusOK)
+	})
+
+	It("ProxyAuth_RemoteUserInjectionDoesNotBypassUnknownProxyUser", func() {
+		resp := doProxy("/api/users", "no-such-user-xyz", map[string]string{
+			"Remote-User": "admin",
+		})
+		assertStatus(resp, http.StatusUnauthorized)
+	})
+
+	It("RefreshToken_NoSession_WithProxyUserStillReturns422", func() {
+		body := assertRefreshTokenWithoutSession("admin", nil)
+		assertInvalidRefreshTokenBody(body)
+	})
+
+	It("ProxyAuth_ConfigResponse_WithUserRoundtrip", func() {
+		resp := doProxy("/api/config", "admin", nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		defer resp.Body.Close()
+		var body map[string]any
+		Expect(json.NewDecoder(resp.Body).Decode(&body)).To(Succeed())
+		Expect(body).To(HaveKey("authDisabled"))
+	})
+})
+
+func assertRefreshTokenWithoutSession(testUser string, extraHeaders map[string]string) string {
+	resp := doProxyRequest(http.MethodPost, "/api/auth/refresh-token", testUser, nil, extraHeaders)
+	return assertStatus(resp, http.StatusUnprocessableEntity)
 }
 
-// TestProxyAuth_UnknownUser verifies that a proxy-provided username that does
-// not exist in LeafWiki results in 401.
-func TestProxyAuth_UnknownUser(t *testing.T) {
-	resp := doProxy(t, "/api/users", "no-such-user-xyz", nil)
-	assertStatus(t, resp, http.StatusUnauthorized)
-}
-
-// TestProxyAuth_NoHeader_ProtectedRoute verifies that a request without
-// X-Test-User (so no Remote-User forwarded) is rejected on a protected route.
-func TestProxyAuth_NoHeader_ProtectedRoute(t *testing.T) {
-	resp := doProxy(t, "/api/users", "", nil)
-	assertStatus(t, resp, http.StatusUnauthorized)
-}
-
-// TestProxyAuth_PublicRoute_NoHeader verifies that public endpoints remain
-// reachable even when no Remote-User header is forwarded.
-func TestProxyAuth_PublicRoute_NoHeader(t *testing.T) {
-	resp := doProxy(t, "/api/config", "", nil)
-	assertStatus(t, resp, http.StatusOK)
-}
-
-// TestProxyAuth_PublicRoute_WithUser verifies that public endpoints also work
-// when a valid Remote-User is forwarded (the user is set in context, but
-// unauthenticated access is still allowed on public routes).
-func TestProxyAuth_PublicRoute_WithUser(t *testing.T) {
-	resp := doProxy(t, "/api/config", "admin", nil)
-	assertStatus(t, resp, http.StatusOK)
-}
-
-// TestProxyAuth_ConfigResponse_Roundtrip verifies the /api/config response is
-// valid JSON — a basic smoke test that the proxy doesn't mangle the response.
-func TestProxyAuth_ConfigResponse_Roundtrip(t *testing.T) {
-	resp := doProxy(t, "/api/config", "", nil)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-	if _, ok := body["authDisabled"]; !ok {
-		t.Error("expected 'authDisabled' field in /api/config response")
-	}
-}
-
-// TestProxyAuth_FallbackToJWT verifies that standard JWT cookie auth still
-// works when no Remote-User header is forwarded (proxy auth is additive, not
-// a replacement for JWT).
-func TestProxyAuth_FallbackToJWT(t *testing.T) {
-	token := loginAdmin(t)
-
-	req, err := http.NewRequest(http.MethodGet, proxyURL+"/api/users", nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	// No X-Test-User — no Remote-User forwarded by nginx.
-	// But we carry the JWT access-token cookie.
-	req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: token})
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do request: %v", err)
-	}
-	assertStatus(t, resp, http.StatusOK)
-}
-
-// TestRefreshToken_NoSession_Returns422 verifies that POST /api/auth/refresh-token
-// without a session cookie returns 422, not 401. A 401 would cause browsers behind a
-// Basic Auth reverse proxy to discard their cached credentials (RFC 9110 §15.5.2).
-func TestRefreshToken_NoSession_Returns422(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, proxyURL+"/api/auth/refresh-token", nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do request: %v", err)
-	}
-	body := readBody(t, resp)
-
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("want 422, got %d — body: %s", resp.StatusCode, body)
-	}
-
+func assertInvalidRefreshTokenBody(body string) {
 	var parsed struct {
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
-		t.Fatalf("response is not valid JSON: %v — body: %s", err, body)
-	}
-	if parsed.Error.Code != "auth_invalid_refresh_token" {
-		t.Errorf("want error code %q, got %q", "auth_invalid_refresh_token", parsed.Error.Code)
-	}
-}
-
-// TestProxyAuth_DirectRemoteUserHeader verifies that a client cannot bypass
-// proxy auth by sending Remote-User directly without going through nginx.
-// Because nginx strips and re-sets the header, a client sending Remote-User
-// directly to nginx will have it overwritten by the value of X-Test-User
-// (which is empty here), so LeafWiki receives an empty Remote-User and falls
-// back to requiring JWT — which we don't provide.
-func TestProxyAuth_DirectRemoteUserInjection(t *testing.T) {
-	// Send Remote-User directly without X-Test-User. nginx will replace it
-	// with the (empty) X-Test-User value, so LeafWiki sees Remote-User: "".
-	resp := doProxy(t, "/api/users", "", map[string]string{
-		"Remote-User": "admin",
-	})
-	// Remote-User is overwritten by nginx → empty → no proxy auth → no JWT → 401
-	assertStatus(t, resp, http.StatusUnauthorized)
+	Expect(json.Unmarshal([]byte(body), &parsed)).To(Succeed(), "body: %s", body)
+	Expect(parsed.Error.Code).To(Equal("auth_invalid_refresh_token"))
 }

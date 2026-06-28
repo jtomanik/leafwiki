@@ -31,6 +31,8 @@ type wikidWorkspaceListResponse struct {
 	} `json:"workspaces"`
 }
 
+var newFrontdRequestWithContext = http.NewRequestWithContext
+
 func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request) (workspaceid.WorkspaceID, error), error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
@@ -45,7 +47,7 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 	return func(source *http.Request) (workspaceid.WorkspaceID, error) {
 		endpoint := baseURL + "/__leafwiki/workspaces"
 		ctx := contextForRequest(source)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		req, err := newFrontdRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return "", err
 		}
@@ -108,7 +110,7 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 		}
 		endpoint := baseURL + "/__leafwiki/workspaces/" + workspaceID.URLPathSegment() + "/ensure"
 		ctx := contextForRequest(source)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+		req, err := newFrontdRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 		if err != nil {
 			return WorkspaceRoute{}, err
 		}

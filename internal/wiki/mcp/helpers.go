@@ -146,7 +146,7 @@ func (r *Routes) editorActorForRequest(req *sdkmcp.CallToolRequest) (*coreauth.U
 	return user, nil
 }
 
-func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
+func mcpToolErrorResult(err error) *sdkmcp.CallToolResult {
 	if loc, ok := sharederrors.AsLocalizedError(err); ok {
 		detail := sharederrors.LocalizedErrorDetailFromError(loc)
 		return &sdkmcp.CallToolResult{
@@ -155,7 +155,7 @@ func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 			},
 			Meta:    mcpToolErrorMeta(detail),
 			IsError: true,
-		}, true
+		}
 	}
 	if detail, _, ok := wikipages.PageErrorDetailForError(err); ok {
 		return &sdkmcp.CallToolResult{
@@ -164,7 +164,7 @@ func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 			},
 			Meta:    mcpToolErrorMeta(detail),
 			IsError: true,
-		}, true
+		}
 	}
 	detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeMCPToolError, err.Error())
 	return &sdkmcp.CallToolResult{
@@ -173,7 +173,7 @@ func mcpToolErrorResult(err error) (*sdkmcp.CallToolResult, bool) {
 		},
 		Meta:    mcpToolErrorMeta(detail),
 		IsError: true,
-	}, true
+	}
 }
 
 func mcpToolErrorMeta(detail sharederrors.LocalizedErrorDetail) sdkmcp.Meta {

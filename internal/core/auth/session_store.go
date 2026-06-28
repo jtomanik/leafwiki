@@ -49,7 +49,7 @@ func NewSessionStore(storageDir string) (*SessionStore, error) {
 	// Cleanup expired sessions periodically
 	go func() {
 		defer close(s.done)
-		ticker := time.NewTicker(1 * time.Hour)
+		ticker := time.NewTicker(authSessionCleanupInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -72,7 +72,7 @@ func (s *SessionStore) withDB(fn func(db *sql.DB) error) error {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		db, err := sql.Open("sqlite", sessionDatabasePath(s.storageDir, s.dbFilename))
+		db, err := authSQLOpen("sqlite", sessionDatabasePath(s.storageDir, s.dbFilename))
 		if err != nil {
 			return err
 		}

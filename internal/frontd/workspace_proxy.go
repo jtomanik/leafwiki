@@ -88,7 +88,7 @@ func (p *workspaceRouterProxy) ServeHTTP(w http.ResponseWriter, req *http.Reques
 		writeFrontdError(w, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed)
 		return
 	}
-	encoded, err := projectdaemon.EncodeActorContext(actor)
+	encoded, err := encodeActorContext(actor)
 	if err != nil {
 		writeFrontdError(w, http.StatusInternalServerError, errCodeWorkspaceActorContextEncodeFailed)
 		return

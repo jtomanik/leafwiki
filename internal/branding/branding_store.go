@@ -14,6 +14,8 @@ type BrandingStore struct {
 	storageDir string
 }
 
+var brandingMarshalIndent = json.MarshalIndent
+
 // NewBrandingStore creates a new branding store
 func NewBrandingStore(storageDir string) *BrandingStore {
 	return &BrandingStore{
@@ -52,7 +54,7 @@ func (s *BrandingStore) Load() (*BrandingConfig, error) {
 
 // Save writes the branding configuration to disk
 func (s *BrandingStore) Save(config *BrandingConfig) error {
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := brandingMarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal branding config: %w", err)
 	}

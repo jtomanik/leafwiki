@@ -2,7 +2,6 @@ package projectdaemon
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"sync"
 	"time"
@@ -139,7 +138,7 @@ func (r *SessionRegistry) notify(count int) {
 
 func randomID() (string, error) {
 	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := readRandom(raw[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(raw[:]), nil

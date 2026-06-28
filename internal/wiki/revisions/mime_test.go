@@ -1,23 +1,15 @@
 package revisions
 
-import "testing"
+import (
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
 
-func TestDetectRevisionAssetMIMETypeFallsBackToExtensionThenOctetStream(t *testing.T) {
-	t.Run("manifest value wins", func(t *testing.T) {
-		if got := DetectRevisionAssetMIMEType("style.css", "text/custom"); got != "text/custom" {
-			t.Fatalf("DetectRevisionAssetMIMEType = %q, want manifest MIME", got)
-		}
-	})
-
-	t.Run("extension fallback", func(t *testing.T) {
-		if got := DetectRevisionAssetMIMEType("style.css", ""); got != "text/css; charset=utf-8" {
-			t.Fatalf("DetectRevisionAssetMIMEType = %q, want CSS MIME", got)
-		}
-	})
-
-	t.Run("octet stream fallback", func(t *testing.T) {
-		if got := DetectRevisionAssetMIMEType("asset.unknownext", ""); got != "application/octet-stream" {
-			t.Fatalf("DetectRevisionAssetMIMEType = %q, want octet-stream fallback", got)
-		}
-	})
-}
+var _ = ginkgo.DescribeTable("TestDetectRevisionAssetMIMETypeFallsBackToExtensionThenOctetStream",
+	func(name string, manifestMIME string, want string) {
+		Expect(DetectRevisionAssetMIMEType(name, manifestMIME)).To(Equal(want))
+	},
+	ginkgo.Entry("manifest value wins", "style.css", "text/custom", "text/custom"),
+	ginkgo.Entry("extension fallback", "style.css", "", "text/css; charset=utf-8"),
+	ginkgo.Entry("octet stream fallback", "asset.unknownext", "", "application/octet-stream"),
+)

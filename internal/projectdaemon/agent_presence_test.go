@@ -1,15 +1,16 @@
 package projectdaemon
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"encoding/json"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/perber/wiki/internal/agenthooks"
 )
 
-func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
+var _ = ginkgo.It("TestAgentPresenceRegistryRecordCreatesSanitizedSession", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
 	var counts []int
 	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, func(count int) {
@@ -53,9 +54,11 @@ func TestAgentPresenceRegistryRecordCreatesSanitizedSession(t *testing.T) {
 		!strings.Contains(string(raw), `"toolName":"mcp__leafwiki__wiki_get_page"`) {
 		t.Fatalf("session JSON = %s, want string compatibility fields", raw)
 	}
-}
 
-func TestAgentPresenceRegistryRedactsUnsafeMetadata(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestAgentPresenceRegistryRedactsUnsafeMetadata", func() {
+	t := ginkgo.GinkgoT()
 	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
 	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","tool_name":"mcp__leafwiki__wiki_get_page"}`)
 	event.Model = "/Users/example/token-model"
@@ -70,9 +73,29 @@ func TestAgentPresenceRegistryRedactsUnsafeMetadata(t *testing.T) {
 	if sessions[0].Model != "" || sessions[0].Source != "" || sessions[0].ToolName != "mcp__leafwiki__wiki_get_page" || !sessions[0].IsMCPTool {
 		t.Fatalf("unsafe metadata was not redacted: %#v", sessions[0])
 	}
-}
 
-func TestAgentPresenceRegistryUpdatesLifecycleAndExpires(t *testing.T) {
+})
+
+var _ = ginkgo.It("AgentPresenceRegistry exposes seen state after accepted events", func() {
+	t := ginkgo.GinkgoT()
+	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
+	if registry.SeenPresence() {
+		t.Fatalf("SeenPresence = true before any accepted event")
+	}
+
+	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session"}`)
+	registry.Record(event)
+
+	if !registry.SeenPresence() {
+		t.Fatalf("SeenPresence = false after accepted event")
+	}
+	if seen, count := registry.SeenPresenceCount(); !seen || count != 1 {
+		t.Fatalf("SeenPresenceCount = %v/%d, want true/1", seen, count)
+	}
+})
+
+var _ = ginkgo.It("TestAgentPresenceRegistryUpdatesLifecycleAndExpires", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
 	var counts []int
 	registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
@@ -134,108 +157,77 @@ func TestAgentPresenceRegistryUpdatesLifecycleAndExpires(t *testing.T) {
 	if got, want := joinCounts(counts), "1,0,1,0"; got != want {
 		t.Fatalf("counts = %s, want %s", got, want)
 	}
-}
 
-func TestAgentPresenceRegistryIgnoresMissingEndEventsAsFirstActivity(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider agenthooks.ProviderID
-		payload  string
-	}{
-		{
-			name:     "claude session end",
-			provider: agenthooks.ProviderClaude,
-			payload:  `{"hook_event_name":"SessionEnd","session_id":"claude-ended-before-start"}`,
-		},
-		{
-			name:     "cursor session end",
-			provider: agenthooks.ProviderCursor,
-			payload:  `{"hook_event_name":"sessionEnd","session_id":"cursor-ended-before-start"}`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var counts []int
-			registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
-				counts = append(counts, count)
-			})
-			event, ok := agenthooks.Normalize(tt.provider, []byte(tt.payload), time.Now())
-			if !ok {
-				t.Fatalf("Normalize(%s) returned false", tt.provider)
-			}
+})
 
-			registry.Record(event)
-
-			if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
-				t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
-			}
-			if got := joinCounts(counts); got != "" {
-				t.Fatalf("counts = %s, want no notifications", got)
-			}
+var _ = ginkgo.DescribeTable("TestAgentPresenceRegistryIgnoresMissingEndEventsAsFirstActivity",
+	func(provider agenthooks.ProviderID, payload string) {
+		t := ginkgo.GinkgoT()
+		var counts []int
+		registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+			counts = append(counts, count)
 		})
-	}
-}
+		event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
+		if !ok {
+			t.Fatalf("Normalize(%s) returned false", provider)
+		}
 
-func TestAgentPresenceRegistryRejectsUnsafeControlEvents(t *testing.T) {
-	valid := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-	tests := []struct {
-		name  string
-		event agenthooks.Event
-	}{
-		{
-			name: "raw session id",
-			event: agenthooks.Event{
-				Provider:      agenthooks.ProviderCodex,
-				SessionIDHash: "raw-session-secret",
-				EventName:     "SessionStart",
-			},
-		},
-		{
-			name: "unsupported provider",
-			event: func() agenthooks.Event {
-				event := valid
-				event.Provider = "sidecar"
-				return event
-			}(),
-		},
-		{
-			name: "unsupported event",
-			event: func() agenthooks.Event {
-				event := valid
-				event.EventName = "MadeUpHook"
-				return event
-			}(),
-		},
-		{
-			name: "mismatched subagent delta",
-			event: func() agenthooks.Event {
-				event := valid
-				event.SubagentDelta = 1
-				return event
-			}(),
-		},
-	}
+		registry.Record(event)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var counts []int
-			registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
-				counts = append(counts, count)
-			})
+		if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
+			t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
+		}
+		if got := joinCounts(counts); got != "" {
+			t.Fatalf("counts = %s, want no notifications", got)
+		}
+	},
+	ginkgo.Entry("claude session end", agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-ended-before-start"}`),
+	ginkgo.Entry("cursor session end", agenthooks.ProviderCursor, `{"hook_event_name":"sessionEnd","session_id":"cursor-ended-before-start"}`),
+)
 
-			registry.Record(tt.event)
-
-			if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
-				t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
-			}
-			if got := joinCounts(counts); got != "" {
-				t.Fatalf("counts = %s, want no notifications", got)
-			}
+var _ = ginkgo.DescribeTable("TestAgentPresenceRegistryRejectsUnsafeControlEvents",
+	func(eventFactory func(projectdaemonTestT) agenthooks.Event) {
+		t := ginkgo.GinkgoT()
+		var counts []int
+		registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+			counts = append(counts, count)
 		})
-	}
-}
 
-func TestAgentPresenceRegistryZeroTTLExpiresImmediately(t *testing.T) {
+		registry.Record(eventFactory(t))
+
+		if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
+			t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
+		}
+		if got := joinCounts(counts); got != "" {
+			t.Fatalf("counts = %s, want no notifications", got)
+		}
+	},
+	ginkgo.Entry("raw session id", func(projectdaemonTestT) agenthooks.Event {
+		return agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: "raw-session-secret",
+			EventName:     "SessionStart",
+		}
+	}),
+	ginkgo.Entry("unsupported provider", func(t projectdaemonTestT) agenthooks.Event {
+		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+		event.Provider = "sidecar"
+		return event
+	}),
+	ginkgo.Entry("unsupported event", func(t projectdaemonTestT) agenthooks.Event {
+		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+		event.EventName = "MadeUpHook"
+		return event
+	}),
+	ginkgo.Entry("mismatched subagent delta", func(t projectdaemonTestT) agenthooks.Event {
+		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+		event.SubagentDelta = 1
+		return event
+	}),
+)
+
+var _ = ginkgo.It("TestAgentPresenceRegistryZeroTTLExpiresImmediately", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
 	var counts []int
 	registry := NewAgentPresenceRegistry(0, func(count int) {
@@ -264,9 +256,10 @@ func TestAgentPresenceRegistryZeroTTLExpiresImmediately(t *testing.T) {
 	if got, want := joinCounts(counts), "1,0"; got != want {
 		t.Fatalf("counts = %s, want %s", got, want)
 	}
-}
 
-func normalizedPresenceEvent(t *testing.T, provider agenthooks.ProviderID, payload string) agenthooks.Event {
+})
+
+func normalizedPresenceEvent(t projectdaemonTestT, provider agenthooks.ProviderID, payload string) agenthooks.Event {
 	t.Helper()
 	event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
 	if !ok {

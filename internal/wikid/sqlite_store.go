@@ -15,26 +15,43 @@ import (
 
 const wikidSQLiteBusyTimeoutMS = 5000
 
+type wikidCloseFile interface {
+	Close() error
+}
+
+var (
+	wikidOpenFile = func(name string, flag int, perm os.FileMode) (wikidCloseFile, error) {
+		return os.OpenFile(name, flag, perm)
+	}
+	wikidChmod                   = os.Chmod
+	wikidSQLOpen                 = sql.Open
+	wikidInitializeWikidDB       = initializeWikidDB
+	wikidOpenWikidDB             = openWikidDB
+	wikidCloseDB                 = func(db *sql.DB) error { return db.Close() }
+	wikidCloseConn               = func(conn *sql.Conn) error { return conn.Close() }
+	wikidExecSQLiteWithLockRetry = execWikidSQLiteWithLockRetry
+)
+
 func openWikidDB(path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := wikidMkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create wikid db directory: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := wikidOpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("create wikid db: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		return nil, fmt.Errorf("close wikid db handle: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := wikidChmod(path, 0o600); err != nil {
 		return nil, fmt.Errorf("secure wikid db: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := wikidSQLOpen("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if err := initializeWikidDB(db); err != nil {
+	if err := wikidInitializeWikidDB(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -66,7 +83,7 @@ func initializeWikidDB(db *sql.DB) error {
 		)`,
 	}
 	for _, stmt := range statements {
-		if _, err := execWikidSQLiteWithLockRetry(ctx, db, stmt); err != nil {
+		if _, err := wikidExecSQLiteWithLockRetry(ctx, db, stmt); err != nil {
 			return fmt.Errorf("initialize wikid db: %w", err)
 		}
 	}
@@ -74,12 +91,12 @@ func initializeWikidDB(db *sql.DB) error {
 }
 
 func withWikidImmediateTx(path string, fn func(context.Context, *sql.Conn) error) (err error) {
-	db, err := openWikidDB(path)
+	db, err := wikidOpenWikidDB(path)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if closeErr := db.Close(); err == nil && closeErr != nil {
+		if closeErr := wikidCloseDB(db); err == nil && closeErr != nil {
 			err = closeErr
 		}
 	}()
@@ -89,11 +106,11 @@ func withWikidImmediateTx(path string, fn func(context.Context, *sql.Conn) error
 		return err
 	}
 	defer func() {
-		if closeErr := conn.Close(); err == nil && closeErr != nil {
+		if closeErr := wikidCloseConn(conn); err == nil && closeErr != nil {
 			err = closeErr
 		}
 	}()
-	if _, err := execWikidSQLiteWithLockRetry(ctx, conn, "BEGIN IMMEDIATE"); err != nil {
+	if _, err := wikidExecSQLiteWithLockRetry(ctx, conn, "BEGIN IMMEDIATE"); err != nil {
 		return err
 	}
 	committed := false

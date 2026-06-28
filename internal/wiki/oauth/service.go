@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"net/http"
 	"sync"
@@ -44,7 +43,7 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	fositeStore := newFositeStore()
+	fositeStore := newOAuthFositeStore()
 	if err := fositeStore.setClient(fixedOAuthClient()); err != nil {
 		return nil, fmt.Errorf("register fixed oauth client: %w", err)
 	}
@@ -73,7 +72,7 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 
 func randomFositeSecret() ([]byte, error) {
 	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
+	if _, err := oauthRandomRead(secret); err != nil {
 		return nil, fmt.Errorf("create fosite oauth secret: %w", err)
 	}
 	return secret, nil
@@ -85,7 +84,7 @@ func (s *Service) VerifyBearerToken(ctx context.Context, token string, req *http
 	}
 
 	session := newFositeSession("", "")
-	tokenUse, requester, err := s.fositeProvider.IntrospectToken(ctx, token, fosite.AccessToken, session, ScopeMCP)
+	tokenUse, requester, err := oauthIntrospectToken(s.fositeProvider, ctx, token, fosite.AccessToken, session, ScopeMCP)
 	if err != nil || requester == nil {
 		return nil, fmt.Errorf("%w: %v", sdkauth.ErrInvalidToken, err)
 	}

@@ -2,16 +2,16 @@ package branding
 
 import (
 	"bytes"
+	. "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"github.com/perber/wiki/internal/core/shared/errors"
 )
 
 // helper: create a service with temp storage dir
-func newTestBrandingService(t *testing.T) (*BrandingService, string) {
+func newTestBrandingService(t brandingTestTB) (*BrandingService, string) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -22,7 +22,8 @@ func newTestBrandingService(t *testing.T) (*BrandingService, string) {
 	return svc, dir
 }
 
-func TestBrandingService_DeleteLogo_NoLogo_NoOp(t *testing.T) {
+var _ = It("TestBrandingService_DeleteLogo_NoLogo_NoOp", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Ensure config persisted with empty logo
@@ -47,9 +48,11 @@ func TestBrandingService_DeleteLogo_NoLogo_NoOp(t *testing.T) {
 	if cfg2.LogoFile != "" {
 		t.Fatalf("expected LogoFile empty after delete, got %q", cfg2.LogoFile)
 	}
-}
 
-func TestBrandingService_DeleteFavicon_NoFavicon_NoOp(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_DeleteFavicon_NoFavicon_NoOp", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	store := NewBrandingStore(dir)
@@ -72,9 +75,11 @@ func TestBrandingService_DeleteFavicon_NoFavicon_NoOp(t *testing.T) {
 	if cfg2.FaviconFile != "" {
 		t.Fatalf("expected FaviconFile empty after delete, got %q", cfg2.FaviconFile)
 	}
-}
 
-func TestBrandingService_DeleteLogo_RemovesFileAndClearsConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_DeleteLogo_RemovesFileAndClearsConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 	assetsDir := filepath.Join(dir, "branding")
 
@@ -112,9 +117,11 @@ func TestBrandingService_DeleteLogo_RemovesFileAndClearsConfig(t *testing.T) {
 	if cfg.LogoFile != "" {
 		t.Fatalf("expected LogoFile cleared, got %q", cfg.LogoFile)
 	}
-}
 
-func TestBrandingService_DeleteFavicon_RemovesFileAndClearsConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_DeleteFavicon_RemovesFileAndClearsConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 	assetsDir := filepath.Join(dir, "branding")
 
@@ -148,9 +155,11 @@ func TestBrandingService_DeleteFavicon_RemovesFileAndClearsConfig(t *testing.T) 
 	if cfg.FaviconFile != "" {
 		t.Fatalf("expected FaviconFile cleared, got %q", cfg.FaviconFile)
 	}
-}
 
-func TestBrandingService_DeleteLogo_FileMissingStillClearsConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_DeleteLogo_FileMissingStillClearsConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Reference a file that doesn't exist
@@ -174,9 +183,11 @@ func TestBrandingService_DeleteLogo_FileMissingStillClearsConfig(t *testing.T) {
 	if cfg.LogoFile != "" {
 		t.Fatalf("expected LogoFile cleared even if file missing, got %q", cfg.LogoFile)
 	}
-}
 
-func TestBrandingService_DeleteFavicon_FileMissingStillClearsConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_DeleteFavicon_FileMissingStillClearsConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	svc.mu.Lock()
@@ -199,9 +210,11 @@ func TestBrandingService_DeleteFavicon_FileMissingStillClearsConfig(t *testing.T
 	if cfg.FaviconFile != "" {
 		t.Fatalf("expected FaviconFile cleared even if file missing, got %q", cfg.FaviconFile)
 	}
-}
 
-func TestBrandingService_UploadThenDeleteLogo_EndToEnd(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadThenDeleteLogo_EndToEnd", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 	assetsDir := filepath.Join(dir, "branding")
 
@@ -250,9 +263,11 @@ func TestBrandingService_UploadThenDeleteLogo_EndToEnd(t *testing.T) {
 	if cfg.LogoFile != "" {
 		t.Fatalf("expected LogoFile cleared after delete, got %q", cfg.LogoFile)
 	}
-}
 
-func TestBrandingService_UploadThenDeleteFavicon_EndToEnd(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadThenDeleteFavicon_EndToEnd", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 	assetsDir := filepath.Join(dir, "branding")
 
@@ -299,9 +314,11 @@ func TestBrandingService_UploadThenDeleteFavicon_EndToEnd(t *testing.T) {
 	if cfg.FaviconFile != "" {
 		t.Fatalf("expected FaviconFile cleared after delete, got %q", cfg.FaviconFile)
 	}
-}
 
-func TestBrandingService_GetBranding_ReturnsResponseWithConstraints(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_GetBranding_ReturnsResponseWithConstraints", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	resp, err := svc.GetBranding()
@@ -320,9 +337,11 @@ func TestBrandingService_GetBranding_ReturnsResponseWithConstraints(t *testing.T
 	if len(resp.BrandingConstraints.LogoExts) == 0 || len(resp.BrandingConstraints.FaviconExts) == 0 {
 		t.Fatalf("expected non-empty constraints maps")
 	}
-}
 
-func TestBrandingService_UpdateBranding_PersistsToDisk(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_PersistsToDisk", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	if err := svc.UpdateBranding("My Wiki"); err != nil {
@@ -338,9 +357,11 @@ func TestBrandingService_UpdateBranding_PersistsToDisk(t *testing.T) {
 	if cfg.SiteName != "My Wiki" {
 		t.Fatalf("expected SiteName %q, got %q", "My Wiki", cfg.SiteName)
 	}
-}
 
-func TestBrandingService_UpdateBranding_TrimsSiteName(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_TrimsSiteName", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	if err := svc.UpdateBranding("  Trimmed Wiki  "); err != nil {
@@ -355,9 +376,11 @@ func TestBrandingService_UpdateBranding_TrimsSiteName(t *testing.T) {
 	if cfg.SiteName != "Trimmed Wiki" {
 		t.Fatalf("expected SiteName %q, got %q", "Trimmed Wiki", cfg.SiteName)
 	}
-}
 
-func TestBrandingService_UpdateBranding_EmptySiteName_ReturnsValidationError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_EmptySiteName_ReturnsValidationError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	err := svc.UpdateBranding("")
@@ -373,9 +396,11 @@ func TestBrandingService_UpdateBranding_EmptySiteName_ReturnsValidationError(t *
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
 	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
-}
 
-func TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsValidationError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsValidationError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	err := svc.UpdateBranding("   ")
@@ -391,9 +416,11 @@ func TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsValidation
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
 	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
-}
 
-func TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidationError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidationError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	// Create a site name that exceeds the max length (default is 100)
@@ -415,9 +442,11 @@ func TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidationError(t
 	if !strings.Contains(ve.Errors[0].Message, "must not exceed") {
 		t.Fatalf("expected length validation error message, got %q", ve.Errors[0].Message)
 	}
-}
 
-func TestBrandingService_UpdateBranding_MaxLengthSiteName_Success(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_MaxLengthSiteName_Success", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Create a site name exactly at max length (default is 100)
@@ -435,9 +464,11 @@ func TestBrandingService_UpdateBranding_MaxLengthSiteName_Success(t *testing.T) 
 	if cfg.SiteName != exactName {
 		t.Fatalf("expected SiteName with length %d, got length %d", len(exactName), len(cfg.SiteName))
 	}
-}
 
-func TestBrandingService_UpdateBranding_ControlCharacters_ReturnsValidationError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UpdateBranding_ControlCharacters_ReturnsValidationError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	// Test with null character (control character)
@@ -459,9 +490,10 @@ func TestBrandingService_UpdateBranding_ControlCharacters_ReturnsValidationError
 	if !strings.Contains(ve.Errors[0].Message, "control characters") {
 		t.Fatalf("expected control characters validation error message, got %q", ve.Errors[0].Message)
 	}
-}
 
-func assertBrandingFieldErrorCode(t *testing.T, ve *errors.ValidationErrors, code errors.FieldErrorCode, messageID errors.MessageID) {
+})
+
+func assertBrandingFieldErrorCode(t brandingTestTB, ve *errors.ValidationErrors, code errors.FieldErrorCode, messageID errors.MessageID) {
 	t.Helper()
 	if len(ve.Errors) != 1 {
 		t.Fatalf("validation errors = %#v, want one error", ve.Errors)
@@ -474,7 +506,8 @@ func assertBrandingFieldErrorCode(t *testing.T, ve *errors.ValidationErrors, cod
 	}
 }
 
-func TestBrandingService_UpdateBranding_ValidSpecialCharacters_Success(t *testing.T) {
+var _ = It("TestBrandingService_UpdateBranding_ValidSpecialCharacters_Success", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Test with common special characters that should be allowed
@@ -492,9 +525,11 @@ func TestBrandingService_UpdateBranding_ValidSpecialCharacters_Success(t *testin
 	if cfg.SiteName != validName {
 		t.Fatalf("expected SiteName %q, got %q", validName, cfg.SiteName)
 	}
-}
 
-func TestBrandingService_UploadLogo_InvalidExtension_ReturnsError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadLogo_InvalidExtension_ReturnsError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	// bytes.Reader implements io.Reader, but UploadLogo expects multipart.File.
@@ -522,9 +557,11 @@ func TestBrandingService_UploadLogo_InvalidExtension_ReturnsError(t *testing.T) 
 	if localized.Code != "branding_logo_invalid_type" {
 		t.Fatalf("code = %q, want %q", localized.Code, "branding_logo_invalid_type")
 	}
-}
 
-func TestBrandingService_UploadFavicon_InvalidExtension_ReturnsError(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadFavicon_InvalidExtension_ReturnsError", func() {
+	t := GinkgoT()
 	svc, _ := newTestBrandingService(t)
 
 	f, err := os.CreateTemp(t.TempDir(), "badfav-*")
@@ -549,9 +586,11 @@ func TestBrandingService_UploadFavicon_InvalidExtension_ReturnsError(t *testing.
 	if localized.Code != "branding_favicon_invalid_type" {
 		t.Fatalf("code = %q, want %q", localized.Code, "branding_favicon_invalid_type")
 	}
-}
 
-func TestBrandingService_UploadLogo_WritesFileAndUpdatesConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadLogo_WritesFileAndUpdatesConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Create a small "image" file (content doesn't matter; size and extension do)
@@ -597,9 +636,11 @@ func TestBrandingService_UploadLogo_WritesFileAndUpdatesConfig(t *testing.T) {
 	if cfg.LogoFile != "logo.png" {
 		t.Fatalf("expected cfg.LogoFile %q, got %q", "logo.png", cfg.LogoFile)
 	}
-}
 
-func TestBrandingService_UploadFavicon_WritesFileAndUpdatesConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadFavicon_WritesFileAndUpdatesConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	content := bytes.Repeat([]byte("b"), 128)
@@ -642,9 +683,11 @@ func TestBrandingService_UploadFavicon_WritesFileAndUpdatesConfig(t *testing.T) 
 	if cfg.FaviconFile != "favicon.ico" {
 		t.Fatalf("expected cfg.FaviconFile %q, got %q", "favicon.ico", cfg.FaviconFile)
 	}
-}
 
-func TestBrandingService_UploadLogo_RemovesOldLogoVariants(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadLogo_RemovesOldLogoVariants", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	assetsDir := filepath.Join(dir, "branding")
@@ -690,9 +733,11 @@ func TestBrandingService_UploadLogo_RemovesOldLogoVariants(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(assetsDir, "logo.webp")); err == nil {
 		t.Fatalf("expected logo.webp to be removed")
 	}
-}
 
-func TestBrandingService_UploadFavicon_RemovesOldFaviconVariants(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadFavicon_RemovesOldFaviconVariants", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	assetsDir := filepath.Join(dir, "branding")
@@ -738,9 +783,11 @@ func TestBrandingService_UploadFavicon_RemovesOldFaviconVariants(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(assetsDir, "favicon.webp")); err == nil {
 		t.Fatalf("expected favicon.webp to be removed")
 	}
-}
 
-func TestBrandingService_UploadLogo_TooLarge_ReturnsErrorAndDoesNotUpdateConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadLogo_TooLarge_ReturnsErrorAndDoesNotUpdateConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Lower max size to make test fast
@@ -778,9 +825,11 @@ func TestBrandingService_UploadLogo_TooLarge_ReturnsErrorAndDoesNotUpdateConfig(
 	if cfg.LogoFile != "" {
 		t.Fatalf("expected LogoFile to remain empty, got %q", cfg.LogoFile)
 	}
-}
 
-func TestBrandingService_UploadFavicon_TooLarge_ReturnsErrorAndDoesNotUpdateConfig(t *testing.T) {
+})
+
+var _ = It("TestBrandingService_UploadFavicon_TooLarge_ReturnsErrorAndDoesNotUpdateConfig", func() {
+	t := GinkgoT()
 	svc, dir := newTestBrandingService(t)
 
 	// Lower max size to make test fast
@@ -816,4 +865,5 @@ func TestBrandingService_UploadFavicon_TooLarge_ReturnsErrorAndDoesNotUpdateConf
 	if cfg.FaviconFile != "" {
 		t.Fatalf("expected FaviconFile to remain empty, got %q", cfg.FaviconFile)
 	}
-}
+
+})

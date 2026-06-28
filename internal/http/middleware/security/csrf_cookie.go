@@ -16,6 +16,8 @@ type CSRFCookie struct {
 	TTL           time.Duration
 }
 
+var csrfRandRead = rand.Read
+
 func NewCSRFCookie(allowInsecure bool, ttl time.Duration) *CSRFCookie {
 	return &CSRFCookie{
 		AllowInsecure: allowInsecure,
@@ -33,7 +35,7 @@ func (c *CSRFCookie) cookieName(secure bool) string {
 
 func (c *CSRFCookie) generateToken() (string, error) {
 	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := csrfRandRead(buf); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil

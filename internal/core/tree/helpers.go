@@ -2,7 +2,6 @@ package tree
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -72,18 +71,18 @@ func EnsurePageIsFolder(storageDir string, route RoutePath) error {
 	dirPath := pageDirectoryDiskPath(storageDir, routeString)
 
 	// Already a folder? Nothing to do.
-	if info, err := os.Stat(dirPath); err == nil && info.IsDir() {
+	if info, err := treeOSStat(dirPath); err == nil && info.IsDir() {
 		return nil
 	}
 
 	// If .md file exists → convert it to folder
-	if _, err := os.Stat(mdPath); err == nil {
-		if err := os.MkdirAll(dirPath, 0755); err != nil {
+	if _, err := treeOSStat(mdPath); err == nil {
+		if err := treeOSMkdirAll(dirPath, 0755); err != nil {
 			return fmt.Errorf("could not create folder: %w", err)
 		}
 
 		newPath := pageIndexDiskPath(storageDir, routeString)
-		if err := os.Rename(mdPath, newPath); err != nil {
+		if err := treeOSRename(mdPath, newPath); err != nil {
 			return fmt.Errorf("could not move file to index.md: %w", err)
 		}
 	}
@@ -99,12 +98,12 @@ func FoldPageFolderIfEmpty(storageDir string, pagePath string) error {
 	indexPath := pageIndexDiskPath(storageDir, pagePath)
 
 	// Only run if it's actually a folder
-	info, err := os.Stat(dirPath)
+	info, err := treeOSStat(dirPath)
 	if err != nil || !info.IsDir() {
 		return nil // nothing to do
 	}
 
-	entries, err := os.ReadDir(dirPath)
+	entries, err := treeOSReadDir(dirPath)
 	if err != nil {
 		return fmt.Errorf("could not read folder: %w", err)
 	}
@@ -115,12 +114,12 @@ func FoldPageFolderIfEmpty(storageDir string, pagePath string) error {
 	}
 
 	// Move index.md → page.md
-	if err := os.Rename(indexPath, mdPath); err != nil {
+	if err := treeOSRename(indexPath, mdPath); err != nil {
 		return fmt.Errorf("could not move index.md to flat file: %w", err)
 	}
 
 	// Remove the now-empty folder
-	if err := os.Remove(dirPath); err != nil {
+	if err := treeOSRemove(dirPath); err != nil {
 		return fmt.Errorf("could not remove folder: %w", err)
 	}
 

@@ -68,9 +68,9 @@ type RefactorApplyInput struct {
 
 // PreviewPageRefactorUseCase computes what would change if a refactor is applied.
 type PreviewPageRefactorUseCase struct {
-	tree                   *tree.TreeService
+	tree                   refactorPreviewTree
 	slug                   *tree.SlugService
-	links                  *links.LinkService
+	refactorLinks          refactorLinkFinder
 	log                    *slog.Logger
 	markdownLinkRootPrefix string
 }
@@ -96,7 +96,11 @@ func NewPreviewPageRefactorUseCaseWithOptions(
 	log *slog.Logger,
 	opts RefactorUseCaseOptions,
 ) *PreviewPageRefactorUseCase {
-	return &PreviewPageRefactorUseCase{tree: t, slug: s, links: l, log: log, markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix}
+	var finder refactorLinkFinder
+	if l != nil {
+		finder = l
+	}
+	return &PreviewPageRefactorUseCase{tree: t, slug: s, refactorLinks: finder, log: log, markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix}
 }
 
 // Execute computes the refactor preview without making changes.
@@ -189,10 +193,10 @@ func (uc *PreviewPageRefactorUseCase) resolveParentRoutePath(parentID tree.PageI
 }
 
 func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, rootKind tree.NodeKind, excludeIDs map[tree.PageID]struct{}) ([]RefactorAffectedPage, int, error) {
-	if uc.links == nil {
+	if uc.refactorLinks == nil {
 		return []RefactorAffectedPage{}, 0, nil
 	}
-	matches, err := uc.links.GetRefactorMatchesForPrefixAndKind(oldPath, rootKind)
+	matches, err := uc.refactorLinks.GetRefactorMatchesForPrefixAndKind(oldPath, rootKind)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -257,9 +261,10 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, r
 
 // ApplyPageRefactorUseCase applies a rename or move with optional link rewriting.
 type ApplyPageRefactorUseCase struct {
-	tree                   *tree.TreeService
+	tree                   refactorApplyTree
 	slug                   *tree.SlugService
 	links                  *links.LinkService
+	refactorLinks          refactorLinkFinder
 	orchestrator           *pagesave.PageSaveOrchestrator
 	log                    *slog.Logger
 	preview                *PreviewPageRefactorUseCase
@@ -283,10 +288,15 @@ func NewApplyPageRefactorUseCaseWithOptions(
 	log *slog.Logger,
 	opts RefactorUseCaseOptions,
 ) *ApplyPageRefactorUseCase {
+	var finder refactorLinkFinder
+	if l != nil {
+		finder = l
+	}
 	uc := &ApplyPageRefactorUseCase{
 		tree:                   t,
 		slug:                   s,
 		links:                  l,
+		refactorLinks:          finder,
 		log:                    log,
 		markdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
 		preview:                NewPreviewPageRefactorUseCaseWithOptions(t, s, l, log, opts),
@@ -355,9 +365,8 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 
 	o := uc.pageOrchestrator()
 
-	switch in.Kind {
-	case RefactorKindRename:
-		updateUC := NewUpdatePageUseCase(uc.tree, uc.slug, o, uc.log)
+	if in.Kind == RefactorKindRename {
+		updateUC := &UpdatePageUseCase{tree: uc.tree, slug: uc.slug, orchestrator: o, log: uc.log}
 		updated, err := updateUC.Execute(ctx, UpdatePageInput{
 			UserID:  in.UserID,
 			Source:  in.Source,
@@ -378,27 +387,23 @@ func (uc *ApplyPageRefactorUseCase) Execute(ctx context.Context, in RefactorAppl
 			return nil, err
 		}
 		return uc.tree.GetPage(updated.Page.ID)
-
-	case RefactorKindMove:
-		var parentID tree.PageID
-		if in.NewParentID != nil {
-			parentID = *in.NewParentID
-		}
-		moveUC := NewMovePageUseCase(uc.tree, o, uc.log)
-		if err := moveUC.Execute(ctx, MovePageInput{UserID: in.UserID, Source: in.Source, ID: in.PageID, Version: in.Version, ParentID: parentID}); err != nil {
-			return nil, err
-		}
-		if err := uc.rewriteIncomingLinks(in, plan); err != nil {
-			return nil, err
-		}
-		if err := uc.rewritePathChangedSubtree(in.UserID, in.Source, snapshots, plan.oldPath, plan.newPath); err != nil {
-			return nil, err
-		}
-		return uc.tree.GetPage(in.PageID)
-
-	default:
-		return nil, sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRefactorKind, nil)
 	}
+
+	var moveParentID tree.PageID
+	if in.NewParentID != nil {
+		moveParentID = *in.NewParentID
+	}
+	moveUC := &MovePageUseCase{tree: uc.tree, orchestrator: o, log: uc.log}
+	if err := moveUC.Execute(ctx, MovePageInput{UserID: in.UserID, Source: in.Source, ID: in.PageID, Version: in.Version, ParentID: moveParentID}); err != nil {
+		return nil, err
+	}
+	if err := uc.rewriteIncomingLinks(in, plan); err != nil {
+		return nil, err
+	}
+	if err := uc.rewritePathChangedSubtree(in.UserID, in.Source, snapshots, plan.oldPath, plan.newPath); err != nil {
+		return nil, err
+	}
+	return uc.tree.GetPage(in.PageID)
 }
 
 func (uc *ApplyPageRefactorUseCase) defaultOrchestrator() *pagesave.PageSaveOrchestrator {
@@ -449,11 +454,11 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 		newPath: newRoutePath,
 	}
 
-	if !in.RewriteLinks || uc.links == nil {
+	if !in.RewriteLinks || uc.refactorLinks == nil {
 		return plan, nil
 	}
 
-	matches, err := uc.links.GetRefactorMatchesForPrefixAndKind(oldPath, page.Kind)
+	matches, err := uc.refactorLinks.GetRefactorMatchesForPrefixAndKind(oldPath, page.Kind)
 	if err != nil {
 		return nil, err
 	}

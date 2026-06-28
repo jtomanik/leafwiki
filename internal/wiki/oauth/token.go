@@ -7,7 +7,7 @@ import (
 )
 
 func (r *Routes) handleToken(c *gin.Context) {
-	request, err := r.service.fositeProvider.NewAccessRequest(c.Request.Context(), c.Request, newFositeSession("", ""))
+	request, err := oauthNewAccessRequest(r.service.fositeProvider, c.Request.Context(), c.Request, newFositeSession("", ""))
 	if err != nil {
 		writeTokenError(c, err)
 		return
@@ -16,7 +16,7 @@ func (r *Routes) handleToken(c *gin.Context) {
 		writeTokenError(c, err)
 		return
 	}
-	response, err := r.service.fositeProvider.NewAccessResponse(c.Request.Context(), request)
+	response, err := oauthNewAccessResponse(r.service.fositeProvider, c.Request.Context(), request)
 	if err != nil {
 		writeTokenError(c, err)
 		return

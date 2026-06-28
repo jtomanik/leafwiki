@@ -26,7 +26,7 @@ type CreatePageOutput struct {
 
 // CreatePageUseCase creates a new page in the tree and fires post-save side effects.
 type CreatePageUseCase struct {
-	tree         *tree.TreeService
+	tree         createPageTree
 	slug         *tree.SlugService
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger

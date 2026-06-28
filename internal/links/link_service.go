@@ -52,12 +52,10 @@ func (b *LinkService) IndexAllPages() error {
 	}
 
 	var ids []tree.PageID
-	if err := b.treeService.WalkNodes(func(id tree.PageID) error {
+	_ = b.treeService.WalkNodes(func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
-	}); err != nil {
-		return err
-	}
+	})
 
 	pages, errs := b.treeService.GetPages(ids)
 	markdownIndex := b.markdownLinkIndexForTree()

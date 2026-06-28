@@ -24,88 +24,96 @@ const (
 
 func (r *Routes) registerPartialEditTools(server *sdkmcp.Server) {
 	addEditorTool[updatePageMetadataInput, partialEditOutput](r, server, toolUpdatePageMetadata, func(ctx context.Context, actor toolActor, in updatePageMetadataInput) (partialEditOutput, error) {
-		page, err := r.resolveValidationPage(ctx, validatePageInput{PageID: in.PageID, Path: in.Path})
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		if err := partialEditVersionPreflight(tree.PageVersionFromString(strings.TrimSpace(in.Version)), page); err != nil {
-			return partialEditOutput{}, err
-		}
-		raw, err := r.treeService.ReadPageRaw(page.ID)
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		currentTags, currentProperties := pages.ExtractPageMetadataFromPageMetadata(doc.Metadata)
-		tags, properties, err := pages.ApplyMetadataPatch(currentTags, currentProperties, pages.MetadataPatch{
-			SetTags:          in.SetTags,
-			AddTags:          in.AddTags,
-			RemoveTags:       in.RemoveTags,
-			SetProperties:    in.SetProperties,
-			RemoveProperties: in.RemoveProperties,
-		})
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		combined, err := pages.BuildMarkdownWithPublicMetadataPatch(raw, page.ID, page.Title, pages.PublicMetadataPatch{
-			Tags:              tags,
-			TagsPresent:       true,
-			Properties:        properties,
-			PropertiesPresent: true,
-		}, doc.Body)
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		kind := tree.NodeKindPage
-		out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-			UserID:     tree.UserIDFromString(actor.ID),
-			Source:     pagesave.PageMutationSourceMCP,
-			ID:         page.ID,
-			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
-			Title:      page.Title,
-			Slug:       page.Slug,
-			Content:    &combined,
-			Kind:       &kind,
-			FromImport: true,
-		})
-		if err != nil {
-			return partialEditOutput{}, partialEditWriteError(err, page)
-		}
-		return r.partialEditOutput(ctx, out.Page, in.IncludePage, in.IncludeValidation, in.IncludeLinkStatus)
+		return r.updatePageMetadataTool(ctx, actor, in)
 	})
 
 	addEditorTool[replacePageSectionInput, partialEditOutput](r, server, toolReplacePageSection, func(ctx context.Context, actor toolActor, in replacePageSectionInput) (partialEditOutput, error) {
-		page, err := r.resolveValidationPage(ctx, validatePageInput{PageID: in.PageID, Path: in.Path})
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		if err := partialEditVersionPreflight(tree.PageVersionFromString(strings.TrimSpace(in.Version)), page); err != nil {
-			return partialEditOutput{}, err
-		}
-		content, err := pages.ReplaceMarkdownSection(page.Content, in.HeadingPath, in.Occurrence, in.Content)
-		if err != nil {
-			return partialEditOutput{}, err
-		}
-		kind := tree.NodeKindPage
-		out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-			UserID:     tree.UserIDFromString(actor.ID),
-			Source:     pagesave.PageMutationSourceMCP,
-			ID:         page.ID,
-			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
-			Title:      page.Title,
-			Slug:       page.Slug,
-			Content:    &content,
-			Kind:       &kind,
-			FromImport: false,
-		})
-		if err != nil {
-			return partialEditOutput{}, partialEditWriteError(err, page)
-		}
-		return r.partialEditOutput(ctx, out.Page, in.IncludePage, in.IncludeValidation, in.IncludeLinkStatus)
+		return r.replacePageSectionTool(ctx, actor, in)
 	})
+}
+
+func (r *Routes) updatePageMetadataTool(ctx context.Context, actor toolActor, in updatePageMetadataInput) (partialEditOutput, error) {
+	page, err := r.resolveValidationPage(ctx, validatePageInput{PageID: in.PageID, Path: in.Path})
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	if err := partialEditVersionPreflight(tree.PageVersionFromString(strings.TrimSpace(in.Version)), page); err != nil {
+		return partialEditOutput{}, err
+	}
+	raw, err := r.treeService.ReadPageRaw(page.ID)
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	doc, _, err := markdown.ParsePageDocument(raw)
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	currentTags, currentProperties := pages.ExtractPageMetadataFromPageMetadata(doc.Metadata)
+	tags, properties, err := pages.ApplyMetadataPatch(currentTags, currentProperties, pages.MetadataPatch{
+		SetTags:          in.SetTags,
+		AddTags:          in.AddTags,
+		RemoveTags:       in.RemoveTags,
+		SetProperties:    in.SetProperties,
+		RemoveProperties: in.RemoveProperties,
+	})
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	combined, err := buildMarkdownWithPublicMetadataPatch(raw, page.ID, page.Title, pages.PublicMetadataPatch{
+		Tags:              tags,
+		TagsPresent:       true,
+		Properties:        properties,
+		PropertiesPresent: true,
+	}, doc.Body)
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	kind := tree.NodeKindPage
+	out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
+		UserID:     tree.UserIDFromString(actor.ID),
+		Source:     pagesave.PageMutationSourceMCP,
+		ID:         page.ID,
+		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
+		Title:      page.Title,
+		Slug:       page.Slug,
+		Content:    &combined,
+		Kind:       &kind,
+		FromImport: true,
+	})
+	if err != nil {
+		return partialEditOutput{}, partialEditWriteError(err, page)
+	}
+	return r.partialEditOutput(ctx, out.Page, in.IncludePage, in.IncludeValidation, in.IncludeLinkStatus)
+}
+
+func (r *Routes) replacePageSectionTool(ctx context.Context, actor toolActor, in replacePageSectionInput) (partialEditOutput, error) {
+	page, err := r.resolveValidationPage(ctx, validatePageInput{PageID: in.PageID, Path: in.Path})
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	if err := partialEditVersionPreflight(tree.PageVersionFromString(strings.TrimSpace(in.Version)), page); err != nil {
+		return partialEditOutput{}, err
+	}
+	content, err := pages.ReplaceMarkdownSection(page.Content, in.HeadingPath, in.Occurrence, in.Content)
+	if err != nil {
+		return partialEditOutput{}, err
+	}
+	kind := tree.NodeKindPage
+	out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
+		UserID:     tree.UserIDFromString(actor.ID),
+		Source:     pagesave.PageMutationSourceMCP,
+		ID:         page.ID,
+		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
+		Title:      page.Title,
+		Slug:       page.Slug,
+		Content:    &content,
+		Kind:       &kind,
+		FromImport: false,
+	})
+	if err != nil {
+		return partialEditOutput{}, partialEditWriteError(err, page)
+	}
+	return r.partialEditOutput(ctx, out.Page, in.IncludePage, in.IncludeValidation, in.IncludeLinkStatus)
 }
 
 func partialEditVersionPreflight(requested tree.PageVersion, page *tree.Page) error {

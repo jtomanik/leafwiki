@@ -5,256 +5,428 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"testing"
+	"os"
+	"strings"
+	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
-func setupUpdateUserUseCase(t *testing.T) (*UpdateUserUseCase, *coreauth.UserService) {
-	t.Helper()
-	store, err := coreauth.NewUserStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewUserStore: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
-	})
-
-	userSvc := coreauth.NewUserService(store)
+func setupUpdateUserUseCase() (*UpdateUserUseCase, *coreauth.UserService) {
+	userSvc := setupUserService()
 	resolver, err := coreauth.NewUserResolver(userSvc)
-	if err != nil {
-		t.Fatalf("NewUserResolver: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return NewUpdateUserUseCase(userSvc, resolver, slog.Default()), userSvc
 }
 
-func TestUpdateUser_AdminCanChangeRole(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
-
-	viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-
-	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(viewer.ID),
-		Username:         viewer.Username,
-		Email:            viewer.Email,
-		Role:             coreauth.RoleAdmin,
-		RequesterIsAdmin: true,
+func setupUserService() *coreauth.UserService {
+	store, err := coreauth.NewUserStore(ginkgo.GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(func() {
+		Expect(store.Close()).To(Succeed())
 	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if out.User.Role != coreauth.RoleAdmin {
-		t.Errorf("expected role %q, got %q", coreauth.RoleAdmin, out.User.Role)
-	}
+	return coreauth.NewUserService(store)
 }
 
-func TestUpdateUser_AdminCanUpdateProfileWithoutRole(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
+func setupUserServiceWithUnusableStorageDir() *coreauth.UserService {
+	storageDir := ginkgo.GinkgoT().TempDir()
+	store, err := coreauth.NewUserStore(storageDir)
+	Expect(err).NotTo(HaveOccurred())
+	service := coreauth.NewUserService(store)
 
-	editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	Expect(service.Close()).To(Succeed())
+	Expect(os.RemoveAll(storageDir)).To(Succeed())
+	Expect(os.WriteFile(storageDir, []byte("not a directory"), 0o600)).To(Succeed())
 
-	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(editor.ID),
-		Username:         "ed-admin-updated",
-		Email:            "ed-admin-updated@example.com",
-		Role:             "",
-		RequesterIsAdmin: true,
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if out.User.Username != "ed-admin-updated" {
-		t.Errorf("expected username %q, got %q", "ed-admin-updated", out.User.Username)
-	}
-	if out.User.Email != "ed-admin-updated@example.com" {
-		t.Errorf("expected email %q, got %q", "ed-admin-updated@example.com", out.User.Email)
-	}
-	if out.User.Role != coreauth.RoleEditor {
-		t.Errorf("expected role %q, got %q", coreauth.RoleEditor, out.User.Role)
-	}
+	return service
 }
 
-func TestUpdateUser_NonAdminCannotEscalateRole(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
-
-	viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-
-	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(viewer.ID),
-		Username:         viewer.Username,
-		Email:            viewer.Email,
-		Role:             coreauth.RoleAdmin,
-		RequesterIsAdmin: false,
+func setupAPIKeyService(userSvc *coreauth.UserService) *coreauth.APIKeyService {
+	store, err := coreauth.NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(func() {
+		Expect(store.Close()).To(Succeed())
 	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if out.User.Role != coreauth.RoleViewer {
-		t.Errorf("role escalation succeeded: expected %q, got %q", coreauth.RoleViewer, out.User.Role)
-	}
+	return coreauth.NewAPIKeyService(store, userSvc)
 }
 
-func TestUpdateUser_NonAdminCanUpdateOwnProfile(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
+var _ = ginkgo.Describe("auth use cases", func() {
+	ginkgo.It("TestUpdateUser_AdminCanChangeRole", func() {
+		uc, svc := setupUpdateUserUseCase()
 
-	editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+		viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
 
-	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(editor.ID),
-		Username:         "ed-updated",
-		Email:            "ed-updated@example.com",
-		Role:             coreauth.RoleAdmin,
-		RequesterIsAdmin: false,
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if out.User.Username != "ed-updated" {
-		t.Errorf("expected username %q, got %q", "ed-updated", out.User.Username)
-	}
-	if out.User.Email != "ed-updated@example.com" {
-		t.Errorf("expected email %q, got %q", "ed-updated@example.com", out.User.Email)
-	}
-	if out.User.Role != coreauth.RoleEditor {
-		t.Errorf("role must not change: expected %q, got %q", coreauth.RoleEditor, out.User.Role)
-	}
-}
-
-func TestUpdateUser_LastAdminCannotSelfDemote(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
-
-	admin, err := svc.CreateUser("admin", "admin@example.com", "pass", coreauth.RoleAdmin)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-
-	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(admin.ID),
-		Username:         admin.Username,
-		Email:            admin.Email,
-		Role:             coreauth.RoleViewer,
-		RequesterIsAdmin: true,
-	})
-	if !errors.Is(err, coreauth.ErrLastAdminCannotBeDemoted) {
-		t.Errorf("expected ErrLastAdminCannotBeDemoted, got: %v", err)
-	}
-}
-
-func TestUpdateUser_AdminCanBeDemotedWhenAnotherExists(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
-
-	admin1, err := svc.CreateUser("admin1", "admin1@example.com", "pass", coreauth.RoleAdmin)
-	if err != nil {
-		t.Fatalf("CreateUser admin1: %v", err)
-	}
-	if _, err := svc.CreateUser("admin2", "admin2@example.com", "pass", coreauth.RoleAdmin); err != nil {
-		t.Fatalf("CreateUser admin2: %v", err)
-	}
-
-	out, err := uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(admin1.ID),
-		Username:         admin1.Username,
-		Email:            admin1.Email,
-		Role:             coreauth.RoleViewer,
-		RequesterIsAdmin: true,
-	})
-	if err != nil {
-		t.Fatalf("expected demotion to succeed, got: %v", err)
-	}
-	if out.User.Role != coreauth.RoleViewer {
-		t.Errorf("expected role %q, got %q", coreauth.RoleViewer, out.User.Role)
-	}
-}
-
-func TestUpdateUser_AdminInvalidRole(t *testing.T) {
-	uc, svc := setupUpdateUserUseCase(t)
-
-	user, err := svc.CreateUser("alice", "alice@example.com", "pass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-
-	_, err = uc.Execute(context.Background(), UpdateUserInput{
-		ID:               newFixtureUserID(user.ID),
-		Username:         user.Username,
-		Email:            user.Email,
-		Role:             "superuser",
-		RequesterIsAdmin: true,
-	})
-	if err == nil {
-		t.Fatal("expected validation error for invalid role, got nil")
-	}
-}
-
-func TestCreateUserUseCaseValidationReturnsStableFieldCodes(t *testing.T) {
-	uc := NewCreateUserUseCase(nil, nil, slog.Default())
-
-	_, err := uc.Execute(context.Background(), CreateUserInput{
-		Email:    "not-an-email",
-		Password: "short",
-		Role:     "invalid",
+		out, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(viewer.ID),
+			Username:         viewer.Username,
+			Email:            viewer.Email,
+			Role:             coreauth.RoleAdmin,
+			RequesterIsAdmin: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.User.Role).To(Equal(coreauth.RoleAdmin))
 	})
 
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("error = %T %v, want ValidationErrors", err, err)
-	}
-	assertAuthFieldErrorCode(t, ve, "username", "auth_username_required", "validation.auth.username_required")
-	assertAuthFieldErrorCode(t, ve, "email", "auth_email_invalid", "validation.auth.email_invalid")
-	assertAuthFieldErrorCode(t, ve, "password", "auth_password_too_short", "validation.auth.password_too_short")
-	assertAuthFieldErrorCode(t, ve, "role", "auth_role_invalid", "validation.auth.role_invalid")
-}
+	ginkgo.It("TestUpdateUser_AdminCanUpdateProfileWithoutRole", func() {
+		uc, svc := setupUpdateUserUseCase()
 
-func TestCreateAPIKeyUseCaseValidationReturnsStableFieldCodes(t *testing.T) {
-	uc := NewCreateAPIKeyUseCase(nil, nil)
+		editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
 
-	_, err := uc.Execute(context.Background(), CreateAPIKeyInput{Name: ""})
+		out, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(editor.ID),
+			Username:         "ed-admin-updated",
+			Email:            "ed-admin-updated@example.com",
+			Role:             "",
+			RequesterIsAdmin: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.User.Username).To(Equal("ed-admin-updated"))
+		Expect(out.User.Email).To(Equal("ed-admin-updated@example.com"))
+		Expect(out.User.Role).To(Equal(coreauth.RoleEditor))
+	})
 
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("error = %T %v, want ValidationErrors", err, err)
-	}
-	assertAuthFieldErrorCode(t, ve, "name", "auth_api_key_name_required", "validation.auth.api_key_name_required")
-}
+	ginkgo.It("TestUpdateUser_NonAdminCannotEscalateRole", func() {
+		uc, svc := setupUpdateUserUseCase()
 
-func TestAPIKeyUseCaseInputsUseSemanticIDs(t *testing.T) {
-	_ = GetUserByIDInput{ID: newFixtureUserID("user-1")}
-	_ = CreateAPIKeyInput{
-		UserID:          newFixtureUserID("user-1"),
-		CreatedByUserID: newFixtureUserID("admin-1"),
-	}
-	_ = ListAPIKeysInput{UserID: newFixtureUserID("user-1")}
-	_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
-}
+		viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
 
-func assertAuthFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
-	t.Helper()
+		out, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(viewer.ID),
+			Username:         viewer.Username,
+			Email:            viewer.Email,
+			Role:             coreauth.RoleAdmin,
+			RequesterIsAdmin: false,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.User.Role).To(Equal(coreauth.RoleViewer))
+	})
+
+	ginkgo.It("TestUpdateUser_NonAdminCanUpdateOwnProfile", func() {
+		uc, svc := setupUpdateUserUseCase()
+
+		editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+
+		out, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(editor.ID),
+			Username:         "ed-updated",
+			Email:            "ed-updated@example.com",
+			Role:             coreauth.RoleAdmin,
+			RequesterIsAdmin: false,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.User.Username).To(Equal("ed-updated"))
+		Expect(out.User.Email).To(Equal("ed-updated@example.com"))
+		Expect(out.User.Role).To(Equal(coreauth.RoleEditor))
+	})
+
+	ginkgo.It("TestUpdateUser_LastAdminCannotSelfDemote", func() {
+		uc, svc := setupUpdateUserUseCase()
+
+		admin, err := svc.CreateUser("admin", "admin@example.com", "pass", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(admin.ID),
+			Username:         admin.Username,
+			Email:            admin.Email,
+			Role:             coreauth.RoleViewer,
+			RequesterIsAdmin: true,
+		})
+		Expect(err).To(MatchError(coreauth.ErrLastAdminCannotBeDemoted))
+	})
+
+	ginkgo.It("TestUpdateUser_AdminCanBeDemotedWhenAnotherExists", func() {
+		uc, svc := setupUpdateUserUseCase()
+
+		admin1, err := svc.CreateUser("admin1", "admin1@example.com", "pass", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = svc.CreateUser("admin2", "admin2@example.com", "pass", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+
+		out, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(admin1.ID),
+			Username:         admin1.Username,
+			Email:            admin1.Email,
+			Role:             coreauth.RoleViewer,
+			RequesterIsAdmin: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.User.Role).To(Equal(coreauth.RoleViewer))
+	})
+
+	ginkgo.It("TestUpdateUser_AdminInvalidRole", func() {
+		uc, svc := setupUpdateUserUseCase()
+
+		user, err := svc.CreateUser("alice", "alice@example.com", "pass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = uc.Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(user.ID),
+			Username:         user.Username,
+			Email:            user.Email,
+			Role:             "superuser",
+			RequesterIsAdmin: true,
+		})
+		Expect(err).To(HaveOccurred())
+	})
+
+	ginkgo.It("TestCreateUserUseCaseValidationReturnsStableFieldCodes", func() {
+		uc := NewCreateUserUseCase(nil, nil, slog.Default())
+
+		_, err := uc.Execute(context.Background(), CreateUserInput{
+			Email:    "not-an-email",
+			Password: "short",
+			Role:     "invalid",
+		})
+
+		var ve *sharederrors.ValidationErrors
+		Expect(errors.As(err, &ve)).To(BeTrue(), "error = %T %v, want ValidationErrors", err, err)
+		expectAuthFieldErrorCode(ve, "username", "auth_username_required", "validation.auth.username_required")
+		expectAuthFieldErrorCode(ve, "email", "auth_email_invalid", "validation.auth.email_invalid")
+		expectAuthFieldErrorCode(ve, "password", "auth_password_too_short", "validation.auth.password_too_short")
+		expectAuthFieldErrorCode(ve, "role", "auth_role_invalid", "validation.auth.role_invalid")
+	})
+
+	ginkgo.It("TestCreateAPIKeyUseCaseValidationReturnsStableFieldCodes", func() {
+		uc := NewCreateAPIKeyUseCase(nil, nil)
+
+		_, err := uc.Execute(context.Background(), CreateAPIKeyInput{Name: ""})
+
+		var ve *sharederrors.ValidationErrors
+		Expect(errors.As(err, &ve)).To(BeTrue(), "error = %T %v, want ValidationErrors", err, err)
+		expectAuthFieldErrorCode(ve, "name", "auth_api_key_name_required", "validation.auth.api_key_name_required")
+	})
+
+	ginkgo.It("TestAPIKeyUseCaseInputsUseSemanticIDs", func() {
+		_ = GetUserByIDInput{ID: newFixtureUserID("user-1")}
+		_ = CreateAPIKeyInput{
+			UserID:          newFixtureUserID("user-1"),
+			CreatedByUserID: newFixtureUserID("admin-1"),
+		}
+		_ = ListAPIKeysInput{UserID: newFixtureUserID("user-1")}
+		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
+	})
+
+	ginkgo.It("LoginUseCase, LogoutUseCase, and RefreshTokenUseCase return ErrAuthDisabled without an auth service", func() {
+		_, err := NewLoginUseCase(nil).Execute(context.Background(), LoginInput{Identifier: "admin", Password: "password"})
+		Expect(err).To(MatchError(ErrAuthDisabled))
+
+		err = NewLogoutUseCase(nil).Execute(context.Background(), LogoutInput{RefreshToken: "refresh"})
+		Expect(err).To(MatchError(ErrAuthDisabled))
+
+		_, err = NewRefreshTokenUseCase(nil).Execute(context.Background(), RefreshTokenInput{RefreshToken: "refresh"})
+		Expect(err).To(MatchError(ErrAuthDisabled))
+	})
+
+	ginkgo.It("GetUsersUseCase and GetUserByIDUseCase return public users", func() {
+		userSvc := setupUserService()
+		admin, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+		viewer, err := userSvc.CreateUser("viewer", "viewer@example.com", "password123", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+
+		usersOut, err := NewGetUsersUseCase(userSvc).Execute(context.Background())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(usersOut.Users).To(ConsistOf(
+			SatisfyAll(HaveField("ID", admin.ID), HaveField("Username", "admin"), HaveField("Role", coreauth.RoleAdmin)),
+			SatisfyAll(HaveField("ID", viewer.ID), HaveField("Username", "viewer"), HaveField("Role", coreauth.RoleViewer)),
+		))
+
+		userOut, err := NewGetUserByIDUseCase(userSvc).Execute(context.Background(), GetUserByIDInput{ID: newFixtureUserID(viewer.ID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(userOut.User.ID).To(Equal(viewer.ID))
+		Expect(userOut.User.Username).To(Equal("viewer"))
+	})
+
+	ginkgo.It("GetUsersUseCase returns storage errors", func() {
+		userSvc := setupUserServiceWithUnusableStorageDir()
+
+		_, err := NewGetUsersUseCase(userSvc).Execute(context.Background())
+
+		Expect(err).To(HaveOccurred())
+	})
+
+	ginkgo.It("ChangeOwnPasswordUseCase validates the old password and updates a matching user password", func() {
+		userSvc := setupUserService()
+		user, err := userSvc.CreateUser("alice", "alice@example.com", "old-password", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		uc := NewChangeOwnPasswordUseCase(userSvc)
+
+		err = uc.Execute(context.Background(), ChangeOwnPasswordInput{
+			UserID:      newFixtureUserID(user.ID),
+			OldPassword: "wrong-password",
+			NewPassword: "new-password",
+		})
+		var ve *sharederrors.ValidationErrors
+		Expect(errors.As(err, &ve)).To(BeTrue())
+		expectAuthFieldErrorCode(ve, "oldPassword", "auth_old_password_incorrect", "validation.auth.old_password_incorrect")
+
+		err = uc.Execute(context.Background(), ChangeOwnPasswordInput{
+			UserID:      newFixtureUserID(user.ID),
+			OldPassword: "old-password",
+			NewPassword: "new-password",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = userSvc.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "old-password")
+		Expect(err).To(MatchError(coreauth.ErrUserInvalidCredentials))
+		_, err = userSvc.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "new-password")
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	ginkgo.It("user mutation use cases continue when resolver reload only logs a warning", func() {
+		userSvc := setupUserService()
+		resolver := failingUserResolverReloader{err: errors.New("reload failed")}
+
+		createOut, err := (&CreateUserUseCase{
+			user:     userSvc,
+			resolver: resolver,
+			log:      slog.Default(),
+		}).Execute(context.Background(), CreateUserInput{
+			Username: "reload-user",
+			Email:    "reload@example.com",
+			Password: "password123",
+			Role:     coreauth.RoleEditor,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(createOut.User.Username).To(Equal("reload-user"))
+
+		updateOut, err := (&UpdateUserUseCase{
+			user:     userSvc,
+			resolver: resolver,
+			log:      slog.Default(),
+		}).Execute(context.Background(), UpdateUserInput{
+			ID:               newFixtureUserID(createOut.User.ID),
+			Username:         "reload-user-updated",
+			Email:            "reload-updated@example.com",
+			Role:             coreauth.RoleViewer,
+			RequesterIsAdmin: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(updateOut.User.Username).To(Equal("reload-user-updated"))
+		Expect(updateOut.User.Role).To(Equal(coreauth.RoleViewer))
+
+		err = (&DeleteUserUseCase{
+			user:     userSvc,
+			resolver: resolver,
+			log:      slog.Default(),
+		}).Execute(context.Background(), DeleteUserInput{ID: newFixtureUserID(createOut.User.ID)})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = userSvc.GetUserByID(newFixtureUserID(createOut.User.ID))
+		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
+	})
+
+	ginkgo.It("CreateAPIKeyUseCase validates current password when required", func() {
+		userSvc := setupUserService()
+		apiKeys := setupAPIKeyService(userSvc)
+		user, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+		uc := NewCreateAPIKeyUseCase(apiKeys, userSvc)
+
+		_, err = uc.Execute(context.Background(), CreateAPIKeyInput{
+			UserID:                 newFixtureUserID(user.ID),
+			Name:                   "key",
+			CreatedByUserID:        newFixtureUserID(user.ID),
+			CurrentPassword:        "wrong",
+			RequireCurrentPassword: true,
+		})
+		var ve *sharederrors.ValidationErrors
+		Expect(errors.As(err, &ve)).To(BeTrue())
+		expectAuthFieldErrorCode(ve, "currentPassword", "auth_current_password_incorrect", "validation.auth.current_password_incorrect")
+
+		out, err := uc.Execute(context.Background(), CreateAPIKeyInput{
+			UserID:                 newFixtureUserID(user.ID),
+			Name:                   " key ",
+			CreatedByUserID:        newFixtureUserID(user.ID),
+			CurrentPassword:        "password123",
+			RequireCurrentPassword: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.Secret).To(HavePrefix(coreauth.APIKeyPrefix))
+		Expect(out.Key.Name).To(Equal("key"))
+	})
+
+	ginkgo.It("ListAPIKeysUseCase and RevokeAPIKeyUseCase round-trip active keys", func() {
+		userSvc := setupUserService()
+		apiKeys := setupAPIKeyService(userSvc)
+		user, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+		created, err := apiKeys.CreateAPIKey(newFixtureUserID(user.ID), "key", newFixtureUserID(user.ID))
+		Expect(err).NotTo(HaveOccurred())
+
+		listed, err := NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: newFixtureUserID(user.ID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed.Keys).To(HaveLen(1))
+		Expect(listed.Keys[0].ID).To(Equal(created.Key.ID))
+
+		err = NewRevokeAPIKeyUseCase(apiKeys).Execute(context.Background(), RevokeAPIKeyInput{
+			UserID: newFixtureUserID(user.ID),
+			KeyID:  created.Key.ID,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		listed, err = NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: newFixtureUserID(user.ID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listed.Keys).To(BeEmpty())
+	})
+
+	ginkgo.It("auth error helpers map localized codes and success messages", func() {
+		Expect(authErrorStatus(ErrCodeAuthUserNotFound)).To(Equal(404))
+		Expect(authErrorStatus(ErrCodeAuthForbidden)).To(Equal(403))
+		Expect(authErrorStatus("unknown")).To(Equal(500))
+		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
+	})
+
+	ginkgo.It("LoginUseCase, RefreshTokenUseCase, and LogoutUseCase delegate to AuthService", func() {
+		userSvc := setupUserService()
+		sessionStore, err := coreauth.NewSessionStore(ginkgo.GinkgoT().TempDir())
+		Expect(err).NotTo(HaveOccurred())
+		ginkgo.DeferCleanup(func() {
+			Expect(sessionStore.Close()).To(Succeed())
+		})
+		_, err = userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
+		Expect(err).NotTo(HaveOccurred())
+		authSvc := coreauth.NewAuthService(userSvc, sessionStore, strings.Repeat("s", 32), time.Minute, time.Hour)
+
+		loginOut, err := NewLoginUseCase(authSvc).Execute(context.Background(), LoginInput{
+			Identifier: "admin",
+			Password:   "password123",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loginOut.Token.User.Username).To(Equal("admin"))
+
+		refreshOut, err := NewRefreshTokenUseCase(authSvc).Execute(context.Background(), RefreshTokenInput{RefreshToken: loginOut.Token.RefreshToken})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(refreshOut.Token.User.Username).To(Equal("admin"))
+
+		err = NewLogoutUseCase(authSvc).Execute(context.Background(), LogoutInput{RefreshToken: refreshOut.Token.RefreshToken})
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+func expectAuthFieldErrorCode(ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	for _, got := range ve.Errors {
 		if got.Field != field {
 			continue
 		}
-		if fmt.Sprintf("%s", got.Code) != code {
-			t.Fatalf("%s code = %q, want %q", field, got.Code, code)
-		}
-		if fmt.Sprintf("%s", got.MessageID) != messageID {
-			t.Fatalf("%s messageId = %q, want %q", field, got.MessageID, messageID)
-		}
+		Expect(fmt.Sprintf("%s", got.Code)).To(Equal(code))
+		Expect(fmt.Sprintf("%s", got.MessageID)).To(Equal(messageID))
 		return
 	}
-	t.Fatalf("field %q not found in %#v", field, ve.Errors)
+	ginkgo.Fail(fmt.Sprintf("field %q not found in %#v", field, ve.Errors))
+}
+
+type failingUserResolverReloader struct {
+	err error
+}
+
+func (r failingUserResolverReloader) Reload() error {
+	return r.err
 }

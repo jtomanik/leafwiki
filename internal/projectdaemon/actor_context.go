@@ -12,6 +12,8 @@ import (
 
 const ActorContextIssuerWikid = "wikid"
 
+var marshalActorContextJSON = json.Marshal
+
 type ActorContext struct {
 	Version     int                     `json:"version"`
 	Issuer      string                  `json:"issuer"`
@@ -48,7 +50,7 @@ type actorContextWire struct {
 }
 
 func EncodeActorContext(ctx ActorContext) (string, error) {
-	raw, err := json.Marshal(ctx)
+	raw, err := marshalActorContextJSON(ctx)
 	if err != nil {
 		return "", err
 	}

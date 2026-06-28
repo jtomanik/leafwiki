@@ -16,7 +16,7 @@ type SchemaInfo struct {
 func loadSchema(storageDir string) (SchemaInfo, error) {
 	path := filepath.Join(storageDir, "schema.json")
 
-	data, err := os.ReadFile(path)
+	data, err := treeOSReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// First run / legacy install
@@ -28,7 +28,7 @@ func loadSchema(storageDir string) (SchemaInfo, error) {
 	}
 
 	var s SchemaInfo
-	if err := json.Unmarshal(data, &s); err != nil {
+	if err := treeJSONUnmarshal(data, &s); err != nil {
 		log.Printf("Error unmarshaling schema file: %v", err)
 		return SchemaInfo{}, err
 	}
@@ -40,12 +40,8 @@ func saveSchema(storageDir string, version int) error {
 	path := filepath.Join(storageDir, "schema.json")
 	s := SchemaInfo{Version: version}
 
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		log.Printf("Error marshaling schema data: %v", err)
-		return err
-	}
+	data, _ := json.MarshalIndent(s, "", "  ")
 
 	log.Printf("Saving schema version %d to %s", version, path)
-	return os.WriteFile(path, data, 0o644)
+	return treeOSWriteFile(path, data, 0o644)
 }

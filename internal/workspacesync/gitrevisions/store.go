@@ -2,7 +2,6 @@ package gitrevisions
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -127,26 +126,26 @@ func Open(options StoreOptions) (*Store, error) {
 	}
 	dataDir = filepath.Clean(dataDir)
 	rootDir = filepath.Clean(rootDir)
-	if err := os.MkdirAll(filepath.Join(dataDir, ".leafwiki", "git"), 0o755); err != nil {
+	if err := gitRevisionMkdirAll(filepath.Join(dataDir, ".leafwiki", "git"), 0o755); err != nil {
 		return nil, fmt.Errorf("create internal git dir: %w", err)
 	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+	if err := gitRevisionMkdirAll(rootDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create root dir: %w", err)
 	}
 
 	storage := filesystem.NewStorage(osfs.New(internalGitDir(dataDir), osfs.WithBoundOS()), cache.NewObjectLRUDefault())
 	worktree := osfs.New(rootDir, osfs.WithBoundOS())
-	repo, err := git.Open(storage, worktree)
+	repo, err := gitRevisionGitOpen(storage, worktree)
 	if errors.Is(err, git.ErrRepositoryNotExists) {
-		if _, initErr := git.Init(nonFilesystemInitStorageFor(storage), git.WithWorkTree(worktree)); initErr != nil {
+		if _, initErr := gitRevisionGitInit(nonFilesystemInitStorageFor(storage), git.WithWorkTree(worktree)); initErr != nil {
 			return nil, fmt.Errorf("open internal git repository: %w", initErr)
 		}
-		repo, err = git.Open(storage, worktree)
+		repo, err = gitRevisionGitOpen(storage, worktree)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open internal git repository: %w", err)
 	}
-	if err := removeInternalRootGitFile(rootDir, internalGitDir(dataDir)); err != nil {
+	if err := gitRevisionRemoveInternalRootGitFile(rootDir, internalGitDir(dataDir)); err != nil {
 		return nil, err
 	}
 	return &Store{dataDir: dataDir, rootDir: rootDir, repo: repo}, nil
@@ -175,7 +174,7 @@ func internalGitDir(dataDir string) string {
 
 func removeInternalRootGitFile(rootDir string, internalGitDir string) error {
 	gitPath := filepath.Join(rootDir, ".git")
-	info, err := os.Lstat(gitPath)
+	info, err := gitRevisionLstat(gitPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -185,7 +184,7 @@ func removeInternalRootGitFile(rootDir string, internalGitDir string) error {
 	if info.IsDir() {
 		return nil
 	}
-	raw, err := os.ReadFile(gitPath)
+	raw, err := gitRevisionReadFile(gitPath)
 	if err != nil {
 		return fmt.Errorf("read root .git file: %w", err)
 	}
@@ -193,7 +192,7 @@ func removeInternalRootGitFile(rootDir string, internalGitDir string) error {
 	if !ok || !sameFilesystemPath(target, internalGitDir) {
 		return nil
 	}
-	if err := os.Remove(gitPath); err != nil {
+	if err := gitRevisionRemove(gitPath); err != nil {
 		return fmt.Errorf("remove root .git file: %w", err)
 	}
 	return nil
@@ -216,8 +215,8 @@ func parseGitDirFile(raw string, rootDir string) (string, bool) {
 }
 
 func sameFilesystemPath(a string, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
+	absA, errA := gitRevisionAbs(a)
+	absB, errB := gitRevisionAbs(b)
 	if errA == nil {
 		a = absA
 	}
@@ -239,11 +238,11 @@ func (s *Store) commit(ctx context.Context, req CommitRequest, amend bool) (*Com
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	wt, err := s.repo.Worktree()
+	wt, err := gitRevisionRepoWorktree(s.repo)
 	if err != nil {
 		return nil, err
 	}
-	changedMarkdownPaths, err := s.stageMarkdownChanges(ctx, wt)
+	changedMarkdownPaths, err := gitRevisionStoreStageMarkdownChanges(s, ctx, wt)
 	if err != nil {
 		return nil, err
 	}
@@ -255,15 +254,15 @@ func (s *Store) commit(ctx context.Context, req CommitRequest, amend bool) (*Com
 	if batchID == "" {
 		batchID = newBatchID()
 	}
-	hash, err := wt.Commit(commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
+	hash, err := gitRevisionWorktreeCommit(wt, commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
 		Author:    signature(req.Actor),
 		Committer: leafWikiCommitter(),
 		Amend:     amend,
 	})
 	if errors.Is(err, git.ErrEmptyCommit) {
-		head, headErr := s.repo.Head()
+		head, headErr := gitRevisionRepoHead(s.repo)
 		if req.Reason == ReasonRestore && !amend {
-			hash, err = wt.Commit(commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
+			hash, err = gitRevisionWorktreeCommit(wt, commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
 				Author:            signature(req.Actor),
 				Committer:         leafWikiCommitter(),
 				AllowEmptyCommits: true,
@@ -274,7 +273,7 @@ func (s *Store) commit(ctx context.Context, req CommitRequest, amend bool) (*Com
 			return newCommitResult(hash.String(), batchID, messageChangedMarkdownPaths, true), nil
 		}
 		if errors.Is(headErr, plumbing.ErrReferenceNotFound) && !amend {
-			hash, err = wt.Commit(commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
+			hash, err = gitRevisionWorktreeCommit(wt, commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
 				Author:            signature(req.Actor),
 				Committer:         leafWikiCommitter(),
 				AllowEmptyCommits: true,
@@ -322,11 +321,11 @@ func mergeMarkdownPaths(groups ...[]string) []string {
 }
 
 func (s *Store) stageMarkdownChanges(ctx context.Context, wt *git.Worktree) ([]string, error) {
-	paths, err := collectMarkdownPaths(s.rootDir)
+	paths, err := gitRevisionCollectMarkdownPaths(s.rootDir)
 	if err != nil {
 		return nil, err
 	}
-	trackedFiles, err := s.trackedMarkdownFiles()
+	trackedFiles, err := gitRevisionStoreTrackedMarkdownFiles(s)
 	if err != nil {
 		return nil, err
 	}
@@ -335,14 +334,14 @@ func (s *Store) stageMarkdownChanges(ctx context.Context, wt *git.Worktree) ([]s
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		raw, err := os.ReadFile(filepath.Join(s.rootDir, filepath.FromSlash(path)))
+		raw, err := gitRevisionReadFile(filepath.Join(s.rootDir, filepath.FromSlash(path)))
 		if err != nil {
 			return nil, fmt.Errorf("read markdown %s: %w", path, err)
 		}
 		if tracked, ok := trackedFiles[path]; !ok || tracked != string(raw) {
 			changed[path] = struct{}{}
 		}
-		if _, err := wt.Add(path); err != nil {
+		if _, err := gitRevisionWorktreeAdd(wt, path); err != nil {
 			return nil, fmt.Errorf("stage markdown %s: %w", path, err)
 		}
 	}
@@ -355,10 +354,10 @@ func (s *Store) stageMarkdownChanges(ctx context.Context, wt *git.Worktree) ([]s
 			continue
 		}
 		if isManagedMarkdownRelPath(path) {
-			if _, err := wt.Remove(path); err != nil {
+			if _, err := gitRevisionWorktreeRemove(wt, path); err != nil {
 				return nil, fmt.Errorf("stage markdown delete %s: %w", path, err)
 			}
-		} else if err := s.removeFromIndexOnly(path); err != nil {
+		} else if err := gitRevisionStoreRemoveFromIndexOnly(s, path); err != nil {
 			return nil, fmt.Errorf("stage unmanaged markdown delete %s: %w", path, err)
 		}
 		changed[path] = struct{}{}
@@ -372,19 +371,19 @@ func (s *Store) stageMarkdownChanges(ctx context.Context, wt *git.Worktree) ([]s
 }
 
 func (s *Store) removeFromIndexOnly(path string) error {
-	idx, err := s.repo.Storer.Index()
+	idx, err := gitRevisionRepositoryIndex(s.repo)
 	if err != nil {
 		return err
 	}
-	if _, err := idx.Remove(path); err != nil {
+	if _, err := gitRevisionIndexRemove(idx, path); err != nil {
 		return err
 	}
-	return s.repo.Storer.SetIndex(idx)
+	return gitRevisionRepositorySetIndex(s.repo, idx)
 }
 
 func collectMarkdownPaths(rootDir string) ([]string, error) {
 	var paths []string
-	err := filepath.WalkDir(rootDir, func(path string, entry os.DirEntry, walkErr error) error {
+	err := gitRevisionWalkDir(rootDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -401,7 +400,7 @@ func collectMarkdownPaths(rootDir string) ([]string, error) {
 		if !entry.Type().IsRegular() || !isManagedMarkdownPath(name) {
 			return nil
 		}
-		rel, err := filepath.Rel(rootDir, path)
+		rel, err := gitRevisionRel(rootDir, path)
 		if err != nil {
 			return err
 		}
@@ -417,31 +416,31 @@ func collectMarkdownPaths(rootDir string) ([]string, error) {
 
 func (s *Store) trackedMarkdownFiles() (map[string]string, error) {
 	files := make(map[string]string)
-	head, err := s.repo.Head()
+	head, err := gitRevisionRepoHead(s.repo)
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
 		return files, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read internal git HEAD: %w", err)
 	}
-	commit, err := s.repo.CommitObject(head.Hash())
+	commit, err := gitRevisionRepoCommitObject(s.repo, head.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("load HEAD commit: %w", err)
 	}
-	tree, err := commit.Tree()
+	tree, err := gitRevisionCommitTree(commit)
 	if err != nil {
 		return nil, fmt.Errorf("load HEAD tree: %w", err)
 	}
-	iter := tree.Files()
+	iter := gitRevisionTreeFiles(tree)
 	defer iter.Close()
-	if err := iter.ForEach(func(file *object.File) error {
+	if err := gitRevisionFileIterForEach(iter, func(file *object.File) error {
 		if isTrackedMarkdownRelPath(file.Name) {
-			reader, err := file.Reader()
+			reader, err := gitRevisionFileReader(file)
 			if err != nil {
 				return err
 			}
 			defer reader.Close()
-			raw, err := io.ReadAll(reader)
+			raw, err := gitRevisionReadAll(reader)
 			if err != nil {
 				return err
 			}
@@ -541,7 +540,7 @@ func commitActorIDs(req CommitRequest) []ActorID {
 
 func newBatchID() string {
 	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := gitRevisionRandRead(raw[:]); err != nil {
 		return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 	}
 	return hex.EncodeToString(raw[:])
@@ -599,7 +598,7 @@ func (s *Store) ForEachCommit(ctx context.Context, visit func(Commit) (bool, err
 	if visit == nil {
 		return nil
 	}
-	iter, err := s.repo.Log(&git.LogOptions{})
+	iter, err := gitRevisionRepoLog(s.repo, &git.LogOptions{})
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
 		return nil
 	}
@@ -608,7 +607,7 @@ func (s *Store) ForEachCommit(ctx context.Context, visit func(Commit) (bool, err
 	}
 	defer iter.Close()
 
-	err = iter.ForEach(func(commit *object.Commit) error {
+	err = gitRevisionCommitIterForEach(iter, func(commit *object.Commit) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -634,7 +633,7 @@ func (s *Store) GetCommit(ctx context.Context, commitHash identity.CommitHash) (
 	if err := ctx.Err(); err != nil {
 		return Commit{}, err
 	}
-	commit, err := s.repo.CommitObject(plumbing.NewHash(fmt.Sprint(commitHash)))
+	commit, err := gitRevisionRepoCommitObject(s.repo, plumbing.NewHash(fmt.Sprint(commitHash)))
 	if err != nil {
 		return Commit{}, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
@@ -655,30 +654,30 @@ func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	commit, err := s.repo.CommitObject(plumbing.NewHash(fmt.Sprint(commitHash)))
+	commit, err := gitRevisionRepoCommitObject(s.repo, plumbing.NewHash(fmt.Sprint(commitHash)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
-	currentTree, err := commit.Tree()
+	currentTree, err := gitRevisionCommitTree(commit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load commit tree: %w", err)
 	}
 	paths := make(map[string]struct{})
 	contents := make(map[string]string)
 
-	parentIter := commit.Parents()
-	parent, err := parentIter.Next()
+	parentIter := gitRevisionCommitParents(commit)
+	parent, err := gitRevisionCommitIterNext(parentIter)
 	if errors.Is(err, object.ErrParentNotFound) || errors.Is(err, io.EOF) {
-		iter := currentTree.Files()
+		iter := gitRevisionTreeFiles(currentTree)
 		defer iter.Close()
-		if err := iter.ForEach(func(file *object.File) error {
+		if err := gitRevisionFileIterForEach(iter, func(file *object.File) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			if !isManagedMarkdownRelPath(file.Name) {
 				return nil
 			}
-			content, err := file.Contents()
+			content, err := gitRevisionFileContents(file)
 			if err != nil {
 				return err
 			}
@@ -693,12 +692,12 @@ func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.
 	if err != nil {
 		return nil, nil, fmt.Errorf("load parent for commit %s: %w", commitHash, err)
 	}
-	parentTree, err := parent.Tree()
+	parentTree, err := gitRevisionCommitTree(parent)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load parent tree: %w", err)
 	}
 
-	changes, err := parentTree.DiffContext(ctx, currentTree)
+	changes, err := gitRevisionTreeDiffContext(parentTree, ctx, currentTree)
 	if err != nil {
 		return nil, nil, fmt.Errorf("diff commit %s: %w", commitHash, err)
 	}
@@ -706,7 +705,7 @@ func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		from, to, err := change.Files()
+		from, to, err := gitRevisionChangeFiles(change)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -717,7 +716,7 @@ func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.
 			continue
 		}
 		paths[to.Name] = struct{}{}
-		content, err := to.Contents()
+		content, err := gitRevisionFileContents(to)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -788,7 +787,7 @@ func parseCommitMessage(message string) (string, map[string]string, []ActorID) {
 }
 
 func (s *Store) RestoreWorkspace(ctx context.Context, commitHash identity.CommitHash, req CommitRequest) (*Commit, error) {
-	files, err := s.FilesAt(ctx, commitHash)
+	files, err := gitRevisionStoreFilesAt(s, ctx, commitHash)
 	if err != nil {
 		return nil, err
 	}
@@ -802,14 +801,14 @@ func (s *Store) RestoreWorkspace(ctx context.Context, commitHash identity.Commit
 		}
 		target[relPath] = struct{}{}
 		fullPath := filepath.Join(s.rootDir, filepath.FromSlash(relPath))
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		if err := gitRevisionMkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create restore parent %s: %w", relPath, err)
 		}
-		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+		if err := gitRevisionWriteFile(fullPath, []byte(content), 0o644); err != nil {
 			return nil, fmt.Errorf("write restored markdown %s: %w", relPath, err)
 		}
 	}
-	current, err := collectMarkdownPaths(s.rootDir)
+	current, err := gitRevisionCollectMarkdownPaths(s.rootDir)
 	if err != nil {
 		return nil, err
 	}
@@ -817,7 +816,7 @@ func (s *Store) RestoreWorkspace(ctx context.Context, commitHash identity.Commit
 		if _, keep := target[relPath]; keep {
 			continue
 		}
-		if err := os.Remove(filepath.Join(s.rootDir, filepath.FromSlash(relPath))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := gitRevisionRemove(filepath.Join(s.rootDir, filepath.FromSlash(relPath))); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("remove markdown absent from restore %s: %w", relPath, err)
 		}
 	}
@@ -827,7 +826,7 @@ func (s *Store) RestoreWorkspace(ctx context.Context, commitHash identity.Commit
 	if req.Source == "" {
 		req.Source = SourceSystem
 	}
-	return s.Capture(ctx, req)
+	return gitRevisionStoreCapture(s, ctx, req)
 }
 
 func (s *Store) RestoreDocument(ctx context.Context, relPath string, commitHash identity.CommitHash, req CommitRequest) (*Commit, error) {
@@ -846,7 +845,7 @@ func (s *Store) RestoreDocumentToPath(ctx context.Context, targetRelPath string,
 	if sourceRelPath == "." || strings.HasPrefix(sourceRelPath, "../") || !isManagedMarkdownRelPath(sourceRelPath) {
 		return nil, fmt.Errorf("document restore source path is invalid: %s", sourceRelPath)
 	}
-	content, err := s.fileContentAt(ctx, commitHash, sourceRelPath)
+	content, err := gitRevisionStoreFileContentAt(s, ctx, commitHash, sourceRelPath)
 	if err != nil {
 		return nil, err
 	}
@@ -862,10 +861,10 @@ func (s *Store) RestoreDocumentContentToPath(ctx context.Context, targetRelPath 
 		return nil, fmt.Errorf("document restore path is invalid: %s", targetRelPath)
 	}
 	fullPath := filepath.Join(s.rootDir, filepath.FromSlash(targetRelPath))
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+	if err := gitRevisionMkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create restore parent %s: %w", targetRelPath, err)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+	if err := gitRevisionWriteFile(fullPath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("write restored markdown %s: %w", targetRelPath, err)
 	}
 	if req.Reason == "" {
@@ -874,7 +873,7 @@ func (s *Store) RestoreDocumentContentToPath(ctx context.Context, targetRelPath 
 	if req.Source == "" {
 		req.Source = SourceSystem
 	}
-	return s.Capture(ctx, req)
+	return gitRevisionStoreCapture(s, ctx, req)
 }
 
 func (s *Store) fileContentAt(ctx context.Context, commitHash identity.CommitHash, relPath string) (string, error) {
@@ -882,19 +881,19 @@ func (s *Store) fileContentAt(ctx context.Context, commitHash identity.CommitHas
 		return "", err
 	}
 	hash := plumbing.NewHash(fmt.Sprint(commitHash))
-	commit, err := s.repo.CommitObject(hash)
+	commit, err := gitRevisionRepoCommitObject(s.repo, hash)
 	if err != nil {
 		return "", fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
-	tree, err := commit.Tree()
+	tree, err := gitRevisionCommitTree(commit)
 	if err != nil {
 		return "", fmt.Errorf("load commit tree: %w", err)
 	}
-	file, err := tree.File(relPath)
+	file, err := gitRevisionTreeFile(tree, relPath)
 	if err != nil {
 		return "", fmt.Errorf("document %s is not present in commit %s: %w", relPath, commitHash, err)
 	}
-	content, err := file.Contents()
+	content, err := gitRevisionFileContents(file)
 	if err != nil {
 		return "", fmt.Errorf("read document %s from commit %s: %w", relPath, commitHash, err)
 	}
@@ -906,7 +905,7 @@ func (s *Store) FilesAt(ctx context.Context, commitHash identity.CommitHash) (ma
 		return nil, err
 	}
 	hash := plumbing.NewHash(fmt.Sprint(commitHash))
-	commit, err := s.repo.CommitObject(hash)
+	commit, err := gitRevisionRepoCommitObject(s.repo, hash)
 	if err != nil {
 		return nil, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
@@ -914,26 +913,26 @@ func (s *Store) FilesAt(ctx context.Context, commitHash identity.CommitHash) (ma
 }
 
 func (s *Store) filesAtCommit(ctx context.Context, commit *object.Commit) (map[string]string, error) {
-	tree, err := commit.Tree()
+	tree, err := gitRevisionCommitTree(commit)
 	if err != nil {
 		return nil, fmt.Errorf("load commit tree: %w", err)
 	}
 	files := make(map[string]string)
-	iter := tree.Files()
+	iter := gitRevisionTreeFiles(tree)
 	defer iter.Close()
-	err = iter.ForEach(func(file *object.File) error {
+	err = gitRevisionFileIterForEach(iter, func(file *object.File) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if !isManagedMarkdownRelPath(file.Name) {
 			return nil
 		}
-		reader, err := file.Reader()
+		reader, err := gitRevisionFileReader(file)
 		if err != nil {
 			return err
 		}
 		defer reader.Close()
-		raw, err := io.ReadAll(reader)
+		raw, err := gitRevisionReadAll(reader)
 		if err != nil {
 			return err
 		}

@@ -5,6 +5,8 @@ import (
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
+var runSingleChecker = singlechecker.Main
+
 func main() {
-	singlechecker.Main(semantichygiene.Analyzer)
+	runSingleChecker(semantichygiene.Analyzer)
 }

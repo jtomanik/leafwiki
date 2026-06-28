@@ -13,16 +13,11 @@ import (
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
+var buildMarkdownWithPublicMetadataPatch = wikipages.BuildMarkdownWithPublicMetadataPatch
+
 func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	addTypedTool[getTreeInput, treeOutput](server, toolGetTree, func(_ context.Context, in getTreeInput) (treeOutput, error) {
-		root := r.treeService.GetTree()
-		if root == nil {
-			return treeOutput{}, nil
-		}
-		if in.Depth != nil {
-			return treeOutput{Tree: dto.ToAPINodeWithContentPathsAndDepth(root, "", r.userResolver, r.treeService.ContentPathForNode, *in.Depth)}, nil
-		}
-		return treeOutput{Tree: dto.ToAPINodeWithContentPaths(root, "", r.userResolver, r.treeService.ContentPathForNode)}, nil
+		return r.getTreeTool(in), nil
 	})
 
 	addTypedTool[pageIDInput, pageOutput](server, toolGetPage, func(ctx context.Context, in pageIDInput) (pageOutput, error) {
@@ -50,23 +45,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addTypedTool[pathInput, lookupPathOutput](server, toolLookupPath, func(ctx context.Context, in pathInput) (lookupPathOutput, error) {
-		kind := tree.NodeKind("")
-		if strings.TrimSpace(in.Kind) != "" {
-			validKind, err := wikipages.ValidatePageKindString(strings.TrimSpace(in.Kind))
-			if err != nil {
-				return lookupPathOutput{}, err
-			}
-			kind = validKind
-		}
-		routePath, err := wikipages.ValidateSemanticRoutePath(normalizeToolRoutePath(in.Path))
-		if err != nil {
-			return lookupPathOutput{}, err
-		}
-		out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: routePath, Kind: kind})
-		if err != nil {
-			return lookupPathOutput{}, err
-		}
-		return lookupPathOutput{Lookup: out.Lookup}, nil
+		return r.lookupPathTool(ctx, in)
 	})
 
 	addTypedTool[pageIDInput, resolvePermalinkOutput](server, toolResolvePermalink, func(ctx context.Context, in pageIDInput) (resolvePermalinkOutput, error) {
@@ -117,63 +96,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addEditorTool[updatePageInput, pageOutput](r, server, toolUpdatePage, func(ctx context.Context, actor toolActor, in updatePageInput) (pageOutput, error) {
-		var tagsForValidation []string
-		if in.TagsPresent {
-			tagsForValidation = in.Tags
-		}
-		var propertiesForValidation map[string]string
-		if in.PropertiesPresent {
-			propertiesForValidation = in.Properties
-		}
-		if err := wikipages.ValidatePageMetadataInput(tagsForValidation, propertiesForValidation); err != nil {
-			return pageOutput{}, err
-		}
-		contentToSave := in.Content
-		fromImport := false
-		if in.Content != nil || in.TagsPresent || in.PropertiesPresent {
-			pageID := tree.PageIDFromString(strings.TrimSpace(in.ID))
-			currentRaw, err := r.treeService.ReadPageRaw(pageID)
-			if err != nil {
-				return pageOutput{}, err
-			}
-			body := ""
-			if in.Content != nil {
-				body = *in.Content
-			} else {
-				doc, _, err := markdown.ParsePageDocument(currentRaw)
-				if err != nil {
-					return pageOutput{}, err
-				}
-				body = doc.Body
-			}
-			combined, err := wikipages.BuildMarkdownWithPublicMetadataPatch(currentRaw, pageID, in.Title, wikipages.PublicMetadataPatch{
-				Tags:              tagsForValidation,
-				TagsPresent:       in.TagsPresent,
-				Properties:        propertiesForValidation,
-				PropertiesPresent: in.PropertiesPresent,
-			}, body)
-			if err != nil {
-				return pageOutput{}, err
-			}
-			contentToSave = &combined
-			fromImport = true
-		}
-		kind := tree.NodeKindPage
-		out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
-			UserID:     tree.UserIDFromString(actor.ID),
-			Source:     pagesave.PageMutationSourceMCP,
-			ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
-			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
-			Title:      in.Title,
-			Slug:       tree.SlugFromString(in.Slug),
-			Content:    contentToSave,
-			Kind:       &kind,
-			FromImport: fromImport,
-		})
-		if err != nil {
-			return pageOutput{}, err
-		}
-		return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
+		return r.updatePageTool(ctx, actor, in)
 	})
 
 	addEditorTool[deletePageInput, messageOutput](r, server, toolDeletePage, func(ctx context.Context, actor toolActor, in deletePageInput) (messageOutput, error) {
@@ -217,25 +140,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 	})
 
 	addEditorTool[ensurePageInput, pageOutput](r, server, toolEnsurePage, func(ctx context.Context, actor toolActor, in ensurePageInput) (pageOutput, error) {
-		kind, err := wikipages.ValidatePageKind(in.Kind)
-		if err != nil {
-			return pageOutput{}, err
-		}
-		targetPath, err := wikipages.ValidateSemanticRoutePath(in.Path)
-		if err != nil {
-			return pageOutput{}, err
-		}
-		out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
-			UserID:      tree.UserIDFromString(actor.ID),
-			Source:      pagesave.PageMutationSourceMCP,
-			TargetPath:  targetPath,
-			TargetTitle: in.Title,
-			Kind:        &kind,
-		})
-		if err != nil {
-			return pageOutput{}, err
-		}
-		return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
+		return r.ensurePageTool(ctx, actor, in)
 	})
 
 	addEditorTool[convertPageInput, messageOutput](r, server, toolConvertPage, func(ctx context.Context, actor toolActor, in convertPageInput) (messageOutput, error) {
@@ -269,6 +174,119 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 		}
 		return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
 	})
+}
+
+func (r *Routes) getTreeTool(in getTreeInput) treeOutput {
+	root := r.treeService.GetTree()
+	if root == nil {
+		return treeOutput{}
+	}
+	if in.Depth != nil {
+		return treeOutput{Tree: dto.ToAPINodeWithContentPathsAndDepth(root, "", r.userResolver, r.treeService.ContentPathForNode, *in.Depth)}
+	}
+	return treeOutput{Tree: dto.ToAPINodeWithContentPaths(root, "", r.userResolver, r.treeService.ContentPathForNode)}
+}
+
+func (r *Routes) lookupPathTool(ctx context.Context, in pathInput) (lookupPathOutput, error) {
+	kind := tree.NodeKind("")
+	if strings.TrimSpace(in.Kind) != "" {
+		validKind, err := wikipages.ValidatePageKindString(strings.TrimSpace(in.Kind))
+		if err != nil {
+			return lookupPathOutput{}, err
+		}
+		kind = validKind
+	}
+	routePath, err := wikipages.ValidateSemanticRoutePath(normalizeToolRoutePath(in.Path))
+	if err != nil {
+		return lookupPathOutput{}, err
+	}
+	out, err := r.lookupPath.Execute(ctx, wikipages.LookupPagePathInput{Path: routePath, Kind: kind})
+	if err != nil {
+		return lookupPathOutput{}, err
+	}
+	return lookupPathOutput{Lookup: out.Lookup}, nil
+}
+
+func (r *Routes) updatePageTool(ctx context.Context, actor toolActor, in updatePageInput) (pageOutput, error) {
+	var tagsForValidation []string
+	if in.TagsPresent {
+		tagsForValidation = in.Tags
+	}
+	var propertiesForValidation map[string]string
+	if in.PropertiesPresent {
+		propertiesForValidation = in.Properties
+	}
+	if err := wikipages.ValidatePageMetadataInput(tagsForValidation, propertiesForValidation); err != nil {
+		return pageOutput{}, err
+	}
+	contentToSave := in.Content
+	fromImport := false
+	if in.Content != nil || in.TagsPresent || in.PropertiesPresent {
+		pageID := tree.PageIDFromString(strings.TrimSpace(in.ID))
+		currentRaw, err := r.treeService.ReadPageRaw(pageID)
+		if err != nil {
+			return pageOutput{}, err
+		}
+		body := ""
+		if in.Content != nil {
+			body = *in.Content
+		} else {
+			doc, _, err := markdown.ParsePageDocument(currentRaw)
+			if err != nil {
+				return pageOutput{}, err
+			}
+			body = doc.Body
+		}
+		combined, err := buildMarkdownWithPublicMetadataPatch(currentRaw, pageID, in.Title, wikipages.PublicMetadataPatch{
+			Tags:              tagsForValidation,
+			TagsPresent:       in.TagsPresent,
+			Properties:        propertiesForValidation,
+			PropertiesPresent: in.PropertiesPresent,
+		}, body)
+		if err != nil {
+			return pageOutput{}, err
+		}
+		contentToSave = &combined
+		fromImport = true
+	}
+	kind := tree.NodeKindPage
+	out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
+		UserID:     tree.UserIDFromString(actor.ID),
+		Source:     pagesave.PageMutationSourceMCP,
+		ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
+		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
+		Title:      in.Title,
+		Slug:       tree.SlugFromString(in.Slug),
+		Content:    contentToSave,
+		Kind:       &kind,
+		FromImport: fromImport,
+	})
+	if err != nil {
+		return pageOutput{}, err
+	}
+	return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
+}
+
+func (r *Routes) ensurePageTool(ctx context.Context, actor toolActor, in ensurePageInput) (pageOutput, error) {
+	kind, err := wikipages.ValidatePageKind(in.Kind)
+	if err != nil {
+		return pageOutput{}, err
+	}
+	targetPath, err := wikipages.ValidateSemanticRoutePath(in.Path)
+	if err != nil {
+		return pageOutput{}, err
+	}
+	out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
+		UserID:      tree.UserIDFromString(actor.ID),
+		Source:      pagesave.PageMutationSourceMCP,
+		TargetPath:  targetPath,
+		TargetTitle: in.Title,
+		Kind:        &kind,
+	})
+	if err != nil {
+		return pageOutput{}, err
+	}
+	return pageOutput{Page: r.apiPage(out.Page, 0)}, nil
 }
 
 func (r *Routes) findToolPageByInputPath(ctx context.Context, rawPath string, rawKind string) (*wikipages.FindByPathOutput, error) {

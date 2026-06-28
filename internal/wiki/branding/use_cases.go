@@ -15,8 +15,18 @@ type GetBrandingOutput struct {
 	Config *corebanding.BrandingConfigResponse
 }
 
+type brandingServiceClient interface {
+	GetBranding() (*corebanding.BrandingConfigResponse, error)
+	UpdateBranding(siteName string) error
+	UploadLogo(file multipart.File, filename string) (string, error)
+	DeleteLogo() error
+	UploadFavicon(file multipart.File, filename string) (string, error)
+	DeleteFavicon() error
+	GetBrandingAssetsDir() string
+}
+
 type GetBrandingUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewGetBrandingUseCase(b *corebanding.BrandingService) *GetBrandingUseCase {
@@ -38,7 +48,7 @@ type UpdateBrandingInput struct {
 }
 
 type UpdateBrandingUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewUpdateBrandingUseCase(b *corebanding.BrandingService) *UpdateBrandingUseCase {
@@ -69,7 +79,7 @@ type UploadLogoOutput struct {
 }
 
 type UploadLogoUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewUploadLogoUseCase(b *corebanding.BrandingService) *UploadLogoUseCase {
@@ -91,7 +101,7 @@ func (uc *UploadLogoUseCase) Execute(_ context.Context, in UploadLogoInput) (*Up
 // ─── DeleteLogoUseCase ───────────────────────────────────────────────────────
 
 type DeleteLogoUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewDeleteLogoUseCase(b *corebanding.BrandingService) *DeleteLogoUseCase {
@@ -122,7 +132,7 @@ type UploadFaviconOutput struct {
 }
 
 type UploadFaviconUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewUploadFaviconUseCase(b *corebanding.BrandingService) *UploadFaviconUseCase {
@@ -144,7 +154,7 @@ func (uc *UploadFaviconUseCase) Execute(_ context.Context, in UploadFaviconInput
 // ─── DeleteFaviconUseCase ────────────────────────────────────────────────────
 
 type DeleteFaviconUseCase struct {
-	branding *corebanding.BrandingService
+	branding brandingServiceClient
 }
 
 func NewDeleteFaviconUseCase(b *corebanding.BrandingService) *DeleteFaviconUseCase {

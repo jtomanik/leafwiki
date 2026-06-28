@@ -18,6 +18,10 @@ import (
 // DisableRefreshTokenRateLimit can be set via ldflags for E2E/debug builds.
 var DisableRefreshTokenRateLimit = "false"
 
+var setAuthCookies = func(cookies *authmw.AuthCookies, c *gin.Context, accessToken string, refreshToken string) error {
+	return cookies.Set(c, accessToken, refreshToken)
+}
+
 // Routes is the RouteRegistrar for the auth domain.
 type Routes struct {
 	login             *LoginUseCase
@@ -224,7 +228,7 @@ func (r *Routes) handleLogin(rctx httpinternal.RouterContext) gin.HandlerFunc {
 			)
 			return
 		}
-		if err := rctx.AuthCookies.Set(c, out.Token.Token, out.Token.RefreshToken); err != nil {
+		if err := setAuthCookies(rctx.AuthCookies, c, out.Token.Token, out.Token.RefreshToken); err != nil {
 			if errors.Is(err, utils.ErrHTTPSRequired) {
 				respondWithAuthStatusError(c, http.StatusBadRequest, ErrCodeAuthCookieFailed,
 					"HTTPS is required for auth cookies. Use HTTPS or start LeafWiki with --allow-insecure for trusted plain HTTP setups.",
@@ -285,7 +289,7 @@ func (r *Routes) handleRefreshToken(rctx httpinternal.RouterContext) gin.Handler
 			)
 			return
 		}
-		if err := rctx.AuthCookies.Set(c, out.Token.Token, out.Token.RefreshToken); err != nil {
+		if err := setAuthCookies(rctx.AuthCookies, c, out.Token.Token, out.Token.RefreshToken); err != nil {
 			if errors.Is(err, utils.ErrHTTPSRequired) {
 				respondWithAuthStatusError(c, http.StatusBadRequest, ErrCodeAuthCookieFailed,
 					"HTTPS is required for auth cookies. Use HTTPS or start LeafWiki with --allow-insecure for trusted plain HTTP setups.",

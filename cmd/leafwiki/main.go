@@ -94,7 +94,10 @@ func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io
 	return closer, nil
 }
 
-var failOpenAgentHookProvider string
+var (
+	failOpenAgentHookProvider string
+	leafwikiExit              = os.Exit
+)
 
 type configFlagMixError = runtimeconfig.ConfigFlagMixError
 type configUsageError = runtimeconfig.ConfigUsageError
@@ -107,11 +110,11 @@ func fail(msg string, args ...any) {
 		if allowResponse := agenthooks.AllowResponse(provider); len(allowResponse) > 0 {
 			_, _ = os.Stdout.Write(allowResponse)
 		}
-		os.Exit(0)
+		leafwikiExit(0)
 	}
 	slog.Default().Error(msg, args...)
 	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
-	os.Exit(1)
+	leafwikiExit(1)
 }
 
 func failInvalidConfigFile(err error) {
@@ -126,7 +129,7 @@ func failInvalidConfigFile(err error) {
 func failWithoutAgentHook(msg string, args ...any) {
 	slog.Default().Error(msg, args...)
 	fmt.Fprintln(os.Stderr, failureMessage(msg, args...))
-	os.Exit(1)
+	leafwikiExit(1)
 }
 
 func failureMessage(msg string, args ...any) string {
@@ -141,9 +144,109 @@ func failureMessage(msg string, args ...any) string {
 	return b.String()
 }
 
+type leafwikiTempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+type leafwikiRuntimeLock interface {
+	Release() error
+}
+
+func defaultDaemonStdin() io.ReadCloser {
+	return os.Stdin
+}
+
+func defaultDaemonStdout() io.Writer {
+	return os.Stdout
+}
+
+func notifyRuntimeSignals(c chan<- os.Signal, sig ...os.Signal) {
+	signal.Notify(c, sig...)
+}
+
+func stopRuntimeSignals(c chan<- os.Signal) {
+	signal.Stop(c)
+}
+
+func shutdownHTTPServer(server *http.Server, ctx context.Context) error {
+	return server.Shutdown(ctx)
+}
+
 var projectDaemonExecutable = os.Executable
 
 var projectDaemonStartupConfigPostStartCleanupDelay = 30 * time.Second
+
+var startInternalRuntimeRoleProcessForRuntime = startInternalRuntimeRoleProcess
+
+var (
+	createTempFileForRuntime                      = func(dir string, pattern string) (leafwikiTempFile, error) { return os.CreateTemp(dir, pattern) }
+	runDaemonServiceForDispatch                   = runDaemonService
+	runAgentHookCommandForDispatch                = runAgentHookCommand
+	runProjectDaemonLauncherForDispatch           = runProjectDaemonLauncher
+	attachOrStartRuntimeDaemonForLaunch           = attachOrStartRuntimeDaemon
+	runDaemonHeartbeatForLaunch                   = runDaemonHeartbeat
+	runDaemonStdioBridgeForLaunch                 = runDaemonStdioBridge
+	daemonStdioActorContextForLaunch              = daemonStdioActorContext
+	encodeActorContextForRuntime                  = projectdaemon.EncodeActorContext
+	attachOrStartRuntimeDaemonForAgentHook        = attachOrStartRuntimeDaemon
+	filepathAbsForRuntime                         = filepath.Abs
+	filepathRelForRuntime                         = filepath.Rel
+	userHomeDirForRuntime                         = os.UserHomeDir
+	openDaemonNullDeviceForRuntime                = func() (*os.File, error) { return os.OpenFile(os.DevNull, os.O_RDWR, 0) }
+	jsonMarshalForRuntime                         = json.Marshal
+	resolveLoggingForRuntime                      = leaflogging.Resolve
+	acquireDataDirLockForRuntime                  = func(path string) (leafwikiRuntimeLock, error) { return locking.AcquireDataDirLock(path) }
+	acquireRootDirLockForRuntime                  = func(path string) (leafwikiRuntimeLock, error) { return locking.AcquireRootDirLock(path) }
+	statPathForRuntime                            = os.Stat
+	mkdirAllForRuntime                            = os.MkdirAll
+	processFindProcessForRuntime                  = os.FindProcess
+	startCommandForRuntime                        = func(cmd *exec.Cmd) error { return cmd.Start() }
+	releaseProcessForRuntime                      = func(process *os.Process) error { return process.Release() }
+	bridgeTransportsForRuntime                    = bridgeTransports
+	newControlPlaneProxyForRuntime                = frontd.NewControlPlaneProxy
+	newWorkspaceProxyForRuntime                   = frontd.NewWorkspaceProxy
+	newWorkspacesAPIForRuntime                    = frontd.NewWorkspacesAPI
+	newWikidWorkspaceResolverForRuntime           = frontd.NewWikidWorkspaceResolver
+	frontdPublicMCPHandlerForRuntime              = frontdPublicMCPHandler
+	newWikidSingleWorkspaceResolverForRuntime     = frontd.NewWikidSingleWorkspaceResolver
+	defaultDaemonStdinForRuntime                  = defaultDaemonStdin
+	defaultDaemonStdoutForRuntime                 = defaultDaemonStdout
+	notifyRuntimeSignalsForRuntime                = notifyRuntimeSignals
+	stopRuntimeSignalsForRuntime                  = stopRuntimeSignals
+	shutdownInternalRuntimeHTTPServerForRuntime   = shutdownHTTPServer
+	shutdownWikidControlServerForRuntime          = shutdownHTTPServer
+	internalRuntimeRoleReadinessTimeoutForProcess = internalRuntimeRoleReadinessTimeout
+	runWikidFrontdOwnerForProjectDaemon           = runWikidFrontdOwner
+	netListenForRuntime                           = net.Listen
+	randomTokenForRuntime                         = projectdaemon.RandomToken
+	configHashForRuntime                          = projectdaemon.ConfigHash
+	newRuntimeWikiForRuntime                      = newRuntimeWiki
+	controlPlaneRouterOptionsForOwner             = controlPlaneRouterOptionsForRuntime
+	startWikidFrontdRuntimeForOwner               = startWikidFrontdRuntime
+	newMCPProxyWithActorForRuntime                = frontd.NewMCPProxyWithActor
+	writeDescriptorAtomicForRuntime               = projectdaemon.WriteDescriptorAtomic
+	registeredFederatedWorkspaceForAttach         = registeredFederatedWorkspaceForRequest
+	seedRuntimeHomeGrantsForOwner                 = seedRuntimeHomeGrants
+	ensureRuntimeHomeGrantForOwner                = ensureRuntimeHomeGrant
+	newFederatedWorkspaceManagerForOwner          = newFederatedWorkspaceManager
+	verifyFrontdAPIKeyForRuntime                  = verifyFrontdAPIKey
+	verifyFrontdOAuthBearerTokenForRuntime        = verifyFrontdOAuthBearerToken
+	getFrontdUserByIDForRuntime                   = getFrontdUserByID
+	serveWikidControlServerForOwner               = serveWikidControlServer
+	grantsForSubjectForRuntime                    = func(store *wikid.GrantStore, subject string) ([]wikid.Grant, error) {
+		return store.GrantsForSubject(subject)
+	}
+	actorContextForWorkspaceGrantForRuntime = actorContextForWorkspaceGrant
+	readHealthyProjectDaemonForAttach       = readHealthyProjectDaemon
+	verifyStdioAPIKeyFromStorageForAttach   = verifyStdioAPIKeyFromStorage
+	spawnProjectDaemonOwnerForAttach        = spawnProjectDaemonOwner
+	waitForProjectDaemonForAttach           = waitForProjectDaemon
+	registerFederatedFirstContactForAttach  = registerFederatedFirstContact
+	ensureFederatedWorkspaceForAttach       = ensureFederatedWorkspace
+)
 
 const agentHookMaxPayloadBytes = 1024 * 1024
 
@@ -510,7 +613,7 @@ func validateMCPSettings(transports mcpTransports, disableAuth bool, logTarget l
 
 func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookRequested bool, cfg leafwikiRuntimeConfig) {
 	if serviceModeRequested {
-		if err := runDaemonService(context.Background(), cfg); err != nil {
+		if err := runDaemonServiceForDispatch(context.Background(), cfg); err != nil {
 			failWithoutAgentHook(localization.MessageIDCLIErrorLeafWikiDaemonFailed, "error", err)
 		}
 		return
@@ -520,12 +623,12 @@ func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookR
 		if len(args) >= 2 {
 			provider = agenthooks.ProviderID(args[1])
 		}
-		if err := runAgentHookCommand(context.Background(), cfg, provider, os.Stdin, os.Stdout); err != nil {
+		if err := runAgentHookCommandForDispatch(context.Background(), cfg, provider, os.Stdin, os.Stdout); err != nil {
 			slog.Default().Warn("Agent hook failed open", "provider", provider, "error", err)
 		}
 		return
 	}
-	if err := runProjectDaemonLauncher(context.Background(), cfg); err != nil {
+	if err := runProjectDaemonLauncherForDispatch(context.Background(), cfg); err != nil {
 		fail(localization.MessageIDCLIErrorLeafWikiStartupFailed, "error", err)
 	}
 }
@@ -728,8 +831,8 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 	defer cancel()
 	var closeStdin sync.Once
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 	go func() {
 		select {
 		case <-signals:
@@ -742,7 +845,7 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 		case <-ctx.Done():
 		}
 	}()
-	desc, err := attachOrStartRuntimeDaemon(ctx, cfg)
+	desc, err := attachOrStartRuntimeDaemonForLaunch(ctx, cfg)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil
@@ -772,7 +875,7 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 	defer stopHeartbeat()
 	heartbeatErr := make(chan error, 1)
 	go func() {
-		heartbeatErr <- runDaemonHeartbeat(heartbeatCtx, client, handle.ID, 2*time.Second)
+		heartbeatErr <- runDaemonHeartbeatForLaunch(heartbeatCtx, client, handle.ID, 2*time.Second)
 	}()
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -785,15 +888,18 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 		defer stopBridge()
 		bridgeCfg := daemonStdioBridgeConfig(desc, cfg)
 		if strings.TrimSpace(desc.PrivateMCPURL) != "" {
-			actorContext, err := daemonStdioActorContext(ctx, desc, cfg)
+			actorContext, err := daemonStdioActorContextForLaunch(ctx, desc, cfg)
 			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					return nil
+				}
 				return err
 			}
 			bridgeCfg.ActorContext = actorContext
 		}
 		bridgeErr := make(chan error, 1)
 		go func() {
-			bridgeErr <- runDaemonStdioBridge(bridgeCtx, bridgeCfg)
+			bridgeErr <- runDaemonStdioBridgeForLaunch(bridgeCtx, bridgeCfg)
 		}()
 		select {
 		case err := <-bridgeErr:
@@ -821,8 +927,8 @@ func runDaemonService(parent context.Context, cfg leafwikiRuntimeConfig) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 	go func() {
 		select {
 		case <-signals:
@@ -861,7 +967,7 @@ func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, prov
 	cfg.DetachDaemonOwnerIO = true
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	desc, err := attachOrStartRuntimeDaemon(ctx, cfg)
+	desc, err := attachOrStartRuntimeDaemonForAgentHook(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -913,7 +1019,7 @@ func daemonStdioActorContext(ctx context.Context, desc *projectdaemon.Descriptor
 		}
 		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
 	}
-	encoded, err := projectdaemon.EncodeActorContext(out.Actor)
+	encoded, err := encodeActorContextForRuntime(out.Actor)
 	if err != nil {
 		return "", fmt.Errorf("encode native STDIO actor context: %w", err)
 	}
@@ -961,12 +1067,12 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 	}
 	layout := wikid.GlobalLayout(globalCfg.DataDir)
 	if cfg.MCPTransports.Stdio {
-		if workspace, ok, err := registeredFederatedWorkspaceForRequest(layout, requestCfg); err != nil {
+		if workspace, ok, err := registeredFederatedWorkspaceForAttach(layout, requestCfg); err != nil {
 			return nil, err
 		} else if ok {
 			directRequestCfg := requestCfg
 			directRequestCfg.WorkspaceID = workspace.ID
-			desc, healthy, err := readHealthyProjectDaemon(ctx, workspaceDescriptorPath, directRequestCfg)
+			desc, healthy, err := readHealthyProjectDaemonForAttach(ctx, workspaceDescriptorPath, directRequestCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -983,7 +1089,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 	}
 
 	globalDescriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
-	globalDesc, healthy, err := readHealthyProjectDaemon(ctx, globalDescriptorPath, globalCfg)
+	globalDesc, healthy, err := readHealthyProjectDaemonForAttach(ctx, globalDescriptorPath, globalCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -996,18 +1102,18 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 			return nil, err
 		}
 		if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
-			if err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(globalCfg.DataDir), cfg.APIKey); err != nil {
+			if err := verifyStdioAPIKeyFromStorageForAttach(authStorageDirForRuntime(globalCfg.DataDir), cfg.APIKey); err != nil {
 				if errors.Is(err, coreauth.ErrInvalidToken) {
 					return nil, fmt.Errorf("invalid native STDIO API key")
 				}
 				return nil, fmt.Errorf("verify native STDIO API key: %w", err)
 			}
 		}
-		errorPath, err := spawnProjectDaemonOwner(cfg)
+		errorPath, err := spawnProjectDaemonOwnerForAttach(cfg)
 		if err != nil {
 			return nil, err
 		}
-		globalDesc, err = waitForProjectDaemon(ctx, globalDescriptorPath, errorPath, globalCfg, cfg.MCPTransports)
+		globalDesc, err = waitForProjectDaemonForAttach(ctx, globalDescriptorPath, errorPath, globalCfg, cfg.MCPTransports)
 		if err != nil {
 			return nil, err
 		}
@@ -1015,7 +1121,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 		return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
 	}
 
-	workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, cfg)
+	workspace, isHome, err := registerFederatedFirstContactForAttach(layout, requestCfg, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -1026,12 +1132,12 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 	requestCfg.MarkdownLinkRootPrefix = workspace.MarkdownLinkRootPrefix
 	shouldEnsure := cfg.DisableAuth || cfg.MCPTransports.Stdio
 	if shouldEnsure {
-		if err := ensureFederatedWorkspace(ctx, globalDesc, workspace.ID, cfg); err != nil {
+		if err := ensureFederatedWorkspaceForAttach(ctx, globalDesc, workspace.ID, cfg); err != nil {
 			return nil, err
 		}
 	}
 	if cfg.MCPTransports.Stdio {
-		return waitForProjectDaemon(ctx, workspaceDescriptorPath, "", requestCfg, cfg.MCPTransports)
+		return waitForProjectDaemonForAttach(ctx, workspaceDescriptorPath, "", requestCfg, cfg.MCPTransports)
 	}
 	return globalDesc, nil
 }
@@ -1249,7 +1355,7 @@ func processPIDAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	process, err := os.FindProcess(pid)
+	process, err := processFindProcessForRuntime(pid)
 	if err != nil {
 		return false
 	}
@@ -1276,7 +1382,7 @@ func projectDaemonIdentityMismatch(desc *projectdaemon.Descriptor, ownerCfg proj
 	return errors.New(projectdaemon.FormatConfigMismatch(mismatches))
 }
 
-const projectDaemonWaitTimeout = 30 * time.Second
+var projectDaemonWaitTimeout = 30 * time.Second
 
 func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath string, ownerCfg projectdaemon.Config, requestTransports mcpTransports) (*projectdaemon.Descriptor, error) {
 	deadlineCtx, cancel := context.WithTimeout(ctx, projectDaemonWaitTimeout)
@@ -1383,7 +1489,7 @@ func writeProjectDaemonStartupError(path string, err error) {
 	if locking.IsLockHeld(err) {
 		kind = projectDaemonStartupErrorKindLock
 	}
-	raw, marshalErr := json.Marshal(projectDaemonStartupError{
+	raw, marshalErr := jsonMarshalForRuntime(projectDaemonStartupError{
 		Kind:            kind,
 		MessageID:       localization.MessageIDCLIErrorProjectDaemonFailed,
 		RenderedMessage: err.Error(),
@@ -1416,7 +1522,7 @@ func isTrustedDaemonControlURL(raw string) bool {
 }
 
 func projectDaemonLocksHeld(dataDir string, rootDir string) (bool, error) {
-	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	dataLock, err := acquireDataDirLockForRuntime(dataDir)
 	if err == nil {
 		_ = dataLock.Release()
 		return false, nil
@@ -1424,7 +1530,7 @@ func projectDaemonLocksHeld(dataDir string, rootDir string) (bool, error) {
 	if !locking.IsDataDirLockHeld(err) {
 		return false, err
 	}
-	rootLock, err := locking.AcquireRootDirLock(rootDir)
+	rootLock, err := acquireRootDirLockForRuntime(rootDir)
 	if err == nil {
 		_ = rootLock.Release()
 		return false, nil
@@ -1436,7 +1542,7 @@ func projectDaemonLocksHeld(dataDir string, rootDir string) (bool, error) {
 }
 
 func projectDaemonLocksFree(dataDir string, rootDir string) (bool, error) {
-	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	dataLock, err := acquireDataDirLockForRuntime(dataDir)
 	if err != nil {
 		if locking.IsDataDirLockHeld(err) {
 			return false, nil
@@ -1445,7 +1551,7 @@ func projectDaemonLocksFree(dataDir string, rootDir string) (bool, error) {
 	}
 	defer dataLock.Release()
 
-	rootLock, err := locking.AcquireRootDirLock(rootDir)
+	rootLock, err := acquireRootDirLockForRuntime(rootDir)
 	if err != nil {
 		if locking.IsRootDirLockHeld(err) {
 			return false, nil
@@ -1459,7 +1565,7 @@ func projectDaemonLocksFree(dataDir string, rootDir string) (bool, error) {
 }
 
 func projectDaemonDataLockFreeRootLockHeld(dataDir string, rootDir string) (bool, error) {
-	dataLock, err := locking.AcquireDataDirLock(dataDir)
+	dataLock, err := acquireDataDirLockForRuntime(dataDir)
 	if err != nil {
 		if locking.IsDataDirLockHeld(err) {
 			return false, nil
@@ -1470,7 +1576,7 @@ func projectDaemonDataLockFreeRootLockHeld(dataDir string, rootDir string) (bool
 		return false, err
 	}
 
-	rootLock, err := locking.AcquireRootDirLock(rootDir)
+	rootLock, err := acquireRootDirLockForRuntime(rootDir)
 	if err == nil {
 		_ = rootLock.Release()
 		return false, nil
@@ -1671,7 +1777,7 @@ func daemonWorkspaceRuntimeConfig(cfg leafwikiRuntimeConfig) (leafwikiRuntimeCon
 	ownerCfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
 	ownerCfg.EnableWorkspaceSync = true
 	if ownerCfg.MCPTransports.Stdio && ownerCfg.Logging.Target == leaflogging.TargetStderr {
-		fileLogging, err := leaflogging.Resolve(leaflogging.ConfigInput{
+		fileLogging, err := resolveLoggingForRuntime(leaflogging.ConfigInput{
 			Target:    string(leaflogging.TargetFile),
 			TargetSet: true,
 			DataDir:   ownerCfg.Workspace.DataDir,
@@ -1690,11 +1796,11 @@ func daemonLogFileForConfig(cfg leafwikiRuntimeConfig, canonicalDataDir string) 
 		return cfg.Logging.FilePath
 	}
 	logPath := filepath.Clean(cfg.Logging.FilePath)
-	absLogPath, err := filepath.Abs(logPath)
+	absLogPath, err := filepathAbsForRuntime(logPath)
 	if err != nil {
 		return logPath
 	}
-	originalDataDir, err := filepath.Abs(filepath.Clean(cfg.Workspace.DataDir))
+	originalDataDir, err := filepathAbsForRuntime(filepath.Clean(cfg.Workspace.DataDir))
 	if err == nil {
 		if rel, ok := localRelativePath(originalDataDir, absLogPath); ok {
 			return filepath.Clean(filepath.Join(canonicalDataDir, rel))
@@ -1707,7 +1813,7 @@ func daemonLogFileForConfig(cfg leafwikiRuntimeConfig, canonicalDataDir string) 
 }
 
 func localRelativePath(base string, target string) (string, bool) {
-	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	rel, err := filepathRelForRuntime(filepath.Clean(base), filepath.Clean(target))
 	if err != nil {
 		return "", false
 	}
@@ -1722,7 +1828,7 @@ func spawnProjectDaemonOwner(cfg leafwikiRuntimeConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	errorFile, err := os.CreateTemp("", "leafwiki-project-daemon-*.err")
+	errorFile, err := createTempFileForRuntime("", "leafwiki-project-daemon-*.err")
 	if err != nil {
 		return "", fmt.Errorf("create daemon startup error file: %w", err)
 	}
@@ -1730,11 +1836,11 @@ func spawnProjectDaemonOwner(cfg leafwikiRuntimeConfig) (string, error) {
 	_ = errorFile.Close()
 	_ = os.Remove(errorPath)
 	ownerCfg.DaemonStartupErrorPath = errorPath
-	raw, err := json.Marshal(ownerCfg)
+	raw, err := jsonMarshalForRuntime(ownerCfg)
 	if err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp("", "leafwiki-project-daemon-*.json")
+	tmp, err := createTempFileForRuntime("", "leafwiki-project-daemon-*.json")
 	if err != nil {
 		return "", fmt.Errorf("create daemon startup config: %w", err)
 	}
@@ -1763,7 +1869,7 @@ func spawnProjectDaemonOwner(cfg leafwikiRuntimeConfig) (string, error) {
 	}
 	args := []string{"--internal-project-daemon", startupPath}
 	if os.Getenv("GO_WANT_LEAFWIKI_HELPER_PROCESS") == "1" {
-		args = []string{"-test.run=TestLeafWikiHelperProcess", "--", "--internal-project-daemon", startupPath}
+		args = []string{"-test.run=TestLeafWikiSuite", "--", "--internal-project-daemon", startupPath}
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = daemonOwnerEnv()
@@ -1772,13 +1878,13 @@ func spawnProjectDaemonOwner(cfg leafwikiRuntimeConfig) (string, error) {
 		return "", err
 	}
 	defer cleanupIO()
-	if err := cmd.Start(); err != nil {
+	if err := startCommandForRuntime(cmd); err != nil {
 		return "", fmt.Errorf("start project daemon: %w", err)
 	}
 	removeStartupConfig = false
 	scheduleProjectDaemonStartupConfigCleanup(startupPath)
 	if cmd.Process != nil {
-		if err := cmd.Process.Release(); err != nil {
+		if err := releaseProcessForRuntime(cmd.Process); err != nil {
 			return "", fmt.Errorf("release project daemon process: %w", err)
 		}
 	}
@@ -1828,7 +1934,7 @@ func globalRuntimeWorkspace() (wiki.Workspace, error) {
 }
 
 func globalRuntimeHomeDir() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDirForRuntime()
 	if err != nil {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
@@ -1878,7 +1984,7 @@ func setSysProcAttrBool(attr *syscall.SysProcAttr, field string, value bool) boo
 }
 
 func openDaemonNullDevice() (*os.File, func(), error) {
-	nullDevice, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	nullDevice, err := openDaemonNullDeviceForRuntime()
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open daemon null device: %w", err)
 	}
@@ -1940,17 +2046,17 @@ type daemonStdioBridge struct {
 
 func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
 	if cfg.Stdin == nil {
-		cfg.Stdin = os.Stdin
+		cfg.Stdin = defaultDaemonStdinForRuntime()
 	}
 	if cfg.Stdout == nil {
-		cfg.Stdout = os.Stdout
+		cfg.Stdout = defaultDaemonStdoutForRuntime()
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var closeStdin sync.Once
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 	go func() {
 		select {
 		case <-signals:
@@ -1976,7 +2082,7 @@ func runDaemonStdioBridge(parent context.Context, cfg daemonStdioBridge) error {
 		DisableStandaloneSSE: true,
 		MaxRetries:           -1,
 	}
-	err := bridgeTransports(ctx, stdioTransport, httpTransport)
+	err := bridgeTransportsForRuntime(ctx, stdioTransport, httpTransport)
 	cancel()
 	select {
 	case filterErr := <-filterDone:
@@ -2078,7 +2184,7 @@ func (rt stdioActorContextRoundTripper) actorContext(req *http.Request) (string,
 		}
 		return "", fmt.Errorf("resolve native STDIO actor context: %w", err)
 	}
-	encoded, err := projectdaemon.EncodeActorContext(out.Actor)
+	encoded, err := encodeActorContextForRuntime(out.Actor)
 	if err != nil {
 		return "", fmt.Errorf("encode native STDIO actor context: %w", err)
 	}
@@ -2146,8 +2252,8 @@ func bridgeTransports(ctx context.Context, left sdkmcp.Transport, right sdkmcp.T
 
 func waitForForegroundSession(ctx context.Context, heartbeatErr <-chan error) error {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -2288,12 +2394,16 @@ func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.
 	case <-ctx.Done():
 		return m.supervisor.Status(workspaceID), ctx.Err()
 	case result := <-resultCh:
-		status, ok := result.Val.(wikid.WorkspaceStatus)
-		if !ok && result.Err == nil {
-			return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID.String(), result.Val)
-		}
-		return status, result.Err
+		return federatedEnsureResultStatus(workspaceID, result.Val, result.Err)
 	}
+}
+
+func federatedEnsureResultStatus(workspaceID workspaceid.WorkspaceID, value any, resultErr error) (wikid.WorkspaceStatus, error) {
+	status, ok := value.(wikid.WorkspaceStatus)
+	if !ok && resultErr == nil {
+		return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID.String(), value)
+	}
+	return status, resultErr
 }
 
 func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID workspaceid.WorkspaceID, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
@@ -2359,7 +2469,7 @@ func (m *federatedWorkspaceManager) writeWorkspaceDescriptor(workspace wikid.Wor
 	if err != nil {
 		return err
 	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
+	hash, err := configHashForRuntime(ownerCfg)
 	if err != nil {
 		return err
 	}
@@ -2393,7 +2503,7 @@ func (m *federatedWorkspaceManager) writeWorkspaceDescriptor(workspace wikid.Wor
 		if err := removeNonRegularDescriptor(path); err != nil {
 			return err
 		}
-		if err := projectdaemon.WriteDescriptorAtomic(path, desc); err != nil {
+		if err := writeDescriptorAtomicForRuntime(path, desc); err != nil {
 			return err
 		}
 	}
@@ -2537,7 +2647,7 @@ func (s *wikidFrontdRuntime) startWorkspacedLocked() error {
 	workspacedCfg := s.cfg
 	workspacedCfg.Host = "127.0.0.1"
 	workspacedCfg.Port = "0"
-	proc, ready, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{
+	proc, ready, err := startInternalRuntimeRoleProcessForRuntime(internalRuntimeRoleStartupConfig{
 		Role:        projectdaemon.RoleWorkspaced,
 		Runtime:     workspacedCfg,
 		DaemonToken: s.daemonToken,
@@ -2556,7 +2666,7 @@ func (s *wikidFrontdRuntime) startFrontdLocked() error {
 	if strings.TrimSpace(s.workspacedURL) == "" {
 		return fmt.Errorf("workspaced URL is unavailable")
 	}
-	proc, ready, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{
+	proc, ready, err := startInternalRuntimeRoleProcessForRuntime(internalRuntimeRoleStartupConfig{
 		Role:          projectdaemon.RoleFrontd,
 		Runtime:       s.cfg,
 		WorkspacedURL: s.workspacedURL,
@@ -2661,7 +2771,7 @@ func requiredRuntimeRoleHealth() []projectdaemon.RoleName {
 }
 
 func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-	readyFile, err := os.CreateTemp("", "leafwiki-runtime-ready-*.json")
+	readyFile, err := createTempFileForRuntime("", "leafwiki-runtime-ready-*.json")
 	if err != nil {
 		return nil, internalRuntimeRoleReady{}, fmt.Errorf("create %s ready file: %w", startup.Role, err)
 	}
@@ -2693,7 +2803,7 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 	if err != nil {
 		return nil, internalRuntimeRoleReady{}, err
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startCommandForRuntime(cmd); err != nil {
 		cleanupIO()
 		return nil, internalRuntimeRoleReady{}, fmt.Errorf("start %s role process: %w", startup.Role, err)
 	}
@@ -2715,7 +2825,7 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 		done:     done,
 		waitDone: make(chan struct{}),
 	}
-	ready, err := waitForInternalRuntimeRoleReady(readyPath, proc, internalRuntimeRoleReadinessTimeout)
+	ready, err := waitForInternalRuntimeRoleReady(readyPath, proc, internalRuntimeRoleReadinessTimeoutForProcess)
 	_ = os.Remove(readyPath)
 	if err != nil {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -2733,11 +2843,11 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 }
 
 func writeInternalRuntimeRoleStartupConfig(startup internalRuntimeRoleStartupConfig) (string, error) {
-	raw, err := json.Marshal(startup)
+	raw, err := jsonMarshalForRuntime(startup)
 	if err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp("", "leafwiki-runtime-role-*.json")
+	tmp, err := createTempFileForRuntime("", "leafwiki-runtime-role-*.json")
 	if err != nil {
 		return "", fmt.Errorf("create %s startup config: %w", startup.Role, err)
 	}
@@ -2804,7 +2914,7 @@ func writeInternalRuntimeRoleReady(path string, ready internalRuntimeRoleReady) 
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	raw, err := json.Marshal(ready)
+	raw, err := jsonMarshalForRuntime(ready)
 	if err != nil {
 		return err
 	}
@@ -2814,7 +2924,7 @@ func writeInternalRuntimeRoleReady(path string, ready internalRuntimeRoleReady) 
 func internalRuntimeRoleArgs(startupPath string) []string {
 	args := []string{"--internal-runtime-role", startupPath}
 	if os.Getenv("GO_WANT_LEAFWIKI_HELPER_PROCESS") == "1" {
-		args = []string{"-test.run=TestLeafWikiHelperProcess", "--", "--internal-runtime-role", startupPath}
+		args = []string{"-test.run=TestLeafWikiSuite", "--", "--internal-runtime-role", startupPath}
 	}
 	return args
 }
@@ -2944,8 +3054,8 @@ func waitForInternalRuntimeRoleSignal(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 
 	select {
 	case <-ctx.Done():
@@ -2973,11 +3083,11 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	}
 	opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{}
 	publicRouter := httpinternal.NewRouter(nil, frontendConfigForRuntimeStorage(ownerCfg.DataDir), opts)
-	controlPlaneProxy, err := frontd.NewControlPlaneProxy(startup.WikidURL, startup.DaemonToken)
+	controlPlaneProxy, err := newControlPlaneProxyForRuntime(startup.WikidURL, startup.DaemonToken)
 	if err != nil {
 		return err
 	}
-	workspaceProxy, err := frontd.NewWorkspaceProxy(frontd.WorkspaceProxyOptions{
+	workspaceProxy, err := newWorkspaceProxyForRuntime(frontd.WorkspaceProxyOptions{
 		Upstream:    startup.WorkspacedURL,
 		DaemonToken: startup.DaemonToken,
 		Actor:       wikidActorResolver(startup.WikidURL, startup.DaemonToken),
@@ -2985,11 +3095,11 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	if err != nil {
 		return err
 	}
-	workspacesAPI, err := frontd.NewWorkspacesAPI(startup.WikidURL, startup.DaemonToken)
+	workspacesAPI, err := newWorkspacesAPIForRuntime(startup.WikidURL, startup.DaemonToken)
 	if err != nil {
 		return err
 	}
-	workspaceResolver, err := frontd.NewWikidWorkspaceResolver(startup.WikidURL, startup.DaemonToken)
+	workspaceResolver, err := newWikidWorkspaceResolverForRuntime(startup.WikidURL, startup.DaemonToken)
 	if err != nil {
 		return err
 	}
@@ -3003,20 +3113,14 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 			return actorResolver(clone)
 		},
 	})
-	workspaceMux := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, frontd.PublicWorkspacesPrefix+"/") {
-			workspaceRouterProxy.ServeHTTP(w, req)
-			return
-		}
-		workspaceProxy.ServeHTTP(w, req)
-	})
+	workspaceMux := frontdWorkspaceMux(workspaceRouterProxy, workspaceProxy)
 	var mcpProxy http.Handler
 	if cfg.MCPTransports.HTTP {
-		baseMCPProxy, err := frontdPublicMCPHandler(cfg, startup.WorkspacedURL, startup.DaemonToken, startup.WikidURL)
+		baseMCPProxy, err := frontdPublicMCPHandlerForRuntime(cfg, startup.WorkspacedURL, startup.DaemonToken, startup.WikidURL)
 		if err != nil {
 			return err
 		}
-		rootMCPWorkspaceResolver, err := frontd.NewWikidSingleWorkspaceResolver(startup.WikidURL, startup.DaemonToken)
+		rootMCPWorkspaceResolver, err := newWikidSingleWorkspaceResolverForRuntime(startup.WikidURL, startup.DaemonToken)
 		if err != nil {
 			return err
 		}
@@ -3026,30 +3130,11 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 			Resolve:     workspaceResolver,
 			ResolveRoot: rootMCPWorkspaceResolver,
 			Proxy: func(route frontd.WorkspaceRoute) http.Handler {
-				proxy, err := frontd.NewMCPProxyWithActor(frontd.WorkspaceProxyOptions{
-					Upstream:    route.Upstream,
-					DaemonToken: route.DaemonToken,
-					Actor: func(req *http.Request) (projectdaemon.ActorContext, error) {
-						clone := req.Clone(req.Context())
-						clone.Header = req.Header.Clone()
-						clone.Header.Set(projectdaemon.WorkspaceIDHeader, route.WorkspaceID.HTTPHeaderValue())
-						return actorResolver(clone)
-					},
-				})
-				if err != nil {
-					return workspaceMCPUnavailableHandler()
-				}
-				return proxy
+				return frontdWorkspaceMCPProxy(route, actorResolver)
 			},
 		})
 		workspaceMCP = frontdMCPBearerAuthHandler(cfg, startup.WikidURL, startup.DaemonToken, workspaceMCP)
-		mcpProxy = localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if req.URL.Path == "/mcp" || strings.HasPrefix(req.URL.Path, "/mcp/workspaces/") {
-				workspaceMCP.ServeHTTP(w, req)
-				return
-			}
-			baseMCPProxy.ServeHTTP(w, req)
-		}))
+		mcpProxy = frontdMCPMux(baseMCPProxy, workspaceMCP)
 	}
 	handler := frontd.NewIngressHandler(publicRouter, frontd.IngressOptions{
 		BasePath:     cfg.BasePath,
@@ -3058,7 +3143,7 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 		MCP:          mcpProxy,
 		ControlPlane: controlPlaneProxy,
 	})
-	listener, err := net.Listen("tcp", buildListenAddress(cfg.Host, cfg.Port))
+	listener, err := netListenForRuntime("tcp", buildListenAddress(cfg.Host, cfg.Port))
 	if err != nil {
 		return fmt.Errorf("start frontd listener: %w", err)
 	}
@@ -3072,6 +3157,43 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 		return err
 	}
 	return serveInternalRuntimeHTTP(parent, projectdaemon.RoleFrontd, listener, handler, startup.ParentPID)
+}
+
+func frontdWorkspaceMux(workspaceRouterProxy http.Handler, workspaceProxy http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, frontd.PublicWorkspacesPrefix+"/") {
+			workspaceRouterProxy.ServeHTTP(w, req)
+			return
+		}
+		workspaceProxy.ServeHTTP(w, req)
+	})
+}
+
+func frontdWorkspaceMCPProxy(route frontd.WorkspaceRoute, actorResolver func(*http.Request) (projectdaemon.ActorContext, error)) http.Handler {
+	proxy, err := newMCPProxyWithActorForRuntime(frontd.WorkspaceProxyOptions{
+		Upstream:    route.Upstream,
+		DaemonToken: route.DaemonToken,
+		Actor: func(req *http.Request) (projectdaemon.ActorContext, error) {
+			clone := req.Clone(req.Context())
+			clone.Header = req.Header.Clone()
+			clone.Header.Set(projectdaemon.WorkspaceIDHeader, route.WorkspaceID.HTTPHeaderValue())
+			return actorResolver(clone)
+		},
+	})
+	if err != nil {
+		return workspaceMCPUnavailableHandler()
+	}
+	return proxy
+}
+
+func frontdMCPMux(baseMCPProxy http.Handler, workspaceMCP http.Handler) http.Handler {
+	return localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/mcp" || strings.HasPrefix(req.URL.Path, "/mcp/workspaces/") {
+			workspaceMCP.ServeHTTP(w, req)
+			return
+		}
+		baseMCPProxy.ServeHTTP(w, req)
+	}))
 }
 
 func frontendConfigForRuntimeStorage(storageDir string) httpinternal.FrontendConfig {
@@ -3107,7 +3229,7 @@ func runWorkspacedRole(parent context.Context, startup internalRuntimeRoleStartu
 	}
 	defer logCloser.Close()
 
-	w, err := newRuntimeWiki(cfg, ownerCfg, runtimeWikiWorkspaceOnly)
+	w, err := newRuntimeWikiForRuntime(cfg, ownerCfg, runtimeWikiWorkspaceOnly)
 	if err != nil {
 		return err
 	}
@@ -3138,7 +3260,7 @@ func runWorkspacedRole(parent context.Context, startup internalRuntimeRoleStartu
 		}
 		router.ServeHTTP(w, req)
 	})
-	listener, err := net.Listen("tcp", buildListenAddress("127.0.0.1", cfg.Port))
+	listener, err := netListenForRuntime("tcp", buildListenAddress("127.0.0.1", cfg.Port))
 	if err != nil {
 		return fmt.Errorf("start workspaced listener: %w", err)
 	}
@@ -3159,8 +3281,8 @@ func serveInternalRuntimeHTTP(parent context.Context, role projectdaemon.RoleNam
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
+	notifyRuntimeSignalsForRuntime(signals, os.Interrupt, syscall.SIGTERM)
+	defer stopRuntimeSignalsForRuntime(signals)
 	go func() {
 		select {
 		case <-signals:
@@ -3187,7 +3309,7 @@ func serveInternalRuntimeHTTP(parent context.Context, role projectdaemon.RoleNam
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	if err := shutdownInternalRuntimeHTTPServerForRuntime(server, shutdownCtx); err != nil {
 		return err
 	}
 	return nil
@@ -3442,9 +3564,12 @@ func callWikidPrivateEndpoint(ctx context.Context, wikidURL string, daemonToken 
 	}
 	if source != nil {
 		req.Header = source.Header.Clone()
-		req.Header.Set("X-LeafWiki-Original-Method", source.Method)
-		req.Header.Set("X-LeafWiki-Original-Path", source.URL.Path)
-		req.Header.Set("X-LeafWiki-Original-Remote-Addr", source.RemoteAddr)
+		if req.Header == nil {
+			req.Header = http.Header{}
+		}
+		req.Header.Set("X-LeafWiki-Original-Method", originalMethod(source))
+		req.Header.Set("X-LeafWiki-Original-Path", originalPath(source))
+		req.Header.Set("X-LeafWiki-Original-Remote-Addr", originalRemoteAddr(source))
 	}
 	req.Header.Set(projectdaemon.ControlTokenHeader, daemonToken)
 	req.Header.Del(projectdaemon.ActorContextHeader)
@@ -3470,7 +3595,7 @@ func frontdMCPTokenVerifier(w *wiki.Wiki) sdkauth.TokenVerifier {
 			if w.APIKeyService() == nil {
 				return nil, fmt.Errorf("%w: api key verifier unavailable", sdkauth.ErrInvalidToken)
 			}
-			verified, err := w.APIKeyService().VerifyAPIKey(token)
+			verified, err := verifyFrontdAPIKeyForRuntime(w, token)
 			if err != nil {
 				if !errors.Is(err, coreauth.ErrInvalidToken) {
 					return nil, fmt.Errorf("api key verifier failed: %w", err)
@@ -3486,8 +3611,20 @@ func frontdMCPTokenVerifier(w *wiki.Wiki) sdkauth.TokenVerifier {
 		if w.OAuthService() == nil {
 			return nil, fmt.Errorf("%w: oauth verifier unavailable", sdkauth.ErrInvalidToken)
 		}
-		return w.OAuthService().VerifyBearerToken(ctx, token, req)
+		return verifyFrontdOAuthBearerTokenForRuntime(w, ctx, token, req)
 	}
+}
+
+func verifyFrontdAPIKey(w *wiki.Wiki, token string) (*coreauth.APIKeyVerification, error) {
+	return w.APIKeyService().VerifyAPIKey(token)
+}
+
+func verifyFrontdOAuthBearerToken(w *wiki.Wiki, ctx context.Context, token string, req *http.Request) (*sdkauth.TokenInfo, error) {
+	return w.OAuthService().VerifyBearerToken(ctx, token, req)
+}
+
+func getFrontdUserByID(w *wiki.Wiki, userID coreauth.UserID) (*coreauth.User, error) {
+	return w.UserService().GetUserByID(userID)
 }
 
 func frontdMCPActorResolver(w *wiki.Wiki, cfg leafwikiRuntimeConfig) func(*http.Request) (projectdaemon.ActorContext, error) {
@@ -3502,7 +3639,7 @@ func frontdMCPActorResolver(w *wiki.Wiki, cfg leafwikiRuntimeConfig) func(*http.
 		if w.UserService() == nil {
 			return projectdaemon.ActorContext{}, fmt.Errorf("authenticated MCP user service is unavailable")
 		}
-		user, err := w.UserService().GetUserByID(coreauth.UserIDFromString(tokenInfo.UserID))
+		user, err := getFrontdUserByIDForRuntime(w, coreauth.UserIDFromString(tokenInfo.UserID))
 		if err != nil {
 			return projectdaemon.ActorContext{}, err
 		}
@@ -3522,7 +3659,7 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 		return user, method, err
 	}
 	if token := httpBearerToken(req); token != "" && coreauth.IsAPIKeyBearer(token) && isMCPActorPath(req.URL.Path) {
-		verified, err := w.APIKeyService().VerifyAPIKey(token)
+		verified, err := verifyFrontdAPIKeyForRuntime(w, token)
 		if err != nil {
 			return nil, "", err
 		}
@@ -3532,11 +3669,11 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 		if w.OAuthService() == nil || w.UserService() == nil {
 			return nil, "", fmt.Errorf("oauth actor services are unavailable")
 		}
-		info, err := w.OAuthService().VerifyBearerToken(req.Context(), token, req)
+		info, err := verifyFrontdOAuthBearerTokenForRuntime(w, req.Context(), token, req)
 		if err != nil {
 			return nil, "", err
 		}
-		user, err := w.UserService().GetUserByID(coreauth.UserIDFromString(info.UserID))
+		user, err := getFrontdUserByIDForRuntime(w, coreauth.UserIDFromString(info.UserID))
 		if err != nil {
 			return nil, "", err
 		}
@@ -3746,7 +3883,7 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 			role = wikid.GrantRoleAdmin
 		} else {
 			subject := "user:" + user.ID
-			userGrants, err := grants.GrantsForSubject(subject)
+			userGrants, err := grantsForSubjectForRuntime(grants, subject)
 			if err != nil {
 				http.Error(w, "load workspace grants", http.StatusInternalServerError)
 				return
@@ -3764,7 +3901,7 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 			}
 		}
 	}
-	actor, err := actorContextForWorkspaceGrant(user, method, cfg, workspaceID, role)
+	actor, err := actorContextForWorkspaceGrantForRuntime(user, method, cfg, workspaceID, role)
 	if err != nil {
 		http.Error(w, "encode actor context", http.StatusInternalServerError)
 		return
@@ -3833,34 +3970,34 @@ type runtimeError struct {
 }
 
 func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, ownerCfg projectdaemon.Config) error {
-	controlListener, err := net.Listen("tcp", "127.0.0.1:0")
+	controlListener, err := netListenForRuntime("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("start control listener: %w", err)
 	}
 	defer controlListener.Close()
 
-	controlToken, err := projectdaemon.RandomToken()
+	controlToken, err := randomTokenForRuntime()
 	if err != nil {
 		return err
 	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
+	hash, err := configHashForRuntime(ownerCfg)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	controlPlaneWiki, err := newRuntimeWiki(cfg, ownerCfg, runtimeWikiControlPlaneOnly)
+	controlPlaneWiki, err := newRuntimeWikiForRuntime(cfg, ownerCfg, runtimeWikiControlPlaneOnly)
 	if err != nil {
 		return err
 	}
 	defer controlPlaneWiki.Close()
-	controlPlaneOpts, err := controlPlaneRouterOptionsForRuntime(cfg, controlPlaneWiki)
+	controlPlaneOpts, err := controlPlaneRouterOptionsForOwner(cfg, controlPlaneWiki)
 	if err != nil {
 		return err
 	}
 	controlPlaneRouter := frontd.NewRouter(controlPlaneWiki, controlPlaneOpts)
 	wikidURL := "http://" + controlListener.Addr().String()
-	runtime, err := startWikidFrontdRuntime(ctx, cfg, controlToken, wikidURL)
+	runtime, err := startWikidFrontdRuntimeForOwner(ctx, cfg, controlToken, wikidURL)
 	if err != nil {
 		return err
 	}
@@ -3879,7 +4016,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		workspacedPID = role.PID
 	}
 	runtime.mu.Unlock()
-	privateMCP, err := frontd.NewMCPProxyWithActor(frontd.WorkspaceProxyOptions{
+	privateMCP, err := newMCPProxyWithActorForRuntime(frontd.WorkspaceProxyOptions{
 		Upstream:    workspacedURL,
 		DaemonToken: controlToken,
 		Actor:       wikidControlMCPActorResolver(authStorageDirForRuntime(ownerCfg.DataDir), cfg),
@@ -3910,12 +4047,12 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		return fmt.Errorf("bootstrap home workspace: %w", err)
 	}
 	grants := wikid.NewGrantStore(layout.DBPath)
-	if err := seedRuntimeHomeGrants(grants, cfg); err != nil {
+	if err := seedRuntimeHomeGrantsForOwner(grants, cfg); err != nil {
 		return err
 	}
 	workspaceSupervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 	workspaceSupervisor.MarkReady(wikid.HomeWorkspaceID, workspacedPID, workspacedURL)
-	workspaceManager := newFederatedWorkspaceManager(cfg, controlToken, wikidURL, layout, workspaceSupervisor)
+	workspaceManager := newFederatedWorkspaceManagerForOwner(cfg, controlToken, wikidURL, layout, workspaceSupervisor)
 	workspaceManager.MarkReady(wikid.HomeWorkspaceID, workspacedPID, workspacedURL)
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -3929,17 +4066,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		Grants:     grants,
 		Supervisor: workspaceSupervisor,
 		Subject: func(req *http.Request) (wikid.WorkspaceSubject, error) {
-			user, _, err := frontdActorUser(cloneWithOriginalRequest(req), controlPlaneWiki, cfg)
-			if err != nil {
-				return wikid.WorkspaceSubject{}, err
-			}
-			if err := ensureRuntimeHomeGrant(grants, user); err != nil {
-				return wikid.WorkspaceSubject{}, err
-			}
-			return wikid.WorkspaceSubject{
-				Subject: "user:" + user.ID,
-				Role:    wikidGrantRoleForCoreRole(user.Role),
-			}, nil
+			return runtimeWorkspaceSubject(req, controlPlaneWiki, cfg, grants)
 		},
 		Ensure: func(ctx context.Context, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
 			return workspaceManager.Ensure(ctx, workspace)
@@ -3960,11 +4087,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 			ConfigHash:    hash,
 		},
 		VerifyAPIKey: func(key string) error {
-			err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(ownerCfg.DataDir), key)
-			if errors.Is(err, coreauth.ErrInvalidToken) {
-				return projectdaemon.ErrInvalidAPIKey
-			}
-			return err
+			return verifyOwnerControlAPIKey(ownerCfg, key)
 		},
 	})
 	controlServer := &http.Server{Addr: controlListener.Addr().String(), Handler: wikid.NewPrivateHandler(wikid.PrivateHandlerOptions{
@@ -3975,19 +4098,10 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		ActorContext: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			handleWikidActorContext(w, req, controlPlaneWiki, cfg, registry, grants)
 		}),
-		TokenVerify: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			handleWikidTokenVerify(w, req, controlPlaneWiki)
-		}),
+		TokenVerify:  runtimeTokenVerifyHandler(controlPlaneWiki),
 		WorkspaceAPI: workspaceAPI,
 	})}
-	serverDone := make(chan error, 1)
-	go func() {
-		err := controlServer.Serve(controlListener)
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		serverDone <- err
-	}()
+	serverDone := serveWikidControlServerForOwner(controlServer, controlListener)
 
 	desc := &projectdaemon.Descriptor{
 		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
@@ -4014,28 +4128,16 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 		desc.PublicURL = nativeStdioHTTPURL(cfg.Host, cfg.Port, cfg.BasePath)
 	}
 	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
+	if err := writeDescriptorAtomicForRuntime(descriptorPath, desc); err != nil {
 		return err
 	}
 	globalDescriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
-	if err := projectdaemon.WriteDescriptorAtomic(globalDescriptorPath, desc); err != nil {
+	if err := writeDescriptorAtomicForRuntime(globalDescriptorPath, desc); err != nil {
 		return err
 	}
 	var descriptorMu sync.Mutex
 	runtime.setRoleChangeCallback(func(roles []projectdaemon.RoleHealth) {
-		descriptorMu.Lock()
-		defer descriptorMu.Unlock()
-		desc.Roles = append([]projectdaemon.RoleHealth(nil), roles...)
-		syncHomeWorkspaceStatus(workspaceSupervisor, roles)
-		if publicURL := roleURL(roles, projectdaemon.RoleFrontd); publicURL != "" {
-			desc.PublicURL = publicURL
-		}
-		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, desc); err != nil {
-			slog.Default().Warn("Runtime role descriptor update failed", "error", err)
-		}
-		if err := projectdaemon.WriteDescriptorAtomic(globalDescriptorPath, desc); err != nil {
-			slog.Default().Warn("Runtime role global descriptor update failed", "error", err)
-		}
+		updateRuntimeRoleDescriptors(&descriptorMu, desc, workspaceSupervisor, descriptorPath, globalDescriptorPath, roles)
 	})
 	defer projectdaemon.RemoveDescriptor(descriptorPath)
 	defer projectdaemon.RemoveDescriptor(globalDescriptorPath)
@@ -4053,7 +4155,63 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	return controlServer.Shutdown(shutdownCtx)
+	return shutdownWikidControlServerForRuntime(controlServer, shutdownCtx)
+}
+
+func runtimeWorkspaceSubject(req *http.Request, controlPlaneWiki *wiki.Wiki, cfg leafwikiRuntimeConfig, grants *wikid.GrantStore) (wikid.WorkspaceSubject, error) {
+	user, _, err := frontdActorUser(cloneWithOriginalRequest(req), controlPlaneWiki, cfg)
+	if err != nil {
+		return wikid.WorkspaceSubject{}, err
+	}
+	if err := ensureRuntimeHomeGrantForOwner(grants, user); err != nil {
+		return wikid.WorkspaceSubject{}, err
+	}
+	return wikid.WorkspaceSubject{
+		Subject: "user:" + user.ID,
+		Role:    wikidGrantRoleForCoreRole(user.Role),
+	}, nil
+}
+
+func runtimeTokenVerifyHandler(controlPlaneWiki *wiki.Wiki) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		handleWikidTokenVerify(w, req, controlPlaneWiki)
+	})
+}
+
+func verifyOwnerControlAPIKey(ownerCfg projectdaemon.Config, key string) error {
+	err := verifyStdioAPIKeyFromStorage(authStorageDirForRuntime(ownerCfg.DataDir), key)
+	if errors.Is(err, coreauth.ErrInvalidToken) {
+		return projectdaemon.ErrInvalidAPIKey
+	}
+	return err
+}
+
+func serveWikidControlServer(server *http.Server, listener net.Listener) <-chan error {
+	serverDone := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+			err = nil
+		}
+		serverDone <- err
+	}()
+	return serverDone
+}
+
+func updateRuntimeRoleDescriptors(descriptorMu *sync.Mutex, desc *projectdaemon.Descriptor, workspaceSupervisor *wikid.WorkspaceSupervisor, descriptorPath string, globalDescriptorPath string, roles []projectdaemon.RoleHealth) {
+	descriptorMu.Lock()
+	defer descriptorMu.Unlock()
+	desc.Roles = append([]projectdaemon.RoleHealth(nil), roles...)
+	syncHomeWorkspaceStatus(workspaceSupervisor, roles)
+	if publicURL := roleURL(roles, projectdaemon.RoleFrontd); publicURL != "" {
+		desc.PublicURL = publicURL
+	}
+	if err := writeDescriptorAtomicForRuntime(descriptorPath, desc); err != nil {
+		slog.Default().Warn("Runtime role descriptor update failed", "error", err)
+	}
+	if err := writeDescriptorAtomicForRuntime(globalDescriptorPath, desc); err != nil {
+		slog.Default().Warn("Runtime role global descriptor update failed", "error", err)
+	}
 }
 
 func roleURL(roles []projectdaemon.RoleHealth, name projectdaemon.RoleName) string {
@@ -4168,10 +4326,10 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 		return err
 	}
 	dataDirMissingBeforeLock := false
-	if _, err := os.Stat(ownerCfg.DataDir); os.IsNotExist(err) {
+	if _, err := statPathForRuntime(ownerCfg.DataDir); os.IsNotExist(err) {
 		dataDirMissingBeforeLock = true
 	}
-	dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
+	dataLock, err := acquireDataDirLockForRuntime(ownerCfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("acquire data directory lock: %w", err)
 	}
@@ -4198,17 +4356,17 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	if dataDirMissingBeforeLock {
 		slog.Default().Info("Data directory created", "path", cfg.Workspace.DataDir)
 	}
-	if _, err := os.Stat(ownerCfg.DataDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(ownerCfg.DataDir, 0o755); err != nil {
+	if _, err := statPathForRuntime(ownerCfg.DataDir); os.IsNotExist(err) {
+		if err := mkdirAllForRuntime(ownerCfg.DataDir, 0o755); err != nil {
 			return fmt.Errorf("create data directory: %w", err)
 		}
 	}
-	if _, err := os.Stat(ownerCfg.RootDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(ownerCfg.RootDir, 0o755); err != nil {
+	if _, err := statPathForRuntime(ownerCfg.RootDir); os.IsNotExist(err) {
+		if err := mkdirAllForRuntime(ownerCfg.RootDir, 0o755); err != nil {
 			return fmt.Errorf("create root directory: %w", err)
 		}
 	}
-	rootLock, err := locking.AcquireRootDirLock(ownerCfg.RootDir)
+	rootLock, err := acquireRootDirLockForRuntime(ownerCfg.RootDir)
 	if err != nil {
 		return fmt.Errorf("acquire root directory lock: %w", err)
 	}
@@ -4224,7 +4382,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	if err := os.MkdirAll(authPaths.OAuthDir, 0o755); err != nil {
 		return fmt.Errorf("create wikid oauth dir: %w", err)
 	}
-	return runWikidFrontdOwner(parent, cfg, ownerCfg)
+	return runWikidFrontdOwnerForProjectDaemon(parent, cfg, ownerCfg)
 }
 
 func waitForFirstProjectDaemonSession(ctx context.Context, sessions *projectdaemon.SessionRegistry, interval time.Duration) error {

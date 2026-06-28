@@ -1,13 +1,14 @@
 package oauth
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"reflect"
-	"testing"
 
 	"github.com/ory/fosite"
 )
 
-func TestFositeClientFixedFallbackPreservesLoopbackRedirectCompatibility(t *testing.T) {
+var _ = ginkgo.It("TestFositeClientFixedFallbackPreservesLoopbackRedirectCompatibility", func() {
+	t := ginkgo.GinkgoT()
 	client := fixedOAuthClient().fositeClient()
 
 	if got := client.GetID(); got != ClientID {
@@ -23,9 +24,11 @@ func TestFositeClientFixedFallbackPreservesLoopbackRedirectCompatibility(t *test
 	assertFositeArguments(t, client.GetResponseTypes(), []string{"code"})
 	assertFositeArguments(t, client.GetScopes(), []string{ScopeMCP})
 	assertFositeArguments(t, client.GetAudience(), nil)
-}
 
-func TestFositeClientMapsDynamicRegistration(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeClientMapsDynamicRegistration", func() {
+	t := ginkgo.GinkgoT()
 	client := oauthClientFromRegistration("leafwiki-dcr-test", registeredClient{
 		ClientName:    "Codex",
 		RedirectURIs:  []string{"http://127.0.0.1:49152/callback"},
@@ -47,9 +50,11 @@ func TestFositeClientMapsDynamicRegistration(t *testing.T) {
 	assertFositeArguments(t, client.GetResponseTypes(), []string{"code"})
 	assertFositeArguments(t, client.GetScopes(), []string{ScopeMCP})
 	assertFositeArguments(t, client.GetAudience(), nil)
-}
 
-func TestFositeSessionStoresSubjectWithoutRoleSnapshot(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeSessionStoresSubjectWithoutRoleSnapshot", func() {
+	t := ginkgo.GinkgoT()
 	session := newFositeSession("user-123", "admin")
 
 	if got := session.GetSubject(); got != "user-123" {
@@ -61,9 +66,10 @@ func TestFositeSessionStoresSubjectWithoutRoleSnapshot(t *testing.T) {
 	if _, ok := session.Extra["role"]; ok {
 		t.Fatalf("session stores role snapshot in Extra: %#v", session.Extra)
 	}
-}
 
-func assertFositeArguments(t *testing.T, got fosite.Arguments, want []string) {
+})
+
+func assertFositeArguments(t oauthTestT, got fosite.Arguments, want []string) {
 	t.Helper()
 
 	if !reflect.DeepEqual([]string(got), want) {

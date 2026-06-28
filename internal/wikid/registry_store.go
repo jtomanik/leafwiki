@@ -144,6 +144,10 @@ func loadRegistryDocument(ctx context.Context, q registryQuerier) (RegistryDocum
 		return RegistryDocument{}, err
 	}
 	defer rows.Close()
+	return loadRegistryRows(rows)
+}
+
+func loadRegistryRows(rows wikidRows) (RegistryDocument, error) {
 	doc := NewRegistryDocument()
 	for rows.Next() {
 		var workspace WorkspaceRecord

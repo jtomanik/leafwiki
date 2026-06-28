@@ -7,15 +7,35 @@ import (
 	"path/filepath"
 )
 
+type descriptorTempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var (
+	chmodDescriptorFile        = os.Chmod
+	createDescriptorTempFile   = func(dir string, pattern string) (descriptorTempFile, error) { return os.CreateTemp(dir, pattern) }
+	marshalDescriptorJSON      = json.MarshalIndent
+	mkdirAllDescriptorPath     = os.MkdirAll
+	removeDescriptorPath       = os.Remove
+	removeTemporaryDescriptor  = os.Remove
+	renameTemporaryDescriptor  = os.Rename
+	readDescriptorFile         = os.ReadFile
+	lstatDescriptorFile        = os.Lstat
+	validateDescriptorFileMode = func(info os.FileInfo) os.FileMode { return info.Mode() }
+)
+
 func ReadTrustedDescriptor(path string) (*Descriptor, error) {
-	info, err := os.Lstat(path)
+	info, err := lstatDescriptorFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
+	if !validateDescriptorFileMode(info).IsRegular() {
 		return nil, fmt.Errorf("project daemon descriptor is not a regular file")
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
+	if got := validateDescriptorFileMode(info).Perm(); got != 0o600 {
 		return nil, fmt.Errorf("project daemon descriptor mode = %04o, want 0600", got)
 	}
 	if err := validateDescriptorOwner(path, info); err != nil {
@@ -25,7 +45,7 @@ func ReadTrustedDescriptor(path string) (*Descriptor, error) {
 }
 
 func ReadDescriptor(path string) (*Descriptor, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readDescriptorFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -40,19 +60,19 @@ func WriteDescriptorAtomic(path string, desc *Descriptor) error {
 	if desc == nil {
 		return fmt.Errorf("descriptor is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAllDescriptorPath(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create descriptor directory: %w", err)
 	}
-	raw, err := json.MarshalIndent(desc, "", "  ")
+	raw, err := marshalDescriptorJSON(desc, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	tmp, err := createDescriptorTempFile(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary descriptor: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer removeTemporaryDescriptor(tmpPath)
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("secure temporary descriptor: %w", err)
@@ -68,17 +88,17 @@ func WriteDescriptorAtomic(path string, desc *Descriptor) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temporary descriptor: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameTemporaryDescriptor(tmpPath, path); err != nil {
 		return fmt.Errorf("replace descriptor: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := chmodDescriptorFile(path, 0o600); err != nil {
 		return fmt.Errorf("secure descriptor: %w", err)
 	}
 	return nil
 }
 
 func RemoveDescriptor(path string) error {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := removeDescriptorPath(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

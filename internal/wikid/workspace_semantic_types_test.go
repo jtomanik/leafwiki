@@ -1,14 +1,15 @@
 package wikid
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"path/filepath"
-	"testing"
 	"time"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestWorkspaceRuntimeModelsCarrySemanticWorkspaceID(t *testing.T) {
+var _ = ginkgo.It("TestWorkspaceRuntimeModelsCarrySemanticWorkspaceID", func() {
+	t := ginkgo.GinkgoT()
 	workspaceID := workspaceid.WorkspaceID("home")
 
 	doc := RegistryDocument{
@@ -30,9 +31,10 @@ func TestWorkspaceRuntimeModelsCarrySemanticWorkspaceID(t *testing.T) {
 	if status.WorkspaceID != workspaceID || status.State != WorkspaceStateRunning {
 		t.Fatalf("supervisor status = %#v, want typed workspace ID to remain running", status)
 	}
-}
+})
 
-func TestRegistryStoreRejectsWorkspaceIDWhitespaceBeforeNormalization(t *testing.T) {
+var _ = ginkgo.It("TestRegistryStoreRejectsWorkspaceIDWhitespaceBeforeNormalization", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	store := NewRegistryStore(layout.DBPath)
 	now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
@@ -56,9 +58,10 @@ func TestRegistryStoreRejectsWorkspaceIDWhitespaceBeforeNormalization(t *testing
 	if len(doc.Workspaces) != 0 {
 		t.Fatalf("workspaces after rejected padded ID registration = %#v, want none", doc.Workspaces)
 	}
-}
+})
 
-func TestRegistryStoreRejectsSeededGrantWorkspaceIDWhitespaceBeforeNormalization(t *testing.T) {
+var _ = ginkgo.It("TestRegistryStoreRejectsSeededGrantWorkspaceIDWhitespaceBeforeNormalization", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	store := NewRegistryStore(layout.DBPath)
 	now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
@@ -95,4 +98,4 @@ func TestRegistryStoreRejectsSeededGrantWorkspaceIDWhitespaceBeforeNormalization
 	if len(grants.Grants) != 0 {
 		t.Fatalf("grants after rejected seeded grant = %#v, want rollback", grants.Grants)
 	}
-}
+})

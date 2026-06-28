@@ -1,13 +1,14 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 )
 
-func TestLeafWikiRepoLocalSkillRemainsInstallable(t *testing.T) {
+var _ = ginkgo.It("TestLeafWikiRepoLocalSkillRemainsInstallable", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "skills", "llmwiki", "SKILL.md"))
 	if err != nil {
@@ -23,9 +24,11 @@ func TestLeafWikiRepoLocalSkillRemainsInstallable(t *testing.T) {
 	if !strings.Contains(content, "wiki_get_context") {
 		t.Fatalf("repo-local skill should teach the context-first workflow")
 	}
-}
 
-func TestDocsReadmeUsesWikiRootLinksForActiveRootContent(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestDocsReadmeUsesWikiRootLinksForActiveRootContent", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "README.md"))
 	if err != nil {
@@ -46,9 +49,11 @@ func TestDocsReadmeUsesWikiRootLinksForActiveRootContent(t *testing.T) {
 			t.Fatalf("docs/README.md contains repo-root link %s; active wiki root content must use wiki-root or external links", forbidden)
 		}
 	}
-}
 
-func TestDuplicateVisiblePlanCopiesAreMarkedSuperseded(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestDuplicateVisiblePlanCopiesAreMarkedSuperseded", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	for _, tc := range []struct {
 		duplicate string
@@ -68,9 +73,11 @@ func TestDuplicateVisiblePlanCopiesAreMarkedSuperseded(t *testing.T) {
 			t.Fatalf("%s must clearly mark itself as superseded by %s", tc.duplicate, tc.canonical)
 		}
 	}
-}
 
-func TestHistoricalLLMWikiCompanionPlanWarnsAboutStaleMCPExamples(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestHistoricalLLMWikiCompanionPlanWarnsAboutStaleMCPExamples", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "llm_wiki_companion_skill.PLAN.md"))
 	if err != nil {
@@ -80,7 +87,8 @@ func TestHistoricalLLMWikiCompanionPlanWarnsAboutStaleMCPExamples(t *testing.T) 
 	if !strings.Contains(content, "Historical note") || !strings.Contains(content, "`--enable-mcp` examples are historical") {
 		t.Fatalf("visible historical plan must warn readers that stale --enable-mcp examples are historical")
 	}
-}
+
+})
 
 func firstLine(content string) string {
 	line, _, _ := strings.Cut(content, "\n")

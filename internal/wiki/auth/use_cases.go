@@ -106,9 +106,13 @@ type CreateUserOutput struct {
 	User *coreauth.PublicUser
 }
 
+type userResolverReloader interface {
+	Reload() error
+}
+
 type CreateUserUseCase struct {
 	user     *coreauth.UserService
-	resolver *coreauth.UserResolver
+	resolver userResolverReloader
 	log      *slog.Logger
 }
 
@@ -165,7 +169,7 @@ type UpdateUserOutput struct {
 
 type UpdateUserUseCase struct {
 	user     *coreauth.UserService
-	resolver *coreauth.UserResolver
+	resolver userResolverReloader
 	log      *slog.Logger
 }
 
@@ -248,7 +252,7 @@ type DeleteUserInput struct{ ID coreauth.UserID }
 
 type DeleteUserUseCase struct {
 	user     *coreauth.UserService
-	resolver *coreauth.UserResolver
+	resolver userResolverReloader
 	log      *slog.Logger
 }
 

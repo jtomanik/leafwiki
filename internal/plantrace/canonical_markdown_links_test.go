@@ -1,11 +1,11 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"testing"
 )
 
 type canonicalPlanEvidence struct {
@@ -34,7 +34,7 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"External and non-page links are ignored", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_TreatsProtocolRelativeAndSchemedURLsAsExternal")},
 	{"Link-like text in inline code and fenced code is ignored", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestCanonicalizeMarkdownLinks_SkipsMultiBacktickCodeSpans")},
 	{"Malformed percent-encoding reports an invalid link instead of panicking", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFilesReportsInvalidCanonicalLinks")},
-	{"Relative link cannot escape the workspace root", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation")},
+	{"Relative link cannot escape the workspace root", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation")},
 	{"Existing canonical relative page links preserve relative style", evidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelative")},
 	{"Existing canonical absolute page links preserve absolute style", evidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelative")},
 	{"Section move keeps section links extensionless", evidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_RewriteSectionLinksUsesFilesystemRelativeSemantics")},
@@ -49,26 +49,26 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"root index.md has precedence over root README.md", evidence("internal/core/tree/node_store_reconstruct_test.go", "TestNodeStore_ReconstructTreeFromFS_RootIndexBeatsRootReadme")},
 	{"README.md as normal page keeps its filesystem casing in generated links", evidence("e2e/tests/root-dir.spec.ts", "[README Page](/${fixture.indexedSlug}/README.md)")},
 	{"Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules", evidence("internal/core/tree/node_store_reconstruct_test.go", "TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex")},
-	{"Old extensionless page link migrates to .md", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowRewritesResolvableLegacyPageLinkBeforeValidation")},
-	{"Old extensionless section link remains extensionless", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop")},
-	{"Unresolved old extensionless page link becomes validation error", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowLeavesUnresolvedLegacyPageLinkAndReportsValidationError")},
+	{"Old extensionless page link migrates to .md", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowRewritesResolvableLegacyPageLinkBeforeValidation")},
+	{"Old extensionless section link remains extensionless", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowCanonicalizesSectionTrailingSlashWithoutRevisionLoop")},
+	{"Unresolved old extensionless page link becomes validation error", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowLeavesUnresolvedLegacyPageLinkAndReportsValidationError")},
 	{"Query and fragment survive migration", evidence("e2e/tests/workspace-sync.spec.ts", "workspace-sync-preserves-query-fragment-and-leaves-assets-code-blocks-unchanged")},
-	{"Relative old page link migrates to relative .md", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical")},
-	{"Existing canonical .md page link is not rewritten", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical")},
-	{"Ambiguous extensionless link is left as validation error", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite")},
+	{"Relative old page link migrates to relative .md", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical")},
+	{"Existing canonical .md page link is not rewritten", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowRelativeLegacyPageLinkMigratesAndCanonicalRelativeLinkStaysCanonical")},
+	{"Ambiguous extensionless link is left as validation error", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite")},
 	{"Explicit index.md section link canonicalizes to the section", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection")},
 	{"Explicit README.md section fallback link canonicalizes to the section", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection")},
 	{"Explicit README.md page link stays a page when index.md exists", evidence("internal/http/router_test.go", "TestGetPageByPathEndpoint_ReadmeMarkdownPathUsesFallbackOnlyWhenActive")},
-	{"Migration is idempotent", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision")},
-	{"Migration writeback is captured in revision history", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions")},
-	{"Migration write failure reports sync validation state without losing raw content", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails")},
+	{"Migration is idempotent", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision")},
+	{"Migration writeback is captured in revision history", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions")},
+	{"Migration write failure reports sync validation state without losing raw content", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails")},
 	{"Canonical .md page link indexes as outgoing link", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ResolvesCanonicalRelativePageMdFromSourceFileDirectory")},
 	{"Canonical section link indexes as outgoing link", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ResolvesCanonicalSectionLinkForSameBasenameTwin")},
 	{"Case mismatch is invalid", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFiles_UsesExactCaseSensitiveTargetMatching")},
 	{"Assets are not coerced", evidence("internal/links/link_service_test.go", "TestExtractLinksFromMarkdown_IgnoresAssetDestinations")},
 	{"Broken canonical .md page link is reported as broken", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting")},
 	{"Old extensionless page link is reported as non-canonical when migration cannot resolve it", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFiles_RejectsUnmigratedExtensionlessPageLink")},
-	{"Duplicate syntaxes do not create duplicate target identities after migration", evidence("internal/workspacesync/service_test.go", "TestServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity")},
+	{"Duplicate syntaxes do not create duplicate target identities after migration", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity")},
 	{"Reference-style link definitions are rewritten", evidence("internal/importer/content_transformer_test.go", "TestContentTransformer_RewritesReferenceDefinitions")},
 	{"Image links remain governed by existing image and asset validation", evidence("internal/links/link_service_test.go", "TestExtractLinksFromMarkdown_IgnoresImageLinksToPageDestinations")},
 	{"GitHub .md page links remain GitHub-compatible", evidence("e2e/tests/importer.spec.ts", "importer-ui-canonical-page-links-navigate-in-preview")},
@@ -81,7 +81,7 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"Importer does not coerce assets with .md extension under asset namespaces", evidence("internal/importer/content_transformer_test.go", "asset markdown path remains unchanged")},
 	{"User can click a canonical page link in preview", evidence("e2e/tests/page.spec.ts", "preview-clicks-canonical-absolute-page-link-with-query-fragment")},
 	{"Workspace sync repairs links and shows validation errors for the rest", evidence("e2e/tests/workspace-sync.spec.ts", "workspace-sync-repairs-link-and-keeps-remaining-validation-error-in-same-sync")},
-	{"MCP agent context returns canonical examples", evidence("internal/wiki/mcp/mcp_integration_test.go", "TestLocalMCPGetContext_ReturnsAgentReadyContext")},
+	{"MCP agent context returns canonical examples", evidence("internal/wiki/mcp/mcp_integration_test.go", "LocalMCPGetContext_ReturnsAgentReadyContext")},
 	{"User can click a canonical section link in preview", evidence("e2e/tests/page.spec.ts", "preview-clicks-section-link-with-trailing-slash-and-canonicalizes-url")},
 	{"Preview shows a broken-link state for unresolved canonical page links", evidence("e2e/tests/page.spec.ts", "preview-shows-broken-state-for-unresolved-canonical-page-md-link")},
 	{"Direct browser route opens canonical .md page deep link", evidence("e2e/tests/page.spec.ts", "direct-browser-deep-link-page-md-opens-viewer-page")},
@@ -99,7 +99,8 @@ func evidence(file string, text string) canonicalPlanEvidence {
 	return canonicalPlanEvidence{file: file, text: text}
 }
 
-func TestCanonicalMarkdownLinksPlanScenarioTitleAuditIndex(t *testing.T) {
+var _ = ginkgo.It("TestCanonicalMarkdownLinksPlanScenarioTitleAuditIndex", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := canonicalPlanRepoRoot(t)
 	planTitles := canonicalPlanScenarioTitles(t, filepath.Join(repoRoot, "docs", "plans", "canonical_markdown_links.PLAN.md"))
 	if len(planTitles) != len(canonicalMarkdownLinksPlanScenarioCoverage) {
@@ -134,9 +135,10 @@ func TestCanonicalMarkdownLinksPlanScenarioTitleAuditIndex(t *testing.T) {
 			t.Fatalf("scenario coverage %q is not present in the plan", title)
 		}
 	}
-}
 
-func canonicalPlanRepoRoot(t *testing.T) string {
+})
+
+func canonicalPlanRepoRoot(t plantraceTestT) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -145,7 +147,7 @@ func canonicalPlanRepoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-func canonicalPlanScenarioTitles(t *testing.T, planPath string) []string {
+func canonicalPlanScenarioTitles(t plantraceTestT, planPath string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(planPath)
 	if err != nil {
@@ -161,7 +163,7 @@ func canonicalPlanScenarioTitles(t *testing.T, planPath string) []string {
 	return titles
 }
 
-func assertCanonicalPlanEvidenceExists(t *testing.T, repoRoot string, title string, evidence canonicalPlanEvidence) {
+func assertCanonicalPlanEvidenceExists(t plantraceTestT, repoRoot string, title string, evidence canonicalPlanEvidence) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(repoRoot, evidence.file))
 	if err != nil {

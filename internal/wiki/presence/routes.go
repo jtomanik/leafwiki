@@ -62,18 +62,22 @@ func (r *Routes) handleHeartbeat(c *gin.Context) {
 	}
 	page := r.resolvePage(heartbeat.PageID, heartbeat.Path)
 	if err := r.registry.Record(heartbeat, user, page); err != nil {
-		if loc, ok := sharederrors.AsLocalizedError(err); ok {
-			c.JSON(http.StatusBadRequest, presenceErrorResponse{
-				Error: sharederrors.LocalizedErrorDetailFromError(loc),
-			})
-			return
-		}
-		c.JSON(http.StatusBadRequest, presenceErrorResponse{
-			Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodePresenceInvalidRequest, err.Error()),
-		})
+		writePresenceRecordError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func writePresenceRecordError(c *gin.Context, err error) {
+	if loc, ok := sharederrors.AsLocalizedError(err); ok {
+		c.JSON(http.StatusBadRequest, presenceErrorResponse{
+			Error: sharederrors.LocalizedErrorDetailFromError(loc),
+		})
+		return
+	}
+	c.JSON(http.StatusBadRequest, presenceErrorResponse{
+		Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodePresenceInvalidRequest, err.Error()),
+	})
 }
 
 type presenceErrorResponse struct {

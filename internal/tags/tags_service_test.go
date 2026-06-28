@@ -1,33 +1,47 @@
 package tags
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
+
 
 	"github.com/perber/wiki/internal/core/tree"
-	"github.com/perber/wiki/internal/test_utils"
 )
 
 // ─── ExtractTagsFromContent ──────────────────────────────────────────────────
 
-func TestExtractTagsFromContent_BlockListSyntax(t *testing.T) {
+var _ = ginkgo.Describe("TestExtractTagsFromContent_BlockListSyntax", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags:\n  - react\n  - typescript\n---\n\n# Page"
 	got := ExtractTagsFromContent(content)
 	assertStringSliceEqual(t, got, []string{"react", "typescript"})
-}
 
-func TestExtractTagsFromContent_InlineListSyntax(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_InlineListSyntax", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags: [react, typescript]\n---\n\n# Page"
 	got := ExtractTagsFromContent(content)
 	assertStringSliceEqual(t, got, []string{"react", "typescript"})
-}
 
-func TestExtractTagsFromContent_NormalizesToLowercase(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_NormalizesToLowercase", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags:\n  - React\n  - TypeScript\n  - GO\n---\n"
 	got := ExtractTagsFromContent(content)
 	assertStringSliceEqual(t, got, []string{"react", "typescript", "go"})
-}
 
-func TestExtractTagsFromContent_DeduplicatesCaseInsensitive(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_DeduplicatesCaseInsensitive", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags:\n  - react\n  - React\n  - REACT\n---\n"
 	got := ExtractTagsFromContent(content)
 	if len(got) != 1 {
@@ -36,9 +50,13 @@ func TestExtractTagsFromContent_DeduplicatesCaseInsensitive(t *testing.T) {
 	if len(got) > 0 && got[0] != "react" {
 		t.Errorf("got[0] = %q, want 'react'", got[0])
 	}
-}
 
-func TestExtractTagsFromContent_TrimsWhitespace(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_TrimsWhitespace", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags:\n  - \" react \"\n  - \" go \"\n---\n"
 	got := ExtractTagsFromContent(content)
 	for _, tag := range got {
@@ -46,40 +64,60 @@ func TestExtractTagsFromContent_TrimsWhitespace(t *testing.T) {
 			t.Errorf("tag %q has surrounding whitespace", tag)
 		}
 	}
-}
 
-func TestExtractTagsFromContent_NoFrontmatterReturnsNil(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_NoFrontmatterReturnsNil", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "# Page\n\nJust content, no frontmatter."
 	got := ExtractTagsFromContent(content)
 	if got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
-}
 
-func TestExtractTagsFromContent_EmptyContentReturnsNil(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_EmptyContentReturnsNil", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	got := ExtractTagsFromContent("")
 	if got != nil {
 		t.Errorf("expected nil for empty content, got %v", got)
 	}
-}
 
-func TestExtractTagsFromContent_FrontmatterWithoutTagsFieldReturnsNil(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_FrontmatterWithoutTagsFieldReturnsNil", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntitle: My Page\nauthor: Alice\n---\n\n# Content"
 	got := ExtractTagsFromContent(content)
 	if got != nil {
 		t.Errorf("expected nil when tags key absent, got %v", got)
 	}
-}
 
-func TestExtractTagsFromContent_EmptyTagsListReturnsNil(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_EmptyTagsListReturnsNil", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags: []\n---\n\n# Content"
 	got := ExtractTagsFromContent(content)
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %v", got)
 	}
-}
 
-func TestExtractTagsFromContent_SkipsEmptyTagEntries(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_SkipsEmptyTagEntries", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	content := "---\ntags:\n  - react\n  - \"\"\n  - typescript\n---\n"
 	got := ExtractTagsFromContent(content)
 	for _, tag := range got {
@@ -90,20 +128,26 @@ func TestExtractTagsFromContent_SkipsEmptyTagEntries(t *testing.T) {
 	if len(got) != 2 {
 		t.Errorf("expected 2 non-empty tags, got %d: %v", len(got), got)
 	}
-}
 
-func TestExtractTagsFromContent_TagsKeyIsCaseInsensitive(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestExtractTagsFromContent_TagsKeyIsCaseInsensitive", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	// Frontmatter keys like "Tags" or "TAGS" should still be found.
 	content := "---\nTags:\n  - react\n---\n"
 	got := ExtractTagsFromContent(content)
 	if len(got) != 1 || got[0] != "react" {
 		t.Errorf("expected [react] for upper-case Tags key, got %v", got)
 	}
-}
+
+	})
+})
 
 // ─── TagsService integration (with real tree + store) ────────────────────────
 
-func setupTagsService(t *testing.T) (*TagsService, *tree.TreeService) {
+func setupTagsService(t tagsTestT) (*TagsService, *tree.TreeService) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -116,7 +160,7 @@ func setupTagsService(t *testing.T) (*TagsService, *tree.TreeService) {
 	if err != nil {
 		t.Fatalf("NewTagsStore: %v", err)
 	}
-	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
+	t.Cleanup(func() { closeTagsStoreForTest(store, t) })
 
 	return NewTagsService(store), ts
 }
@@ -126,7 +170,7 @@ func pageKind() *tree.NodeKind {
 	return &k
 }
 
-func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
+func createPageWithTags(t tagsTestT, ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
 	t.Helper()
 
 	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), pageKind())
@@ -147,7 +191,7 @@ func createPageWithTags(t *testing.T, ts *tree.TreeService, title, slug string, 
 	return *idPtr
 }
 
-func indexAllPages(t *testing.T, svc *TagsService, ts *tree.TreeService) {
+func indexAllPages(t tagsTestT, svc *TagsService, ts *tree.TreeService) {
 	t.Helper()
 	var ids []tree.PageID
 	if err := ts.WalkNodes(func(id tree.PageID) error {
@@ -167,7 +211,9 @@ func indexAllPages(t *testing.T, svc *TagsService, ts *tree.TreeService) {
 	}
 }
 
-func TestTagsService_IndexAllPages_BuildsIndex(t *testing.T) {
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_BuildsIndex", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 
 	id1 := createPageWithTags(t, ts, "Page React", "react-page", []string{"react", "typescript"})
@@ -190,9 +236,13 @@ func TestTagsService_IndexAllPages_BuildsIndex(t *testing.T) {
 	if len(pageIDs2) != 1 || pageIDs2[0] != id2 {
 		t.Errorf("expected [%s], got %v", id2, pageIDs2)
 	}
-}
 
-func TestTagsService_IndexAllPages_IsIdempotent(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_IsIdempotent", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 	createPageWithTags(t, ts, "Page A", "page-a", []string{"go"})
 
@@ -210,9 +260,13 @@ func TestTagsService_IndexAllPages_IsIdempotent(t *testing.T) {
 	if len(allTags) != 1 || allTags[0].Tag != "go" || allTags[0].Count != 1 {
 		t.Errorf("expected [{go 1}], got %v", allTags)
 	}
-}
 
-func TestTagsService_IndexAllPages_PagesWithoutTagsAreSkipped(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_PagesWithoutTagsAreSkipped", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 
 	idPtr, err := ts.CreateNode("system", nil, "No Tags Page", "no-tags", pageKind())
@@ -233,9 +287,13 @@ func TestTagsService_IndexAllPages_PagesWithoutTagsAreSkipped(t *testing.T) {
 	if len(allTags) != 0 {
 		t.Errorf("expected no tags indexed for page without frontmatter, got %v", allTags)
 	}
-}
 
-func TestTagsService_IndexAllPages_NormalizesTagsToLowercase(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_NormalizesTagsToLowercase", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 	createPageWithTags(t, ts, "Mixed Case", "mixed", []string{"React", "TypeScript"})
 
@@ -251,9 +309,13 @@ func TestTagsService_IndexAllPages_NormalizesTagsToLowercase(t *testing.T) {
 			t.Errorf("tag %q is not lowercase", tc.Tag)
 		}
 	}
-}
 
-func TestTagsService_IndexAllPages_ReadsTagsFromRawFrontmatter(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_ReadsTagsFromRawFrontmatter", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 	pageID := createPageWithTags(t, ts, "Tagged Page", "tagged-page", []string{"react"})
 
@@ -274,9 +336,13 @@ func TestTagsService_IndexAllPages_ReadsTagsFromRawFrontmatter(t *testing.T) {
 	if len(pageIDs) != 1 || pageIDs[0] != pageID {
 		t.Fatalf("expected [%s], got %v", pageID, pageIDs)
 	}
-}
 
-func TestTagsService_SetAndDeleteTagsForPage(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_SetAndDeleteTagsForPage", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, _ := setupTagsService(t)
 
 	if err := svc.SetTagsForPage("page-x", []string{"go", "test"}); err != nil {
@@ -293,9 +359,13 @@ func TestTagsService_SetAndDeleteTagsForPage(t *testing.T) {
 	if len(allTags) != 0 {
 		t.Errorf("expected no tags after delete, got %v", allTags)
 	}
-}
 
-func TestTagsService_GetTagsForPages_ReturnsCorrectTags(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_GetTagsForPages_ReturnsCorrectTags", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, _ := setupTagsService(t)
 
 	_ = svc.SetTagsForPage("p1", []string{"go", "testing"})
@@ -308,11 +378,15 @@ func TestTagsService_GetTagsForPages_ReturnsCorrectTags(t *testing.T) {
 
 	assertStringSliceEqual(t, got["p1"], []string{"go", "testing"})
 	assertStringSliceEqual(t, got["p2"], []string{"typescript"})
-}
+
+	})
+})
 
 // ─── IndexPageContent ─────────────────────────────────────────────────────────
 
-func TestTagsService_IndexPageContent_StoresTagsAndExcerpt(t *testing.T) {
+var _ = ginkgo.Describe("TestTagsService_IndexPageContent_StoresTagsAndExcerpt", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, _ := setupTagsService(t)
 
 	raw := "---\ntags:\n  - go\n  - testing\n---\n\nThis is the page body."
@@ -335,9 +409,13 @@ func TestTagsService_IndexPageContent_StoresTagsAndExcerpt(t *testing.T) {
 	if exc["page-1"] != "This is the page body." {
 		t.Errorf("excerpt = %q", exc["page-1"])
 	}
-}
 
-func TestTagsService_IndexPageContent_NoFrontmatterStoresEmptyTags(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexPageContent_NoFrontmatterStoresEmptyTags", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, _ := setupTagsService(t)
 
 	raw := "# Just a page\n\nSome content without frontmatter."
@@ -360,9 +438,13 @@ func TestTagsService_IndexPageContent_NoFrontmatterStoresEmptyTags(t *testing.T)
 	if exc["page-1"] == "" {
 		t.Error("expected non-empty excerpt for page without frontmatter")
 	}
-}
 
-func TestTagsService_IndexPageContent_UpdatesExistingEntry(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexPageContent_UpdatesExistingEntry", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, _ := setupTagsService(t)
 
 	if err := svc.IndexPageContent("page-1", "---\ntags:\n  - go\n---\n\nFirst version."); err != nil {
@@ -387,9 +469,13 @@ func TestTagsService_IndexPageContent_UpdatesExistingEntry(t *testing.T) {
 	if len(oldTags) != 0 {
 		t.Errorf("old tag 'go' should be gone after update, got %v", oldTags)
 	}
-}
 
-func TestTagsService_IndexAllPages_StoresExcerpts(t *testing.T) {
+	})
+})
+
+var _ = ginkgo.Describe("TestTagsService_IndexAllPages_StoresExcerpts", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
 	svc, ts := setupTagsService(t)
 
 	pageID := createPageWithTags(t, ts, "Excerpt Page", "excerpt-page", []string{"go"})
@@ -403,7 +489,9 @@ func TestTagsService_IndexAllPages_StoresExcerpts(t *testing.T) {
 	if exc[pageID] == "" {
 		t.Errorf("expected non-empty excerpt after indexing")
 	}
-}
+
+	})
+})
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

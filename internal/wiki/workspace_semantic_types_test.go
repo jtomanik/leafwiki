@@ -2,13 +2,13 @@ package wiki
 
 import (
 	"path/filepath"
-	"testing"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestWorkspaceCarriesValidatedSemanticWorkspaceID(t *testing.T) {
-	t.Parallel()
+var _ = ginkgo.It("TestWorkspaceCarriesValidatedSemanticWorkspaceID", func() {
+	t := ginkgo.GinkgoT()
 
 	workspace := NormalizeWorkspace(Workspace{
 		ID:      workspaceid.WorkspaceID("docs"),
@@ -23,10 +23,10 @@ func TestWorkspaceCarriesValidatedSemanticWorkspaceID(t *testing.T) {
 	if err := ValidateWorkspace(invalid); err == nil {
 		t.Fatal("ValidateWorkspace accepted invalid workspace ID")
 	}
-}
+})
 
-func TestValidateWorkspaceRejectsWhitespaceWorkspaceIDBeforeNormalization(t *testing.T) {
-	t.Parallel()
+var _ = ginkgo.It("TestValidateWorkspaceRejectsWhitespaceWorkspaceIDBeforeNormalization", func() {
+	t := ginkgo.GinkgoT()
 
 	workspace := Workspace{
 		ID:      workspaceid.WorkspaceID(" docs "),
@@ -40,4 +40,4 @@ func TestValidateWorkspaceRejectsWhitespaceWorkspaceIDBeforeNormalization(t *tes
 	if got := workspaceid.WorkspaceIDErrorCode(err); got != workspaceid.ErrCodeWorkspaceIDWhitespace {
 		t.Fatalf("workspace ID error code = %q, want %q", got, workspaceid.ErrCodeWorkspaceIDWhitespace)
 	}
-}
+})

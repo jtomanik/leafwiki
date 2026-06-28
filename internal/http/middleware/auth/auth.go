@@ -72,20 +72,24 @@ func RequireAuth(authService *coreauth.AuthService, authCookies *AuthCookies, au
 			return
 		}
 
-		switch {
-		case errors.Is(err, ErrInvalidUserContext):
-			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthInvalidUserContext, "Invalid user context")
-		case errors.Is(err, ErrAuthDisabledMissingUser):
-			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthDisabledMissingUser, "User not authenticated and auth is disabled")
-		case errors.Is(err, ErrMissingAccessToken):
-			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthAccessTokenMissing, "Missing or invalid access token")
-		case errors.Is(err, ErrAuthServiceUnavailable):
-			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthServiceUnavailable, "Authentication service unavailable")
-		case errors.Is(err, ErrInvalidOrExpiredToken):
-			abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthTokenInvalid, "Invalid or expired token")
-		default:
-			abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthTokenInvalid, "Authentication failed")
-		}
+		abortRequireAuthError(c, err)
+	}
+}
+
+func abortRequireAuthError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidUserContext):
+		abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthInvalidUserContext, "Invalid user context")
+	case errors.Is(err, ErrAuthDisabledMissingUser):
+		abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthDisabledMissingUser, "User not authenticated and auth is disabled")
+	case errors.Is(err, ErrMissingAccessToken):
+		abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthAccessTokenMissing, "Missing or invalid access token")
+	case errors.Is(err, ErrAuthServiceUnavailable):
+		abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthServiceUnavailable, "Authentication service unavailable")
+	case errors.Is(err, ErrInvalidOrExpiredToken):
+		abortAuthMiddlewareError(c, http.StatusUnauthorized, errCodeAuthTokenInvalid, "Invalid or expired token")
+	default:
+		abortAuthMiddlewareError(c, http.StatusInternalServerError, errCodeAuthTokenInvalid, "Authentication failed")
 	}
 }
 

@@ -3,16 +3,12 @@ package tree
 import (
 	"path/filepath"
 	"strings"
-	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
-func TestMapWorkspaceMarkdownRoute(t *testing.T) {
-	root := t.TempDir()
-	mustMkdir(t, filepath.Join(root, "plans"))
-	mustMkdir(t, filepath.Join(root, "docs"))
-	mustWriteFile(t, filepath.Join(root, "docs", "index.md"), "# Docs", 0o644)
-
-	tests := []struct {
+var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRoute", func() {
+	for _, tt := range []struct {
 		name        string
 		relPath     string
 		isDir       bool
@@ -74,10 +70,15 @@ func TestMapWorkspaceMarkdownRoute(t *testing.T) {
 			wantRoute: "user-guides",
 			wantKind:  NodeKindSection,
 		},
-	}
+	} {
+		tt := tt
+		ginkgo.It(tt.name, func() {
+			t := ginkgo.GinkgoT()
+			root := t.TempDir()
+			mustMkdir(t, filepath.Join(root, "plans"))
+			mustMkdir(t, filepath.Join(root, "docs"))
+			mustWriteFile(t, filepath.Join(root, "docs", "index.md"), "# Docs", 0o644)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
 			got, err := MapWorkspaceMarkdownRoute(root, tt.relPath, tt.isDir)
 			if err != nil {
 				t.Fatalf("MapWorkspaceMarkdownRoute() error = %v", err)
@@ -105,47 +106,59 @@ func TestMapWorkspaceMarkdownRoute(t *testing.T) {
 			}
 		})
 	}
-}
+})
 
-func TestMapWorkspaceMarkdownRouteRejectsEmptyNormalizedSegments(t *testing.T) {
-	root := t.TempDir()
+var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRouteRejectsEmptyNormalizedSegments", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
+		root := t.TempDir()
 
-	_, err := MapWorkspaceMarkdownRoute(root, "plans/!!!.md", false)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if !strings.Contains(err.Error(), "segment") || !strings.Contains(err.Error(), "not a valid slug") {
-		t.Fatalf("expected invalid slug segment error, got %v", err)
-	}
-}
+		_, err := MapWorkspaceMarkdownRoute(root, "plans/!!!.md", false)
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+		if !strings.Contains(err.Error(), "segment") || !strings.Contains(err.Error(), "not a valid slug") {
+			t.Fatalf("expected invalid slug segment error, got %v", err)
+		}
 
-func TestWorkspaceRouteConflictTrackerReportsNormalizedCollisions(t *testing.T) {
-	tracker := newWorkspaceRouteConflictTracker()
-	first := WorkspaceMarkdownRoute{SourcePath: "plans/foo_bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
-	second := WorkspaceMarkdownRoute{SourcePath: "plans/foo-bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
+	})
+})
 
-	if conflict := tracker.Record(first); conflict != nil {
-		t.Fatalf("first route conflict = %#v", conflict)
-	}
-	conflict := tracker.Record(second)
-	if conflict == nil {
-		t.Fatalf("expected normalized route conflict")
-	}
-	if conflict.RoutePath != "plans/foo-bar" || conflict.Kind != NodeKindPage {
-		t.Fatalf("conflict route = %#v", conflict)
-	}
-	if conflict.FirstPath != "plans/foo_bar.md" || conflict.SecondPath != "plans/foo-bar.md" {
-		t.Fatalf("conflict paths = %#v", conflict)
-	}
-}
+var _ = ginkgo.Describe("TestWorkspaceRouteConflictTrackerReportsNormalizedCollisions", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
+		tracker := newWorkspaceRouteConflictTracker()
+		first := WorkspaceMarkdownRoute{SourcePath: "plans/foo_bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
+		second := WorkspaceMarkdownRoute{SourcePath: "plans/foo-bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
 
-func TestWorkspaceRouteConflictTrackerAllowsPageAndSectionTwinRoutes(t *testing.T) {
-	tracker := newWorkspaceRouteConflictTracker()
+		if conflict := tracker.Record(first); conflict != nil {
+			t.Fatalf("first route conflict = %#v", conflict)
+		}
+		conflict := tracker.Record(second)
+		if conflict == nil {
+			t.Fatalf("expected normalized route conflict")
+		}
+		if conflict.RoutePath != "plans/foo-bar" || conflict.Kind != NodeKindPage {
+			t.Fatalf("conflict route = %#v", conflict)
+		}
+		if conflict.FirstPath != "plans/foo_bar.md" || conflict.SecondPath != "plans/foo-bar.md" {
+			t.Fatalf("conflict paths = %#v", conflict)
+		}
 
-	if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes", RoutePath: "notes", Kind: NodeKindSection}); conflict != nil {
-		t.Fatalf("section route conflict = %#v", conflict)
-	}
-	if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes.md", RoutePath: "notes", Kind: NodeKindPage}); conflict != nil {
-		t.Fatalf("page and section twin route conflict = %#v", conflict)
-	}
-}
+	})
+})
+
+var _ = ginkgo.Describe("TestWorkspaceRouteConflictTrackerAllowsPageAndSectionTwinRoutes", func() {
+	ginkgo.It("preserves behavior", func() {
+		t := ginkgo.GinkgoT()
+		tracker := newWorkspaceRouteConflictTracker()
+
+		if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes", RoutePath: "notes", Kind: NodeKindSection}); conflict != nil {
+			t.Fatalf("section route conflict = %#v", conflict)
+		}
+		if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes.md", RoutePath: "notes", Kind: NodeKindPage}); conflict != nil {
+			t.Fatalf("page and section twin route conflict = %#v", conflict)
+		}
+
+	})
+})

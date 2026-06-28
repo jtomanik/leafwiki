@@ -1,11 +1,12 @@
 package wikid
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"time"
 )
 
-func TestWorkspaceSupervisorTracksIndependentWorkspaceState(t *testing.T) {
+var _ = ginkgo.It("TestWorkspaceSupervisorTracksIndependentWorkspaceState", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{
 		MaxRestarts: 1,
@@ -38,4 +39,4 @@ func TestWorkspaceSupervisorTracksIndependentWorkspaceState(t *testing.T) {
 	if alpha = supervisor.Status("alpha"); alpha.State != WorkspaceStateCrashed {
 		t.Fatalf("alpha after budget = %#v, want crashed", alpha)
 	}
-}
+})

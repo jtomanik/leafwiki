@@ -2,34 +2,41 @@ package security
 
 import (
 	"crypto/tls"
+	"errors"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
-func TestCSRFCookie_CookieName_Secure(t *testing.T) {
+var _ = It("TestCSRFCookie_CookieName_Secure", func() {
+	t := GinkgoT()
 	csrf := NewCSRFCookie(false, time.Hour)
 
 	name := csrf.cookieName(true)
 	if name != "__Host-leafwiki_csrf" {
 		t.Errorf("Expected secure CSRF cookie name '__Host-leafwiki_csrf', got '%s'", name)
 	}
-}
 
-func TestCSRFCookie_CookieName_Insecure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_CookieName_Insecure", func() {
+	t := GinkgoT()
 	csrf := NewCSRFCookie(true, time.Hour)
 
 	name := csrf.cookieName(false)
 	if name != "leafwiki_csrf" {
 		t.Errorf("Expected insecure CSRF cookie name 'leafwiki_csrf', got '%s'", name)
 	}
-}
 
-func TestCSRFCookie_Issue_Secure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Issue_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(false, time.Hour)
 
@@ -90,9 +97,11 @@ func TestCSRFCookie_Issue_Secure(t *testing.T) {
 	if headerToken != csrfCookie.Value {
 		t.Errorf("Expected header token '%s' to match cookie value '%s'", headerToken, csrfCookie.Value)
 	}
-}
 
-func TestCSRFCookie_Issue_Insecure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Issue_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(true, time.Hour)
 
@@ -130,9 +139,11 @@ func TestCSRFCookie_Issue_Insecure(t *testing.T) {
 	if csrfCookie.HttpOnly {
 		t.Error("Expected CSRF cookie to NOT be HttpOnly")
 	}
-}
 
-func TestCSRFCookie_Issue_ErrorWhenHTTPSRequired(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Issue_ErrorWhenHTTPSRequired", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(false, time.Hour)
 
@@ -159,9 +170,40 @@ func TestCSRFCookie_Issue_ErrorWhenHTTPSRequired(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when HTTPS required for CSRF cookie, got %d", w.Code)
 	}
-}
 
-func TestCSRFCookie_Read_Secure(t *testing.T) {
+})
+
+var _ = It("returns token generation errors from Issue", func() {
+	gin.SetMode(gin.TestMode)
+	csrf := NewCSRFCookie(true, time.Hour)
+	tokenErr := errors.New("entropy unavailable")
+	originalRandRead := csrfRandRead
+	csrfRandRead = func([]byte) (int, error) {
+		return 0, tokenErr
+	}
+	DeferCleanup(func() {
+		csrfRandRead = originalRandRead
+	})
+
+	router := gin.New()
+	router.GET("/test", func(c *gin.Context) {
+		token, err := csrf.Issue(c)
+		Expect(token).To(BeEmpty())
+		Expect(err).To(MatchError(tokenErr))
+		c.Status(http.StatusTeapot)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	Expect(rec.Code).To(Equal(http.StatusTeapot))
+	Expect(rec.Result().Cookies()).To(BeEmpty())
+	Expect(rec.Result().Header.Get("X-CSRF-Token")).To(BeEmpty())
+})
+
+var _ = It("TestCSRFCookie_Read_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(false, time.Hour)
 
@@ -188,9 +230,11 @@ func TestCSRFCookie_Read_Secure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestCSRFCookie_Read_Insecure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Read_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(true, time.Hour)
 
@@ -216,9 +260,11 @@ func TestCSRFCookie_Read_Insecure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestCSRFCookie_Read_MissingCookie(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Read_MissingCookie", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(false, time.Hour)
 
@@ -241,9 +287,11 @@ func TestCSRFCookie_Read_MissingCookie(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when CSRF cookie is missing, got %d", w.Code)
 	}
-}
 
-func TestCSRFCookie_Clear_Secure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Clear_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(false, time.Hour)
 
@@ -282,9 +330,11 @@ func TestCSRFCookie_Clear_Secure(t *testing.T) {
 	if csrfCookie.MaxAge != -1 {
 		t.Errorf("Expected CSRF cookie MaxAge -1, got %d", csrfCookie.MaxAge)
 	}
-}
 
-func TestCSRFCookie_Clear_Insecure(t *testing.T) {
+})
+
+var _ = It("TestCSRFCookie_Clear_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	csrf := NewCSRFCookie(true, time.Hour)
 
@@ -319,4 +369,43 @@ func TestCSRFCookie_Clear_Insecure(t *testing.T) {
 	if csrfCookie.MaxAge != -1 {
 		t.Errorf("Expected CSRF cookie MaxAge -1, got %d", csrfCookie.MaxAge)
 	}
-}
+
+})
+
+var _ = Describe("CSRF cookie edge coverage", func() {
+	It("reuses an existing secure CSRF cookie when issuing", func() {
+		gin.SetMode(gin.TestMode)
+		csrf := NewCSRFCookie(false, time.Hour)
+		router := gin.New()
+		router.GET("/test", func(c *gin.Context) {
+			token, err := csrf.Issue(c)
+			Expect(err).NotTo(HaveOccurred())
+			c.String(http.StatusOK, token)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.TLS = &tls.ConnectionState{}
+		req.AddCookie(&http.Cookie{Name: "__Host-leafwiki_csrf", Value: "existing-token"})
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w.Code).To(Equal(http.StatusOK))
+		Expect(w.Body.String()).To(Equal("existing-token"))
+		Expect(w.Result().Header.Get("X-CSRF-Token")).To(Equal("existing-token"))
+		Expect(w.Result().Cookies()).To(BeEmpty())
+	})
+
+	It("returns HTTPS-required errors from Read and Clear", func() {
+		gin.SetMode(gin.TestMode)
+		csrf := NewCSRFCookie(false, time.Hour)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		token, err := csrf.Read(ctx)
+		Expect(err).To(MatchError(utils.ErrHTTPSRequired))
+		Expect(token).To(BeEmpty())
+		Expect(csrf.Clear(ctx)).To(MatchError(utils.ErrHTTPSRequired))
+	})
+})

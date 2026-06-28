@@ -2,8 +2,11 @@ package errors
 
 import (
 	"encoding/json"
-	"errors"
-	"testing"
+	stderrors "errors"
+	"fmt"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 const (
@@ -13,136 +16,173 @@ const (
 	testAuthInvalidCredentialsMsgID  MessageID = "errors.auth.invalid_credentials"
 )
 
-func TestNewDefinedLocalizedErrorExposesTypedCodeAndMessageID(t *testing.T) {
-	t.Parallel()
+var _ = Describe("localized errors", func() {
+	It("TestNewDefinedLocalizedErrorExposesTypedCodeAndMessageID", func() {
+		cause := stderrors.New("storage failed")
+		definition := ErrorDefinition{
+			Code:      testPageVersionConflictCode,
+			MessageID: testPageVersionConflictMessageID,
+			Message:   "Page was changed by another request",
+			Template:  "page was changed by another request",
+		}
 
-	cause := errors.New("storage failed")
-	definition := ErrorDefinition{
-		Code:      testPageVersionConflictCode,
-		MessageID: testPageVersionConflictMessageID,
-		Message:   "Page was changed by another request",
-		Template:  "page was changed by another request",
-	}
+		err := NewDefinedLocalizedError(definition, cause, "page-1")
 
-	err := NewDefinedLocalizedError(definition, cause, "page-1")
+		Expect(err.Code).To(Equal(testPageVersionConflictCode))
+		Expect(err.MessageID).To(Equal(testPageVersionConflictMessageID))
+		Expect(err.Message).To(Equal("Page was changed by another request"))
+		Expect(err.Template).To(Equal("page was changed by another request"))
+		Expect(stderrors.Is(err, cause)).To(BeTrue())
+		Expect(err.Args).To(Equal([]string{"page-1"}))
+	})
 
-	if err.Code != testPageVersionConflictCode {
-		t.Fatalf("Code = %q, want typed page_version_conflict", err.Code)
-	}
-	if err.MessageID != testPageVersionConflictMessageID {
-		t.Fatalf("MessageID = %q, want errors.page.version_conflict", err.MessageID)
-	}
-	if err.Message != "Page was changed by another request" || err.Template != "page was changed by another request" {
-		t.Fatalf("localized message/template = %q/%q", err.Message, err.Template)
-	}
-	if !errors.Is(err, cause) {
-		t.Fatalf("localized error does not unwrap cause")
-	}
-	if len(err.Args) != 1 || err.Args[0] != "page-1" {
-		t.Fatalf("Args = %#v, want [page-1]", err.Args)
-	}
-}
+	It("TestNewLocalizedErrorKeepsLegacyConstructorButAddsDefaultMessageID", func() {
+		err := NewLocalizedError(testAuthInvalidCredentialsCode, "Invalid credentials", "invalid credentials", nil)
 
-func TestNewLocalizedErrorKeepsLegacyConstructorButAddsDefaultMessageID(t *testing.T) {
-	t.Parallel()
+		Expect(err.Code).To(Equal(testAuthInvalidCredentialsCode))
+		Expect(err.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+	})
 
-	err := NewLocalizedError(testAuthInvalidCredentialsCode, "Invalid credentials", "invalid credentials", nil)
+	It("TestNewLocalizedErrorFromCodeRendersCatalogMessage", func() {
+		cause := stderrors.New("storage failed")
 
-	if err.Code != testAuthInvalidCredentialsCode {
-		t.Fatalf("Code = %q, want typed auth_invalid_credentials", err.Code)
-	}
-	if err.MessageID != testAuthInvalidCredentialsMsgID {
-		t.Fatalf("MessageID = %q, want errors.auth.invalid_credentials", err.MessageID)
-	}
-}
+		err := NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
 
-func TestNewLocalizedErrorFromCodeRendersCatalogMessage(t *testing.T) {
-	t.Parallel()
+		Expect(err.Code).To(Equal(testPageVersionConflictCode))
+		Expect(err.MessageID).To(Equal(testPageVersionConflictMessageID))
+		Expect(err.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
+		Expect(err.Template).To(Equal(err.Message))
+		Expect(err.Args).To(Equal([]string{"docs.md", "README.md"}))
+		Expect(stderrors.Is(err, cause)).To(BeTrue())
+	})
 
-	cause := errors.New("storage failed")
+	It("TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields", func() {
+		detail := NewLocalizedErrorDetail(
+			testPageVersionConflictCode,
+			"Page was changed by another request",
+			"page was changed by another request",
+			"page-1",
+		)
 
-	err := NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
+		encoded, err := json.Marshal(detail)
 
-	if err.Code != testPageVersionConflictCode {
-		t.Fatalf("Code = %q, want %q", err.Code, testPageVersionConflictCode)
-	}
-	if err.MessageID != testPageVersionConflictMessageID {
-		t.Fatalf("MessageID = %q, want %q", err.MessageID, testPageVersionConflictMessageID)
-	}
-	if err.Message != "Page docs.md was changed by another request before README.md could be saved." {
-		t.Fatalf("Message = %q, want catalog-rendered conflict message", err.Message)
-	}
-	if err.Template != err.Message {
-		t.Fatalf("Template = %q, want rendered catalog message", err.Template)
-	}
-	if len(err.Args) != 2 || err.Args[0] != "docs.md" || err.Args[1] != "README.md" {
-		t.Fatalf("Args = %#v, want preserved args", err.Args)
-	}
-	if !errors.Is(err, cause) {
-		t.Fatalf("localized error does not unwrap cause")
-	}
-}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(encoded)).To(Equal(`{"code":"page_version_conflict","messageId":"errors.page.version_conflict","message":"Page was changed by another request","template":"page was changed by another request","args":["page-1"]}`))
+	})
 
-func TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields(t *testing.T) {
-	t.Parallel()
+	It("TestLocalizedErrorDetailRendersMessageFromCatalog", func() {
+		detail := NewLocalizedErrorDetail(
+			testAuthInvalidCredentialsCode,
+			"legacy fallback",
+			"legacy fallback",
+		)
 
-	detail := NewLocalizedErrorDetail(
-		testPageVersionConflictCode,
-		"Page was changed by another request",
-		"page was changed by another request",
-		"page-1",
-	)
+		Expect(detail.Message).To(Equal("Invalid credentials"))
+		Expect(detail.Template).To(Equal("legacy fallback"))
+		Expect(detail.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+	})
 
-	encoded, err := json.Marshal(detail)
-	if err != nil {
-		t.Fatalf("marshal detail: %v", err)
-	}
+	It("TestLocalizedErrorDetailUsesArgNBridgeAndPreservesArgs", func() {
+		err := NewDefinedLocalizedError(ErrorDefinition{
+			Code:      testPageVersionConflictCode,
+			MessageID: testPageVersionConflictMessageID,
+			Message:   "legacy fallback",
+			Template:  "page %s could not be saved before %s",
+		}, nil, "docs.md", "README.md")
 
-	want := `{"code":"page_version_conflict","messageId":"errors.page.version_conflict","message":"Page was changed by another request","template":"page was changed by another request","args":["page-1"]}`
-	if string(encoded) != want {
-		t.Fatalf("json = %s, want %s", encoded, want)
-	}
-}
+		detail := LocalizedErrorDetailFromError(err)
 
-func TestLocalizedErrorDetailRendersMessageFromCatalog(t *testing.T) {
-	t.Parallel()
+		Expect(detail.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
+		Expect(detail.Args).To(Equal([]string{"docs.md", "README.md"}))
+		Expect(detail.Template).To(Equal("page %s could not be saved before %s"))
+	})
+})
 
-	detail := NewLocalizedErrorDetail(
-		testAuthInvalidCredentialsCode,
-		"legacy fallback",
-		"legacy fallback",
-	)
+var _ = Describe("localized error edge coverage", func() {
+	It("MessageIDForCode handles empty, un-namespaced, and namespaced codes", func() {
+		Expect(MessageIDForCode("")).To(BeEmpty())
+		Expect(MessageIDForCode("  ")).To(BeEmpty())
+		Expect(MessageIDForCode("unknown")).To(Equal(MessageID("errors.unknown")))
+		Expect(MessageIDForCode("auth_invalid_credentials")).To(Equal(MessageID("errors.auth.invalid_credentials")))
+	})
 
-	if detail.Message != "Invalid credentials" {
-		t.Fatalf("Message = %q, want catalog-rendered Invalid credentials", detail.Message)
-	}
-	if detail.Template != "legacy fallback" {
-		t.Fatalf("Template = %q, want compatibility template", detail.Template)
-	}
-	if detail.MessageID != testAuthInvalidCredentialsMsgID {
-		t.Fatalf("MessageID = %q, want %q", detail.MessageID, testAuthInvalidCredentialsMsgID)
-	}
-}
+	It("typed error and message IDs stringify to their stable values", func() {
+		Expect(ErrorCode("page_version_conflict").String()).To(Equal("page_version_conflict"))
+		Expect(MessageID("errors.page.version_conflict").String()).To(Equal("errors.page.version_conflict"))
+	})
 
-func TestLocalizedErrorDetailUsesArgNBridgeAndPreservesArgs(t *testing.T) {
-	t.Parallel()
+	It("nil localized errors have empty Error text and no wrapped cause", func() {
+		var err *LocalizedError
 
-	err := NewDefinedLocalizedError(ErrorDefinition{
-		Code:      testPageVersionConflictCode,
-		MessageID: testPageVersionConflictMessageID,
-		Message:   "legacy fallback",
-		Template:  "page %s could not be saved before %s",
-	}, nil, "docs.md", "README.md")
+		Expect(err.Error()).To(BeEmpty())
+		Expect(err.Unwrap()).To(BeNil())
+	})
 
-	detail := LocalizedErrorDetailFromError(err)
+	It("localized errors include the cause in Error text when present", func() {
+		err := NewLocalizedError("test_code", "visible message", "visible message", stderrors.New("root cause"))
 
-	if detail.Message != "Page docs.md was changed by another request before README.md could be saved." {
-		t.Fatalf("Message = %q, want catalog-rendered page conflict", detail.Message)
-	}
-	if len(detail.Args) != 2 || detail.Args[0] != "docs.md" || detail.Args[1] != "README.md" {
-		t.Fatalf("Args = %#v, want compatibility args preserved", detail.Args)
-	}
-	if detail.Template != "page %s could not be saved before %s" {
-		t.Fatalf("Template = %q, want compatibility template preserved", detail.Template)
-	}
-}
+		Expect(err.Error()).To(Equal("visible message: root cause"))
+	})
+
+	It("NewLocalizedErrorFromCodeWithFallback renders using fallback when no catalog entry exists", func() {
+		cause := stderrors.New("cause")
+
+		err := NewLocalizedErrorFromCodeWithFallback("custom_missing", "fallback {{.Arg0}}", "fallback template", cause, "value")
+
+		Expect(err.Code).To(Equal(ErrorCode("custom_missing")))
+		Expect(err.MessageID).To(Equal(MessageID("errors.custom.missing")))
+		Expect(err.Message).To(Equal("fallback value"))
+		Expect(err.Template).To(Equal("fallback template"))
+		Expect(err.Args).To(Equal([]string{"value"}))
+		Expect(stderrors.Is(err, cause)).To(BeTrue())
+	})
+
+	It("NewDefinedLocalizedError derives message ID when omitted", func() {
+		err := NewDefinedLocalizedError(ErrorDefinition{
+			Code:     testAuthInvalidCredentialsCode,
+			Message:  "Invalid credentials",
+			Template: "invalid credentials",
+		}, nil)
+
+		Expect(err.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+	})
+
+	It("NewLocalizedErrorDetailFromCode renders catalog message and preserves args", func() {
+		detail := NewLocalizedErrorDetailFromCode(testPageVersionConflictCode, "docs.md", "README.md")
+
+		Expect(detail.MessageID).To(Equal(testPageVersionConflictMessageID))
+		Expect(detail.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
+		Expect(detail.Template).To(Equal(detail.Message))
+		Expect(detail.Args).To(Equal([]string{"docs.md", "README.md"}))
+	})
+
+	It("LocalizedErrorDetailFromError returns an empty detail for nil errors", func() {
+		Expect(LocalizedErrorDetailFromError(nil)).To(Equal(LocalizedErrorDetail{}))
+	})
+
+	It("LocalizedErrorDetailFromError derives message ID when the error omitted it", func() {
+		err := &LocalizedError{
+			Code:     testAuthInvalidCredentialsCode,
+			Message:  "fallback",
+			Template: "fallback",
+		}
+
+		detail := LocalizedErrorDetailFromError(err)
+
+		Expect(detail.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+		Expect(detail.Message).To(Equal("Invalid credentials"))
+	})
+
+	It("AsLocalizedError recognizes wrapped localized errors and rejects ordinary errors", func() {
+		localized := NewLocalizedError(testAuthInvalidCredentialsCode, "Invalid credentials", "invalid credentials", nil)
+		wrapped := fmt.Errorf("wrap: %w", localized)
+
+		got, ok := AsLocalizedError(wrapped)
+		Expect(ok).To(BeTrue())
+		Expect(got).To(BeIdenticalTo(localized))
+
+		got, ok = AsLocalizedError(stderrors.New("plain"))
+		Expect(ok).To(BeFalse())
+		Expect(got).To(BeNil())
+	})
+})

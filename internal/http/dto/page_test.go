@@ -2,26 +2,215 @@ package dto
 
 import (
 	"errors"
-	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
+	coreprop "github.com/perber/wiki/internal/properties"
 )
 
-func TestToAPINodeWithContentPaths_OmitsContentPathWhenResolverFails(t *testing.T) {
-	node := &tree.PageNode{
+var _ = Describe("page DTO mapping", func() {
+	It("maps a full page with metadata, content, path, and initialized collections", func() {
+		root, child, _ := dtoTestTree()
+		resolver := newDTOUserResolver(root, child)
+
+		page := ToAPIPage(&tree.Page{PageNode: child, Content: "# Intro"}, resolver)
+
+		Expect(page.Content).To(Equal("# Intro"))
+		Expect(page.Path).To(Equal("docs/intro"))
+		Expect(page.Tags).To(BeEmpty())
+		Expect(page.Tags).NotTo(BeNil())
+		Expect(page.Properties).To(BeEmpty())
+		Expect(page.Properties).NotTo(BeNil())
+		Expect(page.Node.ID).To(Equal("intro"))
+		Expect(page.Node.Path).To(Equal("docs/intro"))
+		Expect(page.Node.Metadata.Creator).To(Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID.String(), Username: "creator"}))
+		Expect(page.Node.Metadata.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
+	})
+
+	It("prunes page children when converting a page with depth zero", func() {
+		root, _, _ := dtoTestTree()
+
+		page := ToAPIPageWithDepth(&tree.Page{PageNode: root, Content: "# Docs"}, nil, 0)
+
+		Expect(page.Children).To(BeEmpty())
+	})
+
+	It("maps node children, content paths, and README fallback state", func() {
+		root, child, _ := dtoTestTree()
+
+		apiNode := ToAPINodeWithContentPaths(root, "", nil, func(node *tree.PageNode) (string, error) {
+			if node == root {
+				return "docs/README.md", nil
+			}
+			return "docs/" + node.Slug.String() + ".md", nil
+		})
+
+		Expect(apiNode.Path).To(Equal("docs"))
+		Expect(apiNode.ContentPath).To(Equal("docs/README.md"))
+		Expect(apiNode.ReadmeFallback).To(BeTrue())
+		Expect(apiNode.Children).To(HaveLen(1))
+		Expect(apiNode.Children[0].ID).To(Equal(child.ID.String()))
+		Expect(apiNode.Children[0].ContentPath).To(Equal("docs/intro.md"))
+		Expect(apiNode.Children[0].ReadmeFallback).To(BeFalse())
+	})
+
+	It("omits content paths when the resolver fails", func() {
+		root, _, _ := dtoTestTree()
+
+		apiNode := ToAPINodeWithContentPaths(root, "", nil, func(*tree.PageNode) (string, error) {
+			return "", errors.New("resolver failed")
+		})
+
+		Expect(apiNode.ContentPath).To(BeEmpty())
+	})
+
+	It("applies node depth limits and allows unlimited depth", func() {
+		root, child, grandchild := dtoTestTree()
+
+		depthOne := ToAPINodeWithDepth(root, "", nil, 1)
+		unlimited := ToAPINodeWithDepth(root, "", nil, -1)
+		withContentPathDepthZero := ToAPINodeWithContentPathsAndDepth(root, "", nil, func(node *tree.PageNode) (string, error) {
+			return node.CalculateRoutePath().FilesystemPath() + ".md", nil
+		}, 0)
+		withContentPathUnlimited := ToAPINodeWithContentPathsAndDepth(root, "", nil, nil, -1)
+
+		Expect(depthOne.Children).To(HaveLen(1))
+		Expect(depthOne.Children[0].Children).To(BeEmpty())
+		Expect(unlimited.Children[0].Children).To(HaveLen(1))
+		Expect(unlimited.Children[0].Children[0].ID).To(Equal(grandchild.ID.String()))
+		Expect(withContentPathDepthZero.Children).To(BeEmpty())
+		Expect(withContentPathDepthZero.ContentPath).To(Equal("docs.md"))
+		Expect(withContentPathUnlimited.Children[0].ID).To(Equal(child.ID.String()))
+	})
+
+	It("handles nil and unlimited pruning defensively", func() {
+		root, _, _ := dtoTestTree()
+		apiNode := ToAPINode(root, "", nil)
+
+		Expect(func() {
+			pruneNodeDepth(nil, 0)
+			pruneNodeDepth(apiNode, -1)
+		}).NotTo(Panic())
+		Expect(apiNode.Children).To(HaveLen(1))
+	})
+
+	It("formats API times with empty zero values", func() {
+		updated := time.Date(2026, 6, 26, 12, 34, 56, 0, time.UTC)
+
+		Expect(FormatAPITime(time.Time{})).To(BeEmpty())
+		Expect(FormatAPITime(updated)).To(Equal("2026-06-26T12:34:56Z"))
+	})
+})
+
+var _ = Describe("property and tag DTO mapping", func() {
+	It("maps property pages with copied properties and author labels", func() {
+		root, child, _ := dtoTestTree()
+		resolver := newDTOUserResolver(root, child)
+
+		page := ToPropertyPage(child, map[string]coreprop.PropertyEntry{
+			"status": {Value: "draft", Type: "text"},
+		}, resolver)
+
+		Expect(page.ID).To(Equal("intro"))
+		Expect(page.Title).To(Equal("Intro"))
+		Expect(page.Path).To(Equal("docs/intro"))
+		Expect(page.Properties).To(Equal(map[string]PropertyEntry{
+			"status": {Value: "draft", Type: "text"},
+		}))
+		Expect(page.CreatedAt).To(Equal("2026-06-26T10:00:00Z"))
+		Expect(page.UpdatedAt).To(Equal("2026-06-26T11:00:00Z"))
+		Expect(page.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
+	})
+
+	It("leaves optional property timestamps empty when metadata times are zero", func() {
+		node := &tree.PageNode{ID: "untimed", Title: "Untimed", Slug: "untimed", Kind: tree.NodeKindPage}
+
+		page := ToPropertyPage(node, nil, nil)
+
+		Expect(page.CreatedAt).To(BeEmpty())
+		Expect(page.UpdatedAt).To(BeEmpty())
+		Expect(page.Properties).To(BeEmpty())
+	})
+
+	It("maps tagged pages and normalizes nil tags to an empty slice", func() {
+		root, child, _ := dtoTestTree()
+		resolver := newDTOUserResolver(root, child)
+
+		tagged := ToTaggedPage(child, []string{"go", "wiki"}, "Intro excerpt", resolver)
+		emptyTags := ToTaggedPage(root, nil, "", nil)
+
+		Expect(tagged.ID).To(Equal("intro"))
+		Expect(tagged.Kind).To(Equal(tree.NodeKindPage))
+		Expect(tagged.Path).To(Equal("docs/intro"))
+		Expect(tagged.Excerpt).To(Equal("Intro excerpt"))
+		Expect(tagged.Tags).To(Equal([]string{"go", "wiki"}))
+		Expect(tagged.CreatedAt).To(Equal("2026-06-26T10:00:00Z"))
+		Expect(tagged.UpdatedAt).To(Equal("2026-06-26T11:00:00Z"))
+		Expect(tagged.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
+		Expect(emptyTags.Tags).To(BeEmpty())
+		Expect(emptyTags.Tags).NotTo(BeNil())
+	})
+})
+
+func dtoTestTree() (*tree.PageNode, *tree.PageNode, *tree.PageNode) {
+	created := time.Date(2026, 6, 26, 10, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 6, 26, 11, 0, 0, 0, time.UTC)
+	root := &tree.PageNode{
 		ID:       "docs",
 		Title:    "Docs",
 		Slug:     "docs",
 		Kind:     tree.NodeKindSection,
-		Metadata: tree.PageMetadata{CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		Position: 1,
+		Metadata: tree.PageMetadata{
+			CreatedAt:    created,
+			UpdatedAt:    updated,
+			CreatorID:    tree.UserIDFromString("creator-id"),
+			LastAuthorID: tree.UserIDFromString("last-author-id"),
+		},
 	}
+	child := &tree.PageNode{
+		ID:       "intro",
+		Title:    "Intro",
+		Slug:     "intro",
+		Kind:     tree.NodeKindPage,
+		Position: 2,
+		Parent:   root,
+		Metadata: root.Metadata,
+	}
+	grandchild := &tree.PageNode{
+		ID:       "deep",
+		Title:    "Deep",
+		Slug:     "deep",
+		Kind:     tree.NodeKindPage,
+		Position: 3,
+		Parent:   child,
+		Metadata: root.Metadata,
+	}
+	root.Children = []*tree.PageNode{child}
+	child.Children = []*tree.PageNode{grandchild}
+	return root, child, grandchild
+}
 
-	apiNode := ToAPINodeWithContentPaths(node, "", nil, func(*tree.PageNode) (string, error) {
-		return "", errors.New("resolver failed")
+func newDTOUserResolver(nodes ...*tree.PageNode) *coreauth.UserResolver {
+	store, err := coreauth.NewUserStore(GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func() {
+		Expect(store.Close()).To(Succeed())
 	})
-
-	if apiNode.ContentPath != "" {
-		t.Fatalf("ContentPath = %q, want empty when resolver fails", apiNode.ContentPath)
+	service := coreauth.NewUserService(store)
+	creator, err := service.CreateUser("creator", "creator@example.com", "password", coreauth.RoleViewer)
+	Expect(err).NotTo(HaveOccurred())
+	lastAuthor, err := service.CreateUser("last-author", "last-author@example.com", "password", coreauth.RoleEditor)
+	Expect(err).NotTo(HaveOccurred())
+	for _, node := range nodes {
+		node.Metadata.CreatorID = tree.UserIDFromString(creator.ID)
+		node.Metadata.LastAuthorID = tree.UserIDFromString(lastAuthor.ID)
 	}
+	resolver, err := coreauth.NewUserResolver(service)
+	Expect(err).NotTo(HaveOccurred())
+	return resolver
 }

@@ -9,6 +9,14 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 )
 
+var (
+	wikidRemove          = os.Remove
+	wikidMkdirAll        = os.MkdirAll
+	wikidNewUserStore    = coreauth.NewUserStore
+	wikidNewSessionStore = coreauth.NewSessionStore
+	wikidNewAPIKeyStore  = coreauth.NewAPIKeyStore
+)
+
 type AuthStorageLayout struct {
 	AuthDir    string
 	UsersDB    string
@@ -43,7 +51,7 @@ func CleanupLegacyAuthDBs(dataDir string) error {
 	var joined error
 	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
 		path := filepath.Join(dataDir, name)
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := wikidRemove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			joined = errors.Join(joined, fmt.Errorf("remove legacy auth DB %s: %w", path, err))
 		}
 	}
@@ -55,25 +63,25 @@ func OpenAuthStores(dataDir string) (*AuthStores, error) {
 		return nil, err
 	}
 	paths := AuthStoragePaths(dataDir)
-	if err := os.MkdirAll(paths.AuthDir, 0o755); err != nil {
+	if err := wikidMkdirAll(paths.AuthDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create wikid auth dir: %w", err)
 	}
-	if err := os.MkdirAll(paths.OAuthDir, 0o755); err != nil {
+	if err := wikidMkdirAll(paths.OAuthDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create wikid oauth dir: %w", err)
 	}
 
 	stores := &AuthStores{}
 	var err error
-	stores.Users, err = coreauth.NewUserStore(paths.AuthDir)
+	stores.Users, err = wikidNewUserStore(paths.AuthDir)
 	if err != nil {
 		return nil, fmt.Errorf("open wikid user store: %w", err)
 	}
-	stores.Sessions, err = coreauth.NewSessionStore(paths.AuthDir)
+	stores.Sessions, err = wikidNewSessionStore(paths.AuthDir)
 	if err != nil {
 		_ = stores.Close()
 		return nil, fmt.Errorf("open wikid session store: %w", err)
 	}
-	stores.APIKeys, err = coreauth.NewAPIKeyStore(paths.AuthDir)
+	stores.APIKeys, err = wikidNewAPIKeyStore(paths.AuthDir)
 	if err != nil {
 		_ = stores.Close()
 		return nil, fmt.Errorf("open wikid API key store: %w", err)

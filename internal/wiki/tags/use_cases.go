@@ -24,11 +24,15 @@ type GetTagsOutput struct {
 }
 
 type GetTagsUseCase struct {
-	svc *coretags.TagsService
+	svc tagsService
 }
 
 func NewGetTagsUseCase(svc *coretags.TagsService) *GetTagsUseCase {
-	return &GetTagsUseCase{svc: svc}
+	uc := &GetTagsUseCase{}
+	if svc != nil {
+		uc.svc = svc
+	}
+	return uc
 }
 
 func (uc *GetTagsUseCase) Execute(_ context.Context, in GetTagsInput) (*GetTagsOutput, error) {
@@ -72,13 +76,25 @@ type GetPagesByTagsOutput struct {
 }
 
 type GetPagesByTagsUseCase struct {
-	svc          *coretags.TagsService
+	svc          tagsService
 	treeService  *tree.TreeService
 	userResolver *auth.UserResolver
 }
 
+type tagsService interface {
+	GetAllTags(filter string, pageSize coretags.TagLimit) ([]coretags.TagCount, error)
+	GetAllTagsForSelection(filter string, selected []string, pageSize coretags.TagLimit) ([]coretags.TagCount, error)
+	GetPageIDsByTags(tags []string) ([]tree.PageID, error)
+	GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]string, error)
+	GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error)
+}
+
 func NewGetPagesByTagsUseCase(svc *coretags.TagsService, treeService *tree.TreeService, userResolver *auth.UserResolver) *GetPagesByTagsUseCase {
-	return &GetPagesByTagsUseCase{svc: svc, treeService: treeService, userResolver: userResolver}
+	uc := &GetPagesByTagsUseCase{treeService: treeService, userResolver: userResolver}
+	if svc != nil {
+		uc.svc = svc
+	}
+	return uc
 }
 
 func ValidatePagesByTagsInput(tags []string) ([]string, error) {

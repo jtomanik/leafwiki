@@ -1,16 +1,17 @@
 package oauth
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"reflect"
 	"runtime"
-	"testing"
 	"time"
 
 	"github.com/ory/fosite"
 )
 
-func TestFositeConfigUsesLeafWikiOAuthDefaults(t *testing.T) {
+var _ = ginkgo.It("TestFositeConfigUsesLeafWikiOAuthDefaults", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	cfg := ServiceConfig{
 		AccessTokenTimeout:  15 * time.Minute,
@@ -40,9 +41,11 @@ func TestFositeConfigUsesLeafWikiOAuthDefaults(t *testing.T) {
 	if got := fositeConfig.GetMinParameterEntropy(ctx); got != fosite.MinParameterEntropy {
 		t.Fatalf("min parameter entropy = %d, want %d", got, fosite.MinParameterEntropy)
 	}
-}
 
-func TestFositeConfigUsesHMACOpaqueStrategy(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeConfigUsesHMACOpaqueStrategy", func() {
+	t := ginkgo.GinkgoT()
 	fositeConfig := newFositeConfig(ServiceConfig{}, []byte("leafwiki-fosite-test-secret-32-bytes"))
 
 	strategy := newFositeStrategy(fositeConfig)
@@ -50,9 +53,11 @@ func TestFositeConfigUsesHMACOpaqueStrategy(t *testing.T) {
 	if got := reflect.TypeOf(strategy).String(); got != "*oauth2.HMACSHAStrategy" {
 		t.Fatalf("strategy has type %s, want *oauth2.HMACSHAStrategy", got)
 	}
-}
 
-func TestFositeConfigUsesNarrowProviderComposition(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeConfigUsesNarrowProviderComposition", func() {
+	t := ginkgo.GinkgoT()
 	factories := newFositeFactories()
 
 	got := make([]string, 0, len(factories))
@@ -68,4 +73,5 @@ func TestFositeConfigUsesNarrowProviderComposition(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("provider factories = %#v, want %#v", got, want)
 	}
-}
+
+})

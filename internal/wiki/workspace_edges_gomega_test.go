@@ -1,0 +1,110 @@
+package wiki
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = ginkgo.Describe("workspace validation edges", func() {
+	ginkgo.It("rejects missing data and equal root/data directories", func() {
+		t := ginkgo.GinkgoT()
+		sameDir := filepath.Join(t.TempDir(), "same")
+
+		Expect(ValidateWorkspace(Workspace{ID: "default"})).To(MatchError(ContainSubstring("data dir must not be empty")))
+		Expect(ValidateWorkspace(Workspace{ID: "default", DataDir: sameDir, RootDir: sameDir})).To(MatchError(ContainSubstring("root dir must be different from data dir")))
+	})
+
+	ginkgo.It("surfaces absolute path failures from the resolver", func() {
+		expected := errors.New("abs failed")
+		restoreWorkspacePathSeams()
+		resolveWorkspaceAbs = func(string) (string, error) {
+			return "", expected
+		}
+
+		_, err := resolveWorkspacePath("docs")
+		Expect(err).To(MatchError(expected))
+	})
+
+	ginkgo.It("surfaces data and root path resolution errors", func() {
+		t := ginkgo.GinkgoT()
+		loopA, loopB := createWorkspaceSymlinkLoop(t.TempDir())
+
+		err := ValidateWorkspace(Workspace{
+			ID:      "default",
+			DataDir: loopA,
+			RootDir: filepath.Join(t.TempDir(), "root"),
+		})
+		Expect(err).To(MatchError(ContainSubstring("resolve data dir:")))
+
+		err = ValidateWorkspace(Workspace{
+			ID:      "default",
+			DataDir: filepath.Join(t.TempDir(), "data"),
+			RootDir: loopB,
+		})
+		Expect(err).To(MatchError(ContainSubstring("resolve root dir:")))
+	})
+
+	ginkgo.It("keeps unresolved paths when no existing parent can be resolved", func() {
+		restoreWorkspacePathSeams()
+		resolveWorkspaceAbs = func(string) (string, error) {
+			return string(filepath.Separator) + "missing", nil
+		}
+		resolveWorkspaceEvalSymlinks = func(string) (string, error) {
+			return "", os.ErrNotExist
+		}
+
+		resolved, err := resolveWorkspacePath("missing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resolved).To(Equal(string(filepath.Separator) + "missing"))
+	})
+
+	ginkgo.It("surfaces resolver failures while walking missing parents", func() {
+		expected := errors.New("parent failed")
+		restoreWorkspacePathSeams()
+		resolveWorkspaceAbs = func(string) (string, error) {
+			return filepath.Join(string(filepath.Separator), "missing", "leaf"), nil
+		}
+		callCount := 0
+		resolveWorkspaceEvalSymlinks = func(string) (string, error) {
+			callCount++
+			if callCount == 1 {
+				return "", os.ErrNotExist
+			}
+			return "", expected
+		}
+
+		_, err := resolveWorkspacePath("leaf")
+		Expect(err).To(MatchError(expected))
+	})
+
+	ginkgo.It("treats paths with no relative form as not contained", func() {
+		t := ginkgo.GinkgoT()
+
+		Expect(pathContains(filepath.Join(t.TempDir(), "parent"), "relative-child")).To(BeFalse())
+	})
+})
+
+func createWorkspaceSymlinkLoop(baseDir string) (string, string) {
+	ginkgo.GinkgoHelper()
+
+	loopA := filepath.Join(baseDir, "loop-a")
+	loopB := filepath.Join(baseDir, "loop-b")
+	Expect(os.Symlink(loopB, loopA)).To(Succeed())
+	Expect(os.Symlink(loopA, loopB)).To(Succeed())
+	return loopA, loopB
+}
+
+func restoreWorkspacePathSeams() {
+	ginkgo.GinkgoHelper()
+
+	originalAbs := resolveWorkspaceAbs
+	originalEvalSymlinks := resolveWorkspaceEvalSymlinks
+	ginkgo.DeferCleanup(func() {
+		resolveWorkspaceAbs = originalAbs
+		resolveWorkspaceEvalSymlinks = originalEvalSymlinks
+	})
+}

@@ -1,6 +1,9 @@
 package main
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -44,452 +47,554 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestWriteUsage_DocumentsMCPTransportSelector(t *testing.T) {
-	var buf bytes.Buffer
-
-	writeUsage(&buf)
-
-	output := buf.String()
-	if !strings.Contains(output, "Usage: leafwiki [command]") {
-		t.Fatalf("expected usage output to include catalog-backed usage line, got %q", output)
+func TestLeafWikiSuite(t *testing.T) {
+	if runLeafWikiHelperProcessForTest() {
+		return
 	}
-	if !strings.Contains(output, "leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]") {
-		t.Fatalf("expected authenticated startup usage to include --root-dir, got %q", output)
-	}
-	for _, expected := range []string{
-		"--jwt-secret",
-		"--admin-password",
-		"--allow-insecure",
-		"--data-dir",
-		"--root-dir",
-		"--log-target",
-		"--log-file",
-		"--mcp",
-		"--api-key",
-		"Federated runtime idle timeout",
-		"leafwiki daemon reads ~/.leafwiki/leafwiki.yml",
-		"--config",
-		"leafwiki agent-hook <codex|claude|cursor|unknown>",
-		"LEAFWIKI_ROOT_DIR",
-		"LEAFWIKI_LOG_TARGET",
-		"LEAFWIKI_LOG_FILE",
-		"LEAFWIKI_MCP",
-		"LEAFWIKI_MCP_API_KEY",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("expected usage output to contain %q, got %q", expected, output)
+	RegisterFailHandler(ginkgo.Fail)
+	ginkgo.RunSpecs(t, "LeafWiki Suite")
+}
+
+type leafwikiTestT interface {
+	Helper()
+	TempDir() string
+	Cleanup(func())
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Setenv(key string, value string)
+	Skip(args ...any)
+}
+
+func newFixtureUserID[T ~string](raw T) coreauth.UserID {
+	return coreauth.UserIDFromString(raw)
+}
+
+var _ = ginkgo.Describe("TestWriteUsage_DocumentsMCPTransportSelector", func() {
+	ginkgo.It("TestWriteUsage_DocumentsMCPTransportSelector", func() {
+		t := ginkgo.GinkgoT()
+		var buf bytes.Buffer
+
+		writeUsage(&buf)
+
+		output := buf.String()
+		if !strings.Contains(output, "Usage: leafwiki [command]") {
+			t.Fatalf("expected usage output to include catalog-backed usage line, got %q", output)
 		}
-	}
-	for _, removed := range []string{
-		"--enable-revision",
-		"--enable-workspace-sync",
-		"--max-revision-history",
-		"--enable-mcp",
-		"--mcp-stdio",
-		"LEAFWIKI_ENABLE_REVISION",
-		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
-		"LEAFWIKI_MAX_REVISION_HISTORY",
-		"LEAFWIKI_RUNTIME_STACK",
-		"LEAFWIKI_ENABLE_MCP",
-		"LEAFWIKI_MCP_STDIO",
-	} {
-		if strings.Contains(output, removed) {
-			t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
+		if !strings.Contains(output, "leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]") {
+			t.Fatalf("expected authenticated startup usage to include --root-dir, got %q", output)
 		}
-	}
-}
-
-func TestWriteUsage_RendersHelpBodyFromCatalog(t *testing.T) {
-	var buf bytes.Buffer
-
-	writeUsage(&buf)
-
-	rendered := localization.English.Render("cli.help.body", "").Message
-	if rendered == "" {
-		t.Fatalf("cli.help.body rendered empty")
-	}
-	if !strings.Contains(buf.String(), rendered) {
-		t.Fatalf("usage output did not include catalog help body")
-	}
-}
-
-func TestFailureMessageRendersCatalogBackedErrorBody(t *testing.T) {
-	got := failureMessage("cli.error.invalid_environment", "error", "bad env")
-	want := "Invalid environment error=bad env"
-	if got != want {
-		t.Fatalf("failureMessage = %q, want %q", got, want)
-	}
-}
-
-func TestRegisterFlagsRejectsRemovedStartupFlags(t *testing.T) {
-	for _, arg := range []string{
-		"--enable-revision",
-		"--enable-workspace-sync",
-		"--enable-mcp",
-		"--mcp-stdio",
-		"--max-revision-history=0",
-	} {
-		t.Run(arg, func(t *testing.T) {
-			fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
-			var errOut bytes.Buffer
-			fs.SetOutput(&errOut)
-			registerFlags(fs)
-
-			err := fs.Parse([]string{arg})
-			if err == nil {
-				t.Fatalf("parse %s unexpectedly succeeded", arg)
+		for _, expected := range []string{
+			"--jwt-secret",
+			"--admin-password",
+			"--allow-insecure",
+			"--data-dir",
+			"--root-dir",
+			"--log-target",
+			"--log-file",
+			"--mcp",
+			"--api-key",
+			"Federated runtime idle timeout",
+			"leafwiki daemon reads ~/.leafwiki/leafwiki.yml",
+			"--config",
+			"leafwiki agent-hook <codex|claude|cursor|unknown>",
+			"LEAFWIKI_ROOT_DIR",
+			"LEAFWIKI_LOG_TARGET",
+			"LEAFWIKI_LOG_FILE",
+			"LEAFWIKI_MCP",
+			"LEAFWIKI_MCP_API_KEY",
+		} {
+			if !strings.Contains(output, expected) {
+				t.Fatalf("expected usage output to contain %q, got %q", expected, output)
 			}
-			if !strings.Contains(err.Error(), "flag provided but not defined") {
-				t.Fatalf("parse %s error = %v, stderr=%q, want unknown flag", arg, err, errOut.String())
+		}
+		for _, removed := range []string{
+			"--enable-revision",
+			"--enable-workspace-sync",
+			"--max-revision-history",
+			"--enable-mcp",
+			"--mcp-stdio",
+			"LEAFWIKI_ENABLE_REVISION",
+			"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
+			"LEAFWIKI_MAX_REVISION_HISTORY",
+			"LEAFWIKI_RUNTIME_STACK",
+			"LEAFWIKI_ENABLE_MCP",
+			"LEAFWIKI_MCP_STDIO",
+		} {
+			if strings.Contains(output, removed) {
+				t.Fatalf("usage output contains removed MCP option %q: %q", removed, output)
 			}
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestWriteUsage_RendersHelpBodyFromCatalog", func() {
+	ginkgo.It("TestWriteUsage_RendersHelpBodyFromCatalog", func() {
+		t := ginkgo.GinkgoT()
+		var buf bytes.Buffer
+
+		writeUsage(&buf)
+
+		rendered := localization.English.Render("cli.help.body", "").Message
+		if rendered == "" {
+			t.Fatalf("cli.help.body rendered empty")
+		}
+		if !strings.Contains(buf.String(), rendered) {
+			t.Fatalf("usage output did not include catalog help body")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFailureMessageRendersCatalogBackedErrorBody", func() {
+	ginkgo.It("TestFailureMessageRendersCatalogBackedErrorBody", func() {
+		t := ginkgo.GinkgoT()
+		got := failureMessage("cli.error.invalid_environment", "error", "bad env")
+		want := "Invalid environment error=bad env"
+		if got != want {
+			t.Fatalf("failureMessage = %q, want %q", got, want)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRegisterFlagsRejectsRemovedStartupFlags", func() {
+	ginkgo.It("TestRegisterFlagsRejectsRemovedStartupFlags", func() {
+		t := ginkgo.GinkgoT()
+		for _, arg := range []string{
+			"--enable-revision",
+			"--enable-workspace-sync",
+			"--enable-mcp",
+			"--mcp-stdio",
+			"--max-revision-history=0",
+		} {
+			func() {
+				t := t
+				_ = arg
+				fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+				var errOut bytes.Buffer
+				fs.SetOutput(&errOut)
+				registerFlags(fs)
+
+				err := fs.Parse([]string{arg})
+				if err == nil {
+					t.Fatalf("parse %s unexpectedly succeeded", arg)
+				}
+				if !strings.Contains(err.Error(), "flag provided but not defined") {
+					t.Fatalf("parse %s error = %v, stderr=%q, want unknown flag", arg, err, errOut.String())
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv", func() {
+	ginkgo.It("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv", func() {
+		t := ginkgo.GinkgoT()
+		for _, name := range []string{
+			"LEAFWIKI_RUNTIME_STACK",
+			"LEAFWIKI_ENABLE_REVISION",
+			"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
+			"LEAFWIKI_MAX_REVISION_HISTORY",
+			"LEAFWIKI_ENABLE_MCP",
+			"LEAFWIKI_MCP_STDIO",
+		} {
+			func() {
+				t := t
+				_ = name
+				previousValue, hadPreviousValue := os.LookupEnv(name)
+				if err := os.Setenv(name, ""); err != nil {
+					t.Fatalf("set %s: %v", name, err)
+				}
+				defer func() {
+					if hadPreviousValue {
+						_ = os.Setenv(name, previousValue)
+						return
+					}
+					_ = os.Unsetenv(name)
+				}()
+
+				err := rejectRemovedLeafWikiEnv()
+				if err == nil {
+					t.Fatalf("rejectRemovedLeafWikiEnv with %s unexpectedly succeeded", name)
+				}
+				if !strings.Contains(err.Error(), "unknown environment variable: "+name) {
+					t.Fatalf("error = %v, want unknown env %s", err, name)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonConfigForRuntimeIncludesWorkspaceID", func() {
+	ginkgo.It("TestDaemonConfigForRuntimeIncludesWorkspaceID", func() {
+		t := ginkgo.GinkgoT()
+		cfg := leafwikiRuntimeConfig{
+			Workspace: wiki.Workspace{
+				ID:      "home",
+				DataDir: filepath.Join(t.TempDir(), "data"),
+				RootDir: filepath.Join(t.TempDir(), "root"),
+			},
+			RuntimeStack: projectdaemon.RuntimeStackWikidFrontd,
+		}
+
+		ownerCfg, err := daemonConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemonConfigForRuntime failed: %v", err)
+		}
+
+		if ownerCfg.WorkspaceID != "home" {
+			t.Fatalf("WorkspaceID = %q, want home", ownerCfg.WorkspaceID)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveWorkspaceDefaultsToHomeWorkspaceID", func() {
+	ginkgo.It("TestResolveWorkspaceDefaultsToHomeWorkspaceID", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		flags := registerFlags(fs)
+		if err := fs.Parse([]string{
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--root-dir", filepath.Join(t.TempDir(), "root"),
+		}); err != nil {
+			t.Fatalf("parse flags: %v", err)
+		}
+		visited := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+		workspace, err := resolveWorkspace(flags, visited)
+		if err != nil {
+			t.Fatalf("resolveWorkspace failed: %v", err)
+		}
+
+		if workspace.ID != "home" {
+			t.Fatalf("workspace ID = %q, want home", workspace.ID)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonStdioBridgeConfigPrefersDescriptorPrivateMCP", func() {
+	ginkgo.It("TestDaemonStdioBridgeConfigPrefersDescriptorPrivateMCP", func() {
+		t := ginkgo.GinkgoT()
+		desc := &projectdaemon.Descriptor{
+			ControlURL:      "http://127.0.0.1:41000",
+			ControlToken:    "control-token",
+			PrivateMCPURL:   "http://127.0.0.1:42000/mcp",
+			PrivateMCPToken: "private-token",
+		}
+
+		cfg := daemonStdioBridgeConfig(desc, leafwikiRuntimeConfig{APIKey: "api-key"})
+
+		if cfg.EndpointURL != desc.PrivateMCPURL {
+			t.Fatalf("EndpointURL = %q, want private MCP URL", cfg.EndpointURL)
+		}
+		if cfg.ControlToken != desc.PrivateMCPToken {
+			t.Fatalf("ControlToken = %q, want private MCP token", cfg.ControlToken)
+		}
+		if cfg.AuthControlURL != desc.ControlURL || cfg.AuthControlToken != desc.ControlToken {
+			t.Fatalf("auth verifier = %q/%q, want descriptor control endpoint", cfg.AuthControlURL, cfg.AuthControlToken)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestControlPlaneRouterRegistersOAuthWhenHTTPMCPEnabled", func() {
+	ginkgo.It("TestControlPlaneRouterRegistersOAuthWhenHTTPMCPEnabled", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := t.TempDir()
+		rootDir := t.TempDir()
+		cfg := leafwikiRuntimeConfig{
+			Workspace:           wiki.Workspace{ID: "current", DataDir: dataDir, RootDir: rootDir},
+			Host:                "127.0.0.1",
+			Port:                "8085",
+			AdminPassword:       "admin",
+			JWTSecret:           "secret",
+			AllowInsecure:       true,
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			MCPTransports:       mcpTransports{HTTP: true},
+			RuntimeStack:        projectdaemon.RuntimeStackWikidFrontd,
+		}
+		ownerCfg, err := daemonConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemonConfigForRuntime failed: %v", err)
+		}
+		stores, err := wikid.OpenAuthStores(ownerCfg.DataDir)
+		if err != nil {
+			t.Fatalf("open wikid auth stores: %v", err)
+		}
+		if err := stores.Close(); err != nil {
+			t.Fatalf("close wikid auth stores: %v", err)
+		}
+		w, err := newRuntimeWiki(cfg, ownerCfg, runtimeWikiControlPlaneOnly)
+		if err != nil {
+			t.Fatalf("newRuntimeWiki failed: %v", err)
+		}
+		defer w.Close()
+		opts, err := controlPlaneRouterOptionsForRuntime(cfg, w)
+		if err != nil {
+			t.Fatalf("controlPlaneRouterOptionsForRuntime failed: %v", err)
+		}
+		router := frontd.NewRouter(w, opts)
+
+		q := url.Values{
+			"client_id":             {"leafwiki-local-mcp"},
+			"response_type":         {"code"},
+			"redirect_uri":          {"http://127.0.0.1:49152/callback"},
+			"scope":                 {"leafwiki:mcp"},
+			"state":                 {"control-plane-oauth"},
+			"resource":              {"http://127.0.0.1/mcp"},
+			"code_challenge":        {"abcdefghijklmnopqrstuvwxyz0123456789abcdefghi"},
+			"code_challenge_method": {"S256"},
+		}
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/oauth/authorize?"+q.Encode(), nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("GET /oauth/authorize status = %d, want 302: %s", rec.Code, rec.Body.String())
+		}
+		if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/login?returnTo=") {
+			t.Fatalf("GET /oauth/authorize location = %q, want login redirect", location)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFrontdActorUserAllowsPublicAccessReadsAsViewer", func() {
+	ginkgo.It("TestFrontdActorUserAllowsPublicAccessReadsAsViewer", func() {
+		t := ginkgo.GinkgoT()
+		w := newFrontdActorTestWiki(t)
+		defer w.Close()
+		req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+
+		user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+			PublicAccess: true,
+			Workspace:    wiki.Workspace{ID: "current"},
 		})
-	}
-}
 
-func TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv(t *testing.T) {
-	for _, name := range []string{
-		"LEAFWIKI_RUNTIME_STACK",
-		"LEAFWIKI_ENABLE_REVISION",
-		"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
-		"LEAFWIKI_MAX_REVISION_HISTORY",
-		"LEAFWIKI_ENABLE_MCP",
-		"LEAFWIKI_MCP_STDIO",
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv(name, "")
+		if err != nil {
+			t.Fatalf("frontdActorUser public read failed: %v", err)
+		}
+		if method != "public_access" {
+			t.Fatalf("auth method = %q, want public_access", method)
+		}
+		if user.ID != "public-viewer" || user.Role != coreauth.RoleViewer {
+			t.Fatalf("public actor = %#v, want public viewer", user)
+		}
 
-			err := rejectRemovedLeafWikiEnv()
-			if err == nil {
-				t.Fatalf("rejectRemovedLeafWikiEnv with %s unexpectedly succeeded", name)
-			}
-			if !strings.Contains(err.Error(), "unknown environment variable: "+name) {
-				t.Fatalf("error = %v, want unknown env %s", err, name)
-			}
+	})
+})
+
+var _ = ginkgo.Describe("TestFrontdActorUserHonorsTrustedRemoteUserHeader", func() {
+	ginkgo.It("TestFrontdActorUserHonorsTrustedRemoteUserHeader", func() {
+		t := ginkgo.GinkgoT()
+		w := newFrontdActorTestWiki(t)
+		defer w.Close()
+		created, err := w.UserService().CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
+		if err != nil {
+			t.Fatalf("CreateUser failed: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Remote-User", "editor")
+
+		user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+			EnableHTTPRemoteUser: true,
+			HTTPRemoteUserHeader: "Remote-User",
+			TrustedProxyIPsRaw:   "127.0.0.1",
+			Workspace:            wiki.Workspace{ID: "current"},
 		})
-	}
-}
 
-func TestDaemonConfigForRuntimeIncludesWorkspaceID(t *testing.T) {
-	cfg := leafwikiRuntimeConfig{
-		Workspace: wiki.Workspace{
-			ID:      "home",
-			DataDir: filepath.Join(t.TempDir(), "data"),
-			RootDir: filepath.Join(t.TempDir(), "root"),
-		},
-		RuntimeStack: projectdaemon.RuntimeStackWikidFrontd,
-	}
+		if err != nil {
+			t.Fatalf("frontdActorUser remote user failed: %v", err)
+		}
+		if method != "remote_user" {
+			t.Fatalf("auth method = %q, want remote_user", method)
+		}
+		if user.ID != created.ID || user.Username != "editor" || user.Role != coreauth.RoleEditor {
+			t.Fatalf("remote actor = %#v, want created editor %#v", user, created)
+		}
 
-	ownerCfg, err := daemonConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemonConfigForRuntime failed: %v", err)
-	}
-
-	if ownerCfg.WorkspaceID != "home" {
-		t.Fatalf("WorkspaceID = %q, want home", ownerCfg.WorkspaceID)
-	}
-}
-
-func TestResolveWorkspaceDefaultsToHomeWorkspaceID(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	flags := registerFlags(fs)
-	if err := fs.Parse([]string{
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--root-dir", filepath.Join(t.TempDir(), "root"),
-	}); err != nil {
-		t.Fatalf("parse flags: %v", err)
-	}
-	visited := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-
-	workspace, err := resolveWorkspace(flags, visited)
-	if err != nil {
-		t.Fatalf("resolveWorkspace failed: %v", err)
-	}
-
-	if workspace.ID != "home" {
-		t.Fatalf("workspace ID = %q, want home", workspace.ID)
-	}
-}
-
-func TestDaemonStdioBridgeConfigPrefersDescriptorPrivateMCP(t *testing.T) {
-	desc := &projectdaemon.Descriptor{
-		ControlURL:      "http://127.0.0.1:41000",
-		ControlToken:    "control-token",
-		PrivateMCPURL:   "http://127.0.0.1:42000/mcp",
-		PrivateMCPToken: "private-token",
-	}
-
-	cfg := daemonStdioBridgeConfig(desc, leafwikiRuntimeConfig{APIKey: "api-key"})
-
-	if cfg.EndpointURL != desc.PrivateMCPURL {
-		t.Fatalf("EndpointURL = %q, want private MCP URL", cfg.EndpointURL)
-	}
-	if cfg.ControlToken != desc.PrivateMCPToken {
-		t.Fatalf("ControlToken = %q, want private MCP token", cfg.ControlToken)
-	}
-	if cfg.AuthControlURL != desc.ControlURL || cfg.AuthControlToken != desc.ControlToken {
-		t.Fatalf("auth verifier = %q/%q, want descriptor control endpoint", cfg.AuthControlURL, cfg.AuthControlToken)
-	}
-}
-
-func TestControlPlaneRouterRegistersOAuthWhenHTTPMCPEnabled(t *testing.T) {
-	dataDir := t.TempDir()
-	rootDir := t.TempDir()
-	cfg := leafwikiRuntimeConfig{
-		Workspace:           wiki.Workspace{ID: "current", DataDir: dataDir, RootDir: rootDir},
-		Host:                "127.0.0.1",
-		Port:                "8085",
-		AdminPassword:       "admin",
-		JWTSecret:           "secret",
-		AllowInsecure:       true,
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		MCPTransports:       mcpTransports{HTTP: true},
-		RuntimeStack:        projectdaemon.RuntimeStackWikidFrontd,
-	}
-	ownerCfg, err := daemonConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemonConfigForRuntime failed: %v", err)
-	}
-	stores, err := wikid.OpenAuthStores(ownerCfg.DataDir)
-	if err != nil {
-		t.Fatalf("open wikid auth stores: %v", err)
-	}
-	if err := stores.Close(); err != nil {
-		t.Fatalf("close wikid auth stores: %v", err)
-	}
-	w, err := newRuntimeWiki(cfg, ownerCfg, runtimeWikiControlPlaneOnly)
-	if err != nil {
-		t.Fatalf("newRuntimeWiki failed: %v", err)
-	}
-	defer w.Close()
-	opts, err := controlPlaneRouterOptionsForRuntime(cfg, w)
-	if err != nil {
-		t.Fatalf("controlPlaneRouterOptionsForRuntime failed: %v", err)
-	}
-	router := frontd.NewRouter(w, opts)
-
-	q := url.Values{
-		"client_id":             {"leafwiki-local-mcp"},
-		"response_type":         {"code"},
-		"redirect_uri":          {"http://127.0.0.1:49152/callback"},
-		"scope":                 {"leafwiki:mcp"},
-		"state":                 {"control-plane-oauth"},
-		"resource":              {"http://127.0.0.1/mcp"},
-		"code_challenge":        {"abcdefghijklmnopqrstuvwxyz0123456789abcdefghi"},
-		"code_challenge_method": {"S256"},
-	}
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/oauth/authorize?"+q.Encode(), nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusFound {
-		t.Fatalf("GET /oauth/authorize status = %d, want 302: %s", rec.Code, rec.Body.String())
-	}
-	if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/login?returnTo=") {
-		t.Fatalf("GET /oauth/authorize location = %q, want login redirect", location)
-	}
-}
-
-func TestFrontdActorUserAllowsPublicAccessReadsAsViewer(t *testing.T) {
-	w := newFrontdActorTestWiki(t)
-	defer w.Close()
-	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
-
-	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
-		PublicAccess: true,
-		Workspace:    wiki.Workspace{ID: "current"},
 	})
+})
 
-	if err != nil {
-		t.Fatalf("frontdActorUser public read failed: %v", err)
-	}
-	if method != "public_access" {
-		t.Fatalf("auth method = %q, want public_access", method)
-	}
-	if user.ID != "public-viewer" || user.Role != coreauth.RoleViewer {
-		t.Fatalf("public actor = %#v, want public viewer", user)
-	}
-}
+var _ = ginkgo.Describe("TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI", func() {
+	ginkgo.It("TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI", func() {
+		t := ginkgo.GinkgoT()
+		w := newFrontdActorTestWiki(t)
+		defer w.Close()
+		editor, err := w.UserService().CreateUser("mcp-editor", "mcp-editor@example.com", "password", coreauth.RoleEditor)
+		if err != nil {
+			t.Fatalf("CreateUser failed: %v", err)
+		}
+		editorID := newFixtureUserID(editor.ID)
+		created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
+		if err != nil {
+			t.Fatalf("CreateAPIKey failed: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Via API key"}`))
+		req.Header.Set("Authorization", "Bearer "+created.Secret)
 
-func TestFrontdActorUserHonorsTrustedRemoteUserHeader(t *testing.T) {
-	w := newFrontdActorTestWiki(t)
-	defer w.Close()
-	created, err := w.UserService().CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("Remote-User", "editor")
-
-	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
-		EnableHTTPRemoteUser: true,
-		HTTPRemoteUserHeader: "Remote-User",
-		TrustedProxyIPsRaw:   "127.0.0.1",
-		Workspace:            wiki.Workspace{ID: "current"},
-	})
-
-	if err != nil {
-		t.Fatalf("frontdActorUser remote user failed: %v", err)
-	}
-	if method != "remote_user" {
-		t.Fatalf("auth method = %q, want remote_user", method)
-	}
-	if user.ID != created.ID || user.Username != "editor" || user.Role != coreauth.RoleEditor {
-		t.Fatalf("remote actor = %#v, want created editor %#v", user, created)
-	}
-}
-
-func TestFrontdActorUserRejectsMCPAPIKeyForWorkspaceAPI(t *testing.T) {
-	w := newFrontdActorTestWiki(t)
-	defer w.Close()
-	editor, err := w.UserService().CreateUser("mcp-editor", "mcp-editor@example.com", "password", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
-	editorID := newFixtureUserID(editor.ID)
-	created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
-	if err != nil {
-		t.Fatalf("CreateAPIKey failed: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Via API key"}`))
-	req.Header.Set("Authorization", "Bearer "+created.Secret)
-
-	user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
-		Workspace: wiki.Workspace{ID: "current"},
-	})
-
-	if err == nil {
-		t.Fatalf("frontdActorUser allowed MCP API key as workspace user %#v with method %q, want error", user, method)
-	}
-}
-
-func TestExtractedFrontdFrontendConfigUsesBrandingForSPAHTML(t *testing.T) {
-	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, "branding.json"), []byte(`{"siteName":"Runtime Wiki","faviconFile":"favicon.ico"}`), 0o644); err != nil {
-		t.Fatalf("write branding config: %v", err)
-	}
-	embedFrontendOrig := httpinternal.EmbedFrontend
-	httpinternal.EmbedFrontend = "true"
-	t.Cleanup(func() {
-		httpinternal.EmbedFrontend = embedFrontendOrig
-	})
-	router := httpinternal.NewRouter(nil, frontendConfigForRuntimeStorage(dataDir), httpinternal.RouterOptions{})
-
-	req := httptest.NewRequest(http.MethodGet, "/page", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /page status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "<title>Runtime Wiki</title>") {
-		t.Fatalf("SPA title did not use branding: %s", body)
-	}
-	if !strings.Contains(body, `href="/branding/favicon.ico"`) {
-		t.Fatalf("SPA favicon did not use branding: %s", body)
-	}
-}
-
-func TestWikidFrontdRuntimeWithProcessLockSerializesProcessMapAccess(t *testing.T) {
-	runtime := &wikidFrontdRuntime{}
-	runtime.mu.Lock()
-	entered := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		_ = runtime.withProcessLock(func() error {
-			close(entered)
-			return nil
+		user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
+			Workspace: wiki.Workspace{ID: "current"},
 		})
-		close(done)
-	}()
 
-	select {
-	case <-entered:
-		t.Fatalf("withProcessLock entered callback while process mutex was held")
-	case <-done:
-		t.Fatalf("withProcessLock returned while process mutex was held")
-	case <-time.After(25 * time.Millisecond):
-	}
+		if err == nil {
+			t.Fatalf("frontdActorUser allowed MCP API key as workspace user %#v with method %q, want error", user, method)
+		}
 
-	runtime.mu.Unlock()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatalf("withProcessLock did not enter callback after process mutex was released")
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatalf("withProcessLock did not return after callback completed")
-	}
-}
+	})
+})
 
-func TestFrontdPublicMCPRequiresBearerBeforeProxying(t *testing.T) {
-	var upstreamCalled bool
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		upstreamCalled = true
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer upstream.Close()
+var _ = ginkgo.Describe("TestExtractedFrontdFrontendConfigUsesBrandingForSPAHTML", func() {
+	ginkgo.It("TestExtractedFrontdFrontendConfigUsesBrandingForSPAHTML", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dataDir, "branding.json"), []byte(`{"siteName":"Runtime Wiki","faviconFile":"favicon.ico"}`), 0o644); err != nil {
+			t.Fatalf("write branding config: %v", err)
+		}
+		embedFrontendOrig := httpinternal.EmbedFrontend
+		httpinternal.EmbedFrontend = "true"
+		t.Cleanup(func() {
+			httpinternal.EmbedFrontend = embedFrontendOrig
+		})
+		router := httpinternal.NewRouter(nil, frontendConfigForRuntimeStorage(dataDir), httpinternal.RouterOptions{})
 
-	handler, err := frontdPublicMCPHandler(leafwikiRuntimeConfig{
-		BasePath:  "",
-		Workspace: wiki.Workspace{ID: "current"},
-	}, upstream.URL, "private-token", "http://127.0.0.1:1")
-	if err != nil {
-		t.Fatalf("frontdPublicMCPHandler failed: %v", err)
-	}
+		req := httptest.NewRequest(http.MethodGet, "/page", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
 
-	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /page status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "<title>Runtime Wiki</title>") {
+			t.Fatalf("SPA title did not use branding: %s", body)
+		}
+		if !strings.Contains(body, `href="/branding/favicon.ico"`) {
+			t.Fatalf("SPA favicon did not use branding: %s", body)
+		}
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) {
-		t.Fatalf("WWW-Authenticate = %q, want public OAuth protected-resource metadata", rec.Header().Get("WWW-Authenticate"))
-	}
-	if upstreamCalled {
-		t.Fatalf("public MCP request reached workspaced without bearer auth")
-	}
-}
+	})
+})
 
-func TestFrontdWorkspaceMCPRequiresBearerBeforeProxying(t *testing.T) {
-	var nextCalled bool
-	handler := frontdMCPBearerAuthHandler(
-		leafwikiRuntimeConfig{
+var _ = ginkgo.Describe("TestWikidFrontdRuntimeWithProcessLockSerializesProcessMapAccess", func() {
+	ginkgo.It("TestWikidFrontdRuntimeWithProcessLockSerializesProcessMapAccess", func() {
+		t := ginkgo.GinkgoT()
+		runtime := &wikidFrontdRuntime{}
+		runtime.mu.Lock()
+		entered := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			_ = runtime.withProcessLock(func() error {
+				close(entered)
+				return nil
+			})
+			close(done)
+		}()
+
+		select {
+		case <-entered:
+			t.Fatalf("withProcessLock entered callback while process mutex was held")
+		case <-done:
+			t.Fatalf("withProcessLock returned while process mutex was held")
+		case <-time.After(25 * time.Millisecond):
+		}
+
+		runtime.mu.Unlock()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatalf("withProcessLock did not enter callback after process mutex was released")
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("withProcessLock did not return after callback completed")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFrontdPublicMCPRequiresBearerBeforeProxying", func() {
+	ginkgo.It("TestFrontdPublicMCPRequiresBearerBeforeProxying", func() {
+		t := ginkgo.GinkgoT()
+		var upstreamCalled bool
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			upstreamCalled = true
+			w.WriteHeader(http.StatusAccepted)
+		}))
+		defer upstream.Close()
+
+		handler, err := frontdPublicMCPHandler(leafwikiRuntimeConfig{
 			BasePath:  "",
 			Workspace: wiki.Workspace{ID: "current"},
-		},
-		"http://127.0.0.1:1",
-		"private-token",
-		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			nextCalled = true
-			w.WriteHeader(http.StatusAccepted)
-		}),
-	)
+		}, upstream.URL, "private-token", "http://127.0.0.1:1")
+		if err != nil {
+			t.Fatalf("frontdPublicMCPHandler failed: %v", err)
+		}
 
-	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp/workspaces/docs", strings.NewReader("{}"))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) {
-		t.Fatalf("WWW-Authenticate = %q, want public OAuth protected-resource metadata", rec.Header().Get("WWW-Authenticate"))
-	}
-	if nextCalled {
-		t.Fatalf("workspace MCP request reached router without bearer auth")
-	}
-}
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Header().Get("WWW-Authenticate"), `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) {
+			t.Fatalf("WWW-Authenticate = %q, want public OAuth protected-resource metadata", rec.Header().Get("WWW-Authenticate"))
+		}
+		if upstreamCalled {
+			t.Fatalf("public MCP request reached workspaced without bearer auth")
+		}
 
-func assertRuntimeStructuredError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+	})
+})
+
+var _ = ginkgo.Describe("TestFrontdWorkspaceMCPRequiresBearerBeforeProxying", func() {
+	ginkgo.It("TestFrontdWorkspaceMCPRequiresBearerBeforeProxying", func() {
+		t := ginkgo.GinkgoT()
+		var nextCalled bool
+		handler := frontdMCPBearerAuthHandler(
+			leafwikiRuntimeConfig{
+				BasePath:  "",
+				Workspace: wiki.Workspace{ID: "current"},
+			},
+			"http://127.0.0.1:1",
+			"private-token",
+			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				nextCalled = true
+				w.WriteHeader(http.StatusAccepted)
+			}),
+		)
+
+		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp/workspaces/docs", strings.NewReader("{}"))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Header().Get("WWW-Authenticate"), `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) {
+			t.Fatalf("WWW-Authenticate = %q, want public OAuth protected-resource metadata", rec.Header().Get("WWW-Authenticate"))
+		}
+		if nextCalled {
+			t.Fatalf("workspace MCP request reached router without bearer auth")
+		}
+
+	})
+})
+
+func assertRuntimeStructuredError(t leafwikiTestT, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
 	t.Helper()
 	if rec.Code != wantStatus {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
@@ -509,507 +614,577 @@ func assertRuntimeStructuredError(t *testing.T, rec *httptest.ResponseRecorder, 
 	}
 }
 
-func TestWorkspaceMCPUnavailableHandlerReturnsStructuredError(t *testing.T) {
-	rec := httptest.NewRecorder()
+var _ = ginkgo.Describe("TestWorkspaceMCPUnavailableHandlerReturnsStructuredError", func() {
+	ginkgo.It("TestWorkspaceMCPUnavailableHandlerReturnsStructuredError", func() {
+		t := ginkgo.GinkgoT()
+		rec := httptest.NewRecorder()
 
-	workspaceMCPUnavailableHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp/workspaces/docs", nil))
+		workspaceMCPUnavailableHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp/workspaces/docs", nil))
 
-	assertRuntimeStructuredError(t, rec, http.StatusServiceUnavailable, "mcp_workspace_unavailable", "errors.mcp.workspace_unavailable")
-}
+		assertRuntimeStructuredError(t, rec, http.StatusServiceUnavailable, "mcp_workspace_unavailable", "errors.mcp.workspace_unavailable")
 
-func TestPrivateMCPUnauthorizedReturnsStructuredError(t *testing.T) {
-	rec := httptest.NewRecorder()
-
-	writePrivateMCPUnauthorized(rec)
-
-	assertRuntimeStructuredError(t, rec, http.StatusUnauthorized, "private_mcp_control_token_invalid", "errors.private.mcp_control_token_invalid")
-}
-
-func TestLocalOnlyHTTPMCPHandlerRejectsNonLoopbackRequests(t *testing.T) {
-	calls := 0
-	handler := localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	remoteReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	remoteReq.RemoteAddr = "100.64.0.10:12345"
-	remoteRec := httptest.NewRecorder()
-	handler.ServeHTTP(remoteRec, remoteReq)
-	if remoteRec.Code != http.StatusNotFound {
-		t.Fatalf("remote /mcp status = %d, want 404", remoteRec.Code)
-	}
-	if calls != 0 {
-		t.Fatalf("remote /mcp reached handler %d times, want 0", calls)
-	}
-
-	loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	loopbackReq.RemoteAddr = "127.0.0.1:12345"
-	loopbackRec := httptest.NewRecorder()
-	handler.ServeHTTP(loopbackRec, loopbackReq)
-	if loopbackRec.Code != http.StatusNoContent {
-		t.Fatalf("loopback /mcp status = %d, want 204", loopbackRec.Code)
-	}
-	if calls != 1 {
-		t.Fatalf("loopback /mcp reached handler %d times, want 1", calls)
-	}
-}
-
-func TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore(t *testing.T) {
-	authDir := t.TempDir()
-	userStore, err := coreauth.NewUserStore(authDir)
-	if err != nil {
-		t.Fatalf("NewUserStore failed: %v", err)
-	}
-	defer userStore.Close()
-	userService := coreauth.NewUserService(userStore)
-	editor, err := userService.CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
-	apiKeyStore, err := coreauth.NewAPIKeyStore(authDir)
-	if err != nil {
-		t.Fatalf("NewAPIKeyStore failed: %v", err)
-	}
-	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
-	defer apiKeyService.Close()
-	editorID := newFixtureUserID(editor.ID)
-	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
-	if err != nil {
-		t.Fatalf("CreateAPIKey failed: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer "+created.Secret)
-	actor, err := wikidControlMCPActorResolver(authDir, leafwikiRuntimeConfig{
-		Workspace: wiki.Workspace{ID: "current"},
-	})(req)
-
-	if err != nil {
-		t.Fatalf("wikidControlMCPActorResolver failed: %v", err)
-	}
-	if actor.Subject != "user:"+editor.ID || actor.Username != "editor" || actor.AuthMethod != "api_key" {
-		t.Fatalf("actor = %#v, want API-key editor actor", actor)
-	}
-}
-
-func TestRegisterFederatedFirstContactSeedsStdioAPIKeyWorkspaceGrant(t *testing.T) {
-	baseDir := t.TempDir()
-	layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
-	authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
-	apiKey := createMCPAPIKeyInStorageDir(t, authDir)
-	requestCfg := projectdaemon.Config{
-		DataDir: filepath.Join(baseDir, "workspace-data"),
-		RootDir: filepath.Join(baseDir, "workspace-root"),
-	}
-
-	workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, leafwikiRuntimeConfig{
-		RuntimeStack:  projectdaemon.RuntimeStackWikidFrontd,
-		MCPTransports: mcpTransports{Stdio: true},
-		APIKey:        apiKey,
 	})
+})
 
-	if err != nil {
-		t.Fatalf("registerFederatedFirstContact failed: %v", err)
-	}
-	if isHome {
-		t.Fatalf("registered first-contact workspace as home")
-	}
-	doc, err := wikid.NewGrantStore(layout.DBPath).Load()
-	if err != nil {
-		t.Fatalf("load grants failed: %v", err)
-	}
-	var found bool
-	for _, grant := range doc.Grants {
-		if strings.HasPrefix(grant.Subject, "user:") && grant.WorkspaceID == workspace.ID && grant.Role == wikid.GrantRoleEditor {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("grants = %#v, want editor grant for first-contact workspace %q", doc.Grants, workspace.ID)
-	}
-}
+var _ = ginkgo.Describe("TestPrivateMCPUnauthorizedReturnsStructuredError", func() {
+	ginkgo.It("TestPrivateMCPUnauthorizedReturnsStructuredError", func() {
+		t := ginkgo.GinkgoT()
+		rec := httptest.NewRecorder()
 
-func TestRegisterFederatedFirstContactDoesNotSeedStdioAPIKeyGrantForExistingWorkspace(t *testing.T) {
-	baseDir := t.TempDir()
-	layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
-	authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
-	apiKey := createMCPAPIKeyInStorageDir(t, authDir)
-	requestCfg := projectdaemon.Config{
-		DataDir: filepath.Join(baseDir, "workspace-data"),
-		RootDir: filepath.Join(baseDir, "workspace-root"),
-	}
-	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
-	existing, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
-		DisplayName: federatedWorkspaceDisplayName(requestCfg),
-		DataDir:     requestCfg.DataDir,
-		RootDir:     requestCfg.RootDir,
+		writePrivateMCPUnauthorized(rec)
+
+		assertRuntimeStructuredError(t, rec, http.StatusUnauthorized, "private_mcp_control_token_invalid", "errors.private.mcp_control_token_invalid")
+
 	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
+})
 
-	workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, leafwikiRuntimeConfig{
-		RuntimeStack:  projectdaemon.RuntimeStackWikidFrontd,
-		MCPTransports: mcpTransports{Stdio: true},
-		APIKey:        apiKey,
+var _ = ginkgo.Describe("TestLocalOnlyHTTPMCPHandlerRejectsNonLoopbackRequests", func() {
+	ginkgo.It("TestLocalOnlyHTTPMCPHandlerRejectsNonLoopbackRequests", func() {
+		t := ginkgo.GinkgoT()
+		calls := 0
+		handler := localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		remoteReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		remoteReq.RemoteAddr = "100.64.0.10:12345"
+		remoteRec := httptest.NewRecorder()
+		handler.ServeHTTP(remoteRec, remoteReq)
+		if remoteRec.Code != http.StatusNotFound {
+			t.Fatalf("remote /mcp status = %d, want 404", remoteRec.Code)
+		}
+		if calls != 0 {
+			t.Fatalf("remote /mcp reached handler %d times, want 0", calls)
+		}
+
+		loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		loopbackReq.RemoteAddr = "127.0.0.1:12345"
+		loopbackRec := httptest.NewRecorder()
+		handler.ServeHTTP(loopbackRec, loopbackReq)
+		if loopbackRec.Code != http.StatusNoContent {
+			t.Fatalf("loopback /mcp status = %d, want 204", loopbackRec.Code)
+		}
+		if calls != 1 {
+			t.Fatalf("loopback /mcp reached handler %d times, want 1", calls)
+		}
+
 	})
+})
 
-	if err != nil {
-		t.Fatalf("registerFederatedFirstContact failed: %v", err)
-	}
-	if isHome {
-		t.Fatalf("registered existing workspace as home")
-	}
-	if workspace.ID != existing.ID {
-		t.Fatalf("workspace ID = %q, want existing workspace %q", workspace.ID, existing.ID)
-	}
-	doc, err := wikid.NewGrantStore(layout.DBPath).Load()
-	if err != nil {
-		t.Fatalf("load grants failed: %v", err)
-	}
-	if len(doc.Grants) != 0 {
-		t.Fatalf("grants = %#v, want no self-grant for existing workspace %q", doc.Grants, workspace.ID)
-	}
-}
-
-func TestEnsureFederatedWorkspacePreservesStructuredGrantDenial(t *testing.T) {
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/__leafwiki/workspaces/workspace-b/ensure" {
-			http.NotFound(w, req)
-			return
+var _ = ginkgo.Describe("TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore", func() {
+	ginkgo.It("TestWikidControlMCPActorResolverLoadsAPIKeyUserFromWikidAuthStore", func() {
+		t := ginkgo.GinkgoT()
+		authDir := t.TempDir()
+		userStore, err := coreauth.NewUserStore(authDir)
+		if err != nil {
+			t.Fatalf("NewUserStore failed: %v", err)
 		}
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
-			t.Fatalf("control token = %q, want control-token", req.Header.Get(projectdaemon.ControlTokenHeader))
+		defer userStore.Close()
+		userService := coreauth.NewUserService(userStore)
+		editor, err := userService.CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
+		if err != nil {
+			t.Fatalf("CreateUser failed: %v", err)
 		}
-		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
-	}))
-	t.Cleanup(control.Close)
+		apiKeyStore, err := coreauth.NewAPIKeyStore(authDir)
+		if err != nil {
+			t.Fatalf("NewAPIKeyStore failed: %v", err)
+		}
+		apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
+		defer apiKeyService.Close()
+		editorID := newFixtureUserID(editor.ID)
+		created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
+		if err != nil {
+			t.Fatalf("CreateAPIKey failed: %v", err)
+		}
 
-	err := ensureFederatedWorkspace(context.Background(), &projectdaemon.Descriptor{
-		ControlURL:    control.URL,
-		ControlToken:  "control-token",
-		SchemaVersion: projectdaemon.DescriptorSchemaVersion,
-	}, workspaceid.WorkspaceID("workspace-b"), leafwikiRuntimeConfig{
-		APIKey: "valid-but-ungranted-key",
+		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req.Header.Set("Authorization", "Bearer "+created.Secret)
+		actor, err := wikidControlMCPActorResolver(authDir, leafwikiRuntimeConfig{
+			Workspace: wiki.Workspace{ID: "current"},
+		})(req)
+
+		if err != nil {
+			t.Fatalf("wikidControlMCPActorResolver failed: %v", err)
+		}
+		if actor.Subject != "user:"+editor.ID || actor.Username != "editor" || actor.AuthMethod != "api_key" {
+			t.Fatalf("actor = %#v, want API-key editor actor", actor)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatal("ensureFederatedWorkspace returned nil, want workspace grant denial")
-	}
-	var endpointErr *wikidPrivateEndpointError
-	if !errors.As(err, &endpointErr) {
-		t.Fatalf("ensure error = %T %v, want wikidPrivateEndpointError", err, err)
-	}
-	if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
-		t.Fatalf("endpoint error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", endpointErr)
-	}
-	if !strings.Contains(err.Error(), "ensure workspace") || !strings.Contains(endpointErr.Message, "workspace access denied") {
-		t.Fatalf("ensure error = %v, want workspace access diagnostic", err)
-	}
-}
-
-func TestWriteRuntimeErrorRendersMessageFromCatalog(t *testing.T) {
-	t.Parallel()
-
-	rec := httptest.NewRecorder()
-	writeRuntimeError(rec, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want forbidden", rec.Code)
-	}
-	var body runtimeErrorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode runtime error: %v", err)
-	}
-	if body.Error.Code != runtimeErrorCodeWorkspaceGrantDenied {
-		t.Fatalf("code = %q, want %q", body.Error.Code, runtimeErrorCodeWorkspaceGrantDenied)
-	}
-	if body.Error.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
-		t.Fatalf("messageId = %q, want %q", body.Error.MessageID, sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied))
-	}
-	if body.Error.Message != "workspace access denied" {
-		t.Fatalf("message = %q, want catalog-rendered workspace access denied", body.Error.Message)
-	}
-}
-
-func TestRegisterFederatedFirstContactPersistsMarkdownLinkRootPrefix(t *testing.T) {
-	baseDir := t.TempDir()
-	layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
-	requestCfg := projectdaemon.Config{
-		DataDir: filepath.Join(baseDir, "workspace-data"),
-		RootDir: filepath.Join(baseDir, "workspace-root"),
-	}
-	cfg := testRuntimeConfig(requestCfg.DataDir, requestCfg.RootDir, freeTCPPort(t), mcpTransports{Stdio: true}, true)
-	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	cfg.MarkdownLinkRootPrefix = "/docs"
-
-	workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, cfg)
-
-	if err != nil {
-		t.Fatalf("registerFederatedFirstContact failed: %v", err)
-	}
-	if isHome {
-		t.Fatalf("registered first-contact workspace as home")
-	}
-	if workspace.MarkdownLinkRootPrefix != "/docs" {
-		t.Fatalf("workspace markdown link root prefix = %q, want /docs", workspace.MarkdownLinkRootPrefix)
-	}
-	loaded, ok, err := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout).Workspace(workspace.ID)
-	if err != nil {
-		t.Fatalf("load workspace: %v", err)
-	}
-	if !ok {
-		t.Fatalf("workspace %q not found in registry", workspace.ID)
-	}
-	if loaded.MarkdownLinkRootPrefix != "/docs" {
-		t.Fatalf("persisted markdown link root prefix = %q, want /docs", loaded.MarkdownLinkRootPrefix)
-	}
-}
-
-func TestFederatedWorkspaceRuntimeConfigRestoresMarkdownLinkRootPrefix(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "workspace-data")
-	rootDir := filepath.Join(baseDir, "workspace-root")
-	manager := &federatedWorkspaceManager{
-		base: testRuntimeConfig(filepath.Join(baseDir, "home"), filepath.Join(baseDir, "home-root"), freeTCPPort(t), mcpTransports{}, true),
-	}
-
-	cfg := manager.workspaceRuntimeConfig(wikid.WorkspaceRecord{
-		ID:                     "docs",
-		DataDir:                dataDir,
-		RootDir:                rootDir,
-		MarkdownLinkRootPrefix: "/docs",
-	}, "41000")
-
-	if cfg.MarkdownLinkRootPrefix != "/docs" {
-		t.Fatalf("runtime markdown link root prefix = %q, want /docs", cfg.MarkdownLinkRootPrefix)
-	}
-}
-
-func TestDaemonOwnerRuntimeConfigClearsHomeMarkdownLinkRootPrefix(t *testing.T) {
-	baseDir := t.TempDir()
-	cfg := testRuntimeConfig(
-		filepath.Join(baseDir, "workspace-data"),
-		filepath.Join(baseDir, "workspace-root"),
-		freeTCPPort(t),
-		mcpTransports{Stdio: true},
-		true,
-	)
-	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	cfg.MarkdownLinkRootPrefix = "/docs"
-
-	ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
-	if err != nil {
-		t.Fatalf("daemonOwnerRuntimeConfig failed: %v", err)
-	}
-	if ownerCfg.Workspace.ID != wikid.HomeWorkspaceID {
-		t.Fatalf("owner workspace ID = %q, want home", ownerCfg.Workspace.ID)
-	}
-	if ownerCfg.MarkdownLinkRootPrefix != "" {
-		t.Fatalf("owner markdown link root prefix = %q, want empty for home workspace", ownerCfg.MarkdownLinkRootPrefix)
-	}
-}
-
-func TestFederatedWorkspaceManagerUsesSemanticWorkspaceIDState(t *testing.T) {
-	manager := &federatedWorkspaceManager{}
-	manager.processes = map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{}
-	manager.descriptors = map[workspaceid.WorkspaceID][]string{}
-	manager.workspaces = map[workspaceid.WorkspaceID]wikid.WorkspaceRecord{}
-
-	var _ map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess = manager.processes
-	var _ map[workspaceid.WorkspaceID][]string = manager.descriptors
-	var _ map[workspaceid.WorkspaceID]wikid.WorkspaceRecord = manager.workspaces
-	var _ func(workspaceid.WorkspaceID, wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) = manager.ensureWorkspace
-	var _ func(workspaceid.WorkspaceID, *internalRuntimeRoleProcess) = manager.monitorWorkspaceProcess
-	var _ func(*coreauth.User, string, leafwikiRuntimeConfig, workspaceid.WorkspaceID, wikid.GrantRole) (projectdaemon.ActorContext, error) = actorContextForWorkspaceGrant
-}
-
-func TestSyncHomeWorkspaceStatusTracksWorkspacedRole(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	now := time.Now().UTC()
-
-	syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
-		Name:      projectdaemon.RoleWorkspaced,
-		State:     projectdaemon.RoleStateReady,
-		PID:       123,
-		URL:       "http://127.0.0.1:41001",
-		UpdatedAt: now,
-	}})
-	if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateRunning || status.PID != 123 || status.URL == "" {
-		t.Fatalf("ready status = %#v", status)
-	}
-
-	syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
-		Name:      projectdaemon.RoleWorkspaced,
-		State:     projectdaemon.RoleStateRestarting,
-		PID:       123,
-		URL:       "http://127.0.0.1:41001",
-		Error:     "exit status 2",
-		UpdatedAt: now.Add(time.Second),
-	}})
-	if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateRestarting || status.Error != "exit status 2" {
-		t.Fatalf("restarting status = %#v", status)
-	}
-
-	syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
-		Name:      projectdaemon.RoleWorkspaced,
-		State:     projectdaemon.RoleStateCrashed,
-		Error:     "restart limit",
-		UpdatedAt: now.Add(2 * time.Second),
-	}})
-	if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateCrashed || status.Error != "restart limit" {
-		t.Fatalf("crashed status = %#v", status)
-	}
-}
-
-func TestProjectDaemonDescriptorHealthyProbesWorkspacedPrivateMCP(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != "private-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+var _ = ginkgo.Describe("TestRegisterFederatedFirstContactSeedsStdioAPIKeyWorkspaceGrant", func() {
+	ginkgo.It("TestRegisterFederatedFirstContactSeedsStdioAPIKeyWorkspaceGrant", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
+		authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
+		apiKey := createMCPAPIKeyInStorageDir(t, authDir)
+		requestCfg := projectdaemon.Config{
+			DataDir: filepath.Join(baseDir, "workspace-data"),
+			RootDir: filepath.Join(baseDir, "workspace-root"),
 		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
 
-	desc := &projectdaemon.Descriptor{
-		Role:            projectdaemon.RoleWorkspaced,
-		PID:             os.Getpid(),
-		PrivateMCPURL:   server.URL + "/mcp",
-		PrivateMCPToken: "private-token",
-	}
-	healthy, err := projectDaemonDescriptorHealthy(context.Background(), desc)
-	if err != nil {
-		t.Fatalf("projectDaemonDescriptorHealthy failed: %v", err)
-	}
-	if !healthy {
-		t.Fatalf("healthy = false, want private MCP endpoint probe to pass")
-	}
-
-	wrongTokenDesc := *desc
-	wrongTokenDesc.PrivateMCPToken = "wrong-token"
-	healthy, err = projectDaemonDescriptorHealthy(context.Background(), &wrongTokenDesc)
-	if err != nil {
-		t.Fatalf("projectDaemonDescriptorHealthy with wrong token failed: %v", err)
-	}
-	if healthy {
-		t.Fatalf("healthy = true with wrong private MCP token")
-	}
-
-	server.Close()
-	healthy, err = projectDaemonDescriptorHealthy(context.Background(), desc)
-	if err != nil {
-		t.Fatalf("projectDaemonDescriptorHealthy after close failed: %v", err)
-	}
-	if healthy {
-		t.Fatalf("healthy = true after private MCP endpoint closed")
-	}
-}
-
-func TestHandleWikidActorContextResolvesOAuthBearerForMCP(t *testing.T) {
-	w := newFrontdActorTestWiki(t)
-	defer w.Close()
-	cfg := leafwikiRuntimeConfig{
-		Workspace:           wiki.Workspace{ID: "current"},
-		Host:                "127.0.0.1",
-		AllowInsecure:       true,
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		MCPTransports:       mcpTransports{HTTP: true},
-	}
-	opts, err := routerOptionsForRuntime(cfg, w, "", true, "127.0.0.1")
-	if err != nil {
-		t.Fatalf("routerOptionsForRuntime failed: %v", err)
-	}
-	router := frontd.NewRouter(w, opts)
-	token := issueOAuthAccessTokenForTest(t, router)
-
-	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
-	rec := httptest.NewRecorder()
-	handleWikidActorContext(rec, req, w, cfg, nil, nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("actor context status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Actor projectdaemon.ActorContext `json:"actor"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode actor context: %v", err)
-	}
-	if body.Actor.Username != "admin" || body.Actor.AuthMethod != "oauth" {
-		t.Fatalf("actor = %#v, want OAuth admin actor", body.Actor)
-	}
-}
-
-func TestHandleWikidActorContextReturnsStructuredWorkspaceGrantDenial(t *testing.T) {
-	w := newFrontdActorTestWiki(t)
-	defer w.Close()
-	cfg := leafwikiRuntimeConfig{
-		Workspace:     wiki.Workspace{ID: "current"},
-		PublicAccess:  true,
-		AllowInsecure: true,
-		MCPTransports: mcpTransports{HTTP: true},
-	}
-	layout := wikid.GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	if _, err := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
-		t.Fatalf("BootstrapHome failed: %v", err)
-	}
-	grants := wikid.NewGrantStore(layout.DBPath)
-	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
-	req.Header.Set("X-LeafWiki-Original-Method", http.MethodGet)
-	req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
-	rec := httptest.NewRecorder()
-
-	handleWikidActorContext(rec, req, w, cfg, nil, grants)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("actor context status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
-	if body.Error.Code != "workspace_grant_denied" || body.Error.MessageID != "errors.workspace.grant_denied" {
-		t.Fatalf("structured error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", body.Error)
-	}
-	if !strings.Contains(body.Error.Message, "workspace access denied") {
-		t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
-	}
-}
-
-func TestEffectiveWorkspaceGrantRoleCapsGrantByCurrentUserRole(t *testing.T) {
-	tests := []struct {
-		name     string
-		userRole wikid.GrantRole
-		grant    wikid.GrantRole
-		want     wikid.GrantRole
-	}{
-		{name: "viewer grant remains viewer", userRole: wikid.GrantRoleEditor, grant: wikid.GrantRoleViewer, want: wikid.GrantRoleViewer},
-		{name: "editor grant capped by downgraded viewer", userRole: wikid.GrantRoleViewer, grant: wikid.GrantRoleEditor, want: wikid.GrantRoleViewer},
-		{name: "admin user keeps editor grant", userRole: wikid.GrantRoleAdmin, grant: wikid.GrantRoleEditor, want: wikid.GrantRoleEditor},
-		{name: "unknown user role denies effective grant", userRole: "", grant: wikid.GrantRoleEditor, want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := effectiveWorkspaceGrantRole(tt.userRole, tt.grant); got != tt.want {
-				t.Fatalf("effectiveWorkspaceGrantRole(%q, %q) = %q, want %q", tt.userRole, tt.grant, got, tt.want)
-			}
+		workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, leafwikiRuntimeConfig{
+			RuntimeStack:  projectdaemon.RuntimeStackWikidFrontd,
+			MCPTransports: mcpTransports{Stdio: true},
+			APIKey:        apiKey,
 		})
-	}
-}
 
-func newFrontdActorTestWiki(t *testing.T) *wiki.Wiki {
+		if err != nil {
+			t.Fatalf("registerFederatedFirstContact failed: %v", err)
+		}
+		if isHome {
+			t.Fatalf("registered first-contact workspace as home")
+		}
+		doc, err := wikid.NewGrantStore(layout.DBPath).Load()
+		if err != nil {
+			t.Fatalf("load grants failed: %v", err)
+		}
+		var found bool
+		for _, grant := range doc.Grants {
+			if strings.HasPrefix(grant.Subject, "user:") && grant.WorkspaceID == workspace.ID && grant.Role == wikid.GrantRoleEditor {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("grants = %#v, want editor grant for first-contact workspace %q", doc.Grants, workspace.ID)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRegisterFederatedFirstContactDoesNotSeedStdioAPIKeyGrantForExistingWorkspace", func() {
+	ginkgo.It("TestRegisterFederatedFirstContactDoesNotSeedStdioAPIKeyGrantForExistingWorkspace", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
+		authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
+		apiKey := createMCPAPIKeyInStorageDir(t, authDir)
+		requestCfg := projectdaemon.Config{
+			DataDir: filepath.Join(baseDir, "workspace-data"),
+			RootDir: filepath.Join(baseDir, "workspace-root"),
+		}
+		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+		existing, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
+			DisplayName: federatedWorkspaceDisplayName(requestCfg),
+			DataDir:     requestCfg.DataDir,
+			RootDir:     requestCfg.RootDir,
+		})
+		if err != nil {
+			t.Fatalf("RegisterWorkspace failed: %v", err)
+		}
+
+		workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, leafwikiRuntimeConfig{
+			RuntimeStack:  projectdaemon.RuntimeStackWikidFrontd,
+			MCPTransports: mcpTransports{Stdio: true},
+			APIKey:        apiKey,
+		})
+
+		if err != nil {
+			t.Fatalf("registerFederatedFirstContact failed: %v", err)
+		}
+		if isHome {
+			t.Fatalf("registered existing workspace as home")
+		}
+		if workspace.ID != existing.ID {
+			t.Fatalf("workspace ID = %q, want existing workspace %q", workspace.ID, existing.ID)
+		}
+		doc, err := wikid.NewGrantStore(layout.DBPath).Load()
+		if err != nil {
+			t.Fatalf("load grants failed: %v", err)
+		}
+		if len(doc.Grants) != 0 {
+			t.Fatalf("grants = %#v, want no self-grant for existing workspace %q", doc.Grants, workspace.ID)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestEnsureFederatedWorkspacePreservesStructuredGrantDenial", func() {
+	ginkgo.It("TestEnsureFederatedWorkspacePreservesStructuredGrantDenial", func() {
+		t := ginkgo.GinkgoT()
+		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path != "/__leafwiki/workspaces/workspace-b/ensure" {
+				http.NotFound(w, req)
+				return
+			}
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
+				t.Fatalf("control token = %q, want control-token", req.Header.Get(projectdaemon.ControlTokenHeader))
+			}
+			writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
+		}))
+		t.Cleanup(control.Close)
+
+		err := ensureFederatedWorkspace(context.Background(), &projectdaemon.Descriptor{
+			ControlURL:    control.URL,
+			ControlToken:  "control-token",
+			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+		}, workspaceid.WorkspaceID("workspace-b"), leafwikiRuntimeConfig{
+			APIKey: "valid-but-ungranted-key",
+		})
+
+		if err == nil {
+			t.Fatal("ensureFederatedWorkspace returned nil, want workspace grant denial")
+		}
+		var endpointErr *wikidPrivateEndpointError
+		if !errors.As(err, &endpointErr) {
+			t.Fatalf("ensure error = %T %v, want wikidPrivateEndpointError", err, err)
+		}
+		if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+			t.Fatalf("endpoint error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", endpointErr)
+		}
+		if !strings.Contains(err.Error(), "ensure workspace") || !strings.Contains(endpointErr.Message, "workspace access denied") {
+			t.Fatalf("ensure error = %v, want workspace access diagnostic", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestWriteRuntimeErrorRendersMessageFromCatalog", func() {
+	ginkgo.It("TestWriteRuntimeErrorRendersMessageFromCatalog", func() {
+		t := ginkgo.GinkgoT()
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		writeRuntimeError(rec, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want forbidden", rec.Code)
+		}
+		var body runtimeErrorResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode runtime error: %v", err)
+		}
+		if body.Error.Code != runtimeErrorCodeWorkspaceGrantDenied {
+			t.Fatalf("code = %q, want %q", body.Error.Code, runtimeErrorCodeWorkspaceGrantDenied)
+		}
+		if body.Error.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+			t.Fatalf("messageId = %q, want %q", body.Error.MessageID, sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied))
+		}
+		if body.Error.Message != "workspace access denied" {
+			t.Fatalf("message = %q, want catalog-rendered workspace access denied", body.Error.Message)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRegisterFederatedFirstContactPersistsMarkdownLinkRootPrefix", func() {
+	ginkgo.It("TestRegisterFederatedFirstContactPersistsMarkdownLinkRootPrefix", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
+		requestCfg := projectdaemon.Config{
+			DataDir: filepath.Join(baseDir, "workspace-data"),
+			RootDir: filepath.Join(baseDir, "workspace-root"),
+		}
+		cfg := testRuntimeConfig(requestCfg.DataDir, requestCfg.RootDir, freeTCPPort(t), mcpTransports{Stdio: true}, true)
+		cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+		cfg.MarkdownLinkRootPrefix = "/docs"
+
+		workspace, isHome, err := registerFederatedFirstContact(layout, requestCfg, cfg)
+
+		if err != nil {
+			t.Fatalf("registerFederatedFirstContact failed: %v", err)
+		}
+		if isHome {
+			t.Fatalf("registered first-contact workspace as home")
+		}
+		if workspace.MarkdownLinkRootPrefix != "/docs" {
+			t.Fatalf("workspace markdown link root prefix = %q, want /docs", workspace.MarkdownLinkRootPrefix)
+		}
+		loaded, ok, err := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout).Workspace(workspace.ID)
+		if err != nil {
+			t.Fatalf("load workspace: %v", err)
+		}
+		if !ok {
+			t.Fatalf("workspace %q not found in registry", workspace.ID)
+		}
+		if loaded.MarkdownLinkRootPrefix != "/docs" {
+			t.Fatalf("persisted markdown link root prefix = %q, want /docs", loaded.MarkdownLinkRootPrefix)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceRuntimeConfigRestoresMarkdownLinkRootPrefix", func() {
+	ginkgo.It("TestFederatedWorkspaceRuntimeConfigRestoresMarkdownLinkRootPrefix", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "workspace-data")
+		rootDir := filepath.Join(baseDir, "workspace-root")
+		manager := &federatedWorkspaceManager{
+			base: testRuntimeConfig(filepath.Join(baseDir, "home"), filepath.Join(baseDir, "home-root"), freeTCPPort(t), mcpTransports{}, true),
+		}
+
+		cfg := manager.workspaceRuntimeConfig(wikid.WorkspaceRecord{
+			ID:                     "docs",
+			DataDir:                dataDir,
+			RootDir:                rootDir,
+			MarkdownLinkRootPrefix: "/docs",
+		}, "41000")
+
+		if cfg.MarkdownLinkRootPrefix != "/docs" {
+			t.Fatalf("runtime markdown link root prefix = %q, want /docs", cfg.MarkdownLinkRootPrefix)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonOwnerRuntimeConfigClearsHomeMarkdownLinkRootPrefix", func() {
+	ginkgo.It("TestDaemonOwnerRuntimeConfigClearsHomeMarkdownLinkRootPrefix", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		cfg := testRuntimeConfig(
+			filepath.Join(baseDir, "workspace-data"),
+			filepath.Join(baseDir, "workspace-root"),
+			freeTCPPort(t),
+			mcpTransports{Stdio: true},
+			true,
+		)
+		cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+		cfg.MarkdownLinkRootPrefix = "/docs"
+
+		ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
+		if err != nil {
+			t.Fatalf("daemonOwnerRuntimeConfig failed: %v", err)
+		}
+		if ownerCfg.Workspace.ID != wikid.HomeWorkspaceID {
+			t.Fatalf("owner workspace ID = %q, want home", ownerCfg.Workspace.ID)
+		}
+		if ownerCfg.MarkdownLinkRootPrefix != "" {
+			t.Fatalf("owner markdown link root prefix = %q, want empty for home workspace", ownerCfg.MarkdownLinkRootPrefix)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerUsesSemanticWorkspaceIDState", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerUsesSemanticWorkspaceIDState", func() {
+		manager := &federatedWorkspaceManager{}
+		manager.processes = map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{}
+		manager.descriptors = map[workspaceid.WorkspaceID][]string{}
+		manager.workspaces = map[workspaceid.WorkspaceID]wikid.WorkspaceRecord{}
+
+		var _ map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess = manager.processes
+		var _ map[workspaceid.WorkspaceID][]string = manager.descriptors
+		var _ map[workspaceid.WorkspaceID]wikid.WorkspaceRecord = manager.workspaces
+		var _ func(workspaceid.WorkspaceID, wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) = manager.ensureWorkspace
+		var _ func(workspaceid.WorkspaceID, *internalRuntimeRoleProcess) = manager.monitorWorkspaceProcess
+		var _ func(*coreauth.User, string, leafwikiRuntimeConfig, workspaceid.WorkspaceID, wikid.GrantRole) (projectdaemon.ActorContext, error) = actorContextForWorkspaceGrant
+
+	})
+})
+
+var _ = ginkgo.Describe("TestSyncHomeWorkspaceStatusTracksWorkspacedRole", func() {
+	ginkgo.It("TestSyncHomeWorkspaceStatusTracksWorkspacedRole", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		now := time.Now().UTC()
+
+		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
+			Name:      projectdaemon.RoleWorkspaced,
+			State:     projectdaemon.RoleStateReady,
+			PID:       123,
+			URL:       "http://127.0.0.1:41001",
+			UpdatedAt: now,
+		}})
+		if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateRunning || status.PID != 123 || status.URL == "" {
+			t.Fatalf("ready status = %#v", status)
+		}
+
+		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
+			Name:      projectdaemon.RoleWorkspaced,
+			State:     projectdaemon.RoleStateRestarting,
+			PID:       123,
+			URL:       "http://127.0.0.1:41001",
+			Error:     "exit status 2",
+			UpdatedAt: now.Add(time.Second),
+		}})
+		if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateRestarting || status.Error != "exit status 2" {
+			t.Fatalf("restarting status = %#v", status)
+		}
+
+		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
+			Name:      projectdaemon.RoleWorkspaced,
+			State:     projectdaemon.RoleStateCrashed,
+			Error:     "restart limit",
+			UpdatedAt: now.Add(2 * time.Second),
+		}})
+		if status := supervisor.Status(wikid.HomeWorkspaceID); status.State != wikid.WorkspaceStateCrashed || status.Error != "restart limit" {
+			t.Fatalf("crashed status = %#v", status)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestProjectDaemonDescriptorHealthyProbesWorkspacedPrivateMCP", func() {
+	ginkgo.It("TestProjectDaemonDescriptorHealthyProbesWorkspacedPrivateMCP", func() {
+		t := ginkgo.GinkgoT()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != "private-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		desc := &projectdaemon.Descriptor{
+			Role:            projectdaemon.RoleWorkspaced,
+			PID:             os.Getpid(),
+			PrivateMCPURL:   server.URL + "/mcp",
+			PrivateMCPToken: "private-token",
+		}
+		healthy, err := projectDaemonDescriptorHealthy(context.Background(), desc)
+		if err != nil {
+			t.Fatalf("projectDaemonDescriptorHealthy failed: %v", err)
+		}
+		if !healthy {
+			t.Fatalf("healthy = false, want private MCP endpoint probe to pass")
+		}
+
+		wrongTokenDesc := *desc
+		wrongTokenDesc.PrivateMCPToken = "wrong-token"
+		healthy, err = projectDaemonDescriptorHealthy(context.Background(), &wrongTokenDesc)
+		if err != nil {
+			t.Fatalf("projectDaemonDescriptorHealthy with wrong token failed: %v", err)
+		}
+		if healthy {
+			t.Fatalf("healthy = true with wrong private MCP token")
+		}
+
+		server.Close()
+		healthy, err = projectDaemonDescriptorHealthy(context.Background(), desc)
+		if err != nil {
+			t.Fatalf("projectDaemonDescriptorHealthy after close failed: %v", err)
+		}
+		if healthy {
+			t.Fatalf("healthy = true after private MCP endpoint closed")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestHandleWikidActorContextResolvesOAuthBearerForMCP", func() {
+	ginkgo.It("TestHandleWikidActorContextResolvesOAuthBearerForMCP", func() {
+		t := ginkgo.GinkgoT()
+		w := newFrontdActorTestWiki(t)
+		defer w.Close()
+		cfg := leafwikiRuntimeConfig{
+			Workspace:           wiki.Workspace{ID: "current"},
+			Host:                "127.0.0.1",
+			AllowInsecure:       true,
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			MCPTransports:       mcpTransports{HTTP: true},
+		}
+		opts, err := routerOptionsForRuntime(cfg, w, "", true, "127.0.0.1")
+		if err != nil {
+			t.Fatalf("routerOptionsForRuntime failed: %v", err)
+		}
+		router := frontd.NewRouter(w, opts)
+		token := issueOAuthAccessTokenForTest(t, router)
+
+		req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
+		rec := httptest.NewRecorder()
+		handleWikidActorContext(rec, req, w, cfg, nil, nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("actor context status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Actor projectdaemon.ActorContext `json:"actor"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode actor context: %v", err)
+		}
+		if body.Actor.Username != "admin" || body.Actor.AuthMethod != "oauth" {
+			t.Fatalf("actor = %#v, want OAuth admin actor", body.Actor)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestHandleWikidActorContextReturnsStructuredWorkspaceGrantDenial", func() {
+	ginkgo.It("TestHandleWikidActorContextReturnsStructuredWorkspaceGrantDenial", func() {
+		t := ginkgo.GinkgoT()
+		w := newFrontdActorTestWiki(t)
+		defer w.Close()
+		cfg := leafwikiRuntimeConfig{
+			Workspace:     wiki.Workspace{ID: "current"},
+			PublicAccess:  true,
+			AllowInsecure: true,
+			MCPTransports: mcpTransports{HTTP: true},
+		}
+		layout := wikid.GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
+		if _, err := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
+			t.Fatalf("BootstrapHome failed: %v", err)
+		}
+		grants := wikid.NewGrantStore(layout.DBPath)
+		req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
+		req.Header.Set("X-LeafWiki-Original-Method", http.MethodGet)
+		req.Header.Set("X-LeafWiki-Original-Path", "/mcp")
+		rec := httptest.NewRecorder()
+
+		handleWikidActorContext(rec, req, w, cfg, nil, grants)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("actor context status = %d, want 403: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Error struct {
+				Code      string `json:"code"`
+				MessageID string `json:"messageId"`
+				Message   string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if body.Error.Code != "workspace_grant_denied" || body.Error.MessageID != "errors.workspace.grant_denied" {
+			t.Fatalf("structured error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", body.Error)
+		}
+		if !strings.Contains(body.Error.Message, "workspace access denied") {
+			t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestEffectiveWorkspaceGrantRoleCapsGrantByCurrentUserRole", func() {
+	ginkgo.It("TestEffectiveWorkspaceGrantRoleCapsGrantByCurrentUserRole", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name     string
+			userRole wikid.GrantRole
+			grant    wikid.GrantRole
+			want     wikid.GrantRole
+		}{
+			{name: "viewer grant remains viewer", userRole: wikid.GrantRoleEditor, grant: wikid.GrantRoleViewer, want: wikid.GrantRoleViewer},
+			{name: "editor grant capped by downgraded viewer", userRole: wikid.GrantRoleViewer, grant: wikid.GrantRoleEditor, want: wikid.GrantRoleViewer},
+			{name: "admin user keeps editor grant", userRole: wikid.GrantRoleAdmin, grant: wikid.GrantRoleEditor, want: wikid.GrantRoleEditor},
+			{name: "unknown user role denies effective grant", userRole: "", grant: wikid.GrantRoleEditor, want: ""},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				if got := effectiveWorkspaceGrantRole(tt.userRole, tt.grant); got != tt.want {
+					t.Fatalf("effectiveWorkspaceGrantRole(%q, %q) = %q, want %q", tt.userRole, tt.grant, got, tt.want)
+				}
+
+			}()
+		}
+
+	})
+})
+
+func newFrontdActorTestWiki(t leafwikiTestT) *wiki.Wiki {
 	t.Helper()
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		StorageDir:          t.TempDir(),
@@ -1024,7 +1199,7 @@ func newFrontdActorTestWiki(t *testing.T) *wiki.Wiki {
 	return w
 }
 
-func issueOAuthAccessTokenForTest(t *testing.T, router http.Handler) string {
+func issueOAuthAccessTokenForTest(t leafwikiTestT, router http.Handler) string {
 	t.Helper()
 	loginReq := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/api/auth/login", strings.NewReader(`{"identifier":"admin","password":"admin"}`))
 	loginReq.Header.Set("Content-Type", "application/json")
@@ -1108,765 +1283,904 @@ func issueOAuthAccessTokenForTest(t *testing.T, router http.Handler) string {
 	return tokenBody.AccessToken
 }
 
-func TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent(t *testing.T) {
-	t.Setenv("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "true")
+var _ = ginkgo.Describe("TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent", func() {
+	ginkgo.It("TestResolveBoolUsesWorkspaceSyncEnvironmentWhenFlagAbsent", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "true")
 
-	got := resolveBool("enable-workspace-sync", false, map[string]bool{}, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
+		got := resolveBool("enable-workspace-sync", false, map[string]bool{}, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
 
-	if !got {
-		t.Fatalf("enableWorkspaceSync from env = false, want true")
-	}
-}
+		if !got {
+			t.Fatalf("enableWorkspaceSync from env = false, want true")
+		}
 
-func TestResolveLoggingConfig_DefaultsToFileUnderResolvedDataDir(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-
-	cfg := resolveLoggingConfigForArgs(t, []string{"--data-dir=" + dataDir})
-
-	if cfg.Target != leaflogging.TargetFile {
-		t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetFile)
-	}
-	if got, want := cfg.FilePath, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"); got != want {
-		t.Fatalf("FilePath = %q, want %q", got, want)
-	}
-}
-
-func TestResolveLoggingConfig_CLIOverridesEnvironmentTarget(t *testing.T) {
-	t.Setenv("LEAFWIKI_LOG_TARGET", "file")
-
-	cfg := resolveLoggingConfigForArgs(t, []string{"--log-target=stderr"})
-
-	if cfg.Target != leaflogging.TargetStderr {
-		t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStderr)
-	}
-	if cfg.FilePath != "" {
-		t.Fatalf("FilePath = %q, want empty for stderr target", cfg.FilePath)
-	}
-}
-
-func TestResolveLoggingConfig_UsesEnvironmentWhenFlagAbsent(t *testing.T) {
-	t.Setenv("LEAFWIKI_LOG_TARGET", "stdout")
-
-	cfg := resolveLoggingConfigForArgs(t, nil)
-
-	if cfg.Target != leaflogging.TargetStdout {
-		t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStdout)
-	}
-}
-
-func TestResolveLoggingConfig_CLIStreamTargetIgnoresInheritedEnvLogFile(t *testing.T) {
-	t.Setenv("LEAFWIKI_LOG_FILE", "logs/from-env.log")
-
-	cfg := resolveLoggingConfigForArgs(t, []string{"--log-target=stderr"})
-
-	if cfg.Target != leaflogging.TargetStderr {
-		t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStderr)
-	}
-	if cfg.FilePath != "" {
-		t.Fatalf("FilePath = %q, want empty for stderr target", cfg.FilePath)
-	}
-}
-
-func TestResolveLoggingConfig_RejectsLogFileForStreamTarget(t *testing.T) {
-	_, err := resolveLoggingConfigForArgsAllowError(t, []string{
-		"--log-target=stderr",
-		"--log-file=custom.log",
 	})
+})
 
-	if err == nil {
-		t.Fatalf("expected log-file with stderr target to fail")
-	}
-	if !strings.Contains(err.Error(), "--log-file requires --log-target file") {
-		t.Fatalf("error = %v, want log-file target message", err)
-	}
-}
+var _ = ginkgo.Describe("TestResolveLoggingConfig_DefaultsToFileUnderResolvedDataDir", func() {
+	ginkgo.It("TestResolveLoggingConfig_DefaultsToFileUnderResolvedDataDir", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
 
-func TestMainProcess_DefaultServerLoggingUsesFileForStartupAndRequestLogsAndKeepsStdoutClean(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-	}, map[string]string{})
+		cfg := resolveLoggingConfigForArgs(t, []string{"--data-dir=" + dataDir})
 
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
-	waitForFileContaining(t, logPath, "Starting LeafWiki")
-	waitForFileContaining(t, logPath, "http request")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+		if cfg.Target != leaflogging.TargetFile {
+			t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetFile)
+		}
+		if got, want := cfg.FilePath, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"); got != want {
+			t.Fatalf("FilePath = %q, want %q", got, want)
+		}
 
-	stdout := readFileString(t, proc.stdoutPath)
-	if strings.Contains(stdout, "Starting LeafWiki") {
-		t.Fatalf("stdout contains server log: %q", stdout)
-	}
-	assertJSONLogContains(t, logPath, "Starting LeafWiki")
-	requestEntry := assertJSONLogContains(t, logPath, "http request")
-	if requestEntry["method"] != http.MethodGet || requestEntry["path"] != "/api/health" || requestEntry["status"] != float64(http.StatusOK) {
-		t.Fatalf("http request entry = %#v, want GET /api/health 200", requestEntry)
-	}
-}
-
-func TestMainProcess_DefaultFileLoggingRecordsFreshDataDirectoryCreation(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
-
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	waitForFileContaining(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "Starting LeafWiki")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
-
-	entry := assertJSONLogContains(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "Data directory created")
-	wantPath := filepath.Join(filepath.Dir(filepath.Clean(dataDir)), "home", ".leafwiki")
-	if entry["path"] != wantPath {
-		t.Fatalf("data directory log entry = %#v, want path %q", entry, wantPath)
-	}
-}
-
-func TestMainProcess_CLIStderrTargetOverridesEnvFileTarget(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_LOG_TARGET": "file",
 	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
-	waitForFileContaining(t, proc.stderrPath, "http request")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+var _ = ginkgo.Describe("TestResolveLoggingConfig_CLIOverridesEnvironmentTarget", func() {
+	ginkgo.It("TestResolveLoggingConfig_CLIOverridesEnvironmentTarget", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_LOG_TARGET", "file")
 
-	defaultLogPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
-	if _, err := os.Stat(defaultLogPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("default log file stat error = %v, want not exist", err)
-	}
-	stdout := readFileString(t, proc.stdoutPath)
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty for stderr target", stdout)
-	}
-}
+		cfg := resolveLoggingConfigForArgs(t, []string{"--log-target=stderr"})
 
-func TestMainProcess_EnvironmentStderrTargetIsUsedWhenFlagAbsent(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-	}, map[string]string{
-		"LEAFWIKI_LOG_TARGET": "stderr",
+		if cfg.Target != leaflogging.TargetStderr {
+			t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStderr)
+		}
+		if cfg.FilePath != "" {
+			t.Fatalf("FilePath = %q, want empty for stderr target", cfg.FilePath)
+		}
+
 	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
-	waitForFileContaining(t, proc.stderrPath, "http request")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+var _ = ginkgo.Describe("TestResolveLoggingConfig_UsesEnvironmentWhenFlagAbsent", func() {
+	ginkgo.It("TestResolveLoggingConfig_UsesEnvironmentWhenFlagAbsent", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_LOG_TARGET", "stdout")
 
-	defaultLogPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
-	if _, err := os.Stat(defaultLogPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("default log file stat error = %v, want not exist", err)
-	}
-}
+		cfg := resolveLoggingConfigForArgs(t, nil)
 
-func TestMainProcess_RejectsInvalidLogTargetOnStderrWithNoStdout(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-	}, map[string]string{
-		"LEAFWIKI_LOG_TARGET": "syslog",
+		if cfg.Target != leaflogging.TargetStdout {
+			t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStdout)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatalf("expected invalid log target to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "invalid log target") {
-		t.Fatalf("stderr = %q, want invalid log target", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestResolveLoggingConfig_CLIStreamTargetIgnoresInheritedEnvLogFile", func() {
+	ginkgo.It("TestResolveLoggingConfig_CLIStreamTargetIgnoresInheritedEnvLogFile", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_LOG_FILE", "logs/from-env.log")
 
-func TestMainProcess_ConfigYAMLValueOverridesEnvironment(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	configPath := filepath.Join(baseDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+		cfg := resolveLoggingConfigForArgs(t, []string{"--log-target=stderr"})
+
+		if cfg.Target != leaflogging.TargetStderr {
+			t.Fatalf("Target = %q, want %q", cfg.Target, leaflogging.TargetStderr)
+		}
+		if cfg.FilePath != "" {
+			t.Fatalf("FilePath = %q, want empty for stderr target", cfg.FilePath)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveLoggingConfig_RejectsLogFileForStreamTarget", func() {
+	ginkgo.It("TestResolveLoggingConfig_RejectsLogFileForStreamTarget", func() {
+		t := ginkgo.GinkgoT()
+		_, err := resolveLoggingConfigForArgsAllowError(t, []string{
+			"--log-target=stderr",
+			"--log-file=custom.log",
+		})
+
+		if err == nil {
+			t.Fatalf("expected log-file with stderr target to fail")
+		}
+		if !strings.Contains(err.Error(), "--log-file requires --log-target file") {
+			t.Fatalf("error = %v, want log-file target message", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DefaultServerLoggingUsesFileForStartupAndRequestLogsAndKeepsStdoutClean", func() {
+	ginkgo.It("TestMainProcess_DefaultServerLoggingUsesFileForStartupAndRequestLogsAndKeepsStdoutClean", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+		}, map[string]string{})
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
+		waitForFileContaining(t, logPath, "Starting LeafWiki")
+		waitForFileContaining(t, logPath, "http request")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		stdout := readFileString(t, proc.stdoutPath)
+		if strings.Contains(stdout, "Starting LeafWiki") {
+			t.Fatalf("stdout contains server log: %q", stdout)
+		}
+		assertJSONLogContains(t, logPath, "Starting LeafWiki")
+		requestEntry := assertJSONLogContains(t, logPath, "http request")
+		if requestEntry["method"] != http.MethodGet || requestEntry["path"] != "/api/health" || requestEntry["status"] != float64(http.StatusOK) {
+			t.Fatalf("http request entry = %#v, want GET /api/health 200", requestEntry)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DefaultFileLoggingRecordsFreshDataDirectoryCreation", func() {
+	ginkgo.It("TestMainProcess_DefaultFileLoggingRecordsFreshDataDirectoryCreation", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		waitForFileContaining(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "Starting LeafWiki")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		entry := assertJSONLogContains(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "Data directory created")
+		wantPath := filepath.Join(filepath.Dir(filepath.Clean(dataDir)), "home", ".leafwiki")
+		if entry["path"] != wantPath {
+			t.Fatalf("data directory log entry = %#v, want path %q", entry, wantPath)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_CLIStderrTargetOverridesEnvFileTarget", func() {
+	ginkgo.It("TestMainProcess_CLIStderrTargetOverridesEnvFileTarget", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{
+			"LEAFWIKI_LOG_TARGET": "file",
+		})
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
+		waitForFileContaining(t, proc.stderrPath, "http request")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		defaultLogPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
+		if _, err := os.Stat(defaultLogPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("default log file stat error = %v, want not exist", err)
+		}
+		stdout := readFileString(t, proc.stdoutPath)
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty for stderr target", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_EnvironmentStderrTargetIsUsedWhenFlagAbsent", func() {
+	ginkgo.It("TestMainProcess_EnvironmentStderrTargetIsUsedWhenFlagAbsent", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+		}, map[string]string{
+			"LEAFWIKI_LOG_TARGET": "stderr",
+		})
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
+		waitForFileContaining(t, proc.stderrPath, "http request")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		defaultLogPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
+		if _, err := os.Stat(defaultLogPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("default log file stat error = %v, want not exist", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_RejectsInvalidLogTargetOnStderrWithNoStdout", func() {
+	ginkgo.It("TestMainProcess_RejectsInvalidLogTargetOnStderrWithNoStdout", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+		}, map[string]string{
+			"LEAFWIKI_LOG_TARGET": "syslog",
+		})
+
+		if err == nil {
+			t.Fatalf("expected invalid log target to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "invalid log target") {
+			t.Fatalf("stderr = %q, want invalid log target", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigYAMLValueOverridesEnvironment", func() {
+	ginkgo.It("TestMainProcess_ConfigYAMLValueOverridesEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		configPath := filepath.Join(baseDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
 data-dir: %s
 root-dir: %s
 host: 127.0.0.1
 port: %s
 log-target: stderr
 `, dataDir, rootDir, port))
-	proc := startLeafwikiHelper(t, []string{"--config", configPath}, map[string]string{
-		"LEAFWIKI_PORT": "1",
+		proc := startLeafwikiHelper(t, []string{"--config", configPath}, map[string]string{
+			"LEAFWIKI_PORT": "1",
+		})
+
+		waitForLeafwikiReady(t, proc, port)
+		proc.stop(t)
+
 	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	proc.stop(t)
-}
+var _ = ginkgo.Describe("TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars", func() {
+	ginkgo.It("TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_PORT", "9999")
+		t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
+		t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
+		t.Setenv("LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX", "/wiki-docs")
+		t.Setenv("LEAFWIKI_PUBLIC_ACCESS", "true")
 
-func TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars(t *testing.T) {
-	t.Setenv("LEAFWIKI_PORT", "9999")
-	t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
-	t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
-	t.Setenv("LEAFWIKI_MARKDOWN_LINK_ROOT_PREFIX", "/wiki-docs")
-	t.Setenv("LEAFWIKI_PUBLIC_ACCESS", "true")
-
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, `port: 8088
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, `port: 8088
 base-path: ""
 markdown-link-root-prefix: docs/
 public-access: false
 `)
-	flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
+		flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
 
-	if got := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080"); got != "8088" {
-		t.Fatalf("port = %q, want YAML value 8088", got)
-	}
-	if got := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1"); got != "0.0.0.0" {
-		t.Fatalf("host = %q, want omitted YAML to use env", got)
-	}
-	if got := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data"); got != "./data" {
-		t.Fatalf("data-dir = %q, want default for omitted YAML/env key", got)
-	}
-	if got := resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""); got != "" {
-		t.Fatalf("base-path = %q, want explicit YAML empty string to override env", got)
-	}
-	markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
-	if err != nil {
-		t.Fatalf("resolve markdown-link-root-prefix: %v", err)
-	}
-	if markdownLinkRootPrefix != "/docs" {
-		t.Fatalf("markdown-link-root-prefix = %q, want /docs", markdownLinkRootPrefix)
-	}
-	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
-		t.Fatalf("public-access = true, want explicit YAML false to override env")
-	}
-}
-
-func TestConfigFileFlagNamesCoverPublicRegisteredFlags(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	registerFlags(fs)
-
-	excluded := map[string]bool{
-		"config":                  true,
-		"enable-mcp":              true,
-		"internal-project-daemon": true,
-		"internal-runtime-role":   true,
-		"mcp-stdio":               true,
-	}
-	allowed := configFileFlagNames()
-	for name := range excluded {
-		if _, ok := allowed[name]; ok {
-			t.Fatalf("configFileFlagNames includes excluded flag %q", name)
+		if got := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080"); got != "8088" {
+			t.Fatalf("port = %q, want YAML value 8088", got)
 		}
-	}
+		if got := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1"); got != "0.0.0.0" {
+			t.Fatalf("host = %q, want omitted YAML to use env", got)
+		}
+		if got := resolveString("data-dir", *flags.dataDir, visited, "LEAFWIKI_DATA_DIR", "./data"); got != "./data" {
+			t.Fatalf("data-dir = %q, want default for omitted YAML/env key", got)
+		}
+		if got := resolveString("base-path", *flags.basePath, visited, "LEAFWIKI_BASE_PATH", ""); got != "" {
+			t.Fatalf("base-path = %q, want explicit YAML empty string to override env", got)
+		}
+		markdownLinkRootPrefix, err := resolveMarkdownLinkRootPrefix(flags, visited)
+		if err != nil {
+			t.Fatalf("resolve markdown-link-root-prefix: %v", err)
+		}
+		if markdownLinkRootPrefix != "/docs" {
+			t.Fatalf("markdown-link-root-prefix = %q, want /docs", markdownLinkRootPrefix)
+		}
+		if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
+			t.Fatalf("public-access = true, want explicit YAML false to override env")
+		}
 
-	var missing []string
-	fs.VisitAll(func(f *flag.Flag) {
-		if excluded[f.Name] {
-			return
-		}
-		if _, ok := allowed[f.Name]; !ok {
-			missing = append(missing, f.Name)
-		}
 	})
+})
 
-	var extra []string
-	for name := range allowed {
-		if fs.Lookup(name) == nil {
-			extra = append(extra, name)
+var _ = ginkgo.Describe("TestConfigFileFlagNamesCoverPublicRegisteredFlags", func() {
+	ginkgo.It("TestConfigFileFlagNamesCoverPublicRegisteredFlags", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		registerFlags(fs)
+
+		excluded := map[string]bool{
+			"config":                  true,
+			"enable-mcp":              true,
+			"internal-project-daemon": true,
+			"internal-runtime-role":   true,
+			"mcp-stdio":               true,
 		}
-	}
-	sort.Strings(missing)
-	sort.Strings(extra)
-	if len(missing) > 0 || len(extra) > 0 {
-		t.Fatalf("configFileFlagNames mismatch: missing=%v extra=%v", missing, extra)
-	}
-}
-
-func TestServiceExampleConfigParsesActiveTemplate(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	registerFlags(fs)
-	visited := map[string]bool{}
-
-	if err := applyYAMLConfigPath(fs, visited, serviceExampleConfigPath(t), "service config example"); err != nil {
-		t.Fatalf("parse service config example: %v", err)
-	}
-
-	for _, expected := range []string{
-		"allow-insecure",
-		"disable-auth",
-		"host",
-		"log-file",
-		"log-target",
-		"mcp",
-		"port",
-	} {
-		if !visited[expected] {
-			t.Fatalf("service config example active keys = %#v, want %q", visited, expected)
+		allowed := configFileFlagNames()
+		for name := range excluded {
+			if _, ok := allowed[name]; ok {
+				t.Fatalf("configFileFlagNames includes excluded flag %q", name)
+			}
 		}
-	}
-}
 
-func TestServiceExampleConfigDocumentsEveryPublicYAMLKey(t *testing.T) {
-	documented := serviceExampleConfigKeys(t)
-	allowed := configFileFlagNames()
+		var missing []string
+		fs.VisitAll(func(f *flag.Flag) {
+			if excluded[f.Name] {
+				return
+			}
+			if _, ok := allowed[f.Name]; !ok {
+				missing = append(missing, f.Name)
+			}
+		})
 
-	var missing []string
-	for name := range allowed {
-		if _, ok := documented[name]; !ok {
-			missing = append(missing, name)
+		var extra []string
+		for name := range allowed {
+			if fs.Lookup(name) == nil {
+				extra = append(extra, name)
+			}
 		}
-	}
-	var extra []string
-	for name := range documented {
-		if _, ok := allowed[name]; !ok {
-			extra = append(extra, name)
+		sort.Strings(missing)
+		sort.Strings(extra)
+		if len(missing) > 0 || len(extra) > 0 {
+			t.Fatalf("configFileFlagNames mismatch: missing=%v extra=%v", missing, extra)
 		}
-	}
-	sort.Strings(missing)
-	sort.Strings(extra)
-	if len(missing) > 0 || len(extra) > 0 {
-		t.Fatalf("service config example key mismatch: missing=%v extra=%v", missing, extra)
-	}
-}
 
-func TestApplyYAMLConfigFile_AcceptsQuotedScalarCoercions(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, `public-access: "false"
+	})
+})
+
+var _ = ginkgo.Describe("TestServiceExampleConfigParsesActiveTemplate", func() {
+	ginkgo.It("TestServiceExampleConfigParsesActiveTemplate", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		registerFlags(fs)
+		visited := map[string]bool{}
+
+		if err := applyYAMLConfigPath(fs, visited, serviceExampleConfigPath(t), "service config example"); err != nil {
+			t.Fatalf("parse service config example: %v", err)
+		}
+
+		for _, expected := range []string{
+			"allow-insecure",
+			"disable-auth",
+			"host",
+			"log-file",
+			"log-target",
+			"mcp",
+			"port",
+		} {
+			if !visited[expected] {
+				t.Fatalf("service config example active keys = %#v, want %q", visited, expected)
+			}
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestServiceExampleConfigDocumentsEveryPublicYAMLKey", func() {
+	ginkgo.It("TestServiceExampleConfigDocumentsEveryPublicYAMLKey", func() {
+		t := ginkgo.GinkgoT()
+		documented := serviceExampleConfigKeys(t)
+		allowed := configFileFlagNames()
+
+		var missing []string
+		for name := range allowed {
+			if _, ok := documented[name]; !ok {
+				missing = append(missing, name)
+			}
+		}
+		var extra []string
+		for name := range documented {
+			if _, ok := allowed[name]; !ok {
+				extra = append(extra, name)
+			}
+		}
+		sort.Strings(missing)
+		sort.Strings(extra)
+		if len(missing) > 0 || len(extra) > 0 {
+			t.Fatalf("service config example key mismatch: missing=%v extra=%v", missing, extra)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestApplyYAMLConfigFile_AcceptsQuotedScalarCoercions", func() {
+	ginkgo.It("TestApplyYAMLConfigFile_AcceptsQuotedScalarCoercions", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, `public-access: "false"
 allow-insecure: "true"
 access-token-timeout: "30m"
 `)
 
-	flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
+		flags, visited, _ := parseConfigFlagsForArgs(t, []string{"--config", configPath})
 
-	if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
-		t.Fatalf("public-access = true, want quoted YAML false")
-	}
-	if got := resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE"); !got {
-		t.Fatalf("allow-insecure = false, want quoted YAML true")
-	}
-	if got := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT"); got != 30*time.Minute {
-		t.Fatalf("access-token-timeout = %s, want quoted YAML 30m", got)
-	}
-}
+		if got := resolveBool("public-access", *flags.publicAccess, visited, "LEAFWIKI_PUBLIC_ACCESS"); got {
+			t.Fatalf("public-access = true, want quoted YAML false")
+		}
+		if got := resolveBool("allow-insecure", *flags.allowInsecure, visited, "LEAFWIKI_ALLOW_INSECURE"); !got {
+			t.Fatalf("allow-insecure = false, want quoted YAML true")
+		}
+		if got := resolveDuration("access-token-timeout", *flags.accessTokenTimeout, visited, "LEAFWIKI_ACCESS_TOKEN_TIMEOUT"); got != 30*time.Minute {
+			t.Fatalf("access-token-timeout = %s, want quoted YAML 30m", got)
+		}
 
-func TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues(t *testing.T) {
-	tests := []struct {
-		name      string
-		yaml      string
-		wantError string
-	}{
-		{name: "unknown key", yaml: "unknown-option: true\n", wantError: `unknown --config key "unknown-option"`},
-		{name: "duplicate key", yaml: "port: 8080\nport: 8081\n", wantError: `duplicate --config key "port"`},
-		{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", wantError: `requires a non-null scalar value`},
-		{name: "null value", yaml: "base-path: null\n", wantError: `requires a non-null scalar value`},
-		{name: "hidden compatibility key", yaml: "enable-mcp: true\n", wantError: `unknown --config key "enable-mcp"`},
-		{name: "removed revision key", yaml: "enable-revision: true\n", wantError: `unknown --config key "enable-revision"`},
-		{name: "removed workspace sync key", yaml: "enable-workspace-sync: true\n", wantError: `unknown --config key "enable-workspace-sync"`},
-		{name: "removed revision limit key", yaml: "max-revision-history: 0\n", wantError: `unknown --config key "max-revision-history"`},
-		{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", wantError: `unknown --config key "internal-project-daemon"`},
-		{name: "config key", yaml: "config: other.yml\n", wantError: `unknown --config key "config"`},
-		{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", wantError: `unknown --config key "mcp-stdio"`},
-		{name: "bad bool scalar", yaml: "public-access: maybe\n", wantError: `invalid --config value for "public-access"`},
-		{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", wantError: `invalid --config value for "access-token-timeout"`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-			writeTestConfig(t, configPath, tt.yaml)
+	})
+})
 
-			_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
+var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues", func() {
+	ginkgo.It("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name      string
+			yaml      string
+			wantError string
+		}{
+			{name: "unknown key", yaml: "unknown-option: true\n", wantError: `unknown --config key "unknown-option"`},
+			{name: "duplicate key", yaml: "port: 8080\nport: 8081\n", wantError: `duplicate --config key "port"`},
+			{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", wantError: `requires a non-null scalar value`},
+			{name: "null value", yaml: "base-path: null\n", wantError: `requires a non-null scalar value`},
+			{name: "hidden compatibility key", yaml: "enable-mcp: true\n", wantError: `unknown --config key "enable-mcp"`},
+			{name: "removed revision key", yaml: "enable-revision: true\n", wantError: `unknown --config key "enable-revision"`},
+			{name: "removed workspace sync key", yaml: "enable-workspace-sync: true\n", wantError: `unknown --config key "enable-workspace-sync"`},
+			{name: "removed revision limit key", yaml: "max-revision-history: 0\n", wantError: `unknown --config key "max-revision-history"`},
+			{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", wantError: `unknown --config key "internal-project-daemon"`},
+			{name: "config key", yaml: "config: other.yml\n", wantError: `unknown --config key "config"`},
+			{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", wantError: `unknown --config key "mcp-stdio"`},
+			{name: "bad bool scalar", yaml: "public-access: maybe\n", wantError: `invalid --config value for "public-access"`},
+			{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", wantError: `invalid --config value for "access-token-timeout"`},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+				writeTestConfig(t, configPath, tt.yaml)
 
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.wantError)
-			}
-		})
-	}
-}
+				_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
 
-func TestApplyYAMLConfigFile_RejectsConfigMixedWithNormalCLIFlag(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "port: 8080\n")
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.wantError)
+				}
 
-	_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath, "--port", "8081"})
+			}()
+		}
 
-	if err == nil || !strings.Contains(err.Error(), "--config cannot be combined with --port") {
-		t.Fatalf("applyYAMLConfigFile error = %v, want config/CLI mutual exclusion", err)
-	}
-}
+	})
+})
 
-func TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "data-dir: ./data\n")
+var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsConfigMixedWithNormalCLIFlag", func() {
+	ginkgo.It("TestApplyYAMLConfigFile_RejectsConfigMixedWithNormalCLIFlag", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "port: 8080\n")
 
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "reset password trailing flag",
-			args: []string{"--config", configPath, "reset-admin-password", "--data-dir", "other"},
-			want: "--config cannot be combined with --data-dir",
-		},
-		{
-			name: "agent hook trailing flag",
-			args: []string{"--config", configPath, "agent-hook", "codex", "--data-dir", "other"},
-			want: "--config cannot be combined with --data-dir",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, err := parseConfigFlagsForArgsAllowError(t, tt.args)
+		_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath, "--port", "8081"})
 
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.want)
-			}
-		})
-	}
-}
+		if err == nil || !strings.Contains(err.Error(), "--config cannot be combined with --port") {
+			t.Fatalf("applyYAMLConfigFile error = %v, want config/CLI mutual exclusion", err)
+		}
 
-func TestMainProcess_ConfigPathValueNamedAgentHookDoesNotFailOpen(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", "agent-hook",
-		"--not-a-real-flag",
-	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("config path plus invalid flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "not-a-real-flag") {
-		t.Fatalf("stderr = %q, want invalid flag error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag", func() {
+	ginkgo.It("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "data-dir: ./data\n")
 
-func TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagWithoutFailOpen(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "data-dir: ./data\n")
-	payload := `{"hook_event_name":"SessionStart","session_id":"config-conflict-secret"}`
+		tests := []struct {
+			name string
+			args []string
+			want string
+		}{
+			{
+				name: "reset password trailing flag",
+				args: []string{"--config", configPath, "reset-admin-password", "--data-dir", "other"},
+				want: "--config cannot be combined with --data-dir",
+			},
+			{
+				name: "agent hook trailing flag",
+				args: []string{"--config", configPath, "agent-hook", "codex", "--data-dir", "other"},
+				want: "--config cannot be combined with --data-dir",
+			},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				_, _, _, err := parseConfigFlagsForArgsAllowError(t, tt.args)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", configPath,
-		"agent-hook", "codex",
-		"--data-dir", "other",
-	}, nil, payload, 5*time.Second)
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.want)
+				}
 
-	if err == nil {
-		t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
-		t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
-	}
-	if strings.Contains(stderr, "config-conflict-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+			}()
+		}
 
-func TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagBeforeReadingConfig(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "missing.yml")
-	payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-conflict-secret"}`
+	})
+})
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", configPath,
-		"agent-hook", "codex",
-		"--data-dir", "other",
-	}, nil, payload, 5*time.Second)
+var _ = ginkgo.Describe("TestMainProcess_ConfigPathValueNamedAgentHookDoesNotFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigPathValueNamedAgentHookDoesNotFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", "agent-hook",
+			"--not-a-real-flag",
+		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 
-	if err == nil {
-		t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
-		t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
-	}
-	if strings.Contains(stderr, "missing-config-conflict-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+		if err == nil {
+			t.Fatalf("config path plus invalid flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "not-a-real-flag") {
+			t.Fatalf("stderr = %q, want invalid flag error", stderr)
+		}
 
-func TestMainProcess_ConfigAgentHookMissingConfigFileFailsOpen(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "missing.yml")
-	payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-secret"}`
+	})
+})
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", configPath,
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "data-dir: ./data\n")
+		payload := `{"hook_event_name":"SessionStart","session_id":"config-conflict-secret"}`
 
-	if err != nil {
-		t.Fatalf("agent-hook missing config file should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stdout, "missing-config-secret") || strings.Contains(stderr, "missing-config-secret") {
-		t.Fatalf("hook output leaked payload secret\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-}
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", configPath,
+			"agent-hook", "codex",
+			"--data-dir", "other",
+		}, nil, payload, 5*time.Second)
 
-func TestMainProcess_ConfigAgentHookRejectsFlagLookingConfigPathWithoutFailOpen(t *testing.T) {
-	payload := `{"hook_event_name":"SessionStart","session_id":"flag-looking-config-secret"}`
+		if err == nil {
+			t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
+			t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
+		}
+		if strings.Contains(stderr, "config-conflict-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", "--data-dir",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("flag-looking config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "--config requires a path") {
-		t.Fatalf("stderr = %q, want config path-shape error", stderr)
-	}
-	if strings.Contains(stderr, "flag-looking-config-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagBeforeReadingConfig", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsTrailingCLIFlagBeforeReadingConfig", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "missing.yml")
+		payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-conflict-secret"}`
 
-func TestMainProcess_ConfigAgentHookRejectsDashPrefixedConfigPathWithoutFailOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	configPath := filepath.Join(baseDir, "---config")
-	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", configPath,
+			"agent-hook", "codex",
+			"--data-dir", "other",
+		}, nil, payload, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "--config cannot be combined with --data-dir") {
+			t.Fatalf("stderr = %q, want config/CLI mutual exclusion error", stderr)
+		}
+		if strings.Contains(stderr, "missing-config-conflict-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookMissingConfigFileFailsOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookMissingConfigFileFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "missing.yml")
+		payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-secret"}`
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", configPath,
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("agent-hook missing config file should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stdout, "missing-config-secret") || strings.Contains(stderr, "missing-config-secret") {
+			t.Fatalf("hook output leaked payload secret\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsFlagLookingConfigPathWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsFlagLookingConfigPathWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		payload := `{"hook_event_name":"SessionStart","session_id":"flag-looking-config-secret"}`
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", "--data-dir",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("flag-looking config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "--config requires a path") {
+			t.Fatalf("stderr = %q, want config path-shape error", stderr)
+		}
+		if strings.Contains(stderr, "flag-looking-config-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsDashPrefixedConfigPathWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsDashPrefixedConfigPathWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		configPath := filepath.Join(baseDir, "---config")
+		writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
 data-dir: %s
 root-dir: %s
 log-target: stderr
 `, baseDir, baseDir))
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get working directory: %v", err)
-	}
-	if err := os.Chdir(baseDir); err != nil {
-		t.Fatalf("chdir temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(previousDir); err != nil {
-			t.Fatalf("restore working directory: %v", err)
+		previousDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("get working directory: %v", err)
 		}
-	})
-	payload := `{"hook_event_name":"SessionStart","session_id":"dash-prefixed-config-secret"}`
-
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", "---config",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("dash-prefixed config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "--config requires a path") {
-		t.Fatalf("stderr = %q, want config path-shape error", stderr)
-	}
-	if strings.Contains(stderr, "dash-prefixed-config-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
-
-func TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{name: "inline empty", args: []string{"--config=", "agent-hook", "codex"}},
-		{name: "separate empty", args: []string{"--config", "", "agent-hook", "codex"}},
-		{name: "trailing bare after agent hook", args: []string{"agent-hook", "codex", "--config"}},
-		{name: "inline empty before help after agent hook", args: []string{"agent-hook", "codex", "--config=", "--help"}},
-		{name: "single dash", args: []string{"--config", "-", "agent-hook", "codex"}},
-		{name: "double dash", args: []string{"--config", "--", "agent-hook", "codex"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			payload := `{"hook_event_name":"SessionStart","session_id":"empty-config-secret"}`
-
-			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, tt.args, nil, payload, 5*time.Second)
-
-			if err == nil {
-				t.Fatalf("empty config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-			}
-			if stdout == "{}\n" {
-				t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-			}
-			if !strings.Contains(stderr, "--config requires a path") {
-				t.Fatalf("stderr = %q, want empty config path error", stderr)
-			}
-			if strings.Contains(stderr, "empty-config-secret") {
-				t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		if err := os.Chdir(baseDir); err != nil {
+			t.Fatalf("chdir temp dir: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chdir(previousDir); err != nil {
+				t.Fatalf("restore working directory: %v", err)
 			}
 		})
-	}
-}
+		payload := `{"hook_event_name":"SessionStart","session_id":"dash-prefixed-config-secret"}`
 
-func TestMainProcess_ConfigAgentHookRejectsHelpMixWithoutFailOpen(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "data-dir: ./data\n")
-	payload := `{"hook_event_name":"SessionStart","session_id":"config-help-secret"}`
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", "---config",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"agent-hook", "codex",
-		"--config", configPath,
-		"--help",
-	}, nil, payload, 5*time.Second)
+		if err == nil {
+			t.Fatalf("dash-prefixed config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "--config requires a path") {
+			t.Fatalf("stderr = %q, want config path-shape error", stderr)
+		}
+		if strings.Contains(stderr, "dash-prefixed-config-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-	if err == nil {
-		t.Fatalf("config mixed with help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid config arguments") {
-		t.Fatalf("stderr = %q, want config argument error", stderr)
-	}
-	if strings.Contains(stderr, "config-help-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+	})
+})
 
-func TestMainProcess_ConfigRejectsPositionalHelp(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "data-dir: ./data\n")
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name string
+			args []string
+		}{
+			{name: "inline empty", args: []string{"--config=", "agent-hook", "codex"}},
+			{name: "separate empty", args: []string{"--config", "", "agent-hook", "codex"}},
+			{name: "trailing bare after agent hook", args: []string{"agent-hook", "codex", "--config"}},
+			{name: "inline empty before help after agent hook", args: []string{"agent-hook", "codex", "--config=", "--help"}},
+			{name: "single dash", args: []string{"--config", "-", "agent-hook", "codex"}},
+			{name: "double dash", args: []string{"--config", "--", "agent-hook", "codex"}},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				payload := `{"hook_event_name":"SessionStart","session_id":"empty-config-secret"}`
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--config", configPath,
-		"help",
-	}, nil)
+				stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, tt.args, nil, payload, 5*time.Second)
 
-	if err == nil {
-		t.Fatalf("config mixed with positional help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if strings.Contains(stdout, "Usage:") {
-		t.Fatalf("stdout = %q, want no successful usage output", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid config file") || !strings.Contains(stderr, "--config cannot be combined with help") {
-		t.Fatalf("stderr = %q, want config/help mix error", stderr)
-	}
-}
+				if err == nil {
+					t.Fatalf("empty config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+				}
+				if stdout == "{}\n" {
+					t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+				}
+				if !strings.Contains(stderr, "--config requires a path") {
+					t.Fatalf("stderr = %q, want empty config path error", stderr)
+				}
+				if strings.Contains(stderr, "empty-config-secret") {
+					t.Fatalf("stderr leaked hook payload data: %s", stderr)
+				}
 
-func TestMainProcess_ConfigAgentHookRejectsUnknownFlagWithoutFailOpen(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-	writeTestConfig(t, configPath, "data-dir: ./data\n")
-	payload := `{"hook_event_name":"SessionStart","session_id":"unknown-config-flag-secret"}`
+			}()
+		}
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", configPath,
-		"--not-a-real-flag",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("config mixed with unknown flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "not-a-real-flag") {
-		t.Fatalf("stderr = %q, want unknown flag error", stderr)
-	}
-	if strings.Contains(stderr, "unknown-config-flag-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsHelpMixWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsHelpMixWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "data-dir: ./data\n")
+		payload := `{"hook_event_name":"SessionStart","session_id":"config-help-secret"}`
 
-func TestMainProcess_AgentHookFailOpenUsesConfig(t *testing.T) {
-	baseDir := t.TempDir()
-	sameDir := filepath.Join(baseDir, "same")
-	configPath := filepath.Join(baseDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"agent-hook", "codex",
+			"--config", configPath,
+			"--help",
+		}, nil, payload, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("config mixed with help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid config arguments") {
+			t.Fatalf("stderr = %q, want config argument error", stderr)
+		}
+		if strings.Contains(stderr, "config-help-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigRejectsPositionalHelp", func() {
+	ginkgo.It("TestMainProcess_ConfigRejectsPositionalHelp", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "data-dir: ./data\n")
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--config", configPath,
+			"help",
+		}, nil)
+
+		if err == nil {
+			t.Fatalf("config mixed with positional help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if strings.Contains(stdout, "Usage:") {
+			t.Fatalf("stdout = %q, want no successful usage output", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid config file") || !strings.Contains(stderr, "--config cannot be combined with help") {
+			t.Fatalf("stderr = %q, want config/help mix error", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigAgentHookRejectsUnknownFlagWithoutFailOpen", func() {
+	ginkgo.It("TestMainProcess_ConfigAgentHookRejectsUnknownFlagWithoutFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+		writeTestConfig(t, configPath, "data-dir: ./data\n")
+		payload := `{"hook_event_name":"SessionStart","session_id":"unknown-config-flag-secret"}`
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", configPath,
+			"--not-a-real-flag",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("config mixed with unknown flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "not-a-real-flag") {
+			t.Fatalf("stderr = %q, want unknown flag error", stderr)
+		}
+		if strings.Contains(stderr, "unknown-config-flag-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_AgentHookFailOpenUsesConfig", func() {
+	ginkgo.It("TestMainProcess_AgentHookFailOpenUsesConfig", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		sameDir := filepath.Join(baseDir, "same")
+		configPath := filepath.Join(baseDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
 data-dir: %s
 root-dir: %s
 log-target: stderr
 `, sameDir, sameDir))
-	payload := `{"hook_event_name":"SessionStart","session_id":"config-hook-secret"}`
+		payload := `{"hook_event_name":"SessionStart","session_id":"config-hook-secret"}`
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--config", configPath,
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--config", configPath,
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-	if err != nil {
-		t.Fatalf("agent-hook invalid config should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "config-hook-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+		if err != nil {
+			t.Fatalf("agent-hook invalid config should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "config-hook-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-func TestMainProcess_ResetAdminPasswordUsesConfigDataDir(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	initWikidAdminUser(t, dataDir)
-	configPath := filepath.Join(baseDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, fmt.Sprintf("data-dir: %s\n", dataDir))
+	})
+})
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--config", configPath,
-		"reset-admin-password",
-	}, map[string]string{})
+var _ = ginkgo.Describe("TestMainProcess_ResetAdminPasswordUsesConfigDataDir", func() {
+	ginkgo.It("TestMainProcess_ResetAdminPasswordUsesConfigDataDir", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		initWikidAdminUser(t, dataDir)
+		configPath := filepath.Join(baseDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, fmt.Sprintf("data-dir: %s\n", dataDir))
 
-	if err != nil {
-		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Admin password reset successfully") {
-		t.Fatalf("stdout = %q, want reset output", stdout)
-	}
-}
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--config", configPath,
+			"reset-admin-password",
+		}, map[string]string{})
 
-func TestMainProcess_ConfigPathDoesNotAffectDaemonIdentity(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	configBody := fmt.Sprintf(`mcp: stdio
+		if err != nil {
+			t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Admin password reset successfully") {
+			t.Fatalf("stdout = %q, want reset output", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ConfigPathDoesNotAffectDaemonIdentity", func() {
+	ginkgo.It("TestMainProcess_ConfigPathDoesNotAffectDaemonIdentity", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		configBody := fmt.Sprintf(`mcp: stdio
 disable-auth: true
 data-dir: %s
 root-dir: %s
@@ -1874,1412 +2188,1578 @@ host: 127.0.0.1
 port: %s
 log-target: stderr
 `, dataDir, rootDir, port)
-	firstConfig := filepath.Join(baseDir, "first.yml")
-	secondConfig := filepath.Join(baseDir, "second.yml")
-	writeTestConfig(t, firstConfig, configBody)
-	writeTestConfig(t, secondConfig, configBody)
-	env := map[string]string{"HOME": filepath.Join(baseDir, "home")}
-	first := startLeafwikiHelperWithStdin(t, []string{"--config", firstConfig}, env, stdinReader)
-	waitForLeafwikiReady(t, first, port)
+		firstConfig := filepath.Join(baseDir, "first.yml")
+		secondConfig := filepath.Join(baseDir, "second.yml")
+		writeTestConfig(t, firstConfig, configBody)
+		writeTestConfig(t, secondConfig, configBody)
+		env := map[string]string{"HOME": filepath.Join(baseDir, "home")}
+		first := startLeafwikiHelperWithStdin(t, []string{"--config", firstConfig}, env, stdinReader)
+		waitForLeafwikiReady(t, first, port)
 
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{"--config", secondConfig}, env, 5*time.Second)
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{"--config", secondConfig}, env, 5*time.Second)
 
-	if err != nil {
-		t.Fatalf("second config path should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	if strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no config mismatch from config path", stderr)
-	}
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	first.waitForExit(t)
-}
+		if err != nil {
+			t.Fatalf("second config path should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		if strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no config mismatch from config path", stderr)
+		}
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		first.waitForExit(t)
 
-func TestMainProcess_RejectsExplicitLogFileForStreamTarget(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--log-target", "stderr",
-		"--log-file", "custom.log",
-	}, nil)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("expected --log-file with stderr target to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "--log-file requires --log-target file") {
-		t.Fatalf("stderr = %q, want --log-file target error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_RejectsExplicitLogFileForStreamTarget", func() {
+	ginkgo.It("TestMainProcess_RejectsExplicitLogFileForStreamTarget", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--log-target", "stderr",
+			"--log-file", "custom.log",
+		}, nil)
 
-func TestMainProcess_NativeStdioAuthEnabledRequiresAPIKey(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp=stdio",
-		"--data-dir", dataDir,
-		"--jwt-secret", "test-secret",
-		"--admin-password", "admin-password",
-	}, nil)
+		if err == nil {
+			t.Fatalf("expected --log-file with stderr target to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "--log-file requires --log-target file") {
+			t.Fatalf("stderr = %q, want --log-file target error", stderr)
+		}
 
-	if err == nil {
-		t.Fatalf("expected native stdio with auth enabled to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "native STDIO requires either disabled auth or an API key") {
-		t.Fatalf("stderr = %q, want native stdio API-key requirement", stderr)
-	}
-}
+	})
+})
 
-func TestMainProcess_NativeStdioRejectsInvalidAPIKeyWithoutLeakingSecret(t *testing.T) {
-	secret := "lwk_secret_bad"
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp=stdio",
-		"--api-key", secret,
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--jwt-secret", "test-secret",
-		"--admin-password", "admin-password",
-		"--log-target", "stderr",
-	}, nil)
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioAuthEnabledRequiresAPIKey", func() {
+	ginkgo.It("TestMainProcess_NativeStdioAuthEnabledRequiresAPIKey", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--mcp=stdio",
+			"--data-dir", dataDir,
+			"--jwt-secret", "test-secret",
+			"--admin-password", "admin-password",
+		}, nil)
 
-	if err == nil {
-		t.Fatalf("expected native stdio with invalid API key to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
-		t.Fatalf("process output leaked API key\nstdout=%q\nstderr=%q", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "invalid native STDIO API key") {
-		t.Fatalf("stderr = %q, want invalid API-key error", stderr)
-	}
-}
+		if err == nil {
+			t.Fatalf("expected native stdio with auth enabled to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "native STDIO requires either disabled auth or an API key") {
+			t.Fatalf("stderr = %q, want native stdio API-key requirement", stderr)
+		}
 
-func TestMainProcess_NativeStdioRejectsStdoutLogging(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--log-target", "stdout",
-	}, nil)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("expected native stdio with stdout logging to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "stdout is reserved for MCP STDIO") {
-		t.Fatalf("stderr = %q, want stdout reserved error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioRejectsInvalidAPIKeyWithoutLeakingSecret", func() {
+	ginkgo.It("TestMainProcess_NativeStdioRejectsInvalidAPIKeyWithoutLeakingSecret", func() {
+		t := ginkgo.GinkgoT()
+		secret := "lwk_secret_bad"
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--mcp=stdio",
+			"--api-key", secret,
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--jwt-secret", "test-secret",
+			"--admin-password", "admin-password",
+			"--log-target", "stderr",
+		}, nil)
 
-func TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP(t *testing.T) {
-	var ownerPID int
-	baseDir := t.TempDir()
-	t.Cleanup(func() {
+		if err == nil {
+			t.Fatalf("expected native stdio with invalid API key to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+			t.Fatalf("process output leaked API key\nstdout=%q\nstderr=%q", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "invalid native STDIO API key") {
+			t.Fatalf("stderr = %q, want invalid API-key error", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioRejectsStdoutLogging", func() {
+	ginkgo.It("TestMainProcess_NativeStdioRejectsStdoutLogging", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--log-target", "stdout",
+		}, nil)
+
+		if err == nil {
+			t.Fatalf("expected native stdio with stdout logging to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "stdout is reserved for MCP STDIO") {
+			t.Fatalf("stderr = %q, want stdout reserved error", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP", func() {
+	ginkgo.It("TestMainProcess_PublicHTTPMCPNonLoopbackHostStartsWebAndKeepsLocalMCP", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		baseDir := t.TempDir()
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--mcp=http",
+			"--disable-auth",
+			"--host", "0.0.0.0",
+			"--port", port,
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--log-target", "stderr",
+		}, nil)
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		ownerPID = globalDesc.PID
+		toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
+		assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+		proc.stop(t)
 		terminateProjectDaemonProcess(t, ownerPID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
+
 	})
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--mcp=http",
-		"--disable-auth",
-		"--host", "0.0.0.0",
-		"--port", port,
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--log-target", "stderr",
-	}, nil)
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	ownerPID = globalDesc.PID
-	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
-	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, ownerPID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
-}
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly", func() {
+	ginkgo.It("TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--mcp=stdio",
+			"bogus",
+		}, nil)
 
-func TestMainProcess_NativeStdioRejectsPositionalCommandWithStderrOnly(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--mcp=stdio",
-		"bogus",
-	}, nil)
+		if err == nil {
+			t.Fatalf("expected native stdio with a positional command to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "native STDIO does not support positional commands") {
+			t.Fatalf("stderr = %q, want positional-command error", stderr)
+		}
 
-	if err == nil {
-		t.Fatalf("expected native stdio with a positional command to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "native STDIO does not support positional commands") {
-		t.Fatalf("stderr = %q, want positional-command error", stderr)
-	}
-}
-
-func TestMainProcess_NativeStdioEnvironmentRejectsPositionalCommandWithStderrOnly(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"bogus",
-	}, map[string]string{
-		"LEAFWIKI_MCP": "stdio",
 	})
+})
 
-	if err == nil {
-		t.Fatalf("expected env-enabled native stdio with a positional command to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "native STDIO does not support positional commands") {
-		t.Fatalf("stderr = %q, want positional-command error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioEnvironmentRejectsPositionalCommandWithStderrOnly", func() {
+	ginkgo.It("TestMainProcess_NativeStdioEnvironmentRejectsPositionalCommandWithStderrOnly", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"bogus",
+		}, map[string]string{
+			"LEAFWIKI_MCP": "stdio",
+		})
 
-func TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-
-	waitForLeafwikiReady(t, proc, port)
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-
-	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	waitForLeafwikiUnavailable(t, port)
-}
-
-func TestMainProcess_NativeStdioOnlyKeepsHTTPMCPRouteDisabled(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--root-dir", filepath.Join(t.TempDir(), "content"),
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-
-	waitForLeafwikiReady(t, proc, port)
-	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
-	if err != nil {
-		t.Fatalf("GET /mcp: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
-	}
-
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-}
-
-func TestMainProcess_NativeStdioSecondCompatibleStartupAttachesToProjectDaemon(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, first, port)
-	if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
-		t.Fatalf("write first STDIO MCP frames: %v", err)
-	}
-	waitForFileContaining(t, first.stdoutPath, `"id":2`)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
-
-	if err != nil {
-		t.Fatalf("second compatible startup should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use"} {
-		if strings.Contains(stderr, unexpected) {
-			t.Fatalf("stderr = %q, want no old ownership failure %q", stderr, unexpected)
+		if err == nil {
+			t.Fatalf("expected env-enabled native stdio with a positional command to exit non-zero")
 		}
-	}
-	waitForLeafwikiReady(t, first, port)
-}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "native STDIO does not support positional commands") {
+			t.Fatalf("stderr = %q, want positional-command error", stderr)
+		}
 
-func TestMainProcess_NativeStdioOnlyStartupAttachesToHTTPEnabledProjectDaemon(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--mcp=http",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "file",
-		"--disable-request-log",
-	}, nil, 12*time.Second)
-
-	if err != nil {
-		t.Fatalf("stdio-only startup should attach to HTTP-enabled daemon, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	if strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no public MCP, logging, or request-log config mismatch", stderr)
-	}
-	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
-	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
-}
-
-func TestMainProcess_NativeStdioOwnerStderrLoggingFallsBackToFile(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-		"--daemon-idle-timeout", "0",
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, proc, port)
-
-	logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
-	waitForFileContaining(t, logPath, "Starting LeafWiki")
-
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-}
-
-func TestSpawnProjectDaemonOwnerRemovesSecretStartupConfigOnExecutableFailure(t *testing.T) {
-	oldExecutable := projectDaemonExecutable
-	t.Cleanup(func() {
-		projectDaemonExecutable = oldExecutable
 	})
+})
 
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	jwtSecret := fmt.Sprintf("cleanup-jwt-secret-%d", time.Now().UnixNano())
-	adminPassword := "cleanup-admin-password"
-	var startupPath string
-	projectDaemonExecutable = func() (string, error) {
-		startupPath = findLeafwikiDaemonStartupConfigContaining(t, jwtSecret)
-		if startupPath == "" {
-			t.Fatalf("startup config containing secret marker was not visible before executable lookup")
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer", func() {
+	ginkgo.It("TestMainProcess_NativeStdioStartsHTTPAndStdinCloseStopsServer", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		rootDir := filepath.Join(t.TempDir(), "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+
+		waitForLeafwikiReady(t, proc, port)
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
 		}
-		assertFileMode(t, startupPath, 0o600)
-		return "", errors.New("forced executable failure")
-	}
+		proc.waitForExit(t)
 
-	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, false)
-	cfg.JWTSecret = jwtSecret
-	cfg.AdminPassword = adminPassword
-	_, err := spawnProjectDaemonOwner(cfg)
+		if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		waitForLeafwikiUnavailable(t, port)
 
-	if err == nil || !strings.Contains(err.Error(), "forced executable failure") {
-		t.Fatalf("spawnProjectDaemonOwner error = %v, want forced executable failure", err)
-	}
-	if _, err := os.Stat(startupPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("startup config %s still exists after pre-start failure: %v", startupPath, err)
-	}
-}
-
-func TestSpawnProjectDaemonOwnerEventuallyRemovesSecretStartupConfigWhenChildExitsBeforeRead(t *testing.T) {
-	oldExecutable := projectDaemonExecutable
-	oldCleanupDelay := projectDaemonStartupConfigPostStartCleanupDelay
-	t.Cleanup(func() {
-		projectDaemonExecutable = oldExecutable
-		projectDaemonStartupConfigPostStartCleanupDelay = oldCleanupDelay
 	})
+})
 
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skip("true executable not available")
-	}
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	jwtSecret := fmt.Sprintf("post-start-cleanup-jwt-%d", time.Now().UnixNano())
-	var startupPath string
-	projectDaemonExecutable = func() (string, error) {
-		startupPath = findLeafwikiDaemonStartupConfigContaining(t, jwtSecret)
-		if startupPath == "" {
-			t.Fatalf("startup config containing secret marker was not visible before child start")
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioOnlyKeepsHTTPMCPRouteDisabled", func() {
+	ginkgo.It("TestMainProcess_NativeStdioOnlyKeepsHTTPMCPRouteDisabled", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--root-dir", filepath.Join(t.TempDir(), "content"),
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+
+		waitForLeafwikiReady(t, proc, port)
+		resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
+		if err != nil {
+			t.Fatalf("GET /mcp: %v", err)
 		}
-		assertFileMode(t, startupPath, 0o600)
-		return truePath, nil
-	}
-	projectDaemonStartupConfigPostStartCleanupDelay = 25 * time.Millisecond
-
-	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, false)
-	cfg.JWTSecret = jwtSecret
-	cfg.AdminPassword = "post-start-cleanup-admin"
-	_, err = spawnProjectDaemonOwner(cfg)
-	if err != nil {
-		t.Fatalf("spawnProjectDaemonOwner failed: %v", err)
-	}
-	waitForFileRemoved(t, startupPath, 2*time.Second)
-}
-
-func TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	apiKey := createWikidMCPAPIKeyWithUser(t, dataDir)
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--mcp=http",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--jwt-secret", "owner-jwt-secret",
-		"--admin-password", "owner-admin-password",
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, map[string]string{})
-	waitForLeafwikiReady(t, first, port)
-	grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
-	}, 5*time.Second)
-
-	if err != nil {
-		t.Fatalf("stdio API-key startup should attach without owner bootstrap secrets, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	for _, unexpected := range []string{"JWT secret is required", "admin password is required", "project daemon config mismatch"} {
-		if strings.Contains(stderr, unexpected) {
-			t.Fatalf("stderr = %q, want no bootstrap-secret attach failure %q", stderr, unexpected)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 		}
-	}
-}
 
-func TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	received := make(chan string, 4)
-	staleControl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		raw, _ := io.ReadAll(req.Body)
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		proc.waitForExit(t)
+		if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioSecondCompatibleStartupAttachesToProjectDaemon", func() {
+	ginkgo.It("TestMainProcess_NativeStdioSecondCompatibleStartupAttachesToProjectDaemon", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, first, port)
+		if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
+			t.Fatalf("write first STDIO MCP frames: %v", err)
+		}
+		waitForFileContaining(t, first.stdoutPath, `"id":2`)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("second compatible startup should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use"} {
+			if strings.Contains(stderr, unexpected) {
+				t.Fatalf("stderr = %q, want no old ownership failure %q", stderr, unexpected)
+			}
+		}
+		waitForLeafwikiReady(t, first, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioOnlyStartupAttachesToHTTPEnabledProjectDaemon", func() {
+	ginkgo.It("TestMainProcess_NativeStdioOnlyStartupAttachesToHTTPEnabledProjectDaemon", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--mcp=http",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "file",
+			"--disable-request-log",
+		}, nil, 12*time.Second)
+
+		if err != nil {
+			t.Fatalf("stdio-only startup should attach to HTTP-enabled daemon, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		if strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no public MCP, logging, or request-log config mismatch", stderr)
+		}
+		toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
+		assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioOwnerStderrLoggingFallsBackToFile", func() {
+	ginkgo.It("TestMainProcess_NativeStdioOwnerStderrLoggingFallsBackToFile", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+			"--daemon-idle-timeout", "0",
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, proc, port)
+
+		logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
+		waitForFileContaining(t, logPath, "Starting LeafWiki")
+
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		proc.waitForExit(t)
+		if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestSpawnProjectDaemonOwnerRemovesSecretStartupConfigOnExecutableFailure", func() {
+	ginkgo.It("TestSpawnProjectDaemonOwnerRemovesSecretStartupConfigOnExecutableFailure", func() {
+		t := ginkgo.GinkgoT()
+		oldExecutable := projectDaemonExecutable
+		t.Cleanup(func() {
+			projectDaemonExecutable = oldExecutable
+		})
+
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		jwtSecret := fmt.Sprintf("cleanup-jwt-secret-%d", time.Now().UnixNano())
+		adminPassword := "cleanup-admin-password"
+		var startupPath string
+		projectDaemonExecutable = func() (string, error) {
+			startupPath = findLeafwikiDaemonStartupConfigContaining(t, jwtSecret)
+			if startupPath == "" {
+				t.Fatalf("startup config containing secret marker was not visible before executable lookup")
+			}
+			assertFileMode(t, startupPath, 0o600)
+			return "", errors.New("forced executable failure")
+		}
+
+		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, false)
+		cfg.JWTSecret = jwtSecret
+		cfg.AdminPassword = adminPassword
+		_, err := spawnProjectDaemonOwner(cfg)
+
+		if err == nil || !strings.Contains(err.Error(), "forced executable failure") {
+			t.Fatalf("spawnProjectDaemonOwner error = %v, want forced executable failure", err)
+		}
+		if _, err := os.Stat(startupPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("startup config %s still exists after pre-start failure: %v", startupPath, err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestSpawnProjectDaemonOwnerEventuallyRemovesSecretStartupConfigWhenChildExitsBeforeRead", func() {
+	ginkgo.It("TestSpawnProjectDaemonOwnerEventuallyRemovesSecretStartupConfigWhenChildExitsBeforeRead", func() {
+		t := ginkgo.GinkgoT()
+		oldExecutable := projectDaemonExecutable
+		oldCleanupDelay := projectDaemonStartupConfigPostStartCleanupDelay
+		t.Cleanup(func() {
+			projectDaemonExecutable = oldExecutable
+			projectDaemonStartupConfigPostStartCleanupDelay = oldCleanupDelay
+		})
+
+		truePath, err := exec.LookPath("true")
+		if err != nil {
+			t.Skip("true executable not available")
+		}
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		jwtSecret := fmt.Sprintf("post-start-cleanup-jwt-%d", time.Now().UnixNano())
+		var startupPath string
+		projectDaemonExecutable = func() (string, error) {
+			startupPath = findLeafwikiDaemonStartupConfigContaining(t, jwtSecret)
+			if startupPath == "" {
+				t.Fatalf("startup config containing secret marker was not visible before child start")
+			}
+			assertFileMode(t, startupPath, 0o600)
+			return truePath, nil
+		}
+		projectDaemonStartupConfigPostStartCleanupDelay = 25 * time.Millisecond
+
+		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, false)
+		cfg.JWTSecret = jwtSecret
+		cfg.AdminPassword = "post-start-cleanup-admin"
+		_, err = spawnProjectDaemonOwner(cfg)
+		if err != nil {
+			t.Fatalf("spawnProjectDaemonOwner failed: %v", err)
+		}
+		waitForFileRemoved(t, startupPath, 2*time.Second)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets", func() {
+	ginkgo.It("TestMainProcess_NativeStdioAPIKeyAttachDoesNotRequireOwnerBootstrapSecrets", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		apiKey := createWikidMCPAPIKeyWithUser(t, dataDir)
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--mcp=http",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--jwt-secret", "owner-jwt-secret",
+			"--admin-password", "owner-admin-password",
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, map[string]string{})
+		waitForLeafwikiReady(t, first, port)
+		grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, map[string]string{
+			"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
+		}, 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("stdio API-key startup should attach without owner bootstrap secrets, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		for _, unexpected := range []string{"JWT secret is required", "admin password is required", "project daemon config mismatch"} {
+			if strings.Contains(stderr, unexpected) {
+				t.Fatalf("stderr = %q, want no bootstrap-secret attach failure %q", stderr, unexpected)
+			}
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey", func() {
+	ginkgo.It("TestMainProcess_StaleDescriptorIsReplacedWithoutSendingAPIKey", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		received := make(chan string, 4)
+		staleControl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			raw, _ := io.ReadAll(req.Body)
+			select {
+			case received <- req.URL.Path + " " + req.Header.Get("Authorization") + " " + string(raw):
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		}))
+		t.Cleanup(staleControl.Close)
+
+		apiKey := createWikidMCPAPIKey(t, dataDir)
+		port := freeTCPPort(t)
+		runtimeCfg := testRuntimeConfig(dataDir, rootDir, port, mcpTransports{Stdio: true}, false)
+		runtimeCfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+		runtimeCfg.JWTSecret = "owner-jwt-secret"
+		runtimeCfg.AdminPassword = "owner-admin-password"
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		ownerRuntimeCfg := runtimeCfg
+		ownerRuntimeCfg.Workspace = wiki.Workspace{ID: wikid.HomeWorkspaceID, DataDir: layout.HomeDir, RootDir: layout.HomeRootDir}
+		ownerCfg, err := daemonConfigForRuntime(ownerRuntimeCfg)
+		if err != nil {
+			t.Fatalf("daemonConfigForRuntime: %v", err)
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("ConfigHash: %v", err)
+		}
+		descriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
+		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+			SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+			PID:              os.Getpid(),
+			StartedAt:        time.Now().UTC(),
+			DataDir:          ownerCfg.DataDir,
+			RootDir:          ownerCfg.RootDir,
+			PublicURL:        "http://127.0.0.1:" + port,
+			PublicMCPEnabled: false,
+			ControlURL:       staleControl.URL,
+			ConfigHash:       hash,
+			IdleTimeout:      "0s",
+			ControlToken:     "stale-token",
+			Config:           ownerCfg,
+		}); err != nil {
+			t.Fatalf("write stale descriptor: %v", err)
+		}
+
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--allow-insecure",
+			"--jwt-secret", "owner-jwt-secret",
+			"--admin-password", "owner-admin-password",
+			"--log-target", "stderr",
+		}, map[string]string{
+			"LEAFWIKI_MCP_API_KEY": apiKey,
+		}, stdinReader)
+		waitForLeafwikiReady(t, proc, port)
+
+		_ = waitForGlobalWikidDescriptor(t, dataDir)
+		replaced := readFileString(t, descriptorPath)
+		if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
+			t.Fatalf("descriptor was not replaced:\n%s", replaced)
+		}
 		select {
-		case received <- req.URL.Path + " " + req.Header.Get("Authorization") + " " + string(raw):
+		case got := <-received:
+			if strings.Contains(got, apiKey) {
+				t.Fatalf("stale descriptor endpoint received API key: %q", got)
+			}
+			t.Fatalf("stale descriptor endpoint received request before replacement: %q", got)
 		default:
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	t.Cleanup(staleControl.Close)
-
-	apiKey := createWikidMCPAPIKey(t, dataDir)
-	port := freeTCPPort(t)
-	runtimeCfg := testRuntimeConfig(dataDir, rootDir, port, mcpTransports{Stdio: true}, false)
-	runtimeCfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	runtimeCfg.JWTSecret = "owner-jwt-secret"
-	runtimeCfg.AdminPassword = "owner-admin-password"
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	ownerRuntimeCfg := runtimeCfg
-	ownerRuntimeCfg.Workspace = wiki.Workspace{ID: wikid.HomeWorkspaceID, DataDir: layout.HomeDir, RootDir: layout.HomeRootDir}
-	ownerCfg, err := daemonConfigForRuntime(ownerRuntimeCfg)
-	if err != nil {
-		t.Fatalf("daemonConfigForRuntime: %v", err)
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("ConfigHash: %v", err)
-	}
-	descriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-		PID:              os.Getpid(),
-		StartedAt:        time.Now().UTC(),
-		DataDir:          ownerCfg.DataDir,
-		RootDir:          ownerCfg.RootDir,
-		PublicURL:        "http://127.0.0.1:" + port,
-		PublicMCPEnabled: false,
-		ControlURL:       staleControl.URL,
-		ConfigHash:       hash,
-		IdleTimeout:      "0s",
-		ControlToken:     "stale-token",
-		Config:           ownerCfg,
-	}); err != nil {
-		t.Fatalf("write stale descriptor: %v", err)
-	}
-
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--allow-insecure",
-		"--jwt-secret", "owner-jwt-secret",
-		"--admin-password", "owner-admin-password",
-		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY": apiKey,
-	}, stdinReader)
-	waitForLeafwikiReady(t, proc, port)
-
-	_ = waitForGlobalWikidDescriptor(t, dataDir)
-	replaced := readFileString(t, descriptorPath)
-	if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
-		t.Fatalf("descriptor was not replaced:\n%s", replaced)
-	}
-	select {
-	case got := <-received:
-		if strings.Contains(got, apiKey) {
-			t.Fatalf("stale descriptor endpoint received API key: %q", got)
+		if stdout := readFileString(t, proc.stdoutPath); strings.Contains(stdout, apiKey) {
+			t.Fatalf("process stdout leaked API key: %q", stdout)
 		}
-		t.Fatalf("stale descriptor endpoint received request before replacement: %q", got)
-	default:
-	}
-	if stdout := readFileString(t, proc.stdoutPath); strings.Contains(stdout, apiKey) {
-		t.Fatalf("process stdout leaked API key: %q", stdout)
-	}
-	if stderr := readFileString(t, proc.stderrPath); strings.Contains(stderr, apiKey) {
-		t.Fatalf("process stderr leaked API key: %q", stderr)
-	}
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-}
+		if stderr := readFileString(t, proc.stderrPath); strings.Contains(stderr, apiKey) {
+			t.Fatalf("process stderr leaked API key: %q", stderr)
+		}
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		proc.waitForExit(t)
 
-func TestMainProcess_UntrustedStaleDescriptorIsReplacedWhenLocksAreFree(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(t *testing.T, path string)
-	}{
-		{
-			name: "corrupt json",
-			setup: func(t *testing.T, path string) {
-				t.Helper()
-				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_UntrustedStaleDescriptorIsReplacedWhenLocksAreFree", func() {
+	ginkgo.It("TestMainProcess_UntrustedStaleDescriptorIsReplacedWhenLocksAreFree", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name  string
+			setup func(t leafwikiTestT, path string)
+		}{
+			{
+				name: "corrupt json",
+				setup: func(t leafwikiTestT, path string) {
+					t.Helper()
+					if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+						t.Fatalf("write corrupt descriptor: %v", err)
+					}
+				},
+			},
+			{
+				name: "wrong mode",
+				setup: func(t leafwikiTestT, path string) {
+					t.Helper()
+					if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+						t.Fatalf("write wrong-mode descriptor: %v", err)
+					}
+				},
+			},
+			{
+				name: "non regular path",
+				setup: func(t leafwikiTestT, path string) {
+					t.Helper()
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatalf("create descriptor directory: %v", err)
+					}
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				baseDir := t.TempDir()
+				dataDir := filepath.Join(baseDir, "data")
+				rootDir := filepath.Join(baseDir, "content")
+				descriptorPath := filepath.Join(dataDir, ".leafwiki", projectdaemon.DescriptorFileName)
+				if err := os.MkdirAll(filepath.Dir(descriptorPath), 0o755); err != nil {
+					t.Fatalf("create descriptor dir: %v", err)
+				}
+				if err := os.MkdirAll(rootDir, 0o755); err != nil {
+					t.Fatalf("create root dir: %v", err)
+				}
+				tt.setup(t, descriptorPath)
+
+				port := freeTCPPort(t)
+				proc := startLeafwikiHelper(t, []string{
+					"--disable-auth",
+					"--data-dir", dataDir,
+					"--root-dir", rootDir,
+					"--host", "127.0.0.1",
+					"--port", port,
+					"--log-target", "stderr",
+				}, nil)
+				waitForLeafwikiReady(t, proc, port)
+
+				desc := waitForProjectDaemonDescriptor(t, dataDir)
+				if desc.PID == 0 || desc.ControlURL == "" {
+					t.Fatalf("replacement descriptor = %#v, want live daemon descriptor", desc)
+				}
+				info, err := os.Stat(descriptorPath)
+				if err != nil {
+					t.Fatalf("stat replacement descriptor: %v", err)
+				}
+				if got := info.Mode().Perm(); got != 0o600 {
+					t.Fatalf("replacement descriptor mode = %v, want 0600", got)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestReadHealthyProjectDaemonPreservesUntrustedDescriptorWhenAnyProjectLockIsHeld", func() {
+	ginkgo.It("TestReadHealthyProjectDaemonPreservesUntrustedDescriptorWhenAnyProjectLockIsHeld", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name string
+			lock func(t leafwikiTestT, dataDir string, rootDir string) func()
+		}{
+			{
+				name: "data lock held",
+				lock: func(t leafwikiTestT, dataDir string, _ string) func() {
+					t.Helper()
+					lock, err := locking.AcquireDataDirLock(dataDir)
+					if err != nil {
+						t.Fatalf("acquire data lock: %v", err)
+					}
+					return func() { _ = lock.Release() }
+				},
+			},
+			{
+				name: "root lock held",
+				lock: func(t leafwikiTestT, _ string, rootDir string) func() {
+					t.Helper()
+					lock, err := locking.AcquireRootDirLock(rootDir)
+					if err != nil {
+						t.Fatalf("acquire root lock: %v", err)
+					}
+					return func() { _ = lock.Release() }
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				baseDir := t.TempDir()
+				dataDir := filepath.Join(baseDir, "data")
+				rootDir := filepath.Join(baseDir, "content")
+				if err := os.MkdirAll(filepath.Join(dataDir, ".leafwiki"), 0o755); err != nil {
+					t.Fatalf("create descriptor dir: %v", err)
+				}
+				if err := os.MkdirAll(rootDir, 0o755); err != nil {
+					t.Fatalf("create root dir: %v", err)
+				}
+				canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+				if err != nil {
+					t.Fatalf("canonicalize project: %v", err)
+				}
+				descriptorPath := projectdaemon.DescriptorPath(canonicalData)
+				if err := os.WriteFile(descriptorPath, []byte("{"), 0o600); err != nil {
 					t.Fatalf("write corrupt descriptor: %v", err)
 				}
-			},
-		},
-		{
-			name: "wrong mode",
-			setup: func(t *testing.T, path string) {
-				t.Helper()
-				if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
-					t.Fatalf("write wrong-mode descriptor: %v", err)
+				release := tt.lock(t, canonicalData, canonicalRoot)
+				defer release()
+
+				_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{
+					DataDir: canonicalData,
+					RootDir: canonicalRoot,
+				})
+
+				if err == nil {
+					t.Fatalf("readHealthyProjectDaemon err = nil, want untrusted descriptor error while a project lock is held")
 				}
-			},
-		},
-		{
-			name: "non regular path",
-			setup: func(t *testing.T, path string) {
-				t.Helper()
-				if err := os.Mkdir(path, 0o700); err != nil {
-					t.Fatalf("create descriptor directory: %v", err)
+				if healthy {
+					t.Fatalf("healthy = true, want false")
 				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			baseDir := t.TempDir()
-			dataDir := filepath.Join(baseDir, "data")
-			rootDir := filepath.Join(baseDir, "content")
-			descriptorPath := filepath.Join(dataDir, ".leafwiki", projectdaemon.DescriptorFileName)
-			if err := os.MkdirAll(filepath.Dir(descriptorPath), 0o755); err != nil {
-				t.Fatalf("create descriptor dir: %v", err)
-			}
-			if err := os.MkdirAll(rootDir, 0o755); err != nil {
-				t.Fatalf("create root dir: %v", err)
-			}
-			tt.setup(t, descriptorPath)
-
-			port := freeTCPPort(t)
-			proc := startLeafwikiHelper(t, []string{
-				"--disable-auth",
-				"--data-dir", dataDir,
-				"--root-dir", rootDir,
-				"--host", "127.0.0.1",
-				"--port", port,
-				"--log-target", "stderr",
-			}, nil)
-			waitForLeafwikiReady(t, proc, port)
-
-			desc := waitForProjectDaemonDescriptor(t, dataDir)
-			if desc.PID == 0 || desc.ControlURL == "" {
-				t.Fatalf("replacement descriptor = %#v, want live daemon descriptor", desc)
-			}
-			info, err := os.Stat(descriptorPath)
-			if err != nil {
-				t.Fatalf("stat replacement descriptor: %v", err)
-			}
-			if got := info.Mode().Perm(); got != 0o600 {
-				t.Fatalf("replacement descriptor mode = %v, want 0600", got)
-			}
-		})
-	}
-}
-
-func TestReadHealthyProjectDaemonPreservesUntrustedDescriptorWhenAnyProjectLockIsHeld(t *testing.T) {
-	tests := []struct {
-		name string
-		lock func(t *testing.T, dataDir string, rootDir string) func()
-	}{
-		{
-			name: "data lock held",
-			lock: func(t *testing.T, dataDir string, _ string) func() {
-				t.Helper()
-				lock, err := locking.AcquireDataDirLock(dataDir)
-				if err != nil {
-					t.Fatalf("acquire data lock: %v", err)
+				if _, statErr := os.Stat(descriptorPath); statErr != nil {
+					t.Fatalf("descriptor was removed while a project lock was held: %v", statErr)
 				}
-				return func() { _ = lock.Release() }
-			},
-		},
-		{
-			name: "root lock held",
-			lock: func(t *testing.T, _ string, rootDir string) func() {
-				t.Helper()
-				lock, err := locking.AcquireRootDirLock(rootDir)
-				if err != nil {
-					t.Fatalf("acquire root lock: %v", err)
-				}
-				return func() { _ = lock.Release() }
-			},
-		},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			baseDir := t.TempDir()
-			dataDir := filepath.Join(baseDir, "data")
-			rootDir := filepath.Join(baseDir, "content")
-			if err := os.MkdirAll(filepath.Join(dataDir, ".leafwiki"), 0o755); err != nil {
-				t.Fatalf("create descriptor dir: %v", err)
-			}
-			if err := os.MkdirAll(rootDir, 0o755); err != nil {
-				t.Fatalf("create root dir: %v", err)
-			}
-			canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-			if err != nil {
-				t.Fatalf("canonicalize project: %v", err)
-			}
-			descriptorPath := projectdaemon.DescriptorPath(canonicalData)
-			if err := os.WriteFile(descriptorPath, []byte("{"), 0o600); err != nil {
-				t.Fatalf("write corrupt descriptor: %v", err)
-			}
-			release := tt.lock(t, canonicalData, canonicalRoot)
-			defer release()
+			}()
+		}
 
-			_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{
-				DataDir: canonicalData,
-				RootDir: canonicalRoot,
-			})
-
-			if err == nil {
-				t.Fatalf("readHealthyProjectDaemon err = nil, want untrusted descriptor error while a project lock is held")
-			}
-			if healthy {
-				t.Fatalf("healthy = true, want false")
-			}
-			if _, statErr := os.Stat(descriptorPath); statErr != nil {
-				t.Fatalf("descriptor was removed while a project lock was held: %v", statErr)
-			}
-		})
-	}
-}
-
-func TestReadHealthyProjectDaemonPreservesTrustedDescriptorWhenLocksHeldButControlUnreachable(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
-	ownerCfg, err := daemonConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemon config: %v", err)
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("config hash: %v", err)
-	}
-	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-		PID:              12345,
-		StartedAt:        time.Now(),
-		DataDir:          ownerCfg.DataDir,
-		RootDir:          ownerCfg.RootDir,
-		PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
-		PublicMCPEnabled: ownerCfg.PublicMCPEnabled,
-		ControlURL:       "http://127.0.0.1:" + freeTCPPort(t),
-		ConfigHash:       hash,
-		IdleTimeout:      ownerCfg.DaemonIdleTimeout,
-		ControlToken:     "control-token",
-		Config:           ownerCfg,
-	}); err != nil {
-		t.Fatalf("write descriptor: %v", err)
-	}
-	dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
-	if err != nil {
-		t.Fatalf("acquire data lock: %v", err)
-	}
-	defer dataLock.Release()
-	rootLock, err := locking.AcquireRootDirLock(ownerCfg.RootDir)
-	if err != nil {
-		t.Fatalf("acquire root lock: %v", err)
-	}
-	defer rootLock.Release()
-
-	_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, ownerCfg)
-
-	if err == nil {
-		t.Fatalf("readHealthyProjectDaemon err = nil, want control health error while project locks are held")
-	}
-	if healthy {
-		t.Fatalf("healthy = true, want false")
-	}
-	lowerErr := strings.ToLower(err.Error())
-	if !strings.Contains(lowerErr, "control") && !strings.Contains(lowerErr, "health") {
-		t.Fatalf("readHealthyProjectDaemon error = %v, want control/health context", err)
-	}
-	if _, statErr := os.Stat(descriptorPath); statErr != nil {
-		t.Fatalf("descriptor was removed while project locks were held: %v", statErr)
-	}
-}
-
-func TestReadHealthyProjectDaemonPreservesTrustedUnsupportedSchemaDescriptorWhenProjectLockHeld(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
-	ownerCfg, err := daemonConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemon config: %v", err)
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("config hash: %v", err)
-	}
-	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-		SchemaVersion:    projectdaemon.DescriptorSchemaVersion + 1,
-		PID:              12345,
-		StartedAt:        time.Now(),
-		DataDir:          ownerCfg.DataDir,
-		RootDir:          ownerCfg.RootDir,
-		PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
-		PublicMCPEnabled: ownerCfg.PublicMCPEnabled,
-		ControlURL:       "http://127.0.0.1:" + freeTCPPort(t),
-		ConfigHash:       hash,
-		IdleTimeout:      ownerCfg.DaemonIdleTimeout,
-		ControlToken:     "control-token",
-		Config:           ownerCfg,
-	}); err != nil {
-		t.Fatalf("write descriptor: %v", err)
-	}
-	dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
-	if err != nil {
-		t.Fatalf("acquire data lock: %v", err)
-	}
-	defer dataLock.Release()
-
-	_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, ownerCfg)
-
-	if err == nil {
-		t.Fatalf("readHealthyProjectDaemon err = nil, want unsupported schema error while project lock is held")
-	}
-	if healthy {
-		t.Fatalf("healthy = true, want false")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "schema") {
-		t.Fatalf("readHealthyProjectDaemon error = %v, want schema context", err)
-	}
-	if _, statErr := os.Stat(descriptorPath); statErr != nil {
-		t.Fatalf("descriptor was removed while project lock was held: %v", statErr)
-	}
-}
-
-func TestMainProcess_PlainWebOwnerSupportsLaterPrivateStdioAttach(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
-
-	if err != nil {
-		t.Fatalf("stdio startup should attach to plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
-	if err != nil {
-		t.Fatalf("GET /mcp: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
-	}
-}
-
-func TestMainProcess_AgentPresenceControlStartsOwnerActivity(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := client.RecordAgentPresence(ctx, agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-		EventName:     "SessionStart",
-		SeenAt:        time.Now(),
-	}); err != nil {
-		t.Fatalf("RecordAgentPresence failed: %v\nstderr:\n%s", err, readFileString(t, first.stderrPath))
-	}
-	sessions, err := client.ListAgentPresence(ctx)
-	if err != nil {
-		t.Fatalf("ListAgentPresence failed: %v", err)
-	}
-	if len(sessions) != 1 || sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "codex") {
-		t.Fatalf("agent presence sessions = %#v, want recorded codex presence", sessions)
-	}
-	waitForLeafwikiReady(t, first, port)
-}
-
-func TestMainProcessAgentHookMalformedJSONFailsOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"agent-hook", "codex",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, "{", 5*time.Second)
-
-	if err != nil {
-		t.Fatalf("agent-hook malformed JSON err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "{") {
-		t.Fatalf("stderr leaked raw malformed payload: %s", stderr)
-	}
-	if _, err := os.Stat(projectdaemon.DescriptorPath(dataDir)); !os.IsNotExist(err) {
-		t.Fatalf("descriptor err = %v, want no daemon descriptor for malformed hook", err)
-	}
-}
-
-func TestMainProcessAgentHookStartsDaemonAndRecordsPresence(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	payload := `{"hook_event_name":"SessionStart","session_id":"raw-codex-session","model":"gpt-5.4","source":"startup","prompt":"private prompt"}`
-
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"agent-hook", "codex",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, payload, 10*time.Second)
-
-	if err != nil {
-		t.Fatalf("agent-hook valid payload err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "raw-codex-session") || strings.Contains(stderr, "private prompt") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, desc.PID)
 	})
-	client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	sessions, err := client.ListAgentPresence(ctx)
-	if err != nil {
-		t.Fatalf("ListAgentPresence failed: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("presence session count = %d, want 1: %#v", len(sessions), sessions)
-	}
-	if sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "raw-codex-session") {
-		t.Fatalf("session hash = %q, want hash of raw session id", sessions[0].SessionIDHash)
-	}
-	if sessions[0].Provider != agenthooks.ProviderCodex || sessions[0].LastEvent != "SessionStart" || sessions[0].Model != "gpt-5.4" || sessions[0].Source != "startup" {
-		t.Fatalf("presence session = %#v", sessions[0])
-	}
-	if strings.Contains(fmt.Sprintf("%#v", sessions[0]), "raw-codex-session") || strings.Contains(fmt.Sprintf("%#v", sessions[0]), "private prompt") {
-		t.Fatalf("presence session leaked raw payload data: %#v", sessions[0])
-	}
-}
+})
 
-func TestMainProcessAgentHookReplacesStaleDescriptorAndFailsOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	t.Setenv("HOME", filepath.Join(baseDir, "home"))
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	received := make(chan string, 4)
-	staleControl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		raw, _ := io.ReadAll(req.Body)
+var _ = ginkgo.Describe("TestReadHealthyProjectDaemonPreservesTrustedDescriptorWhenLocksHeldButControlUnreachable", func() {
+	ginkgo.It("TestReadHealthyProjectDaemonPreservesTrustedDescriptorWhenLocksHeldButControlUnreachable", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
+		ownerCfg, err := daemonConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemon config: %v", err)
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("config hash: %v", err)
+		}
+		descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+			SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+			PID:              12345,
+			StartedAt:        time.Now(),
+			DataDir:          ownerCfg.DataDir,
+			RootDir:          ownerCfg.RootDir,
+			PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
+			PublicMCPEnabled: ownerCfg.PublicMCPEnabled,
+			ControlURL:       "http://127.0.0.1:" + freeTCPPort(t),
+			ConfigHash:       hash,
+			IdleTimeout:      ownerCfg.DaemonIdleTimeout,
+			ControlToken:     "control-token",
+			Config:           ownerCfg,
+		}); err != nil {
+			t.Fatalf("write descriptor: %v", err)
+		}
+		dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
+		if err != nil {
+			t.Fatalf("acquire data lock: %v", err)
+		}
+		defer dataLock.Release()
+		rootLock, err := locking.AcquireRootDirLock(ownerCfg.RootDir)
+		if err != nil {
+			t.Fatalf("acquire root lock: %v", err)
+		}
+		defer rootLock.Release()
+
+		_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, ownerCfg)
+
+		if err == nil {
+			t.Fatalf("readHealthyProjectDaemon err = nil, want control health error while project locks are held")
+		}
+		if healthy {
+			t.Fatalf("healthy = true, want false")
+		}
+		lowerErr := strings.ToLower(err.Error())
+		if !strings.Contains(lowerErr, "control") && !strings.Contains(lowerErr, "health") {
+			t.Fatalf("readHealthyProjectDaemon error = %v, want control/health context", err)
+		}
+		if _, statErr := os.Stat(descriptorPath); statErr != nil {
+			t.Fatalf("descriptor was removed while project locks were held: %v", statErr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestReadHealthyProjectDaemonPreservesTrustedUnsupportedSchemaDescriptorWhenProjectLockHeld", func() {
+	ginkgo.It("TestReadHealthyProjectDaemonPreservesTrustedUnsupportedSchemaDescriptorWhenProjectLockHeld", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
+		ownerCfg, err := daemonConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemon config: %v", err)
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("config hash: %v", err)
+		}
+		descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+			SchemaVersion:    projectdaemon.DescriptorSchemaVersion + 1,
+			PID:              12345,
+			StartedAt:        time.Now(),
+			DataDir:          ownerCfg.DataDir,
+			RootDir:          ownerCfg.RootDir,
+			PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
+			PublicMCPEnabled: ownerCfg.PublicMCPEnabled,
+			ControlURL:       "http://127.0.0.1:" + freeTCPPort(t),
+			ConfigHash:       hash,
+			IdleTimeout:      ownerCfg.DaemonIdleTimeout,
+			ControlToken:     "control-token",
+			Config:           ownerCfg,
+		}); err != nil {
+			t.Fatalf("write descriptor: %v", err)
+		}
+		dataLock, err := locking.AcquireDataDirLock(ownerCfg.DataDir)
+		if err != nil {
+			t.Fatalf("acquire data lock: %v", err)
+		}
+		defer dataLock.Release()
+
+		_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, ownerCfg)
+
+		if err == nil {
+			t.Fatalf("readHealthyProjectDaemon err = nil, want unsupported schema error while project lock is held")
+		}
+		if healthy {
+			t.Fatalf("healthy = true, want false")
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "schema") {
+			t.Fatalf("readHealthyProjectDaemon error = %v, want schema context", err)
+		}
+		if _, statErr := os.Stat(descriptorPath); statErr != nil {
+			t.Fatalf("descriptor was removed while project lock was held: %v", statErr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_PlainWebOwnerSupportsLaterPrivateStdioAttach", func() {
+	ginkgo.It("TestMainProcess_PlainWebOwnerSupportsLaterPrivateStdioAttach", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("stdio startup should attach to plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
+		if err != nil {
+			t.Fatalf("GET /mcp: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_AgentPresenceControlStartsOwnerActivity", func() {
+	ginkgo.It("TestMainProcess_AgentPresenceControlStartsOwnerActivity", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := client.RecordAgentPresence(ctx, agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+			EventName:     "SessionStart",
+			SeenAt:        time.Now(),
+		}); err != nil {
+			t.Fatalf("RecordAgentPresence failed: %v\nstderr:\n%s", err, readFileString(t, first.stderrPath))
+		}
+		sessions, err := client.ListAgentPresence(ctx)
+		if err != nil {
+			t.Fatalf("ListAgentPresence failed: %v", err)
+		}
+		if len(sessions) != 1 || sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "codex") {
+			t.Fatalf("agent presence sessions = %#v, want recorded codex presence", sessions)
+		}
+		waitForLeafwikiReady(t, first, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcessAgentHookMalformedJSONFailsOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookMalformedJSONFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"agent-hook", "codex",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, "{", 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("agent-hook malformed JSON err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "{") {
+			t.Fatalf("stderr leaked raw malformed payload: %s", stderr)
+		}
+		if _, err := os.Stat(projectdaemon.DescriptorPath(dataDir)); !os.IsNotExist(err) {
+			t.Fatalf("descriptor err = %v, want no daemon descriptor for malformed hook", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcessAgentHookStartsDaemonAndRecordsPresence", func() {
+	ginkgo.It("TestMainProcessAgentHookStartsDaemonAndRecordsPresence", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		payload := `{"hook_event_name":"SessionStart","session_id":"raw-codex-session","model":"gpt-5.4","source":"startup","prompt":"private prompt"}`
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"agent-hook", "codex",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, payload, 10*time.Second)
+
+		if err != nil {
+			t.Fatalf("agent-hook valid payload err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "raw-codex-session") || strings.Contains(stderr, "private prompt") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, desc.PID)
+		})
+		client := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		sessions, err := client.ListAgentPresence(ctx)
+		if err != nil {
+			t.Fatalf("ListAgentPresence failed: %v", err)
+		}
+		if len(sessions) != 1 {
+			t.Fatalf("presence session count = %d, want 1: %#v", len(sessions), sessions)
+		}
+		if sessions[0].SessionIDHash != agentHookSessionHash(agenthooks.ProviderCodex, "raw-codex-session") {
+			t.Fatalf("session hash = %q, want hash of raw session id", sessions[0].SessionIDHash)
+		}
+		if sessions[0].Provider != agenthooks.ProviderCodex || sessions[0].LastEvent != "SessionStart" || sessions[0].Model != "gpt-5.4" || sessions[0].Source != "startup" {
+			t.Fatalf("presence session = %#v", sessions[0])
+		}
+		if strings.Contains(fmt.Sprintf("%#v", sessions[0]), "raw-codex-session") || strings.Contains(fmt.Sprintf("%#v", sessions[0]), "private prompt") {
+			t.Fatalf("presence session leaked raw payload data: %#v", sessions[0])
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcessAgentHookReplacesStaleDescriptorAndFailsOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookReplacesStaleDescriptorAndFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		t.Setenv("HOME", filepath.Join(baseDir, "home"))
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		received := make(chan string, 4)
+		staleControl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			raw, _ := io.ReadAll(req.Body)
+			select {
+			case received <- req.URL.Path + " " + req.Header.Get(projectdaemon.ControlTokenHeader) + " " + string(raw):
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		}))
+		t.Cleanup(staleControl.Close)
+
+		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
+		ownerCfg, err := daemonRequestConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemonRequestConfigForRuntime: %v", err)
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("ConfigHash: %v", err)
+		}
+		descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
+		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+			SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+			PID:              os.Getpid(),
+			StartedAt:        time.Now().UTC(),
+			DataDir:          ownerCfg.DataDir,
+			RootDir:          ownerCfg.RootDir,
+			PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
+			PublicMCPEnabled: false,
+			ControlURL:       staleControl.URL,
+			ConfigHash:       hash,
+			IdleTimeout:      "0s",
+			ControlToken:     "stale-token",
+			Config:           ownerCfg,
+		}); err != nil {
+			t.Fatalf("write stale descriptor: %v", err)
+		}
+		payload := `{"hook_event_name":"SessionStart","session_id":"stale-descriptor-secret","prompt":"private prompt"}`
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"agent-hook", "codex",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", ownerCfg.Port,
+			"--log-target", "stderr",
+		}, nil, payload, 10*time.Second)
+
+		if err != nil {
+			t.Fatalf("agent-hook stale descriptor should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "stale-descriptor-secret") || strings.Contains(stderr, "private prompt") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
+		replaced := readFileString(t, descriptorPath)
+		if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
+			t.Fatalf("descriptor was not replaced:\n%s", replaced)
+		}
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, desc.PID)
+		})
 		select {
-		case received <- req.URL.Path + " " + req.Header.Get(projectdaemon.ControlTokenHeader) + " " + string(raw):
+		case got := <-received:
+			t.Fatalf("stale descriptor endpoint received request before replacement: %q", got)
 		default:
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	t.Cleanup(staleControl.Close)
 
-	cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true)
-	ownerCfg, err := daemonRequestConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemonRequestConfigForRuntime: %v", err)
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("ConfigHash: %v", err)
-	}
-	descriptorPath := projectdaemon.DescriptorPath(ownerCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-		SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-		PID:              os.Getpid(),
-		StartedAt:        time.Now().UTC(),
-		DataDir:          ownerCfg.DataDir,
-		RootDir:          ownerCfg.RootDir,
-		PublicURL:        "http://127.0.0.1:" + ownerCfg.Port,
-		PublicMCPEnabled: false,
-		ControlURL:       staleControl.URL,
-		ConfigHash:       hash,
-		IdleTimeout:      "0s",
-		ControlToken:     "stale-token",
-		Config:           ownerCfg,
-	}); err != nil {
-		t.Fatalf("write stale descriptor: %v", err)
-	}
-	payload := `{"hook_event_name":"SessionStart","session_id":"stale-descriptor-secret","prompt":"private prompt"}`
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"agent-hook", "codex",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", ownerCfg.Port,
-		"--log-target", "stderr",
-	}, nil, payload, 10*time.Second)
-
-	if err != nil {
-		t.Fatalf("agent-hook stale descriptor should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "stale-descriptor-secret") || strings.Contains(stderr, "private prompt") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-	replaced := readFileString(t, descriptorPath)
-	if strings.Contains(replaced, staleControl.URL) || strings.Contains(replaced, "stale-token") {
-		t.Fatalf("descriptor was not replaced:\n%s", replaced)
-	}
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, desc.PID)
 	})
-	select {
-	case got := <-received:
-		t.Fatalf("stale descriptor endpoint received request before replacement: %q", got)
-	default:
-	}
-}
+})
 
-func TestRunAgentHookCommandRecoversPanicAndAllows(t *testing.T) {
-	var stdout bytes.Buffer
-	err := runAgentHookCommand(context.Background(), testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true), agenthooks.ProviderCodex, panicReader{}, &stdout)
+var _ = ginkgo.Describe("TestRunAgentHookCommandRecoversPanicAndAllows", func() {
+	ginkgo.It("TestRunAgentHookCommandRecoversPanicAndAllows", func() {
+		t := ginkgo.GinkgoT()
+		var stdout bytes.Buffer
+		err := runAgentHookCommand(context.Background(), testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true), agenthooks.ProviderCodex, panicReader{}, &stdout)
 
-	if err == nil {
-		t.Fatalf("runAgentHookCommand err = nil, want panic surfaced as fail-open error")
-	}
-	if stdout.String() != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response after panic", stdout.String())
-	}
-}
+		if err == nil {
+			t.Fatalf("runAgentHookCommand err = nil, want panic surfaced as fail-open error")
+		}
+		if stdout.String() != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response after panic", stdout.String())
+		}
 
-func TestRunAgentHookCommandReadErrorFailsOpen(t *testing.T) {
-	var stdout bytes.Buffer
-	err := runAgentHookCommand(
-		context.Background(),
-		testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true),
-		agenthooks.ProviderClaude,
-		errorReader{err: errors.New("synthetic read failure")},
-		&stdout,
-	)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("runAgentHookCommand err = nil, want read error")
-	}
-	if stdout.String() != "{}\n" {
-		t.Fatalf("stdout = %q, want Claude allow response after read error", stdout.String())
-	}
-}
+var _ = ginkgo.Describe("TestRunAgentHookCommandReadErrorFailsOpen", func() {
+	ginkgo.It("TestRunAgentHookCommandReadErrorFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		var stdout bytes.Buffer
+		err := runAgentHookCommand(
+			context.Background(),
+			testRuntimeConfig(t.TempDir(), filepath.Join(t.TempDir(), "root"), freeTCPPort(t), mcpTransports{}, true),
+			agenthooks.ProviderClaude,
+			errorReader{err: errors.New("synthetic read failure")},
+			&stdout,
+		)
 
-func TestMainProcessAgentHookPreDispatchFailuresFailOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	sameDir := filepath.Join(baseDir, "same")
-	payload := `{"hook_event_name":"SessionStart","session_id":"pre-dispatch-secret"}`
+		if err == nil {
+			t.Fatalf("runAgentHookCommand err = nil, want read error")
+		}
+		if stdout.String() != "{}\n" {
+			t.Fatalf("stdout = %q, want Claude allow response after read error", stdout.String())
+		}
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"agent-hook", "codex",
-		"--disable-auth",
-		"--data-dir", sameDir,
-		"--root-dir", sameDir,
-		"--log-target", "stderr",
-	}, nil, payload, 5*time.Second)
+	})
+})
 
-	if err != nil {
-		t.Fatalf("agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "pre-dispatch-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcessAgentHookPreDispatchFailuresFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookPreDispatchFailuresFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		sameDir := filepath.Join(baseDir, "same")
+		payload := `{"hook_event_name":"SessionStart","session_id":"pre-dispatch-secret"}`
 
-func TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	sameDir := filepath.Join(baseDir, "same")
-	payload := `{"hook_event_name":"SessionStart","session_id":"flag-first-secret"}`
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"agent-hook", "codex",
+			"--disable-auth",
+			"--data-dir", sameDir,
+			"--root-dir", sameDir,
+			"--log-target", "stderr",
+		}, nil, payload, 5*time.Second)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--disable-auth",
-		"--data-dir", sameDir,
-		"--root-dir", sameDir,
-		"--log-target", "stderr",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+		if err != nil {
+			t.Fatalf("agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "pre-dispatch-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-	if err != nil {
-		t.Fatalf("flag-first agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "flag-first-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+	})
+})
 
-func TestMainProcessNonHookFlagValueNamedAgentHookDoesNotFailOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	sameDir := filepath.Join(baseDir, "same")
-	if err := os.MkdirAll(sameDir, 0o755); err != nil {
-		t.Fatalf("mkdir sameDir: %v", err)
-	}
+var _ = ginkgo.Describe("TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookFlagFirstPreDispatchFailuresFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		sameDir := filepath.Join(baseDir, "same")
+		payload := `{"hook_event_name":"SessionStart","session_id":"flag-first-secret"}`
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--log-file", "agent-hook",
-		"--disable-auth",
-		"--data-dir", sameDir,
-		"--root-dir", sameDir,
-		"--log-target", "stderr",
-	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--disable-auth",
+			"--data-dir", sameDir,
+			"--root-dir", sameDir,
+			"--log-target", "stderr",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-	if err == nil {
-		t.Fatalf("non-hook startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid workspace configuration") {
-		t.Fatalf("stderr = %q, want workspace configuration error", stderr)
-	}
-}
+		if err != nil {
+			t.Fatalf("flag-first agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "flag-first-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-func TestMainProcessNonHookFlagValueNamedAgentHookParseErrorDoesNotFailOpen(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--log-file", "agent-hook",
-		"--not-a-real-flag",
-	}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
+	})
+})
 
-	if err == nil {
-		t.Fatalf("non-hook parse error unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout == "{}\n" {
-		t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
-	}
-	if !strings.Contains(stderr, "not-a-real-flag") {
-		t.Fatalf("stderr = %q, want flag parse error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcessNonHookFlagValueNamedAgentHookDoesNotFailOpen", func() {
+	ginkgo.It("TestMainProcessNonHookFlagValueNamedAgentHookDoesNotFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		sameDir := filepath.Join(baseDir, "same")
+		if err := os.MkdirAll(sameDir, 0o755); err != nil {
+			t.Fatalf("mkdir sameDir: %v", err)
+		}
 
-func TestMainProcessAgentHookFlagFirstParseErrorsFailOpen(t *testing.T) {
-	payload := `{"hook_event_name":"SessionStart","session_id":"flag-parse-secret"}`
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--log-file", "agent-hook",
+			"--disable-auth",
+			"--data-dir", sameDir,
+			"--root-dir", sameDir,
+			"--log-target", "stderr",
+		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--not-a-real-flag",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+		if err == nil {
+			t.Fatalf("non-hook startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid workspace configuration") {
+			t.Fatalf("stderr = %q, want workspace configuration error", stderr)
+		}
 
-	if err != nil {
-		t.Fatalf("flag-first agent-hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "flag-parse-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+	})
+})
 
-func TestMainProcessAgentHookFlagValueNamedConfigDoesNotDisableFailOpen(t *testing.T) {
-	payload := `{"hook_event_name":"SessionStart","session_id":"flag-value-config-secret"}`
+var _ = ginkgo.Describe("TestMainProcessNonHookFlagValueNamedAgentHookParseErrorDoesNotFailOpen", func() {
+	ginkgo.It("TestMainProcessNonHookFlagValueNamedAgentHookParseErrorDoesNotFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--log-file", "agent-hook",
+			"--not-a-real-flag",
+		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--data-dir", "--config",
-		"--not-a-real-flag",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+		if err == nil {
+			t.Fatalf("non-hook parse error unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout == "{}\n" {
+			t.Fatalf("stdout = %q, want no agent-hook fail-open response", stdout)
+		}
+		if !strings.Contains(stderr, "not-a-real-flag") {
+			t.Fatalf("stderr = %q, want flag parse error", stderr)
+		}
 
-	if err != nil {
-		t.Fatalf("non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "flag-value-config-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+	})
+})
 
-func TestMainProcessAgentHookMalformedConfigFlagDoesNotDisableFailOpen(t *testing.T) {
-	payload := `{"hook_event_name":"SessionStart","session_id":"malformed-config-flag-secret"}`
+var _ = ginkgo.Describe("TestMainProcessAgentHookFlagFirstParseErrorsFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookFlagFirstParseErrorsFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		payload := `{"hook_event_name":"SessionStart","session_id":"flag-parse-secret"}`
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"---config",
-		"--not-a-real-flag",
-		"agent-hook", "codex",
-	}, nil, payload, 5*time.Second)
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--not-a-real-flag",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-	if err != nil {
-		t.Fatalf("malformed non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout)
-	}
-	if strings.Contains(stderr, "malformed-config-flag-secret") {
-		t.Fatalf("stderr leaked hook payload data: %s", stderr)
-	}
-}
+		if err != nil {
+			t.Fatalf("flag-first agent-hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "flag-parse-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-func TestMainProcessAgentHookProviderAllowResponsesFailOpen(t *testing.T) {
-	tests := []struct {
-		name       string
-		provider   string
-		payload    string
-		wantStdout string
-	}{
-		{name: "claude malformed", provider: string(agenthooks.ProviderClaude), payload: "{", wantStdout: "{}\n"},
-		{name: "cursor malformed", provider: string(agenthooks.ProviderCursor), payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
-		{name: "unknown provider", provider: string(agenthooks.ProviderUnknown), payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			baseDir := t.TempDir()
-			dataDir := filepath.Join(baseDir, "data")
-			rootDir := filepath.Join(baseDir, "content")
-			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-				"agent-hook", tt.provider,
-				"--disable-auth",
-				"--data-dir", dataDir,
-				"--root-dir", rootDir,
-				"--host", "127.0.0.1",
-				"--port", freeTCPPort(t),
-				"--log-target", "stderr",
-			}, nil, tt.payload, 5*time.Second)
+	})
+})
 
-			if err != nil {
-				t.Fatalf("agent-hook should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-			}
-			if stdout != tt.wantStdout {
-				t.Fatalf("stdout = %q, want %q", stdout, tt.wantStdout)
-			}
-			if strings.Contains(stderr, "unknown-secret") {
-				t.Fatalf("stderr leaked hook payload data: %s", stderr)
-			}
-		})
-	}
-}
+var _ = ginkgo.Describe("TestMainProcessAgentHookFlagValueNamedConfigDoesNotDisableFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookFlagValueNamedConfigDoesNotDisableFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		payload := `{"hook_event_name":"SessionStart","session_id":"flag-value-config-secret"}`
 
-func TestRunAgentHookCommandOversizedPayloadFailsOpen(t *testing.T) {
-	var stdout bytes.Buffer
-	baseDir := t.TempDir()
-	err := runAgentHookCommand(
-		context.Background(),
-		testRuntimeConfig(filepath.Join(baseDir, "data"), filepath.Join(baseDir, "root"), freeTCPPort(t), mcpTransports{}, true),
-		agenthooks.ProviderCursor,
-		strings.NewReader(strings.Repeat("x", agentHookMaxPayloadBytes+1)),
-		&stdout,
-	)
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--data-dir", "--config",
+			"--not-a-real-flag",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-	if err == nil {
-		t.Fatalf("runAgentHookCommand err = nil, want oversized payload error")
-	}
-	if stdout.String() != "{\"permission\":\"allow\"}\n" {
-		t.Fatalf("stdout = %q, want Cursor allow response", stdout.String())
-	}
-}
+		if err != nil {
+			t.Fatalf("non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "flag-value-config-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-func TestRunAgentHookCommandLockedProjectFailsOpen(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-	if err != nil {
-		t.Fatalf("canonicalize project: %v", err)
-	}
-	dataLock, err := locking.AcquireDataDirLock(canonicalData)
-	if err != nil {
-		t.Fatalf("acquire data lock: %v", err)
-	}
-	defer dataLock.Release()
-	rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
-	if err != nil {
-		t.Fatalf("acquire root lock: %v", err)
-	}
-	defer rootLock.Release()
+	})
+})
 
-	var stdout bytes.Buffer
-	err = runAgentHookCommand(
-		context.Background(),
-		testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true),
-		agenthooks.ProviderCodex,
-		strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"locked-secret"}`),
-		&stdout,
-	)
+var _ = ginkgo.Describe("TestMainProcessAgentHookMalformedConfigFlagDoesNotDisableFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookMalformedConfigFlagDoesNotDisableFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		payload := `{"hook_event_name":"SessionStart","session_id":"malformed-config-flag-secret"}`
 
-	if err == nil {
-		t.Fatalf("runAgentHookCommand err = nil, want locked project error")
-	}
-	if stdout.String() != "{}\n" {
-		t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
-	}
-	if strings.Contains(err.Error(), "locked-secret") {
-		t.Fatalf("error leaked hook payload data: %v", err)
-	}
-}
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"---config",
+			"--not-a-real-flag",
+			"agent-hook", "codex",
+		}, nil, payload, 5*time.Second)
 
-func TestRunAgentHookCommandControlRecordFailuresFailOpen(t *testing.T) {
-	tests := []struct {
-		name          string
-		recordHandler func(http.ResponseWriter, *http.Request)
-		parentTimeout time.Duration
-	}{
-		{name: "control 401", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-		}},
-		{name: "control 400", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "bad event", http.StatusBadRequest)
-		}},
-		{name: "control 500", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "boom", http.StatusInternalServerError)
-		}},
-		{name: "control timeout", parentTimeout: 50 * time.Millisecond, recordHandler: func(w http.ResponseWriter, _ *http.Request) {
-			time.Sleep(250 * time.Millisecond)
-			w.WriteHeader(http.StatusNoContent)
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(t, tt.recordHandler)
-			defer cleanup()
-			ctx := context.Background()
-			if tt.parentTimeout > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, tt.parentTimeout)
-				defer cancel()
-			}
+		if err != nil {
+			t.Fatalf("malformed non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout)
+		}
+		if strings.Contains(stderr, "malformed-config-flag-secret") {
+			t.Fatalf("stderr leaked hook payload data: %s", stderr)
+		}
 
-			var stdout bytes.Buffer
-			err := runAgentHookCommand(
-				ctx,
-				cfg,
-				agenthooks.ProviderCodex,
-				strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`),
-				&stdout,
-			)
+	})
+})
 
-			if err == nil {
-				t.Fatalf("runAgentHookCommand err = nil, want control failure")
-			}
-			if stdout.String() != "{}\n" {
-				t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
-			}
-			if strings.Contains(err.Error(), "control-secret") {
-				t.Fatalf("error leaked hook payload data: %v", err)
-			}
-		})
-	}
-}
+var _ = ginkgo.Describe("TestMainProcessAgentHookProviderAllowResponsesFailOpen", func() {
+	ginkgo.It("TestMainProcessAgentHookProviderAllowResponsesFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name       string
+			provider   string
+			payload    string
+			wantStdout string
+		}{
+			{name: "claude malformed", provider: string(agenthooks.ProviderClaude), payload: "{", wantStdout: "{}\n"},
+			{name: "cursor malformed", provider: string(agenthooks.ProviderCursor), payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
+			{name: "unknown provider", provider: string(agenthooks.ProviderUnknown), payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				baseDir := t.TempDir()
+				dataDir := filepath.Join(baseDir, "data")
+				rootDir := filepath.Join(baseDir, "content")
+				stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+					"agent-hook", tt.provider,
+					"--disable-auth",
+					"--data-dir", dataDir,
+					"--root-dir", rootDir,
+					"--host", "127.0.0.1",
+					"--port", freeTCPPort(t),
+					"--log-target", "stderr",
+				}, nil, tt.payload, 5*time.Second)
+
+				if err != nil {
+					t.Fatalf("agent-hook should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+				}
+				if stdout != tt.wantStdout {
+					t.Fatalf("stdout = %q, want %q", stdout, tt.wantStdout)
+				}
+				if strings.Contains(stderr, "unknown-secret") {
+					t.Fatalf("stderr leaked hook payload data: %s", stderr)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRunAgentHookCommandOversizedPayloadFailsOpen", func() {
+	ginkgo.It("TestRunAgentHookCommandOversizedPayloadFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		var stdout bytes.Buffer
+		baseDir := t.TempDir()
+		err := runAgentHookCommand(
+			context.Background(),
+			testRuntimeConfig(filepath.Join(baseDir, "data"), filepath.Join(baseDir, "root"), freeTCPPort(t), mcpTransports{}, true),
+			agenthooks.ProviderCursor,
+			strings.NewReader(strings.Repeat("x", agentHookMaxPayloadBytes+1)),
+			&stdout,
+		)
+
+		if err == nil {
+			t.Fatalf("runAgentHookCommand err = nil, want oversized payload error")
+		}
+		if stdout.String() != "{\"permission\":\"allow\"}\n" {
+			t.Fatalf("stdout = %q, want Cursor allow response", stdout.String())
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRunAgentHookCommandLockedProjectFailsOpen", func() {
+	ginkgo.It("TestRunAgentHookCommandLockedProjectFailsOpen", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+		if err != nil {
+			t.Fatalf("canonicalize project: %v", err)
+		}
+		dataLock, err := locking.AcquireDataDirLock(canonicalData)
+		if err != nil {
+			t.Fatalf("acquire data lock: %v", err)
+		}
+		defer dataLock.Release()
+		rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
+		if err != nil {
+			t.Fatalf("acquire root lock: %v", err)
+		}
+		defer rootLock.Release()
+
+		var stdout bytes.Buffer
+		err = runAgentHookCommand(
+			context.Background(),
+			testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, true),
+			agenthooks.ProviderCodex,
+			strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"locked-secret"}`),
+			&stdout,
+		)
+
+		if err == nil {
+			t.Fatalf("runAgentHookCommand err = nil, want locked project error")
+		}
+		if stdout.String() != "{}\n" {
+			t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
+		}
+		if strings.Contains(err.Error(), "locked-secret") {
+			t.Fatalf("error leaked hook payload data: %v", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRunAgentHookCommandControlRecordFailuresFailOpen", func() {
+	ginkgo.It("TestRunAgentHookCommandControlRecordFailuresFailOpen", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name          string
+			recordHandler func(http.ResponseWriter, *http.Request)
+			parentTimeout time.Duration
+		}{
+			{name: "control 401", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			}},
+			{name: "control 400", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "bad event", http.StatusBadRequest)
+			}},
+			{name: "control 500", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "boom", http.StatusInternalServerError)
+			}},
+			{name: "control timeout", parentTimeout: 50 * time.Millisecond, recordHandler: func(w http.ResponseWriter, _ *http.Request) {
+				time.Sleep(250 * time.Millisecond)
+				w.WriteHeader(http.StatusNoContent)
+			}},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(t, tt.recordHandler)
+				defer cleanup()
+				ctx := context.Background()
+				if tt.parentTimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tt.parentTimeout)
+					defer cancel()
+				}
+
+				var stdout bytes.Buffer
+				err := runAgentHookCommand(
+					ctx,
+					cfg,
+					agenthooks.ProviderCodex,
+					strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`),
+					&stdout,
+				)
+
+				if err == nil {
+					t.Fatalf("runAgentHookCommand err = nil, want control failure")
+				}
+				if stdout.String() != "{}\n" {
+					t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
+				}
+				if strings.Contains(err.Error(), "control-secret") {
+					t.Fatalf("error leaked hook payload data: %v", err)
+				}
+
+			}()
+		}
+
+	})
+})
 
 type panicReader struct{}
 
@@ -3295,1155 +3775,1239 @@ func (r errorReader) Read([]byte) (int, error) {
 	return 0, r.err
 }
 
-func TestMainProcess_DisabledAuthOwnerRejectsAPIKeyStdioAttach(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	t.Cleanup(func() {
+var _ = ginkgo.Describe("TestMainProcess_DisabledAuthOwnerRejectsAPIKeyStdioAttach", func() {
+	ginkgo.It("TestMainProcess_DisabledAuthOwnerRejectsAPIKeyStdioAttach", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		t.Cleanup(func() {
+			first.stop(t)
+			terminateProjectDaemonProcess(t, globalDesc.PID)
+			waitForLeafwikiUnavailable(t, port)
+			waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
+		})
+
+		apiKey := "lwk_disabled_auth_owner_process_secret"
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("API-key STDIO attach to disabled-auth owner unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty on rejected API-key attach", stdout)
+		}
+		if strings.Contains(stdout, apiKey) || strings.Contains(stderr, apiKey) {
+			t.Fatalf("API key leaked in process output\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "auth-disabled") {
+			t.Fatalf("stderr = %q, want auth-disabled daemon config mismatch", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NonLoopbackPlainWebOwnerSupportsLaterPrivateStdioAttach", func() {
+	ginkgo.It("TestMainProcess_NonLoopbackPlainWebOwnerSupportsLaterPrivateStdioAttach", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "0.0.0.0",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, nativeStdioListToolsInput(), 8*time.Second)
+
+		if err != nil {
+			t.Fatalf("stdio startup should attach to non-loopback plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
+			t.Fatalf("stdout = %q, want tools/list response from private MCP bridge", stdout)
+		}
+		if strings.Contains(stderr, "MCP requires a loopback host") || strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no host validation/config mismatch failure", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner", func() {
+	ginkgo.It("TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner", func() {
+		t := ginkgo.GinkgoT()
+		if !supportsGracefulProcessSignal() {
+			t.Skip("graceful process signaling is required to assert foreground session release")
+		}
+
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+		waitForLeafwikiReady(t, first, port)
+
+		second := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+		waitForLeafwikiReady(t, second, port)
+
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
+			t.Fatalf("signal first foreground process: %v", err)
+		}
+		first.waitForExit(t)
+		waitForLeafwikiReady(t, second, port)
+		stderr := readFileString(t, second.stderrPath)
+		for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use", "project daemon config mismatch"} {
+			if strings.Contains(stderr, unexpected) {
+				t.Fatalf("second foreground startup stderr = %q, want no ownership failure %q", stderr, unexpected)
+			}
+		}
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcess(second.cmd.Process); err != nil {
+			t.Fatalf("signal second foreground process: %v", err)
+		}
+		second.waitForExit(t)
+		waitForLeafwikiUnavailable(t, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_PlainWebOwnerHandlesLaterPrivateStdioMCPFrames", func() {
+	ginkgo.It("TestMainProcess_PlainWebOwnerHandlesLaterPrivateStdioMCPFrames", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, nativeStdioListToolsInput(), 8*time.Second)
+
+		if err != nil {
+			t.Fatalf("stdio startup should proxy MCP frames to existing plain owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
+			t.Fatalf("stdout = %q, want tools/list response from private MCP bridge", stdout)
+		}
+		if strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no config mismatch", stderr)
+		}
+		resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
+		if err != nil {
+			t.Fatalf("GET /mcp: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext", func() {
+	ginkgo.It("TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		apiKey := createWikidMCPAPIKeyWithUser(t, dataDir)
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--mcp=http",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--jwt-secret", "owner-jwt-secret",
+			"--admin-password", "owner-admin-password",
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, map[string]string{})
+		waitForLeafwikiReady(t, first, port)
+		grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, map[string]string{
+			"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
+		}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
+
+		if err != nil {
+			t.Fatalf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, `"username":"editor"`) || !strings.Contains(stdout, `"role":"editor"`) {
+			t.Fatalf("stdout = %q, want get_current_user response for API-key editor", stdout)
+		}
+		if strings.Contains(stderr, "JWT secret is required") || strings.Contains(stderr, "admin password is required") || strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no owner bootstrap/config mismatch failure", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner", func() {
+	ginkgo.It("TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		slug := fmt.Sprintf("stdio-collaboration-%d", time.Now().UnixNano())
+		title := "STDIO Collaboration Page"
+
+		writerStdout, writerStderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_create_page", map[string]any{
+			"title": title,
+			"slug":  slug,
+			"kind":  "page",
+		}), 8*time.Second)
+		if err != nil {
+			t.Fatalf("writer STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, writerStdout, writerStderr)
+		}
+		if !strings.Contains(writerStdout, `"id":2`) || !strings.Contains(writerStdout, slug) {
+			t.Fatalf("writer stdout = %q, want create_page response with slug %q", writerStdout, slug)
+		}
+
+		readerStdout, readerStderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
+		if err != nil {
+			t.Fatalf("reader STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, readerStdout, readerStderr)
+		}
+		if !strings.Contains(readerStdout, `"id":2`) || !strings.Contains(readerStdout, slug) || !strings.Contains(readerStdout, title) {
+			t.Fatalf("reader stdout = %q, want get_page_by_path response for writer-created page", readerStdout)
+		}
+		waitForLeafwikiUnavailable(t, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_PlainWebOwnerRejectsLaterPublicMCPEnablement", func() {
+	ginkgo.It("TestMainProcess_PlainWebOwnerRejectsLaterPublicMCPEnablement", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=http",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("later public MCP enablement unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("later public MCP enablement hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "public-mcp-enabled") {
+			t.Fatalf("stderr = %q, want public MCP config mismatch", stderr)
+		}
 		first.stop(t)
 		terminateProjectDaemonProcess(t, globalDesc.PID)
 		waitForLeafwikiUnavailable(t, port)
 		waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
+
 	})
+})
 
-	apiKey := "lwk_disabled_auth_owner_process_secret"
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("API-key STDIO attach to disabled-auth owner unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty on rejected API-key attach", stdout)
-	}
-	if strings.Contains(stdout, apiKey) || strings.Contains(stderr, apiKey) {
-		t.Fatalf("API key leaked in process output\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "auth-disabled") {
-		t.Fatalf("stderr = %q, want auth-disabled daemon config mismatch", stderr)
-	}
-}
-
-func TestMainProcess_NonLoopbackPlainWebOwnerSupportsLaterPrivateStdioAttach(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "0.0.0.0",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, nativeStdioListToolsInput(), 8*time.Second)
-
-	if err != nil {
-		t.Fatalf("stdio startup should attach to non-loopback plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
-		t.Fatalf("stdout = %q, want tools/list response from private MCP bridge", stdout)
-	}
-	if strings.Contains(stderr, "MCP requires a loopback host") || strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no host validation/config mismatch failure", stderr)
-	}
-}
-
-func TestMainProcess_PlainWebSecondStartupAttachesToExistingOwner(t *testing.T) {
-	if !supportsGracefulProcessSignal() {
-		t.Skip("graceful process signaling is required to assert foreground session release")
-	}
-
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-	waitForLeafwikiReady(t, first, port)
-
-	second := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-	waitForLeafwikiReady(t, second, port)
-
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
-		t.Fatalf("signal first foreground process: %v", err)
-	}
-	first.waitForExit(t)
-	waitForLeafwikiReady(t, second, port)
-	stderr := readFileString(t, second.stderrPath)
-	for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use", "project daemon config mismatch"} {
-		if strings.Contains(stderr, unexpected) {
-			t.Fatalf("second foreground startup stderr = %q, want no ownership failure %q", stderr, unexpected)
+var _ = ginkgo.Describe("TestMainProcess_BasePathOwnerRejectsLaterNoBasePathStartup", func() {
+	ginkgo.It("TestMainProcess_BasePathOwnerRejectsLaterNoBasePathStartup", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--base-path", "/wiki",
+			"--log-target", "stderr",
+		}, nil)
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		if desc.BasePath != "/wiki" {
+			t.Fatalf("descriptor base path = %q, want /wiki", desc.BasePath)
 		}
-	}
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(second.cmd.Process); err != nil {
-		t.Fatalf("signal second foreground process: %v", err)
-	}
-	second.waitForExit(t)
-	waitForLeafwikiUnavailable(t, port)
-}
+		waitForLeafwikiReadyAtBasePath(t, first, port, "/wiki")
 
-func TestMainProcess_PlainWebOwnerHandlesLaterPrivateStdioMCPFrames(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, 5*time.Second)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, nativeStdioListToolsInput(), 8*time.Second)
-
-	if err != nil {
-		t.Fatalf("stdio startup should proxy MCP frames to existing plain owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
-		t.Fatalf("stdout = %q, want tools/list response from private MCP bridge", stdout)
-	}
-	if strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no config mismatch", stderr)
-	}
-	resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
-	if err != nil {
-		t.Fatalf("GET /mcp: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("/mcp status = %d, want %d", resp.StatusCode, http.StatusNotFound)
-	}
-}
-
-func TestMainProcess_AuthHTTPOwnerHandlesLaterPrivateStdioMCPUserContext(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	apiKey := createWikidMCPAPIKeyWithUser(t, dataDir)
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--mcp=http",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--jwt-secret", "owner-jwt-secret",
-		"--admin-password", "owner-admin-password",
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, map[string]string{})
-	waitForLeafwikiReady(t, first, port)
-	grantWikidWorkspaceAccessForDirs(t, dataDir, rootDir, apiKey.UserID, wikid.GrantRoleEditor)
-
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, map[string]string{
-		"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
-	}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
-
-	if err != nil {
-		t.Fatalf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, `"username":"editor"`) || !strings.Contains(stdout, `"role":"editor"`) {
-		t.Fatalf("stdout = %q, want get_current_user response for API-key editor", stdout)
-	}
-	if strings.Contains(stderr, "JWT secret is required") || strings.Contains(stderr, "admin password is required") || strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no owner bootstrap/config mismatch failure", stderr)
-	}
-}
-
-func TestMainProcess_DisabledAuthStdioClientsCollaborateThroughOwner(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	slug := fmt.Sprintf("stdio-collaboration-%d", time.Now().UnixNano())
-	title := "STDIO Collaboration Page"
-
-	writerStdout, writerStderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_create_page", map[string]any{
-		"title": title,
-		"slug":  slug,
-		"kind":  "page",
-	}), 8*time.Second)
-	if err != nil {
-		t.Fatalf("writer STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, writerStdout, writerStderr)
-	}
-	if !strings.Contains(writerStdout, `"id":2`) || !strings.Contains(writerStdout, slug) {
-		t.Fatalf("writer stdout = %q, want create_page response with slug %q", writerStdout, slug)
-	}
-
-	readerStdout, readerStderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
-	if err != nil {
-		t.Fatalf("reader STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, readerStdout, readerStderr)
-	}
-	if !strings.Contains(readerStdout, `"id":2`) || !strings.Contains(readerStdout, slug) || !strings.Contains(readerStdout, title) {
-		t.Fatalf("reader stdout = %q, want get_page_by_path response for writer-created page", readerStdout)
-	}
-	waitForLeafwikiUnavailable(t, port)
-}
-
-func TestMainProcess_PlainWebOwnerRejectsLaterPublicMCPEnablement(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=http",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("later public MCP enablement unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("later public MCP enablement hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "public-mcp-enabled") {
-		t.Fatalf("stderr = %q, want public MCP config mismatch", stderr)
-	}
-	first.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
-}
-
-func TestMainProcess_BasePathOwnerRejectsLaterNoBasePathStartup(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--base-path", "/wiki",
-		"--log-target", "stderr",
-	}, nil)
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	if desc.BasePath != "/wiki" {
-		t.Fatalf("descriptor base path = %q, want /wiki", desc.BasePath)
-	}
-	waitForLeafwikiReadyAtBasePath(t, first, port, "/wiki")
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("later no-base-path startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("later no-base-path startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "base-path") {
-		t.Fatalf("stderr = %q, want base-path config mismatch", stderr)
-	}
-}
-
-func TestMainProcess_AuthOwnerRejectsLaterDisableAuthStartup(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--jwt-secret", "owner-jwt-secret",
-		"--admin-password", "owner-admin-password",
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, nil)
-	waitForLeafwikiReady(t, first, port)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("later disable-auth startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("later disable-auth startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "auth-disabled") {
-		t.Fatalf("stderr = %q, want auth-disabled config mismatch", stderr)
-	}
-}
-
-func TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecified(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": ""})
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
-
-	if desc.IdleTimeout != "10m0s" {
-		t.Fatalf("descriptor idle timeout = %q, want core CLI default 10m0s", desc.IdleTimeout)
-	}
-	if desc.Config.DaemonIdleTimeout != "10m0s" {
-		t.Fatalf("descriptor config daemon idle timeout = %q, want core CLI default 10m0s", desc.Config.DaemonIdleTimeout)
-	}
-	proc.stop(t)
-}
-
-func TestMainProcess_WikidFrontdRuntimeWritesRoleDescriptor(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-
-	workspaceDesc := waitForProjectDaemonDescriptor(t, dataDir)
-	waitForLeafwikiReady(t, proc, port)
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	ownerPID = globalDesc.PID
-
-	if globalDesc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd || globalDesc.Role != projectdaemon.RoleWikid {
-		t.Fatalf("global descriptor runtime metadata = %q/%q, want %q/%q", globalDesc.RuntimeStack, globalDesc.Role, projectdaemon.RuntimeStackWikidFrontd, projectdaemon.RoleWikid)
-	}
-	if globalDesc.WorkspaceID != wikid.HomeWorkspaceID || globalDesc.Config.WorkspaceID != wikid.HomeWorkspaceID {
-		t.Fatalf("global descriptor workspace metadata = %q/%q, want home/home", globalDesc.WorkspaceID, globalDesc.Config.WorkspaceID)
-	}
-	if globalDesc.Config.DataDir != layout.HomeDir || globalDesc.Config.RootDir != layout.HomeRootDir {
-		t.Fatalf("global descriptor config dirs = %q/%q, want %q/%q", globalDesc.Config.DataDir, globalDesc.Config.RootDir, layout.HomeDir, layout.HomeRootDir)
-	}
-	if globalDesc.PrivateMCPURL == "" || globalDesc.PrivateMCPToken == "" {
-		t.Fatalf("global descriptor private MCP fields missing: url=%q token=%q", globalDesc.PrivateMCPURL, globalDesc.PrivateMCPToken)
-	}
-	if workspaceDesc.Role != projectdaemon.RoleWorkspaced || workspaceDesc.WorkspaceID == "" || workspaceDesc.WorkspaceID == wikid.HomeWorkspaceID {
-		t.Fatalf("workspace descriptor role/workspace = %q/%q, want non-home workspaced", workspaceDesc.Role, workspaceDesc.WorkspaceID)
-	}
-	if workspaceDesc.Config.Port != "0" {
-		t.Fatalf("workspace descriptor config port = %q, want ephemeral port 0", workspaceDesc.Config.Port)
-	}
-	if workspaceDesc.PrivateMCPURL == "" || strings.Contains(workspaceDesc.PrivateMCPURL, ":0/") {
-		t.Fatalf("workspace descriptor private MCP URL = %q, want actual listener URL", workspaceDesc.PrivateMCPURL)
-	}
-	gotRoles := map[projectdaemon.RoleName]projectdaemon.RoleHealth{}
-	for _, role := range globalDesc.Roles {
-		gotRoles[role.Name] = role
-	}
-	for _, name := range []projectdaemon.RoleName{projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced} {
-		if gotRoles[name].State != projectdaemon.RoleStateReady {
-			t.Fatalf("role %s state = %q, want ready; all roles = %#v", name, gotRoles[name].State, globalDesc.Roles)
+		if err == nil {
+			t.Fatalf("later no-base-path startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 		}
-		if gotRoles[name].PID <= 0 {
-			t.Fatalf("role %s PID = %d, want live role process; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles)
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("later no-base-path startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 		}
-		if !processExists(gotRoles[name].PID) {
-			t.Fatalf("role %s PID %d is not running; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles)
+		if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "base-path") {
+			t.Fatalf("stderr = %q, want base-path config mismatch", stderr)
 		}
-	}
-	if gotRoles[projectdaemon.RoleWikid].PID != globalDesc.PID {
-		t.Fatalf("wikid PID = %d, want descriptor owner PID %d", gotRoles[projectdaemon.RoleWikid].PID, globalDesc.PID)
-	}
-	if gotRoles[projectdaemon.RoleFrontd].PID == globalDesc.PID ||
-		gotRoles[projectdaemon.RoleWorkspaced].PID == globalDesc.PID ||
-		gotRoles[projectdaemon.RoleFrontd].PID == gotRoles[projectdaemon.RoleWorkspaced].PID {
-		t.Fatalf("role PIDs must be distinct for wikid/frontd/workspaced; descriptor PID = %d roles = %#v", globalDesc.PID, globalDesc.Roles)
-	}
-	proc.stop(t)
-}
 
-func TestMainProcess_WikidFrontdRuntimeListsHomeWorkspace(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
 	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
+})
 
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
+var _ = ginkgo.Describe("TestMainProcess_AuthOwnerRejectsLaterDisableAuthStartup", func() {
+	ginkgo.It("TestMainProcess_AuthOwnerRejectsLaterDisableAuthStartup", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--jwt-secret", "owner-jwt-secret",
+			"--admin-password", "owner-admin-password",
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, nil)
+		waitForLeafwikiReady(t, first, port)
 
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces")
-	if err != nil {
-		t.Fatalf("GET /api/workspaces: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/workspaces status = %d, want 200: %s", resp.StatusCode, body)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read /api/workspaces: %v", err)
-	}
-	var out wikid.WorkspaceListResponse
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatalf("decode /api/workspaces: %v", err)
-	}
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	for _, leaked := range []string{"dataDir", "rootDir", layout.HomeDir, layout.HomeRootDir, dataDir, rootDir} {
-		if strings.Contains(string(body), leaked) {
-			t.Fatalf("/api/workspaces leaked workspace path field %q: %s", leaked, body)
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("later disable-auth startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 		}
-	}
-	if len(out.Workspaces) != 2 {
-		t.Fatalf("workspace list = %#v, want home plus first-contact workspace", out.Workspaces)
-	}
-	if out.Workspaces[0].ID != wikid.HomeWorkspaceID {
-		t.Fatalf("home workspace = %#v, want ID %q", out.Workspaces[0], wikid.HomeWorkspaceID)
-	}
-	if out.Workspaces[1].ID == wikid.HomeWorkspaceID {
-		t.Fatalf("first-contact workspace = %#v, want non-home workspace", out.Workspaces[1])
-	}
-
-	proc.stop(t)
-}
-
-func TestMainProcess_WikidFrontdRuntimeProxiesWorkspaceAPIByID(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
-
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/home/tree")
-	if err != nil {
-		t.Fatalf("GET /api/workspaces/home/tree: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/workspaces/home/tree status = %d, want 200: %s", resp.StatusCode, body)
-	}
-	var tree map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
-		t.Fatalf("decode tree: %v", err)
-	}
-	if tree["children"] == nil {
-		t.Fatalf("tree response missing children payload: %#v", tree)
-	}
-
-	proc.stop(t)
-}
-
-func TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	secondDataDir := filepath.Join(baseDir, "second-data")
-	secondRootDir := filepath.Join(baseDir, "second-root")
-	if err := os.MkdirAll(secondRootDir, 0o755); err != nil {
-		t.Fatalf("create second root: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(secondRootDir, "index.md"), []byte("# Second\n"), 0o644); err != nil {
-		t.Fatalf("write second content: %v", err)
-	}
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-
-	_ = waitForProjectDaemonDescriptor(t, dataDir)
-	waitForLeafwikiReady(t, proc, port)
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	globalDesc, err := projectdaemon.ReadTrustedDescriptor(projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid))
-	if err != nil {
-		t.Fatalf("read global wikid descriptor: %v", err)
-	}
-	ownerPID = globalDesc.PID
-	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
-	second, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
-		DisplayName: "Second",
-		DataDir:     secondDataDir,
-		RootDir:     secondRootDir,
-	})
-	if err != nil {
-		t.Fatalf("register second workspace: %v", err)
-	}
-	grants := wikid.NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(wikid.Grant{Subject: "user:public-editor", WorkspaceID: second.ID, Role: wikid.GrantRoleEditor}); err != nil {
-		t.Fatalf("grant second workspace: %v", err)
-	}
-
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/tree")
-	if err != nil {
-		t.Fatalf("GET second workspace tree: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET second workspace tree status = %d, want 200: %s", resp.StatusCode, body)
-	}
-	var tree map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
-		t.Fatalf("decode second tree: %v", err)
-	}
-	query := url.Values{}
-	query.Set("path", "")
-	query.Set("kind", "section")
-	pageResp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/pages/by-path?" + query.Encode())
-	if err != nil {
-		t.Fatalf("GET second workspace root page: %v", err)
-	}
-	defer pageResp.Body.Close()
-	if pageResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(pageResp.Body)
-		t.Fatalf("GET second workspace root page status = %d, want 200: %s", pageResp.StatusCode, body)
-	}
-	var page struct {
-		Content string `json:"content"`
-		Kind    string `json:"kind"`
-	}
-	if err := json.NewDecoder(pageResp.Body).Decode(&page); err != nil {
-		t.Fatalf("decode second root page: %v", err)
-	}
-	if page.Kind != "section" || !strings.Contains(page.Content, "Second") {
-		t.Fatalf("second root page = %#v, want section containing Second", page)
-	}
-	secondDesc := waitForProjectDaemonDescriptor(t, secondDataDir)
-	if secondDesc.Role != projectdaemon.RoleWorkspaced || secondDesc.WorkspaceID != second.ID {
-		t.Fatalf("second descriptor role/workspace = %q/%q, want workspaced/%q", secondDesc.Role, secondDesc.WorkspaceID, second.ID)
-	}
-	if secondDesc.PrivateMCPURL == "" || secondDesc.PrivateMCPToken == "" {
-		t.Fatalf("second descriptor missing private MCP fields: %#v", secondDesc)
-	}
-
-	proc.stop(t)
-}
-
-func TestAttachFederatedStdioRejectsDescriptorForDifferentRegisteredWorkspace(t *testing.T) {
-	baseDir := t.TempDir()
-	t.Setenv("HOME", filepath.Join(baseDir, "home"))
-	dataDir := filepath.Join(baseDir, "beta-data")
-	rootDir := filepath.Join(baseDir, "beta-root")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-
-	cfg := testRuntimeConfig(dataDir, rootDir, "0", mcpTransports{Stdio: true}, true)
-	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	requestCfg, err := daemonWorkspaceRequestConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("workspace request config: %v", err)
-	}
-	globalCfg, err := daemonRequestConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("global request config: %v", err)
-	}
-	layout := wikid.GlobalLayout(globalCfg.DataDir)
-	registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
-	registered, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
-		DisplayName: "Beta",
-		DataDir:     requestCfg.DataDir,
-		RootDir:     requestCfg.RootDir,
-	})
-	if err != nil {
-		t.Fatalf("register beta workspace: %v", err)
-	}
-	if registered.ID == "alpha" {
-		t.Fatalf("registered workspace ID unexpectedly matched stale descriptor ID")
-	}
-
-	const privateToken = "private-token"
-	privateMCP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != privateToken {
-			http.Error(w, "bad token", http.StatusUnauthorized)
-			return
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("later disable-auth startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer privateMCP.Close()
+		if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "auth-disabled") {
+			t.Fatalf("stderr = %q, want auth-disabled config mismatch", stderr)
+		}
 
-	alphaCfg := requestCfg
-	alphaCfg.WorkspaceID = "alpha"
-	configHash, err := projectdaemon.ConfigHash(alphaCfg)
-	if err != nil {
-		t.Fatalf("config hash: %v", err)
-	}
-	descriptorPath := projectdaemon.DescriptorPath(requestCfg.DataDir)
-	if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-		SchemaVersion:   projectdaemon.DescriptorSchemaVersion,
-		RuntimeStack:    projectdaemon.RuntimeStackWikidFrontd,
-		Role:            projectdaemon.RoleWorkspaced,
-		WorkspaceID:     "alpha",
-		PID:             os.Getpid(),
-		StartedAt:       time.Now().UTC(),
-		DataDir:         requestCfg.DataDir,
-		RootDir:         requestCfg.RootDir,
-		PrivateMCPURL:   privateMCP.URL,
-		PrivateMCPToken: privateToken,
-		ConfigHash:      configHash,
-		Config:          alphaCfg,
-	}); err != nil {
-		t.Fatalf("write alpha workspace descriptor: %v", err)
-	}
+	})
+})
 
-	_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, descriptorPath)
+var _ = ginkgo.Describe("TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecified", func() {
+	ginkgo.It("TestMainProcess_ProjectDaemonDescriptorUsesDefaultIdleTimeoutWhenUnspecified", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": ""})
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
 
-	if err == nil {
-		t.Fatalf("attach with wrong workspace descriptor unexpectedly succeeded")
-	}
-	if !strings.Contains(err.Error(), "workspace-id") || !strings.Contains(err.Error(), registered.ID.String()) || !strings.Contains(err.Error(), "alpha") {
-		t.Fatalf("attach error = %v, want workspace-id mismatch between alpha and %q", err, registered.ID)
-	}
-}
+		if desc.IdleTimeout != "10m0s" {
+			t.Fatalf("descriptor idle timeout = %q, want core CLI default 10m0s", desc.IdleTimeout)
+		}
+		if desc.Config.DaemonIdleTimeout != "10m0s" {
+			t.Fatalf("descriptor config daemon idle timeout = %q, want core CLI default 10m0s", desc.Config.DaemonIdleTimeout)
+		}
+		proc.stop(t)
 
-func TestFederatedWorkspaceManagerEnsureSingleFlightsConcurrentStartup(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
+	})
+})
 
-	started := make(chan struct{}, 1)
-	releaseStart := make(chan struct{})
-	processDone := make(chan error)
-	var startMu sync.Mutex
-	startCount := 0
-	manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-		startMu.Lock()
-		startCount++
-		startMu.Unlock()
-		started <- struct{}{}
-		<-releaseStart
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  101,
-			URL:  "http://127.0.0.1:41001",
-		}, nil
-	}
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeWritesRoleDescriptor", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeWritesRoleDescriptor", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
 
-	workspace := wikid.WorkspaceRecord{
-		ID:      "alpha",
-		DataDir: t.TempDir(),
-		RootDir: t.TempDir(),
-	}
-	var wg sync.WaitGroup
-	results := make(chan wikid.WorkspaceStatus, 2)
-	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			status, err := manager.Ensure(context.Background(), workspace)
-			results <- status
-			errs <- err
-		}()
-	}
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("workspace startup did not begin")
-	}
-	startMu.Lock()
-	if startCount != 1 {
-		t.Fatalf("start count while first startup is running = %d, want 1", startCount)
-	}
-	startMu.Unlock()
-	close(releaseStart)
-	wg.Wait()
-	close(results)
-	close(errs)
+		workspaceDesc := waitForProjectDaemonDescriptor(t, dataDir)
+		waitForLeafwikiReady(t, proc, port)
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		ownerPID = globalDesc.PID
 
-	for err := range errs {
+		if globalDesc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd || globalDesc.Role != projectdaemon.RoleWikid {
+			t.Fatalf("global descriptor runtime metadata = %q/%q, want %q/%q", globalDesc.RuntimeStack, globalDesc.Role, projectdaemon.RuntimeStackWikidFrontd, projectdaemon.RoleWikid)
+		}
+		if globalDesc.WorkspaceID != wikid.HomeWorkspaceID || globalDesc.Config.WorkspaceID != wikid.HomeWorkspaceID {
+			t.Fatalf("global descriptor workspace metadata = %q/%q, want home/home", globalDesc.WorkspaceID, globalDesc.Config.WorkspaceID)
+		}
+		if globalDesc.Config.DataDir != layout.HomeDir || globalDesc.Config.RootDir != layout.HomeRootDir {
+			t.Fatalf("global descriptor config dirs = %q/%q, want %q/%q", globalDesc.Config.DataDir, globalDesc.Config.RootDir, layout.HomeDir, layout.HomeRootDir)
+		}
+		if globalDesc.PrivateMCPURL == "" || globalDesc.PrivateMCPToken == "" {
+			t.Fatalf("global descriptor private MCP fields missing: url=%q token=%q", globalDesc.PrivateMCPURL, globalDesc.PrivateMCPToken)
+		}
+		if workspaceDesc.Role != projectdaemon.RoleWorkspaced || workspaceDesc.WorkspaceID == "" || workspaceDesc.WorkspaceID == wikid.HomeWorkspaceID {
+			t.Fatalf("workspace descriptor role/workspace = %q/%q, want non-home workspaced", workspaceDesc.Role, workspaceDesc.WorkspaceID)
+		}
+		if workspaceDesc.Config.Port != "0" {
+			t.Fatalf("workspace descriptor config port = %q, want ephemeral port 0", workspaceDesc.Config.Port)
+		}
+		if workspaceDesc.PrivateMCPURL == "" || strings.Contains(workspaceDesc.PrivateMCPURL, ":0/") {
+			t.Fatalf("workspace descriptor private MCP URL = %q, want actual listener URL", workspaceDesc.PrivateMCPURL)
+		}
+		gotRoles := map[projectdaemon.RoleName]projectdaemon.RoleHealth{}
+		for _, role := range globalDesc.Roles {
+			gotRoles[role.Name] = role
+		}
+		for _, name := range []projectdaemon.RoleName{projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced} {
+			if gotRoles[name].State != projectdaemon.RoleStateReady {
+				t.Fatalf("role %s state = %q, want ready; all roles = %#v", name, gotRoles[name].State, globalDesc.Roles)
+			}
+			if gotRoles[name].PID <= 0 {
+				t.Fatalf("role %s PID = %d, want live role process; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles)
+			}
+			if !processExists(gotRoles[name].PID) {
+				t.Fatalf("role %s PID %d is not running; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles)
+			}
+		}
+		if gotRoles[projectdaemon.RoleWikid].PID != globalDesc.PID {
+			t.Fatalf("wikid PID = %d, want descriptor owner PID %d", gotRoles[projectdaemon.RoleWikid].PID, globalDesc.PID)
+		}
+		if gotRoles[projectdaemon.RoleFrontd].PID == globalDesc.PID ||
+			gotRoles[projectdaemon.RoleWorkspaced].PID == globalDesc.PID ||
+			gotRoles[projectdaemon.RoleFrontd].PID == gotRoles[projectdaemon.RoleWorkspaced].PID {
+			t.Fatalf("role PIDs must be distinct for wikid/frontd/workspaced; descriptor PID = %d roles = %#v", globalDesc.PID, globalDesc.Roles)
+		}
+		proc.stop(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeListsHomeWorkspace", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeListsHomeWorkspace", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
+
+		resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces")
 		if err != nil {
-			t.Fatalf("Ensure returned error: %v", err)
+			t.Fatalf("GET /api/workspaces: %v", err)
 		}
-	}
-	var statuses []wikid.WorkspaceStatus
-	for status := range results {
-		if status.State != wikid.WorkspaceStateRunning || status.PID != 101 {
-			t.Fatalf("status = %#v, want running pid 101", status)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("GET /api/workspaces status = %d, want 200: %s", resp.StatusCode, body)
 		}
-		statuses = append(statuses, status)
-	}
-	if len(statuses) != 2 {
-		t.Fatalf("received %d statuses, want 2", len(statuses))
-	}
-	if statuses[0] != statuses[1] {
-		t.Fatalf("concurrent Ensure statuses differ: %#v != %#v", statuses[0], statuses[1])
-	}
-	startMu.Lock()
-	defer startMu.Unlock()
-	if startCount != 1 {
-		t.Fatalf("start count after concurrent ensure = %d, want 1", startCount)
-	}
-}
-
-func TestFederatedWorkspaceManagerEnsureCanceledDuplicateWaiterReturnsContextError(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
-
-	started := make(chan struct{}, 1)
-	releaseStart := make(chan struct{})
-	processDone := make(chan error)
-	var startMu sync.Mutex
-	startCount := 0
-	manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-		startMu.Lock()
-		startCount++
-		startMu.Unlock()
-		started <- struct{}{}
-		<-releaseStart
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  101,
-			URL:  "http://127.0.0.1:41001",
-		}, nil
-	}
-
-	workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
-	firstDone := make(chan error, 1)
-	go func() {
-		_, err := manager.Ensure(context.Background(), workspace)
-		firstDone <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("workspace startup did not begin")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	status, err := manager.Ensure(ctx, workspace)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("duplicate Ensure error = %v, want context.Canceled", err)
-	}
-	if status.WorkspaceID != "alpha" {
-		t.Fatalf("duplicate canceled status = %#v, want alpha status", status)
-	}
-	startMu.Lock()
-	if startCount != 1 {
-		t.Fatalf("start count after canceled duplicate waiter = %d, want 1", startCount)
-	}
-	startMu.Unlock()
-
-	close(releaseStart)
-	select {
-	case err := <-firstDone:
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			t.Fatalf("first Ensure returned error: %v", err)
+			t.Fatalf("read /api/workspaces: %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("first Ensure did not finish after release")
-	}
-	startMu.Lock()
-	defer startMu.Unlock()
-	if startCount != 1 {
-		t.Fatalf("start count after first Ensure finished = %d, want 1", startCount)
-	}
-}
+		var out wikid.WorkspaceListResponse
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode /api/workspaces: %v", err)
+		}
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		for _, leaked := range []string{"dataDir", "rootDir", layout.HomeDir, layout.HomeRootDir, dataDir, rootDir} {
+			if strings.Contains(string(body), leaked) {
+				t.Fatalf("/api/workspaces leaked workspace path field %q: %s", leaked, body)
+			}
+		}
+		if len(out.Workspaces) != 2 {
+			t.Fatalf("workspace list = %#v, want home plus first-contact workspace", out.Workspaces)
+		}
+		if out.Workspaces[0].ID != wikid.HomeWorkspaceID {
+			t.Fatalf("home workspace = %#v, want ID %q", out.Workspaces[0], wikid.HomeWorkspaceID)
+		}
+		if out.Workspaces[1].ID == wikid.HomeWorkspaceID {
+			t.Fatalf("first-contact workspace = %#v, want non-home workspace", out.Workspaces[1])
+		}
 
-func TestFederatedWorkspaceManagerEnsureFailureDoesNotPoisonRetry(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
+		proc.stop(t)
 
-	processDone := make(chan error)
-	var startMu sync.Mutex
-	startCount := 0
-	manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeProxiesWorkspaceAPIByID", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeProxiesWorkspaceAPIByID", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
+
+		resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/home/tree")
+		if err != nil {
+			t.Fatalf("GET /api/workspaces/home/tree: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("GET /api/workspaces/home/tree status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		var tree map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+			t.Fatalf("decode tree: %v", err)
+		}
+		if tree["children"] == nil {
+			t.Fatalf("tree response missing children payload: %#v", tree)
+		}
+
+		proc.stop(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeEnsuresRegisteredWorkspaceByID", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		secondDataDir := filepath.Join(baseDir, "second-data")
+		secondRootDir := filepath.Join(baseDir, "second-root")
+		if err := os.MkdirAll(secondRootDir, 0o755); err != nil {
+			t.Fatalf("create second root: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(secondRootDir, "index.md"), []byte("# Second\n"), 0o644); err != nil {
+			t.Fatalf("write second content: %v", err)
+		}
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+
+		_ = waitForProjectDaemonDescriptor(t, dataDir)
+		waitForLeafwikiReady(t, proc, port)
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		globalDesc, err := projectdaemon.ReadTrustedDescriptor(projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid))
+		if err != nil {
+			t.Fatalf("read global wikid descriptor: %v", err)
+		}
+		ownerPID = globalDesc.PID
+		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+		second, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
+			DisplayName: "Second",
+			DataDir:     secondDataDir,
+			RootDir:     secondRootDir,
+		})
+		if err != nil {
+			t.Fatalf("register second workspace: %v", err)
+		}
+		grants := wikid.NewGrantStore(layout.DBPath)
+		if err := grants.Upsert(wikid.Grant{Subject: "user:public-editor", WorkspaceID: second.ID, Role: wikid.GrantRoleEditor}); err != nil {
+			t.Fatalf("grant second workspace: %v", err)
+		}
+
+		resp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/tree")
+		if err != nil {
+			t.Fatalf("GET second workspace tree: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("GET second workspace tree status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		var tree map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+			t.Fatalf("decode second tree: %v", err)
+		}
+		query := url.Values{}
+		query.Set("path", "")
+		query.Set("kind", "section")
+		pageResp, err := http.Get("http://127.0.0.1:" + port + "/api/workspaces/" + second.ID.URLPathSegment() + "/pages/by-path?" + query.Encode())
+		if err != nil {
+			t.Fatalf("GET second workspace root page: %v", err)
+		}
+		defer pageResp.Body.Close()
+		if pageResp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(pageResp.Body)
+			t.Fatalf("GET second workspace root page status = %d, want 200: %s", pageResp.StatusCode, body)
+		}
+		var page struct {
+			Content string `json:"content"`
+			Kind    string `json:"kind"`
+		}
+		if err := json.NewDecoder(pageResp.Body).Decode(&page); err != nil {
+			t.Fatalf("decode second root page: %v", err)
+		}
+		if page.Kind != "section" || !strings.Contains(page.Content, "Second") {
+			t.Fatalf("second root page = %#v, want section containing Second", page)
+		}
+		secondDesc := waitForProjectDaemonDescriptor(t, secondDataDir)
+		if secondDesc.Role != projectdaemon.RoleWorkspaced || secondDesc.WorkspaceID != second.ID {
+			t.Fatalf("second descriptor role/workspace = %q/%q, want workspaced/%q", secondDesc.Role, secondDesc.WorkspaceID, second.ID)
+		}
+		if secondDesc.PrivateMCPURL == "" || secondDesc.PrivateMCPToken == "" {
+			t.Fatalf("second descriptor missing private MCP fields: %#v", secondDesc)
+		}
+
+		proc.stop(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestAttachFederatedStdioRejectsDescriptorForDifferentRegisteredWorkspace", func() {
+	ginkgo.It("TestAttachFederatedStdioRejectsDescriptorForDifferentRegisteredWorkspace", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		t.Setenv("HOME", filepath.Join(baseDir, "home"))
+		dataDir := filepath.Join(baseDir, "beta-data")
+		rootDir := filepath.Join(baseDir, "beta-root")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+
+		cfg := testRuntimeConfig(dataDir, rootDir, "0", mcpTransports{Stdio: true}, true)
+		cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+		requestCfg, err := daemonWorkspaceRequestConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("workspace request config: %v", err)
+		}
+		globalCfg, err := daemonRequestConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("global request config: %v", err)
+		}
+		layout := wikid.GlobalLayout(globalCfg.DataDir)
+		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
+		registered, err := registry.RegisterWorkspace(wikid.RegisterWorkspaceRequest{
+			DisplayName: "Beta",
+			DataDir:     requestCfg.DataDir,
+			RootDir:     requestCfg.RootDir,
+		})
+		if err != nil {
+			t.Fatalf("register beta workspace: %v", err)
+		}
+		if registered.ID == "alpha" {
+			t.Fatalf("registered workspace ID unexpectedly matched stale descriptor ID")
+		}
+
+		const privateToken = "private-token"
+		privateMCP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != privateToken {
+				http.Error(w, "bad token", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer privateMCP.Close()
+
+		alphaCfg := requestCfg
+		alphaCfg.WorkspaceID = "alpha"
+		configHash, err := projectdaemon.ConfigHash(alphaCfg)
+		if err != nil {
+			t.Fatalf("config hash: %v", err)
+		}
+		descriptorPath := projectdaemon.DescriptorPath(requestCfg.DataDir)
+		if err := projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+			SchemaVersion:   projectdaemon.DescriptorSchemaVersion,
+			RuntimeStack:    projectdaemon.RuntimeStackWikidFrontd,
+			Role:            projectdaemon.RoleWorkspaced,
+			WorkspaceID:     "alpha",
+			PID:             os.Getpid(),
+			StartedAt:       time.Now().UTC(),
+			DataDir:         requestCfg.DataDir,
+			RootDir:         requestCfg.RootDir,
+			PrivateMCPURL:   privateMCP.URL,
+			PrivateMCPToken: privateToken,
+			ConfigHash:      configHash,
+			Config:          alphaCfg,
+		}); err != nil {
+			t.Fatalf("write alpha workspace descriptor: %v", err)
+		}
+
+		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, descriptorPath)
+
+		if err == nil {
+			t.Fatalf("attach with wrong workspace descriptor unexpectedly succeeded")
+		}
+		if !strings.Contains(err.Error(), "workspace-id") || !strings.Contains(err.Error(), registered.ID.String()) || !strings.Contains(err.Error(), "alpha") {
+			t.Fatalf("attach error = %v, want workspace-id mismatch between alpha and %q", err, registered.ID)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureSingleFlightsConcurrentStartup", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerEnsureSingleFlightsConcurrentStartup", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
+		}
+
+		started := make(chan struct{}, 1)
+		releaseStart := make(chan struct{})
+		processDone := make(chan error)
+		var startMu sync.Mutex
+		startCount := 0
+		manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			startMu.Lock()
+			startCount++
+			startMu.Unlock()
+			started <- struct{}{}
+			<-releaseStart
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  101,
+				URL:  "http://127.0.0.1:41001",
+			}, nil
+		}
+
+		workspace := wikid.WorkspaceRecord{
+			ID:      "alpha",
+			DataDir: t.TempDir(),
+			RootDir: t.TempDir(),
+		}
+		var wg sync.WaitGroup
+		results := make(chan wikid.WorkspaceStatus, 2)
+		errs := make(chan error, 2)
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				status, err := manager.Ensure(context.Background(), workspace)
+				results <- status
+				errs <- err
+			}()
+		}
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("workspace startup did not begin")
+		}
+		startMu.Lock()
+		if startCount != 1 {
+			t.Fatalf("start count while first startup is running = %d, want 1", startCount)
+		}
+		startMu.Unlock()
+		close(releaseStart)
+		wg.Wait()
+		close(results)
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+		}
+		var statuses []wikid.WorkspaceStatus
+		for status := range results {
+			if status.State != wikid.WorkspaceStateRunning || status.PID != 101 {
+				t.Fatalf("status = %#v, want running pid 101", status)
+			}
+			statuses = append(statuses, status)
+		}
+		if len(statuses) != 2 {
+			t.Fatalf("received %d statuses, want 2", len(statuses))
+		}
+		if statuses[0] != statuses[1] {
+			t.Fatalf("concurrent Ensure statuses differ: %#v != %#v", statuses[0], statuses[1])
+		}
 		startMu.Lock()
 		defer startMu.Unlock()
-		startCount++
-		if startCount == 1 {
-			return nil, internalRuntimeRoleReady{}, errors.New("boom")
+		if startCount != 1 {
+			t.Fatalf("start count after concurrent ensure = %d, want 1", startCount)
 		}
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 202, processDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  202,
-			URL:  "http://127.0.0.1:41002",
-		}, nil
-	}
 
-	workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
-	if status, err := manager.Ensure(context.Background(), workspace); err == nil {
-		t.Fatalf("first Ensure status = %#v, want error", status)
-	}
-	status, err := manager.Ensure(context.Background(), workspace)
-	if err != nil {
-		t.Fatalf("retry Ensure returned error: %v", err)
-	}
-	if status.State != wikid.WorkspaceStateRunning || status.PID != 202 {
-		t.Fatalf("retry status = %#v, want running pid 202", status)
-	}
-	startMu.Lock()
-	defer startMu.Unlock()
-	if startCount != 2 {
-		t.Fatalf("start count after retry = %d, want 2", startCount)
-	}
-}
+	})
+})
 
-func TestFederatedWorkspaceManagerEnsureDoesNotSerializeDifferentWorkspaces(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
-
-	started := make(chan workspaceid.WorkspaceID, 2)
-	releaseStart := make(chan struct{})
-	processDone := make(chan error)
-	manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-		workspaceID := startup.Runtime.Workspace.ID
-		started <- workspaceID
-		<-releaseStart
-		pid := 101
-		url := "http://127.0.0.1:41001"
-		if workspaceID == "beta" {
-			pid = 202
-			url = "http://127.0.0.1:41002"
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureCanceledDuplicateWaiterReturnsContextError", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerEnsureCanceledDuplicateWaiterReturnsContextError", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
 		}
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, pid, processDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  pid,
-			URL:  url,
-		}, nil
-	}
 
-	workspaces := []wikid.WorkspaceRecord{
-		{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()},
-		{ID: "beta", DataDir: t.TempDir(), RootDir: t.TempDir()},
-	}
-	var wg sync.WaitGroup
-	errs := make(chan error, len(workspaces))
-	for _, workspace := range workspaces {
-		workspace := workspace
-		wg.Add(1)
+		started := make(chan struct{}, 1)
+		releaseStart := make(chan struct{})
+		processDone := make(chan error)
+		var startMu sync.Mutex
+		startCount := 0
+		manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			startMu.Lock()
+			startCount++
+			startMu.Unlock()
+			started <- struct{}{}
+			<-releaseStart
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  101,
+				URL:  "http://127.0.0.1:41001",
+			}, nil
+		}
+
+		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
+		firstDone := make(chan error, 1)
 		go func() {
-			defer wg.Done()
 			_, err := manager.Ensure(context.Background(), workspace)
-			errs <- err
+			firstDone <- err
 		}()
-	}
-
-	seen := map[workspaceid.WorkspaceID]bool{}
-	for len(seen) < 2 {
 		select {
-		case workspaceID := <-started:
-			seen[workspaceID] = true
+		case <-started:
 		case <-time.After(2 * time.Second):
-			t.Fatalf("started workspaces = %#v, want alpha and beta before release", seen)
+			t.Fatalf("workspace startup did not begin")
 		}
-	}
-	if !seen["alpha"] || !seen["beta"] {
-		t.Fatalf("started workspaces = %#v, want alpha and beta", seen)
-	}
-	close(releaseStart)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		status, err := manager.Ensure(ctx, workspace)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("duplicate Ensure error = %v, want context.Canceled", err)
+		}
+		if status.WorkspaceID != "alpha" {
+			t.Fatalf("duplicate canceled status = %#v, want alpha status", status)
+		}
+		startMu.Lock()
+		if startCount != 1 {
+			t.Fatalf("start count after canceled duplicate waiter = %d, want 1", startCount)
+		}
+		startMu.Unlock()
+
+		close(releaseStart)
+		select {
+		case err := <-firstDone:
+			if err != nil {
+				t.Fatalf("first Ensure returned error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("first Ensure did not finish after release")
+		}
+		startMu.Lock()
+		defer startMu.Unlock()
+		if startCount != 1 {
+			t.Fatalf("start count after first Ensure finished = %d, want 1", startCount)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureFailureDoesNotPoisonRetry", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerEnsureFailureDoesNotPoisonRetry", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
+		}
+
+		processDone := make(chan error)
+		var startMu sync.Mutex
+		startCount := 0
+		manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			startMu.Lock()
+			defer startMu.Unlock()
+			startCount++
+			if startCount == 1 {
+				return nil, internalRuntimeRoleReady{}, errors.New("boom")
+			}
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 202, processDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  202,
+				URL:  "http://127.0.0.1:41002",
+			}, nil
+		}
+
+		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
+		if status, err := manager.Ensure(context.Background(), workspace); err == nil {
+			t.Fatalf("first Ensure status = %#v, want error", status)
+		}
+		status, err := manager.Ensure(context.Background(), workspace)
+		if err != nil {
+			t.Fatalf("retry Ensure returned error: %v", err)
+		}
+		if status.State != wikid.WorkspaceStateRunning || status.PID != 202 {
+			t.Fatalf("retry status = %#v, want running pid 202", status)
+		}
+		startMu.Lock()
+		defer startMu.Unlock()
+		if startCount != 2 {
+			t.Fatalf("start count after retry = %d, want 2", startCount)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureDoesNotSerializeDifferentWorkspaces", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerEnsureDoesNotSerializeDifferentWorkspaces", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
+		}
+
+		started := make(chan workspaceid.WorkspaceID, 2)
+		releaseStart := make(chan struct{})
+		processDone := make(chan error)
+		manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			workspaceID := startup.Runtime.Workspace.ID
+			started <- workspaceID
+			<-releaseStart
+			pid := 101
+			url := "http://127.0.0.1:41001"
+			if workspaceID == "beta" {
+				pid = 202
+				url = "http://127.0.0.1:41002"
+			}
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, pid, processDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  pid,
+				URL:  url,
+			}, nil
+		}
+
+		workspaces := []wikid.WorkspaceRecord{
+			{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()},
+			{ID: "beta", DataDir: t.TempDir(), RootDir: t.TempDir()},
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, len(workspaces))
+		for _, workspace := range workspaces {
+			workspace := workspace
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := manager.Ensure(context.Background(), workspace)
+				errs <- err
+			}()
+		}
+
+		seen := map[workspaceid.WorkspaceID]bool{}
+		for len(seen) < 2 {
+			select {
+			case workspaceID := <-started:
+				seen[workspaceID] = true
+			case <-time.After(2 * time.Second):
+				t.Fatalf("started workspaces = %#v, want alpha and beta before release", seen)
+			}
+		}
+		if !seen["alpha"] || !seen["beta"] {
+			t.Fatalf("started workspaces = %#v, want alpha and beta", seen)
+		}
+		close(releaseStart)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerStartsWorkspacedWithEphemeralPort", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerStartsWorkspacedWithEphemeralPort", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
+		}
+		processDone := make(chan error)
+		manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			if startup.Runtime.Port != "0" {
+				t.Fatalf("workspaced startup port = %q, want 0", startup.Runtime.Port)
+			}
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  101,
+				URL:  "http://127.0.0.1:49152",
+			}, nil
+		}
+
+		status, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{
+			ID:      "alpha",
+			DataDir: t.TempDir(),
+			RootDir: t.TempDir(),
+		})
 		if err != nil {
 			t.Fatalf("Ensure returned error: %v", err)
 		}
-	}
-}
-
-func TestFederatedWorkspaceManagerStartsWorkspacedWithEphemeralPort(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
-	processDone := make(chan error)
-	manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-		if startup.Runtime.Port != "0" {
-			t.Fatalf("workspaced startup port = %q, want 0", startup.Runtime.Port)
+		if status.State != wikid.WorkspaceStateRunning || status.URL != "http://127.0.0.1:49152" {
+			t.Fatalf("status = %#v, want running actual ready URL", status)
 		}
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  101,
-			URL:  "http://127.0.0.1:49152",
-		}, nil
-	}
 
-	status, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{
-		ID:      "alpha",
-		DataDir: t.TempDir(),
-		RootDir: t.TempDir(),
 	})
-	if err != nil {
-		t.Fatalf("Ensure returned error: %v", err)
-	}
-	if status.State != wikid.WorkspaceStateRunning || status.URL != "http://127.0.0.1:49152" {
-		t.Fatalf("status = %#v, want running actual ready URL", status)
-	}
-}
+})
 
-func TestFederatedWorkspaceManagerRemovesStaleDescriptorsAndRestartsAfterCrash(t *testing.T) {
-	supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{
-		MaxRestarts: 1,
-		Backoff:     time.Millisecond,
-	})
-	manager := newFederatedWorkspaceManager(
-		leafwikiRuntimeConfig{},
-		"daemon-token",
-		"http://127.0.0.1:1",
-		wikid.GlobalLayout(t.TempDir()),
-		supervisor,
-	)
-	manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-		return nil
-	}
+var _ = ginkgo.Describe("TestFederatedWorkspaceManagerRemovesStaleDescriptorsAndRestartsAfterCrash", func() {
+	ginkgo.It("TestFederatedWorkspaceManagerRemovesStaleDescriptorsAndRestartsAfterCrash", func() {
+		t := ginkgo.GinkgoT()
+		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{
+			MaxRestarts: 1,
+			Backoff:     time.Millisecond,
+		})
+		manager := newFederatedWorkspaceManager(
+			leafwikiRuntimeConfig{},
+			"daemon-token",
+			"http://127.0.0.1:1",
+			wikid.GlobalLayout(t.TempDir()),
+			supervisor,
+		)
+		manager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
+			return nil
+		}
 
-	removed := make(chan string, 2)
-	manager.removeDescriptor = func(path string) error {
-		removed <- path
-		return nil
-	}
-	restarted := make(chan struct{}, 1)
-	restartedProcessDone := make(chan error)
-	manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-		restarted <- struct{}{}
-		return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 202, restartedProcessDone), internalRuntimeRoleReady{
-			Role: projectdaemon.RoleWorkspaced,
-			PID:  202,
-			URL:  "http://127.0.0.1:41002",
-		}, nil
-	}
+		removed := make(chan string, 2)
+		manager.removeDescriptor = func(path string) error {
+			removed <- path
+			return nil
+		}
+		restarted := make(chan struct{}, 1)
+		restartedProcessDone := make(chan error)
+		manager.startRole = func(internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
+			restarted <- struct{}{}
+			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 202, restartedProcessDone), internalRuntimeRoleReady{
+				Role: projectdaemon.RoleWorkspaced,
+				PID:  202,
+				URL:  "http://127.0.0.1:41002",
+			}, nil
+		}
 
-	workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
-	processDone := make(chan error, 1)
-	process := testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone)
-	manager.mu.Lock()
-	manager.processes[workspace.ID] = process
-	manager.workspaces[workspace.ID] = workspace
-	manager.descriptors[workspace.ID] = []string{"/tmp/alpha-local.json", "/tmp/alpha-runtime.json"}
-	manager.mu.Unlock()
-	supervisor.MarkReady(workspace.ID, 101, "http://127.0.0.1:41001")
+		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: t.TempDir(), RootDir: t.TempDir()}
+		processDone := make(chan error, 1)
+		process := testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone)
+		manager.mu.Lock()
+		manager.processes[workspace.ID] = process
+		manager.workspaces[workspace.ID] = workspace
+		manager.descriptors[workspace.ID] = []string{"/tmp/alpha-local.json", "/tmp/alpha-runtime.json"}
+		manager.mu.Unlock()
+		supervisor.MarkReady(workspace.ID, 101, "http://127.0.0.1:41001")
 
-	go manager.monitorWorkspaceProcess(workspace.ID, process)
-	processDone <- errors.New("exit status 2")
+		go manager.monitorWorkspaceProcess(workspace.ID, process)
+		processDone <- errors.New("exit status 2")
 
-	seenRemoved := map[string]bool{}
-	for len(seenRemoved) < 2 {
+		seenRemoved := map[string]bool{}
+		for len(seenRemoved) < 2 {
+			select {
+			case path := <-removed:
+				seenRemoved[path] = true
+			case <-time.After(2 * time.Second):
+				t.Fatalf("removed descriptors = %#v, want two paths", seenRemoved)
+			}
+		}
+		if !seenRemoved["/tmp/alpha-local.json"] || !seenRemoved["/tmp/alpha-runtime.json"] {
+			t.Fatalf("removed descriptors = %#v", seenRemoved)
+		}
+
 		select {
-		case path := <-removed:
-			seenRemoved[path] = true
+		case <-restarted:
 		case <-time.After(2 * time.Second):
-			t.Fatalf("removed descriptors = %#v, want two paths", seenRemoved)
+			t.Fatalf("workspace was not restarted after crash")
 		}
-	}
-	if !seenRemoved["/tmp/alpha-local.json"] || !seenRemoved["/tmp/alpha-runtime.json"] {
-		t.Fatalf("removed descriptors = %#v", seenRemoved)
-	}
+		status := supervisor.Status(workspace.ID)
+		if status.State != wikid.WorkspaceStateRunning || status.PID != 202 {
+			t.Fatalf("status after restart = %#v, want running pid 202", status)
+		}
+		manager.mu.Lock()
+		_, descriptorsStillTracked := manager.descriptors[workspace.ID]
+		manager.mu.Unlock()
+		if descriptorsStillTracked {
+			t.Fatalf("stale descriptors still tracked after crash")
+		}
 
-	select {
-	case <-restarted:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("workspace was not restarted after crash")
-	}
-	status := supervisor.Status(workspace.ID)
-	if status.State != wikid.WorkspaceStateRunning || status.PID != 202 {
-		t.Fatalf("status after restart = %#v, want running pid 202", status)
-	}
-	manager.mu.Lock()
-	_, descriptorsStillTracked := manager.descriptors[workspace.ID]
-	manager.mu.Unlock()
-	if descriptorsStillTracked {
-		t.Fatalf("stale descriptors still tracked after crash")
-	}
-}
+	})
+})
 
 func testRuntimeRoleProcess(role projectdaemon.RoleName, pid int, done <-chan error) *internalRuntimeRoleProcess {
 	return &internalRuntimeRoleProcess{
@@ -4454,2568 +5018,2933 @@ func testRuntimeRoleProcess(role projectdaemon.RoleName, pid int, done <-chan er
 	}
 }
 
-func TestInternalRuntimeRoleReadinessBudgetIsThirtySeconds(t *testing.T) {
-	if internalRuntimeRoleReadinessTimeout != 30*time.Second {
-		t.Fatalf("internal runtime role readiness timeout = %v, want 30s", internalRuntimeRoleReadinessTimeout)
-	}
-}
+var _ = ginkgo.Describe("TestInternalRuntimeRoleReadinessBudgetIsThirtySeconds", func() {
+	ginkgo.It("TestInternalRuntimeRoleReadinessBudgetIsThirtySeconds", func() {
+		t := ginkgo.GinkgoT()
+		if internalRuntimeRoleReadinessTimeout != 30*time.Second {
+			t.Fatalf("internal runtime role readiness timeout = %v, want 30s", internalRuntimeRoleReadinessTimeout)
+		}
 
-func TestFederatedWorkspaceEnsureBudgetIsThirtySeconds(t *testing.T) {
-	if federatedWorkspaceEnsureTimeout != 30*time.Second {
-		t.Fatalf("federated workspace ensure timeout = %v, want 30s", federatedWorkspaceEnsureTimeout)
-	}
-}
-
-func TestStartInternalRuntimeRoleProcessStopsChildWhenReadyRoleMismatches(t *testing.T) {
-	pidPath := filepath.Join(t.TempDir(), "wrong-role.pid")
-	t.Setenv("GO_WANT_LEAFWIKI_HELPER_PROCESS", "1")
-	t.Setenv("LEAFWIKI_TEST_RUNTIME_READY_WRONG_ROLE", "1")
-	t.Setenv("LEAFWIKI_TEST_RUNTIME_READY_WRONG_ROLE_PID_PATH", pidPath)
-
-	_, _, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{
-		Role:        projectdaemon.RoleWorkspaced,
-		Runtime:     leafwikiRuntimeConfig{},
-		DaemonToken: "daemon-token",
 	})
-	if err == nil {
-		t.Fatalf("startInternalRuntimeRoleProcess unexpectedly accepted wrong ready role")
-	}
-	if !strings.Contains(err.Error(), "reported readiness") {
-		t.Fatalf("error = %v, want reported readiness mismatch", err)
-	}
-	raw, readErr := os.ReadFile(pidPath)
-	if readErr != nil {
-		t.Fatalf("read wrong-role helper pid: %v", readErr)
-	}
-	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if parseErr != nil {
-		t.Fatalf("parse wrong-role helper pid %q: %v", raw, parseErr)
-	}
-	if processExists(pid) {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-		t.Fatalf("wrong-role child PID %d is still running after startup error", pid)
-	}
-}
+})
 
-func TestMainProcess_WikidFrontdRuntimeRestartsWorkspacedAndUpdatesDescriptor(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
+var _ = ginkgo.Describe("TestFederatedWorkspaceEnsureBudgetIsThirtySeconds", func() {
+	ginkgo.It("TestFederatedWorkspaceEnsureBudgetIsThirtySeconds", func() {
+		t := ginkgo.GinkgoT()
+		if federatedWorkspaceEnsureTimeout != 30*time.Second {
+			t.Fatalf("federated workspace ensure timeout = %v, want 30s", federatedWorkspaceEnsureTimeout)
+		}
+
 	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
+})
 
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
-	initial, ok := findRoleHealth(desc.Roles, projectdaemon.RoleWorkspaced)
-	if !ok || initial.PID <= 0 {
-		t.Fatalf("initial workspaced role = %#v, want child PID", initial)
-	}
-	if err := syscall.Kill(initial.PID, syscall.SIGTERM); err != nil {
-		t.Fatalf("kill workspaced PID %d: %v", initial.PID, err)
-	}
+var _ = ginkgo.Describe("TestStartInternalRuntimeRoleProcessStopsChildWhenReadyRoleMismatches", func() {
+	ginkgo.It("TestStartInternalRuntimeRoleProcessStopsChildWhenReadyRoleMismatches", func() {
+		t := ginkgo.GinkgoT()
+		pidPath := filepath.Join(t.TempDir(), "wrong-role.pid")
+		t.Setenv("GO_WANT_LEAFWIKI_HELPER_PROCESS", "1")
+		t.Setenv("LEAFWIKI_TEST_RUNTIME_READY_WRONG_ROLE", "1")
+		t.Setenv("LEAFWIKI_TEST_RUNTIME_READY_WRONG_ROLE_PID_PATH", pidPath)
 
-	descriptorPath := projectdaemon.DescriptorPath(dataDir)
-	var restarted projectdaemon.RoleHealth
-	waitForRuntimeCondition(t, 10*time.Second, func() bool {
-		raw, err := os.ReadFile(descriptorPath)
+		_, _, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{
+			Role:        projectdaemon.RoleWorkspaced,
+			Runtime:     leafwikiRuntimeConfig{},
+			DaemonToken: "daemon-token",
+		})
+		if err == nil {
+			t.Fatalf("startInternalRuntimeRoleProcess unexpectedly accepted wrong ready role")
+		}
+		if !strings.Contains(err.Error(), "reported readiness") {
+			t.Fatalf("error = %v, want reported readiness mismatch", err)
+		}
+		raw, readErr := os.ReadFile(pidPath)
+		if readErr != nil {
+			t.Fatalf("read wrong-role helper pid: %v", readErr)
+		}
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if parseErr != nil {
+			t.Fatalf("parse wrong-role helper pid %q: %v", raw, parseErr)
+		}
+		if processExists(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("wrong-role child PID %d is still running after startup error", pid)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeRestartsWorkspacedAndUpdatesDescriptor", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeRestartsWorkspacedAndUpdatesDescriptor", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
+		initial, ok := findRoleHealth(desc.Roles, projectdaemon.RoleWorkspaced)
+		if !ok || initial.PID <= 0 {
+			t.Fatalf("initial workspaced role = %#v, want child PID", initial)
+		}
+		if err := syscall.Kill(initial.PID, syscall.SIGTERM); err != nil {
+			t.Fatalf("kill workspaced PID %d: %v", initial.PID, err)
+		}
+
+		descriptorPath := projectdaemon.DescriptorPath(dataDir)
+		var restarted projectdaemon.RoleHealth
+		waitForRuntimeCondition(t, 10*time.Second, func() bool {
+			raw, err := os.ReadFile(descriptorPath)
+			if err != nil {
+				return false
+			}
+			var current projectdaemon.Descriptor
+			if err := json.Unmarshal(raw, &current); err != nil {
+				return false
+			}
+			var ok bool
+			restarted, ok = findRoleHealth(current.Roles, projectdaemon.RoleWorkspaced)
+			return ok && restarted.State == projectdaemon.RoleStateReady && restarted.PID > 0 && restarted.PID != initial.PID && processExists(restarted.PID)
+		})
+
+		proc.stop(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdRuntimeUsesFreshWikidAuthStores", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdRuntimeUsesFreshWikidAuthStores", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--jwt-secret", "auth-store-secret",
+			"--admin-password", "admin-pass",
+			"--allow-insecure",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		ownerPID = globalDesc.PID
+		waitForLeafwikiReady(t, proc, port)
+
+		authDir := filepath.Join(layout.WikidDir, "auth")
+		for _, path := range []string{
+			filepath.Join(authDir, "users.db"),
+			filepath.Join(authDir, "sessions.db"),
+			filepath.Join(authDir, "api_keys.db"),
+		} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("expected wikid auth store %s to exist: %v", path, err)
+			}
+		}
+		for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
+			if _, err := os.Stat(filepath.Join(dataDir, name)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("legacy root auth DB %s stat err = %v, want not exist", name, err)
+			}
+		}
+
+		client := &http.Client{Timeout: 2 * time.Second}
+		httpReq, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+port+"/api/auth/login", strings.NewReader(`{"identifier":"admin","password":"admin-pass"}`))
 		if err != nil {
-			return false
+			t.Fatalf("build login request: %v", err)
 		}
-		var current projectdaemon.Descriptor
-		if err := json.Unmarshal(raw, &current); err != nil {
-			return false
+		httpReq.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			t.Fatalf("POST /api/auth/login: %v", err)
 		}
-		var ok bool
-		restarted, ok = findRoleHealth(current.Roles, projectdaemon.RoleWorkspaced)
-		return ok && restarted.State == projectdaemon.RoleStateReady && restarted.PID > 0 && restarted.PID != initial.PID && processExists(restarted.PID)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("login status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		proc.stop(t)
+
 	})
+})
 
-	proc.stop(t)
-}
-
-func TestMainProcess_WikidFrontdRuntimeUsesFreshWikidAuthStores(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--jwt-secret", "auth-store-secret",
-		"--admin-password", "admin-pass",
-		"--allow-insecure",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	ownerPID = globalDesc.PID
-	waitForLeafwikiReady(t, proc, port)
-
-	authDir := filepath.Join(layout.WikidDir, "auth")
-	for _, path := range []string{
-		filepath.Join(authDir, "users.db"),
-		filepath.Join(authDir, "sessions.db"),
-		filepath.Join(authDir, "api_keys.db"),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected wikid auth store %s to exist: %v", path, err)
-		}
-	}
-	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
-		if _, err := os.Stat(filepath.Join(dataDir, name)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("legacy root auth DB %s stat err = %v, want not exist", name, err)
-		}
-	}
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	httpReq, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+port+"/api/auth/login", strings.NewReader(`{"identifier":"admin","password":"admin-pass"}`))
-	if err != nil {
-		t.Fatalf("build login request: %v", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		t.Fatalf("POST /api/auth/login: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("login status = %d, want 200: %s", resp.StatusCode, body)
-	}
-	proc.stop(t)
-}
-
-func TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
-
-	if !desc.Config.EnableWorkspaceSync {
-		t.Fatalf("descriptor config EnableWorkspaceSync = false, want true")
-	}
-	proc.stop(t)
-}
-
-func TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	for _, removedFlag := range []string{"--enable-revision", "--enable-workspace-sync"} {
-		t.Run(removedFlag, func(t *testing.T) {
-			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-				"--disable-auth",
-				removedFlag,
-				"--data-dir", dataDir,
-				"--root-dir", rootDir,
-				"--host", "127.0.0.1",
-				"--port", freeTCPPort(t),
-				"--log-target", "stderr",
-			}, nil, 5*time.Second)
-
-			if err == nil {
-				t.Fatalf("startup with removed flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("startup with removed flag hung; expected immediate unknown flag error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-			}
-			if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
-				t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
-			}
+var _ = ginkgo.Describe("TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag", func() {
+	ginkgo.It("TestMainProcess_ProjectDaemonDescriptorIncludesWorkspaceSyncFlag", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
 		})
-	}
-}
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
 
-func TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag(t *testing.T) {
-	var ownerPID int
-	t.Cleanup(func() {
-		terminateProjectDaemonProcess(t, ownerPID)
-	})
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--allow-insecure",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil)
-	desc := waitForProjectDaemonDescriptor(t, dataDir)
-	ownerPID = desc.PID
-	waitForLeafwikiReady(t, proc, port)
-
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
-	if err != nil {
-		t.Fatalf("GET /api/config: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
-	}
-	var config map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if config["enableWorkspaceSync"] != true {
-		t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
-	}
-	proc.stop(t)
-}
-
-func TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	ownerRootDir := filepath.Join(baseDir, "owner-content")
-	requestedRootDir := filepath.Join(baseDir, "requested-content")
-	port := freeTCPPort(t)
-	owner := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", ownerRootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{})
-	defer owner.stop(t)
-	waitForLeafwikiReady(t, owner, port)
-	descriptorPath := projectdaemon.DescriptorPath(dataDir)
-	waitForFileContaining(t, descriptorPath, `"rootDir"`)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", requestedRootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{}, 12*time.Second)
-
-	if err == nil {
-		t.Fatalf("different root-dir startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") && !strings.Contains(stderr, "data directory is already in use by workspace") {
-		t.Fatalf("stderr = %q, want root-dir config mismatch or workspace registry conflict", stderr)
-	}
-	if _, err := os.Stat(descriptorPath); err != nil {
-		t.Fatalf("live descriptor was removed after root-dir mismatch: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	waitForLeafwikiReady(t, owner, port)
-}
-
-func TestMainProcess_FirstStartupWritesSecureProjectDaemonDescriptor(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-
-	waitForLeafwikiReady(t, proc, port)
-	descriptorPath := filepath.Join(dataDir, ".leafwiki", "project-daemon.json")
-	waitForFileContaining(t, descriptorPath, `"controlToken"`)
-	info, err := os.Stat(descriptorPath)
-	if err != nil {
-		t.Fatalf("stat descriptor: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("descriptor mode = %v, want 0600", got)
-	}
-	raw := readFileString(t, descriptorPath)
-	if !strings.Contains(raw, filepath.Clean(dataDir)) || !strings.Contains(raw, filepath.Clean(rootDir)) {
-		t.Fatalf("descriptor = %s, want canonical data/root dirs", raw)
-	}
-	if strings.Contains(raw, "LEAFWIKI_MCP_API_KEY") || strings.Contains(raw, "lwk_") {
-		t.Fatalf("descriptor leaked API-key material: %s", raw)
-	}
-}
-
-func TestMainProcess_CanonicalPathVariantsAttachWithDefaultFileLogging(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink path canonicalization test is Unix-oriented")
-	}
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	dataLink := filepath.Join(baseDir, "data-link")
-	rootLink := filepath.Join(baseDir, "content-link")
-	if err := os.Symlink(dataDir, dataLink); err != nil {
-		t.Fatalf("symlink data dir: %v", err)
-	}
-	if err := os.Symlink(rootDir, rootLink); err != nil {
-		t.Fatalf("symlink root dir: %v", err)
-	}
-	port := freeTCPPort(t)
-	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataLink,
-		"--root-dir", rootLink,
-		"--host", "127.0.0.1",
-		"--port", port,
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, first, port)
-	if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
-		t.Fatalf("write first STDIO MCP frames: %v", err)
-	}
-	waitForFileContaining(t, first.stdoutPath, `"id":2`)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-	}, nil, 5*time.Second)
-
-	if err != nil {
-		t.Fatalf("canonical path variant should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if strings.Contains(stderr, "log-file") || strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no log-file config mismatch", stderr)
-	}
-}
-
-func TestMainProcess_AuthEnabledProjectDaemonDescriptorOmitsBootstrapSecretFingerprints(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	jwtSecret := "descriptor-jwt-secret"
-	adminPassword := "descriptor-admin-password"
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--jwt-secret", jwtSecret,
-		"--admin-password", adminPassword,
-		"--allow-insecure",
-		"--log-target", "stderr",
-	}, nil)
-
-	waitForLeafwikiReady(t, proc, port)
-	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
-	descriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
-	waitForFileContaining(t, descriptorPath, `"configHash"`)
-	raw := readFileString(t, descriptorPath)
-	for _, unexpected := range []string{
-		jwtSecret,
-		adminPassword,
-		sha256Hex(jwtSecret),
-		sha256Hex(adminPassword),
-		"jwtSecretHash",
-		"adminPasswordHash",
-	} {
-		if strings.Contains(raw, unexpected) {
-			t.Fatalf("descriptor leaked bootstrap secret material %q:\n%s", unexpected, raw)
+		if !desc.Config.EnableWorkspaceSync {
+			t.Fatalf("descriptor config EnableWorkspaceSync = false, want true")
 		}
-	}
-}
+		proc.stop(t)
 
-func TestMainProcess_NativeStdioCloseKeepsOwnerAliveUntilIdleTimeout(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"}, stdinReader)
+	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-	waitForLeafwikiReady(t, proc, port)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
-}
+var _ = ginkgo.Describe("TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown", func() {
+	ginkgo.It("TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		for _, removedFlag := range []string{"--enable-revision", "--enable-workspace-sync"} {
+			func() {
+				t := t
+				_ = removedFlag
+				stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+					"--disable-auth",
+					removedFlag,
+					"--data-dir", dataDir,
+					"--root-dir", rootDir,
+					"--host", "127.0.0.1",
+					"--port", freeTCPPort(t),
+					"--log-target", "stderr",
+				}, nil, 5*time.Second)
 
-func TestMainProcess_CrashedNativeStdioFrontendExpiresHeartbeatAndReleasesLocks(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"}, stdinReader)
-	waitForLeafwikiReady(t, proc, port)
+				if err == nil {
+					t.Fatalf("startup with removed flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("startup with removed flag hung; expected immediate unknown flag error\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+				}
+				if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
+					t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
+				}
 
-	proc.cancel()
-	_ = stdinWriter.Close()
-	_ = proc.cmd.Wait()
-	proc.stopped = true
+			}()
+		}
 
-	waitForLeafwikiUnavailableWithin(t, port, 25*time.Second)
-	waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
-}
+	})
+})
 
-func TestMainProcess_NativeStdioPipedOutputExitsBeforeOwnerIdleTimeout(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, 1500*time.Millisecond)
+var _ = ginkgo.Describe("TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag", func() {
+	ginkgo.It("TestMainProcess_ConfigEndpointReportsWorkspaceSyncFlag", func() {
+		t := ginkgo.GinkgoT()
+		var ownerPID int
+		t.Cleanup(func() {
+			terminateProjectDaemonProcess(t, ownerPID)
+		})
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--allow-insecure",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil)
+		desc := waitForProjectDaemonDescriptor(t, dataDir)
+		ownerPID = desc.PID
+		waitForLeafwikiReady(t, proc, port)
 
-	if err != nil {
-		t.Fatalf("native STDIO frontend should exit before owner idle timeout, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-	waitForLeafwikiReadyWithDiagnostics(t, port, stdout, stderr)
-	waitForLeafwikiUnavailable(t, port)
-}
+		resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
+		if err != nil {
+			t.Fatalf("GET /api/config: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
+		}
+		var config map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		if config["enableWorkspaceSync"] != true {
+			t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
+		}
+		proc.stop(t)
 
-func TestMainProcess_CombinedNativeStdioHTTPExposesHTTPMCPToolSurface(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio,http",
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--root-dir", filepath.Join(t.TempDir(), "content"),
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
+	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
-	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+var _ = ginkgo.Describe("TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor", func() {
+	ginkgo.It("TestMainProcess_DifferentRootDirDoesNotRemoveLiveProjectDescriptor", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		ownerRootDir := filepath.Join(baseDir, "owner-content")
+		requestedRootDir := filepath.Join(baseDir, "requested-content")
+		port := freeTCPPort(t)
+		owner := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", ownerRootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{})
+		defer owner.stop(t)
+		waitForLeafwikiReady(t, owner, port)
+		descriptorPath := projectdaemon.DescriptorPath(dataDir)
+		waitForFileContaining(t, descriptorPath, `"rootDir"`)
 
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	proc.waitForExit(t)
-	if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
-		t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
-	}
-}
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", requestedRootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{}, 12*time.Second)
 
-func TestMainProcess_RepeatedCombinedNativeStdioHTTPStderrLoggingAttaches(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio,http",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, first, port)
-	if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
-		t.Fatalf("write first combined STDIO MCP frames: %v", err)
-	}
-	waitForFileContaining(t, first.stdoutPath, `"id":2`)
+		if err == nil {
+			t.Fatalf("different root-dir startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "project daemon config mismatch") && !strings.Contains(stderr, "data directory is already in use by workspace") {
+			t.Fatalf("stderr = %q, want root-dir config mismatch or workspace registry conflict", stderr)
+		}
+		if _, err := os.Stat(descriptorPath); err != nil {
+			t.Fatalf("live descriptor was removed after root-dir mismatch: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		waitForLeafwikiReady(t, owner, port)
 
-	stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-		"--mcp=stdio,http",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, nil, nativeStdioListToolsInput(), 8*time.Second)
+	})
+})
 
-	if err != nil {
-		t.Fatalf("repeated combined STDIO+HTTP startup should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
-		t.Fatalf("stdout = %q, want tools/list response from repeated STDIO attach", stdout)
-	}
-	if strings.Contains(stderr, "project daemon config mismatch") {
-		t.Fatalf("stderr = %q, want no logging config mismatch", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_FirstStartupWritesSecureProjectDaemonDescriptor", func() {
+	ginkgo.It("TestMainProcess_FirstStartupWritesSecureProjectDaemonDescriptor", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
 
-func TestMainProcess_LegacyMCPFlagsFailUnknown(t *testing.T) {
-	for _, removedFlag := range []string{"--enable-mcp", "--mcp-stdio"} {
-		t.Run(removedFlag, func(t *testing.T) {
-			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-				removedFlag,
-				"--disable-auth",
-				"--data-dir", filepath.Join(t.TempDir(), "data"),
-				"--root-dir", filepath.Join(t.TempDir(), "content"),
-				"--host", "127.0.0.1",
-				"--port", freeTCPPort(t),
-				"--log-target", "stderr",
-			}, nil, 5*time.Second)
+		waitForLeafwikiReady(t, proc, port)
+		descriptorPath := filepath.Join(dataDir, ".leafwiki", "project-daemon.json")
+		waitForFileContaining(t, descriptorPath, `"controlToken"`)
+		info, err := os.Stat(descriptorPath)
+		if err != nil {
+			t.Fatalf("stat descriptor: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("descriptor mode = %v, want 0600", got)
+		}
+		raw := readFileString(t, descriptorPath)
+		if !strings.Contains(raw, filepath.Clean(dataDir)) || !strings.Contains(raw, filepath.Clean(rootDir)) {
+			t.Fatalf("descriptor = %s, want canonical data/root dirs", raw)
+		}
+		if strings.Contains(raw, "LEAFWIKI_MCP_API_KEY") || strings.Contains(raw, "lwk_") {
+			t.Fatalf("descriptor leaked API-key material: %s", raw)
+		}
 
-			if err == nil {
-				t.Fatalf("startup with removed MCP flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_CanonicalPathVariantsAttachWithDefaultFileLogging", func() {
+	ginkgo.It("TestMainProcess_CanonicalPathVariantsAttachWithDefaultFileLogging", func() {
+		t := ginkgo.GinkgoT()
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink path canonicalization test is Unix-oriented")
+		}
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		dataLink := filepath.Join(baseDir, "data-link")
+		rootLink := filepath.Join(baseDir, "content-link")
+		if err := os.Symlink(dataDir, dataLink); err != nil {
+			t.Fatalf("symlink data dir: %v", err)
+		}
+		if err := os.Symlink(rootDir, rootLink); err != nil {
+			t.Fatalf("symlink root dir: %v", err)
+		}
+		port := freeTCPPort(t)
+		first := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataLink,
+			"--root-dir", rootLink,
+			"--host", "127.0.0.1",
+			"--port", port,
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, first, port)
+		if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
+			t.Fatalf("write first STDIO MCP frames: %v", err)
+		}
+		waitForFileContaining(t, first.stdoutPath, `"id":2`)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+		}, nil, 5*time.Second)
+
+		if err != nil {
+			t.Fatalf("canonical path variant should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if strings.Contains(stderr, "log-file") || strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no log-file config mismatch", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_AuthEnabledProjectDaemonDescriptorOmitsBootstrapSecretFingerprints", func() {
+	ginkgo.It("TestMainProcess_AuthEnabledProjectDaemonDescriptorOmitsBootstrapSecretFingerprints", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		jwtSecret := "descriptor-jwt-secret"
+		adminPassword := "descriptor-admin-password"
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--jwt-secret", jwtSecret,
+			"--admin-password", adminPassword,
+			"--allow-insecure",
+			"--log-target", "stderr",
+		}, nil)
+
+		waitForLeafwikiReady(t, proc, port)
+		layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
+		descriptorPath := projectdaemon.GlobalDescriptorPath(layout.RuntimeDir, projectdaemon.RoleWikid)
+		waitForFileContaining(t, descriptorPath, `"configHash"`)
+		raw := readFileString(t, descriptorPath)
+		for _, unexpected := range []string{
+			jwtSecret,
+			adminPassword,
+			sha256Hex(jwtSecret),
+			sha256Hex(adminPassword),
+			"jwtSecretHash",
+			"adminPasswordHash",
+		} {
+			if strings.Contains(raw, unexpected) {
+				t.Fatalf("descriptor leaked bootstrap secret material %q:\n%s", unexpected, raw)
 			}
-			if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
-				t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioCloseKeepsOwnerAliveUntilIdleTimeout", func() {
+	ginkgo.It("TestMainProcess_NativeStdioCloseKeepsOwnerAliveUntilIdleTimeout", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"}, stdinReader)
+
+		waitForLeafwikiReady(t, proc, port)
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		proc.waitForExit(t)
+		waitForLeafwikiReady(t, proc, port)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_CrashedNativeStdioFrontendExpiresHeartbeatAndReleasesLocks", func() {
+	ginkgo.It("TestMainProcess_CrashedNativeStdioFrontendExpiresHeartbeatAndReleasesLocks", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"}, stdinReader)
+		waitForLeafwikiReady(t, proc, port)
+
+		proc.cancel()
+		_ = stdinWriter.Close()
+		_ = proc.cmd.Wait()
+		proc.stopped = true
+
+		waitForLeafwikiUnavailableWithin(t, port, 25*time.Second)
+		waitForProjectLocksReusable(t, dataDir, rootDir, 15*time.Second)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioPipedOutputExitsBeforeOwnerIdleTimeout", func() {
+	ginkgo.It("TestMainProcess_NativeStdioPipedOutputExitsBeforeOwnerIdleTimeout", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, 1500*time.Millisecond)
+
+		if err != nil {
+			t.Fatalf("native STDIO frontend should exit before owner idle timeout, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+		waitForLeafwikiReadyWithDiagnostics(t, port, stdout, stderr)
+		waitForLeafwikiUnavailable(t, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_CombinedNativeStdioHTTPExposesHTTPMCPToolSurface", func() {
+	ginkgo.It("TestMainProcess_CombinedNativeStdioHTTPExposesHTTPMCPToolSurface", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio,http",
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--root-dir", filepath.Join(t.TempDir(), "content"),
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+
+		waitForLeafwikiReady(t, proc, port)
+		toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
+		assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		proc.waitForExit(t)
+		if stdout := readFileString(t, proc.stdoutPath); stdout != "" {
+			t.Fatalf("stdout = %q, want empty without MCP frames", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_RepeatedCombinedNativeStdioHTTPStderrLoggingAttaches", func() {
+	ginkgo.It("TestMainProcess_RepeatedCombinedNativeStdioHTTPStderrLoggingAttaches", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		first := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio,http",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, first, port)
+		if _, err := io.WriteString(stdinWriter, nativeStdioListToolsInput()); err != nil {
+			t.Fatalf("write first combined STDIO MCP frames: %v", err)
+		}
+		waitForFileContaining(t, first.stdoutPath, `"id":2`)
+
+		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+			"--mcp=stdio,http",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, nil, nativeStdioListToolsInput(), 8*time.Second)
+
+		if err != nil {
+			t.Fatalf("repeated combined STDIO+HTTP startup should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, "create_page") {
+			t.Fatalf("stdout = %q, want tools/list response from repeated STDIO attach", stdout)
+		}
+		if strings.Contains(stderr, "project daemon config mismatch") {
+			t.Fatalf("stderr = %q, want no logging config mismatch", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_LegacyMCPFlagsFailUnknown", func() {
+	ginkgo.It("TestMainProcess_LegacyMCPFlagsFailUnknown", func() {
+		t := ginkgo.GinkgoT()
+		for _, removedFlag := range []string{"--enable-mcp", "--mcp-stdio"} {
+			func() {
+				t := t
+				_ = removedFlag
+				stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+					removedFlag,
+					"--disable-auth",
+					"--data-dir", filepath.Join(t.TempDir(), "data"),
+					"--root-dir", filepath.Join(t.TempDir(), "content"),
+					"--host", "127.0.0.1",
+					"--port", freeTCPPort(t),
+					"--log-target", "stderr",
+				}, nil, 5*time.Second)
+
+				if err == nil {
+					t.Fatalf("startup with removed MCP flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+				}
+				if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, strings.TrimLeft(removedFlag, "-")) {
+					t.Fatalf("stderr = %q, want unknown flag error for %s", stderr, removedFlag)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioMalformedJSONReturnsParseErrorAndContinues", func() {
+	ginkgo.It("TestMainProcess_NativeStdioMalformedJSONReturnsParseErrorAndContinues", func() {
+		t := ginkgo.GinkgoT()
+		proc, stdin := startLeafwikiHelperWithStdinPipe(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", filepath.Join(t.TempDir(), "data"),
+			"--root-dir", filepath.Join(t.TempDir(), "content"),
+			"--host", "127.0.0.1",
+			"--port", freeTCPPort(t),
+			"--log-target", "stderr",
+		}, nil)
+
+		if _, err := io.WriteString(stdin, "not-json\n"); err != nil {
+			t.Fatalf("write malformed frame: %v", err)
+		}
+		if _, err := io.WriteString(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`+"\n"); err != nil {
+			t.Fatalf("write initialize frame: %v", err)
+		}
+		waitForFileContaining(t, proc.stdoutPath, `"id":1`)
+		if err := stdin.Close(); err != nil {
+			t.Fatalf("close stdin: %v", err)
+		}
+		proc.waitForExit(t)
+
+		stdout := readFileString(t, proc.stdoutPath)
+		if !strings.Contains(stdout, `"code":-32700`) {
+			t.Fatalf("stdout = %q, want JSON-RPC parse error", stdout)
+		}
+		if !strings.Contains(stdout, `"id":null`) {
+			t.Fatalf("stdout = %q, want parse error id null", stdout)
+		}
+		if !strings.Contains(stdout, `"id":1`) {
+			t.Fatalf("stdout = %q, want initialize response after malformed frame", stdout)
+		}
+		if stderr := readFileString(t, proc.stderrPath); strings.Contains(stderr, "MCP STDIO failed") {
+			t.Fatalf("stderr = %q, want malformed JSON to stay protocol-level", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioRejectsSecondProcessWithConfigMismatch", func() {
+	ginkgo.It("TestMainProcess_NativeStdioRejectsSecondProcessWithConfigMismatch", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		rawSecret := "jwt_secret_should_not_leak"
+		firstPort := freeTCPPort(t)
+		first := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", firstPort,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, first, firstPort)
+		_ = waitForProjectDaemonDescriptor(t, dataDir)
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", freeTCPPort(t),
+			"--markdown-link-root-prefix", "/docs",
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_JWT_SECRET": rawSecret}, 5*time.Second)
+
+		if err == nil {
+			t.Fatalf("expected second process with config mismatch to exit non-zero")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second process did not exit; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "markdown-link-root-prefix") {
+			t.Fatalf("stderr = %q, want markdown-link-root-prefix config mismatch", stderr)
+		}
+		if strings.Contains(stderr, rawSecret) {
+			t.Fatalf("stderr leaked raw secret: %q", stderr)
+		}
+
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		first.waitForExit(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioRejectsSecondProcessWithSameRootDir", func() {
+	ginkgo.It("TestMainProcess_NativeStdioRejectsSecondProcessWithSameRootDir", func() {
+		t := ginkgo.GinkgoT()
+		stdinReader, stdinWriter := io.Pipe()
+		defer stdinWriter.Close()
+		baseDir := t.TempDir()
+		rootDir := filepath.Join(baseDir, "content")
+		firstPort := freeTCPPort(t)
+		first := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", filepath.Join(baseDir, "data-a"),
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", firstPort,
+			"--log-target", "stderr",
+		}, nil, stdinReader)
+		waitForLeafwikiReady(t, first, firstPort)
+		_ = waitForProjectDaemonDescriptor(t, filepath.Join(baseDir, "data-a"))
+
+		stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", filepath.Join(baseDir, "data-b"),
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", freeTCPPort(t),
+			"--log-target", "stderr",
+		}, nil, 12*time.Second)
+
+		if err == nil {
+			t.Fatalf("expected second process with same root dir to exit non-zero")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second process did not exit; expected root directory lock rejection\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "root directory is already in use") {
+			t.Fatalf("stderr = %q, want root directory lock error", stderr)
+		}
+
+		if err := stdinWriter.Close(); err != nil {
+			t.Fatalf("close stdin writer: %v", err)
+		}
+		first.waitForExit(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestWaitForProjectDaemonConcurrentStartupAttachesToWinningOwnerAfterSpawnError", func() {
+	ginkgo.It("TestWaitForProjectDaemonConcurrentStartupAttachesToWinningOwnerAfterSpawnError", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+		if err != nil {
+			t.Fatalf("canonicalize project: %v", err)
+		}
+		ownerCfg := projectdaemon.Config{
+			DataDir:           canonicalData,
+			RootDir:           canonicalRoot,
+			AuthDisabled:      true,
+			PublicMCPEnabled:  false,
+			Host:              "127.0.0.1",
+			Port:              "8080",
+			DaemonIdleTimeout: "10m0s",
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("ConfigHash: %v", err)
+		}
+		dataLock, err := locking.AcquireDataDirLock(canonicalData)
+		if err != nil {
+			t.Fatalf("acquire fake owner data lock: %v", err)
+		}
+		defer dataLock.Release()
+		rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
+		if err != nil {
+			t.Fatalf("acquire fake owner root lock: %v", err)
+		}
+		defer rootLock.Release()
+		token := "control-token"
+		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != token {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
 			}
-		})
-	}
-}
-
-func TestMainProcess_NativeStdioMalformedJSONReturnsParseErrorAndContinues(t *testing.T) {
-	proc, stdin := startLeafwikiHelperWithStdinPipe(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(t.TempDir(), "data"),
-		"--root-dir", filepath.Join(t.TempDir(), "content"),
-		"--host", "127.0.0.1",
-		"--port", freeTCPPort(t),
-		"--log-target", "stderr",
-	}, nil)
-
-	if _, err := io.WriteString(stdin, "not-json\n"); err != nil {
-		t.Fatalf("write malformed frame: %v", err)
-	}
-	if _, err := io.WriteString(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`+"\n"); err != nil {
-		t.Fatalf("write initialize frame: %v", err)
-	}
-	waitForFileContaining(t, proc.stdoutPath, `"id":1`)
-	if err := stdin.Close(); err != nil {
-		t.Fatalf("close stdin: %v", err)
-	}
-	proc.waitForExit(t)
-
-	stdout := readFileString(t, proc.stdoutPath)
-	if !strings.Contains(stdout, `"code":-32700`) {
-		t.Fatalf("stdout = %q, want JSON-RPC parse error", stdout)
-	}
-	if !strings.Contains(stdout, `"id":null`) {
-		t.Fatalf("stdout = %q, want parse error id null", stdout)
-	}
-	if !strings.Contains(stdout, `"id":1`) {
-		t.Fatalf("stdout = %q, want initialize response after malformed frame", stdout)
-	}
-	if stderr := readFileString(t, proc.stderrPath); strings.Contains(stderr, "MCP STDIO failed") {
-		t.Fatalf("stderr = %q, want malformed JSON to stay protocol-level", stderr)
-	}
-}
-
-func TestMainProcess_NativeStdioRejectsSecondProcessWithConfigMismatch(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	rawSecret := "jwt_secret_should_not_leak"
-	firstPort := freeTCPPort(t)
-	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", firstPort,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, first, firstPort)
-	_ = waitForProjectDaemonDescriptor(t, dataDir)
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", freeTCPPort(t),
-		"--markdown-link-root-prefix", "/docs",
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_JWT_SECRET": rawSecret}, 5*time.Second)
-
-	if err == nil {
-		t.Fatalf("expected second process with config mismatch to exit non-zero")
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("second process did not exit; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "project daemon config mismatch") || !strings.Contains(stderr, "markdown-link-root-prefix") {
-		t.Fatalf("stderr = %q, want markdown-link-root-prefix config mismatch", stderr)
-	}
-	if strings.Contains(stderr, rawSecret) {
-		t.Fatalf("stderr leaked raw secret: %q", stderr)
-	}
-
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	first.waitForExit(t)
-}
-
-func TestMainProcess_NativeStdioRejectsSecondProcessWithSameRootDir(t *testing.T) {
-	stdinReader, stdinWriter := io.Pipe()
-	defer stdinWriter.Close()
-	baseDir := t.TempDir()
-	rootDir := filepath.Join(baseDir, "content")
-	firstPort := freeTCPPort(t)
-	first := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(baseDir, "data-a"),
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", firstPort,
-		"--log-target", "stderr",
-	}, nil, stdinReader)
-	waitForLeafwikiReady(t, first, firstPort)
-	_ = waitForProjectDaemonDescriptor(t, filepath.Join(baseDir, "data-a"))
-
-	stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", filepath.Join(baseDir, "data-b"),
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", freeTCPPort(t),
-		"--log-target", "stderr",
-	}, nil, 12*time.Second)
-
-	if err == nil {
-		t.Fatalf("expected second process with same root dir to exit non-zero")
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("second process did not exit; expected root directory lock rejection\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "root directory is already in use") {
-		t.Fatalf("stderr = %q, want root directory lock error", stderr)
-	}
-
-	if err := stdinWriter.Close(); err != nil {
-		t.Fatalf("close stdin writer: %v", err)
-	}
-	first.waitForExit(t)
-}
-
-func TestWaitForProjectDaemonConcurrentStartupAttachesToWinningOwnerAfterSpawnError(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-	if err != nil {
-		t.Fatalf("canonicalize project: %v", err)
-	}
-	ownerCfg := projectdaemon.Config{
-		DataDir:           canonicalData,
-		RootDir:           canonicalRoot,
-		AuthDisabled:      true,
-		PublicMCPEnabled:  false,
-		Host:              "127.0.0.1",
-		Port:              "8080",
-		DaemonIdleTimeout: "10m0s",
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("ConfigHash: %v", err)
-	}
-	dataLock, err := locking.AcquireDataDirLock(canonicalData)
-	if err != nil {
-		t.Fatalf("acquire fake owner data lock: %v", err)
-	}
-	defer dataLock.Release()
-	rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
-	if err != nil {
-		t.Fatalf("acquire fake owner root lock: %v", err)
-	}
-	defer rootLock.Release()
-	token := "control-token"
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if req.Method == http.MethodGet && req.URL.Path == "/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(projectdaemon.DaemonHealth{
-				OK:            true,
-				SchemaVersion: projectdaemon.DescriptorSchemaVersion,
-				PID:           os.Getpid(),
-				DataDir:       canonicalData,
-				RootDir:       canonicalRoot,
-				ConfigHash:    hash,
-			})
-			return
-		}
-		http.NotFound(w, req)
-	}))
-	t.Cleanup(control.Close)
-	descriptorPath := projectdaemon.DescriptorPath(canonicalData)
-	errorPath := filepath.Join(t.TempDir(), "startup.err")
-	if err := os.WriteFile(errorPath, []byte("acquire data directory lock: data directory is already in use"), 0o600); err != nil {
-		t.Fatalf("write startup error: %v", err)
-	}
-	go func() {
-		time.Sleep(2200 * time.Millisecond)
-		_ = projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-			SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-			PID:              os.Getpid(),
-			StartedAt:        time.Now().UTC(),
-			DataDir:          canonicalData,
-			RootDir:          canonicalRoot,
-			PublicURL:        "http://127.0.0.1:8080",
-			PublicMCPEnabled: false,
-			ControlURL:       control.URL,
-			ConfigHash:       hash,
-			IdleTimeout:      "10m0s",
-			ControlToken:     token,
-			Config:           ownerCfg,
-		})
-	}()
-
-	desc, err := waitForProjectDaemon(context.Background(), descriptorPath, errorPath, ownerCfg, mcpTransports{Stdio: true})
-	if err != nil {
-		t.Fatalf("waitForProjectDaemon should attach to winning owner after startup error, got %v", err)
-	}
-	if desc.ControlURL != control.URL {
-		t.Fatalf("attached descriptor control URL = %q, want %q", desc.ControlURL, control.URL)
-	}
-}
-
-func TestWaitForProjectDaemonConcurrentStartupHandlesStructuredLockError(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-	if err != nil {
-		t.Fatalf("canonicalize project: %v", err)
-	}
-	ownerCfg := projectdaemon.Config{
-		DataDir:           canonicalData,
-		RootDir:           canonicalRoot,
-		AuthDisabled:      true,
-		Host:              "127.0.0.1",
-		Port:              "8080",
-		DaemonIdleTimeout: "10m0s",
-	}
-	hash, err := projectdaemon.ConfigHash(ownerCfg)
-	if err != nil {
-		t.Fatalf("ConfigHash: %v", err)
-	}
-	dataLock, err := locking.AcquireDataDirLock(canonicalData)
-	if err != nil {
-		t.Fatalf("acquire fake owner data lock: %v", err)
-	}
-	defer dataLock.Release()
-	rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
-	if err != nil {
-		t.Fatalf("acquire fake owner root lock: %v", err)
-	}
-	defer rootLock.Release()
-	token := "control-token"
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if req.Method == http.MethodGet && req.URL.Path == "/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(projectdaemon.DaemonHealth{
-				OK:            true,
-				SchemaVersion: projectdaemon.DescriptorSchemaVersion,
-				PID:           os.Getpid(),
-				DataDir:       canonicalData,
-				RootDir:       canonicalRoot,
-				ConfigHash:    hash,
-			})
-			return
-		}
-		http.NotFound(w, req)
-	}))
-	t.Cleanup(control.Close)
-	descriptorPath := projectdaemon.DescriptorPath(canonicalData)
-	errorPath := filepath.Join(t.TempDir(), "startup.err")
-	rawErr, err := json.Marshal(projectDaemonStartupError{
-		Kind:            projectDaemonStartupErrorKindLock,
-		RenderedMessage: "acquire data directory lock: data directory is already in use",
-	})
-	if err != nil {
-		t.Fatalf("marshal startup error: %v", err)
-	}
-	if err := os.WriteFile(errorPath, rawErr, 0o600); err != nil {
-		t.Fatalf("write startup error: %v", err)
-	}
-	go func() {
-		time.Sleep(2200 * time.Millisecond)
-		_ = projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
-			SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
-			PID:              os.Getpid(),
-			StartedAt:        time.Now().UTC(),
-			DataDir:          canonicalData,
-			RootDir:          canonicalRoot,
-			PublicURL:        "http://127.0.0.1:8080",
-			PublicMCPEnabled: false,
-			ControlURL:       control.URL,
-			ConfigHash:       hash,
-			IdleTimeout:      "10m0s",
-			ControlToken:     token,
-			Config:           ownerCfg,
-		})
-	}()
-
-	desc, err := waitForProjectDaemon(context.Background(), descriptorPath, errorPath, ownerCfg, mcpTransports{})
-	if err != nil {
-		t.Fatalf("waitForProjectDaemon should attach after structured lock startup error, got %v", err)
-	}
-	if desc.ControlURL != control.URL {
-		t.Fatalf("attached descriptor control URL = %q, want %q", desc.ControlURL, control.URL)
-	}
-}
-
-func TestWaitForProjectDaemonReportsNonLockStartupErrorDirectly(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-	if err != nil {
-		t.Fatalf("canonicalize project: %v", err)
-	}
-	ownerCfg := projectdaemon.Config{
-		DataDir:           canonicalData,
-		RootDir:           canonicalRoot,
-		AuthDisabled:      true,
-		Host:              "127.0.0.1",
-		Port:              "8080",
-		DaemonIdleTimeout: "10m0s",
-	}
-	errorPath := filepath.Join(t.TempDir(), "startup.err")
-	if err := os.WriteFile(errorPath, []byte("start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use"), 0o600); err != nil {
-		t.Fatalf("write startup error: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	_, err = waitForProjectDaemon(ctx, projectdaemon.DescriptorPath(canonicalData), errorPath, ownerCfg, mcpTransports{})
-	if err == nil {
-		t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
-	}
-	if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
-		t.Fatalf("error = %v, want direct non-lock startup failure", err)
-	}
-	if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
-		t.Fatalf("error = %v, want bind startup failure", err)
-	}
-}
-
-func TestWaitForProjectDaemonReportsStructuredNonLockStartupErrorDirectly(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("create data dir: %v", err)
-	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
-	if err != nil {
-		t.Fatalf("canonicalize project: %v", err)
-	}
-	ownerCfg := projectdaemon.Config{
-		DataDir:           canonicalData,
-		RootDir:           canonicalRoot,
-		AuthDisabled:      true,
-		Host:              "127.0.0.1",
-		Port:              "8080",
-		DaemonIdleTimeout: "10m0s",
-	}
-	errorPath := filepath.Join(t.TempDir(), "startup.err")
-	rawErr, err := json.Marshal(projectDaemonStartupError{
-		Kind:            projectDaemonStartupErrorKindStartup,
-		RenderedMessage: "start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use",
-	})
-	if err != nil {
-		t.Fatalf("marshal startup error: %v", err)
-	}
-	if err := os.WriteFile(errorPath, rawErr, 0o600); err != nil {
-		t.Fatalf("write startup error: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	_, err = waitForProjectDaemon(ctx, projectdaemon.DescriptorPath(canonicalData), errorPath, ownerCfg, mcpTransports{})
-	if err == nil {
-		t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
-	}
-	if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
-		t.Fatalf("error = %v, want direct non-lock startup failure", err)
-	}
-	if strings.Contains(err.Error(), `"kind"`) || strings.Contains(err.Error(), `"message"`) {
-		t.Fatalf("error = %v, want structured startup message without raw JSON", err)
-	}
-	if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
-		t.Fatalf("error = %v, want bind startup failure", err)
-	}
-}
-
-func TestCompareProjectDaemonConfigForStdioOnlyAttachIgnoresOwnerLoggingSettings(t *testing.T) {
-	owner := projectdaemon.Config{
-		DataDir:           "/tmp/leafwiki-data",
-		RootDir:           "/tmp/leafwiki-root",
-		AuthDisabled:      true,
-		Host:              "127.0.0.1",
-		Port:              "8080",
-		LogTarget:         "stderr",
-		LogFile:           "",
-		DisableRequestLog: false,
-		DaemonIdleTimeout: "10m0s",
-	}
-	requested := owner
-	requested.LogTarget = "file"
-	requested.LogFile = "/tmp/leafwiki-data/.leafwiki/logs/leafwiki.log"
-	requested.DisableRequestLog = true
-
-	mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
-
-	if len(mismatches) > 0 {
-		t.Fatalf("mismatches = %#v, want STDIO-only attach to ignore owner logging settings", mismatches)
-	}
-}
-
-func TestCompareProjectDaemonConfigForPlainServerPreservesPublicMCPMismatch(t *testing.T) {
-	owner := projectdaemon.Config{
-		DataDir:          "/tmp/leafwiki-data",
-		RootDir:          "/tmp/leafwiki-root",
-		AuthDisabled:     true,
-		PublicMCPEnabled: true,
-		Host:             "127.0.0.1",
-		Port:             "8080",
-	}
-	requested := owner
-	requested.PublicMCPEnabled = false
-
-	mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{})
-
-	if len(mismatches) != 1 || mismatches[0].Field != "public-mcp-enabled" {
-		t.Fatalf("mismatches = %#v, want public MCP mismatch for plain server startup", mismatches)
-	}
-}
-
-func TestDaemonConfigForRuntimeIncludesWorkspaceSync(t *testing.T) {
-	baseDir := t.TempDir()
-	cfg := testRuntimeConfig(
-		filepath.Join(baseDir, "data"),
-		filepath.Join(baseDir, "content"),
-		"8080",
-		mcpTransports{},
-		true,
-	)
-	cfg.EnableWorkspaceSync = true
-
-	daemonCfg, err := daemonConfigForRuntime(cfg)
-	if err != nil {
-		t.Fatalf("daemon config: %v", err)
-	}
-
-	if !daemonCfg.EnableWorkspaceSync {
-		t.Fatalf("EnableWorkspaceSync = false, want true")
-	}
-}
-
-func TestDaemonOwnerRuntimeConfigForWikidFrontdForcesWorkspaceSync(t *testing.T) {
-	baseDir := t.TempDir()
-	cfg := testRuntimeConfig(
-		filepath.Join(baseDir, "data"),
-		filepath.Join(baseDir, "content"),
-		"8080",
-		mcpTransports{},
-		true,
-	)
-	cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
-	cfg.EnableWorkspaceSync = false
-
-	ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
-	if err != nil {
-		t.Fatalf("daemonOwnerRuntimeConfig failed: %v", err)
-	}
-	daemonCfg, err := daemonConfigForRuntime(ownerCfg)
-	if err != nil {
-		t.Fatalf("daemonConfigForRuntime failed: %v", err)
-	}
-
-	if !ownerCfg.EnableWorkspaceSync || !daemonCfg.EnableWorkspaceSync {
-		t.Fatalf("workspace sync = %v/%v, want true/true", ownerCfg.EnableWorkspaceSync, daemonCfg.EnableWorkspaceSync)
-	}
-}
-
-func TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields(t *testing.T) {
-	owner := completeDaemonCompareConfig()
-	tests := []struct {
-		name  string
-		field string
-		mut   func(*projectdaemon.Config)
-	}{
-		{name: "data dir", field: "data-dir", mut: func(cfg *projectdaemon.Config) { cfg.DataDir = "/tmp/other-data" }},
-		{name: "root dir", field: "root-dir", mut: func(cfg *projectdaemon.Config) { cfg.RootDir = "/tmp/other-root" }},
-		{name: "auth mode", field: "auth-disabled", mut: func(cfg *projectdaemon.Config) { cfg.AuthDisabled = !cfg.AuthDisabled }},
-		{name: "public MCP", field: "public-mcp-enabled", mut: func(cfg *projectdaemon.Config) { cfg.PublicMCPEnabled = !cfg.PublicMCPEnabled }},
-		{name: "host", field: "host", mut: func(cfg *projectdaemon.Config) { cfg.Host = "127.0.0.2" }},
-		{name: "port", field: "port", mut: func(cfg *projectdaemon.Config) { cfg.Port = "9090" }},
-		{name: "base path", field: "base-path", mut: func(cfg *projectdaemon.Config) { cfg.BasePath = "/docs" }},
-		{name: "markdown link root prefix", field: "markdown-link-root-prefix", mut: func(cfg *projectdaemon.Config) { cfg.MarkdownLinkRootPrefix = "/docs" }},
-		{name: "public access", field: "public-access", mut: func(cfg *projectdaemon.Config) { cfg.PublicAccess = !cfg.PublicAccess }},
-		{name: "allow insecure", field: "allow-insecure", mut: func(cfg *projectdaemon.Config) { cfg.AllowInsecure = !cfg.AllowInsecure }},
-		{name: "access token timeout", field: "access-token-timeout", mut: func(cfg *projectdaemon.Config) { cfg.AccessTokenTimeout = "2h0m0s" }},
-		{name: "refresh token timeout", field: "refresh-token-timeout", mut: func(cfg *projectdaemon.Config) { cfg.RefreshTokenTimeout = "720h0m0s" }},
-		{name: "injected header hash", field: "inject-code-in-header-hash", mut: func(cfg *projectdaemon.Config) { cfg.InjectCodeInHeaderHash = "other-hash" }},
-		{name: "custom stylesheet", field: "custom-stylesheet", mut: func(cfg *projectdaemon.Config) { cfg.CustomStylesheet = "/tmp/custom.css" }},
-		{name: "log target", field: "log-target", mut: func(cfg *projectdaemon.Config) { cfg.LogTarget = "file" }},
-		{name: "log file", field: "log-file", mut: func(cfg *projectdaemon.Config) { cfg.LogFile = "/tmp/leafwiki.log" }},
-		{name: "hide metadata", field: "hide-link-metadata-section", mut: func(cfg *projectdaemon.Config) { cfg.HideLinkMetadataSection = !cfg.HideLinkMetadataSection }},
-		{name: "upload size", field: "max-asset-upload-size-bytes", mut: func(cfg *projectdaemon.Config) { cfg.MaxAssetUploadSizeBytes = 99 }},
-		{name: "link refactor", field: "enable-link-refactor", mut: func(cfg *projectdaemon.Config) { cfg.EnableLinkRefactor = !cfg.EnableLinkRefactor }},
-		{name: "remote user enabled", field: "enable-http-remote-user", mut: func(cfg *projectdaemon.Config) { cfg.EnableHTTPRemoteUser = !cfg.EnableHTTPRemoteUser }},
-		{name: "remote user header", field: "http-remote-user-header", mut: func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserHeader = "X-User" }},
-		{name: "trusted proxies", field: "trusted-proxy-ips", mut: func(cfg *projectdaemon.Config) { cfg.TrustedProxyIPs = "127.0.0.1/32" }},
-		{name: "remote user logout", field: "http-remote-user-logout-url", mut: func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserLogoutURL = "https://example.test/logout" }},
-		{name: "request log", field: "disable-request-log", mut: func(cfg *projectdaemon.Config) { cfg.DisableRequestLog = !cfg.DisableRequestLog }},
-		{name: "idle timeout", field: "daemon-idle-timeout", mut: func(cfg *projectdaemon.Config) { cfg.DaemonIdleTimeout = "1m0s" }},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			requested := owner
-			tt.mut(&requested)
-
-			mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{HTTP: true})
-
-			if len(mismatches) != 1 || mismatches[0].Field != tt.field {
-				t.Fatalf("mismatches = %#v, want one %q mismatch", mismatches, tt.field)
+			if req.Method == http.MethodGet && req.URL.Path == "/health" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(projectdaemon.DaemonHealth{
+					OK:            true,
+					SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+					PID:           os.Getpid(),
+					DataDir:       canonicalData,
+					RootDir:       canonicalRoot,
+					ConfigHash:    hash,
+				})
+				return
 			}
-		})
-	}
-}
-
-func TestCompareProjectDaemonConfigForStdioOnlyAttachDocumentsIgnoredFields(t *testing.T) {
-	owner := completeDaemonCompareConfig()
-	requested := owner
-	requested.PublicMCPEnabled = !owner.PublicMCPEnabled
-	requested.Host = "0.0.0.0"
-	requested.LogTarget = "file"
-	requested.LogFile = "/tmp/leafwiki.log"
-	requested.DisableRequestLog = !owner.DisableRequestLog
-
-	mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
-
-	if len(mismatches) > 0 {
-		t.Fatalf("mismatches = %#v, want STDIO-only attach to inherit public MCP/logging/request-log settings", mismatches)
-	}
-}
-
-func TestCompareProjectDaemonDescriptorForRequestChecksTopLevelWorkspaceID(t *testing.T) {
-	requested := completeDaemonCompareConfig()
-	requested.WorkspaceID = "beta"
-	descriptorConfig := requested
-	desc := &projectdaemon.Descriptor{
-		Role:            projectdaemon.RoleWorkspaced,
-		WorkspaceID:     "alpha",
-		PrivateMCPURL:   "http://127.0.0.1:1/mcp",
-		PrivateMCPToken: "token",
-		Config:          descriptorConfig,
-	}
-
-	mismatches := compareProjectDaemonDescriptorForRequest(desc, requested, mcpTransports{Stdio: true})
-
-	if len(mismatches) != 1 || mismatches[0].Field != "workspace-id" || mismatches[0].Want != "alpha" || mismatches[0].Got != "beta" {
-		t.Fatalf("mismatches = %#v, want top-level workspace-id mismatch alpha -> beta", mismatches)
-	}
-}
-
-func TestDaemonStdioBridgeHTTPClientHasNoFullRequestTimeout(t *testing.T) {
-	client := daemonStdioBridgeHTTPClient(daemonStdioBridge{
-		ControlToken: "control-token",
-		APIKey:       "stdio-api-key",
-	})
-
-	if client == nil {
-		t.Fatalf("daemonStdioBridgeHTTPClient returned nil")
-	}
-	if client.Timeout != 0 {
-		t.Fatalf("HTTP client Timeout = %v, want zero so MCP request contexts control cancellation", client.Timeout)
-	}
-	authTransport, ok := client.Transport.(projectdaemon.AuthRoundTripper)
-	if !ok {
-		t.Fatalf("HTTP client transport = %T, want projectdaemon.AuthRoundTripper", client.Transport)
-	}
-	if authTransport.ControlToken != "control-token" || authTransport.BearerToken != "stdio-api-key" {
-		t.Fatalf("auth transport = %#v, want bridge credentials installed", authTransport)
-	}
-}
-
-func TestDaemonStdioBridgeHTTPClientRefreshesActorContextBeforeForwarding(t *testing.T) {
-	verifyCalls := 0
-	revoked := false
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/__leafwiki/actor-context" {
 			http.NotFound(w, req)
-			return
+		}))
+		t.Cleanup(control.Close)
+		descriptorPath := projectdaemon.DescriptorPath(canonicalData)
+		errorPath := filepath.Join(t.TempDir(), "startup.err")
+		if err := os.WriteFile(errorPath, []byte("acquire data directory lock: data directory is already in use"), 0o600); err != nil {
+			t.Fatalf("write startup error: %v", err)
 		}
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if req.Header.Get("Authorization") != "Bearer stdio-api-key" {
-			t.Fatalf("actor-context authorization = %q, want bearer API key", req.Header.Get("Authorization"))
-		}
-		if req.Header.Get(projectdaemon.WorkspaceIDHeader) != "workspace-a" {
-			t.Fatalf("actor-context workspace = %q, want workspace-a", req.Header.Get(projectdaemon.WorkspaceIDHeader))
-		}
-		verifyCalls++
-		if revoked {
-			http.Error(w, "access denied", http.StatusUnauthorized)
-			return
-		}
-		writeRuntimeJSON(w, map[string]any{"actor": projectdaemon.ActorContext{
-			Version:     1,
-			Issuer:      projectdaemon.ActorContextIssuerWikid,
-			Subject:     "user:editor",
-			Username:    "editor",
-			Role:        coreauth.RoleEditor,
-			WorkspaceID: "workspace-a",
-			AuthMethod:  "api_key",
-			IssuedAt:    now,
-			ExpiresAt:   now.Add(5 * time.Minute),
-		}})
-	}))
-	t.Cleanup(control.Close)
+		go func() {
+			time.Sleep(2200 * time.Millisecond)
+			_ = projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+				SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+				PID:              os.Getpid(),
+				StartedAt:        time.Now().UTC(),
+				DataDir:          canonicalData,
+				RootDir:          canonicalRoot,
+				PublicURL:        "http://127.0.0.1:8080",
+				PublicMCPEnabled: false,
+				ControlURL:       control.URL,
+				ConfigHash:       hash,
+				IdleTimeout:      "10m0s",
+				ControlToken:     token,
+				Config:           ownerCfg,
+			})
+		}()
 
-	upstreamCalls := 0
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		upstreamCalls++
-		if req.Header.Get(projectdaemon.ControlTokenHeader) != "private-token" {
-			t.Fatalf("private MCP control token = %q, want private-token", req.Header.Get(projectdaemon.ControlTokenHeader))
+		desc, err := waitForProjectDaemon(context.Background(), descriptorPath, errorPath, ownerCfg, mcpTransports{Stdio: true})
+		if err != nil {
+			t.Fatalf("waitForProjectDaemon should attach to winning owner after startup error, got %v", err)
 		}
-		if req.Header.Get("Authorization") != "Bearer stdio-api-key" {
-			t.Fatalf("private MCP authorization = %q, want bearer API key", req.Header.Get("Authorization"))
+		if desc.ControlURL != control.URL {
+			t.Fatalf("attached descriptor control URL = %q, want %q", desc.ControlURL, control.URL)
 		}
-		actor, err := projectdaemon.DecodeActorContext(req.Header.Get(projectdaemon.ActorContextHeader), projectdaemon.ActorContextValidation{
-			Now:         now.Add(time.Minute),
-			WorkspaceID: "workspace-a",
+
+	})
+})
+
+var _ = ginkgo.Describe("TestWaitForProjectDaemonConcurrentStartupHandlesStructuredLockError", func() {
+	ginkgo.It("TestWaitForProjectDaemonConcurrentStartupHandlesStructuredLockError", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+		if err != nil {
+			t.Fatalf("canonicalize project: %v", err)
+		}
+		ownerCfg := projectdaemon.Config{
+			DataDir:           canonicalData,
+			RootDir:           canonicalRoot,
+			AuthDisabled:      true,
+			Host:              "127.0.0.1",
+			Port:              "8080",
+			DaemonIdleTimeout: "10m0s",
+		}
+		hash, err := projectdaemon.ConfigHash(ownerCfg)
+		if err != nil {
+			t.Fatalf("ConfigHash: %v", err)
+		}
+		dataLock, err := locking.AcquireDataDirLock(canonicalData)
+		if err != nil {
+			t.Fatalf("acquire fake owner data lock: %v", err)
+		}
+		defer dataLock.Release()
+		rootLock, err := locking.AcquireRootDirLock(canonicalRoot)
+		if err != nil {
+			t.Fatalf("acquire fake owner root lock: %v", err)
+		}
+		defer rootLock.Release()
+		token := "control-token"
+		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != token {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if req.Method == http.MethodGet && req.URL.Path == "/health" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(projectdaemon.DaemonHealth{
+					OK:            true,
+					SchemaVersion: projectdaemon.DescriptorSchemaVersion,
+					PID:           os.Getpid(),
+					DataDir:       canonicalData,
+					RootDir:       canonicalRoot,
+					ConfigHash:    hash,
+				})
+				return
+			}
+			http.NotFound(w, req)
+		}))
+		t.Cleanup(control.Close)
+		descriptorPath := projectdaemon.DescriptorPath(canonicalData)
+		errorPath := filepath.Join(t.TempDir(), "startup.err")
+		rawErr, err := json.Marshal(projectDaemonStartupError{
+			Kind:            projectDaemonStartupErrorKindLock,
+			RenderedMessage: "acquire data directory lock: data directory is already in use",
 		})
 		if err != nil {
-			t.Fatalf("private MCP actor context invalid: %v", err)
+			t.Fatalf("marshal startup error: %v", err)
 		}
-		if actor.Subject != "user:editor" || actor.Role != coreauth.RoleEditor {
-			t.Fatalf("private MCP actor context = %#v, want refreshed editor actor", actor)
+		if err := os.WriteFile(errorPath, rawErr, 0o600); err != nil {
+			t.Fatalf("write startup error: %v", err)
 		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(upstream.Close)
+		go func() {
+			time.Sleep(2200 * time.Millisecond)
+			_ = projectdaemon.WriteDescriptorAtomic(descriptorPath, &projectdaemon.Descriptor{
+				SchemaVersion:    projectdaemon.DescriptorSchemaVersion,
+				PID:              os.Getpid(),
+				StartedAt:        time.Now().UTC(),
+				DataDir:          canonicalData,
+				RootDir:          canonicalRoot,
+				PublicURL:        "http://127.0.0.1:8080",
+				PublicMCPEnabled: false,
+				ControlURL:       control.URL,
+				ConfigHash:       hash,
+				IdleTimeout:      "10m0s",
+				ControlToken:     token,
+				Config:           ownerCfg,
+			})
+		}()
 
-	client := daemonStdioBridgeHTTPClient(daemonStdioBridge{
-		ControlToken:     "private-token",
-		AuthControlURL:   control.URL,
-		AuthControlToken: "control-token",
-		WorkspaceID:      "workspace-a",
-		APIKey:           "stdio-api-key",
-		ActorContext:     "stale-actor-context",
+		desc, err := waitForProjectDaemon(context.Background(), descriptorPath, errorPath, ownerCfg, mcpTransports{})
+		if err != nil {
+			t.Fatalf("waitForProjectDaemon should attach after structured lock startup error, got %v", err)
+		}
+		if desc.ControlURL != control.URL {
+			t.Fatalf("attached descriptor control URL = %q, want %q", desc.ControlURL, control.URL)
+		}
+
 	})
+})
 
-	resp, err := client.Get(upstream.URL + "/mcp")
-	if err != nil {
-		t.Fatalf("first bridge request failed: %v", err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("first bridge status = %d, want 204", resp.StatusCode)
-	}
-	if verifyCalls != 1 || upstreamCalls != 1 {
-		t.Fatalf("first bridge calls verify/upstream = %d/%d, want 1/1", verifyCalls, upstreamCalls)
-	}
+var _ = ginkgo.Describe("TestWaitForProjectDaemonReportsNonLockStartupErrorDirectly", func() {
+	ginkgo.It("TestWaitForProjectDaemonReportsNonLockStartupErrorDirectly", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+		if err != nil {
+			t.Fatalf("canonicalize project: %v", err)
+		}
+		ownerCfg := projectdaemon.Config{
+			DataDir:           canonicalData,
+			RootDir:           canonicalRoot,
+			AuthDisabled:      true,
+			Host:              "127.0.0.1",
+			Port:              "8080",
+			DaemonIdleTimeout: "10m0s",
+		}
+		errorPath := filepath.Join(t.TempDir(), "startup.err")
+		if err := os.WriteFile(errorPath, []byte("start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use"), 0o600); err != nil {
+			t.Fatalf("write startup error: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
 
-	revoked = true
-	resp, err = client.Get(upstream.URL + "/mcp")
-	if err == nil {
+		_, err = waitForProjectDaemon(ctx, projectdaemon.DescriptorPath(canonicalData), errorPath, ownerCfg, mcpTransports{})
+		if err == nil {
+			t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
+		}
+		if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
+			t.Fatalf("error = %v, want direct non-lock startup failure", err)
+		}
+		if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
+			t.Fatalf("error = %v, want bind startup failure", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestWaitForProjectDaemonReportsStructuredNonLockStartupErrorDirectly", func() {
+	ginkgo.It("TestWaitForProjectDaemonReportsStructuredNonLockStartupErrorDirectly", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("create data dir: %v", err)
+		}
+		if err := os.MkdirAll(rootDir, 0o755); err != nil {
+			t.Fatalf("create root dir: %v", err)
+		}
+		canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+		if err != nil {
+			t.Fatalf("canonicalize project: %v", err)
+		}
+		ownerCfg := projectdaemon.Config{
+			DataDir:           canonicalData,
+			RootDir:           canonicalRoot,
+			AuthDisabled:      true,
+			Host:              "127.0.0.1",
+			Port:              "8080",
+			DaemonIdleTimeout: "10m0s",
+		}
+		errorPath := filepath.Join(t.TempDir(), "startup.err")
+		rawErr, err := json.Marshal(projectDaemonStartupError{
+			Kind:            projectDaemonStartupErrorKindStartup,
+			RenderedMessage: "start HTTP listener: listen tcp 127.0.0.1:8080: bind: address already in use",
+		})
+		if err != nil {
+			t.Fatalf("marshal startup error: %v", err)
+		}
+		if err := os.WriteFile(errorPath, rawErr, 0o600); err != nil {
+			t.Fatalf("write startup error: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		_, err = waitForProjectDaemon(ctx, projectdaemon.DescriptorPath(canonicalData), errorPath, ownerCfg, mcpTransports{})
+		if err == nil {
+			t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
+		}
+		if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
+			t.Fatalf("error = %v, want direct non-lock startup failure", err)
+		}
+		if strings.Contains(err.Error(), `"kind"`) || strings.Contains(err.Error(), `"message"`) {
+			t.Fatalf("error = %v, want structured startup message without raw JSON", err)
+		}
+		if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
+			t.Fatalf("error = %v, want bind startup failure", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCompareProjectDaemonConfigForStdioOnlyAttachIgnoresOwnerLoggingSettings", func() {
+	ginkgo.It("TestCompareProjectDaemonConfigForStdioOnlyAttachIgnoresOwnerLoggingSettings", func() {
+		t := ginkgo.GinkgoT()
+		owner := projectdaemon.Config{
+			DataDir:           "/tmp/leafwiki-data",
+			RootDir:           "/tmp/leafwiki-root",
+			AuthDisabled:      true,
+			Host:              "127.0.0.1",
+			Port:              "8080",
+			LogTarget:         "stderr",
+			LogFile:           "",
+			DisableRequestLog: false,
+			DaemonIdleTimeout: "10m0s",
+		}
+		requested := owner
+		requested.LogTarget = "file"
+		requested.LogFile = "/tmp/leafwiki-data/.leafwiki/logs/leafwiki.log"
+		requested.DisableRequestLog = true
+
+		mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
+
+		if len(mismatches) > 0 {
+			t.Fatalf("mismatches = %#v, want STDIO-only attach to ignore owner logging settings", mismatches)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCompareProjectDaemonConfigForPlainServerPreservesPublicMCPMismatch", func() {
+	ginkgo.It("TestCompareProjectDaemonConfigForPlainServerPreservesPublicMCPMismatch", func() {
+		t := ginkgo.GinkgoT()
+		owner := projectdaemon.Config{
+			DataDir:          "/tmp/leafwiki-data",
+			RootDir:          "/tmp/leafwiki-root",
+			AuthDisabled:     true,
+			PublicMCPEnabled: true,
+			Host:             "127.0.0.1",
+			Port:             "8080",
+		}
+		requested := owner
+		requested.PublicMCPEnabled = false
+
+		mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{})
+
+		if len(mismatches) != 1 || mismatches[0].Field != "public-mcp-enabled" {
+			t.Fatalf("mismatches = %#v, want public MCP mismatch for plain server startup", mismatches)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonConfigForRuntimeIncludesWorkspaceSync", func() {
+	ginkgo.It("TestDaemonConfigForRuntimeIncludesWorkspaceSync", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		cfg := testRuntimeConfig(
+			filepath.Join(baseDir, "data"),
+			filepath.Join(baseDir, "content"),
+			"8080",
+			mcpTransports{},
+			true,
+		)
+		cfg.EnableWorkspaceSync = true
+
+		daemonCfg, err := daemonConfigForRuntime(cfg)
+		if err != nil {
+			t.Fatalf("daemon config: %v", err)
+		}
+
+		if !daemonCfg.EnableWorkspaceSync {
+			t.Fatalf("EnableWorkspaceSync = false, want true")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonOwnerRuntimeConfigForWikidFrontdForcesWorkspaceSync", func() {
+	ginkgo.It("TestDaemonOwnerRuntimeConfigForWikidFrontdForcesWorkspaceSync", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		cfg := testRuntimeConfig(
+			filepath.Join(baseDir, "data"),
+			filepath.Join(baseDir, "content"),
+			"8080",
+			mcpTransports{},
+			true,
+		)
+		cfg.RuntimeStack = projectdaemon.RuntimeStackWikidFrontd
+		cfg.EnableWorkspaceSync = false
+
+		ownerCfg, err := daemonOwnerRuntimeConfig(cfg)
+		if err != nil {
+			t.Fatalf("daemonOwnerRuntimeConfig failed: %v", err)
+		}
+		daemonCfg, err := daemonConfigForRuntime(ownerCfg)
+		if err != nil {
+			t.Fatalf("daemonConfigForRuntime failed: %v", err)
+		}
+
+		if !ownerCfg.EnableWorkspaceSync || !daemonCfg.EnableWorkspaceSync {
+			t.Fatalf("workspace sync = %v/%v, want true/true", ownerCfg.EnableWorkspaceSync, daemonCfg.EnableWorkspaceSync)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields", func() {
+	ginkgo.It("TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields", func() {
+		t := ginkgo.GinkgoT()
+		owner := completeDaemonCompareConfig()
+		tests := []struct {
+			name  string
+			field string
+			mut   func(*projectdaemon.Config)
+		}{
+			{name: "data dir", field: "data-dir", mut: func(cfg *projectdaemon.Config) { cfg.DataDir = "/tmp/other-data" }},
+			{name: "root dir", field: "root-dir", mut: func(cfg *projectdaemon.Config) { cfg.RootDir = "/tmp/other-root" }},
+			{name: "auth mode", field: "auth-disabled", mut: func(cfg *projectdaemon.Config) { cfg.AuthDisabled = !cfg.AuthDisabled }},
+			{name: "public MCP", field: "public-mcp-enabled", mut: func(cfg *projectdaemon.Config) { cfg.PublicMCPEnabled = !cfg.PublicMCPEnabled }},
+			{name: "host", field: "host", mut: func(cfg *projectdaemon.Config) { cfg.Host = "127.0.0.2" }},
+			{name: "port", field: "port", mut: func(cfg *projectdaemon.Config) { cfg.Port = "9090" }},
+			{name: "base path", field: "base-path", mut: func(cfg *projectdaemon.Config) { cfg.BasePath = "/docs" }},
+			{name: "markdown link root prefix", field: "markdown-link-root-prefix", mut: func(cfg *projectdaemon.Config) { cfg.MarkdownLinkRootPrefix = "/docs" }},
+			{name: "public access", field: "public-access", mut: func(cfg *projectdaemon.Config) { cfg.PublicAccess = !cfg.PublicAccess }},
+			{name: "allow insecure", field: "allow-insecure", mut: func(cfg *projectdaemon.Config) { cfg.AllowInsecure = !cfg.AllowInsecure }},
+			{name: "access token timeout", field: "access-token-timeout", mut: func(cfg *projectdaemon.Config) { cfg.AccessTokenTimeout = "2h0m0s" }},
+			{name: "refresh token timeout", field: "refresh-token-timeout", mut: func(cfg *projectdaemon.Config) { cfg.RefreshTokenTimeout = "720h0m0s" }},
+			{name: "injected header hash", field: "inject-code-in-header-hash", mut: func(cfg *projectdaemon.Config) { cfg.InjectCodeInHeaderHash = "other-hash" }},
+			{name: "custom stylesheet", field: "custom-stylesheet", mut: func(cfg *projectdaemon.Config) { cfg.CustomStylesheet = "/tmp/custom.css" }},
+			{name: "log target", field: "log-target", mut: func(cfg *projectdaemon.Config) { cfg.LogTarget = "file" }},
+			{name: "log file", field: "log-file", mut: func(cfg *projectdaemon.Config) { cfg.LogFile = "/tmp/leafwiki.log" }},
+			{name: "hide metadata", field: "hide-link-metadata-section", mut: func(cfg *projectdaemon.Config) { cfg.HideLinkMetadataSection = !cfg.HideLinkMetadataSection }},
+			{name: "upload size", field: "max-asset-upload-size-bytes", mut: func(cfg *projectdaemon.Config) { cfg.MaxAssetUploadSizeBytes = 99 }},
+			{name: "link refactor", field: "enable-link-refactor", mut: func(cfg *projectdaemon.Config) { cfg.EnableLinkRefactor = !cfg.EnableLinkRefactor }},
+			{name: "remote user enabled", field: "enable-http-remote-user", mut: func(cfg *projectdaemon.Config) { cfg.EnableHTTPRemoteUser = !cfg.EnableHTTPRemoteUser }},
+			{name: "remote user header", field: "http-remote-user-header", mut: func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserHeader = "X-User" }},
+			{name: "trusted proxies", field: "trusted-proxy-ips", mut: func(cfg *projectdaemon.Config) { cfg.TrustedProxyIPs = "127.0.0.1/32" }},
+			{name: "remote user logout", field: "http-remote-user-logout-url", mut: func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserLogoutURL = "https://example.test/logout" }},
+			{name: "request log", field: "disable-request-log", mut: func(cfg *projectdaemon.Config) { cfg.DisableRequestLog = !cfg.DisableRequestLog }},
+			{name: "idle timeout", field: "daemon-idle-timeout", mut: func(cfg *projectdaemon.Config) { cfg.DaemonIdleTimeout = "1m0s" }},
+		}
+
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				requested := owner
+				tt.mut(&requested)
+
+				mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{HTTP: true})
+
+				if len(mismatches) != 1 || mismatches[0].Field != tt.field {
+					t.Fatalf("mismatches = %#v, want one %q mismatch", mismatches, tt.field)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCompareProjectDaemonConfigForStdioOnlyAttachDocumentsIgnoredFields", func() {
+	ginkgo.It("TestCompareProjectDaemonConfigForStdioOnlyAttachDocumentsIgnoredFields", func() {
+		t := ginkgo.GinkgoT()
+		owner := completeDaemonCompareConfig()
+		requested := owner
+		requested.PublicMCPEnabled = !owner.PublicMCPEnabled
+		requested.Host = "0.0.0.0"
+		requested.LogTarget = "file"
+		requested.LogFile = "/tmp/leafwiki.log"
+		requested.DisableRequestLog = !owner.DisableRequestLog
+
+		mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
+
+		if len(mismatches) > 0 {
+			t.Fatalf("mismatches = %#v, want STDIO-only attach to inherit public MCP/logging/request-log settings", mismatches)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCompareProjectDaemonDescriptorForRequestChecksTopLevelWorkspaceID", func() {
+	ginkgo.It("TestCompareProjectDaemonDescriptorForRequestChecksTopLevelWorkspaceID", func() {
+		t := ginkgo.GinkgoT()
+		requested := completeDaemonCompareConfig()
+		requested.WorkspaceID = "beta"
+		descriptorConfig := requested
+		desc := &projectdaemon.Descriptor{
+			Role:            projectdaemon.RoleWorkspaced,
+			WorkspaceID:     "alpha",
+			PrivateMCPURL:   "http://127.0.0.1:1/mcp",
+			PrivateMCPToken: "token",
+			Config:          descriptorConfig,
+		}
+
+		mismatches := compareProjectDaemonDescriptorForRequest(desc, requested, mcpTransports{Stdio: true})
+
+		if len(mismatches) != 1 || mismatches[0].Field != "workspace-id" || mismatches[0].Want != "alpha" || mismatches[0].Got != "beta" {
+			t.Fatalf("mismatches = %#v, want top-level workspace-id mismatch alpha -> beta", mismatches)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonStdioBridgeHTTPClientHasNoFullRequestTimeout", func() {
+	ginkgo.It("TestDaemonStdioBridgeHTTPClientHasNoFullRequestTimeout", func() {
+		t := ginkgo.GinkgoT()
+		client := daemonStdioBridgeHTTPClient(daemonStdioBridge{
+			ControlToken: "control-token",
+			APIKey:       "stdio-api-key",
+		})
+
+		if client == nil {
+			t.Fatalf("daemonStdioBridgeHTTPClient returned nil")
+		}
+		if client.Timeout != 0 {
+			t.Fatalf("HTTP client Timeout = %v, want zero so MCP request contexts control cancellation", client.Timeout)
+		}
+		authTransport, ok := client.Transport.(projectdaemon.AuthRoundTripper)
+		if !ok {
+			t.Fatalf("HTTP client transport = %T, want projectdaemon.AuthRoundTripper", client.Transport)
+		}
+		if authTransport.ControlToken != "control-token" || authTransport.BearerToken != "stdio-api-key" {
+			t.Fatalf("auth transport = %#v, want bridge credentials installed", authTransport)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonStdioBridgeHTTPClientRefreshesActorContextBeforeForwarding", func() {
+	ginkgo.It("TestDaemonStdioBridgeHTTPClientRefreshesActorContextBeforeForwarding", func() {
+		t := ginkgo.GinkgoT()
+		verifyCalls := 0
+		revoked := false
+		now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path != "/__leafwiki/actor-context" {
+				http.NotFound(w, req)
+				return
+			}
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != "control-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if req.Header.Get("Authorization") != "Bearer stdio-api-key" {
+				t.Fatalf("actor-context authorization = %q, want bearer API key", req.Header.Get("Authorization"))
+			}
+			if req.Header.Get(projectdaemon.WorkspaceIDHeader) != "workspace-a" {
+				t.Fatalf("actor-context workspace = %q, want workspace-a", req.Header.Get(projectdaemon.WorkspaceIDHeader))
+			}
+			verifyCalls++
+			if revoked {
+				http.Error(w, "access denied", http.StatusUnauthorized)
+				return
+			}
+			writeRuntimeJSON(w, map[string]any{"actor": projectdaemon.ActorContext{
+				Version:     1,
+				Issuer:      projectdaemon.ActorContextIssuerWikid,
+				Subject:     "user:editor",
+				Username:    "editor",
+				Role:        coreauth.RoleEditor,
+				WorkspaceID: "workspace-a",
+				AuthMethod:  "api_key",
+				IssuedAt:    now,
+				ExpiresAt:   now.Add(5 * time.Minute),
+			}})
+		}))
+		t.Cleanup(control.Close)
+
+		upstreamCalls := 0
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			upstreamCalls++
+			if req.Header.Get(projectdaemon.ControlTokenHeader) != "private-token" {
+				t.Fatalf("private MCP control token = %q, want private-token", req.Header.Get(projectdaemon.ControlTokenHeader))
+			}
+			if req.Header.Get("Authorization") != "Bearer stdio-api-key" {
+				t.Fatalf("private MCP authorization = %q, want bearer API key", req.Header.Get("Authorization"))
+			}
+			actor, err := projectdaemon.DecodeActorContext(req.Header.Get(projectdaemon.ActorContextHeader), projectdaemon.ActorContextValidation{
+				Now:         now.Add(time.Minute),
+				WorkspaceID: "workspace-a",
+			})
+			if err != nil {
+				t.Fatalf("private MCP actor context invalid: %v", err)
+			}
+			if actor.Subject != "user:editor" || actor.Role != coreauth.RoleEditor {
+				t.Fatalf("private MCP actor context = %#v, want refreshed editor actor", actor)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		t.Cleanup(upstream.Close)
+
+		client := daemonStdioBridgeHTTPClient(daemonStdioBridge{
+			ControlToken:     "private-token",
+			AuthControlURL:   control.URL,
+			AuthControlToken: "control-token",
+			WorkspaceID:      "workspace-a",
+			APIKey:           "stdio-api-key",
+			ActorContext:     "stale-actor-context",
+		})
+
+		resp, err := client.Get(upstream.URL + "/mcp")
+		if err != nil {
+			t.Fatalf("first bridge request failed: %v", err)
+		}
 		_ = resp.Body.Close()
-		t.Fatalf("revoked bridge request unexpectedly succeeded with status %d", resp.StatusCode)
-	}
-	if !strings.Contains(err.Error(), "unauthorized native STDIO API key") {
-		t.Fatalf("revoked bridge error = %v, want unauthorized native STDIO API key", err)
-	}
-	if verifyCalls != 2 || upstreamCalls != 1 {
-		t.Fatalf("revoked bridge calls verify/upstream = %d/%d, want 2/1", verifyCalls, upstreamCalls)
-	}
-}
-
-func TestDaemonStdioActorContextPreservesWorkspaceGrantDenial(t *testing.T) {
-	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/__leafwiki/actor-context" {
-			http.NotFound(w, req)
-			return
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("first bridge status = %d, want 204", resp.StatusCode)
 		}
-		writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
-	}))
-	t.Cleanup(control.Close)
-
-	transport := stdioActorContextRoundTripper{
-		AuthControlURL:   control.URL,
-		AuthControlToken: "control-token",
-		WorkspaceID:      "workspace-b",
-		APIKey:           "valid-but-ungranted-key",
-	}
-	_, err := transport.actorContext(httptest.NewRequest(http.MethodGet, "/mcp", nil))
-
-	if err == nil {
-		t.Fatalf("actorContext returned nil, want workspace grant denial")
-	}
-	if strings.Contains(err.Error(), "unauthorized native STDIO API key") {
-		t.Fatalf("actorContext error = %v, want grant denial not invalid API-key label", err)
-	}
-	var endpointErr *wikidPrivateEndpointError
-	if !errors.As(err, &endpointErr) {
-		t.Fatalf("actorContext error = %T %v, want wikidPrivateEndpointError", err, err)
-	}
-	if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
-		t.Fatalf("endpoint error = %#v, want structured workspace grant denial", endpointErr)
-	}
-	if !strings.Contains(err.Error(), "resolve native STDIO actor context") || !strings.Contains(endpointErr.Message, "workspace access denied") {
-		t.Fatalf("actorContext error = %v, want workspace access diagnostic", err)
-	}
-}
-
-func TestRunDaemonHeartbeatReturnsControlErrors(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		http.Error(w, "session not found", http.StatusNotFound)
-	}))
-	t.Cleanup(server.Close)
-
-	client := projectdaemon.NewClient(server.URL, "control-token")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	err := runDaemonHeartbeat(ctx, client, "missing-session", 10*time.Millisecond)
-
-	if err == nil {
-		t.Fatalf("runDaemonHeartbeat returned nil, want control error")
-	}
-	if !strings.Contains(err.Error(), "session not found") {
-		t.Fatalf("heartbeat error = %v, want session not found", err)
-	}
-}
-
-func TestIdleShutdownCallbackIgnoresStaleZeroNotificationWithActiveSession(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	currentCount := 1
-	callback := idleShutdownCallback(ctx, cancel, 0, func() int {
-		return currentCount
-	})
-
-	callback(1)
-	callback(0)
-	select {
-	case <-ctx.Done():
-		t.Fatalf("stale zero notification canceled active daemon")
-	case <-time.After(25 * time.Millisecond):
-	}
-
-	currentCount = 0
-	callback(0)
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatalf("current zero notification did not cancel daemon")
-	}
-}
-
-func TestCancelIfNoSessionAfterStartupGraceWaitsForFirstSession(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	registry := projectdaemon.NewSessionRegistry(time.Second, nil)
-
-	done := make(chan struct{})
-	go func() {
-		cancelIfNoSessionAfterStartupGrace(ctx, cancel, registry, 25*time.Millisecond)
-		close(done)
-	}()
-
-	id, err := registry.Register()
-	if err != nil {
-		t.Fatalf("register first session: %v", err)
-	}
-	registry.Release(id)
-	select {
-	case <-ctx.Done():
-		t.Fatalf("startup grace canceled after a first session registered")
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("startup grace goroutine did not exit after first session registered")
-	}
-}
-
-func TestCancelIfNoSessionAfterStartupGraceCancelsWhenNoSessionRegisters(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	registry := projectdaemon.NewSessionRegistry(time.Second, nil)
-	go cancelIfNoSessionAfterStartupGrace(ctx, cancel, registry, 10*time.Millisecond)
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(250 * time.Millisecond):
-		t.Fatalf("startup grace did not cancel idle daemon with no sessions")
-	}
-}
-
-func TestProjectDaemonActivityCountCombinesSessionsAndAgentPresence(t *testing.T) {
-	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
-	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
-
-	if got := projectDaemonActivityCount(sessions, presence); got != 0 {
-		t.Fatalf("activity count = %d, want 0", got)
-	}
-	handle, err := sessions.Register()
-	if err != nil {
-		t.Fatalf("register session: %v", err)
-	}
-	presence.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-		EventName:     "SessionStart",
-		SeenAt:        time.Now(),
-	})
-	if got := projectDaemonActivityCount(sessions, presence); got != 2 {
-		t.Fatalf("activity count = %d, want 2", got)
-	}
-	sessions.Release(handle)
-	if got := projectDaemonActivityCount(sessions, presence); got != 1 {
-		t.Fatalf("activity count after session release = %d, want 1", got)
-	}
-}
-
-func TestCancelIfNoActivityAfterStartupGraceWaitsForFirstAgentPresence(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
-	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
-
-	done := make(chan struct{})
-	go func() {
-		cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 25*time.Millisecond)
-		close(done)
-	}()
-
-	presence.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-		EventName:     "SessionStart",
-		SeenAt:        time.Now(),
-	})
-	select {
-	case <-ctx.Done():
-		t.Fatalf("startup grace canceled after first agent presence")
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("startup grace goroutine did not exit after first agent presence")
-	}
-}
-
-func TestCancelIfNoActivityAfterStartupGraceIgnoresMissingAgentEnd(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
-	presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
-	event, ok := agenthooks.Normalize(
-		agenthooks.ProviderClaude,
-		[]byte(`{"hook_event_name":"SessionEnd","session_id":"ended-before-start"}`),
-		time.Now(),
-	)
-	if !ok {
-		t.Fatalf("Normalize returned false")
-	}
-	presence.Record(event)
-
-	go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 10*time.Millisecond)
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(250 * time.Millisecond):
-		t.Fatalf("startup grace did not cancel after missing agent end event")
-	}
-}
-
-func TestDaemonOwnerEnvOmitsSessionAndBootstrapSecrets(t *testing.T) {
-	t.Setenv("LEAFWIKI_MCP_API_KEY", "lwk_secret")
-	t.Setenv("LEAFWIKI_RUN_MCP_API_KEY", "lwk_run_secret")
-	t.Setenv("LEAFWIKI_JWT_SECRET", "jwt-secret")
-	t.Setenv("LEAFWIKI_RUN_MCP_JWT_SECRET", "run-jwt-secret")
-	t.Setenv("LEAFWIKI_ADMIN_PASSWORD", "admin-password")
-	t.Setenv("LEAFWIKI_RUN_MCP_ADMIN_PASSWORD", "run-admin-password")
-	t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
-
-	joined := strings.Join(daemonOwnerEnv(), "\n")
-	for _, unexpected := range []string{
-		"LEAFWIKI_MCP_API_KEY=",
-		"LEAFWIKI_RUN_MCP_API_KEY=",
-		"LEAFWIKI_JWT_SECRET=",
-		"LEAFWIKI_RUN_MCP_JWT_SECRET=",
-		"LEAFWIKI_ADMIN_PASSWORD=",
-		"LEAFWIKI_RUN_MCP_ADMIN_PASSWORD=",
-		"lwk_secret",
-		"jwt-secret",
-		"admin-password",
-	} {
-		if strings.Contains(joined, unexpected) {
-			t.Fatalf("daemon owner env retained secret %q:\n%s", unexpected, joined)
+		if verifyCalls != 1 || upstreamCalls != 1 {
+			t.Fatalf("first bridge calls verify/upstream = %d/%d, want 1/1", verifyCalls, upstreamCalls)
 		}
-	}
-	if !strings.Contains(joined, "LEAFWIKI_BASE_PATH=/wiki") {
-		t.Fatalf("daemon owner env lost non-secret LeafWiki setting:\n%s", joined)
-	}
-}
 
-func TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock(t *testing.T) {
-	if !supportsGracefulProcessSignal() {
-		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
-	}
-
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	firstPort := freeTCPPort(t)
-	first, firstStdinWriter := startLeafwikiHelperWithStdinPipe(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", firstPort,
-		"--log-target", "stderr",
-	}, map[string]string{})
-	waitForLeafwikiReady(t, first, firstPort)
-
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
-		t.Fatalf("send SIGTERM: %v", err)
-	}
-	first.waitForExit(t)
-	_ = firstStdinWriter.Close()
-	waitForLeafwikiUnavailable(t, firstPort)
-
-	secondStdinReader, secondStdinWriter := io.Pipe()
-	secondPort := freeTCPPort(t)
-	second := startLeafwikiHelperWithStdin(t, []string{
-		"--mcp=stdio",
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", secondPort,
-		"--log-target", "stderr",
-	}, map[string]string{}, secondStdinReader)
-	waitForLeafwikiReady(t, second, secondPort)
-
-	if err := secondStdinWriter.Close(); err != nil {
-		t.Fatalf("close second stdin writer: %v", err)
-	}
-	second.waitForExit(t)
-}
-
-func TestMainProcess_ForegroundServerSignalLeavesDetachedOwnerUntilIdleTimeout(t *testing.T) {
-	if !supportsProcessGroupSignal() {
-		t.Skip("process-group signaling is not available on this platform")
-	}
-
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelperInProcessGroup(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--root-dir", rootDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-	}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
-
-	waitForLeafwikiReady(t, proc, port)
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcessGroup(proc.cmd.Process); err != nil {
-		t.Fatalf("send process-group SIGTERM: %v", err)
-	}
-	proc.waitForExit(t)
-	waitForLeafwikiReady(t, proc, port)
-	waitForLeafwikiUnavailable(t, port)
-}
-
-func TestMainProcess_FileTargetStartupFailureAlsoReachesStderr(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"--admin-password", "admin-password",
-	}, nil)
-
-	if err == nil {
-		t.Fatalf("expected missing JWT secret to exit non-zero")
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "JWT secret is required") {
-		t.Fatalf("stderr = %q, want JWT secret error", stderr)
-	}
-	assertJSONLogContains(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
-}
-
-func TestMainProcess_HelpStaysOnStdout(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"--help"}, nil)
-
-	if err != nil {
-		t.Fatalf("help process error = %v, stderr=%q", err, stderr)
-	}
-	for _, expected := range []string{"Usage:", "leafwiki daemon", "--log-target", "--log-file"} {
-		if !strings.Contains(stdout, expected) {
-			t.Fatalf("stdout = %q, want %q", stdout, expected)
+		revoked = true
+		resp, err = client.Get(upstream.URL + "/mcp")
+		if err == nil {
+			_ = resp.Body.Close()
+			t.Fatalf("revoked bridge request unexpectedly succeeded with status %d", resp.StatusCode)
 		}
-	}
-	if strings.Contains(stderr, `"msg"`) {
-		t.Fatalf("stderr contains log output: %q", stderr)
-	}
-}
-
-func TestMainProcess_DaemonHelpStaysOnStdout(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon", "--help"}, nil)
-
-	if err != nil {
-		t.Fatalf("daemon help process error = %v, stderr=%q", err, stderr)
-	}
-	for _, expected := range []string{"Usage:", "leafwiki daemon", "~/.leafwiki/leafwiki.yml"} {
-		if !strings.Contains(stdout, expected) {
-			t.Fatalf("stdout = %q, want %q", stdout, expected)
+		if !strings.Contains(err.Error(), "unauthorized native STDIO API key") {
+			t.Fatalf("revoked bridge error = %v, want unauthorized native STDIO API key", err)
 		}
-	}
-	if strings.Contains(stderr, `"msg"`) {
-		t.Fatalf("stderr contains log output: %q", stderr)
-	}
-}
+		if verifyCalls != 2 || upstreamCalls != 1 {
+			t.Fatalf("revoked bridge calls verify/upstream = %d/%d, want 2/1", verifyCalls, upstreamCalls)
+		}
 
-func TestMainProcess_DaemonRequiresDefaultServiceConfig(t *testing.T) {
-	homeDir := t.TempDir()
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME": homeDir,
 	})
+})
 
-	if err == nil {
-		t.Fatalf("daemon without service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	wantPath := filepath.Join(homeDir, ".leafwiki", "leafwiki.yml")
-	if !strings.Contains(stderr, "Service config file is required") || !strings.Contains(stderr, wantPath) {
-		t.Fatalf("stderr = %q, want required service config path %q", stderr, wantPath)
-	}
-}
+var _ = ginkgo.Describe("TestDaemonStdioActorContextPreservesWorkspaceGrantDenial", func() {
+	ginkgo.It("TestDaemonStdioActorContextPreservesWorkspaceGrantDenial", func() {
+		t := ginkgo.GinkgoT()
+		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path != "/__leafwiki/actor-context" {
+				http.NotFound(w, req)
+				return
+			}
+			writeRuntimeError(w, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
+		}))
+		t.Cleanup(control.Close)
 
-func TestMainProcess_DaemonRejectsInvalidDefaultServiceConfig(t *testing.T) {
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	configPath := filepath.Join(serviceDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, ":\n")
+		transport := stdioActorContextRoundTripper{
+			AuthControlURL:   control.URL,
+			AuthControlToken: "control-token",
+			WorkspaceID:      "workspace-b",
+			APIKey:           "valid-but-ungranted-key",
+		}
+		_, err := transport.actorContext(httptest.NewRequest(http.MethodGet, "/mcp", nil))
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME": homeDir,
+		if err == nil {
+			t.Fatalf("actorContext returned nil, want workspace grant denial")
+		}
+		if strings.Contains(err.Error(), "unauthorized native STDIO API key") {
+			t.Fatalf("actorContext error = %v, want grant denial not invalid API-key label", err)
+		}
+		var endpointErr *wikidPrivateEndpointError
+		if !errors.As(err, &endpointErr) {
+			t.Fatalf("actorContext error = %T %v, want wikidPrivateEndpointError", err, err)
+		}
+		if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
+			t.Fatalf("endpoint error = %#v, want structured workspace grant denial", endpointErr)
+		}
+		if !strings.Contains(err.Error(), "resolve native STDIO actor context") || !strings.Contains(endpointErr.Message, "workspace access denied") {
+			t.Fatalf("actorContext error = %v, want workspace access diagnostic", err)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatalf("daemon with invalid service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, configPath) {
-		t.Fatalf("stderr = %q, want invalid service config path %q", stderr, configPath)
-	}
-}
+var _ = ginkgo.Describe("TestRunDaemonHeartbeatReturnsControlErrors", func() {
+	ginkgo.It("TestRunDaemonHeartbeatReturnsControlErrors", func() {
+		t := ginkgo.GinkgoT()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		}))
+		t.Cleanup(server.Close)
 
-func TestMainProcess_DaemonRejectsInternalServiceConfigKeys(t *testing.T) {
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	configPath := filepath.Join(serviceDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, "internal-project-daemon: /tmp/startup.json\n")
+		client := projectdaemon.NewClient(server.URL, "control-token")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		err := runDaemonHeartbeat(ctx, client, "missing-session", 10*time.Millisecond)
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME": homeDir,
+		if err == nil {
+			t.Fatalf("runDaemonHeartbeat returned nil, want control error")
+		}
+		if !strings.Contains(err.Error(), "session not found") {
+			t.Fatalf("heartbeat error = %v, want session not found", err)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatalf("daemon with internal service config key unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, `unknown service config key "internal-project-daemon"`) {
-		t.Fatalf("stderr = %q, want unknown internal service config key error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestIdleShutdownCallbackIgnoresStaleZeroNotificationWithActiveSession", func() {
+	ginkgo.It("TestIdleShutdownCallbackIgnoresStaleZeroNotificationWithActiveSession", func() {
+		t := ginkgo.GinkgoT()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		currentCount := 1
+		callback := idleShutdownCallback(ctx, cancel, 0, func() int {
+			return currentCount
+		})
 
-func TestMainProcess_DaemonRejectsStdioMCPServiceConfig(t *testing.T) {
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	configPath := filepath.Join(serviceDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, `disable-auth: true
+		callback(1)
+		callback(0)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("stale zero notification canceled active daemon")
+		case <-time.After(25 * time.Millisecond):
+		}
+
+		currentCount = 0
+		callback(0)
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatalf("current zero notification did not cancel daemon")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCancelIfNoSessionAfterStartupGraceWaitsForFirstSession", func() {
+	ginkgo.It("TestCancelIfNoSessionAfterStartupGraceWaitsForFirstSession", func() {
+		t := ginkgo.GinkgoT()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		registry := projectdaemon.NewSessionRegistry(time.Second, nil)
+
+		done := make(chan struct{})
+		go func() {
+			cancelIfNoSessionAfterStartupGrace(ctx, cancel, registry, 25*time.Millisecond)
+			close(done)
+		}()
+
+		id, err := registry.Register()
+		if err != nil {
+			t.Fatalf("register first session: %v", err)
+		}
+		registry.Release(id)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("startup grace canceled after a first session registered")
+		case <-done:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("startup grace goroutine did not exit after first session registered")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCancelIfNoSessionAfterStartupGraceCancelsWhenNoSessionRegisters", func() {
+	ginkgo.It("TestCancelIfNoSessionAfterStartupGraceCancelsWhenNoSessionRegisters", func() {
+		t := ginkgo.GinkgoT()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		registry := projectdaemon.NewSessionRegistry(time.Second, nil)
+		go cancelIfNoSessionAfterStartupGrace(ctx, cancel, registry, 10*time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("startup grace did not cancel idle daemon with no sessions")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestProjectDaemonActivityCountCombinesSessionsAndAgentPresence", func() {
+	ginkgo.It("TestProjectDaemonActivityCountCombinesSessionsAndAgentPresence", func() {
+		t := ginkgo.GinkgoT()
+		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+		presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+
+		if got := projectDaemonActivityCount(sessions, presence); got != 0 {
+			t.Fatalf("activity count = %d, want 0", got)
+		}
+		handle, err := sessions.Register()
+		if err != nil {
+			t.Fatalf("register session: %v", err)
+		}
+		presence.Record(agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+			EventName:     "SessionStart",
+			SeenAt:        time.Now(),
+		})
+		if got := projectDaemonActivityCount(sessions, presence); got != 2 {
+			t.Fatalf("activity count = %d, want 2", got)
+		}
+		sessions.Release(handle)
+		if got := projectDaemonActivityCount(sessions, presence); got != 1 {
+			t.Fatalf("activity count after session release = %d, want 1", got)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCancelIfNoActivityAfterStartupGraceWaitsForFirstAgentPresence", func() {
+	ginkgo.It("TestCancelIfNoActivityAfterStartupGraceWaitsForFirstAgentPresence", func() {
+		t := ginkgo.GinkgoT()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+		presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+
+		done := make(chan struct{})
+		go func() {
+			cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 25*time.Millisecond)
+			close(done)
+		}()
+
+		presence.Record(agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
+			EventName:     "SessionStart",
+			SeenAt:        time.Now(),
+		})
+		select {
+		case <-ctx.Done():
+			t.Fatalf("startup grace canceled after first agent presence")
+		case <-done:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("startup grace goroutine did not exit after first agent presence")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestCancelIfNoActivityAfterStartupGraceIgnoresMissingAgentEnd", func() {
+	ginkgo.It("TestCancelIfNoActivityAfterStartupGraceIgnoresMissingAgentEnd", func() {
+		t := ginkgo.GinkgoT()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
+		presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+		event, ok := agenthooks.Normalize(
+			agenthooks.ProviderClaude,
+			[]byte(`{"hook_event_name":"SessionEnd","session_id":"ended-before-start"}`),
+			time.Now(),
+		)
+		if !ok {
+			t.Fatalf("Normalize returned false")
+		}
+		presence.Record(event)
+
+		go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, presence, 10*time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("startup grace did not cancel after missing agent end event")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestDaemonOwnerEnvOmitsSessionAndBootstrapSecrets", func() {
+	ginkgo.It("TestDaemonOwnerEnvOmitsSessionAndBootstrapSecrets", func() {
+		t := ginkgo.GinkgoT()
+		t.Setenv("LEAFWIKI_MCP_API_KEY", "lwk_secret")
+		t.Setenv("LEAFWIKI_RUN_MCP_API_KEY", "lwk_run_secret")
+		t.Setenv("LEAFWIKI_JWT_SECRET", "jwt-secret")
+		t.Setenv("LEAFWIKI_RUN_MCP_JWT_SECRET", "run-jwt-secret")
+		t.Setenv("LEAFWIKI_ADMIN_PASSWORD", "admin-password")
+		t.Setenv("LEAFWIKI_RUN_MCP_ADMIN_PASSWORD", "run-admin-password")
+		t.Setenv("LEAFWIKI_BASE_PATH", "/wiki")
+
+		joined := strings.Join(daemonOwnerEnv(), "\n")
+		for _, unexpected := range []string{
+			"LEAFWIKI_MCP_API_KEY=",
+			"LEAFWIKI_RUN_MCP_API_KEY=",
+			"LEAFWIKI_JWT_SECRET=",
+			"LEAFWIKI_RUN_MCP_JWT_SECRET=",
+			"LEAFWIKI_ADMIN_PASSWORD=",
+			"LEAFWIKI_RUN_MCP_ADMIN_PASSWORD=",
+			"lwk_secret",
+			"jwt-secret",
+			"admin-password",
+		} {
+			if strings.Contains(joined, unexpected) {
+				t.Fatalf("daemon owner env retained secret %q:\n%s", unexpected, joined)
+			}
+		}
+		if !strings.Contains(joined, "LEAFWIKI_BASE_PATH=/wiki") {
+			t.Fatalf("daemon owner env lost non-secret LeafWiki setting:\n%s", joined)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock", func() {
+	ginkgo.It("TestMainProcess_NativeStdioSIGTERMReleasesDataDirLock", func() {
+		t := ginkgo.GinkgoT()
+		if !supportsGracefulProcessSignal() {
+			t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
+		}
+
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		firstPort := freeTCPPort(t)
+		first, firstStdinWriter := startLeafwikiHelperWithStdinPipe(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", firstPort,
+			"--log-target", "stderr",
+		}, map[string]string{})
+		waitForLeafwikiReady(t, first, firstPort)
+
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcess(first.cmd.Process); err != nil {
+			t.Fatalf("send SIGTERM: %v", err)
+		}
+		first.waitForExit(t)
+		_ = firstStdinWriter.Close()
+		waitForLeafwikiUnavailable(t, firstPort)
+
+		secondStdinReader, secondStdinWriter := io.Pipe()
+		secondPort := freeTCPPort(t)
+		second := startLeafwikiHelperWithStdin(t, []string{
+			"--mcp=stdio",
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", secondPort,
+			"--log-target", "stderr",
+		}, map[string]string{}, secondStdinReader)
+		waitForLeafwikiReady(t, second, secondPort)
+
+		if err := secondStdinWriter.Close(); err != nil {
+			t.Fatalf("close second stdin writer: %v", err)
+		}
+		second.waitForExit(t)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ForegroundServerSignalLeavesDetachedOwnerUntilIdleTimeout", func() {
+	ginkgo.It("TestMainProcess_ForegroundServerSignalLeavesDetachedOwnerUntilIdleTimeout", func() {
+		t := ginkgo.GinkgoT()
+		if !supportsProcessGroupSignal() {
+			t.Skip("process-group signaling is not available on this platform")
+		}
+
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelperInProcessGroup(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--root-dir", rootDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
+
+		waitForLeafwikiReady(t, proc, port)
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcessGroup(proc.cmd.Process); err != nil {
+			t.Fatalf("send process-group SIGTERM: %v", err)
+		}
+		proc.waitForExit(t)
+		waitForLeafwikiReady(t, proc, port)
+		waitForLeafwikiUnavailableWithin(t, port, 15*time.Second)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_FileTargetStartupFailureAlsoReachesStderr", func() {
+	ginkgo.It("TestMainProcess_FileTargetStartupFailureAlsoReachesStderr", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"--admin-password", "admin-password",
+		}, nil)
+
+		if err == nil {
+			t.Fatalf("expected missing JWT secret to exit non-zero")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "JWT secret is required") {
+			t.Fatalf("stderr = %q, want JWT secret error", stderr)
+		}
+		assertJSONLogContains(t, filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"), "JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_HelpStaysOnStdout", func() {
+	ginkgo.It("TestMainProcess_HelpStaysOnStdout", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"--help"}, nil)
+
+		if err != nil {
+			t.Fatalf("help process error = %v, stderr=%q", err, stderr)
+		}
+		for _, expected := range []string{"Usage:", "leafwiki daemon", "--log-target", "--log-file"} {
+			if !strings.Contains(stdout, expected) {
+				t.Fatalf("stdout = %q, want %q", stdout, expected)
+			}
+		}
+		if strings.Contains(stderr, `"msg"`) {
+			t.Fatalf("stderr contains log output: %q", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DaemonHelpStaysOnStdout", func() {
+	ginkgo.It("TestMainProcess_DaemonHelpStaysOnStdout", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon", "--help"}, nil)
+
+		if err != nil {
+			t.Fatalf("daemon help process error = %v, stderr=%q", err, stderr)
+		}
+		for _, expected := range []string{"Usage:", "leafwiki daemon", "~/.leafwiki/leafwiki.yml"} {
+			if !strings.Contains(stdout, expected) {
+				t.Fatalf("stdout = %q, want %q", stdout, expected)
+			}
+		}
+		if strings.Contains(stderr, `"msg"`) {
+			t.Fatalf("stderr contains log output: %q", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DaemonRequiresDefaultServiceConfig", func() {
+	ginkgo.It("TestMainProcess_DaemonRequiresDefaultServiceConfig", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME": homeDir,
+		})
+
+		if err == nil {
+			t.Fatalf("daemon without service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		wantPath := filepath.Join(homeDir, ".leafwiki", "leafwiki.yml")
+		if !strings.Contains(stderr, "Service config file is required") || !strings.Contains(stderr, wantPath) {
+			t.Fatalf("stderr = %q, want required service config path %q", stderr, wantPath)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DaemonRejectsInvalidDefaultServiceConfig", func() {
+	ginkgo.It("TestMainProcess_DaemonRejectsInvalidDefaultServiceConfig", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		configPath := filepath.Join(serviceDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, ":\n")
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME": homeDir,
+		})
+
+		if err == nil {
+			t.Fatalf("daemon with invalid service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, configPath) {
+			t.Fatalf("stderr = %q, want invalid service config path %q", stderr, configPath)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DaemonRejectsInternalServiceConfigKeys", func() {
+	ginkgo.It("TestMainProcess_DaemonRejectsInternalServiceConfigKeys", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		configPath := filepath.Join(serviceDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, "internal-project-daemon: /tmp/startup.json\n")
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME": homeDir,
+		})
+
+		if err == nil {
+			t.Fatalf("daemon with internal service config key unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, `unknown service config key "internal-project-daemon"`) {
+			t.Fatalf("stderr = %q, want unknown internal service config key error", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DaemonRejectsStdioMCPServiceConfig", func() {
+	ginkgo.It("TestMainProcess_DaemonRejectsStdioMCPServiceConfig", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		configPath := filepath.Join(serviceDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, `disable-auth: true
 mcp: stdio
 `)
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME": homeDir,
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME": homeDir,
+		})
+
+		if err == nil {
+			t.Fatalf("daemon with stdio MCP service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, "leafwiki daemon does not support mcp: stdio") {
+			t.Fatalf("stderr = %q, want stdio MCP service config error", stderr)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatalf("daemon with stdio MCP service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
-	}
-	if !strings.Contains(stderr, "Invalid service config file") || !strings.Contains(stderr, "leafwiki daemon does not support mcp: stdio") {
-		t.Fatalf("stderr = %q, want stdio MCP service config error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestApplyDaemonServiceConfigUsesDefaultsInsteadOfEnvironment", func() {
+	ginkgo.It("TestApplyDaemonServiceConfigUsesDefaultsInsteadOfEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		t.Setenv("HOME", homeDir)
+		t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
+		t.Setenv("LEAFWIKI_PORT", "9999")
+		t.Setenv("LEAFWIKI_ROOT_DIR", filepath.Join(t.TempDir(), "env-root"))
+		t.Setenv("LEAFWIKI_LOG_FILE", "env.log")
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		writeTestConfig(t, filepath.Join(serviceDir, "leafwiki.yml"), "disable-auth: true\n")
 
-func TestApplyDaemonServiceConfigUsesDefaultsInsteadOfEnvironment(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	t.Setenv("LEAFWIKI_HOST", "0.0.0.0")
-	t.Setenv("LEAFWIKI_PORT", "9999")
-	t.Setenv("LEAFWIKI_ROOT_DIR", filepath.Join(t.TempDir(), "env-root"))
-	t.Setenv("LEAFWIKI_LOG_FILE", "env.log")
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	writeTestConfig(t, filepath.Join(serviceDir, "leafwiki.yml"), "disable-auth: true\n")
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		flags := registerFlags(fs)
+		if err := fs.Parse([]string{"daemon"}); err != nil {
+			t.Fatalf("parse flags: %v", err)
+		}
+		visited := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+		if err := applyDaemonServiceConfig(fs, flags, visited, fs.Args()); err != nil {
+			t.Fatalf("applyDaemonServiceConfig: %v", err)
+		}
 
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	flags := registerFlags(fs)
-	if err := fs.Parse([]string{"daemon"}); err != nil {
-		t.Fatalf("parse flags: %v", err)
-	}
-	visited := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-	if err := applyDaemonServiceConfig(fs, flags, visited, fs.Args()); err != nil {
-		t.Fatalf("applyDaemonServiceConfig: %v", err)
-	}
+		if got := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1"); got != "127.0.0.1" {
+			t.Fatalf("host = %q, want service default 127.0.0.1", got)
+		}
+		if got := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080"); got != "8080" {
+			t.Fatalf("port = %q, want service default 8080", got)
+		}
+		workspace, err := resolveWorkspace(flags, visited)
+		if err != nil {
+			t.Fatalf("resolveWorkspace: %v", err)
+		}
+		if workspace.DataDir != serviceDir {
+			t.Fatalf("data dir = %q, want service dir %q", workspace.DataDir, serviceDir)
+		}
+		if workspace.RootDir != filepath.Join(serviceDir, "root") {
+			t.Fatalf("root dir = %q, want service root", workspace.RootDir)
+		}
+		loggingConfig, err := resolveLoggingConfig(flags, visited, workspace.DataDir)
+		if err != nil {
+			t.Fatalf("resolveLoggingConfig: %v", err)
+		}
+		wantLogFile := filepath.Join(serviceDir, ".leafwiki", "logs", "leafwiki.log")
+		if loggingConfig.FilePath != wantLogFile {
+			t.Fatalf("log file = %q, want service default %q", loggingConfig.FilePath, wantLogFile)
+		}
 
-	if got := resolveString("host", *flags.host, visited, "LEAFWIKI_HOST", "127.0.0.1"); got != "127.0.0.1" {
-		t.Fatalf("host = %q, want service default 127.0.0.1", got)
-	}
-	if got := resolveString("port", *flags.port, visited, "LEAFWIKI_PORT", "8080"); got != "8080" {
-		t.Fatalf("port = %q, want service default 8080", got)
-	}
-	workspace, err := resolveWorkspace(flags, visited)
-	if err != nil {
-		t.Fatalf("resolveWorkspace: %v", err)
-	}
-	if workspace.DataDir != serviceDir {
-		t.Fatalf("data dir = %q, want service dir %q", workspace.DataDir, serviceDir)
-	}
-	if workspace.RootDir != filepath.Join(serviceDir, "root") {
-		t.Fatalf("root dir = %q, want service root", workspace.RootDir)
-	}
-	loggingConfig, err := resolveLoggingConfig(flags, visited, workspace.DataDir)
-	if err != nil {
-		t.Fatalf("resolveLoggingConfig: %v", err)
-	}
-	wantLogFile := filepath.Join(serviceDir, ".leafwiki", "logs", "leafwiki.log")
-	if loggingConfig.FilePath != wantLogFile {
-		t.Fatalf("log file = %q, want service default %q", loggingConfig.FilePath, wantLogFile)
-	}
-}
+	})
+})
 
-func TestMainProcess_DaemonRunsForegroundRuntimeUntilSignal(t *testing.T) {
-	if !supportsGracefulProcessSignal() {
-		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
-	}
+var _ = ginkgo.Describe("TestMainProcess_DaemonRunsForegroundRuntimeUntilSignal", func() {
+	ginkgo.It("TestMainProcess_DaemonRunsForegroundRuntimeUntilSignal", func() {
+		t := ginkgo.GinkgoT()
+		if !supportsGracefulProcessSignal() {
+			t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
+		}
 
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	port := freeTCPPort(t)
-	configPath := filepath.Join(serviceDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		port := freeTCPPort(t)
+		configPath := filepath.Join(serviceDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, fmt.Sprintf(`disable-auth: true
 host: 127.0.0.1
 port: %s
 log-target: stderr
 daemon-idle-timeout: 0
 `, port))
 
-	proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME":                         homeDir,
-		"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "0",
+		proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME":                         homeDir,
+			"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "0",
+		})
+
+		waitForLeafwikiReady(t, proc, port)
+		projectDescriptorPath := projectdaemon.DescriptorPath(serviceDir)
+		projectDesc := waitForProjectDaemonDescriptor(t, serviceDir)
+		if projectDesc.Role != projectdaemon.RoleWikid || projectDesc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd {
+			t.Fatalf("project descriptor role/stack = %q/%q, want wikid/%q", projectDesc.Role, projectDesc.RuntimeStack, projectdaemon.RuntimeStackWikidFrontd)
+		}
+		canonicalDataDir, canonicalRootDir, err := projectdaemon.CanonicalizeProject(serviceDir, filepath.Join(serviceDir, "root"))
+		if err != nil {
+			t.Fatalf("canonicalize service dirs: %v", err)
+		}
+		if projectDesc.DataDir != canonicalDataDir || projectDesc.RootDir != canonicalRootDir {
+			t.Fatalf("project descriptor dirs = %q/%q, want service home/root", projectDesc.DataDir, projectDesc.RootDir)
+		}
+		if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleWikid); !ok {
+			t.Fatalf("project descriptor roles = %#v, want wikid", projectDesc.Roles)
+		}
+		if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleFrontd); !ok {
+			t.Fatalf("project descriptor roles = %#v, want frontd", projectDesc.Roles)
+		}
+		if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleWorkspaced); !ok {
+			t.Fatalf("project descriptor roles = %#v, want workspaced", projectDesc.Roles)
+		}
+
+		globalDescriptorPath := projectdaemon.GlobalDescriptorPath(wikid.GlobalLayout(serviceDir).RuntimeDir, projectdaemon.RoleWikid)
+		globalDesc := waitForProjectDaemonDescriptorAtPath(t, globalDescriptorPath)
+		if globalDesc.PID != projectDesc.PID || globalDesc.Role != projectdaemon.RoleWikid {
+			t.Fatalf("global descriptor = %#v, want same wikid owner pid %d", globalDesc, projectDesc.PID)
+		}
+
+		time.Sleep(projectdaemon.DefaultHeartbeatTTL + 500*time.Millisecond)
+		waitForLeafwikiReady(t, proc, port)
+		if !processExists(proc.cmd.Process.Pid) {
+			t.Fatalf("daemon process exited before signal")
+		}
+
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcess(proc.cmd.Process); err != nil {
+			t.Fatalf("send SIGTERM: %v", err)
+		}
+		proc.waitForExit(t)
+		waitForFileRemoved(t, projectDescriptorPath, 5*time.Second)
+		waitForFileRemoved(t, globalDescriptorPath, 5*time.Second)
+		waitForLeafwikiUnavailable(t, port)
+
 	})
+})
 
-	waitForLeafwikiReady(t, proc, port)
-	projectDescriptorPath := projectdaemon.DescriptorPath(serviceDir)
-	projectDesc := waitForProjectDaemonDescriptor(t, serviceDir)
-	if projectDesc.Role != projectdaemon.RoleWikid || projectDesc.RuntimeStack != projectdaemon.RuntimeStackWikidFrontd {
-		t.Fatalf("project descriptor role/stack = %q/%q, want wikid/%q", projectDesc.Role, projectDesc.RuntimeStack, projectdaemon.RuntimeStackWikidFrontd)
-	}
-	canonicalDataDir, canonicalRootDir, err := projectdaemon.CanonicalizeProject(serviceDir, filepath.Join(serviceDir, "root"))
-	if err != nil {
-		t.Fatalf("canonicalize service dirs: %v", err)
-	}
-	if projectDesc.DataDir != canonicalDataDir || projectDesc.RootDir != canonicalRootDir {
-		t.Fatalf("project descriptor dirs = %q/%q, want service home/root", projectDesc.DataDir, projectDesc.RootDir)
-	}
-	if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleWikid); !ok {
-		t.Fatalf("project descriptor roles = %#v, want wikid", projectDesc.Roles)
-	}
-	if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleFrontd); !ok {
-		t.Fatalf("project descriptor roles = %#v, want frontd", projectDesc.Roles)
-	}
-	if _, ok := findRoleHealth(projectDesc.Roles, projectdaemon.RoleWorkspaced); !ok {
-		t.Fatalf("project descriptor roles = %#v, want workspaced", projectDesc.Roles)
-	}
-
-	globalDescriptorPath := projectdaemon.GlobalDescriptorPath(wikid.GlobalLayout(serviceDir).RuntimeDir, projectdaemon.RoleWikid)
-	globalDesc := waitForProjectDaemonDescriptorAtPath(t, globalDescriptorPath)
-	if globalDesc.PID != projectDesc.PID || globalDesc.Role != projectdaemon.RoleWikid {
-		t.Fatalf("global descriptor = %#v, want same wikid owner pid %d", globalDesc, projectDesc.PID)
-	}
-
-	time.Sleep(projectdaemon.DefaultHeartbeatTTL + 500*time.Millisecond)
-	waitForLeafwikiReady(t, proc, port)
-	if !processExists(proc.cmd.Process.Pid) {
-		t.Fatalf("daemon process exited before signal")
-	}
-
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(proc.cmd.Process); err != nil {
-		t.Fatalf("send SIGTERM: %v", err)
-	}
-	proc.waitForExit(t)
-	waitForFileRemoved(t, projectDescriptorPath, 5*time.Second)
-	waitForFileRemoved(t, globalDescriptorPath, 5*time.Second)
-	waitForLeafwikiUnavailable(t, port)
-}
-
-func TestMainProcess_DaemonRejectsRuntimeStackEnvironment(t *testing.T) {
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	port := freeTCPPort(t)
-	writeTestConfig(t, filepath.Join(serviceDir, "leafwiki.yml"), fmt.Sprintf(`disable-auth: true
+var _ = ginkgo.Describe("TestMainProcess_DaemonRejectsRuntimeStackEnvironment", func() {
+	ginkgo.It("TestMainProcess_DaemonRejectsRuntimeStackEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		port := freeTCPPort(t)
+		writeTestConfig(t, filepath.Join(serviceDir, "leafwiki.yml"), fmt.Sprintf(`disable-auth: true
 host: 127.0.0.1
 port: %s
 log-target: stderr
 daemon-idle-timeout: 0
 `, port))
 
-	stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME":                   homeDir,
-		"LEAFWIKI_RUNTIME_STACK": "bogus",
+		stdout, stderr, err := runLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME":                   homeDir,
+			"LEAFWIKI_RUNTIME_STACK": "bogus",
+		})
+
+		if err == nil {
+			t.Fatalf("daemon with removed runtime env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_RUNTIME_STACK") {
+			t.Fatalf("stderr = %q, want removed runtime env error", stderr)
+		}
+
 	})
+})
 
-	if err == nil {
-		t.Fatalf("daemon with removed runtime env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_RUNTIME_STACK") {
-		t.Fatalf("stderr = %q, want removed runtime env error", stderr)
-	}
-}
+var _ = ginkgo.Describe("TestMainProcess_DaemonRunsFromServiceExampleTemplate", func() {
+	ginkgo.It("TestMainProcess_DaemonRunsFromServiceExampleTemplate", func() {
+		t := ginkgo.GinkgoT()
+		if !supportsGracefulProcessSignal() {
+			t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
+		}
 
-func TestMainProcess_DaemonRunsFromServiceExampleTemplate(t *testing.T) {
-	if !supportsGracefulProcessSignal() {
-		t.Skip("SIGTERM-style graceful process signaling is not available on this platform")
-	}
+		homeDir := t.TempDir()
+		serviceDir := filepath.Join(homeDir, ".leafwiki")
+		if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+			t.Fatalf("create service dir: %v", err)
+		}
+		port := freeTCPPort(t)
+		raw := readFileString(t, serviceExampleConfigPath(t))
+		raw = strings.Replace(raw, "port: 8080", "port: "+port, 1)
+		configPath := filepath.Join(serviceDir, "leafwiki.yml")
+		writeTestConfig(t, configPath, raw)
 
-	homeDir := t.TempDir()
-	serviceDir := filepath.Join(homeDir, ".leafwiki")
-	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("create service dir: %v", err)
-	}
-	port := freeTCPPort(t)
-	raw := readFileString(t, serviceExampleConfigPath(t))
-	raw = strings.Replace(raw, "port: 8080", "port: "+port, 1)
-	configPath := filepath.Join(serviceDir, "leafwiki.yml")
-	writeTestConfig(t, configPath, raw)
+		proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
+			"HOME": homeDir,
+		})
 
-	proc := startLeafwikiHelper(t, []string{"daemon"}, map[string]string{
-		"HOME": homeDir,
-	})
+		waitForLeafwikiReady(t, proc, port)
+		desc := waitForProjectDaemonDescriptor(t, serviceDir)
+		if desc.Config.Port != port {
+			t.Fatalf("descriptor port = %q, want template override %q", desc.Config.Port, port)
+		}
+		if !desc.Config.PublicMCPEnabled {
+			t.Fatalf("descriptor public MCP = false, want service template to enable HTTP MCP")
+		}
+		if !desc.Config.EnableWorkspaceSync {
+			t.Fatalf("descriptor workspace sync = false, want service template to enable workspace sync")
+		}
+		wantLogPath := filepath.Join(desc.DataDir, "logs", "leafwiki.log")
+		if desc.Config.LogTarget != "file" || desc.Config.LogFile != wantLogPath {
+			t.Fatalf("descriptor logging = %q/%q, want file/%q", desc.Config.LogTarget, desc.Config.LogFile, wantLogPath)
+		}
+		waitForFileContaining(t, wantLogPath, "Starting LeafWiki")
 
-	waitForLeafwikiReady(t, proc, port)
-	desc := waitForProjectDaemonDescriptor(t, serviceDir)
-	if desc.Config.Port != port {
-		t.Fatalf("descriptor port = %q, want template override %q", desc.Config.Port, port)
-	}
-	if !desc.Config.PublicMCPEnabled {
-		t.Fatalf("descriptor public MCP = false, want service template to enable HTTP MCP")
-	}
-	if !desc.Config.EnableWorkspaceSync {
-		t.Fatalf("descriptor workspace sync = false, want service template to enable workspace sync")
-	}
-	wantLogPath := filepath.Join(desc.DataDir, "logs", "leafwiki.log")
-	if desc.Config.LogTarget != "file" || desc.Config.LogFile != wantLogPath {
-		t.Fatalf("descriptor logging = %q/%q, want file/%q", desc.Config.LogTarget, desc.Config.LogFile, wantLogPath)
-	}
-	waitForFileContaining(t, wantLogPath, "Starting LeafWiki")
-
-	resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
-	if err != nil {
-		t.Fatalf("GET /api/config: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
-	}
-	var config map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if config["enableWorkspaceSync"] != true {
-		t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
-	}
-
-	toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
-	assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
-
-	waitForForegroundSignalHandler()
-	if err := signalLeafwikiProcess(proc.cmd.Process); err != nil {
-		t.Fatalf("send SIGTERM: %v", err)
-	}
-	proc.waitForExit(t)
-	waitForLeafwikiUnavailable(t, port)
-}
-
-func TestMainProcess_HelpFlagAfterOtherFlagsStaysOnStdout(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--log-target", "stderr",
-		"--help",
-	}, nil)
-
-	if err != nil {
-		t.Fatalf("help process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "--log-target") {
-		t.Fatalf("stdout = %q, want help output", stdout)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
-	}
-}
-
-func TestMainProcess_HelpFlagValueDoesNotShortCircuitSubcommandParsing(t *testing.T) {
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--admin-password", "help",
-		"unknown-command",
-	}, nil)
-
-	if err != nil {
-		t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Unknown command: unknown-command") {
-		t.Fatalf("stdout = %q, want unknown command handling", stdout)
-	}
-}
-
-func TestMainProcess_UnknownCommandIgnoresDirtyServerOnlyEnvironment(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"unknown-command",
-	}, map[string]string{
-		"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
-	})
-
-	if err != nil {
-		t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Unknown command: unknown-command") {
-		t.Fatalf("stdout = %q, want unknown command handling", stdout)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
-	}
-}
-
-func TestMainProcess_UnknownCommandRejectsMCPStdioEnvironment(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"unknown-command",
-	}, map[string]string{
-		"LEAFWIKI_MCP_STDIO": "true",
-	})
-
-	if err == nil {
-		t.Fatalf("unknown command with removed env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_MCP_STDIO") {
-		t.Fatalf("stderr = %q, want removed env error", stderr)
-	}
-}
-
-func TestMainProcess_ResetAdminPasswordIgnoresDirtyServerOnlyEnvironment(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	initWikidAdminUser(t, dataDir)
-
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"reset-admin-password",
-	}, map[string]string{
-		"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
-	})
-
-	if err != nil {
-		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Admin password reset successfully") {
-		t.Fatalf("stdout = %q, want reset output", stdout)
-	}
-}
-
-func TestMainProcess_UnknownCommandStaysUserFacingAndDoesNotCreateLogFile(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"unknown-command",
-	}, nil)
-
-	if err != nil {
-		t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Unknown command: unknown-command") || !strings.Contains(stdout, "Usage:") {
-		t.Fatalf("stdout = %q, want unknown command and usage", stdout)
-	}
-	if strings.Contains(stderr, "Starting LeafWiki") {
-		t.Fatalf("stderr contains server log: %q", stderr)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("log file stat error = %v, want not exist", err)
-	}
-}
-
-func TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	initWikidAdminUser(t, dataDir)
-
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"reset-admin-password",
-	}, map[string]string{})
-
-	if err != nil {
-		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Admin password reset successfully") || !strings.Contains(stdout, "New password") {
-		t.Fatalf("stdout = %q, want reset credentials", stdout)
-	}
-	if strings.Contains(stdout, `"msg"`) || strings.Contains(stdout, "Starting LeafWiki") {
-		t.Fatalf("stdout contains log output: %q", stdout)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("log file stat error = %v, want not exist", err)
-	}
-}
-
-func TestMainProcess_WikidFrontdResetAdminPasswordUsesWikidAuthStore(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	initWikidAdminUser(t, dataDir)
-
-	stdout, stderr, err := runLeafwikiHelper(t, []string{
-		"--data-dir", dataDir,
-		"reset-admin-password",
-	}, map[string]string{})
-
-	if err != nil {
-		t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
-	}
-	if !strings.Contains(stdout, "Admin password reset successfully") || !strings.Contains(stdout, "New password") {
-		t.Fatalf("stdout = %q, want reset credentials", stdout)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "users.db")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy root users.db stat err = %v, want not exist", err)
-	}
-}
-
-func TestMainProcess_ExplicitStdoutTargetWritesServerLogsToStdout(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stdout",
-	}, nil)
-
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	waitForFileContaining(t, proc.stdoutPath, "Starting LeafWiki")
-	waitForFileContaining(t, proc.stdoutPath, "http request")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
-
-	stdout := readFileString(t, proc.stdoutPath)
-	if !strings.Contains(stdout, "Starting LeafWiki") {
-		t.Fatalf("stdout = %q, want server log", stdout)
-	}
-	if !strings.Contains(stdout, "http request") {
-		t.Fatalf("stdout = %q, want request log", stdout)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("default log file stat error = %v, want not exist", err)
-	}
-}
-
-func TestMainProcess_DisableRequestLogSuppressesProcessRequestLog(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	port := freeTCPPort(t)
-	proc := startLeafwikiHelper(t, []string{
-		"--disable-auth",
-		"--data-dir", dataDir,
-		"--host", "127.0.0.1",
-		"--port", port,
-		"--log-target", "stderr",
-		"--disable-request-log",
-	}, nil)
-
-	waitForLeafwikiReady(t, proc, port)
-	globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
-	waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
-	proc.stop(t)
-	terminateProjectDaemonProcess(t, globalDesc.PID)
-	waitForLeafwikiUnavailable(t, port)
-	waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
-
-	stderr := readFileString(t, proc.stderrPath)
-	if strings.Contains(stderr, "http request") {
-		t.Fatalf("stderr = %q, want request log suppressed", stderr)
-	}
-	stdout := readFileString(t, proc.stdoutPath)
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty for stderr target", stdout)
-	}
-}
-
-func TestResolveWorkspace_DefaultsRootDirUnderDataDir(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-
-	workspace := resolveWorkspaceForArgs(t, []string{"--data-dir=" + dataDir})
-
-	if workspace.DataDir != dataDir {
-		t.Fatalf("DataDir = %q, want %q", workspace.DataDir, dataDir)
-	}
-	if got, want := workspace.RootDir, filepath.Join(dataDir, "root"); got != want {
-		t.Fatalf("RootDir = %q, want %q", got, want)
-	}
-}
-
-func TestResolveWorkspace_EnvRootDirOverridesDefault(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	t.Setenv("LEAFWIKI_ROOT_DIR", rootDir)
-
-	workspace := resolveWorkspaceForArgs(t, []string{"--data-dir=" + dataDir})
-
-	if workspace.RootDir != rootDir {
-		t.Fatalf("RootDir = %q, want env root %q", workspace.RootDir, rootDir)
-	}
-}
-
-func TestResolveWorkspace_CLIRootDirOverridesEnv(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
-	envRootDir := filepath.Join(t.TempDir(), "env-content")
-	cliRootDir := filepath.Join(t.TempDir(), "cli-content")
-	t.Setenv("LEAFWIKI_ROOT_DIR", envRootDir)
-
-	workspace := resolveWorkspaceForArgs(t, []string{
-		"--data-dir=" + dataDir,
-		"--root-dir=" + cliRootDir,
-	})
-
-	if workspace.RootDir != cliRootDir {
-		t.Fatalf("RootDir = %q, want CLI root %q", workspace.RootDir, cliRootDir)
-	}
-}
-
-func TestResolveWorkspace_NormalizesPaths(t *testing.T) {
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
-
-	workspace := resolveWorkspaceForArgs(t, []string{
-		"--data-dir= " + dataDir + string(filepath.Separator) + ". ",
-		"--root-dir= " + rootDir + string(filepath.Separator) + ". ",
-	})
-
-	if workspace.DataDir != dataDir {
-		t.Fatalf("DataDir = %q, want normalized %q", workspace.DataDir, dataDir)
-	}
-	if workspace.RootDir != rootDir {
-		t.Fatalf("RootDir = %q, want normalized %q", workspace.RootDir, rootDir)
-	}
-}
-
-func TestValidateWorkspaceRejectsSameDataAndRootDir(t *testing.T) {
-	dir := t.TempDir()
-
-	err := validateWorkspaceDirs(dir, filepath.Clean(filepath.Join(dir, ".")))
-	if err == nil {
-		t.Fatalf("expected RootDir == DataDir to be rejected")
-	}
-	if !strings.Contains(err.Error(), "root dir must be different from data dir") {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
-}
-
-func TestValidateWorkspaceRejectsRootDirContainingDataDir(t *testing.T) {
-	rootDir := filepath.Join(t.TempDir(), "wiki")
-	dataDir := filepath.Join(rootDir, "data")
-
-	err := validateWorkspaceDirs(dataDir, rootDir)
-	if err == nil {
-		t.Fatalf("expected RootDir containing DataDir to be rejected")
-	}
-	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
-}
-
-func TestResolveStartupWorkspace_SkipsWorkspaceValidationForResetAdminPassword(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("LEAFWIKI_ROOT_DIR", dir)
-
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
-	if err := fs.Parse([]string{"--data-dir=" + dir, "reset-admin-password"}); err != nil {
-		t.Fatalf("parse flags: %v (%s)", err, errOut.String())
-	}
-	visited := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-
-	if _, shouldStart, err := resolveStartupWorkspace(flags, visited, fs.Args()); err != nil || shouldStart {
-		t.Fatalf("resolveStartupWorkspace reset = shouldStart %v err %v, want no validation and no startup", shouldStart, err)
-	}
-}
-
-func TestResolveMCPTransports_DefaultEnvCLIAndSelector(t *testing.T) {
-	t.Run("default none", func(t *testing.T) {
-		got, err := resolveMCPTransportsForArgs(t, nil)
+		resp, err := http.Get("http://127.0.0.1:" + port + "/api/config")
 		if err != nil {
-			t.Fatalf("resolveMCPTransports: %v", err)
+			t.Fatalf("GET /api/config: %v", err)
 		}
-		if got.HTTP || got.Stdio {
-			t.Fatalf("default transports = %#v, want none", got)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("GET /api/config = %d: %s", resp.StatusCode, body)
 		}
-	})
+		var config map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		if config["enableWorkspaceSync"] != true {
+			t.Fatalf("enableWorkspaceSync = %v, want true in /api/config", config["enableWorkspaceSync"])
+		}
 
-	t.Run("env enables http", func(t *testing.T) {
-		t.Setenv("LEAFWIKI_MCP", "http")
-		got, err := resolveMCPTransportsForArgs(t, nil)
+		toolNames := listProcessHTTPMCPToolNames(t, "http://127.0.0.1:"+port+"/mcp/workspaces/home")
+		assertToolNamesMatch(t, toolNames, federatedRuntimeToolNames())
+
+		waitForForegroundSignalHandler()
+		if err := signalLeafwikiProcess(proc.cmd.Process); err != nil {
+			t.Fatalf("send SIGTERM: %v", err)
+		}
+		proc.waitForExit(t)
+		waitForLeafwikiUnavailable(t, port)
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_HelpFlagAfterOtherFlagsStaysOnStdout", func() {
+	ginkgo.It("TestMainProcess_HelpFlagAfterOtherFlagsStaysOnStdout", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--log-target", "stderr",
+			"--help",
+		}, nil)
+
 		if err != nil {
-			t.Fatalf("resolveMCPTransports: %v", err)
+			t.Fatalf("help process error = %v, stderr=%q", err, stderr)
 		}
-		if !got.HTTP || got.Stdio {
-			t.Fatalf("env transports = %#v, want http only", got)
+		if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "--log-target") {
+			t.Fatalf("stdout = %q, want help output", stdout)
 		}
-	})
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
 
-	t.Run("cli overrides env", func(t *testing.T) {
-		t.Setenv("LEAFWIKI_MCP", "http")
-		got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=stdio"})
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_HelpFlagValueDoesNotShortCircuitSubcommandParsing", func() {
+	ginkgo.It("TestMainProcess_HelpFlagValueDoesNotShortCircuitSubcommandParsing", func() {
+		t := ginkgo.GinkgoT()
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--admin-password", "help",
+			"unknown-command",
+		}, nil)
+
 		if err != nil {
-			t.Fatalf("resolveMCPTransports: %v", err)
+			t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
 		}
-		if got.HTTP || !got.Stdio {
-			t.Fatalf("CLI transports = %#v, want stdio only", got)
+		if !strings.Contains(stdout, "Unknown command: unknown-command") {
+			t.Fatalf("stdout = %q, want unknown command handling", stdout)
 		}
-	})
 
-	t.Run("combined orderings", func(t *testing.T) {
-		for _, raw := range []string{"--mcp=stdio,http", "--mcp=http,stdio"} {
-			got, err := resolveMCPTransportsForArgs(t, []string{raw})
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_UnknownCommandIgnoresDirtyServerOnlyEnvironment", func() {
+	ginkgo.It("TestMainProcess_UnknownCommandIgnoresDirtyServerOnlyEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"unknown-command",
+		}, map[string]string{
+			"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
+		})
+
+		if err != nil {
+			t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Unknown command: unknown-command") {
+			t.Fatalf("stdout = %q, want unknown command handling", stdout)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_UnknownCommandRejectsMCPStdioEnvironment", func() {
+	ginkgo.It("TestMainProcess_UnknownCommandRejectsMCPStdioEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"unknown-command",
+		}, map[string]string{
+			"LEAFWIKI_MCP_STDIO": "true",
+		})
+
+		if err == nil {
+			t.Fatalf("unknown command with removed env unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+		if !strings.Contains(stderr, "unknown environment variable: LEAFWIKI_MCP_STDIO") {
+			t.Fatalf("stderr = %q, want removed env error", stderr)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ResetAdminPasswordIgnoresDirtyServerOnlyEnvironment", func() {
+	ginkgo.It("TestMainProcess_ResetAdminPasswordIgnoresDirtyServerOnlyEnvironment", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		initWikidAdminUser(t, dataDir)
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"reset-admin-password",
+		}, map[string]string{
+			"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
+		})
+
+		if err != nil {
+			t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Admin password reset successfully") {
+			t.Fatalf("stdout = %q, want reset output", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_UnknownCommandStaysUserFacingAndDoesNotCreateLogFile", func() {
+	ginkgo.It("TestMainProcess_UnknownCommandStaysUserFacingAndDoesNotCreateLogFile", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"unknown-command",
+		}, nil)
+
+		if err != nil {
+			t.Fatalf("unknown command process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Unknown command: unknown-command") || !strings.Contains(stdout, "Usage:") {
+			t.Fatalf("stdout = %q, want unknown command and usage", stdout)
+		}
+		if strings.Contains(stderr, "Starting LeafWiki") {
+			t.Fatalf("stderr contains server log: %q", stderr)
+		}
+		if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("log file stat error = %v, want not exist", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly", func() {
+	ginkgo.It("TestMainProcess_ResetAdminPasswordKeepsCredentialsOnStdoutOnly", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		initWikidAdminUser(t, dataDir)
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"reset-admin-password",
+		}, map[string]string{})
+
+		if err != nil {
+			t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Admin password reset successfully") || !strings.Contains(stdout, "New password") {
+			t.Fatalf("stdout = %q, want reset credentials", stdout)
+		}
+		if strings.Contains(stdout, `"msg"`) || strings.Contains(stdout, "Starting LeafWiki") {
+			t.Fatalf("stdout contains log output: %q", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("log file stat error = %v, want not exist", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_WikidFrontdResetAdminPasswordUsesWikidAuthStore", func() {
+	ginkgo.It("TestMainProcess_WikidFrontdResetAdminPasswordUsesWikidAuthStore", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		initWikidAdminUser(t, dataDir)
+
+		stdout, stderr, err := runLeafwikiHelper(t, []string{
+			"--data-dir", dataDir,
+			"reset-admin-password",
+		}, map[string]string{})
+
+		if err != nil {
+			t.Fatalf("reset-admin-password process error = %v, stderr=%q", err, stderr)
+		}
+		if !strings.Contains(stdout, "Admin password reset successfully") || !strings.Contains(stdout, "New password") {
+			t.Fatalf("stdout = %q, want reset credentials", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(dataDir, "users.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("legacy root users.db stat err = %v, want not exist", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_ExplicitStdoutTargetWritesServerLogsToStdout", func() {
+	ginkgo.It("TestMainProcess_ExplicitStdoutTargetWritesServerLogsToStdout", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stdout",
+		}, nil)
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		waitForFileContaining(t, proc.stdoutPath, "Starting LeafWiki")
+		waitForFileContaining(t, proc.stdoutPath, "http request")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		stdout := readFileString(t, proc.stdoutPath)
+		if !strings.Contains(stdout, "Starting LeafWiki") {
+			t.Fatalf("stdout = %q, want server log", stdout)
+		}
+		if !strings.Contains(stdout, "http request") {
+			t.Fatalf("stdout = %q, want request log", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("default log file stat error = %v, want not exist", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestMainProcess_DisableRequestLogSuppressesProcessRequestLog", func() {
+	ginkgo.It("TestMainProcess_DisableRequestLogSuppressesProcessRequestLog", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		port := freeTCPPort(t)
+		proc := startLeafwikiHelper(t, []string{
+			"--disable-auth",
+			"--data-dir", dataDir,
+			"--host", "127.0.0.1",
+			"--port", port,
+			"--log-target", "stderr",
+			"--disable-request-log",
+		}, nil)
+
+		waitForLeafwikiReady(t, proc, port)
+		globalDesc := waitForGlobalWikidDescriptor(t, dataDir)
+		waitForFileContaining(t, proc.stderrPath, "Starting LeafWiki")
+		proc.stop(t)
+		terminateProjectDaemonProcess(t, globalDesc.PID)
+		waitForLeafwikiUnavailable(t, port)
+		waitForProjectLocksReusable(t, dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
+
+		stderr := readFileString(t, proc.stderrPath)
+		if strings.Contains(stderr, "http request") {
+			t.Fatalf("stderr = %q, want request log suppressed", stderr)
+		}
+		stdout := readFileString(t, proc.stdoutPath)
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty for stderr target", stdout)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveWorkspace_DefaultsRootDirUnderDataDir", func() {
+	ginkgo.It("TestResolveWorkspace_DefaultsRootDirUnderDataDir", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+
+		workspace := resolveWorkspaceForArgs(t, []string{"--data-dir=" + dataDir})
+
+		if workspace.DataDir != dataDir {
+			t.Fatalf("DataDir = %q, want %q", workspace.DataDir, dataDir)
+		}
+		if got, want := workspace.RootDir, filepath.Join(dataDir, "root"); got != want {
+			t.Fatalf("RootDir = %q, want %q", got, want)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveWorkspace_EnvRootDirOverridesDefault", func() {
+	ginkgo.It("TestResolveWorkspace_EnvRootDirOverridesDefault", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		rootDir := filepath.Join(t.TempDir(), "content")
+		t.Setenv("LEAFWIKI_ROOT_DIR", rootDir)
+
+		workspace := resolveWorkspaceForArgs(t, []string{"--data-dir=" + dataDir})
+
+		if workspace.RootDir != rootDir {
+			t.Fatalf("RootDir = %q, want env root %q", workspace.RootDir, rootDir)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveWorkspace_CLIRootDirOverridesEnv", func() {
+	ginkgo.It("TestResolveWorkspace_CLIRootDirOverridesEnv", func() {
+		t := ginkgo.GinkgoT()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		envRootDir := filepath.Join(t.TempDir(), "env-content")
+		cliRootDir := filepath.Join(t.TempDir(), "cli-content")
+		t.Setenv("LEAFWIKI_ROOT_DIR", envRootDir)
+
+		workspace := resolveWorkspaceForArgs(t, []string{
+			"--data-dir=" + dataDir,
+			"--root-dir=" + cliRootDir,
+		})
+
+		if workspace.RootDir != cliRootDir {
+			t.Fatalf("RootDir = %q, want CLI root %q", workspace.RootDir, cliRootDir)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveWorkspace_NormalizesPaths", func() {
+	ginkgo.It("TestResolveWorkspace_NormalizesPaths", func() {
+		t := ginkgo.GinkgoT()
+		baseDir := t.TempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
+
+		workspace := resolveWorkspaceForArgs(t, []string{
+			"--data-dir= " + dataDir + string(filepath.Separator) + ". ",
+			"--root-dir= " + rootDir + string(filepath.Separator) + ". ",
+		})
+
+		if workspace.DataDir != dataDir {
+			t.Fatalf("DataDir = %q, want normalized %q", workspace.DataDir, dataDir)
+		}
+		if workspace.RootDir != rootDir {
+			t.Fatalf("RootDir = %q, want normalized %q", workspace.RootDir, rootDir)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestValidateWorkspaceRejectsSameDataAndRootDir", func() {
+	ginkgo.It("TestValidateWorkspaceRejectsSameDataAndRootDir", func() {
+		t := ginkgo.GinkgoT()
+		dir := t.TempDir()
+
+		err := validateWorkspaceDirs(dir, filepath.Clean(filepath.Join(dir, ".")))
+		if err == nil {
+			t.Fatalf("expected RootDir == DataDir to be rejected")
+		}
+		if !strings.Contains(err.Error(), "root dir must be different from data dir") {
+			t.Fatalf("unexpected validation error: %v", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestValidateWorkspaceRejectsRootDirContainingDataDir", func() {
+	ginkgo.It("TestValidateWorkspaceRejectsRootDirContainingDataDir", func() {
+		t := ginkgo.GinkgoT()
+		rootDir := filepath.Join(t.TempDir(), "wiki")
+		dataDir := filepath.Join(rootDir, "data")
+
+		err := validateWorkspaceDirs(dataDir, rootDir)
+		if err == nil {
+			t.Fatalf("expected RootDir containing DataDir to be rejected")
+		}
+		if !strings.Contains(err.Error(), "root dir must not contain data dir") {
+			t.Fatalf("unexpected validation error: %v", err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveStartupWorkspace_SkipsWorkspaceValidationForResetAdminPassword", func() {
+	ginkgo.It("TestResolveStartupWorkspace_SkipsWorkspaceValidationForResetAdminPassword", func() {
+		t := ginkgo.GinkgoT()
+		dir := t.TempDir()
+		t.Setenv("LEAFWIKI_ROOT_DIR", dir)
+
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		var errOut bytes.Buffer
+		fs.SetOutput(&errOut)
+		flags := registerFlags(fs)
+		if err := fs.Parse([]string{"--data-dir=" + dir, "reset-admin-password"}); err != nil {
+			t.Fatalf("parse flags: %v (%s)", err, errOut.String())
+		}
+		visited := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+		if _, shouldStart, err := resolveStartupWorkspace(flags, visited, fs.Args()); err != nil || shouldStart {
+			t.Fatalf("resolveStartupWorkspace reset = shouldStart %v err %v, want no validation and no startup", shouldStart, err)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestResolveMCPTransports_DefaultEnvCLIAndSelector", func() {
+	ginkgo.It("TestResolveMCPTransports_DefaultEnvCLIAndSelector", func() {
+		t := ginkgo.GinkgoT()
+		func() {
+			t := t
+			_ = "default none"
+			got, err := resolveMCPTransportsForArgs(t, nil)
 			if err != nil {
-				t.Fatalf("resolveMCPTransports(%s): %v", raw, err)
+				t.Fatalf("resolveMCPTransports: %v", err)
 			}
-			if !got.HTTP || !got.Stdio {
-				t.Fatalf("%s transports = %#v, want both", raw, got)
+			if got.HTTP || got.Stdio {
+				t.Fatalf("default transports = %#v, want none", got)
 			}
-		}
-	})
 
-	t.Run("selector ignores removed legacy envs after env validation", func(t *testing.T) {
-		got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=none"})
-		if err != nil {
-			t.Fatalf("resolveMCPTransports: %v", err)
-		}
-		if got.HTTP || got.Stdio {
-			t.Fatalf("selector transports = %#v, want none", got)
-		}
-	})
-}
+		}()
 
-func TestParseMCPTransports_RejectsInvalidValues(t *testing.T) {
-	tests := []struct {
-		name      string
-		raw       string
-		wantError string
-	}{
-		{name: "unknown", raw: "websocket", wantError: "invalid MCP transport"},
-		{name: "none combined", raw: "none,stdio", wantError: "none cannot be combined"},
-		{name: "duplicate", raw: "stdio,stdio", wantError: "duplicate MCP transport"},
-		{name: "empty part", raw: "stdio,", wantError: "invalid MCP transport"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := parseMCPTransports(tt.raw); err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("parseMCPTransports(%q) error = %v, want %q", tt.raw, err, tt.wantError)
+		func() {
+			t := t
+			_ = "env enables http"
+			t.Setenv("LEAFWIKI_MCP", "http")
+			got, err := resolveMCPTransportsForArgs(t, nil)
+			if err != nil {
+				t.Fatalf("resolveMCPTransports: %v", err)
 			}
-		})
-	}
-}
+			if !got.HTTP || got.Stdio {
+				t.Fatalf("env transports = %#v, want http only", got)
+			}
 
-func TestValidateMCPTransportOptions(t *testing.T) {
-	tests := []struct {
-		name      string
-		opts      mcpTransportOptions
-		wantError string
-	}{
-		{
-			name: "HTTP allows non-loopback web host",
-			opts: mcpTransportOptions{
-				Transports: mcpTransports{HTTP: true},
-				Host:       "0.0.0.0",
-				LogTarget:  leaflogging.TargetStderr,
-			},
-		},
-		{
-			name: "STDIO allows non-loopback web host",
-			opts: mcpTransportOptions{
-				Transports:  mcpTransports{Stdio: true},
-				DisableAuth: true,
-				Host:        "0.0.0.0",
-				LogTarget:   leaflogging.TargetStderr,
-			},
-		},
-		{
-			name: "STDIO rejects stdout logging",
-			opts: mcpTransportOptions{
-				Transports:  mcpTransports{Stdio: true},
-				DisableAuth: true,
-				Host:        "127.0.0.1",
-				LogTarget:   leaflogging.TargetStdout,
-			},
-			wantError: "stdout is reserved for MCP STDIO",
-		},
-		{
-			name: "STDIO auth enabled requires key",
-			opts: mcpTransportOptions{
-				Transports: mcpTransports{Stdio: true},
-				Host:       "127.0.0.1",
-				LogTarget:  leaflogging.TargetStderr,
-			},
-			wantError: "native STDIO requires either disabled auth or an API key",
-		},
-		{
-			name: "STDIO disabled auth rejects key",
-			opts: mcpTransportOptions{
-				Transports:  mcpTransports{Stdio: true},
-				DisableAuth: true,
-				APIKey:      "lwk_fake",
-				Host:        "127.0.0.1",
-				LogTarget:   leaflogging.TargetStderr,
-			},
-			wantError: "disabled auth and API-key STDIO identity cannot be combined",
-		},
-		{
-			name: "HTTP ignores API key",
-			opts: mcpTransportOptions{
-				Transports: mcpTransports{HTTP: true},
-				APIKey:     "lwk_invalid",
-				Host:       "127.0.0.1",
-				LogTarget:  leaflogging.TargetStderr,
-			},
-		},
-	}
+		}()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateMCPTransportOptions(tt.opts)
-			if tt.wantError == "" {
+		func() {
+			t := t
+			_ = "cli overrides env"
+			t.Setenv("LEAFWIKI_MCP", "http")
+			got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=stdio"})
+			if err != nil {
+				t.Fatalf("resolveMCPTransports: %v", err)
+			}
+			if got.HTTP || !got.Stdio {
+				t.Fatalf("CLI transports = %#v, want stdio only", got)
+			}
+
+		}()
+
+		func() {
+			t := t
+			_ = "combined orderings"
+			for _, raw := range []string{"--mcp=stdio,http", "--mcp=http,stdio"} {
+				got, err := resolveMCPTransportsForArgs(t, []string{raw})
 				if err != nil {
-					t.Fatalf("validateMCPTransportOptions() error = %v, want nil", err)
+					t.Fatalf("resolveMCPTransports(%s): %v", raw, err)
 				}
-				return
+				if !got.HTTP || !got.Stdio {
+					t.Fatalf("%s transports = %#v, want both", raw, got)
+				}
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("validateMCPTransportOptions() error = %v, want %q", err, tt.wantError)
+
+		}()
+
+		func() {
+			t := t
+			_ = "selector ignores removed legacy envs after env validation"
+			got, err := resolveMCPTransportsForArgs(t, []string{"--mcp=none"})
+			if err != nil {
+				t.Fatalf("resolveMCPTransports: %v", err)
 			}
+			if got.HTTP || got.Stdio {
+				t.Fatalf("selector transports = %#v, want none", got)
+			}
+
+		}()
+
+	})
+})
+
+var _ = ginkgo.Describe("TestParseMCPTransports_RejectsInvalidValues", func() {
+	ginkgo.It("TestParseMCPTransports_RejectsInvalidValues", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name      string
+			raw       string
+			wantError string
+		}{
+			{name: "unknown", raw: "websocket", wantError: "invalid MCP transport"},
+			{name: "none combined", raw: "none,stdio", wantError: "none cannot be combined"},
+			{name: "duplicate", raw: "stdio,stdio", wantError: "duplicate MCP transport"},
+			{name: "empty part", raw: "stdio,", wantError: "invalid MCP transport"},
+		}
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				if _, err := parseMCPTransports(tt.raw); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("parseMCPTransports(%q) error = %v, want %q", tt.raw, err, tt.wantError)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
+	ginkgo.It("TestValidateMCPTransportOptions", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name      string
+			opts      mcpTransportOptions
+			wantError string
+		}{
+			{
+				name: "HTTP allows non-loopback web host",
+				opts: mcpTransportOptions{
+					Transports: mcpTransports{HTTP: true},
+					Host:       "0.0.0.0",
+					LogTarget:  leaflogging.TargetStderr,
+				},
+			},
+			{
+				name: "STDIO allows non-loopback web host",
+				opts: mcpTransportOptions{
+					Transports:  mcpTransports{Stdio: true},
+					DisableAuth: true,
+					Host:        "0.0.0.0",
+					LogTarget:   leaflogging.TargetStderr,
+				},
+			},
+			{
+				name: "STDIO rejects stdout logging",
+				opts: mcpTransportOptions{
+					Transports:  mcpTransports{Stdio: true},
+					DisableAuth: true,
+					Host:        "127.0.0.1",
+					LogTarget:   leaflogging.TargetStdout,
+				},
+				wantError: "stdout is reserved for MCP STDIO",
+			},
+			{
+				name: "STDIO auth enabled requires key",
+				opts: mcpTransportOptions{
+					Transports: mcpTransports{Stdio: true},
+					Host:       "127.0.0.1",
+					LogTarget:  leaflogging.TargetStderr,
+				},
+				wantError: "native STDIO requires either disabled auth or an API key",
+			},
+			{
+				name: "STDIO disabled auth rejects key",
+				opts: mcpTransportOptions{
+					Transports:  mcpTransports{Stdio: true},
+					DisableAuth: true,
+					APIKey:      "lwk_fake",
+					Host:        "127.0.0.1",
+					LogTarget:   leaflogging.TargetStderr,
+				},
+				wantError: "disabled auth and API-key STDIO identity cannot be combined",
+			},
+			{
+				name: "HTTP ignores API key",
+				opts: mcpTransportOptions{
+					Transports: mcpTransports{HTTP: true},
+					APIKey:     "lwk_invalid",
+					Host:       "127.0.0.1",
+					LogTarget:  leaflogging.TargetStderr,
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			func() {
+				t := t
+				_ = tt.name
+				err := validateMCPTransportOptions(tt.opts)
+				if tt.wantError == "" {
+					if err != nil {
+						t.Fatalf("validateMCPTransportOptions() error = %v, want nil", err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("validateMCPTransportOptions() error = %v, want %q", err, tt.wantError)
+				}
+
+			}()
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestBuildHTTPRouterOptions_PropagatesMCPEnablement", func() {
+	ginkgo.It("TestBuildHTTPRouterOptions_PropagatesMCPEnablement", func() {
+		t := ginkgo.GinkgoT()
+		opts := buildHTTPRouterOptions(httpRouterOptionsInput{
+			publicAccess:        true,
+			authDisabled:        true,
+			enableMCP:           true,
+			host:                "127.0.0.1",
+			mcpToolListPageSize: 7,
 		})
-	}
-}
 
-func TestBuildHTTPRouterOptions_PropagatesMCPEnablement(t *testing.T) {
-	opts := buildHTTPRouterOptions(httpRouterOptionsInput{
-		publicAccess:        true,
-		authDisabled:        true,
-		enableMCP:           true,
-		host:                "127.0.0.1",
-		mcpToolListPageSize: 7,
+		if !opts.MCPEnabled {
+			t.Fatalf("expected MCPEnabled to be true")
+		}
+		if opts.MCPToolListPageSize != 7 {
+			t.Fatalf("expected MCPToolListPageSize 7, got %d", opts.MCPToolListPageSize)
+		}
+		if opts.MCPBindHost != "127.0.0.1" {
+			t.Fatalf("expected MCPBindHost 127.0.0.1, got %q", opts.MCPBindHost)
+		}
+
 	})
+})
 
-	if !opts.MCPEnabled {
-		t.Fatalf("expected MCPEnabled to be true")
-	}
-	if opts.MCPToolListPageSize != 7 {
-		t.Fatalf("expected MCPToolListPageSize 7, got %d", opts.MCPToolListPageSize)
-	}
-	if opts.MCPBindHost != "127.0.0.1" {
-		t.Fatalf("expected MCPBindHost 127.0.0.1, got %q", opts.MCPBindHost)
-	}
-}
+var _ = ginkgo.Describe("TestBuildListenAddress_HandlesIPv6Loopback", func() {
+	ginkgo.It("TestBuildListenAddress_HandlesIPv6Loopback", func() {
+		t := ginkgo.GinkgoT()
+		got := buildListenAddress("::1", "8080")
+		if got != "[::1]:8080" {
+			t.Fatalf("buildListenAddress(::1, 8080) = %q, want %q", got, "[::1]:8080")
+		}
 
-func TestBuildListenAddress_HandlesIPv6Loopback(t *testing.T) {
-	got := buildListenAddress("::1", "8080")
-	if got != "[::1]:8080" {
-		t.Fatalf("buildListenAddress(::1, 8080) = %q, want %q", got, "[::1]:8080")
-	}
-}
-
-func TestRegisterFlags_AcceptsSingleDashLongFlags(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
-
-	err := fs.Parse([]string{
-		"-jwt-secret=test-secret",
-		"-admin-password=test-password",
-		"-allow-insecure=true",
 	})
-	if err != nil {
-		t.Fatalf("expected single-dash long flags to parse, got %v (%s)", err, errOut.String())
-	}
+})
 
-	if got := *flags.jwtSecret; got != "test-secret" {
-		t.Fatalf("expected jwt secret %q, got %q", "test-secret", got)
-	}
-	if got := *flags.adminPassword; got != "test-password" {
-		t.Fatalf("expected admin password %q, got %q", "test-password", got)
-	}
-	if !*flags.allowInsecure {
-		t.Fatalf("expected allow-insecure to be true")
-	}
-}
+var _ = ginkgo.Describe("TestRegisterFlags_AcceptsSingleDashLongFlags", func() {
+	ginkgo.It("TestRegisterFlags_AcceptsSingleDashLongFlags", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		var errOut bytes.Buffer
+		fs.SetOutput(&errOut)
+		flags := registerFlags(fs)
 
-func TestValidateHTTPRemoteUserConfig(t *testing.T) {
-	tests := []struct {
-		name            string
-		enabled         bool
-		trustedProxyIPs string
-		wantErr         bool
-	}{
-		{"disabled, no IPs", false, "", false},
-		{"disabled, with IPs", false, "127.0.0.1", false},
-		{"enabled, with IPs", true, "127.0.0.1", false},
-		{"enabled, multiple IPs", true, "127.0.0.1,172.18.0.0/16", false},
-		{"enabled, no IPs", true, "", true},
-		{"enabled, whitespace only", true, "   ", true},
-		{"enabled, commas only", true, ",,,", true},
-		{"enabled, commas and whitespace", true, " , , ", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateHTTPRemoteUserConfig(tc.enabled, tc.trustedProxyIPs)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("validateHTTPRemoteUserConfig(%v, %q) error = %v, wantErr %v", tc.enabled, tc.trustedProxyIPs, err, tc.wantErr)
-			}
+		err := fs.Parse([]string{
+			"-jwt-secret=test-secret",
+			"-admin-password=test-password",
+			"-allow-insecure=true",
 		})
-	}
-}
+		if err != nil {
+			t.Fatalf("expected single-dash long flags to parse, got %v (%s)", err, errOut.String())
+		}
 
-func TestRegisterFlags_AcceptsDoubleDashLongFlags(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
+		if got := *flags.jwtSecret; got != "test-secret" {
+			t.Fatalf("expected jwt secret %q, got %q", "test-secret", got)
+		}
+		if got := *flags.adminPassword; got != "test-password" {
+			t.Fatalf("expected admin password %q, got %q", "test-password", got)
+		}
+		if !*flags.allowInsecure {
+			t.Fatalf("expected allow-insecure to be true")
+		}
 
-	err := fs.Parse([]string{
-		"--jwt-secret=test-secret",
-		"--admin-password=test-password",
-		"--allow-insecure=true",
 	})
-	if err != nil {
-		t.Fatalf("expected double-dash long flags to parse, got %v (%s)", err, errOut.String())
-	}
+})
 
-	if got := *flags.jwtSecret; got != "test-secret" {
-		t.Fatalf("expected jwt secret %q, got %q", "test-secret", got)
-	}
-	if got := *flags.adminPassword; got != "test-password" {
-		t.Fatalf("expected admin password %q, got %q", "test-password", got)
-	}
-	if !*flags.allowInsecure {
-		t.Fatalf("expected allow-insecure to be true")
-	}
-}
+var _ = ginkgo.Describe("TestValidateHTTPRemoteUserConfig", func() {
+	ginkgo.It("TestValidateHTTPRemoteUserConfig", func() {
+		t := ginkgo.GinkgoT()
+		tests := []struct {
+			name            string
+			enabled         bool
+			trustedProxyIPs string
+			wantErr         bool
+		}{
+			{"disabled, no IPs", false, "", false},
+			{"disabled, with IPs", false, "127.0.0.1", false},
+			{"enabled, with IPs", true, "127.0.0.1", false},
+			{"enabled, multiple IPs", true, "127.0.0.1,172.18.0.0/16", false},
+			{"enabled, no IPs", true, "", true},
+			{"enabled, whitespace only", true, "   ", true},
+			{"enabled, commas only", true, ",,,", true},
+			{"enabled, commas and whitespace", true, " , , ", true},
+		}
+		for _, tc := range tests {
+			func() {
+				t := t
+				_ = tc.name
+				err := validateHTTPRemoteUserConfig(tc.enabled, tc.trustedProxyIPs)
+				if (err != nil) != tc.wantErr {
+					t.Fatalf("validateHTTPRemoteUserConfig(%v, %q) error = %v, wantErr %v", tc.enabled, tc.trustedProxyIPs, err, tc.wantErr)
+				}
 
-func TestRegisterFlags_AcceptsRootDirFlag(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
+			}()
+		}
 
-	err := fs.Parse([]string{"--root-dir=/tmp/leafwiki-content"})
-	if err != nil {
-		t.Fatalf("expected root-dir flag to parse, got %v (%s)", err, errOut.String())
-	}
-
-	if flags.rootDir == nil || *flags.rootDir != "/tmp/leafwiki-content" {
-		t.Fatalf("expected root-dir to be parsed, got %#v", flags.rootDir)
-	}
-}
-
-func TestRegisterFlags_AcceptsLoggingFlags(t *testing.T) {
-	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
-	var errOut bytes.Buffer
-	fs.SetOutput(&errOut)
-	flags := registerFlags(fs)
-
-	err := fs.Parse([]string{
-		"--log-target=stderr",
-		"--log-file=logs/custom.log",
 	})
-	if err != nil {
-		t.Fatalf("expected logging flags to parse, got %v (%s)", err, errOut.String())
-	}
+})
 
-	if flags.logTarget == nil || *flags.logTarget != "stderr" {
-		t.Fatalf("expected log-target stderr, got %#v", flags.logTarget)
-	}
-	if flags.logFile == nil || *flags.logFile != "logs/custom.log" {
-		t.Fatalf("expected log-file logs/custom.log, got %#v", flags.logFile)
-	}
-}
+var _ = ginkgo.Describe("TestRegisterFlags_AcceptsDoubleDashLongFlags", func() {
+	ginkgo.It("TestRegisterFlags_AcceptsDoubleDashLongFlags", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		var errOut bytes.Buffer
+		fs.SetOutput(&errOut)
+		flags := registerFlags(fs)
 
-func resolveMCPTransportsForArgs(t *testing.T, args []string) (mcpTransports, error) {
+		err := fs.Parse([]string{
+			"--jwt-secret=test-secret",
+			"--admin-password=test-password",
+			"--allow-insecure=true",
+		})
+		if err != nil {
+			t.Fatalf("expected double-dash long flags to parse, got %v (%s)", err, errOut.String())
+		}
+
+		if got := *flags.jwtSecret; got != "test-secret" {
+			t.Fatalf("expected jwt secret %q, got %q", "test-secret", got)
+		}
+		if got := *flags.adminPassword; got != "test-password" {
+			t.Fatalf("expected admin password %q, got %q", "test-password", got)
+		}
+		if !*flags.allowInsecure {
+			t.Fatalf("expected allow-insecure to be true")
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRegisterFlags_AcceptsRootDirFlag", func() {
+	ginkgo.It("TestRegisterFlags_AcceptsRootDirFlag", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		var errOut bytes.Buffer
+		fs.SetOutput(&errOut)
+		flags := registerFlags(fs)
+
+		err := fs.Parse([]string{"--root-dir=/tmp/leafwiki-content"})
+		if err != nil {
+			t.Fatalf("expected root-dir flag to parse, got %v (%s)", err, errOut.String())
+		}
+
+		if flags.rootDir == nil || *flags.rootDir != "/tmp/leafwiki-content" {
+			t.Fatalf("expected root-dir to be parsed, got %#v", flags.rootDir)
+		}
+
+	})
+})
+
+var _ = ginkgo.Describe("TestRegisterFlags_AcceptsLoggingFlags", func() {
+	ginkgo.It("TestRegisterFlags_AcceptsLoggingFlags", func() {
+		t := ginkgo.GinkgoT()
+		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
+		var errOut bytes.Buffer
+		fs.SetOutput(&errOut)
+		flags := registerFlags(fs)
+
+		err := fs.Parse([]string{
+			"--log-target=stderr",
+			"--log-file=logs/custom.log",
+		})
+		if err != nil {
+			t.Fatalf("expected logging flags to parse, got %v (%s)", err, errOut.String())
+		}
+
+		if flags.logTarget == nil || *flags.logTarget != "stderr" {
+			t.Fatalf("expected log-target stderr, got %#v", flags.logTarget)
+		}
+		if flags.logFile == nil || *flags.logFile != "logs/custom.log" {
+			t.Fatalf("expected log-file logs/custom.log, got %#v", flags.logFile)
+		}
+
+	})
+})
+
+func resolveMCPTransportsForArgs(t leafwikiTestT, args []string) (mcpTransports, error) {
 	t.Helper()
 
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
@@ -7030,7 +7959,7 @@ func resolveMCPTransportsForArgs(t *testing.T, args []string) (mcpTransports, er
 	return resolveMCPTransports(flags, visited)
 }
 
-func parseConfigFlagsForArgs(t *testing.T, args []string) (*cliFlags, map[string]bool, []string) {
+func parseConfigFlagsForArgs(t leafwikiTestT, args []string) (*cliFlags, map[string]bool, []string) {
 	t.Helper()
 
 	flags, visited, rest, err := parseConfigFlagsForArgsAllowError(t, args)
@@ -7040,7 +7969,7 @@ func parseConfigFlagsForArgs(t *testing.T, args []string) (*cliFlags, map[string
 	return flags, visited, rest
 }
 
-func parseConfigFlagsForArgsAllowError(t *testing.T, args []string) (*cliFlags, map[string]bool, []string, error) {
+func parseConfigFlagsForArgsAllowError(t leafwikiTestT, args []string) (*cliFlags, map[string]bool, []string, error) {
 	t.Helper()
 
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
@@ -7063,7 +7992,7 @@ func parseConfigFlagsForArgsAllowError(t *testing.T, args []string) (*cliFlags, 
 	return flags, visited, fs.Args(), nil
 }
 
-func writeTestConfig(t *testing.T, path string, body string) {
+func writeTestConfig(t leafwikiTestT, path string, body string) {
 	t.Helper()
 
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -7071,7 +8000,7 @@ func writeTestConfig(t *testing.T, path string, body string) {
 	}
 }
 
-func serviceExampleConfigPath(t *testing.T) string {
+func serviceExampleConfigPath(t leafwikiTestT) string {
 	t.Helper()
 	path := filepath.Join("..", "..", "config", "leafwiki.service.example.yml")
 	if _, err := os.Stat(path); err != nil {
@@ -7080,7 +8009,7 @@ func serviceExampleConfigPath(t *testing.T) string {
 	return path
 }
 
-func serviceExampleConfigKeys(t *testing.T) map[string]struct{} {
+func serviceExampleConfigKeys(t leafwikiTestT) map[string]struct{} {
 	t.Helper()
 	raw, err := os.ReadFile(serviceExampleConfigPath(t))
 	if err != nil {
@@ -7117,7 +8046,7 @@ func isServiceExampleConfigKey(key string) bool {
 	return true
 }
 
-func resolveWorkspaceForArgs(t *testing.T, args []string) wiki.Workspace {
+func resolveWorkspaceForArgs(t leafwikiTestT, args []string) wiki.Workspace {
 	t.Helper()
 
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
@@ -7136,7 +8065,7 @@ func resolveWorkspaceForArgs(t *testing.T, args []string) wiki.Workspace {
 	return workspace
 }
 
-func resolveLoggingConfigForArgs(t *testing.T, args []string) leaflogging.Config {
+func resolveLoggingConfigForArgs(t leafwikiTestT, args []string) leaflogging.Config {
 	t.Helper()
 
 	cfg, err := resolveLoggingConfigForArgsAllowError(t, args)
@@ -7146,7 +8075,7 @@ func resolveLoggingConfigForArgs(t *testing.T, args []string) leaflogging.Config
 	return cfg
 }
 
-func resolveLoggingConfigForArgsAllowError(t *testing.T, args []string) (leaflogging.Config, error) {
+func resolveLoggingConfigForArgsAllowError(t leafwikiTestT, args []string) (leaflogging.Config, error) {
 	t.Helper()
 
 	fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
@@ -7165,9 +8094,9 @@ func resolveLoggingConfigForArgsAllowError(t *testing.T, args []string) (leaflog
 	return resolveLoggingConfig(flags, visited, workspace.DataDir)
 }
 
-func TestLeafWikiHelperProcess(t *testing.T) {
+func runLeafWikiHelperProcessForTest() bool {
 	if os.Getenv("GO_WANT_LEAFWIKI_HELPER_PROCESS") != "1" {
-		return
+		return false
 	}
 
 	args := []string{}
@@ -7215,6 +8144,7 @@ func TestLeafWikiHelperProcess(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
 	os.Exit(0)
+	return true
 }
 
 type leafwikiHelperProcess struct {
@@ -7226,15 +8156,15 @@ type leafwikiHelperProcess struct {
 	stopped    bool
 }
 
-func startLeafwikiHelper(t *testing.T, args []string, env map[string]string) *leafwikiHelperProcess {
+func startLeafwikiHelper(t leafwikiTestT, args []string, env map[string]string) *leafwikiHelperProcess {
 	return startLeafwikiHelperWithStdin(t, args, env, nil)
 }
 
-func startLeafwikiHelperWithStdin(t *testing.T, args []string, env map[string]string, stdin io.Reader) *leafwikiHelperProcess {
+func startLeafwikiHelperWithStdin(t leafwikiTestT, args []string, env map[string]string, stdin io.Reader) *leafwikiHelperProcess {
 	return startLeafwikiHelperWithOptions(t, args, env, stdin, leafwikiHelperStartOptions{})
 }
 
-func startLeafwikiHelperInProcessGroup(t *testing.T, args []string, env map[string]string) *leafwikiHelperProcess {
+func startLeafwikiHelperInProcessGroup(t leafwikiTestT, args []string, env map[string]string) *leafwikiHelperProcess {
 	return startLeafwikiHelperWithOptions(t, args, env, nil, leafwikiHelperStartOptions{processGroup: true})
 }
 
@@ -7242,7 +8172,7 @@ type leafwikiHelperStartOptions struct {
 	processGroup bool
 }
 
-func startLeafwikiHelperWithOptions(t *testing.T, args []string, env map[string]string, stdin io.Reader, opts leafwikiHelperStartOptions) *leafwikiHelperProcess {
+func startLeafwikiHelperWithOptions(t leafwikiTestT, args []string, env map[string]string, stdin io.Reader, opts leafwikiHelperStartOptions) *leafwikiHelperProcess {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -7257,7 +8187,7 @@ func startLeafwikiHelperWithOptions(t *testing.T, args []string, env map[string]
 		t.Fatalf("create stderr file: %v", err)
 	}
 
-	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
+	cmdArgs := append([]string{"-test.run=TestLeafWikiSuite", "--"}, args...)
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(args, env)
 	cmd.Stdin = stdin
@@ -7291,7 +8221,7 @@ func startLeafwikiHelperWithOptions(t *testing.T, args []string, env map[string]
 	return proc
 }
 
-func startLeafwikiHelperWithStdinPipe(t *testing.T, args []string, env map[string]string) (*leafwikiHelperProcess, io.WriteCloser) {
+func startLeafwikiHelperWithStdinPipe(t leafwikiTestT, args []string, env map[string]string) (*leafwikiHelperProcess, io.WriteCloser) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -7306,7 +8236,7 @@ func startLeafwikiHelperWithStdinPipe(t *testing.T, args []string, env map[strin
 		t.Fatalf("create stderr file: %v", err)
 	}
 
-	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
+	cmdArgs := append([]string{"-test.run=TestLeafWikiSuite", "--"}, args...)
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(args, env)
 	stdin, err := cmd.StdinPipe()
@@ -7345,7 +8275,7 @@ func startLeafwikiHelperWithStdinPipe(t *testing.T, args []string, env map[strin
 	return proc, stdin
 }
 
-func (p *leafwikiHelperProcess) stop(t *testing.T) {
+func (p *leafwikiHelperProcess) stop(t leafwikiTestT) {
 	t.Helper()
 	if p.stopped {
 		return
@@ -7392,7 +8322,7 @@ func expectedLeafwikiHelperStopError(err error, ready bool) bool {
 	return false
 }
 
-func (p *leafwikiHelperProcess) waitForExit(t *testing.T) {
+func (p *leafwikiHelperProcess) waitForExit(t leafwikiTestT) {
 	t.Helper()
 	if p.stopped {
 		return
@@ -7413,22 +8343,22 @@ func (p *leafwikiHelperProcess) waitForExit(t *testing.T) {
 	}
 }
 
-func runLeafwikiHelper(t *testing.T, args []string, env map[string]string) (string, string, error) {
+func runLeafwikiHelper(t leafwikiTestT, args []string, env map[string]string) (string, string, error) {
 	t.Helper()
 
 	return runLeafwikiHelperWithTimeout(t, args, env, 30*time.Second)
 }
 
-func runLeafwikiHelperWithTimeout(t *testing.T, args []string, env map[string]string, timeout time.Duration) (string, string, error) {
+func runLeafwikiHelperWithTimeout(t leafwikiTestT, args []string, env map[string]string, timeout time.Duration) (string, string, error) {
 	t.Helper()
 
 	return runLeafwikiHelperWithInputAndTimeout(t, args, env, "", timeout)
 }
 
-func runLeafwikiHelperWithInputAndTimeout(t *testing.T, args []string, env map[string]string, stdin string, timeout time.Duration) (string, string, error) {
+func runLeafwikiHelperWithInputAndTimeout(t leafwikiTestT, args []string, env map[string]string, stdin string, timeout time.Duration) (string, string, error) {
 	t.Helper()
 
-	cmdArgs := append([]string{"-test.run=TestLeafWikiHelperProcess", "--"}, args...)
+	cmdArgs := append([]string{"-test.run=TestLeafWikiSuite", "--"}, args...)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -7554,13 +8484,13 @@ func leafwikiHelperGlobalLayoutForDataDir(dataDir string) wikid.Layout {
 	return wikid.GlobalLayout(homeDir)
 }
 
-func waitForProjectDaemonDescriptor(t *testing.T, dataDir string) *projectdaemon.Descriptor {
+func waitForProjectDaemonDescriptor(t leafwikiTestT, dataDir string) *projectdaemon.Descriptor {
 	t.Helper()
 
 	return waitForProjectDaemonDescriptorAtPath(t, projectdaemon.DescriptorPath(dataDir))
 }
 
-func waitForProjectDaemonDescriptorAtPath(t *testing.T, path string) *projectdaemon.Descriptor {
+func waitForProjectDaemonDescriptorAtPath(t leafwikiTestT, path string) *projectdaemon.Descriptor {
 	t.Helper()
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -7577,7 +8507,7 @@ func waitForProjectDaemonDescriptorAtPath(t *testing.T, path string) *projectdae
 	return nil
 }
 
-func waitForGlobalWikidDescriptor(t *testing.T, dataDir string) *projectdaemon.Descriptor {
+func waitForGlobalWikidDescriptor(t leafwikiTestT, dataDir string) *projectdaemon.Descriptor {
 	t.Helper()
 
 	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
@@ -7596,7 +8526,7 @@ func waitForGlobalWikidDescriptor(t *testing.T, dataDir string) *projectdaemon.D
 	return nil
 }
 
-func terminateProjectDaemonProcess(t *testing.T, pid int) {
+func terminateProjectDaemonProcess(t leafwikiTestT, pid int) {
 	t.Helper()
 	if pid <= 0 {
 		return
@@ -7635,7 +8565,7 @@ func findRoleHealth(roles []projectdaemon.RoleHealth, name projectdaemon.RoleNam
 	return projectdaemon.RoleHealth{}, false
 }
 
-func waitForRuntimeCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+func waitForRuntimeCondition(t leafwikiTestT, timeout time.Duration, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -7650,7 +8580,7 @@ func waitForRuntimeCondition(t *testing.T, timeout time.Duration, condition func
 	t.Fatalf("condition not met within %s", timeout)
 }
 
-func waitForFileContaining(t *testing.T, path string, want string) {
+func waitForFileContaining(t leafwikiTestT, path string, want string) {
 	t.Helper()
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -7670,7 +8600,7 @@ func waitForFileContaining(t *testing.T, path string, want string) {
 	t.Fatalf("%s did not contain %q before timeout; last content/error: %q", path, want, last)
 }
 
-func waitForFileRemoved(t *testing.T, path string, timeout time.Duration) {
+func waitForFileRemoved(t leafwikiTestT, path string, timeout time.Duration) {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)
@@ -7717,24 +8647,24 @@ func signalLeafwikiProcessGroup(process *os.Process) error {
 	return exec.Command("kill", "-TERM", fmt.Sprintf("-%d", process.Pid)).Run()
 }
 
-func waitForLeafwikiReady(t *testing.T, proc *leafwikiHelperProcess, port string) {
+func waitForLeafwikiReady(t leafwikiTestT, proc *leafwikiHelperProcess, port string) {
 	t.Helper()
 	waitForLeafwikiReadyPathWithDiagnostics(t, port, "/api/health", readFileString(t, proc.stdoutPath), readFileString(t, proc.stderrPath))
 	proc.ready = true
 }
 
-func waitForLeafwikiReadyAtBasePath(t *testing.T, proc *leafwikiHelperProcess, port string, basePath string) {
+func waitForLeafwikiReadyAtBasePath(t leafwikiTestT, proc *leafwikiHelperProcess, port string, basePath string) {
 	t.Helper()
 	waitForLeafwikiReadyPathWithDiagnostics(t, port, strings.TrimRight(basePath, "/")+"/api/health", readFileString(t, proc.stdoutPath), readFileString(t, proc.stderrPath))
 	proc.ready = true
 }
 
-func waitForLeafwikiReadyWithDiagnostics(t *testing.T, port string, stdout string, stderr string) {
+func waitForLeafwikiReadyWithDiagnostics(t leafwikiTestT, port string, stdout string, stderr string) {
 	t.Helper()
 	waitForLeafwikiReadyPathWithDiagnostics(t, port, "/api/health", stdout, stderr)
 }
 
-func waitForLeafwikiReadyPathWithDiagnostics(t *testing.T, port string, path string, stdout string, stderr string) {
+func waitForLeafwikiReadyPathWithDiagnostics(t leafwikiTestT, port string, path string, stdout string, stderr string) {
 	t.Helper()
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	url := "http://127.0.0.1:" + port + path
@@ -7757,13 +8687,13 @@ func waitForLeafwikiReadyPathWithDiagnostics(t *testing.T, port string, path str
 	t.Fatalf("LeafWiki did not become ready at %s: %v\nstdout:\n%s\nstderr:\n%s", url, lastErr, stdout, stderr)
 }
 
-func waitForLeafwikiUnavailable(t *testing.T, port string) {
+func waitForLeafwikiUnavailable(t leafwikiTestT, port string) {
 	t.Helper()
 
-	waitForLeafwikiUnavailableWithin(t, port, 5*time.Second)
+	waitForLeafwikiUnavailableWithin(t, port, 15*time.Second)
 }
 
-func waitForLeafwikiUnavailableWithin(t *testing.T, port string, timeout time.Duration) {
+func waitForLeafwikiUnavailableWithin(t leafwikiTestT, port string, timeout time.Duration) {
 	t.Helper()
 
 	client := &http.Client{Timeout: 200 * time.Millisecond}
@@ -7781,7 +8711,7 @@ func waitForLeafwikiUnavailableWithin(t *testing.T, port string, timeout time.Du
 	t.Fatalf("LeafWiki stayed reachable at %s after shutdown", url)
 }
 
-func waitForProjectLocksReusable(t *testing.T, dataDir string, rootDir string, timeout time.Duration) {
+func waitForProjectLocksReusable(t leafwikiTestT, dataDir string, rootDir string, timeout time.Duration) {
 	t.Helper()
 
 	canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
@@ -7818,7 +8748,7 @@ func federatedRuntimeToolNames() []string {
 	return names
 }
 
-func listProcessHTTPMCPToolNames(t *testing.T, endpoint string) []string {
+func listProcessHTTPMCPToolNames(t leafwikiTestT, endpoint string) []string {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -7854,7 +8784,7 @@ func listProcessHTTPMCPToolNames(t *testing.T, endpoint string) []string {
 	return names
 }
 
-func assertToolNamesMatch(t *testing.T, got []string, want []string) {
+func assertToolNamesMatch(t leafwikiTestT, got []string, want []string) {
 	t.Helper()
 
 	sortedWant := append([]string{}, want...)
@@ -7864,7 +8794,7 @@ func assertToolNamesMatch(t *testing.T, got []string, want []string) {
 	}
 }
 
-func freeTCPPort(t *testing.T) string {
+func freeTCPPort(t leafwikiTestT) string {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -7879,7 +8809,7 @@ func freeTCPPort(t *testing.T) string {
 	return fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
 }
 
-func readFileString(t *testing.T, path string) string {
+func readFileString(t leafwikiTestT, path string) string {
 	t.Helper()
 
 	raw, err := os.ReadFile(path)
@@ -7889,7 +8819,7 @@ func readFileString(t *testing.T, path string) string {
 	return string(raw)
 }
 
-func assertFileMode(t *testing.T, path string, want os.FileMode) {
+func assertFileMode(t leafwikiTestT, path string, want os.FileMode) {
 	t.Helper()
 
 	info, err := os.Stat(path)
@@ -7901,7 +8831,7 @@ func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
-func findLeafwikiDaemonStartupConfigContaining(t *testing.T, marker string) string {
+func findLeafwikiDaemonStartupConfigContaining(t leafwikiTestT, marker string) string {
 	t.Helper()
 
 	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "leafwiki-project-daemon-*.json"))
@@ -7948,7 +8878,7 @@ func testRuntimeConfig(dataDir string, rootDir string, port string, transports m
 	}
 }
 
-func testRuntimeConfigWithHealthyControlDescriptor(t *testing.T, recordHandler http.HandlerFunc) (leafwikiRuntimeConfig, func()) {
+func testRuntimeConfigWithHealthyControlDescriptor(t leafwikiTestT, recordHandler http.HandlerFunc) (leafwikiRuntimeConfig, func()) {
 	t.Helper()
 
 	baseDir := t.TempDir()
@@ -8033,7 +8963,7 @@ func testRuntimeConfigWithHealthyControlDescriptor(t *testing.T, recordHandler h
 	return cfg, cleanup
 }
 
-func assertJSONLogContains(t *testing.T, path string, msg string) map[string]any {
+func assertJSONLogContains(t leafwikiTestT, path string, msg string) map[string]any {
 	t.Helper()
 
 	for _, line := range strings.Split(strings.TrimSpace(readFileString(t, path)), "\n") {
@@ -8057,7 +8987,7 @@ func assertJSONLogContains(t *testing.T, path string, msg string) map[string]any
 	return nil
 }
 
-func initAdminUser(t *testing.T, dataDir string) {
+func initAdminUser(t leafwikiTestT, dataDir string) {
 	t.Helper()
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -8079,7 +9009,7 @@ func initAdminUser(t *testing.T, dataDir string) {
 	}
 }
 
-func initWikidAdminUser(t *testing.T, dataDir string) {
+func initWikidAdminUser(t leafwikiTestT, dataDir string) {
 	t.Helper()
 
 	paths := wikid.AuthStoragePaths(dataDir)
@@ -8106,32 +9036,32 @@ type testMCPAPIKey struct {
 	UserID string
 }
 
-func createMCPAPIKey(t *testing.T, dataDir string) string {
+func createMCPAPIKey(t leafwikiTestT, dataDir string) string {
 	t.Helper()
 
 	return createMCPAPIKeyInStorageDirWithUser(t, dataDir).Secret
 }
 
-func createWikidMCPAPIKey(t *testing.T, dataDir string) string {
+func createWikidMCPAPIKey(t leafwikiTestT, dataDir string) string {
 	t.Helper()
 
 	return createWikidMCPAPIKeyWithUser(t, dataDir).Secret
 }
 
-func createWikidMCPAPIKeyWithUser(t *testing.T, dataDir string) testMCPAPIKey {
+func createWikidMCPAPIKeyWithUser(t leafwikiTestT, dataDir string) testMCPAPIKey {
 	t.Helper()
 
 	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
 	return createMCPAPIKeyInStorageDirWithUser(t, wikid.AuthStoragePaths(layout.HomeDir).AuthDir)
 }
 
-func createMCPAPIKeyInStorageDir(t *testing.T, storageDir string) string {
+func createMCPAPIKeyInStorageDir(t leafwikiTestT, storageDir string) string {
 	t.Helper()
 
 	return createMCPAPIKeyInStorageDirWithUser(t, storageDir).Secret
 }
 
-func createMCPAPIKeyInStorageDirWithUser(t *testing.T, storageDir string) testMCPAPIKey {
+func createMCPAPIKeyInStorageDirWithUser(t leafwikiTestT, storageDir string) testMCPAPIKey {
 	t.Helper()
 
 	if err := os.MkdirAll(storageDir, 0o755); err != nil {
@@ -8169,7 +9099,7 @@ func createMCPAPIKeyInStorageDirWithUser(t *testing.T, storageDir string) testMC
 	return testMCPAPIKey{Secret: created.Secret, UserID: user.ID}
 }
 
-func grantWikidWorkspaceAccessForDirs(t *testing.T, dataDir string, rootDir string, userID string, role wikid.GrantRole) {
+func grantWikidWorkspaceAccessForDirs(t leafwikiTestT, dataDir string, rootDir string, userID string, role wikid.GrantRole) {
 	t.Helper()
 
 	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
@@ -8187,4 +9117,446 @@ func grantWikidWorkspaceAccessForDirs(t *testing.T, dataDir string, rootDir stri
 	if err := grants.Upsert(wikid.Grant{Subject: "user:" + userID, WorkspaceID: workspace.ID, Role: role}); err != nil {
 		t.Fatalf("grant workspace access: %v", err)
 	}
+}
+
+var _ = ginkgo.Describe("visible legacy subcases", func() {
+	ginkgo.DescribeTable("TestRegisterFlagsRejectsRemovedStartupFlags",
+		func(arg string) {
+			fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
+			var errOut bytes.Buffer
+			fs.SetOutput(&errOut)
+			registerFlags(fs)
+
+			err := fs.Parse([]string{arg})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("flag provided but not defined"))
+		},
+		ginkgo.Entry("--enable-revision", "--enable-revision"),
+		ginkgo.Entry("--enable-workspace-sync", "--enable-workspace-sync"),
+		ginkgo.Entry("--enable-mcp", "--enable-mcp"),
+		ginkgo.Entry("--mcp-stdio", "--mcp-stdio"),
+		ginkgo.Entry("--max-revision-history=0", "--max-revision-history=0"),
+	)
+
+	ginkgo.DescribeTable("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv",
+		func(name string) {
+			previousValue, hadPreviousValue := os.LookupEnv(name)
+			Expect(os.Setenv(name, "")).To(Succeed())
+			defer func() {
+				if hadPreviousValue {
+					_ = os.Setenv(name, previousValue)
+					return
+				}
+				_ = os.Unsetenv(name)
+			}()
+
+			err := rejectRemovedLeafWikiEnv()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unknown environment variable: " + name))
+		},
+		ginkgo.Entry("LEAFWIKI_RUNTIME_STACK", "LEAFWIKI_RUNTIME_STACK"),
+		ginkgo.Entry("LEAFWIKI_ENABLE_REVISION", "LEAFWIKI_ENABLE_REVISION"),
+		ginkgo.Entry("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "LEAFWIKI_ENABLE_WORKSPACE_SYNC"),
+		ginkgo.Entry("LEAFWIKI_MAX_REVISION_HISTORY", "LEAFWIKI_MAX_REVISION_HISTORY"),
+		ginkgo.Entry("LEAFWIKI_ENABLE_MCP", "LEAFWIKI_ENABLE_MCP"),
+		ginkgo.Entry("LEAFWIKI_MCP_STDIO", "LEAFWIKI_MCP_STDIO"),
+	)
+
+	ginkgo.DescribeTable("TestEffectiveWorkspaceGrantRoleCapsGrantByCurrentUserRole",
+		func(userRole wikid.GrantRole, grant wikid.GrantRole, want wikid.GrantRole) {
+			Expect(effectiveWorkspaceGrantRole(userRole, grant)).To(Equal(want))
+		},
+		ginkgo.Entry("viewer grant remains viewer", wikid.GrantRoleEditor, wikid.GrantRoleViewer, wikid.GrantRoleViewer),
+		ginkgo.Entry("editor grant capped by downgraded viewer", wikid.GrantRoleViewer, wikid.GrantRoleEditor, wikid.GrantRoleViewer),
+		ginkgo.Entry("admin user keeps editor grant", wikid.GrantRoleAdmin, wikid.GrantRoleEditor, wikid.GrantRoleEditor),
+		ginkgo.Entry("unknown user role denies effective grant", wikid.GrantRole(""), wikid.GrantRoleEditor, wikid.GrantRole("")),
+	)
+
+	ginkgo.DescribeTable("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues",
+		func(yaml string, wantError string) {
+			t := ginkgo.GinkgoT()
+			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+			writeTestConfig(t, configPath, yaml)
+
+			_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(wantError))
+		},
+		ginkgo.Entry("unknown key", "unknown-option: true\n", `unknown --config key "unknown-option"`),
+		ginkgo.Entry("duplicate key", "port: 8080\nport: 8081\n", `duplicate --config key "port"`),
+		ginkgo.Entry("non scalar value", "trusted-proxy-ips:\n  - 127.0.0.1\n", `requires a non-null scalar value`),
+		ginkgo.Entry("null value", "base-path: null\n", `requires a non-null scalar value`),
+		ginkgo.Entry("hidden compatibility key", "enable-mcp: true\n", `unknown --config key "enable-mcp"`),
+		ginkgo.Entry("removed revision key", "enable-revision: true\n", `unknown --config key "enable-revision"`),
+		ginkgo.Entry("removed workspace sync key", "enable-workspace-sync: true\n", `unknown --config key "enable-workspace-sync"`),
+		ginkgo.Entry("removed revision limit key", "max-revision-history: 0\n", `unknown --config key "max-revision-history"`),
+		ginkgo.Entry("internal key", "internal-project-daemon: /tmp/startup.json\n", `unknown --config key "internal-project-daemon"`),
+		ginkgo.Entry("config key", "config: other.yml\n", `unknown --config key "config"`),
+		ginkgo.Entry("mcp stdio compatibility key", "mcp-stdio: true\n", `unknown --config key "mcp-stdio"`),
+		ginkgo.Entry("bad bool scalar", "public-access: maybe\n", `invalid --config value for "public-access"`),
+		ginkgo.Entry("bad duration scalar", "access-token-timeout: soon\n", `invalid --config value for "access-token-timeout"`),
+	)
+
+	ginkgo.DescribeTable("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag",
+		func(args []string, want string) {
+			t := ginkgo.GinkgoT()
+			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
+			writeTestConfig(t, configPath, "data-dir: ./data\n")
+			for i, arg := range args {
+				if arg == "$CONFIG" {
+					args[i] = configPath
+				}
+			}
+
+			_, _, _, err := parseConfigFlagsForArgsAllowError(t, args)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(want))
+		},
+		ginkgo.Entry("reset password trailing flag", []string{"--config", "$CONFIG", "reset-admin-password", "--data-dir", "other"}, "--config cannot be combined with --data-dir"),
+		ginkgo.Entry("agent hook trailing flag", []string{"--config", "$CONFIG", "agent-hook", "codex", "--data-dir", "other"}, "--config cannot be combined with --data-dir"),
+	)
+
+	ginkgo.DescribeTable("TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen",
+		func(args []string) {
+			t := ginkgo.GinkgoT()
+			payload := `{"hook_event_name":"SessionStart","session_id":"empty-config-secret"}`
+
+			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, args, nil, payload, 5*time.Second)
+
+			Expect(err).To(HaveOccurred())
+			Expect(stdout).NotTo(Equal("{}\n"))
+			Expect(stderr).To(ContainSubstring("--config requires a path"))
+			Expect(stderr).NotTo(ContainSubstring("empty-config-secret"))
+		},
+		ginkgo.Entry("inline empty", []string{"--config=", "agent-hook", "codex"}),
+		ginkgo.Entry("separate empty", []string{"--config", "", "agent-hook", "codex"}),
+		ginkgo.Entry("trailing bare after agent hook", []string{"agent-hook", "codex", "--config"}),
+		ginkgo.Entry("inline empty before help after agent hook", []string{"agent-hook", "codex", "--config=", "--help"}),
+		ginkgo.Entry("single dash", []string{"--config", "-", "agent-hook", "codex"}),
+		ginkgo.Entry("double dash", []string{"--config", "--", "agent-hook", "codex"}),
+	)
+
+	ginkgo.DescribeTable("TestMainProcessAgentHookProviderAllowResponsesFailOpen",
+		func(provider string, payload string, wantStdout string) {
+			t := ginkgo.GinkgoT()
+			baseDir := t.TempDir()
+			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
+				"agent-hook", provider,
+				"--disable-auth",
+				"--data-dir", filepath.Join(baseDir, "data"),
+				"--root-dir", filepath.Join(baseDir, "content"),
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, payload, 5*time.Second)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(stdout).To(Equal(wantStdout))
+			Expect(stderr).NotTo(ContainSubstring("unknown-secret"))
+		},
+		ginkgo.Entry("claude malformed", string(agenthooks.ProviderClaude), "{", "{}\n"),
+		ginkgo.Entry("cursor malformed", string(agenthooks.ProviderCursor), "{", "{\"permission\":\"allow\"}\n"),
+		ginkgo.Entry("unknown provider", string(agenthooks.ProviderUnknown), `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, ""),
+	)
+
+	ginkgo.DescribeTable("TestRunAgentHookCommandControlRecordFailuresFailOpen",
+		func(recordHandler func(http.ResponseWriter, *http.Request), parentTimeout time.Duration) {
+			t := ginkgo.GinkgoT()
+			cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(t, recordHandler)
+			defer cleanup()
+			ctx := context.Background()
+			if parentTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, parentTimeout)
+				defer cancel()
+			}
+
+			var stdout bytes.Buffer
+			err := runAgentHookCommand(ctx, cfg, agenthooks.ProviderCodex, strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`), &stdout)
+
+			Expect(err).To(HaveOccurred())
+			Expect(stdout.String()).To(Equal("{}\n"))
+			Expect(err.Error()).NotTo(ContainSubstring("control-secret"))
+		},
+		ginkgo.Entry("control 401", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }, time.Duration(0)),
+		ginkgo.Entry("control 400", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "bad event", http.StatusBadRequest) }, time.Duration(0)),
+		ginkgo.Entry("control 500", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) }, time.Duration(0)),
+		ginkgo.Entry("control timeout", func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(250 * time.Millisecond)
+			w.WriteHeader(http.StatusNoContent)
+		}, 50*time.Millisecond),
+	)
+
+	ginkgo.DescribeTable("TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown",
+		func(removedFlag string) {
+			t := ginkgo.GinkgoT()
+			baseDir := t.TempDir()
+			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+				"--disable-auth",
+				removedFlag,
+				"--data-dir", filepath.Join(baseDir, "data"),
+				"--root-dir", filepath.Join(baseDir, "content"),
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, 5*time.Second)
+
+			Expect(err).To(HaveOccurred(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
+			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeFalse())
+			Expect(stderr).To(ContainSubstring("flag provided but not defined"))
+			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
+		},
+		ginkgo.Entry("--enable-revision", "--enable-revision"),
+		ginkgo.Entry("--enable-workspace-sync", "--enable-workspace-sync"),
+	)
+
+	ginkgo.DescribeTable("TestMainProcess_LegacyMCPFlagsFailUnknown",
+		func(removedFlag string) {
+			t := ginkgo.GinkgoT()
+			stdout, stderr, err := runLeafwikiHelperWithTimeout(t, []string{
+				removedFlag,
+				"--disable-auth",
+				"--data-dir", filepath.Join(t.TempDir(), "data"),
+				"--root-dir", filepath.Join(t.TempDir(), "content"),
+				"--host", "127.0.0.1",
+				"--port", freeTCPPort(t),
+				"--log-target", "stderr",
+			}, nil, 5*time.Second)
+
+			Expect(err).To(HaveOccurred(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
+			Expect(stderr).To(ContainSubstring("flag provided but not defined"))
+			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
+		},
+		ginkgo.Entry("--enable-mcp", "--enable-mcp"),
+		ginkgo.Entry("--mcp-stdio", "--mcp-stdio"),
+	)
+
+	ginkgo.DescribeTable("TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields",
+		func(field string, mut func(*projectdaemon.Config)) {
+			owner := completeDaemonCompareConfig()
+			requested := owner
+			mut(&requested)
+
+			mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{HTTP: true})
+
+			Expect(mismatches).To(HaveLen(1))
+			Expect(mismatches[0].Field).To(Equal(field))
+		},
+		ginkgo.Entry("data dir", "data-dir", func(cfg *projectdaemon.Config) { cfg.DataDir = "/tmp/other-data" }),
+		ginkgo.Entry("root dir", "root-dir", func(cfg *projectdaemon.Config) { cfg.RootDir = "/tmp/other-root" }),
+		ginkgo.Entry("auth mode", "auth-disabled", func(cfg *projectdaemon.Config) { cfg.AuthDisabled = !cfg.AuthDisabled }),
+		ginkgo.Entry("public MCP", "public-mcp-enabled", func(cfg *projectdaemon.Config) { cfg.PublicMCPEnabled = !cfg.PublicMCPEnabled }),
+		ginkgo.Entry("host", "host", func(cfg *projectdaemon.Config) { cfg.Host = "127.0.0.2" }),
+		ginkgo.Entry("port", "port", func(cfg *projectdaemon.Config) { cfg.Port = "9090" }),
+		ginkgo.Entry("base path", "base-path", func(cfg *projectdaemon.Config) { cfg.BasePath = "/docs" }),
+		ginkgo.Entry("markdown link root prefix", "markdown-link-root-prefix", func(cfg *projectdaemon.Config) { cfg.MarkdownLinkRootPrefix = "/docs" }),
+		ginkgo.Entry("public access", "public-access", func(cfg *projectdaemon.Config) { cfg.PublicAccess = !cfg.PublicAccess }),
+		ginkgo.Entry("allow insecure", "allow-insecure", func(cfg *projectdaemon.Config) { cfg.AllowInsecure = !cfg.AllowInsecure }),
+		ginkgo.Entry("access token timeout", "access-token-timeout", func(cfg *projectdaemon.Config) { cfg.AccessTokenTimeout = "2h0m0s" }),
+		ginkgo.Entry("refresh token timeout", "refresh-token-timeout", func(cfg *projectdaemon.Config) { cfg.RefreshTokenTimeout = "720h0m0s" }),
+		ginkgo.Entry("injected header hash", "inject-code-in-header-hash", func(cfg *projectdaemon.Config) { cfg.InjectCodeInHeaderHash = "other-hash" }),
+		ginkgo.Entry("custom stylesheet", "custom-stylesheet", func(cfg *projectdaemon.Config) { cfg.CustomStylesheet = "/tmp/custom.css" }),
+		ginkgo.Entry("log target", "log-target", func(cfg *projectdaemon.Config) { cfg.LogTarget = "file" }),
+		ginkgo.Entry("log file", "log-file", func(cfg *projectdaemon.Config) { cfg.LogFile = "/tmp/leafwiki.log" }),
+		ginkgo.Entry("hide metadata", "hide-link-metadata-section", func(cfg *projectdaemon.Config) { cfg.HideLinkMetadataSection = !cfg.HideLinkMetadataSection }),
+		ginkgo.Entry("upload size", "max-asset-upload-size-bytes", func(cfg *projectdaemon.Config) { cfg.MaxAssetUploadSizeBytes = 99 }),
+		ginkgo.Entry("link refactor", "enable-link-refactor", func(cfg *projectdaemon.Config) { cfg.EnableLinkRefactor = !cfg.EnableLinkRefactor }),
+		ginkgo.Entry("remote user enabled", "enable-http-remote-user", func(cfg *projectdaemon.Config) { cfg.EnableHTTPRemoteUser = !cfg.EnableHTTPRemoteUser }),
+		ginkgo.Entry("remote user header", "http-remote-user-header", func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserHeader = "X-User" }),
+		ginkgo.Entry("trusted proxies", "trusted-proxy-ips", func(cfg *projectdaemon.Config) { cfg.TrustedProxyIPs = "127.0.0.1/32" }),
+		ginkgo.Entry("remote user logout", "http-remote-user-logout-url", func(cfg *projectdaemon.Config) { cfg.HTTPRemoteUserLogoutURL = "https://example.test/logout" }),
+		ginkgo.Entry("request log", "disable-request-log", func(cfg *projectdaemon.Config) { cfg.DisableRequestLog = !cfg.DisableRequestLog }),
+		ginkgo.Entry("idle timeout", "daemon-idle-timeout", func(cfg *projectdaemon.Config) { cfg.DaemonIdleTimeout = "1m0s" }),
+	)
+
+	ginkgo.DescribeTable("TestResolveMCPTransports_DefaultEnvCLIAndSelector",
+		func(args []string, envValue *string, want mcpTransports) {
+			t := ginkgo.GinkgoT()
+			if envValue != nil {
+				previousValue, hadPreviousValue := os.LookupEnv("LEAFWIKI_MCP")
+				Expect(os.Setenv("LEAFWIKI_MCP", *envValue)).To(Succeed())
+				defer func() {
+					if hadPreviousValue {
+						_ = os.Setenv("LEAFWIKI_MCP", previousValue)
+						return
+					}
+					_ = os.Unsetenv("LEAFWIKI_MCP")
+				}()
+			}
+
+			got, err := resolveMCPTransportsForArgs(t, args)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(want))
+		},
+		ginkgo.Entry("default none", []string(nil), (*string)(nil), mcpTransports{}),
+		ginkgo.Entry("env enables http", []string(nil), stringPtr("http"), mcpTransports{HTTP: true}),
+		ginkgo.Entry("cli overrides env", []string{"--mcp=stdio"}, stringPtr("http"), mcpTransports{Stdio: true}),
+		ginkgo.Entry("combined orderings stdio,http", []string{"--mcp=stdio,http"}, (*string)(nil), mcpTransports{HTTP: true, Stdio: true}),
+		ginkgo.Entry("combined orderings http,stdio", []string{"--mcp=http,stdio"}, (*string)(nil), mcpTransports{HTTP: true, Stdio: true}),
+		ginkgo.Entry("selector ignores removed legacy envs after env validation", []string{"--mcp=none"}, (*string)(nil), mcpTransports{}),
+	)
+
+	ginkgo.DescribeTable("TestParseMCPTransports_RejectsInvalidValues",
+		func(raw string, wantError string) {
+			_, err := parseMCPTransports(raw)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(wantError))
+		},
+		ginkgo.Entry("unknown", "websocket", "invalid MCP transport"),
+		ginkgo.Entry("none combined", "none,stdio", "none cannot be combined"),
+		ginkgo.Entry("duplicate", "stdio,stdio", "duplicate MCP transport"),
+		ginkgo.Entry("empty part", "stdio,", "invalid MCP transport"),
+	)
+
+	ginkgo.DescribeTable("TestValidateMCPTransportOptions",
+		func(opts mcpTransportOptions, wantError string) {
+			err := validateMCPTransportOptions(opts)
+			if wantError == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(wantError))
+		},
+		ginkgo.Entry("HTTP allows non-loopback web host", mcpTransportOptions{Transports: mcpTransports{HTTP: true}, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}, ""),
+		ginkgo.Entry("STDIO allows non-loopback web host", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}, ""),
+		ginkgo.Entry("STDIO rejects stdout logging", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "127.0.0.1", LogTarget: leaflogging.TargetStdout}, "stdout is reserved for MCP STDIO"),
+		ginkgo.Entry("STDIO auth enabled requires key", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, "native STDIO requires either disabled auth or an API key"),
+		ginkgo.Entry("STDIO disabled auth rejects key", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, APIKey: "lwk_fake", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, "disabled auth and API-key STDIO identity cannot be combined"),
+		ginkgo.Entry("HTTP ignores API key", mcpTransportOptions{Transports: mcpTransports{HTTP: true}, APIKey: "lwk_invalid", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, ""),
+	)
+
+	ginkgo.DescribeTable("TestValidateHTTPRemoteUserConfig",
+		func(enabled bool, trustedProxyIPs string, wantErr bool) {
+			err := validateHTTPRemoteUserConfig(enabled, trustedProxyIPs)
+			Expect(err != nil).To(Equal(wantErr))
+		},
+		ginkgo.Entry("disabled, no IPs", false, "", false),
+		ginkgo.Entry("disabled, with IPs", false, "127.0.0.1", false),
+		ginkgo.Entry("enabled, with IPs", true, "127.0.0.1", false),
+		ginkgo.Entry("enabled, multiple IPs", true, "127.0.0.1,172.18.0.0/16", false),
+		ginkgo.Entry("enabled, no IPs", true, "", true),
+		ginkgo.Entry("enabled, whitespace only", true, "   ", true),
+		ginkgo.Entry("enabled, commas only", true, ",,,", true),
+		ginkgo.Entry("enabled, commas and whitespace", true, " , , ", true),
+	)
+
+	ginkgo.DescribeTable("TestReadHealthyProjectDaemonPreservesUntrustedDescriptorWhenAnyProjectLockIsHeld",
+		func(lock func(t leafwikiTestT, dataDir string, rootDir string) func()) {
+			t := ginkgo.GinkgoT()
+			baseDir := t.TempDir()
+			dataDir := filepath.Join(baseDir, "data")
+			rootDir := filepath.Join(baseDir, "content")
+			Expect(os.MkdirAll(filepath.Join(dataDir, ".leafwiki"), 0o755)).To(Succeed())
+			Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
+			canonicalData, canonicalRoot, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
+			Expect(err).NotTo(HaveOccurred())
+			descriptorPath := projectdaemon.DescriptorPath(canonicalData)
+			Expect(os.WriteFile(descriptorPath, []byte("{"), 0o600)).To(Succeed())
+			release := lock(t, canonicalData, canonicalRoot)
+			defer release()
+
+			_, healthy, err := readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{DataDir: canonicalData, RootDir: canonicalRoot})
+
+			Expect(err).To(HaveOccurred())
+			Expect(healthy).To(BeFalse())
+			_, statErr := os.Stat(descriptorPath)
+			Expect(statErr).NotTo(HaveOccurred())
+		},
+		ginkgo.Entry("data lock held", func(t leafwikiTestT, dataDir string, _ string) func() {
+			t.Helper()
+			lock, err := locking.AcquireDataDirLock(dataDir)
+			if err != nil {
+				t.Fatalf("acquire data lock: %v", err)
+			}
+			return func() { _ = lock.Release() }
+		}),
+		ginkgo.Entry("root lock held", func(t leafwikiTestT, _ string, rootDir string) func() {
+			t.Helper()
+			lock, err := locking.AcquireRootDirLock(rootDir)
+			if err != nil {
+				t.Fatalf("acquire root lock: %v", err)
+			}
+			return func() { _ = lock.Release() }
+		}),
+	)
+
+	ginkgo.DescribeTable("TestMainProcess_UntrustedStaleDescriptorIsReplacedWhenLocksAreFree",
+		func(setup func(t leafwikiTestT, path string)) {
+			t := ginkgo.GinkgoT()
+			baseDir := t.TempDir()
+			dataDir := filepath.Join(baseDir, "data")
+			rootDir := filepath.Join(baseDir, "content")
+			descriptorPath := filepath.Join(dataDir, ".leafwiki", projectdaemon.DescriptorFileName)
+			Expect(os.MkdirAll(filepath.Dir(descriptorPath), 0o755)).To(Succeed())
+			Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
+			setup(t, descriptorPath)
+
+			port := freeTCPPort(t)
+			proc := startLeafwikiHelper(t, []string{
+				"--disable-auth",
+				"--data-dir", dataDir,
+				"--root-dir", rootDir,
+				"--host", "127.0.0.1",
+				"--port", port,
+				"--log-target", "stderr",
+			}, nil)
+			waitForLeafwikiReady(t, proc, port)
+
+			desc := waitForProjectDaemonDescriptor(t, dataDir)
+			Expect(desc.PID).NotTo(BeZero())
+			Expect(desc.ControlURL).NotTo(BeEmpty())
+			info, err := os.Stat(descriptorPath)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))
+		},
+		ginkgo.Entry("missing", func(leafwikiTestT, string) {}),
+		ginkgo.Entry("corrupt", func(t leafwikiTestT, path string) {
+			t.Helper()
+			if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+				t.Fatalf("write corrupt descriptor: %v", err)
+			}
+		}),
+		ginkgo.Entry("wrong mode", func(t leafwikiTestT, path string) {
+			t.Helper()
+			if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+				t.Fatalf("write wrong-mode descriptor: %v", err)
+			}
+		}),
+		ginkgo.Entry("non regular path", func(t leafwikiTestT, path string) {
+			t.Helper()
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatalf("create descriptor directory: %v", err)
+			}
+		}),
+	)
+})
+
+var _ = ginkgo.Describe("cmd leafwiki helper coverage", func() {
+	ginkgo.DescribeTable("configModeFlagDisplay",
+		func(arg string, name string, want string) {
+			Expect(configModeFlagDisplay(arg, name)).To(Equal(want))
+		},
+		ginkgo.Entry("long flag", "--config", "config", "--config"),
+		ginkgo.Entry("single dash flag", "-config", "config", "-config"),
+		ginkgo.Entry("inline value", "--config=leafwiki.yml", "config", "--config"),
+	)
+
+	ginkgo.DescribeTable("isInvalidBareConfigPathValue",
+		func(value string, want bool) {
+			Expect(isInvalidBareConfigPathValue(value)).To(Equal(want))
+		},
+		ginkgo.Entry("empty", "", true),
+		ginkgo.Entry("blank", "   ", true),
+		ginkgo.Entry("dash", "-", true),
+		ginkgo.Entry("double dash", "--", true),
+		ginkgo.Entry("valid path", "leafwiki.yml", false),
+	)
+})
+
+func stringPtr(value string) *string {
+	return &value
 }

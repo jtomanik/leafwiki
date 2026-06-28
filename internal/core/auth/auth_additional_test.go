@@ -1,0 +1,161 @@
+package auth
+
+import (
+	"database/sql"
+	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = ginkgo.Describe("additional auth coverage", func() {
+	ginkgo.It("SessionStore.CleanupExpiredSessions removes expired sessions and keeps active sessions", func() {
+		store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
+		Expect(err).NotTo(HaveOccurred())
+		defer closeWithErrorCheck(store.Close)
+
+		userID := newFixtureUserID("cleanup-user")
+		expiredID := newFixtureSessionID("expired-session")
+		activeID := newFixtureSessionID("active-session")
+		Expect(store.CreateSession(expiredID, userID, "refresh", time.Now().Add(-time.Hour))).To(Succeed())
+		Expect(store.CreateSession(activeID, userID, "refresh", time.Now().Add(time.Hour))).To(Succeed())
+
+		Expect(store.CleanupExpiredSessions()).To(Succeed())
+
+		expiredActive, err := store.IsActive(expiredID, userID, "refresh", time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(expiredActive).To(BeFalse())
+		active, err := store.IsActive(activeID, userID, "refresh", time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(active).To(BeTrue())
+
+		var expiredRows int
+		Expect(store.withDB(func(db *sql.DB) error {
+			return db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = ?`, expiredID).Scan(&expiredRows)
+		})).To(Succeed())
+		Expect(expiredRows).To(Equal(0))
+	})
+
+	ginkgo.It("UserResolver preloads, lazily resolves, handles empty IDs, and reloads changed labels", func() {
+		service := setupTestUserService(ginkgo.GinkgoT())
+		defer closeWithErrorCheck(service.Close)
+
+		alice, err := service.CreateUser("alice", "alice@example.com", "alicepass", RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		resolver, err := NewUserResolver(service)
+		Expect(err).NotTo(HaveOccurred())
+
+		empty, err := resolver.ResolveUserLabel("")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(empty).To(BeNil())
+
+		aliceLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(aliceLabel).To(Equal(&UserLabel{ID: alice.ID, Username: "alice"}))
+
+		bob, err := service.CreateUser("bob", "bob@example.com", "bobpass", RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+		bobLabel, err := resolver.ResolveUserLabel(newFixtureUserID(bob.ID))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(bobLabel).To(Equal(&UserLabel{ID: bob.ID, Username: "bob"}))
+
+		_, err = service.UpdateUser(newFixtureUserID(alice.ID), "alice-renamed", "alice@example.com", "", RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		cachedLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cachedLabel.Username).To(Equal("alice"))
+
+		Expect(resolver.Reload()).To(Succeed())
+		reloadedLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(reloadedLabel.Username).To(Equal("alice-renamed"))
+	})
+
+	ginkgo.It("UserService.DoesIDAndPasswordMatch handles success, invalid password, and missing user", func() {
+		service := setupTestUserService(ginkgo.GinkgoT())
+		defer closeWithErrorCheck(service.Close)
+
+		user, err := service.CreateUser("charlie", "charlie@example.com", "correct-password", RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+
+		matches, err := service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "correct-password")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(matches).To(BeTrue())
+
+		matches, err = service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "wrong-password")
+		Expect(err).To(Equal(ErrUserInvalidCredentials))
+		Expect(matches).To(BeFalse())
+
+		matches, err = service.DoesIDAndPasswordMatch(newFixtureUserID("missing-user"), "correct-password")
+		Expect(err).To(Equal(ErrUserNotFound))
+		Expect(matches).To(BeFalse())
+	})
+
+	ginkgo.It("UserService.GetUserByUsername and GetUserByIdentifier resolve username, email fallback, and not found", func() {
+		service := setupTestUserService(ginkgo.GinkgoT())
+		defer closeWithErrorCheck(service.Close)
+
+		user, err := service.CreateUser("dana", "dana@example.com", "password", RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+
+		byUsername, err := service.GetUserByUsername("dana")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(byUsername.ID).To(Equal(user.ID))
+
+		byIdentifierUsername, err := service.GetUserByIdentifier("dana")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(byIdentifierUsername.ID).To(Equal(user.ID))
+
+		byIdentifierEmail, err := service.GetUserByIdentifier("dana@example.com")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(byIdentifierEmail.ID).To(Equal(user.ID))
+
+		_, err = service.GetUserByUsername("missing")
+		Expect(err).To(Equal(ErrUserNotFound))
+		_, err = service.GetUserByIdentifier("missing@example.com")
+		Expect(err).To(Equal(ErrUserNotFound))
+	})
+
+	ginkgo.It("UserService.ChangeOwnPassword rejects the wrong old password and replaces the stored password", func() {
+		service := setupTestUserService(ginkgo.GinkgoT())
+		defer closeWithErrorCheck(service.Close)
+
+		user, err := service.CreateUser("erin", "erin@example.com", "old-password", RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		userID := newFixtureUserID(user.ID)
+
+		Expect(service.ChangeOwnPassword(userID, "wrong-password", "new-password")).To(Equal(ErrUserInvalidCredentials))
+		_, err = service.GetUserByEmailOrUsernameAndPassword("erin", "old-password")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(service.ChangeOwnPassword(userID, "old-password", "new-password")).To(Succeed())
+		_, err = service.GetUserByEmailOrUsernameAndPassword("erin", "old-password")
+		Expect(err).To(Equal(ErrUserInvalidCredentials))
+		_, err = service.GetUserByEmailOrUsernameAndPassword("erin", "new-password")
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	ginkgo.It("User public projection and role validation keep sensitive fields out of public data", func() {
+		user := &User{
+			ID:       "user-1",
+			Username: "frank",
+			Email:    "frank@example.com",
+			Password: "secret",
+			Role:     RoleAdmin,
+		}
+
+		public := user.ToPublicUser()
+		Expect(public).To(Equal(&PublicUser{
+			ID:       "user-1",
+			Username: "frank",
+			Email:    "frank@example.com",
+			Role:     RoleAdmin,
+		}))
+		Expect(user.HasRole(RoleAdmin)).To(BeTrue())
+		Expect(user.HasRole(RoleViewer)).To(BeFalse())
+		Expect(IsValidRole(RoleAdmin)).To(BeTrue())
+		Expect(IsValidRole(RoleEditor)).To(BeTrue())
+		Expect(IsValidRole(RoleViewer)).To(BeTrue())
+		Expect(IsValidRole("owner")).To(BeFalse())
+	})
+})

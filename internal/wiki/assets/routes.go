@@ -99,11 +99,7 @@ func (r *Routes) handleUpload(maxUploadSize shared.MaxBytes) gin.HandlerFunc {
 			respondWithAssetStatusError(c, http.StatusBadRequest, ErrCodeAssetMissingFile, "Missing file", "missing file")
 			return
 		}
-		defer func() {
-			if err := file.Close(); err != nil {
-				r.log.Error("could not close uploaded file", "error", err)
-			}
-		}()
+		defer logUploadedAssetFileClose(r.log, file)
 
 		user := authmw.MustGetUser(c)
 		if user == nil {
@@ -122,6 +118,12 @@ func (r *Routes) handleUpload(maxUploadSize shared.MaxBytes) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{"file": out.URL})
+	}
+}
+
+func logUploadedAssetFileClose(log *slog.Logger, file interface{ Close() error }) {
+	if err := file.Close(); err != nil {
+		log.Error("could not close uploaded file", "error", err)
 	}
 }
 

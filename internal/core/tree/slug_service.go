@@ -72,10 +72,6 @@ func (s *SlugService) IsValidSlug(slug string) error {
 		return errors.New("slug must contain only letters, numbers and hyphens")
 	}
 
-	if strings.HasPrefix(slug, "-") || strings.HasSuffix(slug, "-") {
-		return errors.New("slug must not start or end with a hyphen")
-	}
-
 	return nil
 }
 

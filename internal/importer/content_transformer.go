@@ -46,6 +46,12 @@ type ContentTransformerOptions struct {
 
 var importerMarkdownParser = goldmark.New()
 
+var (
+	importerOpenAsset   = os.Open
+	importerFilepathAbs = filepath.Abs
+	importerFilepathRel = filepath.Rel
+)
+
 // newContentTransformer precomputes source->target lookups from the import plan.
 // We resolve links against planned imports so we only rewrite destinations we can actually create.
 func newContentTransformer(plan *PlanResult, sourceBasePath string, assetMaxBytes shared.MaxBytes) *contentTransformer {
@@ -539,13 +545,12 @@ func impliedImportTargetKind(href string) (tree.NodeKind, bool) {
 	if decoded == "" {
 		return "", false
 	}
-	if strings.HasSuffix(decoded, "/") {
-		return tree.NodeKindSection, true
-	}
-
 	trimmed := strings.Trim(strings.TrimPrefix(decoded, "/"), "/")
 	if trimmed == "" {
 		return "", false
+	}
+	if strings.HasSuffix(decoded, "/") {
+		return tree.NodeKindSection, true
 	}
 
 	base := path.Base(trimmed)
@@ -579,7 +584,7 @@ func (t *contentTransformer) resolveAndUploadAsset(
 		return uploaded, nil
 	}
 
-	file, err := os.Open(assetAbs)
+	file, err := importerOpenAsset(assetAbs)
 	if err != nil {
 		return "", fmt.Errorf("open asset %q: %w", assetAbs, err)
 	}
@@ -836,9 +841,6 @@ func (t *contentTransformer) normalizeSourceCandidateToRoutePath(candidate strin
 
 	normalized = strings.TrimSuffix(normalized, "/index")
 	normalized = strings.Trim(normalized, "/")
-	if normalized == "" {
-		return "", false
-	}
 
 	return normalized, true
 }
@@ -922,16 +924,16 @@ func resolveAssetPath(sourceBasePath string, sourcePath tree.WorkspaceSourcePath
 	}
 
 	abs := filepath.Join(sourceBasePath, filepath.FromSlash(rel))
-	baseAbs, err := filepath.Abs(sourceBasePath)
+	baseAbs, err := importerFilepathAbs(sourceBasePath)
 	if err != nil {
 		return "", false
 	}
-	absResolved, err := filepath.Abs(abs)
+	absResolved, err := importerFilepathAbs(abs)
 	if err != nil {
 		return "", false
 	}
 
-	relCheck, err := filepath.Rel(baseAbs, absResolved)
+	relCheck, err := importerFilepathRel(baseAbs, absResolved)
 	if err != nil || relCheck == ".." || strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
 		return "", false
 	}
@@ -1017,9 +1019,6 @@ func defaultWikiLinkLabel(target string) string {
 	base = strings.TrimSuffix(base, ".md")
 	if idx := strings.LastIndex(base, "/"); idx >= 0 {
 		base = base[idx+1:]
-	}
-	if idx := strings.LastIndex(base, "#"); idx >= 0 {
-		base = base[:idx]
 	}
 	if base == "" {
 		return target
@@ -1144,9 +1143,6 @@ func rewriteOutsideCodeSpans(content string, rewrite func(string) (string, error
 	var out strings.Builder
 	plainStart := 0
 	for _, codeRange := range excludedMarkdownCodeRanges(content) {
-		if codeRange.Start < plainStart {
-			continue
-		}
 		rewritten, err := rewrite(content[plainStart:codeRange.Start])
 		if err != nil {
 			return "", err

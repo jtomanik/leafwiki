@@ -46,7 +46,27 @@ const (
 
 const watcherBatchDebounce = 250 * time.Millisecond
 
-var canonicalMarkdownRewriteWriter = writeCanonicalMarkdownRewritesAtomically
+var (
+	canonicalMarkdownRewriteWriter    = writeCanonicalMarkdownRewritesAtomically
+	workspacesyncOSStat               = os.Stat
+	workspacesyncNewMarkdownLinkIndex = markdownlinks.NewIndexFromRootWithOptions
+	workspacesyncWalkDir              = filepath.WalkDir
+	workspacesyncRel                  = filepath.Rel
+	workspacesyncReadFile             = os.ReadFile
+	workspacesyncCreateTemp           = func(dir string, pattern string) (workspacesyncTempFile, error) {
+		return os.CreateTemp(dir, pattern)
+	}
+	workspacesyncRemove    = os.Remove
+	workspacesyncRename    = os.Rename
+	workspacesyncChmod     = os.Chmod
+	workspacesyncWriteFile = os.WriteFile
+)
+
+type workspacesyncTempFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	Close() error
+}
 
 type Actor = gitrevisions.Actor
 type ActorID = gitrevisions.ActorID
@@ -320,12 +340,7 @@ func (s *Service) consumeWatcherEvents(ctx context.Context, watcher fileWatcher)
 		if timer == nil {
 			return
 		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
+		stopWorkspacesyncTimer(timer)
 		timer = nil
 		timerC = nil
 	}
@@ -349,12 +364,7 @@ func (s *Service) consumeWatcherEvents(ctx context.Context, watcher fileWatcher)
 			timerC = timer.C
 			return
 		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
+		stopWorkspacesyncTimer(timer)
 		timer.Reset(watcherBatchDebounce)
 	}
 	flush := func() {
@@ -389,6 +399,19 @@ func (s *Service) consumeWatcherEvents(ctx context.Context, watcher fileWatcher)
 			event.Dropped = true
 			queue(event)
 		}
+	}
+}
+
+func stopWorkspacesyncTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		drainWorkspacesyncTimer(timer)
+	}
+}
+
+func drainWorkspacesyncTimer(timer *time.Timer) {
+	select {
+	case <-timer.C:
+	default:
 	}
 }
 
@@ -601,7 +624,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 	if strings.TrimSpace(s.rootDir) == "" {
 		return false, nil, nil
 	}
-	if info, err := os.Stat(s.rootDir); err != nil {
+	if info, err := workspacesyncOSStat(s.rootDir); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil, nil
 		}
@@ -609,7 +632,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 	} else if !info.IsDir() {
 		return false, nil, nil
 	}
-	index, err := markdownlinks.NewIndexFromRootWithOptions(s.rootDir, markdownlinks.Options{
+	index, err := workspacesyncNewMarkdownLinkIndex(s.rootDir, markdownlinks.Options{
 		MarkdownLinkRootPrefix: s.markdownLinkRootPrefix,
 	})
 	if err != nil {
@@ -617,7 +640,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 	}
 	rewrites := make([]canonicalMarkdownRewrite, 0)
 	migrationIssues := make([]ValidationError, 0)
-	err = filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+	err = workspacesyncWalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -630,7 +653,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 			}
 			return nil
 		}
-		relPath, err := filepath.Rel(s.rootDir, filePath)
+		relPath, err := workspacesyncRel(s.rootDir, filePath)
 		if err != nil {
 			return err
 		}
@@ -638,7 +661,7 @@ func (s *Service) migrateCanonicalMarkdownLinksLockedWithRollback() (bool, func(
 		if !gitrevisions.IsManagedMarkdownRelPath(relPath) {
 			return nil
 		}
-		raw, err := os.ReadFile(filePath)
+		raw, err := workspacesyncReadFile(filePath)
 		if err != nil {
 			return err
 		}
@@ -759,7 +782,7 @@ func writeCanonicalMarkdownRewritesAtomically(rewrites []canonicalMarkdownRewrit
 
 	committed := make([]canonicalMarkdownRewrite, 0, len(prepared))
 	for _, prep := range prepared {
-		if err := os.Rename(prep.TempPath, prep.Path); err != nil {
+		if err := workspacesyncRename(prep.TempPath, prep.Path); err != nil {
 			cleanupPreparedCanonicalMarkdownRewrites(prepared[len(committed):])
 			rollbackErr := rollbackCanonicalMarkdownRewrites(committed)
 			if rollbackErr != nil {
@@ -773,22 +796,22 @@ func writeCanonicalMarkdownRewritesAtomically(rewrites []canonicalMarkdownRewrit
 }
 
 func prepareCanonicalMarkdownRewrite(rewrite canonicalMarkdownRewrite) (preparedCanonicalMarkdownRewrite, error) {
-	temp, err := os.CreateTemp(filepath.Dir(rewrite.Path), "."+filepath.Base(rewrite.Path)+".*.tmp")
+	temp, err := workspacesyncCreateTemp(filepath.Dir(rewrite.Path), "."+filepath.Base(rewrite.Path)+".*.tmp")
 	if err != nil {
 		return preparedCanonicalMarkdownRewrite{}, err
 	}
 	tempPath := temp.Name()
 	if _, err := temp.Write(rewrite.Content); err != nil {
 		_ = temp.Close()
-		_ = os.Remove(tempPath)
+		_ = workspacesyncRemove(tempPath)
 		return preparedCanonicalMarkdownRewrite{}, err
 	}
 	if err := temp.Close(); err != nil {
-		_ = os.Remove(tempPath)
+		_ = workspacesyncRemove(tempPath)
 		return preparedCanonicalMarkdownRewrite{}, err
 	}
-	if err := os.Chmod(tempPath, rewrite.Mode); err != nil {
-		_ = os.Remove(tempPath)
+	if err := workspacesyncChmod(tempPath, rewrite.Mode); err != nil {
+		_ = workspacesyncRemove(tempPath)
 		return preparedCanonicalMarkdownRewrite{}, err
 	}
 	return preparedCanonicalMarkdownRewrite{
@@ -799,14 +822,14 @@ func prepareCanonicalMarkdownRewrite(rewrite canonicalMarkdownRewrite) (prepared
 
 func cleanupPreparedCanonicalMarkdownRewrites(prepared []preparedCanonicalMarkdownRewrite) {
 	for _, prep := range prepared {
-		_ = os.Remove(prep.TempPath)
+		_ = workspacesyncRemove(prep.TempPath)
 	}
 }
 
 func rollbackCanonicalMarkdownRewrites(rewrites []canonicalMarkdownRewrite) error {
 	for i := len(rewrites) - 1; i >= 0; i-- {
 		rewrite := rewrites[i]
-		if err := os.WriteFile(rewrite.Path, rewrite.Original, rewrite.Mode); err != nil {
+		if err := workspacesyncWriteFile(rewrite.Path, rewrite.Original, rewrite.Mode); err != nil {
 			return err
 		}
 	}
@@ -843,7 +866,7 @@ func managedMarkdownEventPath(rootDir string, path string) (string, bool) {
 	}
 	normalizedRoot := strings.TrimSpace(rootDir)
 	if normalizedRoot != "" && filepath.IsAbs(trimmed) {
-		rel, err := filepath.Rel(normalizedRoot, trimmed)
+		rel, err := workspacesyncRel(normalizedRoot, trimmed)
 		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
 			trimmed = rel
 		}
@@ -1390,7 +1413,7 @@ func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, 
 	}
 	targetRoutePath := tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/")).Clean()
 	var found string
-	err := filepath.WalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+	err := workspacesyncWalkDir(s.rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1406,7 +1429,7 @@ func (s *Service) currentWorkspaceMarkdownPathByRoute(page *tree.Page) (string, 
 		if !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
 			return nil
 		}
-		relPath, err := filepath.Rel(s.rootDir, filePath)
+		relPath, err := workspacesyncRel(s.rootDir, filePath)
 		if err != nil {
 			return err
 		}
@@ -1697,7 +1720,8 @@ func markdownPathsInError(rootDir string, message string) []string {
 }
 
 func cleanErrorTokenMarkdownPath(token string) string {
-	cleaned := strings.Trim(token, "\"'`()[]{}.,;:")
+	cleaned := strings.Trim(token, "\"'`()[]{},;:")
+	cleaned = strings.TrimSuffix(cleaned, ".")
 	index := strings.Index(strings.ToLower(cleaned), ".md")
 	if index < 0 {
 		return ""
@@ -1706,7 +1730,8 @@ func cleanErrorTokenMarkdownPath(token string) string {
 	for _, prefix := range []string{"path=", "file="} {
 		cleaned = strings.TrimPrefix(cleaned, prefix)
 	}
-	return strings.Trim(cleaned, "\"'`()[]{}.,;:")
+	cleaned = strings.Trim(cleaned, "\"'`()[]{},;:")
+	return strings.TrimSuffix(cleaned, ".")
 }
 
 func normalizeValidationPath(rootDir string, candidate string) string {

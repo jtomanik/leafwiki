@@ -2,16 +2,18 @@ package security
 
 import (
 	"encoding/json"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
-func TestRateLimiter_NewKey(t *testing.T) {
+var _ = It("TestRateLimiter_NewKey", func() {
+	t := GinkgoT()
 	// This test ensures that the rate limiter doesn't panic when encountering a new key
 	gin.SetMode(gin.TestMode)
 
@@ -34,9 +36,11 @@ func TestRateLimiter_NewKey(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestRateLimiter_ExceedsLimit(t *testing.T) {
+})
+
+var _ = It("TestRateLimiter_ExceedsLimit", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	limiter := NewRateLimiter(3, time.Minute, false)
@@ -70,9 +74,11 @@ func TestRateLimiter_ExceedsLimit(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected status 429, got %d", w.Code)
 	}
-}
 
-func TestRateLimiter_ExceedsLimitReturnsStructuredLocalizedError(t *testing.T) {
+})
+
+var _ = It("TestRateLimiter_ExceedsLimitReturnsStructuredLocalizedError", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	limiter := NewRateLimiter(1, time.Minute, false)
@@ -110,9 +116,11 @@ func TestRateLimiter_ExceedsLimitReturnsStructuredLocalizedError(t *testing.T) {
 	if body.Error.Message != "Too many requests, please try again later" {
 		t.Fatalf("error.message = %q, want catalog-rendered rate-limit message", body.Error.Message)
 	}
-}
 
-func TestRateLimiter_ReleasesLockAfterLimit(t *testing.T) {
+})
+
+var _ = It("TestRateLimiter_ReleasesLockAfterLimit", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	limiter := NewRateLimiter(1, time.Minute, false)
@@ -152,11 +160,6 @@ func TestRateLimiter_ReleasesLockAfterLimit(t *testing.T) {
 	}()
 
 	timeout := 2 * time.Second
-	if deadline, ok := t.Deadline(); ok {
-		if remaining := time.Until(deadline) / 2; remaining > 0 && remaining < timeout {
-			timeout = remaining
-		}
-	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
@@ -167,9 +170,11 @@ func TestRateLimiter_ReleasesLockAfterLimit(t *testing.T) {
 	case <-timer.C:
 		t.Fatal("Request blocked after limit hit; mutex was not released")
 	}
-}
 
-func TestRateLimiter_WindowExpires(t *testing.T) {
+})
+
+var _ = It("TestRateLimiter_WindowExpires", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	// Use a very short window for testing
@@ -207,4 +212,46 @@ func TestRateLimiter_WindowExpires(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200 after window expired, got %d", w.Code)
 	}
-}
+
+})
+
+var _ = Describe("rate limiter edge coverage", func() {
+	It("uses the raw remote address when no port is present", func() {
+		gin.SetMode(gin.TestMode)
+		limiter := NewRateLimiter(1, time.Minute, false)
+		router := gin.New()
+		router.Use(limiter)
+		router.GET("/test", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.RemoteAddr = "192.0.2.10"
+		router.ServeHTTP(httptest.NewRecorder(), req)
+
+		req = httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.RemoteAddr = "192.0.2.10"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		Expect(w.Code).To(Equal(http.StatusTooManyRequests))
+	})
+
+	It("resets the request count after successful responses when configured", func() {
+		gin.SetMode(gin.TestMode)
+		limiter := NewRateLimiter(1, time.Minute, true)
+		router := gin.New()
+		router.Use(limiter)
+		router.GET("/test", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.RemoteAddr = "192.0.2.11:1234"
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			Expect(w.Code).To(Equal(http.StatusOK))
+		}
+	})
+})

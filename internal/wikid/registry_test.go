@@ -4,19 +4,25 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/perber/wiki/internal/workspaceid"
 	_ "modernc.org/sqlite"
 )
 
-func TestRegistryServiceBootstrapsHomeWorkspace(t *testing.T) {
+type wikidTestT interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+var _ = ginkgo.It("TestRegistryServiceBootstrapsHomeWorkspace", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 
@@ -51,9 +57,10 @@ func TestRegistryServiceBootstrapsHomeWorkspace(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("registry mode = %04o, want 0600", got)
 	}
-}
+})
 
-func TestRegistryServiceRegistersStableNonHomeWorkspaceIDs(t *testing.T) {
+var _ = ginkgo.It("TestRegistryServiceRegistersStableNonHomeWorkspaceIDs", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	rootDir := filepath.Join(t.TempDir(), "Docs Root")
@@ -111,9 +118,10 @@ func TestRegistryServiceRegistersStableNonHomeWorkspaceIDs(t *testing.T) {
 	if _, ok := loaded.Workspace(second.ID); !ok {
 		t.Fatalf("registry did not persist second workspace %#v", loaded.Workspaces)
 	}
-}
+})
 
-func TestRegistryServicePersistsNormalizedMarkdownLinkRootPrefix(t *testing.T) {
+var _ = ginkgo.It("TestRegistryServicePersistsNormalizedMarkdownLinkRootPrefix", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	rootDir := filepath.Join(t.TempDir(), "Docs Root")
@@ -159,9 +167,10 @@ func TestRegistryServicePersistsNormalizedMarkdownLinkRootPrefix(t *testing.T) {
 	if persisted.MarkdownLinkRootPrefix != "/handbook" {
 		t.Fatalf("persisted markdown link root prefix = %q, want /handbook", persisted.MarkdownLinkRootPrefix)
 	}
-}
+})
 
-func TestRegistryDocumentWorkspaceDoesNotTrimLookupID(t *testing.T) {
+var _ = ginkgo.It("TestRegistryDocumentWorkspaceDoesNotTrimLookupID", func() {
+	t := ginkgo.GinkgoT()
 	doc := NewRegistryDocument()
 	doc.Workspaces = append(doc.Workspaces, WorkspaceRecord{
 		ID:          HomeWorkspaceID,
@@ -183,9 +192,10 @@ func TestRegistryDocumentWorkspaceDoesNotTrimLookupID(t *testing.T) {
 	if _, ok := doc.Workspace(HomeWorkspaceID); !ok {
 		t.Fatalf("workspace lookup did not resolve exact ID %q", HomeWorkspaceID)
 	}
-}
+})
 
-func TestRegistryServiceRejectsConflictingWorkspaceLocations(t *testing.T) {
+var _ = ginkgo.It("TestRegistryServiceRejectsConflictingWorkspaceLocations", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	rootDir := filepath.Join(t.TempDir(), "Docs Root")
@@ -212,9 +222,10 @@ func TestRegistryServiceRejectsConflictingWorkspaceLocations(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "data directory is already in use") {
 		t.Fatalf("same data error = %v, want data directory conflict", err)
 	}
-}
+})
 
-func TestRegistryStoreRejectsNonURLSafeWorkspaceIDs(t *testing.T) {
+var _ = ginkgo.It("TestRegistryStoreRejectsNonURLSafeWorkspaceIDs", func() {
+	t := ginkgo.GinkgoT()
 	path := filepath.Join(t.TempDir(), "wikid.db")
 	now := time.Now().UTC()
 	doc := NewRegistryDocument()
@@ -231,9 +242,10 @@ func TestRegistryStoreRejectsNonURLSafeWorkspaceIDs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "workspace ID") {
 		t.Fatalf("Save error = %v, want workspace ID validation", err)
 	}
-}
+})
 
-func TestRegistryStoreUpdateSerializesAcrossStoreInstances(t *testing.T) {
+var _ = ginkgo.It("TestRegistryStoreUpdateSerializesAcrossStoreInstances", func() {
+	t := ginkgo.GinkgoT()
 	path := filepath.Join(t.TempDir(), "wikid.db")
 	firstStore := NewRegistryStore(path)
 	secondStore := NewRegistryStore(path)
@@ -290,9 +302,10 @@ func TestRegistryStoreUpdateSerializesAcrossStoreInstances(t *testing.T) {
 	if _, ok := loaded.Workspace("second"); !ok {
 		t.Fatalf("registry missing second workspace after concurrent updates: %#v", loaded.Workspaces)
 	}
-}
+})
 
-func TestRegistryStoreRegisterWorkspaceAndGrantSeedingRollsBackTogether(t *testing.T) {
+var _ = ginkgo.It("TestRegistryStoreRegisterWorkspaceAndGrantSeedingRollsBackTogether", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	store := NewRegistryStore(layout.DBPath)
 	service := NewRegistryService(store, layout)
@@ -326,9 +339,10 @@ func TestRegistryStoreRegisterWorkspaceAndGrantSeedingRollsBackTogether(t *testi
 	if len(grants.Grants) != 0 {
 		t.Fatalf("grants after rolled-back registration = %#v, want none", grants.Grants)
 	}
-}
+})
 
-func TestRegistryServiceConcurrentRegistrationAcrossProcessesUsesSQLiteAuthorityStore(t *testing.T) {
+var _ = ginkgo.It("TestRegistryServiceConcurrentRegistrationAcrossProcessesUsesSQLiteAuthorityStore", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	dataDir := filepath.Join(t.TempDir(), "shared-data")
 	rootDir := filepath.Join(t.TempDir(), "shared-root")
@@ -367,7 +381,7 @@ func TestRegistryServiceConcurrentRegistrationAcrossProcessesUsesSQLiteAuthority
 		t.Fatalf("workspaces = %#v, want one registered workspace", workspaces)
 	}
 	assertSQLiteTableCount(t, layout.DBPath, "workspaces", 1)
-}
+})
 
 func testWorkspaceRecord(id string) WorkspaceRecord {
 	now := time.Now().UTC()
@@ -385,7 +399,7 @@ func testWorkspaceRecord(id string) WorkspaceRecord {
 	}
 }
 
-func decodeWorkspaceIDForTest(t *testing.T, raw string) workspaceid.WorkspaceID {
+func decodeWorkspaceIDForTest(t wikidTestT, raw string) workspaceid.WorkspaceID {
 	t.Helper()
 	payload, err := json.Marshal(raw)
 	if err != nil {
@@ -398,7 +412,8 @@ func decodeWorkspaceIDForTest(t *testing.T, raw string) workspaceid.WorkspaceID 
 	return id
 }
 
-func TestRegistryServiceListsWorkspacesInStableOrder(t *testing.T) {
+var _ = ginkgo.It("TestRegistryServiceListsWorkspacesInStableOrder", func() {
+	t := ginkgo.GinkgoT()
 	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
 	service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 	if _, err := service.RegisterWorkspace(RegisterWorkspaceRequest{
@@ -430,10 +445,10 @@ func TestRegistryServiceListsWorkspacesInStableOrder(t *testing.T) {
 	if len(got) != 3 || got[0] != "home" || !strings.HasPrefix(got[1], "alpha-") || !strings.HasPrefix(got[2], "zulu-") {
 		t.Fatalf("workspace order = %#v", got)
 	}
-}
+})
 
 func runWikidStoreHelper(env map[string]string) error {
-	args := []string{"-test.run=TestWikidStoreHelperProcess", "--"}
+	args := []string{"-test.run=TestWikidSuite", "--"}
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.Env = append(os.Environ(), "GO_WANT_WIKID_STORE_HELPER=1")
 	for key, value := range env {
@@ -446,9 +461,9 @@ func runWikidStoreHelper(env map[string]string) error {
 	return nil
 }
 
-func TestWikidStoreHelperProcess(t *testing.T) {
+func runWikidStoreHelperProcessForTest() bool {
 	if os.Getenv("GO_WANT_WIKID_STORE_HELPER") != "1" {
-		return
+		return false
 	}
 	layout := GlobalLayout(os.Getenv("WIKID_HELPER_HOME"))
 	switch os.Getenv("WIKID_HELPER_OP") {
@@ -459,28 +474,33 @@ func TestWikidStoreHelperProcess(t *testing.T) {
 			DataDir:     os.Getenv("WIKID_HELPER_DATA_DIR"),
 			RootDir:     os.Getenv("WIKID_HELPER_ROOT_DIR"),
 		}); err != nil {
-			t.Fatalf("RegisterWorkspace failed: %v", err)
+			fmt.Fprintf(os.Stderr, "RegisterWorkspace failed: %v\n", err)
+			os.Exit(1)
 		}
 	case "grant":
 		store := NewGrantStore(layout.DBPath)
 		workspaceID, err := workspaceid.ParseWorkspaceID(os.Getenv("WIKID_HELPER_WORKSPACE_ID"))
 		if err != nil {
-			t.Fatalf("ParseWorkspaceID failed: %v", err)
+			fmt.Fprintf(os.Stderr, "ParseWorkspaceID failed: %v\n", err)
+			os.Exit(1)
 		}
 		if err := store.Upsert(Grant{
 			Subject:     os.Getenv("WIKID_HELPER_SUBJECT"),
 			WorkspaceID: workspaceID,
 			Role:        GrantRole(os.Getenv("WIKID_HELPER_ROLE")),
 		}); err != nil {
-			t.Fatalf("GrantStore.Upsert failed: %v", err)
+			fmt.Fprintf(os.Stderr, "GrantStore.Upsert failed: %v\n", err)
+			os.Exit(1)
 		}
 	default:
-		t.Fatalf("unknown helper op %q", os.Getenv("WIKID_HELPER_OP"))
+		fmt.Fprintf(os.Stderr, "unknown helper op %q\n", os.Getenv("WIKID_HELPER_OP"))
+		os.Exit(1)
 	}
 	os.Exit(0)
+	return true
 }
 
-func assertSQLiteTableCount(t *testing.T, dbPath string, table string, want int) {
+func assertSQLiteTableCount(t wikidTestT, dbPath string, table string, want int) {
 	t.Helper()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {

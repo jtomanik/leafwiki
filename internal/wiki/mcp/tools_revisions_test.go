@@ -3,102 +3,93 @@ package mcp
 import (
 	"context"
 	"net/http/httptest"
-	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corerevision "github.com/perber/wiki/internal/core/revision"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-func TestListRevisionsToolPassesWorkspaceCursorAndReturnsNextCursor(t *testing.T) {
-	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: t.TempDir(),
-		RootDir: t.TempDir(),
-	})
-	if err := treeService.LoadTree(); err != nil {
-		t.Fatalf("LoadTree: %v", err)
-	}
-	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode("alice", nil, "Page A", "page-a", &kind)
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
+var _ = Describe("Revision tools", func() {
+	It("passes the workspace cursor and returns the next cursor", func() {
+		t := GinkgoT()
+		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
+			DataDir: t.TempDir(),
+			RootDir: t.TempDir(),
+		})
+		Expect(treeService.LoadTree()).To(Succeed())
+		kind := tree.NodeKindPage
+		pageID, err := treeService.CreateNode("alice", nil, "Page A", "page-a", &kind)
+		Expect(err).NotTo(HaveOccurred())
 
-	var seenCursor string
-	routes := NewRoutes(RoutesConfig{
-		TreeService: treeService,
-		GetPage:     wikipages.NewGetPageUseCase(treeService),
-		ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
-			if page.ID != *pageID {
-				t.Fatalf("workspace page id = %q, want %q", page.ID, pageID.String())
-			}
-			if limit != 1 {
-				t.Fatalf("workspace limit = %d, want 1", limit)
-			}
-			seenCursor = cursor
-			return workspacesync.PageRevisionList{
-				Revisions: []*corerevision.Revision{{
-					ID:       "rev-3",
-					PageID:   *pageID,
-					Type:     corerevision.RevisionTypeContentUpdate,
-					AuthorID: "alice",
-					Title:    "Page A",
-					Slug:     "page-a",
-					Kind:     string(tree.NodeKindPage),
-					Path:     "page-a",
-				}},
-				NextCursor: "rev-3",
-			}, nil
-		},
-	})
-	handler := routes.NewHTTPHandler(httpinternal.RouterOptions{
-		AuthDisabled:        true,
-		EnableWorkspaceSync: true,
-		MCPEnabled:          true,
-		MCPToolListPageSize: 200,
-	})
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
-	session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
-		Endpoint:             server.URL,
-		HTTPClient:           server.Client(),
-		DisableStandaloneSSE: true,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Connect MCP client: %v", err)
-	}
-	t.Cleanup(func() { session.Close() })
+		var seenCursor string
+		routes := NewRoutes(RoutesConfig{
+			TreeService: treeService,
+			GetPage:     wikipages.NewGetPageUseCase(treeService),
+			ListWorkspaceRevisions: func(_ context.Context, page *tree.Page, cursor string, limit workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
+				Expect(page.ID).To(Equal(*pageID))
+				Expect(limit).To(Equal(workspacesync.PageRevisionLimit(1)))
+				seenCursor = cursor
+				return workspacesync.PageRevisionList{
+					Revisions: []*corerevision.Revision{{
+						ID:       "rev-3",
+						PageID:   *pageID,
+						Type:     corerevision.RevisionTypeContentUpdate,
+						AuthorID: "alice",
+						Title:    "Page A",
+						Slug:     "page-a",
+						Kind:     string(tree.NodeKindPage),
+						Path:     "page-a",
+					}},
+					NextCursor: "rev-3",
+				}, nil
+			},
+		})
+		handler := routes.NewHTTPHandler(httpinternal.RouterOptions{
+			AuthDisabled:        true,
+			EnableWorkspaceSync: true,
+			MCPEnabled:          true,
+			MCPToolListPageSize: 200,
+		})
+		server := httptest.NewServer(handler)
+		t.Cleanup(server.Close)
+		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
+		session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
+			Endpoint:             server.URL,
+			HTTPClient:           server.Client(),
+			DisableStandaloneSSE: true,
+		}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		t.Cleanup(func() { session.Close() })
 
-	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      ToolListRevisions.String(),
-		Arguments: map[string]any{"pageId": *pageID, "cursor": "rev-5", "limit": float64(1)},
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+			Name:      ToolListRevisions.String(),
+			Arguments: map[string]any{"pageId": *pageID, "cursor": "rev-5", "limit": float64(1)},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.IsError).To(BeFalse(), "CallTool wiki_list_revisions returned tool error: %#v", result.Content)
+		body, ok := result.StructuredContent.(map[string]any)
+		Expect(ok).To(BeTrue(), "structured content type = %T", result.StructuredContent)
+		Expect(seenCursor).To(Equal("rev-5"))
+		Expect(body["nextCursor"]).To(Equal("rev-3"))
+		revisions, ok := body["revisions"].([]any)
+		Expect(ok).To(BeTrue(), "revisions = %#v", body["revisions"])
+		Expect(revisions).To(HaveLen(1))
+		first, ok := revisions[0].(map[string]any)
+		Expect(ok).To(BeTrue(), "first revision = %#v", revisions[0])
+		Expect(first["id"]).To(Equal("rev-3"))
 	})
-	if err != nil {
-		t.Fatalf("CallTool wiki_list_revisions: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("CallTool wiki_list_revisions returned tool error: %#v", result.Content)
-	}
-	body, ok := result.StructuredContent.(map[string]any)
-	if !ok {
-		t.Fatalf("structured content type = %T, want map", result.StructuredContent)
-	}
-	if seenCursor != "rev-5" {
-		t.Fatalf("workspace cursor = %q, want rev-5", seenCursor)
-	}
-	if body["nextCursor"] != "rev-3" {
-		t.Fatalf("nextCursor = %v, want rev-3", body["nextCursor"])
-	}
-	revisions, ok := body["revisions"].([]any)
-	if !ok || len(revisions) != 1 {
-		t.Fatalf("revisions = %#v, want one revision", body["revisions"])
-	}
-	first, ok := revisions[0].(map[string]any)
-	if !ok || first["id"] != "rev-3" {
-		t.Fatalf("first revision = %#v, want rev-3", revisions[0])
-	}
-}
+
+	It("returns a stable unavailable-backend revision error", func() {
+		err := unavailableWorkspaceRevisionBackend()
+		localized, ok := sharederrors.AsLocalizedError(err)
+		Expect(ok).To(BeTrue())
+		Expect(localized.Code).To(Equal(sharederrors.ErrorCode("revision_not_found")))
+		Expect(localized.MessageID).To(Equal(sharederrors.MessageID("errors.revision.not_found")))
+	})
+})

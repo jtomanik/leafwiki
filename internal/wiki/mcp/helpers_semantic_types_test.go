@@ -1,19 +1,17 @@
 package mcp
 
 import (
-	"testing"
-
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-func TestExactlyOneIDOrPageIDReturnsSemanticPageID(t *testing.T) {
-	pageID, err := exactlyOneIDOrPageID("page-1", "")
-	if err != nil {
-		t.Fatalf("exactlyOneIDOrPageID returned error: %v", err)
-	}
+var _ = Describe("Semantic helper types", func() {
+	It("returns a semantic page ID from exactlyOneIDOrPageID", func() {
+		pageID, err := exactlyOneIDOrPageID("page-1", "")
+		Expect(err).NotTo(HaveOccurred())
 
-	var semanticPageID tree.PageID = pageID
-	if semanticPageID != newFixturePageID("page-1") {
-		t.Fatalf("pageID = %q, want page-1", semanticPageID)
-	}
-}
+		var semanticPageID tree.PageID = pageID
+		Expect(semanticPageID).To(Equal(newFixturePageID("page-1")))
+	})
+})

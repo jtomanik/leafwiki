@@ -357,27 +357,23 @@ func (s *AssetService) copySingleAsset(sourceAssetPath string, targetAssetPath s
 	if err != nil {
 		return fmt.Errorf("could not open source asset file: %w", err)
 	}
-	defer func() {
-		err := sourceFile.Close()
-		if err != nil {
-			s.log.Warn("failed to close source file", "file", sourceFilePath, "error", err)
-		}
-	}()
+	defer logAssetFileClose(s.log, "failed to close source file", sourceFilePath, sourceFile)
 
 	targetFile, err := os.Create(targetFilePath)
 	if err != nil {
 		return fmt.Errorf("could not create target asset file: %w", err)
 	}
-	defer func() {
-		err := targetFile.Close()
-		if err != nil {
-			s.log.Warn("failed to close target file", "file", targetFilePath, "error", err)
-		}
-	}()
+	defer logAssetFileClose(s.log, "failed to close target file", targetFilePath, targetFile)
 
 	if _, err := io.Copy(targetFile, sourceFile); err != nil {
 		return fmt.Errorf("could not copy asset file: %w", err)
 	}
 
 	return nil
+}
+
+func logAssetFileClose(log *slog.Logger, message string, filePath string, file interface{ Close() error }) {
+	if err := file.Close(); err != nil {
+		log.Warn(message, "file", filePath, "error", err)
+	}
 }

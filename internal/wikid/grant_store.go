@@ -90,6 +90,16 @@ func (s *GrantStore) GrantsForSubject(subject string) ([]Grant, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	return grantsForSubjectRows(rows)
+}
+
+type wikidRows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+func grantsForSubjectRows(rows wikidRows) ([]Grant, error) {
 	var grants []Grant
 	for rows.Next() {
 		var grant Grant
@@ -124,6 +134,10 @@ func loadGrantDocument(ctx context.Context, q grantQuerier) (GrantDocument, erro
 		return GrantDocument{}, err
 	}
 	defer rows.Close()
+	return loadGrantRows(rows)
+}
+
+func loadGrantRows(rows wikidRows) (GrantDocument, error) {
 	doc := NewGrantDocument()
 	for rows.Next() {
 		var grant Grant

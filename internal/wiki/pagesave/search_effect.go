@@ -11,8 +11,13 @@ import (
 // SearchIndexSideEffect updates the search index after every page mutation.
 type SearchIndexSideEffect struct {
 	index *search.SQLiteIndex
-	tree  *tree.TreeService // only used by IndexAllPages for the initial walk
+	tree  searchBootstrapTree // only used by IndexAllPages for the initial walk
 	log   *slog.Logger
+}
+
+type searchBootstrapTree interface {
+	WalkNodes(func(tree.PageID) error) error
+	GetPages([]tree.PageID) ([]*tree.Page, []error)
 }
 
 func NewSearchIndexSideEffect(index *search.SQLiteIndex, treeService *tree.TreeService, log *slog.Logger) *SearchIndexSideEffect {

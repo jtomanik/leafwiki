@@ -3,11 +3,13 @@ package projectdaemon
 import (
 	"context"
 	"sync"
-	"testing"
 	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
-func TestSessionRegistryNotifiesOnlyOnCountTransitions(t *testing.T) {
+var _ = ginkgo.It("TestSessionRegistryNotifiesOnlyOnCountTransitions", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	var counts []int
 	registry := NewSessionRegistry(time.Second, func(count int) {
@@ -35,9 +37,11 @@ func TestSessionRegistryNotifiesOnlyOnCountTransitions(t *testing.T) {
 	if got, want := joinCounts(counts), "1,0"; got != want {
 		t.Fatalf("counts = %s, want %s", got, want)
 	}
-}
 
-func TestSessionRegistryUsesSemanticSessionIDs(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestSessionRegistryUsesSemanticSessionIDs", func() {
+	t := ginkgo.GinkgoT()
 	registry := NewSessionRegistry(time.Second, nil)
 
 	id, err := registry.Register()
@@ -50,9 +54,34 @@ func TestSessionRegistryUsesSemanticSessionIDs(t *testing.T) {
 		t.Fatalf("Heartbeat returned false for registered session")
 	}
 	registry.Release(typed)
-}
 
-func TestSessionRegistryRunExpiryLoopPrunesExpiredSessions(t *testing.T) {
+})
+
+var _ = ginkgo.It("SessionRegistry exposes seen state and active count", func() {
+	t := ginkgo.GinkgoT()
+	registry := NewSessionRegistry(time.Second, nil)
+	if registry.SeenSession() {
+		t.Fatalf("SeenSession = true before any registration")
+	}
+	if seen, count := registry.SeenSessionCount(); seen || count != 0 {
+		t.Fatalf("SeenSessionCount = %v/%d, want false/0", seen, count)
+	}
+
+	id, err := registry.Register()
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if seen, count := registry.SeenSessionCount(); !seen || count != 1 {
+		t.Fatalf("SeenSessionCount after register = %v/%d, want true/1", seen, count)
+	}
+	registry.Release(id)
+	if seen, count := registry.SeenSessionCount(); !seen || count != 0 {
+		t.Fatalf("SeenSessionCount after release = %v/%d, want true/0", seen, count)
+	}
+})
+
+var _ = ginkgo.It("TestSessionRegistryRunExpiryLoopPrunesExpiredSessions", func() {
+	t := ginkgo.GinkgoT()
 	var counts []int
 	var countsMu sync.Mutex
 	registry := NewSessionRegistry(10*time.Millisecond, func(count int) {
@@ -86,7 +115,8 @@ func TestSessionRegistryRunExpiryLoopPrunesExpiredSessions(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("session was not pruned before timeout; count=%d counts=%s", registry.Count(), lockedJoinCounts(&countsMu, &counts))
-}
+
+})
 
 func joinCounts(counts []int) string {
 	if len(counts) == 0 {

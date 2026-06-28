@@ -66,7 +66,11 @@ type ListAssetsOutput struct {
 
 type ListAssetsUseCase struct {
 	tree  *tree.TreeService
-	asset *coreassets.AssetService
+	asset assetLister
+}
+
+type assetLister interface {
+	ListAssetsForPage(page *tree.PageNode) ([]string, error)
 }
 
 func NewListAssetsUseCase(t *tree.TreeService, a *coreassets.AssetService) *ListAssetsUseCase {

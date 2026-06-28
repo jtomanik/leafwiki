@@ -3,6 +3,7 @@ package localization
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 	"sync"
 
 	"github.com/BurntSushi/toml"
@@ -11,7 +12,9 @@ import (
 )
 
 //go:embed locales/active.en.toml
-var localeFS embed.FS
+var embeddedLocaleFS embed.FS
+
+var localeFS fs.FS = embeddedLocaleFS
 
 var English = mustNewEnglishRenderer()
 

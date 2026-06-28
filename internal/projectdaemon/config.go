@@ -25,6 +25,13 @@ const (
 	DefaultHeartbeatTTL     = 15 * time.Second
 )
 
+var (
+	absPath           = filepath.Abs
+	evalSymlinks      = filepath.EvalSymlinks
+	marshalConfigJSON = json.Marshal
+	readRandom        = rand.Read
+)
+
 type Config struct {
 	RuntimeStack            string                  `json:"runtimeStack,omitempty"`
 	WorkspaceID             workspaceid.WorkspaceID `json:"workspaceId,omitempty"`
@@ -107,7 +114,7 @@ func GlobalDescriptorPath(runtimeDir string, role RoleName) string {
 }
 
 func ConfigHash(cfg Config) (string, error) {
-	raw, err := json.Marshal(cfg)
+	raw, err := marshalConfigJSON(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -131,9 +138,6 @@ func CompareConfig(owner Config, requested Config) []Mismatch {
 	var mismatches []Mismatch
 	for i := 0; i < cfgType.NumField(); i++ {
 		field := cfgType.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
 		ownerField := ownerValue.Field(i).Interface()
 		requestedField := requestedValue.Field(i).Interface()
 		if reflect.DeepEqual(ownerField, requestedField) {
@@ -165,18 +169,18 @@ func FormatConfigMismatch(mismatches []Mismatch) string {
 
 func RandomToken() (string, error) {
 	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	if _, err := readRandom(raw[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(raw[:]), nil
 }
 
 func canonicalPath(path string) (string, error) {
-	absPath, err := filepath.Abs(filepath.Clean(strings.TrimSpace(path)))
+	cleanAbsPath, err := absPath(filepath.Clean(strings.TrimSpace(path)))
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absPath)
+	resolved, err := evalSymlinks(cleanAbsPath)
 	if err == nil {
 		return filepath.Clean(resolved), nil
 	}
@@ -184,16 +188,16 @@ func canonicalPath(path string) (string, error) {
 		return "", err
 	}
 
-	current := absPath
+	current := cleanAbsPath
 	var suffix []string
 	for {
 		parent := filepath.Dir(current)
 		if parent == current {
-			return filepath.Clean(absPath), nil
+			return filepath.Clean(cleanAbsPath), nil
 		}
 		suffix = append([]string{filepath.Base(current)}, suffix...)
 		current = parent
-		resolved, err := filepath.EvalSymlinks(current)
+		resolved, err := evalSymlinks(current)
 		if err == nil {
 			parts := append([]string{resolved}, suffix...)
 			return filepath.Clean(filepath.Join(parts...)), nil

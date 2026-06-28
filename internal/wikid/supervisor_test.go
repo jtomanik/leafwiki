@@ -1,13 +1,14 @@
 package wikid
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"time"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
-func TestSupervisorRecordsCrashAndSchedulesBoundedRestart(t *testing.T) {
+var _ = ginkgo.It("TestSupervisorRecordsCrashAndSchedulesBoundedRestart", func() {
+	t := ginkgo.GinkgoT()
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	supervisor := NewSupervisor(SupervisorOptions{
 		MaxRestarts: 2,
@@ -36,9 +37,10 @@ func TestSupervisorRecordsCrashAndSchedulesBoundedRestart(t *testing.T) {
 	if state := supervisor.State(projectdaemon.RoleWorkspaced); state.State != projectdaemon.RoleStateReady || state.PID != 333 {
 		t.Fatalf("restarted workspaced state = %#v", state)
 	}
-}
+})
 
-func TestSupervisorStopsRestartingAfterBudgetIsExhausted(t *testing.T) {
+var _ = ginkgo.It("TestSupervisorStopsRestartingAfterBudgetIsExhausted", func() {
+	t := ginkgo.GinkgoT()
 	supervisor := NewSupervisor(SupervisorOptions{MaxRestarts: 1, Backoff: time.Second})
 	supervisor.MarkReady(projectdaemon.RoleWorkspaced, 222, "", true)
 
@@ -51,4 +53,4 @@ func TestSupervisorStopsRestartingAfterBudgetIsExhausted(t *testing.T) {
 	if state := supervisor.State(projectdaemon.RoleWorkspaced); state.State != projectdaemon.RoleStateCrashed || state.Error != "second crash" {
 		t.Fatalf("exhausted state = %#v, want crashed with latest error", state)
 	}
-}
+})

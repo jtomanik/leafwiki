@@ -2,7 +2,6 @@ package tree
 
 import (
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -166,7 +165,7 @@ func isActiveWorkspaceReadme(rootDir string, dir string, name string) bool {
 }
 
 func workspaceDirHasIndexFile(dir string) bool {
-	entries, err := os.ReadDir(dir)
+	entries, err := treeOSReadDir(dir)
 	if err != nil {
 		return false
 	}

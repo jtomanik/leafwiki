@@ -67,6 +67,11 @@ type WorkspaceStatusIssue struct {
 	Severity  IssueSeverity
 }
 
+var (
+	walkWorkspaceDir          = filepath.WalkDir
+	mapWorkspaceMarkdownRoute = tree.MapWorkspaceMarkdownRoute
+)
+
 func ValidateMarkdownContent(routePath string, content string, existingPageID string) Result {
 	return ValidateMarkdownContentWithOptions(tree.RoutePathFromString(routePath), content, ContentValidationOptions{
 		ExistingPageID: tree.PageIDFromString(existingPageID),
@@ -195,7 +200,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		}
 		seenRoutePaths[routeKey] = relPath
 	}
-	err := filepath.WalkDir(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+	err := walkWorkspaceDir(rootDir, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			relPath := workspaceValidationRelPath(rootDir, filePath)
 			addIssue(IssueSeverityError, IssueCodeWorkspaceScanError, relPath, "", walkErr.Error())
@@ -213,7 +218,7 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 				return filepath.SkipDir
 			}
 			relPath := workspaceValidationRelPath(rootDir, filePath)
-			route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, true)
+			route, err := mapWorkspaceMarkdownRoute(rootDir, relPath, true)
 			if err != nil {
 				addIssue(IssueSeverityError, IssueCodeInvalidSlug, relPath, "", err.Error())
 				return filepath.SkipDir
@@ -235,12 +240,9 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 			}
 			return nil
 		}
-		route, err := tree.MapWorkspaceMarkdownRoute(rootDir, relPath, false)
+		route, err := mapWorkspaceMarkdownRoute(rootDir, relPath, false)
 		if err != nil {
 			addIssue(IssueSeverityError, IssueCodeInvalidSlug, relPath, "", err.Error())
-			return nil
-		}
-		if route.Skip {
 			return nil
 		}
 		routePath := route.RoutePath
@@ -264,11 +266,6 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 					seenIDs[existingPageID] = relPath
 				}
 			}
-			if mdFile, err := markdown.NewMarkdownFileFromRaw(relPath, raw); err == nil {
-				if _, err := mdFile.GetTitle(); err != nil {
-					addIssue(IssueSeverityError, IssueCodeMissingTitle, relPath, existingPageID, err.Error())
-				}
-			}
 		}
 		filesByRoute[workspaceValidationRouteConflictKey(routePath, routeKind)] = existingPageID
 		files = append(files, workspaceFile{
@@ -290,15 +287,6 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 	}
 	for _, file := range files {
 		file := file
-		linkResolver := func(routePath tree.RoutePath) (tree.PageID, bool) {
-			if id, ok := workspaceLinkPageIDForRoute(filesByRoute, routePath, tree.NodeKindPage); ok {
-				return id, true
-			}
-			if id, ok := workspaceLinkPageIDForRoute(filesByRoute, routePath, tree.NodeKindSection); ok {
-				return id, true
-			}
-			return "", false
-		}
 		markdownLinkResolver := newWorkspaceMarkdownLinkResolver(file.RelPath, linkIndex, filesByRoute)
 		var assetExists func(destination string) bool
 		if opts.AssetExists != nil {
@@ -309,13 +297,9 @@ func ValidateWorkspaceMarkdownFiles(opts WorkspaceMarkdownValidationOptions) Res
 		result := ValidateMarkdownContentWithOptions(file.RoutePath, file.Content, ContentValidationOptions{
 			ExistingPageID:         file.ExistingPageID,
 			AllowRootRoute:         true,
-			ResolveLinkPageID:      linkResolver,
 			ResolveMarkdownLink:    markdownLinkResolver,
 			MarkdownLinkRootPrefix: opts.MarkdownLinkRootPrefix,
-			ResolveReferencePath: func(destination string) string {
-				return resolveWorkspaceReferencePath(file.RelPath, file.RoutePath, destination)
-			},
-			AssetExists: assetExists,
+			AssetExists:            assetExists,
 		})
 		issues = append(issues, result.Issues...)
 	}
@@ -359,8 +343,6 @@ func newWorkspaceMarkdownLinkResolver(sourceRelPath tree.MarkdownPath, linkIndex
 			return "", "", false, IssueCodeInvalidLink
 		case markdownlinks.TargetKindUnresolved:
 			switch resolved.Code {
-			case markdownlinks.IssueCodeAmbiguousLegacyLink:
-				return "", "", false, IssueCodeAmbiguousLegacyLink
 			case markdownlinks.IssueCodeNonCanonicalMarkdownPath:
 				return "", "", false, IssueCodeNonCanonicalMarkdownPath
 			}

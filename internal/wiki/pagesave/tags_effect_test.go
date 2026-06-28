@@ -1,14 +1,13 @@
 package pagesave
 
 import (
-	"testing"
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/tags"
-	"github.com/perber/wiki/internal/test_utils"
 )
 
-func setupTagsEffectTest(t *testing.T) (*tree.TreeService, *tags.TagsService, *TagsSideEffect) {
+func setupTagsEffectTest(t pagesaveTestT) (*tree.TreeService, *tags.TagsService, *TagsSideEffect) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -21,7 +20,11 @@ func setupTagsEffectTest(t *testing.T) (*tree.TreeService, *tags.TagsService, *T
 	if err != nil {
 		t.Fatalf("NewTagsStore: %v", err)
 	}
-	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("TagsStore.Close: %v", err)
+		}
+	})
 
 	svc := tags.NewTagsService(store)
 	effect := NewTagsSideEffect(svc, nil)
@@ -30,7 +33,7 @@ func setupTagsEffectTest(t *testing.T) (*tree.TreeService, *tags.TagsService, *T
 
 // createPageWithFrontmatter creates a page whose frontmatter is set via the import path,
 // so custom keys (tags, properties) survive the write.
-func createPageWithFrontmatter(t *testing.T, treeSvc *tree.TreeService, title, slug, raw string) *tree.Page {
+func createPageWithFrontmatter(t pagesaveTestT, treeSvc *tree.TreeService, title, slug, raw string) *tree.Page {
 	t.Helper()
 	kind := tree.NodeKindPage
 	id, err := treeSvc.CreateNode("system", nil, title, newFixtureSlug(slug), &kind)
@@ -49,7 +52,8 @@ func createPageWithFrontmatter(t *testing.T, treeSvc *tree.TreeService, title, s
 
 // ─── TagsSideEffect ───────────────────────────────────────────────────────────
 
-func TestTagsSideEffect_Apply_Create_IndexesTagsFromRawContent(t *testing.T) {
+var _ = ginkgo.It("TestTagsSideEffect_Apply_Create_IndexesTagsFromRawContent", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, tagsSvc, effect := setupTagsEffectTest(t)
 
 	raw := "---\ntags:\n  - golang\n  - testing\n---\n\nPage body."
@@ -75,9 +79,11 @@ func TestTagsSideEffect_Apply_Create_IndexesTagsFromRawContent(t *testing.T) {
 	if len(ids2) != 1 || ids2[0] != page.ID {
 		t.Errorf("expected page %q to be indexed under 'testing', got %v", page.ID, ids2)
 	}
-}
 
-func TestTagsSideEffect_Apply_Update_ReindexesTags(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestTagsSideEffect_Apply_Update_ReindexesTags", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, tagsSvc, effect := setupTagsEffectTest(t)
 
 	raw := "---\ntags:\n  - oldtag\n---\n\nOriginal."
@@ -111,9 +117,11 @@ func TestTagsSideEffect_Apply_Update_ReindexesTags(t *testing.T) {
 	if len(fresh) != 1 || fresh[0] != updated.ID {
 		t.Errorf("expected newtag to be indexed, got %v", fresh)
 	}
-}
 
-func TestTagsSideEffect_Apply_Delete_RemovesTags(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestTagsSideEffect_Apply_Delete_RemovesTags", func() {
+	t := ginkgo.GinkgoT()
 	treeSvc, tagsSvc, effect := setupTagsEffectTest(t)
 
 	raw := "---\ntags:\n  - removeme\n---\n\nBody."
@@ -133,4 +141,5 @@ func TestTagsSideEffect_Apply_Delete_RemovesTags(t *testing.T) {
 	if len(ids) != 0 {
 		t.Errorf("expected tag to be removed after delete, got %v", ids)
 	}
-}
+
+})

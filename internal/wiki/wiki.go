@@ -51,7 +51,7 @@ type Wiki struct {
 	storageDir             string
 	workspace              Workspace
 	markdownLinkRootPrefix string
-	workspaceSync          *workspacesync.Service
+	workspaceSync          workspaceSyncFacade
 	workspaceSyncCancel    context.CancelFunc
 	webPresence            *wikipresence.WebPresenceRegistry
 	agentPresence          *projectdaemon.AgentPresenceRegistry
@@ -83,6 +83,69 @@ const SYSTEM_USER_ID = "system"
 
 const workspaceSyncStartupPhaseOpenService = "open_service"
 
+var (
+	newWikiEnsureWorkspaceDirs = ensureWorkspaceDirs
+	newWikiInitAuth            = func(w *Wiki, options *WikiOptions) error { return w.initAuth(options) }
+	newWikiInitOAuth           = func(w *Wiki, options *WikiOptions) error { return w.initOAuth(options) }
+	newWikiInitCoreServices    = func(w *Wiki, options *WikiOptions) error { return w.initCoreServices(options) }
+	newWikiInitLinkService     = func(w *Wiki) error { return w.initLinkService() }
+	newWikiInitTagsService     = func(w *Wiki) error { return w.initTagsService() }
+	newWikiInitProperties      = func(w *Wiki) error { return w.initPropertiesService() }
+	newWikiBootstrapIndexes    = func(w *Wiki) { w.bootstrapTagsAndProperties() }
+	newWikiInitSearch          = func(w *Wiki) error { return w.initSearch() }
+	newWikiInitBranding        = func(w *Wiki) error { return w.initBranding() }
+	newWikiEnsureWelcomePage   = func(w *Wiki) error { return w.EnsureWelcomePage() }
+
+	wikiMkdirAll         = os.MkdirAll
+	newWikiUserStore     = auth.NewUserStore
+	newWikiAPIKeyStore   = auth.NewAPIKeyStore
+	wikiInitDefaultAdmin = func(s *auth.UserService, password string) error { return s.InitDefaultAdmin(password) }
+	newWikiUserResolver  = auth.NewUserResolver
+	newWikiSessionStore  = auth.NewSessionStore
+	newWikiOAuthService  = wikioauth.NewService
+	newWikiTreeService   = tree.NewTreeServiceWithOptions
+	newWikiWorkspaceSync = func(options workspacesync.ServiceOptions) (workspaceSyncFacade, error) {
+		return workspacesync.NewService(options)
+	}
+	newWikiLinksStore         = links.NewLinksStore
+	wikiLinksIndexAllPages    = func(s *links.LinkService) error { return s.IndexAllPages() }
+	newWikiTagsStore          = tags.NewTagsStore
+	newWikiPropertiesStore    = properties.NewPropertiesStore
+	wikiRebuildTagsProperties = func(w *Wiki) error { return w.rebuildTagsAndProperties() }
+	wikiTagsClearIndex        = func(s *tags.TagsService) error { return s.ClearIndex() }
+	wikiPropertiesClearIndex  = func(s *properties.PropertiesService) error { return s.ClearIndex() }
+	wikiTreeWalkNodes         = func(s *tree.TreeService, fn func(tree.PageID) error) error { return s.WalkNodes(fn) }
+	wikiTreeGetPages          = func(s *tree.TreeService, ids []tree.PageID) ([]*tree.Page, []error) { return s.GetPages(ids) }
+	wikiTagsIndexPageContent  = func(s *tags.TagsService, pageID tree.PageID, rawContent string) error {
+		return s.IndexPageContent(pageID, rawContent)
+	}
+	wikiPropsIndexPageContent = func(s *properties.PropertiesService, pageID tree.PageID, rawContent string) error {
+		return s.IndexPageContent(pageID, rawContent)
+	}
+	newWikiSQLiteIndex      = search.NewSQLiteIndex
+	wikiSearchIndexAllPages = func(s *pagesave.SearchIndexSideEffect) error { return s.IndexAllPages() }
+	newWikiBrandingService  = branding.NewBrandingService
+	wikiCloseUserService    = func(s *auth.UserService) error { return s.Close() }
+	wikiCloseAPIKeyService  = func(s *auth.APIKeyService) error { return s.Close() }
+	wikiCloseLinksService   = func(s *links.LinkService) error { return s.Close() }
+	wikiCloseSearchIndex    = func(s *search.SQLiteIndex) error { return s.Close() }
+	wikiCreateWelcomePage   = func(w *Wiki, userID tree.UserID, kind *tree.NodeKind) (*wikipages.CreatePageOutput, error) {
+		return wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
+			context.Background(),
+			wikipages.CreatePageInput{UserID: userID, Title: "Welcome to LeafWiki", Slug: "welcome-to-leafwiki", Kind: kind},
+		)
+	}
+	wikiGetWelcomePage = func(treeService *tree.TreeService, pageID tree.PageID) (*tree.Page, error) {
+		return treeService.GetPage(pageID)
+	}
+	wikiUpdateWelcomePage = func(w *Wiki, userID tree.UserID, page *tree.Page, content *string, kind *tree.NodeKind) (*wikipages.UpdatePageOutput, error) {
+		return wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
+			context.Background(),
+			wikipages.UpdatePageInput{UserID: userID, ID: page.ID, Version: page.Version(), Title: page.Title, Slug: page.Slug, Content: content, Kind: kind},
+		)
+	}
+)
+
 type WikiOptions struct {
 	Workspace               Workspace
 	StorageDir              string          // Path to storage directory
@@ -106,7 +169,7 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 	if err := ValidateWorkspace(workspace); err != nil {
 		return nil, err
 	}
-	if err := ensureWorkspaceDirs(workspace); err != nil {
+	if err := newWikiEnsureWorkspaceDirs(workspace); err != nil {
 		return nil, err
 	}
 	w := &Wiki{
@@ -116,45 +179,45 @@ func NewWiki(options *WikiOptions) (*Wiki, error) {
 		log:                    slog.Default().With("component", "Wiki"),
 	}
 	if !options.WorkspaceOnly {
-		if err := w.initAuth(options); err != nil {
+		if err := newWikiInitAuth(w, options); err != nil {
 			return nil, err
 		}
-		if err := w.initOAuth(options); err != nil {
+		if err := newWikiInitOAuth(w, options); err != nil {
 			return nil, err
 		}
 	}
 	if options.ControlPlaneOnly {
-		if err := w.initBranding(); err != nil {
+		if err := newWikiInitBranding(w); err != nil {
 			return nil, err
 		}
 		w.buildControlPlaneRoutes(options)
 		return w, nil
 	}
-	if err := w.initCoreServices(options); err != nil {
+	if err := newWikiInitCoreServices(w, options); err != nil {
 		return nil, err
 	}
-	if err := w.initLinkService(); err != nil {
+	if err := newWikiInitLinkService(w); err != nil {
 		return nil, err
 	}
-	if err := w.initTagsService(); err != nil {
+	if err := newWikiInitTagsService(w); err != nil {
 		return nil, err
 	}
-	if err := w.initPropertiesService(); err != nil {
+	if err := newWikiInitProperties(w); err != nil {
 		return nil, err
 	}
-	w.bootstrapTagsAndProperties()
-	if err := w.initSearch(); err != nil {
+	newWikiBootstrapIndexes(w)
+	if err := newWikiInitSearch(w); err != nil {
 		return nil, err
 	}
 	w.configureWorkspaceSyncRebuilder()
 	if !options.WorkspaceOnly {
-		if err := w.initBranding(); err != nil {
+		if err := newWikiInitBranding(w); err != nil {
 			return nil, err
 		}
 	}
 	w.webPresence = wikipresence.NewWebPresenceRegistry(wikipresence.DefaultWebPresenceTTL, nil)
 	if w.tree.IsLoaded() {
-		if err := w.EnsureWelcomePage(); err != nil {
+		if err := newWikiEnsureWelcomePage(w); err != nil {
 			return nil, err
 		}
 	} else {
@@ -173,10 +236,10 @@ func resolveWorkspaceOptions(options *WikiOptions) Workspace {
 }
 
 func ensureWorkspaceDirs(workspace Workspace) error {
-	if err := os.MkdirAll(workspace.DataDir, 0o755); err != nil {
+	if err := wikiMkdirAll(workspace.DataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
-	if err := os.MkdirAll(workspace.RootDir, 0o755); err != nil {
+	if err := wikiMkdirAll(workspace.RootDir, 0o755); err != nil {
 		return fmt.Errorf("create root dir: %w", err)
 	}
 	return nil
@@ -189,27 +252,27 @@ func (w *Wiki) initAuth(options *WikiOptions) error {
 	if strings.TrimSpace(options.AuthStorageDir) != "" {
 		authStorageDir = options.AuthStorageDir
 	}
-	store, err := auth.NewUserStore(authStorageDir)
+	store, err := newWikiUserStore(authStorageDir)
 	if err != nil {
 		return err
 	}
 	w.user = auth.NewUserService(store)
-	apiKeyStore, err := auth.NewAPIKeyStore(authStorageDir)
+	apiKeyStore, err := newWikiAPIKeyStore(authStorageDir)
 	if err != nil {
 		return err
 	}
 	w.apiKeys = auth.NewAPIKeyService(apiKeyStore, w.user)
 	if !options.AuthDisabled {
-		if err := w.user.InitDefaultAdmin(options.AdminPassword); err != nil {
+		if err := wikiInitDefaultAdmin(w.user, options.AdminPassword); err != nil {
 			return err
 		}
 	}
-	w.userResolver, err = auth.NewUserResolver(w.user)
+	w.userResolver, err = newWikiUserResolver(w.user)
 	if err != nil {
 		return err
 	}
 	if !options.AuthDisabled {
-		sessionStore, err := auth.NewSessionStore(authStorageDir)
+		sessionStore, err := newWikiSessionStore(authStorageDir)
 		if err != nil {
 			return err
 		}
@@ -219,7 +282,7 @@ func (w *Wiki) initAuth(options *WikiOptions) error {
 }
 
 func (w *Wiki) initOAuth(options *WikiOptions) error {
-	service, err := wikioauth.NewService(wikioauth.ServiceConfig{
+	service, err := newWikiOAuthService(wikioauth.ServiceConfig{
 		AuthService:         w.auth,
 		UserService:         w.user,
 		AccessTokenTimeout:  options.AccessTokenTimeout,
@@ -233,7 +296,7 @@ func (w *Wiki) initOAuth(options *WikiOptions) error {
 }
 
 func (w *Wiki) initCoreServices(_ *WikiOptions) error {
-	w.tree = tree.NewTreeServiceWithOptions(tree.TreeOptions{
+	w.tree = newWikiTreeService(tree.TreeOptions{
 		DataDir: w.workspace.DataDir,
 		RootDir: w.workspace.RootDir,
 	})
@@ -244,7 +307,7 @@ func (w *Wiki) initCoreServices(_ *WikiOptions) error {
 		"data_dir", w.workspace.DataDir,
 		"root_dir", w.workspace.RootDir,
 	)
-	service, err := workspacesync.NewService(workspacesync.ServiceOptions{
+	service, err := newWikiWorkspaceSync(workspacesync.ServiceOptions{
 		Enabled:                true,
 		DataDir:                w.workspace.DataDir,
 		RootDir:                w.workspace.RootDir,
@@ -278,21 +341,21 @@ func (w *Wiki) initCoreServices(_ *WikiOptions) error {
 }
 
 func (w *Wiki) initLinkService() error {
-	linksStore, err := links.NewLinksStore(w.storageDir)
+	linksStore, err := newWikiLinksStore(w.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to init links store: %w", err)
 	}
 	w.links = links.NewLinkServiceWithOptions(w.storageDir, w.tree, linksStore, links.LinkServiceOptions{
 		MarkdownLinkRootPrefix: w.markdownLinkRootPrefix,
 	})
-	if err := w.links.IndexAllPages(); err != nil {
+	if err := wikiLinksIndexAllPages(w.links); err != nil {
 		w.log.Warn("failed to index links on startup", "error", err)
 	}
 	return nil
 }
 
 func (w *Wiki) initTagsService() error {
-	tagsStore, err := tags.NewTagsStore(w.storageDir)
+	tagsStore, err := newWikiTagsStore(w.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to init tags store: %w", err)
 	}
@@ -301,7 +364,7 @@ func (w *Wiki) initTagsService() error {
 }
 
 func (w *Wiki) initPropertiesService() error {
-	propsStore, err := properties.NewPropertiesStore(w.storageDir)
+	propsStore, err := newWikiPropertiesStore(w.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to init properties store: %w", err)
 	}
@@ -312,35 +375,35 @@ func (w *Wiki) initPropertiesService() error {
 // bootstrapTagsAndProperties clears and rebuilds tag and property indexes in a single
 // parallel GetPages pass — avoids two sequential ReadPageRaw loops at startup.
 func (w *Wiki) bootstrapTagsAndProperties() {
-	if err := w.rebuildTagsAndProperties(); err != nil {
+	if err := wikiRebuildTagsProperties(w); err != nil {
 		w.log.Warn("failed to rebuild tags/properties during bootstrap", "error", err)
 	}
 }
 
 func (w *Wiki) rebuildTagsAndProperties() error {
-	if err := w.tags.ClearIndex(); err != nil {
+	if err := wikiTagsClearIndex(w.tags); err != nil {
 		return err
 	}
-	if err := w.props.ClearIndex(); err != nil {
+	if err := wikiPropertiesClearIndex(w.props); err != nil {
 		return err
 	}
 	var ids []tree.PageID
-	if err := w.tree.WalkNodes(func(id tree.PageID) error {
+	if err := wikiTreeWalkNodes(w.tree, func(id tree.PageID) error {
 		ids = append(ids, id)
 		return nil
 	}); err != nil {
 		return err
 	}
-	pages, errs := w.tree.GetPages(ids)
+	pages, errs := wikiTreeGetPages(w.tree, ids)
 	for i, page := range pages {
 		if errs[i] != nil {
 			w.log.Warn("skipping page during bootstrap", "pageID", ids[i].String(), "error", errs[i])
 			continue
 		}
-		if err := w.tags.IndexPageContent(page.ID, page.RawContent); err != nil {
+		if err := wikiTagsIndexPageContent(w.tags, page.ID, page.RawContent); err != nil {
 			w.log.Warn("failed to index tags", "pageID", page.ID, "error", err)
 		}
-		if err := w.props.IndexPageContent(page.ID, page.RawContent); err != nil {
+		if err := wikiPropsIndexPageContent(w.props, page.ID, page.RawContent); err != nil {
 			w.log.Warn("failed to index properties", "pageID", page.ID, "error", err)
 		}
 	}
@@ -349,7 +412,7 @@ func (w *Wiki) rebuildTagsAndProperties() error {
 
 func (w *Wiki) initSearch() error {
 	var err error
-	w.searchIndex, err = search.NewSQLiteIndex(w.storageDir)
+	w.searchIndex, err = newWikiSQLiteIndex(w.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to init search index: %w", err)
 	}
@@ -359,7 +422,7 @@ func (w *Wiki) initSearch() error {
 	go func() {
 		w.status.Start()
 		defer w.status.Finish()
-		if err := searchEffect.IndexAllPages(); err != nil {
+		if err := wikiSearchIndexAllPages(searchEffect); err != nil {
 			w.log.Warn("search bootstrap failed", "error", err)
 			w.status.Fail()
 		} else {
@@ -372,7 +435,7 @@ func (w *Wiki) initSearch() error {
 
 func (w *Wiki) initBranding() error {
 	var err error
-	w.branding, err = branding.NewBrandingService(w.storageDir)
+	w.branding, err = newWikiBrandingService(w.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to init branding service: %w", err)
 	}
@@ -387,14 +450,14 @@ func (w *Wiki) configureWorkspaceSyncRebuilder() {
 }
 
 func (w *Wiki) rebuildDerivedIndexes() error {
-	if err := w.links.IndexAllPages(); err != nil {
+	if err := wikiLinksIndexAllPages(w.links); err != nil {
 		return fmt.Errorf("rebuild links: %w", err)
 	}
-	if err := w.rebuildTagsAndProperties(); err != nil {
+	if err := wikiRebuildTagsProperties(w); err != nil {
 		return fmt.Errorf("rebuild tags/properties: %w", err)
 	}
 	searchEffect := pagesave.NewSearchIndexSideEffect(w.searchIndex, w.tree, w.log)
-	if err := searchEffect.IndexAllPages(); err != nil {
+	if err := wikiSearchIndexAllPages(searchEffect); err != nil {
 		return fmt.Errorf("rebuild search: %w", err)
 	}
 	return nil
@@ -416,13 +479,9 @@ func (w *Wiki) EnsureWelcomePage() error {
 		w.log.Info("Welcome page already exists, skipping creation")
 		return nil
 	}
-	o := w.newPageOrchestrator()
 	k := tree.NodeKindPage
 	systemUserID := tree.UserIDFromString(SYSTEM_USER_ID)
-	createOut, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, o, w.log).Execute(
-		context.Background(),
-		wikipages.CreatePageInput{UserID: systemUserID, Title: "Welcome to LeafWiki", Slug: "welcome-to-leafwiki", Kind: &k},
-	)
+	createOut, err := wikiCreateWelcomePage(w, systemUserID, &k)
 	if err != nil {
 		return err
 	}
@@ -460,14 +519,11 @@ LeafWiki is a lightweight, self-hosted wiki for runbooks, internal docs, and tec
 
 For more information, visit the [LeafWiki GitHub repository](https://github.com/perber/leafwiki).
 `
-	current, err := w.tree.GetPage(p.ID)
+	current, err := wikiGetWelcomePage(w.tree, p.ID)
 	if err != nil {
 		return err
 	}
-	if _, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, o, w.log).Execute(
-		context.Background(),
-		wikipages.UpdatePageInput{UserID: systemUserID, ID: p.ID, Version: current.Version(), Title: p.Title, Slug: p.Slug, Content: &content, Kind: &k},
-	); err != nil {
+	if _, err := wikiUpdateWelcomePage(w, systemUserID, current, &content, &k); err != nil {
 		return err
 	}
 
@@ -515,24 +571,24 @@ func (w *Wiki) Close() error {
 		w.status.Finish()
 	}
 	if w.user != nil {
-		if err := w.user.Close(); err != nil {
+		if err := wikiCloseUserService(w.user); err != nil {
 			return err
 		}
 	}
 	if w.apiKeys != nil {
-		if err := w.apiKeys.Close(); err != nil {
+		if err := wikiCloseAPIKeyService(w.apiKeys); err != nil {
 			return err
 		}
 	}
 
 	if w.links != nil {
-		if err := w.links.Close(); err != nil {
+		if err := wikiCloseLinksService(w.links); err != nil {
 			w.log.Error("error closing links", "error", err)
 		}
 	}
 
 	if w.searchIndex != nil {
-		return w.searchIndex.Close()
+		return wikiCloseSearchIndex(w.searchIndex)
 	}
 	return nil
 }

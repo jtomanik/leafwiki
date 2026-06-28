@@ -19,7 +19,7 @@ type ConvertPageInput struct {
 
 // ConvertPageUseCase converts a page to a different node kind (page ↔ section).
 type ConvertPageUseCase struct {
-	tree         *tree.TreeService
+	tree         convertPageTree
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
 }

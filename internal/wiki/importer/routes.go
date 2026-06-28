@@ -2,6 +2,7 @@ package importer
 
 import (
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,15 @@ import (
 )
 
 const importMaxUploadSize = 500 << 20 // 500 MiB
+
+var (
+	openImporterUploadFile = func(fh *multipart.FileHeader) (multipart.File, error) {
+		return fh.Open()
+	}
+	closeImporterUploadFile = func(file multipart.File) error {
+		return file.Close()
+	}
+)
 
 // Routes is the RouteRegistrar for the importer domain.
 type Routes struct {
@@ -91,13 +101,13 @@ func (r *Routes) handleCreatePlan(c *gin.Context) {
 		respondWithImporterStatusError(c, http.StatusBadRequest, ErrCodeImporterMissingFile, "Missing file", "missing file")
 		return
 	}
-	file, err := fh.Open()
+	file, err := openImporterUploadFile(fh)
 	if err != nil {
 		respondWithImporterStatusError(c, http.StatusBadRequest, ErrCodeImporterFileOpenFailed, "Failed to open uploaded file", "failed to open uploaded file")
 		return
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
+		if err := closeImporterUploadFile(file); err != nil {
 			r.log.Error("could not close uploaded import file", "error", err)
 		}
 	}()

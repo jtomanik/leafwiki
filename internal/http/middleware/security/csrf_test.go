@@ -3,16 +3,17 @@ package security
 import (
 	"crypto/tls"
 	"encoding/json"
+	. "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-func TestCSRFMiddleware_AllowsSafeMethodsWithoutToken(t *testing.T) {
+var _ = It("TestCSRFMiddleware_AllowsSafeMethodsWithoutToken", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	csrf := NewCSRFCookie(false, time.Hour)
@@ -31,9 +32,11 @@ func TestCSRFMiddleware_AllowsSafeMethodsWithoutToken(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for GET without CSRF, got %d", w.Code)
 	}
-}
 
-func TestCSRFMiddleware_BlocksPostWithoutCookie(t *testing.T) {
+})
+
+var _ = It("TestCSRFMiddleware_BlocksPostWithoutCookie", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	csrf := NewCSRFCookie(false, time.Hour)
@@ -55,9 +58,11 @@ func TestCSRFMiddleware_BlocksPostWithoutCookie(t *testing.T) {
 	}
 
 	assertCSRFStructuredError(t, w, "csrf_token_missing", "errors.csrf.token_missing", "CSRF token missing")
-}
 
-func TestCSRFMiddleware_BlocksPostWithCookieButNoHeader(t *testing.T) {
+})
+
+var _ = It("TestCSRFMiddleware_BlocksPostWithCookieButNoHeader", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	csrf := NewCSRFCookie(false, time.Hour)
@@ -84,9 +89,11 @@ func TestCSRFMiddleware_BlocksPostWithCookieButNoHeader(t *testing.T) {
 	}
 
 	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
-}
 
-func TestCSRFMiddleware_BlocksPostWithMismatchingTokens(t *testing.T) {
+})
+
+var _ = It("TestCSRFMiddleware_BlocksPostWithMismatchingTokens", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	csrf := NewCSRFCookie(false, time.Hour)
@@ -114,9 +121,11 @@ func TestCSRFMiddleware_BlocksPostWithMismatchingTokens(t *testing.T) {
 	}
 
 	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
-}
 
-func TestCSRFMiddleware_AllowsPostWithMatchingTokens(t *testing.T) {
+})
+
+var _ = It("TestCSRFMiddleware_AllowsPostWithMatchingTokens", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	csrf := NewCSRFCookie(false, time.Hour)
@@ -143,9 +152,41 @@ func TestCSRFMiddleware_AllowsPostWithMatchingTokens(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for POST with valid CSRF, got %d", w.Code)
 	}
+
+})
+
+var _ = It("allows trusted private-channel POST requests without a CSRF token", func() {
+	t := GinkgoT()
+	gin.SetMode(gin.TestMode)
+
+	csrf := NewCSRFCookie(false, time.Hour)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		TrustPrivateChannel(c)
+		c.Next()
+	})
+	router.Use(CSRFMiddleware(csrf))
+	router.POST("/private", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest("POST", "/private", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204 for trusted private channel without CSRF, got %d: %s", w.Code, w.Body.String())
+	}
+})
+
+type securityTestTB interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }
 
-func assertCSRFStructuredError(t *testing.T, rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+func assertCSRFStructuredError(t securityTestTB, rec *httptest.ResponseRecorder, code string, messageID string, message string) {
 	t.Helper()
 	var body struct {
 		Error struct {

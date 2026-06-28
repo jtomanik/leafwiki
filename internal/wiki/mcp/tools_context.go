@@ -52,12 +52,16 @@ func (depth treeDisplayDepth) ChildDepth() treeDisplayDepth {
 
 func (r *Routes) registerContextTools(server *sdkmcp.Server, opts httpinternal.RouterOptions) {
 	addRequestTypedTool[getContextInput, contextOutput](server, toolGetContext, func(ctx context.Context, req *sdkmcp.CallToolRequest, in getContextInput) (contextOutput, error) {
-		actor, err := r.actorForRequest(req)
-		if err != nil {
-			return contextOutput{}, err
-		}
-		return r.getContext(ctx, req, toolActor{ID: actor.ID, User: actor}, opts, in)
+		return r.getContextTool(ctx, req, opts, in)
 	})
+}
+
+func (r *Routes) getContextTool(ctx context.Context, req *sdkmcp.CallToolRequest, opts httpinternal.RouterOptions, in getContextInput) (contextOutput, error) {
+	actor, err := r.actorForRequest(req)
+	if err != nil {
+		return contextOutput{}, err
+	}
+	return r.getContext(ctx, req, toolActor{ID: actor.ID, User: actor}, opts, in)
 }
 
 func (r *Routes) getContext(ctx context.Context, req *sdkmcp.CallToolRequest, actor toolActor, opts httpinternal.RouterOptions, in getContextInput) (contextOutput, error) {
@@ -303,14 +307,14 @@ func (r *Routes) changesSinceCommit(ctx context.Context, status workspacesync.Sy
 	}
 	changes := []recentChangeOutput{}
 	cursor := workspacesync.CommitHashFromString("")
-	for len(changes) < maxContextDeltaSnapshots {
+	for {
 		remaining := maxContextDeltaSnapshots - len(changes)
-		pageSize := 50
-		if remaining < pageSize {
-			pageSize = remaining
-		}
+		pageSize := contextSnapshotPageSize(remaining)
 		page, err := r.listWorkspaceSnapshots(ctx, cursor, workspacesync.SnapshotLimit(pageSize))
 		if err != nil {
+			return changes, false
+		}
+		if len(page.Snapshots) == 0 {
 			return changes, false
 		}
 		for _, snapshot := range page.Snapshots {
@@ -327,7 +331,13 @@ func (r *Routes) changesSinceCommit(ctx context.Context, status workspacesync.Sy
 		}
 		cursor = page.NextCursor
 	}
-	return changes, false
+}
+
+func contextSnapshotPageSize(remaining int) int {
+	if remaining < 50 {
+		return remaining
+	}
+	return 50
 }
 
 func (r *Routes) recentChangeFromSnapshot(status workspacesync.SyncStatus, snapshot workspacesync.Snapshot) recentChangeOutput {
@@ -383,11 +393,6 @@ func (r *Routes) pageIDForMarkdownPath(markdownPath string) tree.PageID {
 		}
 	}
 	if path.Base(trimmed) == "README.md" {
-		if readmeRoutePath, err := tree.CleanMarkdownPath(trimmed).RoutePath().Validate(); err == nil {
-			if page, err := r.treeService.FindPageByRoutePathAndKind(readmeRoutePath, tree.NodeKindPage); err == nil && page != nil {
-				return page.ID
-			}
-		}
 		sectionRouteRaw := strings.Trim(path.Dir(trimmed), ".")
 		var sectionRoute tree.RoutePath
 		if sectionRouteRaw != "" {
@@ -425,11 +430,7 @@ func (r *Routes) pageIDForRecentChangeRoute(routePath tree.RoutePath, kind tree.
 	if page, err := r.treeService.FindPageByRoutePath(routePath); err == nil {
 		return page.ID
 	}
-	page, err := r.treeService.FindPageByRoutePathAndKind(routePath, tree.NodeKindSection)
-	if err != nil || page == nil {
-		return ""
-	}
-	return page.ID
+	return ""
 }
 
 func (r *Routes) validationFromSyncStatus(status workspacesync.SyncStatus) validationOutput {
@@ -600,9 +601,6 @@ func redactWorkspacePath(text string, rawPath string, label string) string {
 	variants := []string{clean, filepath.ToSlash(clean)}
 	out := text
 	for _, variant := range variants {
-		if variant == "" || variant == "." || variant == string(filepath.Separator) {
-			continue
-		}
 		out = strings.ReplaceAll(out, variant, label)
 	}
 	return out

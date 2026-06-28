@@ -10,8 +10,10 @@ import (
 
 const watcherDebounce = 250 * time.Millisecond
 
+var workspacesyncNewFSWatcher = fswatcher.New
+
 func newFileWatcher(rootDir string) (fileWatcher, error) {
-	watcher, err := fswatcher.New(
+	watcher, err := workspacesyncNewFSWatcher(
 		fswatcher.WithCooldown(watcherDebounce),
 		fswatcher.WithPath(
 			rootDir,

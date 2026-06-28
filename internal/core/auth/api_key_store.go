@@ -54,7 +54,7 @@ func (s *APIKeyStore) Connect() error {
 	if s.db != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", databasePath(s.storageDir, s.dbFilename))
+	db, err := authSQLOpen("sqlite", databasePath(s.storageDir, s.dbFilename))
 	if err != nil {
 		return err
 	}
@@ -114,19 +114,21 @@ func (s *APIKeyStore) CreateAPIKey(key *APIKey, secretHash string) error {
 	if err := s.Connect(); err != nil {
 		return err
 	}
-	scopes, err := json.Marshal(key.Scopes)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`
+	scopes := encodeAPIKeyScopes(key.Scopes)
+	_, err := s.db.Exec(`
 		INSERT INTO api_keys (
 			id, user_id, name, secret_hash, prefix, last4, scopes,
 			created_by_user_id, created_at, last_used_at, revoked_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL);
-	`, key.ID, key.UserID, key.Name, secretHash, key.Prefix, key.Last4, string(scopes),
+	`, key.ID, key.UserID, key.Name, secretHash, key.Prefix, key.Last4, scopes,
 		key.CreatedByUserID, key.CreatedAt.Unix())
 	return err
+}
+
+func encodeAPIKeyScopes(scopes []string) string {
+	encoded, _ := json.Marshal(scopes)
+	return string(encoded)
 }
 
 func (s *APIKeyStore) ListActiveAPIKeys(userID UserID) ([]*APIKey, error) {
@@ -147,7 +149,7 @@ func (s *APIKeyStore) ListActiveAPIKeys(userID UserID) ([]*APIKey, error) {
 		return nil, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil {
+		if err := authCloseRows(rows); err != nil {
 			slog.Default().Error("could not close api key rows", "error", err)
 		}
 	}()

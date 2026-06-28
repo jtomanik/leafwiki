@@ -154,15 +154,7 @@ func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup Readm
 		if pageErr != nil {
 			return nil, true, pageErr
 		}
-		if !fallback.TryPage {
-			return nil, true, tree.ErrPageNotFound
-		}
-		pageRoute, err := ValidatePageRoutePath(fallback.PageRoute)
-		if err != nil {
-			return nil, true, err
-		}
-		out, err := lookup.FindByPath(FindByPathInput{RoutePath: pageRoute, Kind: tree.NodeKindPage})
-		return out, true, err
+		return nil, true, tree.ErrPageNotFound
 	}
 	if fallback.SectionRoute == "" {
 		page, err := lookup.RootPage()
@@ -171,10 +163,7 @@ func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup Readm
 		}
 		return &FindByPathOutput{Page: page}, true, nil
 	}
-	sectionRoute, err := ValidatePageRoutePath(fallback.SectionRoute)
-	if err != nil {
-		return nil, true, err
-	}
+	sectionRoute, _ := ValidatePageRoutePath(fallback.SectionRoute)
 	out, err := lookup.FindByPath(FindByPathInput{RoutePath: sectionRoute, Kind: tree.NodeKindSection})
 	return out, true, err
 }

@@ -2,6 +2,7 @@ package localization
 
 import (
 	"fmt"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -74,7 +75,7 @@ func catalogIDsFromCommittedCatalog() (map[string]struct{}, error) {
 }
 
 func committedCatalog() (map[string]catalogMessage, error) {
-	data, err := localeFS.ReadFile("locales/active.en.toml")
+	data, err := fs.ReadFile(localeFS, "locales/active.en.toml")
 	if err != nil {
 		return nil, fmt.Errorf("read English catalog: %w", err)
 	}

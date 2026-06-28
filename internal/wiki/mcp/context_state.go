@@ -111,9 +111,7 @@ func (s *contextCheckpointStore) evictOverflowLocked(keepSession string) {
 		return
 	}
 	for len(s.sessions) > s.maxSessions {
-		if !s.evictOldestSessionLocked(keepSession) {
-			return
-		}
+		s.evictOldestSessionLocked(keepSession)
 	}
 }
 

@@ -2,15 +2,16 @@ package frontd
 
 import (
 	"errors"
+	. "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute(t *testing.T) {
+var _ = It("TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute", func() {
+	t := GinkgoT()
 	var seen struct {
 		path         string
 		token        string
@@ -51,9 +52,11 @@ func TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute(t *testing.T) {
 	if route.WorkspaceID != workspaceid.WorkspaceID("docs") || route.Upstream != "http://127.0.0.1:49152" || route.PrivateMCPURL != "http://127.0.0.1:49152/mcp" {
 		t.Fatalf("route = %#v", route)
 	}
-}
 
-func TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure(t *testing.T) {
+})
+
+var _ = It("TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure", func() {
+	t := GinkgoT()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("invalid workspace ID unexpectedly reached wikid: %s", req.URL.Path)
 	}))
@@ -68,9 +71,11 @@ func TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure(t *testing.
 	if !errors.Is(err, ErrWorkspaceNotFound) {
 		t.Fatalf("resolve error = %v, want ErrWorkspaceNotFound", err)
 	}
-}
 
-func TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath(t *testing.T) {
+})
+
+var _ = It("TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath", func() {
+	t := GinkgoT()
 	var seen struct {
 		path         string
 		originalPath string
@@ -100,9 +105,11 @@ func TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath(t *testing.T) {
 	if seen.path != "/__leafwiki/workspaces" || seen.originalPath != "/mcp" {
 		t.Fatalf("resolver request path/original = %q/%q", seen.path, seen.originalPath)
 	}
-}
 
-func TestWikidSingleWorkspaceResolverRejectsAmbiguousWorkspaceList(t *testing.T) {
+})
+
+var _ = It("TestWikidSingleWorkspaceResolverRejectsAmbiguousWorkspaceList", func() {
+	t := GinkgoT()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"},{"id":"docs"}]}`))
@@ -118,31 +125,30 @@ func TestWikidSingleWorkspaceResolverRejectsAmbiguousWorkspaceList(t *testing.T)
 	if err != ErrWorkspaceAmbiguous {
 		t.Fatalf("err = %v, want %v", err, ErrWorkspaceAmbiguous)
 	}
+
+})
+
+type workspaceResolverAccessErrorCase struct {
+	code int
+	want error
 }
 
-func TestWikidWorkspaceResolverMapsAccessErrors(t *testing.T) {
-	tests := []struct {
-		name string
-		code int
-		want error
-	}{
-		{name: "not found", code: http.StatusNotFound, want: ErrWorkspaceNotFound},
-		{name: "forbidden", code: http.StatusForbidden, want: ErrWorkspaceForbidden},
+var _ = DescribeTable("TestWikidWorkspaceResolverMapsAccessErrors",
+	func(tt workspaceResolverAccessErrorCase) {
+	t := GinkgoT()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(tt.code)
+	}))
+	defer upstream.Close()
+	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
+	if err != nil {
+		t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				w.WriteHeader(tt.code)
-			}))
-			defer upstream.Close()
-			resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
-			if err != nil {
-				t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
-			}
-			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
-			if err != tt.want {
-				t.Fatalf("err = %v, want %v", err, tt.want)
-			}
-		})
+	_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
+	if err != tt.want {
+		t.Fatalf("err = %v, want %v", err, tt.want)
 	}
-}
+},
+	Entry("not found", workspaceResolverAccessErrorCase{code: http.StatusNotFound, want: ErrWorkspaceNotFound}),
+	Entry("forbidden", workspaceResolverAccessErrorCase{code: http.StatusForbidden, want: ErrWorkspaceForbidden}),
+)

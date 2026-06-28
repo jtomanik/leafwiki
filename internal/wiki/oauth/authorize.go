@@ -11,7 +11,6 @@ import (
 	"github.com/ory/fosite"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
-	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
 type fixedClientRedirectContextKey struct{}
@@ -42,7 +41,7 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			return
 		}
 
-		approvalValues, approvalKey, err := authorizeApprovalValues(c.Request)
+		approvalValues, approvalKey, err := oauthAuthorizeApprovalValues(c.Request)
 		if err != nil {
 			r.redirectAuthorizeError(c, redirectURI, state, fosite.ErrInvalidRequest)
 			return
@@ -73,7 +72,7 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 		session := newFositeSession(user.ID, user.Username)
 		req.SetSession(session)
 		req.GrantScope(ScopeMCP)
-		info, err := r.service.fositeProvider.NewAuthorizeResponse(c.Request.Context(), req, session)
+		info, err := oauthNewAuthorizeResponse(r.service.fositeProvider, c.Request.Context(), req, session)
 		if err != nil {
 			r.redirectAuthorizeError(c, redirectURI, state, err)
 			return
@@ -83,7 +82,7 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 }
 
 func (r *Routes) currentWebUser(c *gin.Context, ctx httpinternal.RouterContext) *coreauth.User {
-	user, err := authmw.ResolveRequestUser(c, r.service.auth, ctx.AuthCookies, false)
+	user, err := oauthResolveRequestUser(c, r.service.auth, ctx.AuthCookies, false)
 	if err != nil {
 		return nil
 	}
@@ -99,7 +98,7 @@ func (s *Service) newAuthorizeRequest(req *http.Request, redirectURI, state stri
 		ctx := context.WithValue(req.Context(), fixedClientRedirectContextKey{}, redirectURI)
 		parseRequest = req.WithContext(ctx)
 	}
-	return s.fositeProvider.NewAuthorizeRequest(parseRequest.Context(), parseRequest)
+	return oauthNewAuthorizeRequest(s.fositeProvider, parseRequest.Context(), parseRequest)
 }
 
 func (r *Routes) validateAuthorizeRequest(req *http.Request, ar fosite.AuthorizeRequester, basePath string) error {

@@ -33,9 +33,6 @@ func NormalizeMarkdownLinkRootPrefix(value string) (string, error) {
 		return "", fmt.Errorf("markdown link root prefix must not contain query or fragment")
 	}
 	prefix := parsed.Path
-	if prefix == "" {
-		return "", nil
-	}
 	for _, segment := range strings.Split(prefix, "/") {
 		if segment == ".." {
 			return "", fmt.Errorf("markdown link root prefix must not traverse directories")

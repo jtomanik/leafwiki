@@ -12,6 +12,15 @@ import (
 var errDataDirLockHeld = errors.New("data directory is already in use")
 var errRootDirLockHeld = errors.New("root directory is already in use")
 
+var (
+	filepathAbsFn          = filepath.Abs
+	lockDataDirFileFn      = lockDataDirFile
+	unlockDataDirFileFn    = unlockDataDirFile
+	closeDataDirLockFileFn = func(file *os.File) error {
+		return file.Close()
+	}
+)
+
 func IsDataDirLockHeld(err error) bool {
 	return errors.Is(err, errDataDirLockHeld)
 }
@@ -50,7 +59,7 @@ func AcquireRootDirLock(rootDir string) (*DataDirLock, error) {
 }
 
 func canonicalLockSubject(path string) (string, error) {
-	abs, err := filepath.Abs(path)
+	abs, err := filepathAbsFn(path)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +78,7 @@ func acquirePathLock(lockPath, subject, label string, heldErr error) (*DataDirLo
 	if err != nil {
 		return nil, fmt.Errorf("open %s lock: %w", label, err)
 	}
-	if err := lockDataDirFile(file); err != nil {
+	if err := lockDataDirFileFn(file); err != nil {
 		_ = file.Close()
 		if errors.Is(err, errDataDirLockHeld) {
 			return nil, fmt.Errorf("%w: %s", heldErr, subject)
@@ -98,10 +107,10 @@ func (l *DataDirLock) Release() error {
 		label = "data directory"
 	}
 	var unlockErr error
-	if err := unlockDataDirFile(file); err != nil {
+	if err := unlockDataDirFileFn(file); err != nil {
 		unlockErr = fmt.Errorf("release %s lock: %w", label, err)
 	}
-	if err := file.Close(); err != nil && unlockErr == nil {
+	if err := closeDataDirLockFileFn(file); err != nil && unlockErr == nil {
 		unlockErr = fmt.Errorf("close %s lock: %w", label, err)
 	}
 	return unlockErr

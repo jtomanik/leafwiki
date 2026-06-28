@@ -1,14 +1,15 @@
 package frontd
 
 import (
+	. "github.com/onsi/ginkgo/v2"
 	"net/http"
-	"testing"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-func TestWorkspaceRouterProxyUsesSemanticWorkspaceID(t *testing.T) {
+var _ = It("TestWorkspaceRouterProxyUsesSemanticWorkspaceID", func() {
+	t := GinkgoT()
 	routeID, upstreamPath, ok := parseWorkspaceAPIPath("/api/workspaces/home/tree")
 	if !ok {
 		t.Fatal("parseWorkspaceAPIPath did not parse workspace route")
@@ -32,4 +33,5 @@ func TestWorkspaceRouterProxyUsesSemanticWorkspaceID(t *testing.T) {
 	if opts.Resolve == nil || opts.Actor == nil {
 		t.Fatal("typed workspace callbacks were not assigned")
 	}
-}
+
+})

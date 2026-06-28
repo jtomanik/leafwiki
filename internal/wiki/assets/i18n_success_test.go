@@ -1,11 +1,12 @@
 package assets
 
-import "testing"
+import (
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
 
-func TestAssetDeleteSuccessMessageRendersFromCatalog(t *testing.T) {
-	t.Parallel()
-
-	if got := apiSuccessMessage(MessageIDAssetDeleteSuccess); got != "Asset deleted" {
-		t.Fatalf("apiSuccessMessage = %q, want Asset deleted", got)
-	}
-}
+var _ = ginkgo.Describe("asset i18n", func() {
+	ginkgo.It("TestAssetDeleteSuccessMessageRendersFromCatalog", func() {
+		Expect(apiSuccessMessage(MessageIDAssetDeleteSuccess)).To(Equal("Asset deleted"))
+	})
+})

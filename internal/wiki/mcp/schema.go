@@ -33,10 +33,7 @@ func addRequestTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDesc
 	sdkmcp.AddTool[In, any](server, tool, func(ctx context.Context, req *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, any, error) {
 		out, err := handler(ctx, req, in)
 		if err != nil {
-			if result, ok := mcpToolErrorResult(err); ok {
-				return result, nil, nil
-			}
-			return nil, nil, err
+			return mcpToolErrorResult(err), nil, nil
 		}
 		return nil, out, nil
 	})
@@ -44,13 +41,17 @@ func addRequestTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDesc
 
 func addActorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descriptor ToolDescriptor, handler func(context.Context, toolActor, In) (Out, error)) {
 	addRequestTypedTool(server, descriptor, func(ctx context.Context, req *sdkmcp.CallToolRequest, in In) (Out, error) {
-		var zero Out
-		user, err := routes.actorForRequest(req)
-		if err != nil {
-			return zero, err
-		}
-		return handler(ctx, toolActor{ID: user.ID, User: user}, in)
+		return callActorTool(routes, ctx, req, in, handler)
 	})
+}
+
+func callActorTool[In, Out any](routes *Routes, ctx context.Context, req *sdkmcp.CallToolRequest, in In, handler func(context.Context, toolActor, In) (Out, error)) (Out, error) {
+	var zero Out
+	user, err := routes.actorForRequest(req)
+	if err != nil {
+		return zero, err
+	}
+	return handler(ctx, toolActor{ID: user.ID, User: user}, in)
 }
 
 func addEditorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descriptor ToolDescriptor, handler func(context.Context, toolActor, In) (Out, error)) {

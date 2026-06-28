@@ -1,17 +1,18 @@
 package oauth
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"testing"
 	"time"
 
 	"github.com/ory/fosite"
 )
 
-func TestNewServiceConstructsFositeBackedService(t *testing.T) {
+var _ = ginkgo.It("TestNewServiceConstructsFositeBackedService", func() {
+	t := ginkgo.GinkgoT()
 	service, err := NewService(ServiceConfig{
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
@@ -36,9 +37,11 @@ func TestNewServiceConstructsFositeBackedService(t *testing.T) {
 	if got := client.GetID(); got != ClientID {
 		t.Fatalf("fixed client ID = %q, want %q", got, ClientID)
 	}
-}
 
-func TestNewAuthorizeRequestUsesFositeValidationWithFixedRedirectAdapter(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestNewAuthorizeRequestUsesFositeValidationWithFixedRedirectAdapter", func() {
+	t := ginkgo.GinkgoT()
 	service, err := NewService(ServiceConfig{
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
@@ -74,7 +77,8 @@ func TestNewAuthorizeRequestUsesFositeValidationWithFixedRedirectAdapter(t *test
 	if got := client.GetRedirectURIs(); len(got) != 0 {
 		t.Fatalf("fixed client persisted redirect URIs = %#v, want empty fixed-client adapter state", got)
 	}
-}
+
+})
 
 func validAuthorizeRequestValues(redirectURI string) url.Values {
 	return url.Values{

@@ -43,7 +43,7 @@ func (f *UserStore) Connect() error {
 	if f.db != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", databasePath(f.storageDir, f.dbFilename))
+	db, err := authSQLOpen("sqlite", databasePath(f.storageDir, f.dbFilename))
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (f *UserStore) GetAllUsers() ([]*User, error) {
 		return nil, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil {
+		if err := authCloseRows(rows); err != nil {
 			slog.Default().Error("could not close rows", "error", err)
 		}
 	}()

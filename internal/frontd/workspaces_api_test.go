@@ -1,16 +1,17 @@
 package frontd
 
 import (
+	. "github.com/onsi/ginkgo/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
-func TestWorkspacesAPIForwardsListStatusAndEnsureToWikid(t *testing.T) {
+var _ = It("TestWorkspacesAPIForwardsListStatusAndEnsureToWikid", func() {
+	t := GinkgoT()
 	var seen []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		seen = append(seen, req.Method+" "+req.URL.Path+" "+req.Header.Get(projectdaemon.ControlTokenHeader))
@@ -42,9 +43,11 @@ func TestWorkspacesAPIForwardsListStatusAndEnsureToWikid(t *testing.T) {
 			t.Fatalf("%s %s forwarded = %q, want %q", tc.method, tc.path, got, tc.want)
 		}
 	}
-}
 
-func TestWorkspacesAPIOverwritesSpoofedOriginalRequestHeaders(t *testing.T) {
+})
+
+var _ = It("TestWorkspacesAPIOverwritesSpoofedOriginalRequestHeaders", func() {
+	t := GinkgoT()
 	var seen struct {
 		method string
 		path   string
@@ -78,9 +81,11 @@ func TestWorkspacesAPIOverwritesSpoofedOriginalRequestHeaders(t *testing.T) {
 	if seen.method != http.MethodPost || seen.path != "/api/workspaces/home/ensure" || seen.remote != "198.51.100.7:1234" {
 		t.Fatalf("original headers = method %q path %q remote %q", seen.method, seen.path, seen.remote)
 	}
-}
 
-func TestWorkspacesAPIRejectsUnsupportedWorkspaceAPIShape(t *testing.T) {
+})
+
+var _ = It("TestWorkspacesAPIRejectsUnsupportedWorkspaceAPIShape", func() {
+	t := GinkgoT()
 	handler, err := NewWorkspacesAPI("http://127.0.0.1:1", "daemon-token")
 	if err != nil {
 		t.Fatalf("NewWorkspacesAPI failed: %v", err)
@@ -93,4 +98,5 @@ func TestWorkspacesAPIRejectsUnsupportedWorkspaceAPIShape(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
-}
+
+})

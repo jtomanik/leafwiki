@@ -1,14 +1,15 @@
 package plantrace
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"testing"
 )
 
-func TestFositeOAuthMigrationDocsPointAtImplementedVerifier(t *testing.T) {
+var _ = ginkgo.It("TestFositeOAuthMigrationDocsPointAtImplementedVerifier", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := fositeOAuthMigrationRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "fosite-oauth-migration.PLAN.md"))
 	if err != nil {
@@ -28,9 +29,11 @@ func TestFositeOAuthMigrationDocsPointAtImplementedVerifier(t *testing.T) {
 			t.Fatalf("Fosite OAuth migration plan does not document implemented verifier location: missing %q", required)
 		}
 	}
-}
 
-func TestFositeOAuthMigrationDiscoveryDocumentsV1VerifierContract(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeOAuthMigrationDiscoveryDocumentsV1VerifierContract", func() {
+	t := ginkgo.GinkgoT()
 	repoRoot := fositeOAuthMigrationRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "discovery", "fosite-oauth-migration.md"))
 	if err != nil {
@@ -55,9 +58,10 @@ func TestFositeOAuthMigrationDiscoveryDocumentsV1VerifierContract(t *testing.T) 
 			t.Fatalf("Fosite OAuth migration discovery does not document v1 verifier contract: missing %q", required)
 		}
 	}
-}
 
-func fositeOAuthMigrationRepoRoot(t *testing.T) string {
+})
+
+func fositeOAuthMigrationRepoRoot(t plantraceTestT) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

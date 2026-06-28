@@ -2,10 +2,12 @@ package pages
 
 import (
 	"strings"
-	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
-func TestReplaceMarkdownSection_ReplacesNestedHeadingPath(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_ReplacesNestedHeadingPath", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n## API\n\n### Auth\n\nold auth\n\n### Rate Limits\n\nkeep rate limits\n\n## Other\n\nkeep other\n"
 
 	got, err := ReplaceMarkdownSection(content, []string{"Guide", "API", "Auth"}, 0, "new auth\n")
@@ -25,9 +27,10 @@ func TestReplaceMarkdownSection_ReplacesNestedHeadingPath(t *testing.T) {
 	if strings.Contains(got, "old auth") {
 		t.Fatalf("content = %q, want old Auth body removed", got)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_IgnoresHeadingsInsideFencedCode(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_IgnoresHeadingsInsideFencedCode", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n```\n## API\nfake code heading\n```\n\n## API\n\nold api\n\n## Other\n\nkeep other\n"
 
 	got, err := ReplaceMarkdownSection(content, []string{"API"}, 0, "new api\n")
@@ -44,9 +47,10 @@ func TestReplaceMarkdownSection_IgnoresHeadingsInsideFencedCode(t *testing.T) {
 	if strings.Contains(got, "old api") {
 		t.Fatalf("content = %q, want old API body removed", got)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_IgnoresHeadingsInsideLongerFencedCode(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_IgnoresHeadingsInsideLongerFencedCode", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n````\n```go\n## API\nfake nested code heading\n```\n````\n\n## API\n\nold api\n"
 
 	got, err := ReplaceMarkdownSection(content, []string{"API"}, 0, "new api\n")
@@ -63,9 +67,10 @@ func TestReplaceMarkdownSection_IgnoresHeadingsInsideLongerFencedCode(t *testing
 	if strings.Contains(got, "old api") {
 		t.Fatalf("content = %q, want old API body removed", got)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_IgnoresHeadingsInsideIndentedCode(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_IgnoresHeadingsInsideIndentedCode", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n    ## API\n    fake indented code heading\n\n## API\n\nold api\n\n## Other\n\nkeep other\n"
 
 	got, err := ReplaceMarkdownSection(content, []string{"API"}, 0, "new api\n")
@@ -82,9 +87,10 @@ func TestReplaceMarkdownSection_IgnoresHeadingsInsideIndentedCode(t *testing.T) 
 	if strings.Contains(got, "old api") {
 		t.Fatalf("content = %q, want old API body removed", got)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_RequiresOccurrenceForAmbiguousHeading(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_RequiresOccurrenceForAmbiguousHeading", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n## Notes\n\nfirst\n\n## Notes\n\nsecond\n"
 
 	_, err := ReplaceMarkdownSection(content, []string{"Notes"}, 0, "new notes\n")
@@ -102,18 +108,20 @@ func TestReplaceMarkdownSection_RequiresOccurrenceForAmbiguousHeading(t *testing
 	if strings.Contains(got, "\nsecond") {
 		t.Fatalf("content = %q, want old second body removed", got)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_MissingHeadingErrorsWithoutContent(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_MissingHeadingErrorsWithoutContent", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n## API\n\nold api\n"
 
 	_, err := ReplaceMarkdownSection(content, []string{"Missing"}, 0, "new\n")
 	if err == nil || !strings.Contains(err.Error(), "heading_not_found") {
 		t.Fatalf("ReplaceMarkdownSection missing error = %v, want heading_not_found", err)
 	}
-}
+})
 
-func TestReplaceMarkdownSection_ReplacesWholeSectionWhenReplacementStartsWithSameLevelHeading(t *testing.T) {
+var _ = ginkgo.It("TestReplaceMarkdownSection_ReplacesWholeSectionWhenReplacementStartsWithSameLevelHeading", func() {
+	t := ginkgo.GinkgoT()
 	content := "# Guide\n\n## API\n\nold api\n\n## Other\n\nkeep other\n"
 
 	got, err := ReplaceMarkdownSection(content, []string{"API"}, 0, "## API\nnew api\n")
@@ -130,4 +138,4 @@ func TestReplaceMarkdownSection_ReplacesWholeSectionWhenReplacementStartsWithSam
 	if !strings.Contains(got, "## Other\n\nkeep other") {
 		t.Fatalf("content = %q, want next same-level section preserved", got)
 	}
-}
+})

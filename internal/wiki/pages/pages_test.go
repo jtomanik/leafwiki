@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -16,6 +17,12 @@ import (
 	"github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
+
+type pagesTestT interface {
+	Helper()
+	TempDir() string
+	Fatalf(format string, args ...any)
+}
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Refactor preview reports conflicts without mutating content
@@ -29,7 +36,7 @@ type testDeps struct {
 	assets     *assets.AssetService
 }
 
-func newTestDeps(t *testing.T) *testDeps {
+func newTestDeps(t pagesTestT) *testDeps {
 	t.Helper()
 	storageDir := t.TempDir()
 
@@ -105,7 +112,8 @@ func slug[T ~string](value T) tree.Slug {
 // CreatePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestCreatePageUseCase_HappyPath_Root(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_HappyPath_Root", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -124,9 +132,10 @@ func TestCreatePageUseCase_HappyPath_Root(t *testing.T) {
 	if out.Page.Slug != "home" {
 		t.Errorf("expected slug 'home', got %q", out.Page.Slug)
 	}
-}
+})
 
-func TestCreatePageUseCase_HappyPath_WithParent(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_HappyPath_WithParent", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -153,9 +162,10 @@ func TestCreatePageUseCase_HappyPath_WithParent(t *testing.T) {
 	if child.Page.Parent == nil || child.Page.Parent.ID != parent.Page.ID {
 		t.Errorf("expected parent ID %q, got %v", parent.Page.ID, child.Page.Parent)
 	}
-}
+})
 
-func TestCreatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_EmptyTitle_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -173,9 +183,10 @@ func TestCreatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
 	assertFieldErrorCode(t, ve, "title", "page_title_required", "validation.page.title_required")
-}
+})
 
-func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_ReservedSlug_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -193,11 +204,9 @@ func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
 	assertFieldErrorCode(t, ve, "slug", "page_slug_invalid", "validation.page.slug_invalid")
-}
+})
 
-func TestPageUseCaseInputsUseSemanticTypesAtBoundary(t *testing.T) {
-	t.Parallel()
-
+var _ = ginkgo.It("TestPageUseCaseInputsUseSemanticTypesAtBoundary", func() {
 	pageID := newFixturePageID("page-1")
 	parentID := newFixturePageID("parent-1")
 	version := newFixturePageVersion("version-1")
@@ -219,10 +228,10 @@ func TestPageUseCaseInputsUseSemanticTypesAtBoundary(t *testing.T) {
 	_ = pages.SuggestSlugInput{ParentID: parentID, CurrentID: pageID}
 	_ = pages.RefactorPreviewInput{PageID: pageID, Slug: slug, NewParentID: &parentID}
 	_ = pages.RefactorApplyInput{UserID: newFixtureUserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
-}
+})
 
-func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
-	t.Parallel()
+var _ = ginkgo.It("TestValidatePageMetadataInputReportsStableCodes", func() {
+	t := ginkgo.GinkgoT()
 
 	err := pages.ValidatePageMetadataInput(
 		[]string{" tag ", "unique", "UNIQUE"},
@@ -244,9 +253,9 @@ func TestValidatePageMetadataInputReportsStableCodes(t *testing.T) {
 	assertFieldErrorCode(t, ve, "properties.leafwiki_custom", "page_property_key_reserved", "validation.page.property_key_reserved_prefix")
 	assertFieldErrorCode(t, ve, "properties.tags", "page_property_key_reserved", "validation.page.property_key_reserved")
 	assertFieldErrorCode(t, ve, "properties.", "page_property_key_required", "validation.page.property_key_required")
-}
+})
 
-func assertFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
+func assertFieldErrorCode(t pagesTestT, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
 	t.Helper()
 
 	for _, err := range ve.Errors {
@@ -263,7 +272,8 @@ func assertFieldErrorCode(t *testing.T, ve *sharederrors.ValidationErrors, field
 	t.Fatalf("missing field error for %s in %#v", field, ve.Errors)
 }
 
-func TestCreatePageUseCase_NilKind_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_NilKind_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -276,9 +286,10 @@ func TestCreatePageUseCase_NilKind_ReturnsValidationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil kind, got nil")
 	}
-}
+})
 
-func TestCreatePageUseCase_Section_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_Section_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -294,13 +305,14 @@ func TestCreatePageUseCase_Section_HappyPath(t *testing.T) {
 	if out.Page.Kind != tree.NodeKindSection {
 		t.Errorf("expected kind %q, got %q", tree.NodeKindSection, out.Page.Kind)
 	}
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UpdatePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestUpdatePageUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -331,9 +343,10 @@ func TestUpdatePageUseCase_HappyPath(t *testing.T) {
 	if out.Page.Slug != "new-title" {
 		t.Errorf("expected slug 'new-title', got %q", out.Page.Slug)
 	}
-}
+})
 
-func TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -376,9 +389,10 @@ func TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testin
 	if !errors.Is(err, tree.ErrVersionConflict) {
 		t.Fatalf("expected tree.ErrVersionConflict, got %T: %v", err, err)
 	}
-}
+})
 
-func TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -403,9 +417,10 @@ func TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired(t *
 	if !errors.Is(err, tree.ErrVersionRequired) {
 		t.Fatalf("expected ErrVersionRequired when sending reserved version bypass value, got %v", err)
 	}
-}
+})
 
-func TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -420,13 +435,14 @@ func TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
 	}
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DeletePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestDeletePageUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
@@ -448,9 +464,10 @@ func TestDeletePageUseCase_HappyPath(t *testing.T) {
 	if _, err := deps.tree.GetPage(newFixturePageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
 		t.Errorf("expected page-not-found after delete, got %v", err)
 	}
-}
+})
 
-func TestDeletePageUseCase_Root_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_Root_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
@@ -460,9 +477,10 @@ func TestDeletePageUseCase_Root_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when deleting root, got nil")
 	}
-}
+})
 
-func TestDeletePageUseCase_WithChildren_Recursive(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_WithChildren_Recursive", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
@@ -480,13 +498,14 @@ func TestDeletePageUseCase_WithChildren_Recursive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error on recursive delete: %v", err)
 	}
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MovePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestMovePageUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
@@ -514,9 +533,10 @@ func TestMovePageUseCase_HappyPath(t *testing.T) {
 	if moved.Parent == nil || moved.Parent.ID != parent.Page.ID {
 		t.Errorf("expected parent %q after move, got %v", parent.Page.ID, moved.Parent)
 	}
-}
+})
 
-func TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
@@ -572,9 +592,10 @@ func TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError(t *testing.
 	if !errors.Is(err, tree.ErrVersionConflict) {
 		t.Fatalf("expected tree.ErrVersionConflict, got %T: %v", err, err)
 	}
-}
+})
 
-func TestMovePageUseCase_Root_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_Root_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
@@ -584,13 +605,14 @@ func TestMovePageUseCase_Root_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when moving root, got nil")
 	}
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConvertPageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestConvertPageUseCase_UsesOrchestratorWithMutationSource(t *testing.T) {
+var _ = ginkgo.It("TestConvertPageUseCase_UsesOrchestratorWithMutationSource", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	capture := &captureEffect{}
@@ -635,13 +657,14 @@ func TestConvertPageUseCase_UsesOrchestratorWithMutationSource(t *testing.T) {
 	if event.After.Kind != tree.NodeKindSection {
 		t.Fatalf("event after kind = %q, want section", event.After.Kind)
 	}
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EnsurePathUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestEnsurePathUseCase_CreatesNewPath(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_CreatesNewPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -657,9 +680,10 @@ func TestEnsurePathUseCase_CreatesNewPath(t *testing.T) {
 	if out.Page == nil {
 		t.Fatal("expected page in output, got nil")
 	}
-}
+})
 
-func TestEnsurePathUseCase_ExistingPath_ReturnsExistingPage(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_ExistingPath_ReturnsExistingPage", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -679,9 +703,10 @@ func TestEnsurePathUseCase_ExistingPath_ReturnsExistingPage(t *testing.T) {
 	if out1.Page.ID != out2.Page.ID {
 		t.Errorf("expected same page ID, got %q vs %q", out1.Page.ID, out2.Page.ID)
 	}
-}
+})
 
-func TestEnsurePathUseCase_CreatesPageTwinWhenSectionRouteExists(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_CreatesPageTwinWhenSectionRouteExists", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -739,9 +764,10 @@ func TestEnsurePathUseCase_CreatesPageTwinWhenSectionRouteExists(t *testing.T) {
 	if second.Page.ID != out.Page.ID {
 		t.Fatalf("second ensure returned page %q, want existing page twin %q", second.Page.ID, out.Page.ID)
 	}
-}
+})
 
-func TestEnsurePathUseCase_CreatesSectionTwinWhenPageRouteExists(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_CreatesSectionTwinWhenPageRouteExists", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -799,9 +825,10 @@ func TestEnsurePathUseCase_CreatesSectionTwinWhenPageRouteExists(t *testing.T) {
 	if second.Page.ID != out.Page.ID {
 		t.Fatalf("second ensure returned section %q, want existing section twin %q", second.Page.ID, out.Page.ID)
 	}
-}
+})
 
-func TestEnsurePathUseCase_EmptyPath_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_EmptyPath_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -811,9 +838,10 @@ func TestEnsurePathUseCase_EmptyPath_ReturnsValidationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error for empty path, got nil")
 	}
-}
+})
 
-func TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -828,13 +856,14 @@ func TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testing.T)
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
 	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GetPageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestGetPageUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestGetPageUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	getUC := pages.NewGetPageUseCase(deps.tree)
@@ -850,9 +879,10 @@ func TestGetPageUseCase_HappyPath(t *testing.T) {
 	if out.Page.ID != created.Page.ID {
 		t.Errorf("expected ID %q, got %q", created.Page.ID, out.Page.ID)
 	}
-}
+})
 
-func TestGetPageUseCase_NotFound_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestGetPageUseCase_NotFound_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	getUC := pages.NewGetPageUseCase(deps.tree)
 
@@ -860,9 +890,10 @@ func TestGetPageUseCase_NotFound_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent page, got nil")
 	}
-}
+})
 
-func TestCreatePageUseCase_ReservedHistorySlug_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_ReservedHistorySlug_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -875,9 +906,10 @@ func TestCreatePageUseCase_ReservedHistorySlug_ReturnsValidationError(t *testing
 	if err == nil {
 		t.Fatal("expected error for reserved history slug, got nil")
 	}
-}
+})
 
-func TestCreatePageUseCase_PageExists_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_PageExists_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -893,9 +925,10 @@ func TestCreatePageUseCase_PageExists_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected duplicate page error, got nil")
 	}
-}
+})
 
-func TestCreatePageUseCase_InvalidParent_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_InvalidParent_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	invalidID := "not-real"
@@ -906,9 +939,10 @@ func TestCreatePageUseCase_InvalidParent_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid parent error, got nil")
 	}
-}
+})
 
-func TestCreatePageUseCase_RejectsCaseInsensitiveSlugConflict(t *testing.T) {
+var _ = ginkgo.It("TestCreatePageUseCase_RejectsCaseInsensitiveSlugConflict", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
@@ -924,9 +958,10 @@ func TestCreatePageUseCase_RejectsCaseInsensitiveSlugConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected conflict for case-insensitive duplicate slug")
 	}
-}
+})
 
-func TestUpdatePageUseCase_AllowsUppercaseSlug(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_AllowsUppercaseSlug", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -954,9 +989,10 @@ func TestUpdatePageUseCase_AllowsUppercaseSlug(t *testing.T) {
 	if out.Page.Slug != "ABCD-efg" {
 		t.Fatalf("expected slug to be preserved, got %q", out.Page.Slug)
 	}
-}
+})
 
-func TestDeletePageUseCase_EmptyID_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_EmptyID_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
@@ -966,9 +1002,10 @@ func TestDeletePageUseCase_EmptyID_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when deleting empty page ID, got nil")
 	}
-}
+})
 
-func TestFindByPathUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestFindByPathUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	findUC := pages.NewFindByPathUseCase(deps.tree)
@@ -986,9 +1023,10 @@ func TestFindByPathUseCase_HappyPath(t *testing.T) {
 	if out.Page.Slug != "company" {
 		t.Errorf("expected slug 'company', got %q", out.Page.Slug)
 	}
-}
+})
 
-func TestFindByPathUseCase_NotFound_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestFindByPathUseCase_NotFound_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	findUC := pages.NewFindByPathUseCase(deps.tree)
 
@@ -996,9 +1034,10 @@ func TestFindByPathUseCase_NotFound_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid path, got nil")
 	}
-}
+})
 
-func TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testing.T) {
+var _ = ginkgo.It("TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	lookupUC := pages.NewLookupPagePathUseCase(deps.tree)
 
@@ -1013,9 +1052,10 @@ func TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationError(t *testin
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
 	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
-}
+})
 
-func TestSortPagesUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestSortPagesUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	sortUC := pages.NewSortPagesUseCase(deps.tree)
@@ -1046,9 +1086,10 @@ func TestSortPagesUseCase_HappyPath(t *testing.T) {
 	if sortedParent.Children[0].ID != child2.Page.ID || sortedParent.Children[1].ID != child1.Page.ID {
 		t.Errorf("expected order [%s, %s], got [%s, %s]", child2.Page.ID, child1.Page.ID, sortedParent.Children[0].ID, sortedParent.Children[1].ID)
 	}
-}
+})
 
-func TestSuggestSlugUseCase_Unique(t *testing.T) {
+var _ = ginkgo.It("TestSuggestSlugUseCase_Unique", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
 
@@ -1062,9 +1103,10 @@ func TestSuggestSlugUseCase_Unique(t *testing.T) {
 	if out.Slug != "my-page" {
 		t.Errorf("expected 'my-page', got %q", out.Slug)
 	}
-}
+})
 
-func TestSuggestSlugUseCase_Conflict(t *testing.T) {
+var _ = ginkgo.It("TestSuggestSlugUseCase_Conflict", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
@@ -1085,9 +1127,10 @@ func TestSuggestSlugUseCase_Conflict(t *testing.T) {
 	if out.Slug != "my-page-1" {
 		t.Errorf("expected 'my-page-1', got %q", out.Slug)
 	}
-}
+})
 
-func TestSuggestSlugUseCase_DeepHierarchy(t *testing.T) {
+var _ = ginkgo.It("TestSuggestSlugUseCase_DeepHierarchy", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
@@ -1132,9 +1175,10 @@ func TestSuggestSlugUseCase_DeepHierarchy(t *testing.T) {
 	if out2.Slug != "data-layer-1" {
 		t.Errorf("expected 'data-layer-1', got %q", out2.Slug)
 	}
-}
+})
 
-func TestCopyPageUseCase_HappyPath(t *testing.T) {
+var _ = ginkgo.It("TestCopyPageUseCase_HappyPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
@@ -1158,9 +1202,10 @@ func TestCopyPageUseCase_HappyPath(t *testing.T) {
 	if out.Page.ID == original.Page.ID {
 		t.Error("expected copied page to have a different ID")
 	}
-}
+})
 
-func TestCopyPageUseCase_WithParent(t *testing.T) {
+var _ = ginkgo.It("TestCopyPageUseCase_WithParent", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
@@ -1181,9 +1226,10 @@ func TestCopyPageUseCase_WithParent(t *testing.T) {
 	if out.Page.Parent == nil || out.Page.Parent.ID != parent.Page.ID {
 		t.Errorf("expected parent ID %q, got %v", parent.Page.ID, out.Page.Parent)
 	}
-}
+})
 
-func TestCopyPageUseCase_NonExistentSource_ReturnsError(t *testing.T) {
+var _ = ginkgo.It("TestCopyPageUseCase_NonExistentSource_ReturnsError", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
 
@@ -1193,9 +1239,10 @@ func TestCopyPageUseCase_NonExistentSource_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent source page, got nil")
 	}
-}
+})
 
-func TestCopyPageUseCase_WithAssets(t *testing.T) {
+var _ = ginkgo.It("TestCopyPageUseCase_WithAssets", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
@@ -1208,7 +1255,11 @@ func TestCopyPageUseCase_WithAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(file.Close, t)
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Fatalf("failed to close test file: %v", err)
+		}
+	}()
 
 	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.AssetName("image.png"), 1024); err != nil {
 		t.Fatalf("Failed to save asset for original page: %v", err)
@@ -1228,9 +1279,10 @@ func TestCopyPageUseCase_WithAssets(t *testing.T) {
 	if len(copiedAssets) != 1 {
 		t.Errorf("expected 1 asset for copied page, got %d", len(copiedAssets))
 	}
-}
+})
 
-func TestCopyPageUseCase_IndexesOutgoingLinksOnCreate(t *testing.T) {
+var _ = ginkgo.It("TestCopyPageUseCase_IndexesOutgoingLinksOnCreate", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1274,9 +1326,10 @@ func TestCopyPageUseCase_IndexesOutgoingLinksOnCreate(t *testing.T) {
 	if outgoing.Outgoings[0].ToPageID != target.Page.ID {
 		t.Fatalf("expected copied page link target %q, got %q", target.Page.ID, outgoing.Outgoings[0].ToPageID)
 	}
-}
+})
 
-func TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	effect := &captureEffect{}
 	orchestrator := pagesave.NewPageSaveOrchestrator(effect)
@@ -1310,9 +1363,10 @@ func TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 	if event.OldPath != "old" {
 		t.Fatalf("expected OldPath=old, got %q", event.OldPath)
 	}
-}
+})
 
-func TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	effect := &captureEffect{}
 	orchestrator := pagesave.NewPageSaveOrchestrator(effect)
@@ -1357,9 +1411,10 @@ func TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety(t *testing.T) {
 	if event.OldPath != "a/child" {
 		t.Fatalf("expected OldPath=a/child, got %q", event.OldPath)
 	}
-}
+})
 
-func TestPreviewPageRefactorUseCase_RenameListsAffectedPages(t *testing.T) {
+var _ = ginkgo.It("TestPreviewPageRefactorUseCase_RenameListsAffectedPages", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1402,9 +1457,10 @@ func TestPreviewPageRefactorUseCase_RenameListsAffectedPages(t *testing.T) {
 	if preview.AffectedPages[0].FromPageID != ref.Page.ID {
 		t.Fatalf("FromPageID = %q, want %q", preview.AffectedPages[0].FromPageID, ref.Page.ID)
 	}
-}
+})
 
-func TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPageLink(t *testing.T) {
+var _ = ginkgo.It("TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPageLink", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1442,9 +1498,10 @@ func TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPa
 	if preview.Counts.AffectedPages != 0 {
 		t.Fatalf("AffectedPages = %d, want 0: %#v", preview.Counts.AffectedPages, preview.AffectedPages)
 	}
-}
+})
 
-func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessPageLink(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessPageLink", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1492,9 +1549,10 @@ func TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessP
 	if refPage.Content != content {
 		t.Fatalf("ref content = %q, want unchanged %q", refPage.Content, content)
 	}
-}
+})
 
-func TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants(t *testing.T) {
+var _ = ginkgo.It("TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1563,9 +1621,10 @@ func TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants(t *t
 	if len(preview.AffectedPages) != 1 || preview.AffectedPages[0].FromPageID != pageRef.Page.ID {
 		t.Fatalf("affected pages = %#v, want only page ref %q", preview.AffectedPages, pageRef.Page.ID)
 	}
-}
+})
 
-func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealthy(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealthy", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1644,9 +1703,10 @@ func TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealt
 	if status.Counts.Outgoings != 1 || status.Outgoings[0].ToPageID != syncChild.Page.ID {
 		t.Fatalf("outgoings = %#v, want healthy link to child %q", status.Outgoings, syncChild.Page.ID)
 	}
-}
+})
 
-func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1706,9 +1766,10 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 		t.Fatalf("expected rewritten link to be healed")
 	}
 
-}
+})
 
-func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1767,15 +1828,20 @@ func TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks(t *t
 	if !sawRewriteBatch {
 		t.Fatalf("did not see orchestrated rewrite batch event; events = %#v", capture.events)
 	}
-}
+})
 
-func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	searchIndex, err := search.NewSQLiteIndex(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSQLiteIndex failed: %v", err)
 	}
-	defer test_utils.WrapCloseWithErrorCheck(searchIndex.Close, t)
+	defer func() {
+		if err := searchIndex.Close(); err != nil {
+			t.Fatalf("failed to close search index: %v", err)
+		}
+	}()
 
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1820,9 +1886,10 @@ func TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent(t *tes
 	if len(result.Items) != 1 || result.Items[0].PageID != ref.Page.ID {
 		t.Fatalf("search result = %#v, want rewritten ref page", result.Items)
 	}
-}
+})
 
-func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1871,10 +1938,11 @@ func TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks(t *tes
 	if refAfter.Content != refContent {
 		t.Fatalf("stale refactor rewrote incoming link content = %q, want %q", refAfter.Content, refContent)
 	}
-}
+})
 
 // - Refactor preview reports conflicts without mutating content
-func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -1927,9 +1995,10 @@ func TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks(t *t
 	if targetAfter.CalculatePath() != "/target" {
 		t.Fatalf("conflicting refactor moved target to %q, want /target", targetAfter.CalculatePath())
 	}
-}
+})
 
-func TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays(t *testing.T) {
+var _ = ginkgo.It("TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
@@ -1961,9 +2030,10 @@ func TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays(t *testing.T) {
 			t.Fatalf("affected page %d matched paths should be empty slice, got nil", i)
 		}
 	}
-}
+})
 
-func TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffectedPages(t *testing.T) {
+var _ = ginkgo.It("TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffectedPages", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2005,9 +2075,10 @@ func TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffecte
 	}
 
 	_ = pageB
-}
+})
 
-func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(t *testing.T) {
+var _ = ginkgo.It("TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2075,9 +2146,10 @@ func TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage(
 		t.Fatalf("expected outgoing link to remain valid after move refactor")
 	}
 
-}
+})
 
-func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
+var _ = ginkgo.It("TestEnsurePathUseCase_HealsLinksForAllCreatedSegments", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2159,9 +2231,10 @@ func TestEnsurePathUseCase_HealsLinksForAllCreatedSegments(t *testing.T) {
 	if gotXY == nil || gotXY.broken || gotXY.toPage == "" {
 		t.Fatalf("expected /x/y healed with ToPageID, got %#v", out2.Outgoings)
 	}
-}
+})
 
-func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_NonRecursive_MarksIncomingBroken", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2221,9 +2294,10 @@ func TestDeletePageUseCase_NonRecursive_MarksIncomingBroken(t *testing.T) {
 	if bl.Count != 0 {
 		t.Fatalf("expected 0 backlinks after delete, got %d", bl.Count)
 	}
-}
+})
 
-func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncomingByPrefix(t *testing.T) {
+var _ = ginkgo.It("TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncomingByPrefix", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2295,9 +2369,10 @@ func TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncoming
 	if got.ToPath != "/docs/b" || !got.Broken || got.ToPageID != "" {
 		t.Fatalf("unexpected outgoing after recursive delete: %#v", got)
 	}
-}
+})
 
-func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2357,9 +2432,10 @@ func TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath(t *testin
 	if got, ok := byPath["/b2"]; !ok || got.broken || got.toID != b.Page.ID {
 		t.Fatalf("expected /b2 healed to %q, got %#v", b.Page.ID, byPath)
 	}
-}
+})
 
-func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing.T) {
+var _ = ginkgo.It("TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2419,9 +2495,10 @@ func TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths(t *tes
 	if got, ok := byPath["/docs2/b"]; !ok || got.broken || got.toID != b.Page.ID {
 		t.Fatalf("expected /docs2/b healed to %q, got %#v", b.Page.ID, byPath)
 	}
-}
+})
 
-func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_MarksOldBroken_HealsNewExactPath", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2480,9 +2557,10 @@ func TestMovePageUseCase_MarksOldBroken_HealsNewExactPath(t *testing.T) {
 	if got := state["/projects/b"]; got.broken || got.toID != b.Page.ID {
 		t.Fatalf("expected /projects/b healed to %q, got %#v", b.Page.ID, state)
 	}
-}
+})
 
-func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2543,9 +2621,10 @@ func TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths(t *testing
 	if got := state["/archive/docs/b"]; got.broken || got.toID != b.Page.ID {
 		t.Fatalf("expected /archive/docs/b healed to %q, got %#v", b.Page.ID, state)
 	}
-}
+})
 
-func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
+var _ = ginkgo.It("TestMovePageUseCase_ReindexesRelativeLinks", func() {
+	t := ginkgo.GinkgoT()
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
@@ -2612,4 +2691,4 @@ func TestMovePageUseCase_ReindexesRelativeLinks(t *testing.T) {
 	if out2.Outgoings[0].ToPath != "/guide/shared" || out2.Outgoings[0].Broken || out2.Outgoings[0].ToPageID != guideShared.Page.ID {
 		t.Fatalf("unexpected outgoing after move: %#v", out2.Outgoings[0])
 	}
-}
+})

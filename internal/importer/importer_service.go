@@ -30,6 +30,18 @@ type ImporterServiceOptions struct {
 	MarkdownLinkRootPrefix string
 }
 
+var (
+	importerServiceRemoveAll = os.RemoveAll
+	importerServiceMkdirAll  = os.MkdirAll
+	importerServiceCreateTmp = os.CreateTemp
+	importerServiceRemove    = os.Remove
+	importerServiceCopy      = io.Copy
+	importerServiceCloseFile = func(file *os.File) error {
+		return file.Close()
+	}
+	importerServiceRel = filepath.Rel
+)
+
 type CurrentPlanState struct {
 	ID              string           `json:"id"`
 	TreeHash        string           `json:"tree_hash"`
@@ -81,7 +93,7 @@ func (is *ImporterService) CreateImportPlanFromFolder(folderPath string, targetB
 		if old.ExecutionStatus == ExecutionStatusRunning {
 			return nil, ErrImportExecutionRunning
 		}
-		err = os.RemoveAll(old.WorkspaceRoot)
+		err = importerServiceRemoveAll(old.WorkspaceRoot)
 		if err != nil {
 			return nil, fmt.Errorf("cleanup old import workspace: %w", err)
 		}
@@ -134,7 +146,7 @@ func (is *ImporterService) ClearCurrentPlan() error {
 		if sp.ExecutionStatus == ExecutionStatusRunning {
 			return ErrImportExecutionRunning
 		}
-		if err := os.RemoveAll(sp.WorkspaceRoot); err != nil {
+		if err := importerServiceRemoveAll(sp.WorkspaceRoot); err != nil {
 			is.logger.Error("remove workspace failed", "error", err)
 		}
 	}
@@ -165,11 +177,6 @@ func (is *ImporterService) ExecuteCurrentPlan(userID tree.UserID) (*ExecutionRes
 				return nil, errors.New("import completed without result")
 			}
 			return sp.ExecutionResult, nil
-		case ExecutionStatusFailed:
-			if sp.ExecutionError != nil {
-				return nil, errors.New(*sp.ExecutionError)
-			}
-			return nil, errors.New("import execution failed")
 		}
 	}
 
@@ -220,7 +227,7 @@ func FindMarkdownEntries(sourceBasePath string) ([]ImportMDFile, error) {
 			return nil
 		}
 
-		rel, err := filepath.Rel(sourceBasePath, p)
+		rel, err := importerServiceRel(sourceBasePath, p)
 		if err != nil {
 			return fmt.Errorf("rel: %w", err)
 		}
@@ -287,26 +294,26 @@ func (is *ImporterService) CreateImportPlanFromZipUpload(
 }
 
 func (is *ImporterService) extractZipReaderToTemp(r io.Reader) (*ZipWorkspace, error) {
-	if err := os.MkdirAll(is.workspaceBaseDir, 0o755); err != nil {
+	if err := importerServiceMkdirAll(is.workspaceBaseDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create import temp dir: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(is.workspaceBaseDir, "upload-*.zip")
+	tmp, err := importerServiceCreateTmp(is.workspaceBaseDir, "upload-*.zip")
 	if err != nil {
 		return nil, fmt.Errorf("create temp zip: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer func() {
-		if err := os.Remove(tmpPath); err != nil {
+		if err := importerServiceRemove(tmpPath); err != nil {
 			is.logger.Error("remove temp zip failed", "error", err)
 		}
 	}()
 
-	if _, err := io.Copy(tmp, r); err != nil {
+	if _, err := importerServiceCopy(tmp, r); err != nil {
 		_ = tmp.Close()
 		return nil, fmt.Errorf("store uploaded zip: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
+	if err := importerServiceCloseFile(tmp); err != nil {
 		return nil, fmt.Errorf("close temp zip: %w", err)
 	}
 
@@ -337,7 +344,7 @@ func (is *ImporterService) cleanupWorkspace(workspaceRoot string) {
 	if workspaceRoot == "" {
 		return
 	}
-	if err := os.RemoveAll(workspaceRoot); err != nil {
+	if err := importerServiceRemoveAll(workspaceRoot); err != nil {
 		is.logger.Error("remove workspace failed", "error", err)
 	}
 }

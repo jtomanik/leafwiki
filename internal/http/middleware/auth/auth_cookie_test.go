@@ -4,14 +4,16 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
-func Test_RequireSecure_TLS(t *testing.T) {
+var _ = It("Test_RequireSecure_TLS", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
@@ -33,146 +35,124 @@ func Test_RequireSecure_TLS(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func Test_RequireSecure_XForwardedProto(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+})
 
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, false)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
-	})
+var _ = DescribeTable("Test_RequireSecure_XForwardedProto",
+	func(value string, expected bool) {
+		t := GinkgoT()
+		gin.SetMode(gin.TestMode)
 
-	testCases := []struct {
-		name     string
-		value    string
-		expected bool
-	}{
-		{"https lowercase", "https", true},
-		{"HTTPS uppercase", "HTTPS", true},
-		{"https with scheme", "https://example.com", true},
-		{"http", "http", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/test", nil)
-			req.Header.Set("X-Forwarded-Proto", tc.value)
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			if tc.expected {
-				if w.Code != http.StatusOK {
-					t.Errorf("Expected status 200, got %d", w.Code)
-				}
-			} else {
-				if w.Code != http.StatusBadRequest {
-					t.Errorf("Expected status 400, got %d", w.Code)
-				}
+		router := gin.New()
+		router.GET("/test", func(c *gin.Context) {
+			secure, err := utils.RequireSecure(c, false)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
 			}
+			c.JSON(http.StatusOK, gin.H{"secure": secure})
 		})
-	}
-}
 
-func Test_RequireSecure_XForwardedSsl(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("X-Forwarded-Proto", value)
+		w := httptest.NewRecorder()
 
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, false)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
-	})
+		router.ServeHTTP(w, req)
 
-	testCases := []struct {
-		name     string
-		value    string
-		expected bool
-	}{
-		{"on lowercase", "on", true},
-		{"ON uppercase", "ON", true},
-		{"On mixed", "On", true},
-		{"off", "off", false},
-		{"empty", "", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/test", nil)
-			req.Header.Set("X-Forwarded-Ssl", tc.value)
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			if tc.expected {
-				if w.Code != http.StatusOK {
-					t.Errorf("Expected status 200, got %d", w.Code)
-				}
-			} else {
-				if w.Code != http.StatusBadRequest {
-					t.Errorf("Expected status 400, got %d", w.Code)
-				}
+		if expected {
+			if w.Code != http.StatusOK {
+				t.Errorf("Expected status 200, got %d", w.Code)
 			}
-		})
-	}
-}
-
-func Test_RequireSecure_FrontEndHttps(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, false)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
-	})
-
-	testCases := []struct {
-		name     string
-		value    string
-		expected bool
-	}{
-		{"on lowercase", "on", true},
-		{"ON uppercase", "ON", true},
-		{"On mixed", "On", true},
-		{"off", "off", false},
-		{"empty", "", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/test", nil)
-			req.Header.Set("Front-End-Https", tc.value)
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			if tc.expected {
-				if w.Code != http.StatusOK {
-					t.Errorf("Expected status 200, got %d", w.Code)
-				}
-			} else {
-				if w.Code != http.StatusBadRequest {
-					t.Errorf("Expected status 400, got %d", w.Code)
-				}
+		} else {
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("Expected status 400, got %d", w.Code)
 			}
-		})
-	}
-}
+		}
+	},
+	Entry("https lowercase", "https", true),
+	Entry("HTTPS uppercase", "HTTPS", true),
+	Entry("https with scheme", "https://example.com", true),
+	Entry("http", "http", false),
+)
 
-func Test_RequireSecure_AllowInsecure(t *testing.T) {
+var _ = DescribeTable("Test_RequireSecure_XForwardedSsl",
+	func(value string, expected bool) {
+		t := GinkgoT()
+		gin.SetMode(gin.TestMode)
+
+		router := gin.New()
+		router.GET("/test", func(c *gin.Context) {
+			secure, err := utils.RequireSecure(c, false)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"secure": secure})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("X-Forwarded-Ssl", value)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if expected {
+			if w.Code != http.StatusOK {
+				t.Errorf("Expected status 200, got %d", w.Code)
+			}
+		} else {
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("Expected status 400, got %d", w.Code)
+			}
+		}
+	},
+	Entry("on lowercase", "on", true),
+	Entry("ON uppercase", "ON", true),
+	Entry("On mixed", "On", true),
+	Entry("off", "off", false),
+	Entry("empty", "", false),
+)
+
+var _ = DescribeTable("Test_RequireSecure_FrontEndHttps",
+	func(value string, expected bool) {
+		t := GinkgoT()
+		gin.SetMode(gin.TestMode)
+
+		router := gin.New()
+		router.GET("/test", func(c *gin.Context) {
+			secure, err := utils.RequireSecure(c, false)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"secure": secure})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("Front-End-Https", value)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if expected {
+			if w.Code != http.StatusOK {
+				t.Errorf("Expected status 200, got %d", w.Code)
+			}
+		} else {
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("Expected status 400, got %d", w.Code)
+			}
+		}
+	},
+	Entry("on lowercase", "on", true),
+	Entry("ON uppercase", "ON", true),
+	Entry("On mixed", "On", true),
+	Entry("off", "off", false),
+	Entry("empty", "", false),
+)
+
+var _ = It("Test_RequireSecure_AllowInsecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
@@ -195,9 +175,11 @@ func Test_RequireSecure_AllowInsecure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200 with AllowInsecure=true, got %d", w.Code)
 	}
-}
 
-func Test_RequireSecure_ErrorWhenHTTPSRequired(t *testing.T) {
+})
+
+var _ = It("Test_RequireSecure_ErrorWhenHTTPSRequired", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
@@ -224,9 +206,11 @@ func Test_RequireSecure_ErrorWhenHTTPSRequired(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when HTTPS required but not present, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_CookieNames_Secure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_CookieNames_Secure", func() {
+	t := GinkgoT()
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
 	accessName, refreshName := auth.cookieNames(true)
@@ -238,9 +222,11 @@ func TestAuthCookies_CookieNames_Secure(t *testing.T) {
 	if refreshName != "__Host-leafwiki_rt" {
 		t.Errorf("Expected refresh cookie name '__Host-leafwiki_rt', got '%s'", refreshName)
 	}
-}
 
-func TestAuthCookies_CookieNames_Insecure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_CookieNames_Insecure", func() {
+	t := GinkgoT()
 	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
 
 	accessName, refreshName := auth.cookieNames(false)
@@ -252,9 +238,11 @@ func TestAuthCookies_CookieNames_Insecure(t *testing.T) {
 	if refreshName != "leafwiki_rt" {
 		t.Errorf("Expected refresh cookie name 'leafwiki_rt', got '%s'", refreshName)
 	}
-}
 
-func TestAuthCookies_Set_Secure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_Set_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -341,9 +329,11 @@ func TestAuthCookies_Set_Secure(t *testing.T) {
 	if refreshCookie.MaxAge != 86400 {
 		t.Errorf("Expected refresh cookie MaxAge 86400, got %d", refreshCookie.MaxAge)
 	}
-}
 
-func TestAuthCookies_Set_Insecure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_Set_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -405,9 +395,11 @@ func TestAuthCookies_Set_Insecure(t *testing.T) {
 	if refreshCookie.Secure {
 		t.Error("Expected refresh cookie to NOT be Secure in insecure mode")
 	}
-}
 
-func TestAuthCookies_Set_ErrorWhenHTTPSRequired(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_Set_ErrorWhenHTTPSRequired", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -429,9 +421,11 @@ func TestAuthCookies_Set_ErrorWhenHTTPSRequired(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when HTTPS required, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_Clear_Secure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_Clear_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -493,9 +487,11 @@ func TestAuthCookies_Clear_Secure(t *testing.T) {
 	if refreshCookie.MaxAge != -1 {
 		t.Errorf("Expected refresh cookie MaxAge -1, got %d", refreshCookie.MaxAge)
 	}
-}
 
-func TestAuthCookies_Clear_Insecure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_Clear_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -533,9 +529,11 @@ func TestAuthCookies_Clear_Insecure(t *testing.T) {
 			t.Errorf("Expected cookie MaxAge -1, got %d", cookie.MaxAge)
 		}
 	}
-}
 
-func TestAuthCookies_ReadAccess_Secure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadAccess_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -562,9 +560,11 @@ func TestAuthCookies_ReadAccess_Secure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_ReadAccess_Insecure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadAccess_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -590,9 +590,11 @@ func TestAuthCookies_ReadAccess_Insecure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_ReadAccess_MissingCookie(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadAccess_MissingCookie", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -615,9 +617,11 @@ func TestAuthCookies_ReadAccess_MissingCookie(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when cookie is missing, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_ReadRefresh_Secure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadRefresh_Secure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -644,9 +648,11 @@ func TestAuthCookies_ReadRefresh_Secure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_ReadRefresh_Insecure(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadRefresh_Insecure", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -672,9 +678,11 @@ func TestAuthCookies_ReadRefresh_Insecure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_ReadRefresh_MissingCookie(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_ReadRefresh_MissingCookie", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
 
@@ -697,9 +705,11 @@ func TestAuthCookies_ReadRefresh_MissingCookie(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 when cookie is missing, got %d", w.Code)
 	}
-}
 
-func TestAuthCookies_CustomTTL(t *testing.T) {
+})
+
+var _ = It("TestAuthCookies_CustomTTL", func() {
+	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 
 	accessTTL := 30 * time.Minute
@@ -742,4 +752,25 @@ func TestAuthCookies_CustomTTL(t *testing.T) {
 			}
 		}
 	}
-}
+
+})
+
+var _ = Describe("auth cookie secure edge coverage", func() {
+	It("returns HTTPS-required errors from Clear and readers", func() {
+		gin.SetMode(gin.TestMode)
+		cookies := NewAuthCookies(false, time.Hour, time.Hour)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		Expect(cookies.Clear(ctx)).To(MatchError(utils.ErrHTTPSRequired))
+
+		access, err := cookies.ReadAccess(ctx)
+		Expect(err).To(MatchError(utils.ErrHTTPSRequired))
+		Expect(access).To(BeEmpty())
+
+		refresh, err := cookies.ReadRefresh(ctx)
+		Expect(err).To(MatchError(utils.ErrHTTPSRequired))
+		Expect(refresh).To(BeEmpty())
+	})
+})

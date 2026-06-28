@@ -17,7 +17,7 @@ import (
 
 // GenerateUniqueID generates a unique ID for a tree entry
 func GenerateUniqueID() (string, error) {
-	id, err := shortid.Generate()
+	id, err := generateShortID()
 	if err != nil {
 		return "", err
 	}
@@ -30,6 +30,24 @@ var charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#
 var ErrFileTooLarge = errors.New("file too large")
 
 type MaxBytes int64
+
+type atomicTempFile interface {
+	io.Writer
+	Name() string
+	Chmod(os.FileMode) error
+	Sync() error
+	Close() error
+}
+
+var (
+	generateShortID = shortid.Generate
+	createTempFile  = func(dir string, pattern string) (atomicTempFile, error) {
+		return os.CreateTemp(dir, pattern)
+	}
+	removeFile  = os.Remove
+	renameFile  = os.Rename
+	runtimeGOOS = runtime.GOOS
+)
 
 func GenerateRandomPassword(length int) (string, error) {
 	password := make([]byte, length)
@@ -46,12 +64,12 @@ func GenerateRandomPassword(length int) (string, error) {
 func atomicReplace(src, dst string) error {
 	// On Windows, os.Rename fails if dst already exists.
 	// On Unix, Rename is atomic and replaces dst.
-	if runtime.GOOS == "windows" {
-		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if runtimeGOOS == "windows" {
+		if err := removeFile(dst); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove existing file: %w", err)
 		}
 	}
-	return os.Rename(src, dst)
+	return renameFile(src, dst)
 }
 
 func atomicWriteDir(filename string) string {
@@ -64,7 +82,7 @@ func atomicWriteDir(filename string) string {
 func WriteFileAtomic(filename string, data []byte, perm os.FileMode) error {
 	dir := atomicWriteDir(filename)
 
-	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
+	tmpFile, err := createTempFile(dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -72,7 +90,7 @@ func WriteFileAtomic(filename string, data []byte, perm os.FileMode) error {
 	tmpName := tmpFile.Name()
 	// Ensure the temp file is removed in case of an error
 	defer func() {
-		_ = os.Remove(tmpName)
+		_ = removeFile(tmpName)
 	}()
 
 	if perm != 0 {
@@ -127,7 +145,7 @@ func CopyWithLimit(dst io.Writer, src io.Reader, max MaxBytes) error {
 func WriteStreamAtomic(targetPath string, src io.Reader, byteCap MaxBytes) error {
 	dir := atomicWriteDir(targetPath)
 
-	out, err := os.CreateTemp(dir, ".tmp-*")
+	out, err := createTempFile(dir, ".tmp-*")
 	if err != nil {
 		return err
 	}
@@ -138,7 +156,7 @@ func WriteStreamAtomic(targetPath string, src io.Reader, byteCap MaxBytes) error
 	defer func() {
 		if out == nil {
 			if !ok {
-				_ = os.Remove(tmp)
+				_ = removeFile(tmp)
 			}
 			return
 		}
@@ -148,7 +166,7 @@ func WriteStreamAtomic(targetPath string, src io.Reader, byteCap MaxBytes) error
 			return
 		}
 		if !ok {
-			_ = os.Remove(tmp)
+			_ = removeFile(tmp)
 		}
 	}()
 

@@ -3,613 +3,496 @@ package assets
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"github.com/perber/wiki/internal/core/shared"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 const testAssetMaxBytes shared.MaxBytes = 1024
 
-func TestSaveAndListAsset(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
-	// Create index.md page
-	pagePath := filepath.Join(tmp, "lonely-page")
-	if err := os.MkdirAll(pagePath, 0755); err != nil {
-		t.Fatalf("failed to create test directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pagePath, "index.md"), []byte("# Lonely Page"), 0644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	service := NewAssetService(tmp, tree.NewSlugService())
+var _ = Describe("asset service behavior", func() {
+	It("TestSaveAndListAsset", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
+		createPageFile(tmp, "lonely-page", "# Lonely Page")
+		service := NewAssetService(tmp, tree.NewSlugService())
 
-	file, name, err := test_utils.CreateMultipartFile("my-image.png", []byte("hello image"))
-	if err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	defer func() {
-		err := file.Close()
-		if err != nil {
-			t.Fatalf("Close() error: %v", err)
+		file, name := createMultipartFile("my-image.png", []byte("hello image"))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
+
+		url, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(url).NotTo(BeEmpty())
+
+		files, err := service.ListAssetsForPage(page)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).To(Equal([]string{"/assets/a7b3/my-image.png"}))
+	})
+
+	It("TestDeletePageAndEnsureAllAssetsAreDeleted", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
+		createPageFile(tmp, "lonely-page", "# Lonely Page")
+		service := NewAssetService(tmp, tree.NewSlugService())
+
+		file, name := createMultipartFile("my-image.png", []byte("hello image"))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
+
+		_, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
+		Expect(err).NotTo(HaveOccurred())
+		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		Expect(assetDir).To(BeADirectory())
+
+		Expect(service.DeleteAllAssetsForPage(page)).To(Succeed())
+		Expect(assetDir).NotTo(BeAnExistingFile())
+
+		files, err := service.ListAssetsForPage(page)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).To(BeEmpty())
+	})
+
+	It("TestDeleteLastAssetRemovesPageAssetDirectory", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+
+		file, name := createMultipartFile("only.png", []byte("hello image"))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
+
+		_, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
+		Expect(err).NotTo(HaveOccurred())
+		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		Expect(assetDir).To(BeADirectory())
+
+		Expect(service.DeleteAsset(page, assetName(name))).To(Succeed())
+		Expect(assetDir).NotTo(BeAnExistingFile())
+	})
+
+	It("TestSlugCollision", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "collision-page"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+
+		for i := 0; i < 3; i++ {
+			file, name := createMultipartFile("logo.png", []byte("image"))
+			DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
+
+			_, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
+			Expect(err).NotTo(HaveOccurred(), "upload %d failed", i)
 		}
-	}()
 
-	url, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
-	if err != nil {
-		t.Fatalf("SaveAsset failed: %v", err)
-	}
+		files, err := service.ListAssetsForPage(page)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).To(HaveLen(3))
+	})
 
-	if url == "" {
-		t.Fatalf("expected public URL, got empty string")
-	}
+	It("TestAssetRename", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "c3d4"}
+		createPageFile(tmp, "rename-page", "# Rename Page")
+		service := NewAssetService(tmp, tree.NewSlugService())
 
-	files, err := service.ListAssetsForPage(page)
-	if err != nil {
-		t.Fatalf("ListAssets failed: %v", err)
-	}
+		file, name := createMultipartFile("old-name.png", []byte("old image"))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
 
-	if len(files) != 1 || files[0] != "/assets/a7b3/my-image.png" {
-		t.Errorf("unexpected asset list: %v", files)
-	}
+		_, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
+		Expect(err).NotTo(HaveOccurred())
+
+		newName := "new-name.png"
+		newURL, err := service.RenameAsset(page, assetName(name), assetName(newName))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(newURL).To(ContainSubstring(newName))
+
+		files, err := service.ListAssetsForPage(page)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).To(Equal([]string{"/assets/c3d4/new-name.png"}))
+	})
+
+	It("TestDeleteMissingAssetReturnsNotFound", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		err := service.DeleteAsset(page, assetName("missing.png"))
+
+		assertLocalizedCode(err, ErrCodeAssetNotFound)
+	})
+})
+
+type invalidSaveNameCase struct {
+	originalName string
+	wantCode     sharederrors.ErrorCode
 }
 
-func TestDeletePageAndEnsureAllAssetsAreDeleted(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
-	// Create index.md page
-	pagePath := filepath.Join(tmp, "lonely-page")
-	if err := os.MkdirAll(pagePath, 0755); err != nil {
-		t.Fatalf("failed to create test directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pagePath, "index.md"), []byte("# Lonely Page"), 0644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	service := NewAssetService(tmp, tree.NewSlugService())
+var _ = DescribeTable("TestSaveAssetForPageRejectsInvalidNormalizedFilenames",
+	func(tc invalidSaveNameCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "upload-page", ID: "upload-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		file := newTestMultipartFile([]byte("asset"))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
 
-	file, name, err := test_utils.CreateMultipartFile("my-image.png", []byte("hello image"))
-	if err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	defer func() {
-		err := file.Close()
-		if err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
+		_, err := service.SaveAssetForPage(page, file, assetName(tc.originalName), testAssetMaxBytes)
 
-	_, err = service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
-	if err != nil {
-		t.Fatalf("SaveAsset failed: %v", err)
-	}
+		assertLocalizedCode(err, tc.wantCode)
+		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		entries, readErr := os.ReadDir(assetDir)
+		Expect(readErr).NotTo(HaveOccurred())
+		Expect(entries).To(BeEmpty())
+	},
+	Entry("name=", invalidSaveNameCase{originalName: "", wantCode: ErrCodeAssetMissingName}),
+	Entry("name=.", invalidSaveNameCase{originalName: ".", wantCode: ErrCodeAssetInvalidName}),
+	Entry("name=..", invalidSaveNameCase{originalName: "..", wantCode: ErrCodeAssetInvalidName}),
+)
+
+var _ = Describe("asset name validation guards", func() {
+	It("TestReadAssetForPageRejectsPathSeparators", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		Expect(os.MkdirAll(pageAssetDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(pageAssetDir, "note.txt"), []byte("asset"), 0o644)).To(Succeed())
+
+		_, err := service.ReadAssetForPage(page, assetName("../note.txt"))
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		_, err = service.ReadAssetForPage(page, assetName(`..\note.txt`))
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+	})
+
+	It("TestDeleteAssetRejectsPathSeparators", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		err := service.DeleteAsset(page, assetName("../"+other.ID.String()+"/note.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(otherAsset).To(BeAnExistingFile())
+	})
+
+	It("TestRenameAssetRejectsPathSeparators", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		pageAsset := writeAssetFile(service, page, "note.txt", []byte("page asset"))
+		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
+
+		_, err := service.RenameAsset(page, assetName("../"+other.ID.String()+"/note.txt"), assetName("renamed.txt"))
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(otherAsset).To(BeAnExistingFile())
+		_, err = service.RenameAsset(page, assetName("note.txt"), assetName("../"+other.ID.String()+"/renamed.txt"))
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(pageAsset).To(BeAnExistingFile())
+	})
+})
+
+type assetNameCase struct {
+	filename string
+}
+
+var _ = DescribeTable("TestReadAssetForPageRejectsDotNames",
+	func(tc assetNameCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		_, err := service.ReadAssetForPage(page, assetName(tc.filename))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+	},
+	Entry(".", assetNameCase{filename: "."}),
+	Entry("..", assetNameCase{filename: ".."}),
+)
+
+var _ = DescribeTable("TestDeleteAssetRejectsDotNames",
+	func(tc assetNameCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		Expect(os.MkdirAll(pageAssetDir, 0o755)).To(Succeed())
+
+		err := service.DeleteAsset(page, assetName(tc.filename))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(pageAssetDir).To(BeADirectory())
+	},
+	Entry(".", assetNameCase{filename: "."}),
+	Entry("..", assetNameCase{filename: ".."}),
+)
+
+type renameDotNameCase struct {
+	oldFilename string
+	newFilename string
+}
+
+var _ = DescribeTable("TestRenameAssetRejectsDotNames",
+	func(tc renameDotNameCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		pageAsset := writeAssetFile(service, page, "note.txt", []byte("page asset"))
+
+		_, err := service.RenameAsset(page, assetName(tc.oldFilename), assetName(tc.newFilename))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(pageAsset).To(BeAnExistingFile())
+	},
+	Entry("old .", renameDotNameCase{oldFilename: ".", newFilename: "renamed.txt"}),
+	Entry("old ..", renameDotNameCase{oldFilename: "..", newFilename: "renamed.txt"}),
+	Entry("new .", renameDotNameCase{oldFilename: "note.txt", newFilename: "."}),
+	Entry("new ..", renameDotNameCase{oldFilename: "note.txt", newFilename: ".."}),
+)
+
+var _ = Describe("asset path and filename helpers", func() {
+	It("TestAssetDiskPaths_WindowsPath", func() {
+		Expect(strings.ReplaceAll(assetPageDiskPath(`C:\wiki\data\assets`, "a7b3"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3`))
+		Expect(strings.ReplaceAll(assetFileDiskPath(`C:\wiki\data\assets\a7b3`, "my-image.png"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3/my-image.png`))
+	})
+
+	It("TestAssetPublicPath_UsesForwardSlashes", func() {
+		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
+		page := &tree.PageNode{ID: "a7b3"}
+
+		Expect(service.buildPublicPath(page, assetName("my-image.png"))).To(Equal("/assets/a7b3/my-image.png"))
+	})
+})
+
+var _ = DescribeTable("TestValidateFilename accepts good names",
+	func(tc assetNameCase) {
+		Expect(validateFilename(tc.filename)).To(Succeed())
+	},
+	Entry("my-image.png", assetNameCase{filename: "my-image.png"}),
+	Entry("file.jpg", assetNameCase{filename: "file.jpg"}),
+	Entry("a", assetNameCase{filename: "a"}),
+	Entry("foo-bar.webp", assetNameCase{filename: "foo-bar.webp"}),
+)
+
+var _ = DescribeTable("TestValidateFilename rejects bad names",
+	func(tc assetNameCase) {
+		Expect(validateFilename(tc.filename)).To(HaveOccurred())
+	},
+	Entry("empty", assetNameCase{filename: ""}),
+	Entry(".", assetNameCase{filename: "."}),
+	Entry("..", assetNameCase{filename: ".."}),
+	Entry("../etc/passwd", assetNameCase{filename: "../etc/passwd"}),
+	Entry("../../users.db", assetNameCase{filename: "../../users.db"}),
+	Entry("foo/bar.png", assetNameCase{filename: "foo/bar.png"}),
+	Entry(`foo\bar.png`, assetNameCase{filename: `foo\bar.png`}),
+)
+
+var _ = DescribeTable("TestDeleteAsset_PathTraversal",
+	func(tc invalidAssetOperationCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "test-page", ID: "traversal-delete"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		err := service.DeleteAsset(page, assetName(tc.filename))
+
+		assertLocalizedCode(err, tc.wantCode)
+	},
+	Entry("../../users.db", invalidAssetOperationCase{filename: "../../users.db", wantCode: ErrCodeAssetInvalidName}),
+	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: "../other-page/secret.png", wantCode: ErrCodeAssetInvalidName}),
+	Entry("..", invalidAssetOperationCase{filename: "..", wantCode: ErrCodeAssetInvalidName}),
+	Entry(".", invalidAssetOperationCase{filename: ".", wantCode: ErrCodeAssetInvalidName}),
+	Entry("foo/bar.png", invalidAssetOperationCase{filename: "foo/bar.png", wantCode: ErrCodeAssetInvalidName}),
+	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: `foo\bar.png`, wantCode: ErrCodeAssetInvalidName}),
+	Entry("empty", invalidAssetOperationCase{filename: "", wantCode: ErrCodeAssetMissingName}),
+)
+
+var _ = DescribeTable("TestRenameAsset_OldFilenamePathTraversal",
+	func(tc invalidAssetOperationCase) {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "test-page", ID: "traversal-rename"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		_, err := service.RenameAsset(page, assetName(tc.filename), assetName("new-name.png"))
+
+		assertLocalizedCode(err, tc.wantCode)
+	},
+	Entry("../../users.db", invalidAssetOperationCase{filename: "../../users.db", wantCode: ErrCodeAssetInvalidName}),
+	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: "../other-page/secret.png", wantCode: ErrCodeAssetInvalidName}),
+	Entry("..", invalidAssetOperationCase{filename: "..", wantCode: ErrCodeAssetInvalidName}),
+	Entry(".", invalidAssetOperationCase{filename: ".", wantCode: ErrCodeAssetInvalidName}),
+	Entry("foo/bar.png", invalidAssetOperationCase{filename: "foo/bar.png", wantCode: ErrCodeAssetInvalidName}),
+	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: `foo\bar.png`, wantCode: ErrCodeAssetInvalidName}),
+	Entry("empty", invalidAssetOperationCase{filename: "", wantCode: ErrCodeAssetMissingName}),
+)
+
+type invalidAssetOperationCase struct {
+	filename string
+	wantCode sharederrors.ErrorCode
+}
+
+var _ = Describe("asset service coverage additions", func() {
+	It("CopyAllAssets copies regular files and skips directories", func() {
+		tmp := GinkgoT().TempDir()
+		source := &tree.PageNode{Slug: "source", ID: "source-id"}
+		target := &tree.PageNode{Slug: "target", ID: "target-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		sourceDir := filepath.Join(service.GetAssetsDir(), source.ID.String())
+		Expect(os.MkdirAll(filepath.Join(sourceDir, "nested"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(sourceDir, "one.png"), []byte("one"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(sourceDir, "nested", "skip.png"), []byte("skip"), 0o644)).To(Succeed())
+
+		Expect(service.CopyAllAssets(source, target)).To(Succeed())
+
+		targetDir := filepath.Join(service.GetAssetsDir(), target.ID.String())
+		raw, err := os.ReadFile(filepath.Join(targetDir, "one.png"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(Equal("one"))
+		Expect(filepath.Join(targetDir, "nested")).NotTo(BeAnExistingFile())
+	})
+
+	It("CopyAllAssets returns nil when the source asset directory is missing", func() {
+		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
+
+		Expect(service.CopyAllAssets(&tree.PageNode{ID: "missing"}, &tree.PageNode{ID: "target"})).To(Succeed())
+	})
+
+	It("ReadAssetForPage returns saved bytes for an existing asset", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		writeAssetFile(service, page, "note.txt", []byte("asset bytes"))
+
+		raw, err := service.ReadAssetForPage(page, assetName("note.txt"))
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(Equal("asset bytes"))
+	})
+
+	It("ReadAssetForPage returns asset_not_found for a missing asset", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		_, err := service.ReadAssetForPage(page, assetName("missing.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetNotFound)
+	})
+
+	It("ReadAssetForPage returns asset_not_found when the page asset directory is missing", func() {
+		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
+
+		_, err := service.ReadAssetForPage(&tree.PageNode{ID: "missing-page"}, assetName("missing.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetNotFound)
+	})
+
+	It("RenameAsset rejects extension changes", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		writeAssetFile(service, page, "note.txt", []byte("asset"))
+
+		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("note.png"))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidExtension)
+	})
+
+	It("RenameAsset rejects invalid slug names", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		writeAssetFile(service, page, "note.txt", []byte("asset"))
+
+		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("Bad Name.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+	})
+
+	It("RenameAsset rejects target collisions", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		writeAssetFile(service, page, "old.txt", []byte("old"))
+		writeAssetFile(service, page, "new.txt", []byte("new"))
+
+		_, err := service.RenameAsset(page, assetName("old.txt"), assetName("new.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetAlreadyExists)
+	})
+
+	It("RenameAsset returns asset_not_found for a missing old filename", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
+
+		_, err := service.RenameAsset(page, assetName("missing.txt"), assetName("new.txt"))
+
+		assertLocalizedCode(err, ErrCodeAssetNotFound)
+	})
+
+	It("DeleteAllAssetsForPage is a no-op when the page has no asset directory", func() {
+		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
+
+		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: "missing-page"})).To(Succeed())
+	})
+
+	It("TestSaveAssetForPage_TooLarge_DoesNotLeavePartialFile", func() {
+		tmp := GinkgoT().TempDir()
+		page := &tree.PageNode{Slug: "limit-page", ID: "limit-page-id"}
+		service := NewAssetService(tmp, tree.NewSlugService())
+		file, name := createMultipartFile("too-large.bin", []byte(strings.Repeat("a", 32)))
+		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
+
+		_, err := service.SaveAssetForPage(page, file, assetName(name), 8)
+
+		Expect(errors.Is(err, shared.ErrFileTooLarge)).To(BeTrue())
+		assertLocalizedCode(err, ErrCodeAssetFileTooLarge)
+		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
+		entries, readErr := os.ReadDir(assetDir)
+		Expect(readErr).NotTo(HaveOccurred())
+		Expect(entries).To(BeEmpty())
+	})
+})
+
+func createPageFile(root, slug, content string) {
+	pagePath := filepath.Join(root, slug)
+	Expect(os.MkdirAll(pagePath, 0o755)).To(Succeed())
+	Expect(os.WriteFile(filepath.Join(pagePath, "index.md"), []byte(content), 0o644)).To(Succeed())
+}
+
+func createMultipartFile(name string, content []byte) (multipart.File, string) {
+	file, filename, err := test_utils.CreateMultipartFile(name, content)
+	Expect(err).NotTo(HaveOccurred())
+	return file, filename
+}
+
+func writeAssetFile(service *AssetService, page *tree.PageNode, filename string, content []byte) string {
 	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if _, err := os.Stat(assetDir); err != nil {
-		t.Fatalf("expected asset directory before delete, got stat error: %v", err)
-	}
-
-	err = service.DeleteAllAssetsForPage(page)
-	if err != nil {
-		t.Fatalf("DeletePage failed: %v", err)
-	}
-	if _, err := os.Stat(assetDir); !os.IsNotExist(err) {
-		t.Fatalf("expected asset directory to be removed, got stat error: %v", err)
-	}
-
-	files, err := service.ListAssetsForPage(page)
-	if err != nil {
-		t.Fatalf("ListAssets failed: %v", err)
-	}
-
-	if len(files) != 0 {
-		t.Errorf("expected no assets, got %d", len(files))
-	}
+	Expect(os.MkdirAll(assetDir, 0o755)).To(Succeed())
+	assetPath := filepath.Join(assetDir, filename)
+	Expect(os.WriteFile(assetPath, content, 0o644)).To(Succeed())
+	return assetPath
 }
 
-func TestDeleteLastAssetRemovesPageAssetDirectory(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	file, name, err := test_utils.CreateMultipartFile("only.png", []byte("hello image"))
-	if err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
-
-	if _, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes); err != nil {
-		t.Fatalf("SaveAsset failed: %v", err)
-	}
-	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if _, err := os.Stat(assetDir); err != nil {
-		t.Fatalf("expected asset directory before delete, got stat error: %v", err)
-	}
-
-	if err := service.DeleteAsset(page, assetName(name)); err != nil {
-		t.Fatalf("DeleteAsset failed: %v", err)
-	}
-	if _, err := os.Stat(assetDir); !os.IsNotExist(err) {
-		t.Fatalf("expected asset directory to be removed after last delete, got stat error: %v", err)
-	}
-}
-
-func TestSlugCollision(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "collision-page"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	for i := 0; i < 3; i++ {
-		file, name, err := test_utils.CreateMultipartFile("logo.png", []byte("image"))
-		if err != nil {
-			t.Fatalf("test_utils.CreateMultipartFile failed: %v", err)
-		}
-		defer func(f multipart.File) {
-			if err := f.Close(); err != nil {
-				t.Fatalf("Close() error: %v", err)
-			}
-		}(file)
-
-		_, err = service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes)
-		if err != nil {
-			t.Fatalf("upload %d failed: %v", i, err)
-		}
-	}
-
-	files, err := service.ListAssetsForPage(page)
-	if err != nil {
-		t.Fatalf("list failed: %v", err)
-	}
-
-	if len(files) != 3 {
-		t.Errorf("expected 3 files, got %d", len(files))
-	}
-}
-
-func TestAssetRename(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "rename-page", ID: "c3d4"}
-	// Create index.md page
-	pagePath := filepath.Join(tmp, "rename-page")
-	if err := os.MkdirAll(pagePath, 0755); err != nil {
-		t.Fatalf("failed to create test directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pagePath, "index.md"), []byte("# Rename Page"), 0644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	file, name, err := test_utils.CreateMultipartFile("old-name.png", []byte("old image"))
-	if err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	defer func() {
-		err := file.Close()
-		if err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
-
-	if _, err := service.SaveAssetForPage(page, file, assetName(name), testAssetMaxBytes); err != nil {
-		t.Fatalf("SaveAsset failed: %v", err)
-	}
-
-	newName := "new-name.png"
-	newUrl, err := service.RenameAsset(page, assetName(name), assetName(newName))
-	if err != nil {
-		t.Fatalf("RenameAsset failed: %v", err)
-	}
-
-	if newUrl != "" && strings.Contains(newUrl, newName) == false {
-		t.Errorf("expected new URL to contain new name %s, got %s", newName, newUrl)
-	}
-
-	files, err := service.ListAssetsForPage(page)
-	if err != nil {
-		t.Fatalf("ListAssets failed: %v", err)
-	}
-
-	expectedURL := "/assets/c3d4/new-name.png"
-	if len(files) != 1 || files[0] != expectedURL {
-		t.Errorf("unexpected asset list after rename: %v", files)
-	}
-}
-
-func TestDeleteMissingAssetReturnsNotFound(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create asset directory: %v", err)
-	}
-
-	err := service.DeleteAsset(page, assetName("missing.png"))
-	if err == nil {
-		t.Fatal("expected delete to fail for missing asset")
-	}
-
+func assertLocalizedCode(err error, want sharederrors.ErrorCode) {
+	Expect(err).To(HaveOccurred())
 	localized, ok := sharederrors.AsLocalizedError(err)
-	if !ok {
-		t.Fatalf("expected localized error, got %T", err)
-	}
-
-	if localized.Code != "asset_not_found" {
-		t.Fatalf("expected asset_not_found, got %s", localized.Code)
-	}
-}
-
-func TestSaveAssetForPageRejectsInvalidNormalizedFilenames(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "upload-page", ID: "upload-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	for _, originalName := range []string{"", ".", ".."} {
-		t.Run("name="+originalName, func(t *testing.T) {
-			file := newTestMultipartFile([]byte("asset"))
-			defer func() {
-				if err := file.Close(); err != nil {
-					t.Fatalf("Close() error: %v", err)
-				}
-			}()
-
-			_, err := service.SaveAssetForPage(page, file, assetName(originalName), testAssetMaxBytes)
-			if originalName == "" {
-				assertLocalizedCode(t, err, "asset_missing_name")
-			} else {
-				assertLocalizedCode(t, err, "asset_invalid_name")
-			}
-		})
-	}
-
-	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	entries, err := os.ReadDir(assetDir)
-	if err != nil {
-		t.Fatalf("failed to read asset directory: %v", err)
-	}
-	if len(entries) != 0 {
-		names := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			names = append(names, entry.Name())
-		}
-		t.Fatalf("invalid upload left asset directory entries: %v", names)
-	}
-}
-
-func TestReadAssetForPageRejectsPathSeparators(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create asset directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pageAssetDir, "note.txt"), []byte("asset"), 0644); err != nil {
-		t.Fatalf("failed to write asset: %v", err)
-	}
-
-	if _, err := service.ReadAssetForPage(page, assetName("../note.txt")); err == nil {
-		t.Fatalf("expected path separator asset read to fail")
-	}
-	if _, err := service.ReadAssetForPage(page, assetName(`..\note.txt`)); err == nil {
-		t.Fatalf("expected windows path separator asset read to fail")
-	}
-}
-
-func TestReadAssetForPageRejectsDotNames(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create asset directory: %v", err)
-	}
-
-	for _, filename := range []string{".", ".."} {
-		if _, err := service.ReadAssetForPage(page, assetName(filename)); err == nil {
-			t.Fatalf("expected dot asset read %q to fail", filename)
-		} else {
-			assertLocalizedCode(t, err, "asset_invalid_name")
-		}
-	}
-}
-
-func TestDeleteAssetRejectsPathSeparators(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
-	other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	otherAssetDir := filepath.Join(service.GetAssetsDir(), other.ID.String())
-	if err := os.MkdirAll(otherAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create other asset directory: %v", err)
-	}
-	otherAsset := filepath.Join(otherAssetDir, "note.txt")
-	if err := os.WriteFile(otherAsset, []byte("other asset"), 0644); err != nil {
-		t.Fatalf("failed to write other asset: %v", err)
-	}
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create page asset directory: %v", err)
-	}
-
-	if err := service.DeleteAsset(page, assetName(fmt.Sprintf("../%s/note.txt", other.ID))); err == nil {
-		t.Fatalf("expected path-bearing delete to fail")
-	}
-	if _, err := os.Stat(otherAsset); err != nil {
-		t.Fatalf("path-bearing delete affected other page asset: %v", err)
-	}
-}
-
-func TestDeleteAssetRejectsDotNames(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create page asset directory: %v", err)
-	}
-
-	for _, filename := range []string{".", ".."} {
-		err := service.DeleteAsset(page, assetName(filename))
-		assertLocalizedCode(t, err, "asset_invalid_name")
-		if _, statErr := os.Stat(pageAssetDir); statErr != nil {
-			t.Fatalf("dot delete affected page asset directory: %v", statErr)
-		}
-	}
-}
-
-func TestRenameAssetRejectsPathSeparators(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
-	other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create page asset directory: %v", err)
-	}
-	pageAsset := filepath.Join(pageAssetDir, "note.txt")
-	if err := os.WriteFile(pageAsset, []byte("page asset"), 0644); err != nil {
-		t.Fatalf("failed to write page asset: %v", err)
-	}
-	otherAssetDir := filepath.Join(service.GetAssetsDir(), other.ID.String())
-	if err := os.MkdirAll(otherAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create other asset directory: %v", err)
-	}
-	otherAsset := filepath.Join(otherAssetDir, "note.txt")
-	if err := os.WriteFile(otherAsset, []byte("other asset"), 0644); err != nil {
-		t.Fatalf("failed to write other asset: %v", err)
-	}
-
-	if _, err := service.RenameAsset(page, assetName(fmt.Sprintf("../%s/note.txt", other.ID)), assetName("renamed.txt")); err == nil {
-		t.Fatalf("expected path-bearing old filename rename to fail")
-	}
-	if _, err := os.Stat(otherAsset); err != nil {
-		t.Fatalf("path-bearing old filename rename affected other page asset: %v", err)
-	}
-	if _, err := service.RenameAsset(page, assetName("note.txt"), assetName(fmt.Sprintf("../%s/renamed.txt", other.ID))); err == nil {
-		t.Fatalf("expected path-bearing new filename rename to fail")
-	}
-	if _, err := os.Stat(pageAsset); err != nil {
-		t.Fatalf("path-bearing new filename rename affected page asset: %v", err)
-	}
-}
-
-func TestRenameAssetRejectsDotNames(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create page asset directory: %v", err)
-	}
-	pageAsset := filepath.Join(pageAssetDir, "note.txt")
-	if err := os.WriteFile(pageAsset, []byte("page asset"), 0644); err != nil {
-		t.Fatalf("failed to write page asset: %v", err)
-	}
-
-	for _, filename := range []string{".", ".."} {
-		_, err := service.RenameAsset(page, assetName(filename), assetName("renamed.txt"))
-		assertLocalizedCode(t, err, "asset_invalid_name")
-	}
-	for _, filename := range []string{".", ".."} {
-		_, err := service.RenameAsset(page, assetName("note.txt"), assetName(filename))
-		assertLocalizedCode(t, err, "asset_invalid_name")
-	}
-	if _, err := os.Stat(pageAsset); err != nil {
-		t.Fatalf("dot rename affected page asset: %v", err)
-	}
-}
-
-func TestAssetDiskPaths_WindowsPath(t *testing.T) {
-	if got, want := strings.ReplaceAll(assetPageDiskPath(`C:\wiki\data\assets`, "a7b3"), `\`, `/`), `C:/wiki/data/assets/a7b3`; got != want {
-		t.Fatalf("asset page path = %q, want %q", got, want)
-	}
-	if got, want := strings.ReplaceAll(assetFileDiskPath(`C:\wiki\data\assets\a7b3`, "my-image.png"), `\`, `/`), `C:/wiki/data/assets/a7b3/my-image.png`; got != want {
-		t.Fatalf("asset file path = %q, want %q", got, want)
-	}
-}
-
-func TestValidateFilename(t *testing.T) {
-	good := []string{"my-image.png", "file.jpg", "a", "foo-bar.webp"}
-	for _, name := range good {
-		if err := validateFilename(name); err != nil {
-			t.Errorf("validateFilename(%q) unexpected error: %v", name, err)
-		}
-	}
-
-	bad := []string{
-		"",
-		".",
-		"..",
-		"../etc/passwd",
-		"../../users.db",
-		"foo/bar.png",
-		`foo\bar.png`,
-	}
-	for _, name := range bad {
-		if err := validateFilename(name); err == nil {
-			t.Errorf("validateFilename(%q) should have returned an error", name)
-		}
-	}
-}
-
-func TestDeleteAsset_PathTraversal(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "test-page", ID: "traversal-delete"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create asset directory: %v", err)
-	}
-
-	traversalNames := []string{
-		"../../users.db",
-		"../other-page/secret.png",
-		"..",
-		".",
-		"foo/bar.png",
-		`foo\bar.png`,
-	}
-	for _, name := range traversalNames {
-		err := service.DeleteAsset(page, assetName(name))
-		if err == nil {
-			t.Errorf("DeleteAsset(%q) should have returned an error", name)
-			continue
-		}
-		localized, ok := sharederrors.AsLocalizedError(err)
-		if !ok {
-			t.Errorf("DeleteAsset(%q): expected localized error, got %T: %v", name, err, err)
-			continue
-		}
-		if localized.Code != "asset_invalid_name" {
-			t.Errorf("DeleteAsset(%q): expected asset_invalid_name, got %s", name, localized.Code)
-		}
-	}
-
-	err := service.DeleteAsset(page, assetName(""))
-	localized, ok := sharederrors.AsLocalizedError(err)
-	if !ok {
-		t.Fatalf("DeleteAsset(\"\"): expected localized error, got %T: %v", err, err)
-	}
-	if localized.Code != "asset_missing_name" {
-		t.Fatalf("DeleteAsset(\"\"): expected asset_missing_name, got %s", localized.Code)
-	}
-}
-
-func TestRenameAsset_OldFilenamePathTraversal(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "test-page", ID: "traversal-rename"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	if err := os.MkdirAll(pageAssetDir, 0755); err != nil {
-		t.Fatalf("failed to create asset directory: %v", err)
-	}
-
-	traversalNames := []string{
-		"../../users.db",
-		"../other-page/secret.png",
-		"..",
-		".",
-		"foo/bar.png",
-		`foo\bar.png`,
-	}
-	for _, name := range traversalNames {
-		_, err := service.RenameAsset(page, assetName(name), assetName("new-name.png"))
-		if err == nil {
-			t.Errorf("RenameAsset(oldFilename=%q) should have returned an error", name)
-			continue
-		}
-		localized, ok := sharederrors.AsLocalizedError(err)
-		if !ok {
-			t.Errorf("RenameAsset(oldFilename=%q): expected localized error, got %T: %v", name, err, err)
-			continue
-		}
-		if localized.Code != "asset_invalid_name" {
-			t.Errorf("RenameAsset(oldFilename=%q): expected asset_invalid_name, got %s", name, localized.Code)
-		}
-	}
-
-	_, err := service.RenameAsset(page, assetName(""), assetName("new-name.png"))
-	localized, ok := sharederrors.AsLocalizedError(err)
-	if !ok {
-		t.Fatalf("RenameAsset(oldFilename=\"\"): expected localized error, got %T: %v", err, err)
-	}
-	if localized.Code != "asset_missing_name" {
-		t.Fatalf("RenameAsset(oldFilename=\"\"): expected asset_missing_name, got %s", localized.Code)
-	}
-}
-
-func TestAssetPublicPath_UsesForwardSlashes(t *testing.T) {
-	service := NewAssetService(t.TempDir(), tree.NewSlugService())
-	page := &tree.PageNode{ID: "a7b3"}
-
-	if got, want := service.buildPublicPath(page, assetName("my-image.png")), "/assets/a7b3/my-image.png"; got != want {
-		t.Fatalf("public path = %q, want %q", got, want)
-	}
-}
-
-func TestSaveAssetForPage_TooLarge_DoesNotLeavePartialFile(t *testing.T) {
-	tmp := t.TempDir()
-	page := &tree.PageNode{Slug: "limit-page", ID: "limit-page-id"}
-	service := NewAssetService(tmp, tree.NewSlugService())
-
-	file, name, err := test_utils.CreateMultipartFile("too-large.bin", []byte(strings.Repeat("a", 32)))
-	if err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
-
-	_, err = service.SaveAssetForPage(page, file, assetName(name), 8)
-	if !errors.Is(err, shared.ErrFileTooLarge) {
-		t.Fatalf("expected ErrFileTooLarge, got %v", err)
-	}
-
-	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
-	entries, readErr := os.ReadDir(assetDir)
-	if readErr != nil {
-		t.Fatalf("failed to read asset directory: %v", readErr)
-	}
-
-	if len(entries) != 0 {
-		t.Fatalf("expected no files after failed upload, got %d", len(entries))
-	}
-}
-
-func assertLocalizedCode(t *testing.T, err error, want sharederrors.ErrorCode) {
-	t.Helper()
-
-	if err == nil {
-		t.Fatalf("expected %s error, got nil", want)
-	}
-	localized, ok := sharederrors.AsLocalizedError(err)
-	if !ok {
-		t.Fatalf("expected localized error %s, got %T: %v", want, err, err)
-	}
-	if localized.Code != want {
-		t.Fatalf("error code = %s, want %s", localized.Code, want)
-	}
+	Expect(ok).To(BeTrue(), "expected localized error %s, got %T: %v", want, err, err)
+	Expect(localized.Code).To(Equal(want))
 }
 
 type testMultipartFile struct {

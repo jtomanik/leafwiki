@@ -1,15 +1,17 @@
 package oauth
 
 import (
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"errors"
 	"fmt"
-	"testing"
+	"sync"
 
 	"github.com/ory/fosite"
 )
 
-func TestFositeStoreClientCreateAndGet(t *testing.T) {
+var _ = ginkgo.It("TestFositeStoreClientCreateAndGet", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 
@@ -30,9 +32,11 @@ func TestFositeStoreClientCreateAndGet(t *testing.T) {
 	if !client.IsPublic() {
 		t.Fatalf("client is confidential, want public")
 	}
-}
 
-func TestFositeStoreAuthorizeCodeInvalidationReturnsStoredRequester(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeStoreAuthorizeCodeInvalidationReturnsStoredRequester", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 	requester := newStoreTestRequester("authorize-request")
@@ -58,9 +62,11 @@ func TestFositeStoreAuthorizeCodeInvalidationReturnsStoredRequester(t *testing.T
 	if invalidated == nil || invalidated.GetID() != "authorize-request" {
 		t.Fatalf("invalidated requester = %#v, want stored requester", invalidated)
 	}
-}
 
-func TestFositeStorePKCECreateGetDelete(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeStorePKCECreateGetDelete", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 	requester := newStoreTestRequester("pkce-request")
@@ -81,9 +87,11 @@ func TestFositeStorePKCECreateGetDelete(t *testing.T) {
 	if _, err := store.GetPKCERequestSession(ctx, "code-signature", newFositeSession("", "")); !errors.Is(err, fosite.ErrNotFound) {
 		t.Fatalf("deleted PKCE error = %v, want ErrNotFound", err)
 	}
-}
 
-func TestFositeStoreAccessTokenCreateGetDelete(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeStoreAccessTokenCreateGetDelete", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 	requester := newStoreTestRequester("access-request")
@@ -104,9 +112,11 @@ func TestFositeStoreAccessTokenCreateGetDelete(t *testing.T) {
 	if _, err := store.GetAccessTokenSession(ctx, "access-signature", newFositeSession("", "")); !errors.Is(err, fosite.ErrNotFound) {
 		t.Fatalf("deleted access token error = %v, want ErrNotFound", err)
 	}
-}
 
-func TestFositeStoreRefreshTokenCreateDeleteAndRotate(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeStoreRefreshTokenCreateDeleteAndRotate", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 	requester := newStoreTestRequester("refresh-request")
@@ -145,9 +155,11 @@ func TestFositeStoreRefreshTokenCreateDeleteAndRotate(t *testing.T) {
 	if _, err := store.GetRefreshTokenSession(ctx, "refresh-signature", newFositeSession("", "")); !errors.Is(err, fosite.ErrNotFound) {
 		t.Fatalf("deleted refresh token error = %v, want ErrNotFound", err)
 	}
-}
 
-func TestFositeStoreRotateRefreshTokenRejectsStaleSignatureWithoutRevokingCurrentToken(t *testing.T) {
+})
+
+var _ = ginkgo.It("TestFositeStoreRotateRefreshTokenRejectsStaleSignatureWithoutRevokingCurrentToken", func() {
+	t := ginkgo.GinkgoT()
 	ctx := context.Background()
 	store := newFositeStore()
 	requester := newStoreTestRequester("refresh-request")
@@ -179,34 +191,73 @@ func TestFositeStoreRotateRefreshTokenRejectsStaleSignatureWithoutRevokingCurren
 	if _, err := store.GetAccessTokenSession(ctx, "new-access-signature", newFositeSession("", "")); err != nil {
 		t.Fatalf("current access token after stale rotate = %v, want active", err)
 	}
-}
 
-func TestFositeStoreConcurrentAccess(t *testing.T) {
+})
+
+var _ = ginkgo.DescribeTable("TestFositeStoreConcurrentAccess",
+	func(worker int) {
+		t := ginkgo.GinkgoT()
+		store := newFositeStore()
+		if err := exerciseFositeStoreWorker(store, worker); err != nil {
+			t.Fatalf("worker-%d failed: %v", worker, err)
+		}
+	},
+	ginkgo.Entry("worker-0", 0),
+	ginkgo.Entry("worker-1", 1),
+	ginkgo.Entry("worker-2", 2),
+	ginkgo.Entry("worker-3", 3),
+	ginkgo.Entry("worker-4", 4),
+	ginkgo.Entry("worker-5", 5),
+	ginkgo.Entry("worker-6", 6),
+	ginkgo.Entry("worker-7", 7),
+)
+
+var _ = ginkgo.It("TestFositeStoreConcurrentAccess shared store remains safe under concurrent workers", func() {
+	t := ginkgo.GinkgoT()
 	store := newFositeStore()
+	start := make(chan struct{})
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
 
 	for i := 0; i < 8; i++ {
 		i := i
-		t.Run(fmt.Sprintf("worker-%d", i), func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			requester := newStoreTestRequester(fmt.Sprintf("request-%d", i))
-			accessSignature := fmt.Sprintf("access-%d", i)
-			refreshSignature := fmt.Sprintf("refresh-%d", i)
-
-			if err := store.CreateAccessTokenSession(ctx, accessSignature, requester); err != nil {
-				t.Fatalf("CreateAccessTokenSession failed: %v", err)
-			}
-			if err := store.CreateRefreshTokenSession(ctx, refreshSignature, accessSignature, requester); err != nil {
-				t.Fatalf("CreateRefreshTokenSession failed: %v", err)
-			}
-			if _, err := store.GetAccessTokenSession(ctx, accessSignature, newFositeSession("", "")); err != nil {
-				t.Fatalf("GetAccessTokenSession failed: %v", err)
-			}
-			if _, err := store.GetRefreshTokenSession(ctx, refreshSignature, newFositeSession("", "")); err != nil {
-				t.Fatalf("GetRefreshTokenSession failed: %v", err)
-			}
-		})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- exerciseFositeStoreWorker(store, i)
+		}()
 	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent worker failed: %v", err)
+		}
+	}
+})
+
+func exerciseFositeStoreWorker(store *fositeStore, worker int) error {
+	ctx := context.Background()
+	requester := newStoreTestRequester(fmt.Sprintf("request-%d", worker))
+	accessSignature := fmt.Sprintf("access-%d", worker)
+	refreshSignature := fmt.Sprintf("refresh-%d", worker)
+
+	if err := store.CreateAccessTokenSession(ctx, accessSignature, requester); err != nil {
+		return fmt.Errorf("CreateAccessTokenSession: %w", err)
+	}
+	if err := store.CreateRefreshTokenSession(ctx, refreshSignature, accessSignature, requester); err != nil {
+		return fmt.Errorf("CreateRefreshTokenSession: %w", err)
+	}
+	if _, err := store.GetAccessTokenSession(ctx, accessSignature, newFositeSession("", "")); err != nil {
+		return fmt.Errorf("GetAccessTokenSession: %w", err)
+	}
+	if _, err := store.GetRefreshTokenSession(ctx, refreshSignature, newFositeSession("", "")); err != nil {
+		return fmt.Errorf("GetRefreshTokenSession: %w", err)
+	}
+	return nil
 }
 
 func newStoreTestRequester(id string) fosite.Requester {

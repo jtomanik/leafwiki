@@ -26,7 +26,7 @@ type EnsurePathOutput struct {
 
 // EnsurePathUseCase ensures a full path exists, creating intermediate nodes as needed.
 type EnsurePathUseCase struct {
-	tree         *tree.TreeService
+	tree         ensurePathTree
 	slug         *tree.SlugService
 	orchestrator *pagesave.PageSaveOrchestrator
 	log          *slog.Logger
@@ -48,12 +48,9 @@ func (uc *EnsurePathUseCase) Execute(_ context.Context, in EnsurePathInput) (*En
 
 	routePath, routePathErr := ValidateRoutePathValue(in.TargetPath)
 	if routePathErr != nil {
-		if routeValidation, ok := routePathErr.(*sharederrors.ValidationErrors); ok {
-			for _, fieldErr := range routeValidation.Errors {
-				ve.Errors = append(ve.Errors, fieldErr)
-			}
-		} else {
-			ve.AddWithCode("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid)
+		routeValidation := routePathErr.(*sharederrors.ValidationErrors)
+		for _, fieldErr := range routeValidation.Errors {
+			ve.Errors = append(ve.Errors, fieldErr)
 		}
 	}
 
