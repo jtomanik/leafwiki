@@ -12,6 +12,20 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
+var invalidRevisionPageIDCases = []struct {
+	name string
+	id   string
+}{
+	{name: "parent directory", id: "../other"},
+	{name: "nested parent directory", id: "../../etc/passwd"},
+	{name: "dot dot", id: ".."},
+	{name: "dot", id: "."},
+	{name: "empty string", id: ""},
+	{name: "whitespace-only string", id: "  "},
+	{name: "path separator", id: "foo/bar"},
+	{name: "windows separator", id: `foo\bar`},
+}
+
 var _ = ginkgo.Describe("fs store", func() {
 	ginkgo.It("TestFSStoreRevisionReadPaths", func() {
 		t := ginkgo.GinkgoT()
@@ -520,21 +534,7 @@ var _ = ginkgo.Describe("fs store", func() {
 	})
 
 	ginkgo.Describe("TestFSStoreRejectsPathTraversalPageID", func() {
-		invalidPageIDs := []struct {
-			name string
-			id   string
-		}{
-			{name: "parent directory", id: "../other"},
-			{name: "nested parent directory", id: "../../etc/passwd"},
-			{name: "dot dot", id: ".."},
-			{name: "dot", id: "."},
-			{name: "empty string", id: ""},
-			{name: "whitespace-only string", id: "  "},
-			{name: "path separator", id: "foo/bar"},
-			{name: "windows separator", id: `foo\bar`},
-		}
-
-		for _, tc := range invalidPageIDs {
+		for _, tc := range invalidRevisionPageIDCases {
 			tc := tc
 			ginkgo.It(tc.name, func() {
 				t := ginkgo.GinkgoT()

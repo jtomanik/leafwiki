@@ -31,7 +31,7 @@ type RevisionState struct {
 	ParentID             tree.PageID
 	Title                string
 	Slug                 tree.Slug
-	Kind                 string
+	Kind                 tree.NodeKind
 	Path                 string
 	Content              string
 	ContentHash          string
@@ -57,7 +57,7 @@ type Revision struct {
 	CreatedAt            time.Time              `json:"created_at"`
 	Title                string                 `json:"title"`
 	Slug                 tree.Slug              `json:"slug"`
-	Kind                 string                 `json:"kind"`
+	Kind                 tree.NodeKind          `json:"kind"`
 	Path                 string                 `json:"path"`
 	ContentHash          string                 `json:"content_hash"`
 	ExtraFrontmatter     map[string]interface{} `json:"extra_frontmatter,omitempty"`

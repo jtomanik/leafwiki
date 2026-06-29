@@ -44,6 +44,18 @@ const (
 	errCodeRevisionIntegritySizeMismatch     sharederrors.ErrorCode = "asset_blob_size_mismatch"
 )
 
+var (
+	ErrAssetHashRequired         = errors.New("asset hash is required")
+	ErrRevisionCreatedAtRequired = errors.New("created_at is required")
+	ErrContentHashMismatch       = errors.New("content hash mismatch")
+	ErrAssetManifestHashMismatch = errors.New("asset manifest hash mismatch")
+	ErrAssetBlobHashMismatch     = errors.New("asset blob hash mismatch")
+	ErrAssetBlobSizeMismatch     = errors.New("asset blob size mismatch")
+	ErrInvalidAssetName          = errors.New("invalid asset name")
+	ErrDuplicateAssetName        = errors.New("duplicate asset name")
+	ErrRevisionStateRequired     = errors.New("revision state is required")
+)
+
 type Service struct {
 	storageDir         string
 	pages              *tree.TreeService
@@ -185,7 +197,7 @@ func (s *Service) RecordAssetChange(pageID tree.PageID, authorID tree.UserID, su
 		return nil, false, err
 	}
 	if contentHash != state.ContentHash {
-		return nil, false, fmt.Errorf("content hash mismatch: computed=%s saved=%s", state.ContentHash, contentHash)
+		return nil, false, fmt.Errorf("%w: computed=%s saved=%s", ErrContentHashMismatch, state.ContentHash, contentHash)
 	}
 
 	if err := s.persistLiveAssets(pageID, state.Assets); err != nil {
@@ -197,7 +209,7 @@ func (s *Service) RecordAssetChange(pageID tree.PageID, authorID tree.UserID, su
 		return nil, false, err
 	}
 	if savedManifestHash != state.AssetManifestHash {
-		return nil, false, fmt.Errorf("asset manifest hash mismatch: computed=%s saved=%s", state.AssetManifestHash, savedManifestHash)
+		return nil, false, fmt.Errorf("%w: computed=%s saved=%s", ErrAssetManifestHashMismatch, state.AssetManifestHash, savedManifestHash)
 	}
 
 	rev, err := s.newRevision(RevisionTypeAssetUpdate, state, authorID, summary, savedManifestHash)
@@ -234,7 +246,7 @@ func (s *Service) RecordStructureChange(pageID tree.PageID, authorID tree.UserID
 		return nil, false, err
 	}
 	if contentHash != state.ContentHash {
-		return nil, false, fmt.Errorf("content hash mismatch: computed=%s saved=%s", state.ContentHash, contentHash)
+		return nil, false, fmt.Errorf("%w: computed=%s saved=%s", ErrContentHashMismatch, state.ContentHash, contentHash)
 	}
 
 	rev, err := s.newRevision(RevisionTypeStructureUpdate, state, authorID, summary, assetManifestHash)
@@ -279,7 +291,7 @@ func (s *Service) resolveAssetManifestHash(pageID tree.PageID, prev *Revision) (
 		return "", err
 	}
 	if savedManifestHash != fullState.AssetManifestHash {
-		return "", fmt.Errorf("asset manifest hash mismatch: computed=%s saved=%s", fullState.AssetManifestHash, savedManifestHash)
+		return "", fmt.Errorf("%w: computed=%s saved=%s", ErrAssetManifestHashMismatch, fullState.AssetManifestHash, savedManifestHash)
 	}
 	s.assetManifestCache.Store(pageID, assetManifestEntry{hash: savedManifestHash})
 	return savedManifestHash, nil
@@ -599,7 +611,7 @@ func (s *Service) revisionStateFromPage(page *tree.Page) *RevisionState {
 		ParentID:      parentID,
 		Title:         page.Title,
 		Slug:          page.Slug,
-		Kind:          string(page.Kind),
+		Kind:          page.Kind,
 		Path:          page.CalculatePath(),
 		Content:       page.Content,
 		ContentHash:   sha256HexBytes([]byte(page.Content)),
@@ -636,7 +648,7 @@ func (s *Service) recordContentUpdateForPage(page *tree.Page, authorID tree.User
 		return nil, false, err
 	}
 	if contentHash != state.ContentHash {
-		return nil, false, fmt.Errorf("content hash mismatch: computed=%s saved=%s", state.ContentHash, contentHash)
+		return nil, false, fmt.Errorf("%w: computed=%s saved=%s", ErrContentHashMismatch, state.ContentHash, contentHash)
 	}
 
 	rev, err := s.newRevision(RevisionTypeContentUpdate, state, authorID, summary, assetManifestHash)
@@ -684,7 +696,7 @@ func (s *Service) newRevision(t RevisionType, state *RevisionState, authorID tre
 
 func (s *Service) enrichStateWithExtraFrontmatter(pageID tree.PageID, state *RevisionState) error {
 	if state == nil {
-		return fmt.Errorf("revision state is required")
+		return ErrRevisionStateRequired
 	}
 
 	raw, err := s.pages.ReadPageRaw(pageID)
@@ -944,10 +956,10 @@ func (s *Service) restoreAssets(pageID tree.PageID, refs []AssetRef) error {
 	for _, ref := range refs {
 		name := strings.TrimSpace(ref.Name)
 		if name == "" || filepath.Base(name) != name || strings.Contains(name, string(os.PathSeparator)) {
-			return fmt.Errorf("invalid asset name: %s", ref.Name)
+			return fmt.Errorf("%w: %s", ErrInvalidAssetName, ref.Name)
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("duplicate asset name in manifest: %s", name)
+			return fmt.Errorf("%w: %s", ErrDuplicateAssetName, name)
 		}
 		seen[name] = struct{}{}
 
@@ -970,7 +982,7 @@ func (s *Service) recordRestoreRevision(pageID tree.PageID, authorID tree.UserID
 		return err
 	}
 	if contentHash != state.ContentHash {
-		return fmt.Errorf("content hash mismatch: computed=%s saved=%s", state.ContentHash, contentHash)
+		return fmt.Errorf("%w: computed=%s saved=%s", ErrContentHashMismatch, state.ContentHash, contentHash)
 	}
 
 	if err := s.persistLiveAssets(pageID, state.Assets); err != nil {
@@ -982,7 +994,7 @@ func (s *Service) recordRestoreRevision(pageID tree.PageID, authorID tree.UserID
 		return err
 	}
 	if savedManifestHash != state.AssetManifestHash {
-		return fmt.Errorf("asset manifest hash mismatch: computed=%s saved=%s", state.AssetManifestHash, savedManifestHash)
+		return fmt.Errorf("%w: computed=%s saved=%s", ErrAssetManifestHashMismatch, state.AssetManifestHash, savedManifestHash)
 	}
 
 	rev, err := s.newRevision(RevisionTypeRestore, state, authorID, "page restored", savedManifestHash)

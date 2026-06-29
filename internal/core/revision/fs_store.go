@@ -147,7 +147,7 @@ func (s *FSStore) SaveRevision(rev *Revision) error {
 		return fmt.Errorf("page id is required")
 	}
 	if rev.CreatedAt.IsZero() {
-		return fmt.Errorf("created_at is required")
+		return ErrRevisionCreatedAtRequired
 	}
 	if err := validateStorageID(revisionIDStorageKey(rev.ID)); err != nil {
 		return fmt.Errorf("invalid revision id: %s", rev.ID)
@@ -397,7 +397,7 @@ func (s *FSStore) LoadAssetManifest(hash string) ([]AssetRef, error) {
 func (s *FSStore) ReadAssetBlob(hash string) ([]byte, error) {
 	hash = strings.TrimSpace(hash)
 	if hash == "" {
-		return nil, fmt.Errorf("asset hash is required")
+		return nil, ErrAssetHashRequired
 	}
 
 	raw, err := revisionReadFile(s.AssetBlobPath(hash))
@@ -412,7 +412,7 @@ func (s *FSStore) ReadAssetBlob(hash string) ([]byte, error) {
 func (s *FSStore) OpenAssetBlob(hash string) (*os.File, error) {
 	hash = strings.TrimSpace(hash)
 	if hash == "" {
-		return nil, fmt.Errorf("asset hash is required")
+		return nil, ErrAssetHashRequired
 	}
 	f, err := revisionOpen(s.AssetBlobPath(hash))
 	if err != nil {
@@ -455,11 +455,11 @@ func (s *FSStore) CopyAssetBlobToPath(hash string, expectedSize int64, dstPath s
 	}
 	if computedHash := hex.EncodeToString(hasher.Sum(nil)); computedHash != hash {
 		_ = revisionRemove(tmpName)
-		return fmt.Errorf("asset blob hash mismatch: computed %s, want %s", computedHash, hash)
+		return fmt.Errorf("%w: computed %s, want %s", ErrAssetBlobHashMismatch, computedHash, hash)
 	}
 	if written != expectedSize {
 		_ = revisionRemove(tmpName)
-		return fmt.Errorf("asset blob size mismatch: got %d, want %d", written, expectedSize)
+		return fmt.Errorf("%w: got %d, want %d", ErrAssetBlobSizeMismatch, written, expectedSize)
 	}
 	if err := revisionRename(tmpName, dstPath); err != nil {
 		_ = revisionRemove(tmpName)

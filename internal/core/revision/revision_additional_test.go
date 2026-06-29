@@ -1,7 +1,6 @@
 package revision
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,9 +11,8 @@ import (
 
 var _ = ginkgo.Describe("revision store additional coverage", func() {
 	ginkgo.It("NewRevisionIDUnchecked preserves the raw commit identifier", func() {
-		id := NewRevisionIDUnchecked(" rev-raw ")
+		id := RevisionIDFromString(" rev-raw ")
 
-		Expect(id.String()).To(Equal(" rev-raw "))
 		Expect(id.CommitID()).To(Equal(" rev-raw "))
 	})
 
@@ -44,14 +42,15 @@ var _ = ginkgo.Describe("revision store additional coverage", func() {
 
 		revisions, err := store.ListRevisions(pageID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(revisions).To(HaveLen(2))
-		Expect(revisions[0].ID).To(Equal(newFixtureRevisionID("rev-4")))
-		Expect(revisions[1].ID).To(Equal(newFixtureRevisionID("rev-3")))
+		Expect(revisions).To(HaveExactElements(
+			HaveField("ID", newFixtureRevisionID("rev-4")),
+			HaveField("ID", newFixtureRevisionID("rev-3")),
+		))
 
 		_, err = store.GetRevision(pageID, newFixtureRevisionID("rev-1"))
-		Expect(errors.Is(err, os.ErrNotExist)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = store.GetRevision(pageID, newFixtureRevisionID("rev-2"))
-		Expect(errors.Is(err, os.ErrNotExist)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		index, err := store.loadRevisionIndex(pageID)
 		Expect(err).NotTo(HaveOccurred())

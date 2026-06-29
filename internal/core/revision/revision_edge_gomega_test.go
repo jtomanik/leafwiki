@@ -1,18 +1,24 @@
 package revision
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 func newGomegaRevisionService() (*Service, *tree.TreeService, string) {
@@ -72,13 +78,22 @@ func saveRevisionFixture(store *FSStore, pageID tree.PageID, revisionID Revision
 	return rev
 }
 
-func expectLocalizedRevisionErrorCode(err error, code sharederrors.ErrorCode) {
-	GinkgoHelper()
+func MatchLocalizedRevisionErrorCode(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
+}
 
-	Expect(err).To(HaveOccurred())
-	localized, ok := sharederrors.AsLocalizedError(err)
-	Expect(ok).To(BeTrue(), "expected localized error, got %T: %v", err, err)
-	Expect(localized.Code).To(Equal(code))
+func MatchJSONUnsupportedTypeError() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var typeErr *json.UnsupportedTypeError
+		return errors.As(err, &typeErr), nil
+	}).WithMessage("match JSON unsupported type error")
+}
+
+func MatchJSONSyntaxError() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var syntaxErr *json.SyntaxError
+		return errors.As(err, &syntaxErr), nil
+	}).WithMessage("match JSON syntax error")
 }
 
 var _ = Describe("revision Gomega edge coverage", func() {
@@ -96,7 +111,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 
 		_, created, err := service.RecordContentUpdate(newFixturePageID("missing"), newFixtureUserID("tester"), "missing")
 		Expect(created).To(BeFalse())
-		Expect(errors.Is(err, tree.ErrPageNotFound)).To(BeTrue())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
 	It("covers revision metadata helper fallbacks and marshal failures", func() {
@@ -112,9 +127,10 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Extra:   map[string]interface{}{"aliases": []interface{}{"a"}},
 		}
 		snapshot := revisionPageMetadata(source)
-		Expect(snapshot).NotTo(BeNil())
-		Expect(snapshot.Fields).To(BeNil())
-		Expect(snapshot.Extra).To(Equal(map[string]interface{}{"aliases": []interface{}{"a"}}))
+		Expect(snapshot).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Fields": BeNil(),
+			"Extra":  Equal(map[string]interface{}{"aliases": []interface{}{"a"}}),
+		})))
 		source.Tags[0] = "mutated"
 		Expect(snapshot.Tags).To(Equal([]string{"alpha"}))
 
@@ -124,11 +140,11 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Page:    markdown.PageMetadataPage{ID: "page"},
 			Fields:  map[string]interface{}{"bad": func() {}},
 		})
-		Expect(err).To(MatchError(ContainSubstring("marshal page metadata")))
+		Expect(err).To(MatchJSONUnsupportedTypeError())
 
 		Expect(hashExtraFrontmatter(nil)).To(BeEmpty())
 		_, err = hashExtraFrontmatter(map[string]interface{}{"bad": func() {}})
-		Expect(err).To(MatchError(ContainSubstring("marshal compatibility metadata extras")))
+		Expect(err).To(MatchJSONUnsupportedTypeError())
 	})
 
 	It("covers restored content helper fallbacks and validation errors", func() {
@@ -180,11 +196,11 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(reader.Close()).To(Succeed())
 
 		_, err = store.ReadContentBlob("missing-content")
-		Expect(err).To(MatchError(ContainSubstring("read content blob")))
+		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = store.ReadAssetBlob("missing-asset")
-		Expect(err).To(MatchError(ContainSubstring("read asset blob")))
+		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = store.OpenAssetBlob(" ")
-		Expect(err).To(MatchError(ContainSubstring("asset hash is required")))
+		Expect(err).To(MatchError(ErrAssetHashRequired))
 		Expect(store.AssetManifestExists("")).To(BeFalse())
 		Expect(store.DeletePageRevisions(newFixturePageID("../bad"))).To(Succeed())
 
@@ -213,37 +229,37 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(os.MkdirAll(store.revisionsPageDir(badListPageID), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(store.revisionsPageDir(badListPageID), "20260626T120000.000000000Z_bad.json"), []byte("{"), 0o644)).To(Succeed())
 		_, _, err := store.ListRevisionsPage(badListPageID, "", 0)
-		Expect(err).To(MatchError(ContainSubstring("read revision")))
+		Expect(err).To(MatchJSONSyntaxError())
 		_, err = store.GetLatestRevision(badListPageID)
-		Expect(err).To(MatchError(ContainSubstring("read latest revision")))
+		Expect(err).To(MatchJSONSyntaxError())
 
 		badIndexPageID := newFixturePageID("bad-index")
 		Expect(os.MkdirAll(store.revisionsPageDir(badIndexPageID), 0o755)).To(Succeed())
 		Expect(os.WriteFile(store.revisionIndexPath(badIndexPageID), []byte("{"), 0o644)).To(Succeed())
 		_, err = store.loadRevisionIndex(badIndexPageID)
-		Expect(err).To(MatchError(ContainSubstring("read revision index")))
+		Expect(err).To(MatchJSONSyntaxError())
 		_, err = store.GetRevision(badIndexPageID, newFixtureRevisionID("rev"))
-		Expect(err).To(MatchError(ContainSubstring("read revision index")))
+		Expect(err).To(MatchJSONSyntaxError())
 
 		indexedBadPageID := newFixturePageID("indexed-bad")
 		Expect(os.MkdirAll(store.revisionsPageDir(indexedBadPageID), 0o755)).To(Succeed())
 		Expect(os.WriteFile(store.revisionIndexPath(indexedBadPageID), []byte(`{"rev-bad":"bad.json"}`), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(store.revisionsPageDir(indexedBadPageID), "bad.json"), []byte("{"), 0o644)).To(Succeed())
 		_, err = store.GetRevision(indexedBadPageID, newFixtureRevisionID("rev-bad"))
-		Expect(err).To(MatchError(ContainSubstring("read revision bad.json")))
+		Expect(err).To(MatchJSONSyntaxError())
 
 		fallbackBadPageID := newFixturePageID("fallback-bad")
 		Expect(os.MkdirAll(store.revisionsPageDir(fallbackBadPageID), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(store.revisionsPageDir(fallbackBadPageID), "20260626T120000.000000000Z_rev-fallback.json"), []byte("{"), 0o644)).To(Succeed())
 		_, err = store.GetRevision(fallbackBadPageID, newFixtureRevisionID("rev-fallback"))
-		Expect(err).To(MatchError(ContainSubstring("read revision")))
+		Expect(err).To(MatchJSONSyntaxError())
 
 		pruneBadIndexPageID := newFixturePageID("prune-bad-index")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 		saveRevisionFixture(store, pruneBadIndexPageID, newFixtureRevisionID("rev-1"), createdAt, "", "")
 		saveRevisionFixture(store, pruneBadIndexPageID, newFixtureRevisionID("rev-2"), createdAt.Add(time.Minute), "", "")
 		Expect(os.WriteFile(store.revisionIndexPath(pruneBadIndexPageID), []byte("{"), 0o644)).To(Succeed())
-		Expect(store.PruneRevisions(pruneBadIndexPageID, 1)).To(MatchError(ContainSubstring("read revision index")))
+		Expect(store.PruneRevisions(pruneBadIndexPageID, 1)).To(MatchJSONSyntaxError())
 	})
 
 	It("validates SaveRevision required fields", func() {
@@ -256,7 +272,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Title:  "Page",
 			Slug:   "page",
 		})
-		Expect(err).To(MatchError(ContainSubstring("created_at is required")))
+		Expect(err).To(MatchError(ErrRevisionCreatedAtRequired))
 	})
 
 	It("covers asset copy validation and destination errors", func() {
@@ -265,21 +281,21 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
 
 		missingDirPath := filepath.Join(tmp, "missing-dir", "asset.txt")
-		Expect(store.CopyAssetBlobToPath(hash, size, missingDirPath)).To(MatchError(ContainSubstring("create temp restore file")))
+		Expect(store.CopyAssetBlobToPath(hash, size, missingDirPath)).To(MatchError(os.ErrNotExist))
 
 		restoreDir := filepath.Join(tmp, "restore")
 		Expect(os.MkdirAll(restoreDir, 0o755)).To(Succeed())
-		Expect(store.CopyAssetBlobToPath(hash, size+1, filepath.Join(restoreDir, "wrong-size.txt"))).To(MatchError(ContainSubstring("asset blob size mismatch")))
+		Expect(store.CopyAssetBlobToPath(hash, size+1, filepath.Join(restoreDir, "wrong-size.txt"))).To(MatchError(ErrAssetBlobSizeMismatch))
 
 		tamperedHash := strings.Repeat("b", 64)
 		tamperedPath := store.AssetBlobPath(tamperedHash)
 		Expect(os.MkdirAll(filepath.Dir(tamperedPath), 0o755)).To(Succeed())
 		Expect(os.WriteFile(tamperedPath, []byte("tampered"), 0o644)).To(Succeed())
-		Expect(store.CopyAssetBlobToPath(tamperedHash, int64(len("tampered")), filepath.Join(restoreDir, "wrong-hash.txt"))).To(MatchError(ContainSubstring("asset blob hash mismatch")))
+		Expect(store.CopyAssetBlobToPath(tamperedHash, int64(len("tampered")), filepath.Join(restoreDir, "wrong-hash.txt"))).To(MatchError(ErrAssetBlobHashMismatch))
 
 		existingDirTarget := filepath.Join(tmp, "existing-dir-target")
 		Expect(os.MkdirAll(existingDirTarget, 0o755)).To(Succeed())
-		Expect(store.CopyAssetBlobToPath(hash, size, existingDirTarget)).To(MatchError(ContainSubstring("move restored asset into place")))
+		Expect(store.CopyAssetBlobToPath(hash, size, existingDirTarget)).To(MatchError(syscall.EEXIST))
 	})
 
 	It("reports missing asset blobs and size mismatches during integrity checks", func() {
@@ -329,8 +345,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 				Slug:  newFixtureSlug("missing"),
 			},
 		}}, newFixtureUserID("tester"), "batch")
-		Expect(errs).To(HaveLen(1))
-		Expect(errs[0]).To(HaveOccurred())
+		Expect(errs).To(ConsistOf(MatchError(tree.ErrPageNotFound)))
 
 		_, created, err := service.RecordAssetChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad")
 		Expect(created).To(BeFalse())
@@ -345,7 +360,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(created).To(BeFalse())
 		Expect(err).To(HaveOccurred())
 		Expect(service.recordRestoreRevision(newFixturePageID("missing-restore-page"), newFixtureUserID("tester"))).To(HaveOccurred())
-		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("page"), nil)).To(MatchError(ContainSubstring("revision state is required")))
+		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("page"), nil)).To(MatchError(ErrRevisionStateRequired))
 		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("missing-enrich-page"), &RevisionState{})).To(HaveOccurred())
 		_, err = service.resolveAssetManifestHash(newFixturePageID("missing-manifest-page"), nil)
 		Expect(err).To(HaveOccurred())
@@ -375,11 +390,11 @@ var _ = Describe("revision Gomega edge coverage", func() {
 
 		pageID := newFixturePageID("restore-validation")
 		hash, size := writeStoredAssetBlob(service.store, []byte("asset"))
-		Expect(service.restoreAssets(pageID, []AssetRef{{Name: "../bad.txt", SHA256: hash, SizeBytes: size}})).To(MatchError(ContainSubstring("invalid asset name")))
+		Expect(service.restoreAssets(pageID, []AssetRef{{Name: "../bad.txt", SHA256: hash, SizeBytes: size}})).To(MatchError(ErrInvalidAssetName))
 		Expect(service.restoreAssets(pageID, []AssetRef{
 			{Name: "dup.txt", SHA256: hash, SizeBytes: size},
 			{Name: "dup.txt", SHA256: hash, SizeBytes: size},
-		})).To(MatchError(ContainSubstring("duplicate asset name")))
+		})).To(MatchError(ErrDuplicateAssetName))
 	})
 
 	It("rolls back content when restore asset rehydration fails", func() {
@@ -396,7 +411,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		rev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-broken-restore-assets"), time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC), contentHash, brokenManifest)
 
 		err = service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))
-		expectLocalizedRevisionErrorCode(err, "revision_restore_failed")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 
 		page, err := treeService.GetPage(pageID)
 		Expect(err).NotTo(HaveOccurred())
@@ -420,7 +435,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 
 		Expect(os.WriteFile(service.store.revisionIndexPath(pageID), []byte("{"), 0o644)).To(Succeed())
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, validRev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, validRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		Expect(os.Remove(service.store.revisionIndexPath(pageID))).To(Succeed())
 
 		invalidMetadataRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-invalid-metadata"), createdAt.Add(time.Minute), contentHash, manifestHash)
@@ -429,7 +444,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Fields:  map[string]interface{}{"bad": []string{"unsupported"}},
 		}
 		Expect(service.store.SaveRevision(invalidMetadataRev)).To(Succeed())
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, invalidMetadataRev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, invalidMetadataRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 
 		brokenAssetPageID := createGomegaRevisionPage(treeService, "Broken Assets", "broken-assets", "body")
 		assetPath := revisionAssetPath(storageDir, brokenAssetPageID)
@@ -461,9 +476,9 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(os.MkdirAll(store.revisionsDir(), 0o755)).To(Succeed())
 		Expect(os.WriteFile(store.revisionsPageDir(fileBackedPageID), []byte("not a dir"), 0o644)).To(Succeed())
 		_, err := store.GetLatestRevision(fileBackedPageID)
-		Expect(err).To(MatchError(ContainSubstring("read revisions dir")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 		_, err = store.GetRevision(fileBackedPageID, newFixtureRevisionID("rev"))
-		Expect(err).To(MatchError(ContainSubstring("read revision index")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 
 		nullIndexPageID := newFixturePageID("null-index")
 		Expect(os.MkdirAll(store.revisionsPageDir(nullIndexPageID), 0o755)).To(Succeed())
@@ -491,7 +506,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Title:     "Page",
 			Slug:      "page",
 		})
-		Expect(err).To(MatchError(ContainSubstring("write revision")))
+		Expect(err).To(MatchError(os.ErrExist))
 
 		badIndexSavePageID := newFixturePageID("save-with-bad-index")
 		Expect(os.MkdirAll(store.revisionsPageDir(badIndexSavePageID), 0o755)).To(Succeed())
@@ -504,12 +519,12 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			Title:     "Page",
 			Slug:      "page",
 		})
-		Expect(err).To(MatchError(ContainSubstring("read revision index")))
+		Expect(err).To(MatchJSONSyntaxError())
 
 		invalidBase := filepath.Join(GinkgoT().TempDir(), "not-a-dir")
 		Expect(os.WriteFile(invalidBase, []byte("x"), 0o644)).To(Succeed())
 		invalidStore := NewFSStore(invalidBase)
-		Expect(invalidStore.saveRevisionIndex(newFixturePageID("page"), nil)).To(MatchError(ContainSubstring("ensure revision dir")))
+		Expect(invalidStore.saveRevisionIndex(newFixturePageID("page"), nil)).To(MatchError(syscall.ENOTDIR))
 	})
 
 	It("localizes restore, snapshot, comparison, and asset preview failures", func() {
@@ -517,27 +532,27 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(newFixturePageID(""), newFixtureRevisionID("rev"), newFixtureUserID("tester")), "revision_restore_invalid_page_id")
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, newFixtureRevisionID(""), newFixtureUserID("tester")), "revision_restore_invalid_revision")
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(newFixturePageID("missing"), newFixtureRevisionID("rev"), newFixtureUserID("tester")), "revision_restore_page_not_found")
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, newFixtureRevisionID("missing-rev"), newFixtureUserID("tester")), "revision_restore_revision_not_found")
+		Expect(service.RestoreRevision(newFixturePageID(""), newFixtureRevisionID("rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreInvalidPageID))
+		Expect(service.RestoreRevision(pageID, newFixtureRevisionID(""), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreInvalidRevision))
+		Expect(service.RestoreRevision(newFixturePageID("missing"), newFixtureRevisionID("rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestorePageNotFound))
+		Expect(service.RestoreRevision(pageID, newFixtureRevisionID("missing-rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreRevisionNotFound))
 
 		manifestHash, err := service.store.SaveAssetManifest(nil)
 		Expect(err).NotTo(HaveOccurred())
 		missingContentRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-missing-content"), createdAt, "missing-content", manifestHash)
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, missingContentRev.ID, newFixtureUserID("tester")), "revision_restore_content_missing")
+		Expect(service.RestoreRevision(pageID, missingContentRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreContentMissing))
 
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))
 		Expect(err).NotTo(HaveOccurred())
 		missingManifestRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-missing-manifest"), createdAt.Add(time.Minute), contentHash, "missing-manifest")
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, missingManifestRev.ID, newFixtureUserID("tester")), "revision_restore_assets_missing")
+		Expect(service.RestoreRevision(pageID, missingManifestRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreAssetsMissing))
 
 		_, err = service.GetRevisionSnapshot(pageID, newFixtureRevisionID("missing-snapshot"))
 		Expect(err).To(HaveOccurred())
 		_, err = service.GetRevisionSnapshot(pageID, missingContentRev.ID)
-		expectLocalizedRevisionErrorCode(err, "revision_preview_content_unavailable")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewContentUnavailable))
 		_, err = service.GetRevisionSnapshot(pageID, missingManifestRev.ID)
-		expectLocalizedRevisionErrorCode(err, "revision_preview_assets_unavailable")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetsUnavailable))
 
 		_, err = service.CompareRevisionSnapshots(pageID, newFixtureRevisionID("missing-base"), missingManifestRev.ID)
 		Expect(err).To(HaveOccurred())
@@ -545,14 +560,14 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 
 		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, tree.AssetName(" "))
-		expectLocalizedRevisionErrorCode(err, "revision_preview_asset_invalid_name")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetInvalidName))
 		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, tree.AssetName("image.png"))
-		expectLocalizedRevisionErrorCode(err, "revision_preview_assets_unavailable")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetsUnavailable))
 
 		missingBlobManifestHash, err := service.store.SaveAssetManifest([]AssetRef{{Name: "image.png", SHA256: strings.Repeat("a", 64), SizeBytes: 5}})
 		Expect(err).NotTo(HaveOccurred())
 		missingBlobRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-missing-blob"), createdAt.Add(2*time.Minute), contentHash, missingBlobManifestHash)
 		_, err = service.GetRevisionAsset(pageID, missingBlobRev.ID, tree.AssetName("image.png"))
-		expectLocalizedRevisionErrorCode(err, "revision_preview_asset_blob_unavailable")
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetBlobMissing))
 	})
 })

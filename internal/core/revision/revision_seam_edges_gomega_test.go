@@ -30,18 +30,20 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(hash).To(Equal(sha256HexBytes([]byte("content-race"))))
 		restore()
 
+		writeFailedErr := errors.New("write failed")
 		restore = setRevisionSeam(&revisionWriteFileAtomic, func(string, []byte, os.FileMode) error {
-			return errors.New("write failed")
+			return writeFailedErr
 		})
 		_, err = store.SaveContentBlob([]byte("content-failure"))
-		Expect(err).To(MatchError(ContainSubstring("write content blob")))
+		Expect(err).To(MatchError(writeFailedErr))
 		restore()
 
+		marshalFailedErr := errors.New("marshal failed")
 		restoreJSON := setRevisionSeam(&revisionJSONMarshal, func(any) ([]byte, error) {
-			return nil, errors.New("marshal failed")
+			return nil, marshalFailedErr
 		})
 		_, err = store.SaveAssetManifest(nil)
-		Expect(err).To(MatchError(ContainSubstring("marshal asset manifest")))
+		Expect(err).To(MatchError(marshalFailedErr))
 		restoreJSON()
 
 		restore = setRevisionSeam(&revisionWriteFileAtomic, func(path string, data []byte, perm os.FileMode) error {
@@ -54,11 +56,12 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(store.AssetManifestExists(manifestHash)).To(BeTrue())
 		restore()
 
+		manifestWriteFailedErr := errors.New("manifest write failed")
 		restore = setRevisionSeam(&revisionWriteFileAtomic, func(string, []byte, os.FileMode) error {
-			return errors.New("manifest write failed")
+			return manifestWriteFailedErr
 		})
 		_, err = store.SaveAssetManifest([]AssetRef{{Name: "other.txt", SHA256: strings.Repeat("b", 64), SizeBytes: 5}})
-		Expect(err).To(MatchError(ContainSubstring("write asset manifest")))
+		Expect(err).To(MatchError(manifestWriteFailedErr))
 	})
 
 	It("covers asset blob save failure and race paths", func() {
@@ -67,42 +70,47 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		srcPath := filepath.Join(tmp, "live.txt")
 		Expect(os.WriteFile(srcPath, []byte("asset"), 0o644)).To(Succeed())
 
+		tmpMkdirFailedErr := errors.New("tmp mkdir failed")
 		restoreMkdir := setRevisionSeam(&revisionMkdirAll, func(path string, perm os.FileMode) error {
 			if strings.HasSuffix(path, string(filepath.Separator)+"tmp") {
-				return errors.New("tmp mkdir failed")
+				return tmpMkdirFailedErr
 			}
 			return os.MkdirAll(path, perm)
 		})
 		_, _, err := store.SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("ensure tmp dir")))
+		Expect(err).To(MatchError(tmpMkdirFailedErr))
 		restoreMkdir()
 
+		tempFailedErr := errors.New("temp failed")
 		restoreCreate := setRevisionSeam(&revisionCreateTemp, func(string, string) (*os.File, error) {
-			return nil, errors.New("temp failed")
+			return nil, tempFailedErr
 		})
 		_, _, err = store.SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("create temp asset blob")))
+		Expect(err).To(MatchError(tempFailedErr))
 		restoreCreate()
 
+		copyFailedErr := errors.New("copy failed")
 		restoreCopy := setRevisionSeam(&revisionCopy, func(io.Writer, io.Reader) (int64, error) {
-			return 0, errors.New("copy failed")
+			return 0, copyFailedErr
 		})
 		_, _, err = store.SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("copy asset to temp blob")))
+		Expect(err).To(MatchError(copyFailedErr))
 		restoreCopy()
 
+		chmodFailedErr := errors.New("chmod failed")
 		restoreChmod := setRevisionSeam(&revisionFileChmod, func(*os.File, os.FileMode) error {
-			return errors.New("chmod failed")
+			return chmodFailedErr
 		})
 		_, _, err = store.SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("chmod temp asset blob")))
+		Expect(err).To(MatchError(chmodFailedErr))
 		restoreChmod()
 
+		closeFailedErr := errors.New("close failed")
 		restoreClose := setRevisionSeam(&revisionFileClose, func(*os.File) error {
-			return errors.New("close failed")
+			return closeFailedErr
 		})
 		_, _, err = store.SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("close temp asset blob")))
+		Expect(err).To(MatchError(closeFailedErr))
 		restoreClose()
 
 		hash, size, err := store.SaveAssetBlobFromPath(srcPath)
@@ -112,14 +120,15 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(hashAgain).To(Equal(hash))
 		Expect(sizeAgain).To(Equal(size))
 
+		assetBlobMkdirFailedErr := errors.New("asset blob mkdir failed")
 		restoreMkdir = setRevisionSeam(&revisionMkdirAll, func(path string, perm os.FileMode) error {
 			if strings.Contains(path, filepath.Join("blobs", "assets")) {
-				return errors.New("asset blob mkdir failed")
+				return assetBlobMkdirFailedErr
 			}
 			return os.MkdirAll(path, perm)
 		})
 		_, _, err = NewFSStore(filepath.Join(tmp, "mkdir-fail")).SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("ensure asset blob dir")))
+		Expect(err).To(MatchError(assetBlobMkdirFailedErr))
 		restoreMkdir()
 
 		restoreRename := setRevisionSeam(&revisionRename, func(src, dst string) error {
@@ -132,11 +141,12 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(hash).To(Equal(sha256HexBytes([]byte("asset"))))
 		restoreRename()
 
+		renameFailedErr := errors.New("rename failed")
 		restoreRename = setRevisionSeam(&revisionRename, func(string, string) error {
-			return errors.New("rename failed")
+			return renameFailedErr
 		})
 		_, _, err = NewFSStore(filepath.Join(tmp, "rename-fail")).SaveAssetBlobFromPath(srcPath)
-		Expect(err).To(MatchError(ContainSubstring("move asset blob into place")))
+		Expect(err).To(MatchError(renameFailedErr))
 	})
 
 	It("covers asset restore copy failures", func() {
@@ -146,22 +156,25 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreDir := filepath.Join(tmp, "restore")
 		Expect(os.MkdirAll(restoreDir, 0o755)).To(Succeed())
 
+		streamFailedErr := errors.New("stream failed")
 		restoreCopy := setRevisionSeam(&revisionCopy, func(io.Writer, io.Reader) (int64, error) {
-			return 0, errors.New("stream failed")
+			return 0, streamFailedErr
 		})
-		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "copy.txt"))).To(MatchError(ContainSubstring("stream asset blob")))
+		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "copy.txt"))).To(MatchError(streamFailedErr))
 		restoreCopy()
 
+		chmodFailedErr := errors.New("chmod failed")
 		restoreChmod := setRevisionSeam(&revisionFileChmod, func(*os.File, os.FileMode) error {
-			return errors.New("chmod failed")
+			return chmodFailedErr
 		})
-		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "chmod.txt"))).To(MatchError(ContainSubstring("chmod restored asset")))
+		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "chmod.txt"))).To(MatchError(chmodFailedErr))
 		restoreChmod()
 
+		closeFailedErr := errors.New("close failed")
 		restoreClose := setRevisionSeam(&revisionFileClose, func(*os.File) error {
-			return errors.New("close failed")
+			return closeFailedErr
 		})
-		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "close.txt"))).To(MatchError(ContainSubstring("close temp restore file")))
+		Expect(store.CopyAssetBlobToPath(hash, size, filepath.Join(restoreDir, "close.txt"))).To(MatchError(closeFailedErr))
 		restoreClose()
 	})
 
@@ -170,9 +183,10 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		pageID := newFixturePageID("store-failure-page")
 		createdAt := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
 
+		indexWriteFailedErr := errors.New("index write failed")
 		restoreWrite := setRevisionSeam(&revisionWriteFileAtomic, func(path string, data []byte, perm os.FileMode) error {
 			if filepath.Base(path) == revisionIndexFileName {
-				return errors.New("index write failed")
+				return indexWriteFailedErr
 			}
 			return os.WriteFile(path, data, perm)
 		})
@@ -184,31 +198,34 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 			Title:     "Page",
 			Slug:      "page",
 		})
-		Expect(err).To(MatchError(ContainSubstring("write revision index")))
+		Expect(err).To(MatchError(indexWriteFailedErr))
 		restoreWrite()
 
 		lookupPageID := newFixturePageID("lookup-read-dir-error")
 		Expect(store.saveRevisionIndex(lookupPageID, revisionIndex{})).To(Succeed())
+		readDirFailedErr := errors.New("read dir failed")
 		restoreReadDir := setRevisionSeam(&revisionReadDir, func(string) ([]os.DirEntry, error) {
-			return nil, errors.New("read dir failed")
+			return nil, readDirFailedErr
 		})
 		_, err = store.GetRevision(lookupPageID, newFixtureRevisionID("missing"))
-		Expect(err).To(MatchError(ContainSubstring("read revisions dir")))
+		Expect(err).To(MatchError(readDirFailedErr))
 		restoreReadDir()
 
 		prunePageID := newFixturePageID("prune-remove-error")
 		saveRevisionFixture(store, prunePageID, newFixtureRevisionID("rev-old"), createdAt, "", "")
 		saveRevisionFixture(store, prunePageID, newFixtureRevisionID("rev-new"), createdAt.Add(time.Minute), "", "")
+		removeFailedErr := errors.New("remove failed")
 		restoreRemove := setRevisionSeam(&revisionRemove, func(string) error {
-			return errors.New("remove failed")
+			return removeFailedErr
 		})
-		Expect(store.PruneRevisions(prunePageID, 1)).To(MatchError(ContainSubstring("delete revision file")))
+		Expect(store.PruneRevisions(prunePageID, 1)).To(MatchError(removeFailedErr))
 		restoreRemove()
 
+		removeAllFailedErr := errors.New("remove all failed")
 		restoreRemoveAll := setRevisionSeam(&revisionRemoveAll, func(string) error {
-			return errors.New("remove all failed")
+			return removeAllFailedErr
 		})
-		Expect(store.DeletePageRevisions(newFixturePageID("delete-failure"))).To(MatchError(ContainSubstring("delete page revisions")))
+		Expect(store.DeletePageRevisions(newFixturePageID("delete-failure"))).To(MatchError(removeAllFailedErr))
 		restoreRemoveAll()
 	})
 
@@ -218,92 +235,98 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		page, err := treeService.GetPage(pageID)
 		Expect(err).NotTo(HaveOccurred())
 
+		latestErr := errors.New("latest failed")
 		restoreLatest := setRevisionSeam(&revisionStoreGetLatestRevision, func(*FSStore, tree.PageID) (*Revision, error) {
-			return nil, errors.New("latest failed")
+			return nil, latestErr
 		})
 		_, created, err := service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
 		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError("latest failed"))
+		Expect(err).To(MatchError(latestErr))
 		_, created, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
 		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError("latest failed"))
+		Expect(err).To(MatchError(latestErr))
 		_, created, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
 		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError("latest failed"))
+		Expect(err).To(MatchError(latestErr))
 		restoreLatest()
 
+		contentSaveErr := errors.New("content save failed")
 		restoreContent := setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
-			return "", errors.New("content save failed")
+			return "", contentSaveErr
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError("content save failed"))
+		Expect(err).To(MatchError(contentSaveErr))
 		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError("content save failed"))
+		Expect(err).To(MatchError(contentSaveErr))
 		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError("content save failed"))
+		Expect(err).To(MatchError(contentSaveErr))
 		restoreContent()
 
 		restoreContent = setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
 			return "wrong-hash", nil
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(ContainSubstring("content hash mismatch")))
+		Expect(err).To(MatchError(ErrContentHashMismatch))
 		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(ContainSubstring("content hash mismatch")))
+		Expect(err).To(MatchError(ErrContentHashMismatch))
 		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(ContainSubstring("content hash mismatch")))
+		Expect(err).To(MatchError(ErrContentHashMismatch))
 		restoreContent()
 
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
+		assetBlobErr := errors.New("asset blob failed")
 		restoreAssetBlob := setRevisionSeam(&revisionStoreSaveAssetBlobFromPath, func(*FSStore, string) (string, int64, error) {
-			return "", 0, errors.New("asset blob failed")
+			return "", 0, assetBlobErr
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError("asset blob failed"))
+		Expect(err).To(MatchError(assetBlobErr))
 		restoreAssetBlob()
 
+		manifestSaveErr := errors.New("manifest save failed")
 		restoreManifest := setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
-			return "", errors.New("manifest save failed")
+			return "", manifestSaveErr
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError("manifest save failed"))
+		Expect(err).To(MatchError(manifestSaveErr))
 		service.assetManifestCache.Delete(pageID)
 		_, err = service.resolveAssetManifestHash(pageID, nil)
-		Expect(err).To(MatchError("manifest save failed"))
+		Expect(err).To(MatchError(manifestSaveErr))
 		restoreManifest()
 
 		restoreManifest = setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
 			return "wrong-manifest", nil
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(ContainSubstring("asset manifest hash mismatch")))
+		Expect(err).To(MatchError(ErrAssetManifestHashMismatch))
 		service.assetManifestCache.Delete(pageID)
 		_, err = service.resolveAssetManifestHash(pageID, nil)
-		Expect(err).To(MatchError(ContainSubstring("asset manifest hash mismatch")))
+		Expect(err).To(MatchError(ErrAssetManifestHashMismatch))
 		restoreManifest()
 
+		idFailedErr := errors.New("id failed")
 		restoreID := setRevisionSeam(&revisionGenerateUniqueID, func() (string, error) {
-			return "", errors.New("id failed")
+			return "", idFailedErr
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(ContainSubstring("generate revision id")))
+		Expect(err).To(MatchError(idFailedErr))
 		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(ContainSubstring("generate revision id")))
+		Expect(err).To(MatchError(idFailedErr))
 		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(ContainSubstring("generate revision id")))
+		Expect(err).To(MatchError(idFailedErr))
 		_, err = service.newRevision(RevisionTypeContentUpdate, service.revisionStateFromPage(page), newFixtureUserID("tester"), "summary", "")
-		Expect(err).To(MatchError(ContainSubstring("generate revision id")))
+		Expect(err).To(MatchError(idFailedErr))
 		restoreID()
 
+		saveRevisionErr := errors.New("save revision failed")
 		restoreSaveRevision := setRevisionSeam(&revisionStoreSaveRevision, func(*FSStore, *Revision) error {
-			return errors.New("save revision failed")
+			return saveRevisionErr
 		})
 		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError("save revision failed"))
+		Expect(err).To(MatchError(saveRevisionErr))
 		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError("save revision failed"))
+		Expect(err).To(MatchError(saveRevisionErr))
 		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError("save revision failed"))
+		Expect(err).To(MatchError(saveRevisionErr))
 		restoreSaveRevision()
 	})
 
@@ -311,17 +334,19 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 
+		deleteRevisionsErr := errors.New("delete revisions failed")
 		restoreDelete := setRevisionSeam(&revisionStoreDeletePageRevisions, func(*FSStore, tree.PageID) error {
-			return errors.New("delete revisions failed")
+			return deleteRevisionsErr
 		})
-		Expect(service.DeletePageData(pageID)).To(MatchError("delete revisions failed"))
+		Expect(service.DeletePageData(pageID)).To(MatchError(deleteRevisionsErr))
 		restoreDelete()
 
+		listErr := errors.New("list failed")
 		restoreList := setRevisionSeam(&revisionStoreListRevisions, func(*FSStore, tree.PageID) ([]*Revision, error) {
-			return nil, errors.New("list failed")
+			return nil, listErr
 		})
 		_, err := service.CheckRevisionIntegrity(pageID)
-		Expect(err).To(MatchError("list failed"))
+		Expect(err).To(MatchError(listErr))
 		restoreList()
 
 		restoreOpenContent := setRevisionSeam(&revisionStoreOpenContentBlob, func(*FSStore, string) (io.ReadCloser, error) {
@@ -355,10 +380,11 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreList()
 		restoreCopy()
 
+		parseErr := errors.New("parse failed")
 		restoreParse := setRevisionSeam(&revisionParsePageDocument, func(string) (markdown.PageDocument, markdown.PageDocumentParseResult, error) {
-			return markdown.PageDocument{}, markdown.PageDocumentParseResult{}, errors.New("parse failed")
+			return markdown.PageDocument{}, markdown.PageDocumentParseResult{}, parseErr
 		})
-		Expect(service.enrichStateWithExtraFrontmatter(pageID, &RevisionState{})).To(MatchError("parse failed"))
+		Expect(service.enrichStateWithExtraFrontmatter(pageID, &RevisionState{})).To(MatchError(parseErr))
 		restoreParse()
 
 		restoreParse = setRevisionSeam(&revisionParsePageDocument, func(string) (markdown.PageDocument, markdown.PageDocumentParseResult, error) {
@@ -369,13 +395,14 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(state.PageMetadata).To(BeNil())
 		restoreParse()
 
+		manifestHashFailedErr := errors.New("manifest hash failed")
 		restoreJSON := setRevisionSeam(&revisionJSONMarshal, func(any) ([]byte, error) {
-			return nil, errors.New("manifest hash failed")
+			return nil, manifestHashFailedErr
 		})
 		_, err = service.CapturePageState(pageID)
-		Expect(err).To(MatchError(ContainSubstring("marshal page metadata")))
+		Expect(err).To(MatchError(manifestHashFailedErr))
 		_, err = computeAssetManifestHash(nil)
-		Expect(err).To(MatchError(ContainSubstring("marshal asset manifest for hash")))
+		Expect(err).To(MatchError(manifestHashFailedErr))
 		restoreJSON()
 
 		assetDir := service.liveAssetDir(newFixturePageID("duplicate-dir-entries"))
@@ -389,16 +416,18 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(assets).To(HaveLen(2))
 		restoreReadDir()
 
+		resetFailedErr := errors.New("reset failed")
 		restoreRemoveAll := setRevisionSeam(&revisionRemoveAll, func(string) error {
-			return errors.New("reset failed")
+			return resetFailedErr
 		})
-		Expect(service.restoreAssets(pageID, nil)).To(MatchError(ContainSubstring("reset live asset dir")))
+		Expect(service.restoreAssets(pageID, nil)).To(MatchError(resetFailedErr))
 		restoreRemoveAll()
 
+		mkdirFailedErr := errors.New("mkdir failed")
 		restoreMkdir := setRevisionSeam(&revisionMkdirAll, func(string, os.FileMode) error {
-			return errors.New("mkdir failed")
+			return mkdirFailedErr
 		})
-		Expect(service.restoreAssets(pageID, []AssetRef{{Name: "asset.txt", SHA256: strings.Repeat("f", 64)}})).To(MatchError(ContainSubstring("ensure live asset dir")))
+		Expect(service.restoreAssets(pageID, []AssetRef{{Name: "asset.txt", SHA256: strings.Repeat("f", 64)}})).To(MatchError(mkdirFailedErr))
 		restoreMkdir()
 	})
 
@@ -414,31 +443,31 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreGet := setRevisionSeam(&revisionStoreGetRevision, func(*FSStore, tree.PageID, RevisionID) (*Revision, error) {
 			return nil, errors.New("revision lookup failed")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		restoreGet()
 
 		restoreRead := setRevisionSeam(&revisionStoreReadContentBlob, func(*FSStore, string) ([]byte, error) {
 			return nil, errors.New("content missing")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_content_missing")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreContentMissing))
 		restoreRead()
 
 		restoreLoad := setRevisionSeam(&revisionStoreLoadAssetManifest, func(*FSStore, string) ([]AssetRef, error) {
 			return nil, errors.New("manifest missing")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_assets_missing")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreAssetsMissing))
 		restoreLoad()
 
 		restoreBuild := setRevisionSeam(&revisionBuildRestoredRawContent, func(tree.PageID, string, *markdown.PageMetadata, map[string]interface{}, string) (string, bool, error) {
 			return "", false, errors.New("build failed")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		restoreBuild()
 
 		restoreUpdate := setRevisionSeam(&revisionUpdateRestoredContent, func(*Service, tree.UserID, tree.PageID, string, tree.Slug, *string, bool) error {
 			return errors.New("update failed")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		restoreUpdate()
 
 		restoreAssets := setRevisionSeam(&revisionRestoreAssets, func(*Service, tree.PageID, []AssetRef) error {
@@ -460,7 +489,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 			}
 			return errors.New("rollback update failed")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		restoreUpdate()
 		restoreBuild()
 		restoreAssets()
@@ -492,7 +521,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 			}
 			return errors.New("rollback update failed")
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		restoreUpdate()
 		restoreBuild()
 		restoreRecord()
@@ -504,40 +533,44 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
 
+		contentSaveErr := errors.New("content save failed")
 		restoreContent := setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
-			return "", errors.New("content save failed")
+			return "", contentSaveErr
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError("content save failed"))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(contentSaveErr))
 		restoreContent()
 
 		restoreContent = setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
 			return "wrong-hash", nil
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(ContainSubstring("content hash mismatch")))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(ErrContentHashMismatch))
 		restoreContent()
 
+		assetSaveErr := errors.New("asset save failed")
 		restoreAsset := setRevisionSeam(&revisionStoreSaveAssetBlobFromPath, func(*FSStore, string) (string, int64, error) {
-			return "", 0, errors.New("asset save failed")
+			return "", 0, assetSaveErr
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError("asset save failed"))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(assetSaveErr))
 		restoreAsset()
 
+		manifestSaveErr := errors.New("manifest save failed")
 		restoreManifest := setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
-			return "", errors.New("manifest save failed")
+			return "", manifestSaveErr
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError("manifest save failed"))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(manifestSaveErr))
 		restoreManifest()
 
 		restoreManifest = setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
 			return "wrong-manifest", nil
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(ContainSubstring("asset manifest hash mismatch")))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(ErrAssetManifestHashMismatch))
 		restoreManifest()
 
+		idFailedErr := errors.New("id failed")
 		restoreID := setRevisionSeam(&revisionGenerateUniqueID, func() (string, error) {
-			return "", errors.New("id failed")
+			return "", idFailedErr
 		})
-		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(ContainSubstring("generate revision id")))
+		Expect(service.recordRestoreRevision(pageID, newFixtureUserID("tester"))).To(MatchError(idFailedErr))
 		restoreID()
 	})
 
@@ -559,11 +592,12 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreManifestExists := setRevisionSeam(&revisionStoreAssetManifestExists, func(*FSStore, string) bool {
 			return false
 		})
+		persistErr := errors.New("persist failed")
 		restoreAssetBlob := setRevisionSeam(&revisionStoreSaveAssetBlobFromPath, func(*FSStore, string) (string, int64, error) {
-			return "", 0, errors.New("persist failed")
+			return "", 0, persistErr
 		})
 		_, err = service.resolveAssetManifestHash(pageID, nil)
-		Expect(err).To(MatchError("persist failed"))
+		Expect(err).To(MatchError(persistErr))
 		restoreAssetBlob()
 		restoreManifestExists()
 
@@ -577,7 +611,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 
 		unloadedTree := tree.NewTreeService(GinkgoT().TempDir())
 		unloadedService := NewService(GinkgoT().TempDir(), unloadedTree, nil)
-		expectLocalizedRevisionErrorCode(unloadedService.RestoreRevision(newFixturePageID("unloaded"), newFixtureRevisionID("rev"), newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(unloadedService.RestoreRevision(newFixturePageID("unloaded"), newFixtureRevisionID("rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))
 		Expect(err).NotTo(HaveOccurred())
@@ -585,22 +619,24 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		rev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-before-state-failure"), time.Date(2026, 6, 27, 12, 30, 0, 0, time.UTC), contentHash, manifestHash)
 
+		scanFailedErr := errors.New("scan failed")
 		restoreReadDir := setRevisionSeam(&revisionReadDir, func(string) ([]os.DirEntry, error) {
-			return nil, errors.New("scan failed")
+			return nil, scanFailedErr
 		})
-		expectLocalizedRevisionErrorCode(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester")), "revision_restore_failed")
+		Expect(service.RestoreRevision(pageID, rev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 		_, err = service.capturePageState(pageID, true)
-		Expect(err).To(MatchError(ContainSubstring("scan failed")))
+		Expect(err).To(MatchError(scanFailedErr))
 		restoreReadDir()
 
 		restoreParse := setRevisionSeam(&revisionParsePageDocument, func(string) (markdown.PageDocument, markdown.PageDocumentParseResult, error) {
 			return markdown.PageDocument{Body: "body"}, markdown.PageDocumentParseResult{}, nil
 		})
+		assetManifestHashFailedErr := errors.New("asset manifest hash failed")
 		restoreJSON := setRevisionSeam(&revisionJSONMarshal, func(any) ([]byte, error) {
-			return nil, errors.New("asset manifest hash failed")
+			return nil, assetManifestHashFailedErr
 		})
 		_, err = service.CapturePageState(pageID)
-		Expect(err).To(MatchError(ContainSubstring("marshal asset manifest for hash")))
+		Expect(err).To(MatchError(assetManifestHashFailedErr))
 		restoreJSON()
 		restoreParse()
 	})
