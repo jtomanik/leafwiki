@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 var _ = Describe("tree deterministic edge coverage", func() {
@@ -19,7 +20,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		tracker := newWorkspaceRouteConflictTracker()
 		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs/guide", Kind: NodeKindPage, Skip: true})).To(BeNil())
 		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs/guide", Kind: NodeKindPage})).To(BeNil())
-		Expect(tracker.seen).To(HaveKey("page:docs/guide"))
+		Expect(tracker.seen).To(HaveKey(RouteLowerKey{Kind: NodeKindPage, Path: RoutePath("docs/guide")}))
 
 		Expect(tracker.Record(WorkspaceMarkdownRoute{SourcePath: "docs/guide", RoutePath: "docs/guide", Kind: NodeKindPage})).To(BeNil())
 
@@ -44,25 +45,31 @@ var _ = Describe("tree deterministic edge coverage", func() {
 
 		route, err := MapWorkspaceMarkdownRoute(root, " / ", true)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(route.Kind).To(Equal(NodeKindSection))
-		Expect(route.RoutePath).To(BeEmpty())
+		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Kind":      Equal(NodeKindSection),
+			"RoutePath": BeEmpty(),
+		}))
 
 		route, err = MapWorkspaceMarkdownRoute(root, "docs/image.png", false)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(route.Skip).To(BeTrue())
-		Expect(route.SkipReason).To(Equal("non_markdown"))
+		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Skip":       BeTrue(),
+			"SkipReason": Equal("non_markdown"),
+		}))
 
 		route, err = MapWorkspaceMarkdownRoute(root, "docs/README.md", false)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(route.Kind).To(Equal(NodeKindPage))
-		Expect(route.RoutePath).To(Equal(RoutePath("docs/README")))
+		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Kind":      Equal(NodeKindPage),
+			"RoutePath": Equal(RoutePath("docs/README")),
+		}))
 
 		normalized, err := normalizeWorkspaceRoutePath(NewSlugService(), "docs//User Guides")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(normalized).To(Equal("docs/user-guides"))
 
 		_, err = normalizeWorkspaceRoutePath(NewSlugService(), "docs/!!!")
-		Expect(err).To(MatchError(ContainSubstring("slug must not be empty")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 		Expect(workspaceDirHasIndexFile(filepath.Join(root, "missing"))).To(BeFalse())
 		Expect(workspaceDirHasIndexFile(filepath.Join(root, "docs"))).To(BeTrue())
 	})
@@ -96,27 +103,27 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(exists).To(BeTrue())
 		Expect(readmePath).To(Equal(filepath.Join(readmeDir, "README.md")))
 
-		Expect(ensureUniqueReconstructedID(map[PageID]string{}, "", "docs/page.md")).To(MatchError(ContainSubstring("empty leafwiki_id")))
+		Expect(ensureUniqueReconstructedID(map[PageID]string{}, "", "docs/page.md")).To(MatchError(ErrEmptyLeafwikiID))
 		seenIDs := map[PageID]string{"page-1": "docs/first.md"}
-		Expect(ensureUniqueReconstructedID(seenIDs, "page-1", "docs/second.md")).To(MatchError(ContainSubstring("duplicate leafwiki_id")))
+		Expect(ensureUniqueReconstructedID(seenIDs, "page-1", "docs/second.md")).To(MatchError(ErrDuplicateLeafwikiID))
 
-		Expect(ensureUniqueReconstructedSlug(map[string]string{}, "", NodeKindPage, "docs/page.md")).To(MatchError(ContainSubstring("empty slug")))
-		seenSlugs := map[string]string{"page:guide": "docs/guide.md"}
-		Expect(ensureUniqueReconstructedSlug(seenSlugs, "GUIDE", NodeKindPage, "docs/GUIDE.md")).To(MatchError(ContainSubstring("duplicate page slug")))
+		Expect(ensureUniqueReconstructedSlug(map[reconstructedSlugKey]string{}, "", NodeKindPage, "docs/page.md")).To(MatchError(ErrSlugEmpty))
+		seenSlugs := map[reconstructedSlugKey]string{{kind: NodeKindPage, slug: SlugFromString("guide")}: "docs/guide.md"}
+		Expect(ensureUniqueReconstructedSlug(seenSlugs, "GUIDE", NodeKindPage, "docs/GUIDE.md")).To(MatchError(ErrDuplicateReconstructedSlug))
 	})
 
 	It("guards section index writes before touching disk", func() {
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
 
 		_, err := store.ensureSectionIndex(nil)
-		Expect(err).To(MatchError(ContainSubstring("an entry is required")))
+		Expect(err).To(matchInvalidOp("ensureSectionIndex"))
 		_, err = store.ensureSectionIndex(&PageNode{Kind: NodeKindPage})
-		Expect(err).To(MatchError(ContainSubstring("entry must be a section")))
+		Expect(err).To(matchInvalidOp("ensureSectionIndex"))
 
 		_, err = store.ensureSectionIndexAtPath(nil, filepath.Join(store.rootDir, "docs", "index.md"))
-		Expect(err).To(MatchError(ContainSubstring("an entry is required")))
+		Expect(err).To(matchInvalidOp("ensureSectionIndexAtPath"))
 		_, err = store.ensureSectionIndexAtPath(&PageNode{Kind: NodeKindPage}, filepath.Join(store.rootDir, "docs", "index.md"))
-		Expect(err).To(MatchError(ContainSubstring("entry must be a section")))
+		Expect(err).To(matchInvalidOp("ensureSectionIndexAtPath"))
 		_, err = store.ensureSectionIndexAtPath(&PageNode{Kind: NodeKindSection}, filepath.Join(filepath.Dir(store.rootDir), "outside.md"))
 		Expect(err).To(HaveOccurred())
 	})
@@ -130,41 +137,41 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(checkNodeVersion(node, NewPageVersionFromTime(versionTime.Add(time.Second)))).To(MatchError(ErrVersionConflict))
 
 		_, err := ValidateRoutePath("")
-		Expect(err).To(MatchError("missing path"))
+		Expect(err).To(MatchError(ErrMissingRoutePath))
 		_, err = ValidateRoutePath(`docs\guide`)
-		Expect(err).To(MatchError(ContainSubstring("invalid path")))
+		Expect(err).To(MatchError(ErrInvalidRoutePath))
 		_, err = ValidateRoutePath("docs//guide")
-		Expect(err).To(MatchError(ContainSubstring("invalid path")))
+		Expect(err).To(MatchError(ErrInvalidRoutePath))
 
 		slugger := NewSlugService()
-		Expect(slugger.IsValidSlug("")).To(MatchError("slug must not be empty"))
+		Expect(slugger.IsValidSlug("")).To(MatchError(ErrSlugEmpty))
 		normalized, err := slugger.NormalizePath("Docs//User Guides", false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(normalized).To(Equal("docs/user-guides"))
 		_, err = slugger.NormalizePath("!!!", true)
-		Expect(err).To(MatchError(ContainSubstring("not a valid slug")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 		normalized, err = slugger.NormalizePathToValidSlugs("docs//User Guides")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(normalized).To(Equal("docs/user-guides"))
 
 		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "!!!", true)
-		Expect(err).To(MatchError(ContainSubstring("slug must not be empty")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "!!!/page.md", false)
-		Expect(err).To(MatchError(ContainSubstring("slug must not be empty")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "docs/!!!.md", false)
-		Expect(err).To(MatchError(ContainSubstring("slug must not be empty")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 	})
 
 	It("uses deterministic fallback metadata times and route kind lookup", func() {
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
 		fallback := time.Date(2026, time.June, 26, 10, 0, 0, 0, time.FixedZone("offset", 3600))
-		Expect(store.metadataFallbackTime(filepath.Join(store.rootDir, "missing.md"), fallback)).To(Equal(fallback.UTC()))
+		Expect(store.metadataFallbackTime(filepath.Join(store.rootDir, "missing.md"), fallback)).To(BeTemporally("==", fallback.UTC()))
 
 		existing := filepath.Join(GinkgoT().TempDir(), "existing.md")
 		Expect(os.WriteFile(existing, []byte("# Existing\n"), 0o644)).To(Succeed())
 		mtime := time.Date(2026, time.June, 25, 12, 0, 0, 0, time.UTC)
 		Expect(os.Chtimes(existing, mtime, mtime)).To(Succeed())
-		Expect(store.metadataFallbackTime(existing, fallback)).To(Equal(mtime))
+		Expect(store.metadataFallbackTime(existing, fallback)).To(BeTemporally("==", mtime))
 
 		svc, _ := newLoadedService(GinkgoT())
 		docsID, err := svc.CreateNode(newFixtureUserID("editor"), nil, "Docs", "docs", ptrKind(NodeKindSection))
@@ -184,35 +191,37 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		adapter := &migrationStoreAdapter{}
 
 		_, err := adapter.ResolveNode(nil)
-		Expect(err).To(MatchError("invalid migration node"))
+		Expect(err).To(MatchError(ErrInvalidMigrationNode))
 		_, err = adapter.ContentPathForRead(nil)
-		Expect(err).To(MatchError("invalid migration node"))
+		Expect(err).To(MatchError(ErrInvalidMigrationNode))
 		_, err = adapter.ContentPathForWrite(nil)
-		Expect(err).To(MatchError("invalid migration node"))
+		Expect(err).To(MatchError(ErrInvalidMigrationNode))
 		_, err = adapter.EnsureSectionIndex(nil)
-		Expect(err).To(MatchError("invalid migration node"))
-		Expect(adapter.SaveChildOrder(nil)).To(MatchError("invalid migration node"))
+		Expect(err).To(MatchError(ErrInvalidMigrationNode))
+		Expect(adapter.SaveChildOrder(nil)).To(MatchError(ErrInvalidMigrationNode))
 		_, err = adapter.ReadPageRaw(nil)
-		Expect(err).To(MatchError("invalid migration node"))
+		Expect(err).To(MatchError(ErrInvalidMigrationNode))
 	})
 
 	It("persists legacy migration snapshots only for loaded trees", func() {
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
 
-		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ContainSubstring("legacy migration snapshot requires loaded tree")))
+		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrLegacySnapshotTreeRequired))
 
 		cyclic := &PageNode{ID: "cycle", Slug: "cycle", Title: "Cycle"}
 		cyclic.Children = []*PageNode{cyclic}
 		svc.tree = cyclic
-		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ContainSubstring("marshal legacy migration snapshot")))
+		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrMarshalLegacyTreeSnapshot))
 
 		svc.tree = &PageNode{ID: RootPageID, Slug: "root", Title: "Root"}
 		Expect(svc.persistLegacyTreeSnapshotLocked()).To(Succeed())
 		Expect(filepath.Join(svc.dataDir, legacyTreeFilename)).To(BeAnExistingFile())
 
 		deps := svc.migrationDependencies()
-		Expect(deps.Root).NotTo(BeNil())
-		Expect(deps.CurrentSchemaVersion).To(Equal(CurrentSchemaVersion))
+		Expect(deps).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Root":                 Not(BeNil()),
+			"CurrentSchemaVersion": Equal(CurrentSchemaVersion),
+		}))
 		Expect(deps.IsMissingContentErr(os.ErrNotExist)).To(BeTrue())
 		Expect(deps.IsMissingContentErr(ErrFileNotFound)).To(BeTrue())
 		Expect(deps.IsMissingContentErr(errors.New("other"))).To(BeFalse())
@@ -224,7 +233,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 
 		schema, err := loadSchema(tmp)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(schema.Version).To(Equal(0))
+		Expect(schema.Version).To(BeZero())
 
 		Expect(saveSchema(tmp, CurrentSchemaVersion)).To(Succeed())
 		raw, err := os.ReadFile(filepath.Join(tmp, "schema.json"))
@@ -261,7 +270,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(EnsurePageIsFolder(root, "guide")).To(Succeed())
 		Expect(os.ReadFile(filepath.Join(root, "guide", "index.md"))).To(Equal([]byte("# Guide")))
 		_, err := os.Stat(filepath.Join(root, "guide.md"))
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		Expect(EnsurePageIsFolder(root, "guide")).To(Succeed())
 		Expect(FoldPageFolderIfEmpty(root, "missing")).To(Succeed())
@@ -275,6 +284,6 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(FoldPageFolderIfEmpty(root, "guide")).To(Succeed())
 		Expect(os.ReadFile(filepath.Join(root, "guide.md"))).To(Equal([]byte("# Guide")))
 		_, err = os.Stat(filepath.Join(root, "guide"))
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 	})
 })

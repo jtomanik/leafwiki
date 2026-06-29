@@ -43,7 +43,7 @@ func (id *PageID) Scan(value any) error {
 		*id = PageID(string(typed))
 		return nil
 	default:
-		return fmt.Errorf("cannot scan %T into PageID", value)
+		return fmt.Errorf("%w: cannot scan %T into PageID", ErrScanPageID, value)
 	}
 }
 
@@ -129,7 +129,7 @@ func (path *RoutePath) Scan(value any) error {
 		*path = RoutePathFromString(string(typed))
 		return nil
 	default:
-		return fmt.Errorf("cannot scan %T into RoutePath", value)
+		return fmt.Errorf("%w: cannot scan %T into RoutePath", ErrScanRoutePath, value)
 	}
 }
 
@@ -308,8 +308,16 @@ func (path RoutePath) HrefPath() MarkdownPath {
 	return MarkdownPath(path.Clean())
 }
 
-func (path RoutePath) LowerKey(kind NodeKind) string {
-	return string(kind) + ":" + strings.ToLower(string(path.Clean()))
+type RouteLowerKey struct {
+	Kind NodeKind
+	Path RoutePath
+}
+
+func (path RoutePath) LowerKey(kind NodeKind) RouteLowerKey {
+	return RouteLowerKey{
+		Kind: kind,
+		Path: path.Lower(),
+	}
 }
 
 func (path RoutePath) Lower() RoutePath {

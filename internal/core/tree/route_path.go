@@ -10,14 +10,14 @@ import (
 func ValidateRoutePath(routePath string) (RoutePath, error) {
 	routePath = strings.TrimSpace(routePath)
 	if routePath == "" {
-		return "", fmt.Errorf("missing path")
+		return "", ErrMissingRoutePath
 	}
 	if strings.Contains(routePath, `\`) {
-		return "", fmt.Errorf("invalid path %s", routePath)
+		return "", fmt.Errorf("%w %s", ErrInvalidRoutePath, routePath)
 	}
 	for _, segment := range strings.Split(routePath, "/") {
 		if segment == "" || segment == "." || segment == ".." || strings.TrimSpace(segment) != segment {
-			return "", fmt.Errorf("invalid path %s", routePath)
+			return "", fmt.Errorf("%w %s", ErrInvalidRoutePath, routePath)
 		}
 	}
 	return RoutePath(routePath), nil

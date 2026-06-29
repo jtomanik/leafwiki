@@ -59,7 +59,7 @@ func (s *SlugService) GenerateUniqueChildSlug(parent *PageNode, currentID PageID
 // - Must not start or end with a hyphen
 func (s *SlugService) IsValidSlug(slug string) error {
 	if slug == "" {
-		return errors.New("slug must not be empty")
+		return ErrSlugEmpty
 	}
 
 	// Check for reserved slugs (case-insensitive)
@@ -123,7 +123,7 @@ func (s *SlugService) NormalizePath(path string, validate bool) (string, error) 
 			// the validation will ensure that the segment is a proper slug
 			seg := normalizeSlug(segment)
 			if err := s.IsValidSlug(seg); err != nil {
-				return "", fmt.Errorf("segment '%s' is not a valid slug: %v", segment, err)
+				return "", fmt.Errorf("segment '%s' is not a valid slug: %w", segment, err)
 			}
 			segment = seg
 		} else {
@@ -152,7 +152,7 @@ func (s *SlugService) NormalizePathToValidSlugs(value string) (string, error) {
 
 		safe := s.GenerateValidSlug(segment)
 		if safe == "" {
-			return "", fmt.Errorf("segment '%s' is not a valid slug: slug must not be empty", segment)
+			return "", fmt.Errorf("segment '%s' is not a valid slug: %w", segment, ErrSlugEmpty)
 		}
 		segments = append(segments, safe)
 	}
@@ -167,7 +167,7 @@ func (s *SlugService) NormalizeFilenameToValidSlug(filename string) (string, err
 	base := filename[:len(filename)-len(ext)]
 	safe := s.GenerateValidSlug(base)
 	if safe == "" {
-		return "", fmt.Errorf("filename '%s' is not a valid slug: slug must not be empty", filename)
+		return "", fmt.Errorf("filename '%s' is not a valid slug: %w", filename, ErrSlugEmpty)
 	}
 	return safe + ext, nil
 }

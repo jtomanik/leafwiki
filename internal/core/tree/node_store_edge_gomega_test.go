@@ -10,6 +10,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/perber/wiki/internal/core/markdown"
 )
 
 var _ = Describe("node store edge coverage", func() {
@@ -31,7 +33,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "guide"), []byte("blocks directory creation"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "guide.md"), []byte("# Guide"), 0o644)).To(Succeed())
-		Expect(EnsurePageIsFolder(root, "guide")).To(MatchError(ContainSubstring("could not create folder")))
+		Expect(EnsurePageIsFolder(root, "guide")).To(MatchError(ErrEnsureFolder))
 
 		if runtime.GOOS != "windows" {
 			locked := filepath.Join(root, "locked")
@@ -39,14 +41,14 @@ var _ = Describe("node store edge coverage", func() {
 			Expect(os.WriteFile(filepath.Join(locked, "index.md"), []byte("# Locked"), 0o644)).To(Succeed())
 			Expect(os.Chmod(locked, 0)).To(Succeed())
 			DeferCleanup(os.Chmod, locked, os.FileMode(0o755))
-			Expect(FoldPageFolderIfEmpty(root, "locked")).To(MatchError(ContainSubstring("could not read folder")))
+			Expect(FoldPageFolderIfEmpty(root, "locked")).To(MatchError(ErrReadDirectory))
 		}
 
 		if runtime.GOOS != "windows" {
 			loop := filepath.Join(root, "loop")
 			Expect(os.Symlink("loop", loop)).To(Succeed())
 			fallback := time.Date(2026, time.June, 27, 10, 0, 0, 0, time.UTC)
-			Expect(store.metadataFallbackTime(loop, fallback)).To(Equal(fallback))
+			Expect(store.metadataFallbackTime(loop, fallback)).To(BeTemporally("==", fallback))
 			_, err := resolvePathForContainment(loop)
 			Expect(err).To(HaveOccurred())
 		}
@@ -96,7 +98,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 		Expect(os.WriteFile(blocked, []byte("not a directory"), 0o644)).To(Succeed())
 		_, err = store.ensureSectionIndexAtPath(section, filepath.Join(blocked, "index.md"))
-		Expect(err).To(MatchError(ContainSubstring("resolve path")))
+		Expect(err).To(MatchError(ErrResolvePath))
 
 		if runtime.GOOS != "windows" {
 			noWriteRoot := filepath.Join(base, "no-write-root")
@@ -106,7 +108,7 @@ var _ = Describe("node store edge coverage", func() {
 			Expect(os.Chmod(noWriteRoot, 0o555)).To(Succeed())
 			DeferCleanup(os.Chmod, noWriteRoot, os.FileMode(0o755))
 			_, err = noWriteStore.ensureSectionIndexAtPath(noWriteSection, filepath.Join(noWriteRoot, "docs", "index.md"))
-			Expect(err).To(MatchError(ContainSubstring("could not ensure folder")))
+			Expect(err).To(MatchError(ErrEnsureFolder))
 		}
 
 		invalidIndexDir := filepath.Join(root, "invalid")
@@ -114,7 +116,7 @@ var _ = Describe("node store edge coverage", func() {
 		invalidIndex := filepath.Join(invalidIndexDir, "index.md")
 		Expect(os.WriteFile(invalidIndex, []byte("<!-- leafwiki\nversion: 1\n"), 0o644)).To(Succeed())
 		_, err = store.ensureSectionIndexAtPath(section, invalidIndex)
-		Expect(err).To(MatchError(ContainSubstring("could not load markdown file")))
+		Expect(err).To(MatchError(ErrLoadMarkdownFile))
 
 		Expect(store.readChildOrder(root)).To(Equal(&childOrderFile{}))
 		Expect(os.WriteFile(filepath.Join(root, orderFilename), []byte("{invalid"), 0o644)).To(Succeed())
@@ -124,7 +126,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(os.Remove(filepath.Join(root, orderFilename))).To(Succeed())
 		Expect(os.Mkdir(filepath.Join(root, orderFilename), 0o755)).To(Succeed())
 		parent.Children = []*PageNode{edgePageNode("a", "a", "A", parent)}
-		Expect(store.SaveChildOrder(parent)).To(MatchError(ContainSubstring("could not atomically write child order file")))
+		Expect(store.SaveChildOrder(parent)).To(MatchError(ErrPersistChildOrder))
 
 		orderParent := edgeSectionNode("ordered", "ordered", "Ordered", parent)
 		orderParent.Children = []*PageNode{
@@ -148,12 +150,12 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(os.MkdirAll(filepath.Join(base, "legacy"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(base, "legacy", "tree.json"), []byte("{invalid"), 0o644)).To(Succeed())
 		_, err := loadLegacyTreeSnapshot(filepath.Join(base, "legacy"), "tree.json", slog.Default())
-		Expect(err).To(MatchError(ContainSubstring("unmarshal tree data")))
+		Expect(err).To(MatchError(ErrUnmarshalTreeData))
 
 		dirSnapshot := filepath.Join(base, "dir-snapshot")
 		Expect(os.MkdirAll(filepath.Join(dirSnapshot, "tree.json"), 0o755)).To(Succeed())
 		_, err = loadLegacyTreeSnapshot(dirSnapshot, "tree.json", slog.Default())
-		Expect(err).To(MatchError(ContainSubstring("read tree file")))
+		Expect(err).To(MatchError(ErrReadTreeFile))
 
 		emptyKindSnapshot := filepath.Join(base, "empty-kind")
 		Expect(os.MkdirAll(emptyKindSnapshot, 0o755)).To(Succeed())
@@ -166,20 +168,20 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(os.WriteFile(fileRoot, []byte("not a directory"), 0o644)).To(Succeed())
 		fileRootStore := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "file-data"), RootDir: fileRoot})
 		_, err = fileRootStore.ReconstructTreeFromFS()
-		Expect(err).To(MatchError(ContainSubstring("is not a directory")))
+		Expect(err).To(MatchError(ErrRootPathNotDirectory))
 
 		invalidRootStore := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "invalid-root-data"), RootDir: filepath.Join(base, "invalid-root")})
 		Expect(os.MkdirAll(invalidRootStore.rootDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(invalidRootStore.rootDir, "index.md"), []byte("<!-- leafwiki\nversion: 1\n"), 0o644)).To(Succeed())
 		_, err = invalidRootStore.ReconstructTreeFromFS()
-		Expect(err).To(MatchError(ContainSubstring("reconstruct root content from fs")))
+		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 
 		duplicateStore := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "duplicate-data"), RootDir: filepath.Join(base, "duplicate-root")})
 		Expect(os.MkdirAll(duplicateStore.rootDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(duplicateStore.rootDir, "a.md"), []byte("---\nleafwiki_id: same\nleafwiki_title: A\n---\n# A\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(duplicateStore.rootDir, "b.md"), []byte("---\nleafwiki_id: same\nleafwiki_title: B\n---\n# B\n"), 0o644)).To(Succeed())
 		_, err = duplicateStore.ReconstructTreeFromFS()
-		Expect(err).To(MatchError(ContainSubstring("duplicate leafwiki_id")))
+		Expect(err).To(MatchError(ErrDuplicateLeafwikiID))
 	})
 
 	It("covers CRUD drift and conversion edge branches", func() {
@@ -230,7 +232,7 @@ var _ = Describe("node store edge coverage", func() {
 		nonEmpty := edgeSectionNode("non-empty", "non-empty", "Non Empty", parent)
 		Expect(os.MkdirAll(filepath.Join(root, "non-empty"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "non-empty", "child.md"), []byte("# Child"), 0o644)).To(Succeed())
-		Expect(store.ConvertNode(nonEmpty, NodeKindPage)).To(MatchError(ContainSubstring("folder not empty")))
+		Expect(store.ConvertNode(nonEmpty, NodeKindPage)).To(matchConvertNotAllowed(NodeKindSection, NodeKindPage))
 	})
 
 	It("covers markdown parse failures through content upsert and read paths", func() {
@@ -238,16 +240,16 @@ var _ = Describe("node store edge coverage", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		badCanonical := "<!-- leafwiki\nversion: 1\n"
 
-		Expect(store.UpsertContentPreservingFrontmatter(page, badCanonical)).To(MatchError(ContainSubstring("could not parse markdown content")))
-		Expect(store.UpsertContentReplacingMetadata(page, badCanonical)).To(MatchError(ContainSubstring("could not parse markdown content")))
+		Expect(store.UpsertContentPreservingFrontmatter(page, badCanonical)).To(MatchError(markdown.ErrMetadataParse))
+		Expect(store.UpsertContentReplacingMetadata(page, badCanonical)).To(MatchError(markdown.ErrMetadataParse))
 
 		Expect(os.WriteFile(filepath.Join(root, "page.md"), []byte(badCanonical), 0o644)).To(Succeed())
-		Expect(store.UpsertContent(page, "new body")).To(MatchError(ContainSubstring("could not load markdown file")))
+		Expect(store.UpsertContent(page, "new body")).To(MatchError(ErrLoadMarkdownFile))
 		_, _, err := store.ReadPageAndRaw(page)
 		Expect(err).To(HaveOccurred())
 		_, err = store.ReadPageContent(page)
 		Expect(err).To(HaveOccurred())
-		Expect(store.SyncMetadataIfExists(page)).To(MatchError(ContainSubstring("load markdown file")))
+		Expect(store.SyncMetadataIfExists(page)).To(MatchError(ErrLoadMarkdownFile))
 	})
 
 	It("covers path resolution and workspace source helpers directly", func() {
@@ -318,7 +320,7 @@ var _ = Describe("node store edge coverage", func() {
 			loopRoot := filepath.Join(base, "loop-root")
 			Expect(os.Symlink("loop-root", loopRoot)).To(Succeed())
 			loopStore := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "loop-data"), RootDir: loopRoot})
-			Expect(loopStore.requirePathInRoot("loopOp", filepath.Join(loopRoot, "page.md"))).To(MatchError(ContainSubstring("resolve root dir")))
+			Expect(loopStore.requirePathInRoot("loopOp", filepath.Join(loopRoot, "page.md"))).To(MatchError(ErrResolveRootDir))
 
 			outside := filepath.Join(base, "outside")
 			Expect(os.MkdirAll(outside, 0o755)).To(Succeed())
@@ -358,6 +360,20 @@ func matchDrift(reason string) OmegaMatcher {
 		}
 		return drift.Reason
 	}, Equal(reason))
+}
+
+func matchConvertNotAllowed(from NodeKind, to NodeKind) OmegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(err error) ConvertNotAllowedError {
+		var convert *ConvertNotAllowedError
+		if !errors.As(err, &convert) {
+			return ConvertNotAllowedError{}
+		}
+		return *convert
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"From": Equal(from),
+		"To":   Equal(to),
+	}))
 }
 
 func mustReadString(path string) string {

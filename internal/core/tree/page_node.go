@@ -124,7 +124,7 @@ func (p *PageNode) writeHashPayload(w io.Writer, includeMetadata bool) {
 	writeString(w, "slug")
 	writeSlug(w, p.Slug)
 	writeString(w, "kind")
-	writeString(w, string(p.Kind))
+	writeNodeKind(w, p.Kind)
 	writeString(w, "position")
 	writeInt64(w, int64(p.Position))
 
@@ -184,6 +184,17 @@ func writeUserID(w io.Writer, id UserID) {
 
 func writeSlug(w io.Writer, slug Slug) {
 	writeString(w, slug.HashPayload())
+}
+
+func writeNodeKind(w io.Writer, kind NodeKind) {
+	switch kind {
+	case NodeKindPage:
+		writeString(w, "page")
+	case NodeKindSection:
+		writeString(w, "section")
+	default:
+		writeString(w, "")
+	}
 }
 
 func writeInt64(w io.Writer, v int64) {

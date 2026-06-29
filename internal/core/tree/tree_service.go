@@ -91,7 +91,7 @@ func (t *TreeService) LoadTree() error {
 			return err
 		}
 		if reconstructed == nil {
-			return fmt.Errorf("internal error: tree reconstruction returned nil tree")
+			return fmt.Errorf("%w: internal error", ErrTreeReconstructionNil)
 		}
 		t.tree = reconstructed
 		t.rebuildIndexesLocked()
@@ -127,7 +127,7 @@ func (t *TreeService) LoadTree() error {
 	}
 
 	if t.tree == nil {
-		return fmt.Errorf("internal error: tree reconstruction returned nil tree")
+		return fmt.Errorf("%w: internal error", ErrTreeReconstructionNil)
 	}
 
 	t.log.Info("Migrating schema", "fromVersion", schema.Version, "toVersion", CurrentSchemaVersion)
@@ -141,7 +141,7 @@ func (t *TreeService) LoadTree() error {
 		return err
 	}
 	if reconstructed == nil {
-		return fmt.Errorf("internal error: tree reconstruction returned nil tree")
+		return fmt.Errorf("%w: internal error", ErrTreeReconstructionNil)
 	}
 
 	t.tree = reconstructed
@@ -173,7 +173,7 @@ func (t *TreeService) ensureLegacyRootDirReady(legacyTree *PageNode) error {
 		return err
 	}
 	if !matchesDefaultRoot {
-		return fmt.Errorf("legacy content remains in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", defaultRootDir, t.rootDir)
+		return fmt.Errorf("%w in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", ErrLegacyContentRemains, defaultRootDir, t.rootDir)
 	}
 
 	missingLegacyContent, err := t.configuredRootMissingLegacyContent(legacyTree)
@@ -184,7 +184,7 @@ func (t *TreeService) ensureLegacyRootDirReady(legacyTree *PageNode) error {
 		return nil
 	}
 
-	return fmt.Errorf("legacy content remains in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", defaultRootDir, t.rootDir)
+	return fmt.Errorf("%w in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", ErrLegacyContentRemains, defaultRootDir, t.rootDir)
 }
 
 func (t *TreeService) ensureCurrentRootDirReady() error {
@@ -209,7 +209,7 @@ func (t *TreeService) ensureCurrentRootDirReady() error {
 		return nil
 	}
 
-	return fmt.Errorf("legacy content remains in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", defaultRootDir, t.rootDir)
+	return fmt.Errorf("%w in the default root dir %s while configured root dir %s is missing legacy markdown; move or copy content before changing root dir", ErrLegacyContentRemains, defaultRootDir, t.rootDir)
 }
 
 func directoryFileContentMatches(sourceDir string, targetDir string) (bool, error) {
@@ -260,7 +260,7 @@ func collectRelativeFiles(dir string) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("collect legacy content files from %s: %w", dir, err)
+		return nil, fmt.Errorf("%w from %s: %w", ErrCollectLegacyContentFiles, dir, err)
 	}
 	sort.Strings(files)
 	return files, nil
@@ -269,14 +269,14 @@ func collectRelativeFiles(dir string) ([]string, error) {
 func filesHaveSameContent(sourceFile string, targetFile string) (bool, error) {
 	sourceData, err := treeOSReadFile(sourceFile)
 	if err != nil {
-		return false, fmt.Errorf("read legacy content path %s: %w", sourceFile, err)
+		return false, fmt.Errorf("%w %s: %w", ErrReadLegacyContentPath, sourceFile, err)
 	}
 	targetData, err := treeOSReadFile(targetFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
-		return false, fmt.Errorf("read configured legacy content path %s: %w", targetFile, err)
+		return false, fmt.Errorf("%w %s: %w", ErrReadConfiguredLegacyContentPath, targetFile, err)
 	}
 	return string(sourceData) == string(targetData), nil
 }
@@ -301,7 +301,7 @@ func (t *TreeService) configuredRootMissingLegacyContent(legacyTree *PageNode) (
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return false, fmt.Errorf("stat legacy content path %s: %w", path.sourceFile, err)
+			return false, fmt.Errorf("%w %s: %w", ErrStatLegacyContentPath, path.sourceFile, err)
 		}
 		if sourceInfo.IsDir() {
 			continue
@@ -313,7 +313,7 @@ func (t *TreeService) configuredRootMissingLegacyContent(legacyTree *PageNode) (
 			if errors.Is(err, os.ErrNotExist) {
 				return true, nil
 			}
-			return false, fmt.Errorf("stat configured legacy content path %s: %w", path.targetFile, err)
+			return false, fmt.Errorf("%w %s: %w", ErrStatConfiguredLegacyContentPath, path.targetFile, err)
 		}
 		if targetInfo.IsDir() {
 			return true, nil
@@ -356,7 +356,7 @@ func legacyTargetMatchesNode(path legacyContentPath) (bool, error) {
 
 	mdFile, err := treeLoadMarkdownFile(path.targetFile)
 	if err != nil {
-		return false, fmt.Errorf("load configured legacy content path %s: %w", path.targetFile, err)
+		return false, fmt.Errorf("%w %s: %w", ErrLoadConfiguredLegacyContentPath, path.targetFile, err)
 	}
 	metadata := mdFile.GetMetadata()
 	return PageIDFromString(strings.TrimSpace(metadata.Page.ID)) == path.nodeID &&
@@ -381,7 +381,7 @@ func (t *TreeService) collectLegacyContentPaths(node *PageNode, parentSegments [
 	if !isRoot {
 		slug := strings.TrimSpace(node.Slug.FilesystemPath())
 		if slug == "" {
-			return fmt.Errorf("legacy tree contains node %q with empty slug", node.ID)
+			return fmt.Errorf("legacy tree contains node %q with empty slug: %w", node.ID, ErrSlugEmpty)
 		}
 		segments = append(append([]string{}, parentSegments...), slug)
 		relPath := filepath.Join(segments...)
@@ -409,7 +409,7 @@ func (t *TreeService) collectLegacyContentPaths(node *PageNode, parentSegments [
 				nodeTitle:  node.Title,
 			})
 		default:
-			return fmt.Errorf("legacy tree contains node %q with unknown kind %q", node.ID, node.Kind)
+			return fmt.Errorf("legacy tree contains node %q with %w %q", node.ID, ErrLegacyUnknownKind, node.Kind)
 		}
 	}
 
@@ -427,7 +427,7 @@ func directoryHasEntries(dir string) (bool, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
-		return false, fmt.Errorf("read directory %s: %w", dir, err)
+		return false, fmt.Errorf("%w %s: %w", ErrReadDirectory, dir, err)
 	}
 	return len(entries) > 0, nil
 }
@@ -481,7 +481,7 @@ func (t *TreeService) reconstructTreeFromFSLocked() error {
 
 	// Defensive check to protect against unexpected nil returns from ReconstructTreeFromFS
 	if newTree == nil {
-		return fmt.Errorf("internal error: ReconstructTreeFromFS returned nil tree")
+		return fmt.Errorf("%w: ReconstructTreeFromFS", ErrTreeReconstructionNil)
 	}
 
 	// Save the old tree in case we need to revert
@@ -540,7 +540,7 @@ func (t *TreeService) RestoreNode(userID UserID, id PageID, parentID *PageID, ti
 		}
 
 		if err := treeStoreUpsertContent(t.store, created.entry, content); err != nil {
-			return fmt.Errorf("could not restore content: %w", err)
+			return fmt.Errorf("%w: %w", ErrRestoreContent, err)
 		}
 
 		created.entry.Metadata = metadata
@@ -549,7 +549,7 @@ func (t *TreeService) RestoreNode(userID UserID, id PageID, parentID *PageID, ti
 		created.entry.Metadata.CreatorID = metadata.CreatorID
 		created.entry.Metadata.LastAuthorID = metadata.LastAuthorID
 		if err := treeStoreSyncMetadataIfExists(t.store, created.entry); err != nil {
-			return fmt.Errorf("could not sync restored metadata: %w", err)
+			return fmt.Errorf("%w: %w", ErrSyncRestoredMetadata, err)
 		}
 
 		restored = &Page{PageNode: created.entry, Content: content}
@@ -596,14 +596,14 @@ func (t *TreeService) createNodeLocked(userID UserID, parentID *PageID, title st
 	if parent.Kind != NodeKindSection && parent.ID != "root" {
 		t.log.Info("converting parent to section", "parentID", parent.ID, "oldKind", parent.Kind, "newKind", NodeKindSection)
 		if err := treeStoreConvertNode(t.store, parent, NodeKindSection); err != nil {
-			return nil, fmt.Errorf("could not convert parent node: %w", err)
+			return nil, fmt.Errorf("%w: %w", ErrConvertParentNode, err)
 		}
 		parent.Kind = NodeKindSection
 		parentWasConverted = true
 	}
 
 	if parent.Kind != NodeKindSection {
-		return nil, fmt.Errorf("cannot add child to non-section parent, got %q", parent.Kind)
+		return nil, fmt.Errorf("%w, got %q", ErrParentMustBeSection, parent.Kind)
 	}
 
 	id := opts.existingID
@@ -611,11 +611,11 @@ func (t *TreeService) createNodeLocked(userID UserID, parentID *PageID, title st
 		var err error
 		rawID, err := treeGenerateUniqueID()
 		if err != nil {
-			return nil, fmt.Errorf("could not generate unique ID: %w", err)
+			return nil, fmt.Errorf("%w: %w", ErrGenerateUniqueID, err)
 		}
 		id = PageIDFromString(rawID)
 	} else if existing := t.getNodeByIDLocked(id); existing != nil {
-		return nil, fmt.Errorf("page id already exists: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrPageAlreadyExists, id)
 	}
 
 	now := time.Now().UTC()
@@ -640,11 +640,11 @@ func (t *TreeService) createNodeLocked(userID UserID, parentID *PageID, title st
 	switch k {
 	case NodeKindPage:
 		if err := treeStoreCreatePage(t.store, parent, entry); err != nil {
-			return nil, fmt.Errorf("could not create page entry: %w", err)
+			return nil, fmt.Errorf("%w: %w", ErrCreatePageEntry, err)
 		}
 	case NodeKindSection:
 		if err := treeStoreCreateSection(t.store, parent, entry); err != nil {
-			return nil, fmt.Errorf("could not create section entry: %w", err)
+			return nil, fmt.Errorf("%w: %w", ErrCreateSectionEntry, err)
 		}
 	}
 
@@ -654,9 +654,9 @@ func (t *TreeService) createNodeLocked(userID UserID, parentID *PageID, title st
 	if err := treeStoreSaveChildOrder(t.store, parent); err != nil {
 		rollbackErr := t.rollbackCreatedNodeLocked(parent, entry, parentWasConverted)
 		if rollbackErr != nil {
-			return nil, errors.Join(fmt.Errorf("could not persist child order: %w", err), fmt.Errorf("rollback created node: %w", rollbackErr))
+			return nil, errors.Join(fmt.Errorf("%w: %w", ErrPersistChildOrder, err), fmt.Errorf("%w: %w", ErrRollbackCreatedNode, rollbackErr))
 		}
-		return nil, fmt.Errorf("could not persist child order: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrPersistChildOrder, err)
 	}
 	return &createNodeResult{
 		id:                 entry.ID,
@@ -943,7 +943,7 @@ func (t *TreeService) DeleteNode(userID UserID, id PageID, recursive bool, expec
 				}
 			}
 		default:
-			return fmt.Errorf("unknown node kind: %v", node.Kind)
+			return &InvalidOpError{Op: "DeleteNode", Reason: fmt.Sprintf("unknown node kind: %v", node.Kind)}
 		}
 
 		// Remove the page from the parent
@@ -1331,7 +1331,7 @@ func (t *TreeService) GetPages(ids []PageID) ([]*Page, []error) {
 			content, raw, err := treeStoreReadPageAndRaw(t.store, tk.node)
 			mu.Lock()
 			if err != nil {
-				errs[tk.index] = fmt.Errorf("could not get page content: %w", err)
+				errs[tk.index] = fmt.Errorf("%w: %w", ErrGetPageContent, err)
 			} else {
 				pages[tk.index] = &Page{PageNode: tk.node, Content: content, RawContent: raw}
 			}
@@ -1360,7 +1360,7 @@ func (t *TreeService) GetPage(id PageID) (*Page, error) {
 
 	content, raw, err := treeStoreReadPageAndRaw(t.store, page)
 	if err != nil {
-		return nil, fmt.Errorf("could not get page content: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrGetPageContent, err)
 	}
 
 	return &Page{
@@ -1386,7 +1386,7 @@ func (t *TreeService) ReadPageRaw(id PageID) (string, error) {
 
 	raw, err := treeStoreReadPageRaw(t.store, page)
 	if err != nil {
-		return "", fmt.Errorf("could not get page raw content: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrGetPageRawContent, err)
 	}
 
 	return raw, nil
@@ -1462,7 +1462,7 @@ func (t *TreeService) findPageByRoutePath(routePath RoutePath, finalKind NodeKin
 
 	content, err := treeStoreReadPageContent(t.store, node)
 	if err != nil {
-		return nil, fmt.Errorf("could not get page content: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrGetPageContent, err)
 	}
 
 	return &Page{
@@ -1609,7 +1609,7 @@ func (t *TreeService) EnsurePagePath(userID UserID, p RoutePath, targetTitle str
 
 	lookup, err := t.lookupPagePathLocked(p, requestedKind)
 	if err != nil {
-		return nil, fmt.Errorf("could not lookup page path: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrLookupPagePath, err)
 	}
 
 	// Path exists -> return existing
@@ -1618,7 +1618,7 @@ func (t *TreeService) EnsurePagePath(userID UserID, p RoutePath, targetTitle str
 		if last.Kind != nil && *last.Kind == requestedKind {
 			page := t.getNodeByIDLocked(*last.ID)
 			if page == nil {
-				return nil, fmt.Errorf("could not find existing page by ID: %w", ErrPageNotFound)
+				return nil, fmt.Errorf("%w: %w", ErrFindExistingPageByID, ErrPageNotFound)
 			}
 			return &EnsurePathResult{Exists: true, Page: page}, nil
 		}
@@ -1647,7 +1647,7 @@ func (t *TreeService) EnsurePagePath(userID UserID, p RoutePath, targetTitle str
 
 		createdNode, err := t.createNodeLocked(userID, currentID, segTitle, segment.Slug, &kindToUse, createNodeOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("could not create segment %q: %w", segment.Slug, err)
+			return nil, fmt.Errorf("%w %q: %w", ErrCreateSegment, segment.Slug, err)
 		}
 		currentID = &createdNode.id
 
@@ -1661,11 +1661,11 @@ func (t *TreeService) EnsurePagePath(userID UserID, p RoutePath, targetTitle str
 
 	// Resolve final page
 	if currentID == nil {
-		return nil, fmt.Errorf("could not ensure page path")
+		return nil, ErrEnsurePagePath
 	}
 	page := t.getNodeByIDLocked(*currentID)
 	if page == nil {
-		return nil, fmt.Errorf("could not find created page by ID: %w", ErrPageNotFound)
+		return nil, fmt.Errorf("%w: %w", ErrFindCreatedPageByID, ErrPageNotFound)
 	}
 
 	// Save once
@@ -1757,7 +1757,7 @@ func (t *TreeService) MoveNode(userID UserID, id PageID, parentID PageID, expect
 	}
 
 	if newParent.Kind != NodeKindSection {
-		return fmt.Errorf("destination parent must be a section, got %q", newParent.Kind)
+		return fmt.Errorf("%w, got %q", ErrParentMustBeSection, newParent.Kind)
 	}
 
 	previousOldChildren := append([]*PageNode(nil), oldParent.Children...)
@@ -1792,26 +1792,26 @@ func (t *TreeService) MoveNode(userID UserID, id PageID, parentID PageID, expect
 	if err := treeStoreSaveChildOrder(t.store, oldParent); err != nil {
 		rollbackErr := t.rollbackMovedNodeLocked(node, oldParent, newParent, previousOldChildren, previousOldPositions, previousNewChildren, previousNewPositions, previousPosition, previousMetadata, newParentWasConverted)
 		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("could not persist source child order: %w", err), fmt.Errorf("rollback moved node: %w", rollbackErr))
+			return errors.Join(fmt.Errorf("%w: %w", ErrPersistSourceChildOrder, err), fmt.Errorf("%w: %w", ErrRollbackMovedNode, rollbackErr))
 		}
-		return fmt.Errorf("could not persist source child order: %w", err)
+		return fmt.Errorf("%w: %w", ErrPersistSourceChildOrder, err)
 	}
 	if newParent != oldParent {
 		if err := treeStoreSaveChildOrder(t.store, newParent); err != nil {
 			rollbackErr := t.rollbackMovedNodeLocked(node, oldParent, newParent, previousOldChildren, previousOldPositions, previousNewChildren, previousNewPositions, previousPosition, previousMetadata, newParentWasConverted)
 			if rollbackErr != nil {
-				return errors.Join(fmt.Errorf("could not persist destination child order: %w", err), fmt.Errorf("rollback moved node: %w", rollbackErr))
+				return errors.Join(fmt.Errorf("%w: %w", ErrPersistDestinationChildOrder, err), fmt.Errorf("%w: %w", ErrRollbackMovedNode, rollbackErr))
 			}
-			return fmt.Errorf("could not persist destination child order: %w", err)
+			return fmt.Errorf("%w: %w", ErrPersistDestinationChildOrder, err)
 		}
 	}
 
 	if err := treeStoreSyncMetadataIfExists(t.store, node); err != nil {
 		rollbackErr := t.rollbackMovedNodeLocked(node, oldParent, newParent, previousOldChildren, previousOldPositions, previousNewChildren, previousNewPositions, previousPosition, previousMetadata, newParentWasConverted)
 		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("could not sync moved node metadata: %w", err), fmt.Errorf("rollback moved node: %w", rollbackErr))
+			return errors.Join(fmt.Errorf("%w: %w", ErrSyncMovedNodeMetadata, err), fmt.Errorf("%w: %w", ErrRollbackMovedNode, rollbackErr))
 		}
-		return fmt.Errorf("could not sync moved node metadata: %w", err)
+		return fmt.Errorf("%w: %w", ErrSyncMovedNodeMetadata, err)
 	}
 
 	return nil
@@ -1853,7 +1853,7 @@ func (t *TreeService) rollbackMovedNodeLocked(node *PageNode, oldParent *PageNod
 	var rollbackErr error
 
 	if moveErr := treeStoreMoveNode(t.store, node, oldParent); moveErr != nil {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("move node back on disk: %w", moveErr))
+		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %w", ErrMoveNodeBackOnDisk, moveErr))
 	}
 
 	restoreChildSnapshot(oldParent, previousOldChildren, previousOldPositions)
@@ -1871,14 +1871,14 @@ func (t *TreeService) rollbackMovedNodeLocked(node *PageNode, oldParent *PageNod
 	if newParentWasConverted && newParent != nil && newParent.ID != "root" && len(newParent.Children) == 0 {
 		newParentDir, dirErr := t.store.sectionDirPathForNode(newParent, "rollbackMovedNode")
 		if dirErr != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("resolve converted parent dir: %w", dirErr))
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %w", ErrResolveConvertedParentDir, dirErr))
 		} else {
 			if removeErr := treeOSRemoveAll(filepath.Join(newParentDir, orderFilename)); removeErr != nil {
-				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove child order before parent rollback: %w", removeErr))
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %w", ErrRemoveChildOrderBeforeParentRollback, removeErr))
 			}
 		}
 		if convertErr := treeStoreConvertNode(t.store, newParent, NodeKindPage); convertErr != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("convert destination parent back to page: %w", convertErr))
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %w", ErrConvertDestinationParentBackToPage, convertErr))
 		} else {
 			newParent.Kind = NodeKindPage
 		}
@@ -1932,7 +1932,7 @@ func (t *TreeService) SortPages(parentID PageID, orderedIDs []PageID) error {
 	seen := make(map[PageID]bool)
 	for _, id := range orderedIDs {
 		if seen[id] {
-			return fmt.Errorf("duplicate ID in sort order: %s", id)
+			return fmt.Errorf("duplicate ID in sort order: %s: %w", id, ErrInvalidSortOrder)
 		}
 		seen[id] = true
 	}

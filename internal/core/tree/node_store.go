@@ -73,26 +73,31 @@ func (f *NodeStore) isSectionContentFileInDir(sectionDir string, filePath string
 func ensureUniqueReconstructedID(seenIDs map[PageID]string, id PageID, path string) error {
 	trimmedID := PageIDFromString(id.MetadataValue())
 	if trimmedID == "" {
-		return fmt.Errorf("reconstruct tree from fs: empty leafwiki_id at %s", path)
+		return fmt.Errorf("reconstruct tree from fs: %w at %s", ErrEmptyLeafwikiID, path)
 	}
 	if existingPath, exists := seenIDs[trimmedID]; exists {
-		return fmt.Errorf("duplicate leafwiki_id %q in %s and %s", trimmedID, existingPath, path)
+		return fmt.Errorf("%w %q in %s and %s", ErrDuplicateLeafwikiID, trimmedID, existingPath, path)
 	}
 	seenIDs[trimmedID] = path
 	return nil
 }
 
-func ensureUniqueReconstructedSlug(seenSlugs map[string]string, slug Slug, kind NodeKind, path string) error {
+type reconstructedSlugKey struct {
+	kind NodeKind
+	slug Slug
+}
+
+func ensureUniqueReconstructedSlug(seenSlugs map[reconstructedSlugKey]string, slug Slug, kind NodeKind, path string) error {
 	trimmedSlug := strings.TrimSpace(slug.FilesystemPath())
 	if trimmedSlug == "" {
-		return fmt.Errorf("reconstruct tree from fs: empty slug at %s", path)
+		return fmt.Errorf("reconstruct tree from fs: %w at %s", ErrSlugEmpty, path)
 	}
-	key := string(kind) + ":" + strings.ToLower(trimmedSlug)
+	key := reconstructedSlugKey{kind: kind, slug: SlugFromString(strings.ToLower(trimmedSlug))}
 	if existingPath, exists := seenSlugs[key]; exists {
 		parentDir := filepath.Base(filepath.Dir(path))
 		return fmt.Errorf(
-			"duplicate %s slug %q in %s/. Conflicting paths: %s and %s",
-			kind, slug, parentDir, existingPath, path,
+			"%w: duplicate %s slug %q in %s/. Conflicting paths: %s and %s",
+			ErrDuplicateReconstructedSlug, kind, slug, parentDir, existingPath, path,
 		)
 	}
 	seenSlugs[key] = path
@@ -206,13 +211,13 @@ func (f *NodeStore) ensureSectionIndex(entry *PageNode) (string, error) {
 	if fileExists(filePath) {
 		mdFile, err = treeLoadMarkdownFile(filePath)
 		if err != nil {
-			return "", fmt.Errorf("could not load markdown file: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 		}
 	}
 
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return "", fmt.Errorf("could not write markdown file: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 
 	return filePath, nil
@@ -229,21 +234,21 @@ func (f *NodeStore) ensureSectionIndexAtPath(entry *PageNode, filePath string) (
 		return "", err
 	}
 	if err := treeOSMkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		return "", fmt.Errorf("could not ensure folder: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrEnsureFolder, err)
 	}
 
 	mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
 	if fileExists(filePath) {
 		loaded, err := treeLoadMarkdownFile(filePath)
 		if err != nil {
-			return "", fmt.Errorf("could not load markdown file: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 		}
 		mdFile = loaded
 	}
 
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return "", fmt.Errorf("could not write markdown file: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 
 	return filePath, nil
@@ -315,12 +320,12 @@ func loadLegacyTreeSnapshot(dataDir string, snapshotFile string, _ *slog.Logger)
 
 	data, err := treeOSReadFile(fullPath)
 	if err != nil {
-		return nil, fmt.Errorf("read tree file %s: %w", fullPath, err)
+		return nil, fmt.Errorf("%w %s: %w", ErrReadTreeFile, fullPath, err)
 	}
 
 	tree := &PageNode{}
 	if err := treeJSONUnmarshal(data, tree); err != nil {
-		return nil, fmt.Errorf("unmarshal tree data %s: %w", fullPath, err)
+		return nil, fmt.Errorf("%w %s: %w", ErrUnmarshalTreeData, fullPath, err)
 	}
 
 	if tree.ID == "root" && tree.Kind == "" {
@@ -358,7 +363,7 @@ func (f *NodeStore) ReconstructTreeFromFS() (*PageNode, error) {
 	}
 
 	if !info.IsDir() {
-		return nil, fmt.Errorf("root path %s is not a directory", f.rootDir)
+		return nil, fmt.Errorf("root path %s %w", f.rootDir, ErrRootPathNotDirectory)
 	}
 
 	if err := f.applyRootSectionContent(root, reconstructNow); err != nil {
@@ -397,9 +402,9 @@ func (f *NodeStore) applyRootSectionContent(root *PageNode, reconstructNow time.
 func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNode, reconstructNow time.Time, seenIDs map[PageID]string) error {
 	entries, err := treeOSReadDir(currentPath)
 	if err != nil {
-		return fmt.Errorf("read dir %s: %w", currentPath, err)
+		return fmt.Errorf("%w %s: %w", ErrReadDirectory, currentPath, err)
 	}
-	seenSlugs := map[string]string{}
+	seenSlugs := map[reconstructedSlugKey]string{}
 
 	// stable, deterministic ordering (case-insensitive, with case-sensitive tie-breaker)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -659,7 +664,7 @@ func (f *NodeStore) SaveChildOrder(parent *PageNode) error {
 	data = append(data, byte('\n'))
 
 	if err := treeWriteFileAtomic(filepath.Join(dirPath, orderFilename), data, 0o644); err != nil {
-		return fmt.Errorf("could not atomically write child order file: %w", err)
+		return fmt.Errorf("%w: %w", ErrPersistChildOrder, err)
 	}
 
 	return nil
@@ -807,14 +812,14 @@ func (f *NodeStore) UpsertContent(entry *PageNode, content string) error {
 	if fileExists(filePath) {
 		mdFile, err = treeLoadMarkdownFile(filePath)
 		if err != nil {
-			return fmt.Errorf("could not load markdown file: %w", err)
+			return fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 		}
 	}
 
 	mdFile.SetContent(content)
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return fmt.Errorf("could not write markdown file: %w", err)
+		return fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 
 	return nil
@@ -837,7 +842,7 @@ func (f *NodeStore) UpsertContentPreservingFrontmatter(entry *PageNode, content 
 	if fileExists(filePath) {
 		mdFile, err = treeLoadMarkdownFile(filePath)
 		if err != nil {
-			return fmt.Errorf("could not load markdown file: %w", err)
+			return fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 		}
 	}
 
@@ -846,7 +851,7 @@ func (f *NodeStore) UpsertContentPreservingFrontmatter(entry *PageNode, content 
 	}
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return fmt.Errorf("could not write markdown file: %w", err)
+		return fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 
 	return nil
@@ -866,7 +871,7 @@ func (f *NodeStore) UpsertContentReplacingMetadata(entry *PageNode, content stri
 	if fileExists(filePath) {
 		mdFile, err = treeLoadMarkdownFile(filePath)
 		if err != nil {
-			return fmt.Errorf("could not load markdown file: %w", err)
+			return fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 		}
 	}
 
@@ -875,7 +880,7 @@ func (f *NodeStore) UpsertContentReplacingMetadata(entry *PageNode, content stri
 	}
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return fmt.Errorf("could not write markdown file: %w", err)
+		return fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 
 	return nil
@@ -1262,12 +1267,12 @@ func (f *NodeStore) SyncMetadataIfExists(entry *PageNode) error {
 
 	mdFile, err := treeLoadMarkdownFile(filePath)
 	if err != nil {
-		return fmt.Errorf("load markdown file: %w", err)
+		return fmt.Errorf("%w: %w", ErrLoadMarkdownFile, err)
 	}
 
 	f.syncManagedMetadata(mdFile, entry)
 	if err := treeMarkdownWriteToFile(mdFile); err != nil {
-		return fmt.Errorf("write markdown file: %w", err)
+		return fmt.Errorf("%w: %w", ErrWriteMarkdownFile, err)
 	}
 	return nil
 }
@@ -1471,11 +1476,11 @@ func (f *NodeStore) validateNodeRoute(entry *PageNode) error {
 func (f *NodeStore) requirePathInRoot(op string, path string) error {
 	rootAbs, err := resolvePathForContainment(f.rootDir)
 	if err != nil {
-		return fmt.Errorf("%s: resolve root dir: %w", op, err)
+		return fmt.Errorf("%s: %w: %w", op, ErrResolveRootDir, err)
 	}
 	pathAbs, err := resolvePathForContainment(path)
 	if err != nil {
-		return fmt.Errorf("%s: resolve path: %w", op, err)
+		return fmt.Errorf("%s: %w: %w", op, ErrResolvePath, err)
 	}
 	rel, err := treeFilepathRel(rootAbs, pathAbs)
 	if err != nil {
@@ -1611,7 +1616,7 @@ func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 		}
 		if entry.Kind == NodeKindSection {
 			if err := treeOSMkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
-				return "", fmt.Errorf("could not ensure folder: %w", err)
+				return "", fmt.Errorf("%w: %w", ErrEnsureFolder, err)
 			}
 		}
 		return sourcePath, nil
@@ -1631,7 +1636,7 @@ func (f *NodeStore) contentPathForNodeWrite(entry *PageNode) (string, error) {
 			return "", err
 		}
 		if err := treeOSMkdirAll(base, 0o755); err != nil {
-			return "", fmt.Errorf("could not ensure folder: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrEnsureFolder, err)
 		}
 		return path, nil
 

@@ -78,7 +78,7 @@ func EnsurePageIsFolder(storageDir string, route RoutePath) error {
 	// If .md file exists → convert it to folder
 	if _, err := treeOSStat(mdPath); err == nil {
 		if err := treeOSMkdirAll(dirPath, 0755); err != nil {
-			return fmt.Errorf("could not create folder: %w", err)
+			return fmt.Errorf("%w: %w", ErrEnsureFolder, err)
 		}
 
 		newPath := pageIndexDiskPath(storageDir, routeString)
@@ -105,7 +105,7 @@ func FoldPageFolderIfEmpty(storageDir string, pagePath string) error {
 
 	entries, err := treeOSReadDir(dirPath)
 	if err != nil {
-		return fmt.Errorf("could not read folder: %w", err)
+		return fmt.Errorf("%w: %w", ErrReadDirectory, err)
 	}
 
 	// Only fold if exactly 1 file: index.md

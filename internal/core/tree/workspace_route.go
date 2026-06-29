@@ -26,11 +26,11 @@ type workspaceRouteConflict struct {
 }
 
 type workspaceRouteConflictTracker struct {
-	seen map[string]WorkspaceMarkdownRoute
+	seen map[RouteLowerKey]WorkspaceMarkdownRoute
 }
 
 func newWorkspaceRouteConflictTracker() *workspaceRouteConflictTracker {
-	return &workspaceRouteConflictTracker{seen: map[string]WorkspaceMarkdownRoute{}}
+	return &workspaceRouteConflictTracker{seen: map[RouteLowerKey]WorkspaceMarkdownRoute{}}
 }
 
 func (t *workspaceRouteConflictTracker) Record(route WorkspaceMarkdownRoute) *workspaceRouteConflict {
@@ -152,7 +152,7 @@ func normalizeWorkspaceRouteSegment(slugger *SlugService, segment string) (strin
 	}
 	safe := slugger.GenerateValidSlug(segment)
 	if safe == "" {
-		return "", fmt.Errorf("segment %q is not a valid slug: slug must not be empty", segment)
+		return "", fmt.Errorf("segment %q is not a valid slug: %w", segment, ErrSlugEmpty)
 	}
 	return safe, nil
 }

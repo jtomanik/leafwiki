@@ -1,7 +1,6 @@
 package tree
 
 import (
-	"errors"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -42,7 +41,7 @@ var _ = ginkgo.Describe("semantic path helpers", func() {
 		Expect(route.MarkdownContentPath(NodeKindSection)).To(Equal(MarkdownPath("Docs/Guide/index.md")))
 		Expect(route.MarkdownPagePath()).To(Equal(MarkdownPath("Docs/Guide.md")))
 		Expect(route.HrefPath()).To(Equal(MarkdownPath("Docs/Guide")))
-		Expect(route.LowerKey(NodeKindPage)).To(Equal("page:docs/guide"))
+		Expect(route.LowerKey(NodeKindPage)).To(Equal(RouteLowerKey{Kind: NodeKindPage, Path: RoutePath("docs/guide")}))
 		Expect(route.Lower()).To(Equal(RoutePath("docs/guide")))
 		Expect(route.WorkspaceSourceDirectory()).To(Equal(WorkspaceSourcePath("Docs/Guide")))
 		Expect(route.LeafSlug()).To(Equal(Slug("Guide")))
@@ -63,7 +62,7 @@ var _ = ginkgo.Describe("semantic path helpers", func() {
 		Expect(scannedPageID).To(Equal(PageID("page-3")))
 		Expect(scannedPageID.Scan(nil)).To(Succeed())
 		Expect(scannedPageID).To(Equal(PageID("")))
-		Expect(scannedPageID.Scan(123)).To(MatchError(ContainSubstring("cannot scan int into PageID")))
+		Expect(scannedPageID.Scan(123)).To(MatchError(ErrScanPageID))
 
 		route := RoutePath("/docs/guide/")
 		routeValue, err := route.Value()
@@ -77,7 +76,7 @@ var _ = ginkgo.Describe("semantic path helpers", func() {
 		Expect(scannedRoute).To(Equal(RoutePath("docs/guide")))
 		Expect(scannedRoute.Scan(nil)).To(Succeed())
 		Expect(scannedRoute).To(Equal(RoutePath("")))
-		Expect(scannedRoute.Scan(time.Now())).To(MatchError(ContainSubstring("cannot scan time.Time into RoutePath")))
+		Expect(scannedRoute.Scan(time.Now())).To(MatchError(ErrScanRoutePath))
 	})
 
 	ginkgo.It("keeps asset names, slugs, and page versions narrowly typed", func() {
@@ -136,24 +135,31 @@ var _ = ginkgo.Describe("tree helper coverage", func() {
 var _ = ginkgo.Describe("tree error wrappers", func() {
 	ginkgo.It("wraps sentinel errors with stable details", func() {
 		drift := &DriftError{NodeID: "page-1", Kind: NodeKindPage, Path: "docs/page.md", Reason: "missing"}
-		Expect(drift.Error()).To(ContainSubstring("nodeID=page-1"))
-		Expect(errors.Is(drift, ErrDrift)).To(BeTrue())
+		Expect(drift).To(MatchError(ErrDrift))
+		Expect(drift).To(HaveField("NodeID", PageIDFromString("page-1")))
+		Expect(drift).To(HaveField("Kind", NodeKindPage))
+		Expect(drift).To(HaveField("Path", "docs/page.md"))
 
 		invalid := &InvalidOpError{Op: "move", Reason: "root"}
-		Expect(invalid.Error()).To(Equal("move: root"))
-		Expect(errors.Is(invalid, ErrInvalidOperation)).To(BeTrue())
+		Expect(invalid).To(MatchError(ErrInvalidOperation))
+		Expect(invalid).To(HaveField("Op", "move"))
+		Expect(invalid).To(HaveField("Reason", "root"))
 
 		exists := &PageAlreadyExistsError{Path: "docs/page.md"}
-		Expect(exists.Error()).To(Equal("already exists: docs/page.md"))
-		Expect(errors.Is(exists, ErrPageAlreadyExists)).To(BeTrue())
+		Expect(exists).To(MatchError(ErrPageAlreadyExists))
+		Expect(exists).To(HaveField("Path", "docs/page.md"))
 
 		missing := &NotFoundError{Resource: "page", ID: "page-404", Path: "docs/missing.md"}
-		Expect(missing.Error()).To(Equal("page not found: page-404"))
-		Expect(errors.Is(missing, ErrPageNotFound)).To(BeTrue())
+		Expect(missing).To(MatchError(ErrPageNotFound))
+		Expect(missing).To(HaveField("Resource", "page"))
+		Expect(missing).To(HaveField("ID", PageIDFromString("page-404")))
+		Expect(missing).To(HaveField("Path", "docs/missing.md"))
 
 		convert := &ConvertNotAllowedError{From: NodeKindSection, To: NodeKindPage, Reason: "has children"}
-		Expect(convert.Error()).To(Equal("cannot convert from section to page: has children"))
-		Expect(errors.Is(convert, ErrConvertNotAllowed)).To(BeTrue())
+		Expect(convert).To(MatchError(ErrConvertNotAllowed))
+		Expect(convert).To(HaveField("From", NodeKindSection))
+		Expect(convert).To(HaveField("To", NodeKindPage))
+		Expect(convert).To(HaveField("Reason", "has children"))
 	})
 
 	ginkgo.It("validates route paths and exposes invalid route errors", func() {
@@ -161,6 +167,6 @@ var _ = ginkgo.Describe("tree error wrappers", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(route).To(Equal(RoutePath("docs/guide")))
 		_, err = RoutePath("../escape").Validate()
-		Expect(err).To(MatchError(ContainSubstring("invalid path")))
+		Expect(err).To(MatchError(ErrInvalidRoutePath))
 	})
 })

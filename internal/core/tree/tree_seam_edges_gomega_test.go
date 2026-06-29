@@ -41,9 +41,10 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 		})
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
-		swapTreeSeam(&treeOSRename, func(string, string) error { return errors.New("rename failed") })
+		renameErr := errors.New("rename failed")
+		swapTreeSeam(&treeOSRename, func(string, string) error { return renameErr })
 
-		Expect(EnsurePageIsFolder(root, "guide")).To(MatchError(ContainSubstring("could not move file to index.md")))
+		Expect(EnsurePageIsFolder(root, "guide")).To(MatchError(renameErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			return fakeTreeFileInfo{name: filepath.Base(path), mode: fs.ModeDir}, nil
@@ -51,19 +52,21 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{fakeTreeDirEntry{name: "index.md"}}, nil
 		})
-		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(ContainSubstring("could not move index.md to flat file")))
+		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(renameErr))
 
 		swapTreeSeam(&treeOSRename, func(string, string) error { return nil })
-		swapTreeSeam(&treeOSRemove, func(string) error { return errors.New("remove failed") })
-		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(ContainSubstring("could not remove folder")))
+		removeErr := errors.New("remove failed")
+		swapTreeSeam(&treeOSRemove, func(string) error { return removeErr })
+		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(removeErr))
 	})
 
 	It("covers metadata and section-index failure seams", func() {
 		mdFile := markdown.NewMarkdownFile(filepath.Join(root, "page.md"), "# Page\n", markdown.Frontmatter{})
 		entry := edgePageNode("page", "page", "Page", parent)
 
-		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return errors.New("write failed") })
-		Expect(store.writeReconstructedMetadata(mdFile, entry)).To(MatchError(ContainSubstring("write reconstructed metadata")))
+		writeMetadataErr := errors.New("write failed")
+		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return writeMetadataErr })
+		Expect(store.writeReconstructedMetadata(mdFile, entry)).To(MatchError(writeMetadataErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
@@ -80,62 +83,67 @@ var _ = Describe("tree seam edge coverage", func() {
 			return fakeTreeFileInfo{name: "index.md"}, nil
 		})
 		_, err := store.ensureSectionIndex(section)
-		Expect(err).To(MatchError(ContainSubstring("could not load markdown file")))
+		Expect(err).To(MatchError(ErrLoadMarkdownFile))
 
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Loaded\n", markdown.Frontmatter{}), nil
 		})
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return errors.New("write failed") })
 		_, err = store.ensureSectionIndexAtPath(section, filepath.Join(root, "section", "index.md"))
-		Expect(err).To(MatchError(ContainSubstring("could not write markdown file")))
+		Expect(err).To(MatchError(ErrWriteMarkdownFile))
 	})
 
 	It("covers node store operation failures through filesystem seams", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 
-		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return errors.New("mkdir failed") })
-		Expect(store.SaveChildOrder(parent)).To(MatchError(ContainSubstring("could not ensure parent directory exists")))
-		Expect(store.CreatePage(parent, page)).To(MatchError(ContainSubstring("could not ensure parent directory exists")))
-		Expect(store.CreateSection(parent, section)).To(MatchError(ContainSubstring("could not ensure parent directory exists")))
-		Expect(store.MoveNode(page, parent)).To(MatchError(ContainSubstring("could not ensure parent directory exists")))
+		mkdirErr := errors.New("mkdir failed")
+		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return mkdirErr })
+		Expect(store.SaveChildOrder(parent)).To(MatchError(mkdirErr))
+		Expect(store.CreatePage(parent, page)).To(MatchError(mkdirErr))
+		Expect(store.CreateSection(parent, section)).To(MatchError(mkdirErr))
+		Expect(store.MoveNode(page, parent)).To(MatchError(mkdirErr))
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
-		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error { return errors.New("atomic failed") })
-		Expect(store.SaveChildOrder(parent)).To(MatchError(ContainSubstring("could not atomically write child order file")))
+		atomicErr := errors.New("atomic failed")
+		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error { return atomicErr })
+		Expect(store.SaveChildOrder(parent)).To(MatchError(atomicErr))
 
-		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return errors.New("write failed") })
-		Expect(store.CreatePage(parent, page)).To(MatchError(ContainSubstring("could not create file")))
-		Expect(store.UpsertContent(page, "body")).To(MatchError(ContainSubstring("could not write markdown file")))
-		Expect(store.UpsertContentPreservingFrontmatter(page, "body")).To(MatchError(ContainSubstring("could not write markdown file")))
-		Expect(store.UpsertContentReplacingMetadata(page, "body")).To(MatchError(ContainSubstring("could not write markdown file")))
+		writeErr := errors.New("write failed")
+		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return writeErr })
+		Expect(store.CreatePage(parent, page)).To(MatchError(writeErr))
+		Expect(store.UpsertContent(page, "body")).To(MatchError(writeErr))
+		Expect(store.UpsertContentPreservingFrontmatter(page, "body")).To(MatchError(writeErr))
+		Expect(store.UpsertContentReplacingMetadata(page, "body")).To(MatchError(writeErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		swapTreeSeam(&treeOSMkdirAll, func(path string, _ os.FileMode) error {
 			if strings.HasSuffix(path, "section") {
-				return errors.New("section mkdir failed")
+				return mkdirErr
 			}
 			return nil
 		})
-		Expect(store.CreateSection(parent, section)).To(MatchError(ContainSubstring("could not create section folder")))
+		Expect(store.CreateSection(parent, section)).To(MatchError(mkdirErr))
 	})
 
 	It("covers reconstruction branches through deterministic seams", func() {
+		errFixtureStatFailed := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
-			return nil, errors.New("stat failed")
+			return nil, errFixtureStatFailed
 		})
 		_, err := store.ReconstructTreeFromFS()
-		Expect(err).To(MatchError(ContainSubstring("stat root dir")))
+		Expect(err).To(MatchError(errFixtureStatFailed))
 
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
 			return fakeTreeFileInfo{mode: fs.ModeDir}, nil
 		})
+		errFixtureReadFailed := errors.New("read failed")
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
-			return nil, errors.New("read failed")
+			return nil, errFixtureReadFailed
 		})
 		_, err = store.ReconstructTreeFromFS()
-		Expect(err).To(MatchError(ContainSubstring("reconstruct root content from fs")))
-		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("read dir")))
+		Expect(err).To(MatchError(errFixtureReadFailed))
+		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ErrReadDirectory))
 
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			if path == root {
@@ -146,15 +154,17 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Root\n", markdown.Frontmatter{}), nil
 		})
+		rootMetadataWriteErr := errors.New("write failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("write failed")
+			return rootMetadataWriteErr
 		})
 		rootNode := edgeSectionNode(RootPageID, "root", "Root", nil)
-		Expect(store.applyRootSectionContent(rootNode, time.Now().UTC())).To(MatchError(ContainSubstring("write reconstructed metadata")))
+		Expect(store.applyRootSectionContent(rootNode, time.Now().UTC())).To(MatchError(rootMetadataWriteErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
+		idErr := errors.New("id failed")
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) {
-			return "", errors.New("id failed")
+			return "", idErr
 		})
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			if path == root {
@@ -167,20 +177,21 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return []os.DirEntry{}, nil
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("generate unique ID")))
+		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(idErr))
 
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "generated", nil })
+		sectionIndexErr := errors.New("section index failed")
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			switch path {
 			case root:
 				return []os.DirEntry{fakeTreeDirEntry{name: "docs", isDir: true}}, nil
 			case filepath.Join(root, "docs"):
-				return nil, errors.New("section index failed")
+				return nil, sectionIndexErr
 			default:
 				return []os.DirEntry{}, nil
 			}
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("resolve section index")))
+		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(sectionIndexErr))
 
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			switch path {
@@ -192,10 +203,11 @@ var _ = Describe("tree seam edge coverage", func() {
 				return []os.DirEntry{}, nil
 			}
 		})
+		loadErr := errors.New("load failed")
 		swapTreeSeam(&treeLoadMarkdownFile, func(string) (*markdown.MarkdownFile, error) {
-			return nil, errors.New("load failed")
+			return nil, loadErr
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("load section index")))
+		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(loadErr))
 	})
 
 	It("covers CRUD stat, rename, and remove branches through seams", func() {
@@ -210,19 +222,20 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.MoveNode(page, dest)).To(MatchError(ContainSubstring("already exists")))
+		Expect(store.MoveNode(page, dest)).To(MatchError(ErrPageAlreadyExists))
 
+		statSourceErr := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch {
 			case strings.HasSuffix(path, "dest/page.md"):
 				return nil, os.ErrNotExist
 			case strings.HasSuffix(path, "page.md"):
-				return nil, errors.New("stat failed")
+				return nil, statSourceErr
 			default:
 				return nil, os.ErrNotExist
 			}
 		})
-		Expect(store.MoveNode(page, dest)).To(MatchError(ContainSubstring("stat source file")))
+		Expect(store.MoveNode(page, dest)).To(MatchError(statSourceErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch {
@@ -242,8 +255,9 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		swapTreeSeam(&treeOSRename, func(string, string) error { return errors.New("rename failed") })
-		Expect(store.MoveNode(page, dest)).To(MatchError(ContainSubstring("could not move file")))
+		moveRenameErr := errors.New("rename failed")
+		swapTreeSeam(&treeOSRename, func(string, string) error { return moveRenameErr })
+		Expect(store.MoveNode(page, dest)).To(MatchError(moveRenameErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if filepath.Base(path) == "section" && filepath.Base(filepath.Dir(path)) != "dest" {
@@ -251,25 +265,27 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.MoveNode(section, dest)).To(MatchError(ContainSubstring("could not move folder")))
+		Expect(store.MoveNode(section, dest)).To(MatchError(moveRenameErr))
 
-		swapTreeSeam(&treeOSRemove, func(string) error { return errors.New("remove failed") })
+		removePageErr := errors.New("remove failed")
+		swapTreeSeam(&treeOSRemove, func(string) error { return removePageErr })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
 				return fakeTreeFileInfo{name: "page.md"}, nil
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.DeletePage(page)).To(MatchError(ContainSubstring("could not delete file")))
+		Expect(store.DeletePage(page)).To(MatchError(removePageErr))
 
-		swapTreeSeam(&treeOSRemoveAll, func(string) error { return errors.New("remove all failed") })
+		removeSectionErr := errors.New("remove all failed")
+		swapTreeSeam(&treeOSRemoveAll, func(string) error { return removeSectionErr })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if filepath.Base(path) == "section" {
 				return fakeTreeFileInfo{mode: fs.ModeDir}, nil
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.DeleteSection(section)).To(MatchError(ContainSubstring("could not delete folder")))
+		Expect(store.DeleteSection(section)).To(MatchError(removeSectionErr))
 	})
 
 	It("covers rename, read, sync, path, resolve, and conversion seam branches", func() {
@@ -282,19 +298,20 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(ContainSubstring("already exists")))
+		Expect(store.RenameNode(page, "renamed")).To(MatchError(ErrPageAlreadyExists))
 
+		statRenameErr := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch {
 			case strings.HasSuffix(path, "renamed.md"):
 				return nil, os.ErrNotExist
 			case strings.HasSuffix(path, "page.md"):
-				return nil, errors.New("stat failed")
+				return nil, statRenameErr
 			default:
 				return nil, os.ErrNotExist
 			}
 		})
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(ContainSubstring("stat source file")))
+		Expect(store.RenameNode(page, "renamed")).To(MatchError(statRenameErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
@@ -302,8 +319,9 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		swapTreeSeam(&treeOSRename, func(string, string) error { return errors.New("rename failed") })
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(ContainSubstring("could not rename file")))
+		renameNodeErr := errors.New("rename failed")
+		swapTreeSeam(&treeOSRename, func(string, string) error { return renameNodeErr })
+		Expect(store.RenameNode(page, "renamed")).To(MatchError(renameNodeErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if filepath.Base(path) == "section" {
@@ -311,10 +329,11 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(ContainSubstring("could not rename folder")))
+		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(renameNodeErr))
 
 		swapTreeSeam(&treeOSRename, func(string, string) error { return nil })
-		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) { return nil, errors.New("read failed") })
+		errFixtureReadFailed := errors.New("read failed")
+		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) { return nil, errFixtureReadFailed })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
 				return fakeTreeFileInfo{name: "page.md"}, nil
@@ -322,35 +341,39 @@ var _ = Describe("tree seam edge coverage", func() {
 			return nil, os.ErrNotExist
 		})
 		_, err := store.ReadPageRaw(page)
-		Expect(err).To(MatchError("read failed"))
+		Expect(err).To(MatchError(errFixtureReadFailed))
 
 		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) { return []byte("# Page\n"), nil })
+		errFixtureParseFailed := errors.New("parse failed")
 		swapTreeSeam(&treeNewMarkdownFileFromRaw, func(string, string) (*markdown.MarkdownFile, error) {
-			return nil, errors.New("parse failed")
+			return nil, errFixtureParseFailed
 		})
 		_, _, err = store.ReadPageAndRaw(page)
-		Expect(err).To(MatchError("parse failed"))
+		Expect(err).To(MatchError(errFixtureParseFailed))
 		_, err = store.ReadPageContent(page)
-		Expect(err).To(MatchError("parse failed"))
+		Expect(err).To(MatchError(errFixtureParseFailed))
 
 		swapTreeSeam(&treeNewMarkdownFileFromRaw, markdown.NewMarkdownFileFromRaw)
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Page\n", markdown.Frontmatter{}), nil
 		})
-		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return errors.New("write failed") })
-		Expect(store.SyncMetadataIfExists(page)).To(MatchError(ContainSubstring("write markdown file")))
+		errFixtureWriteFailed := errors.New("write failed")
+		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return errFixtureWriteFailed })
+		Expect(store.SyncMetadataIfExists(page)).To(MatchError(errFixtureWriteFailed))
 
+		relErr := errors.New("rel failed")
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {
-			return "", errors.New("rel failed")
+			return "", relErr
 		})
 		store.setWorkspaceSourcePathForPhysicalPath(page, filepath.Join(root, "page.md"), "page", NodeKindPage)
 		Expect(page.WorkspaceSourcePath).To(BeEmpty())
-		Expect(store.requirePathInRoot("relOp", filepath.Join(root, "page.md"))).To(MatchError(ContainSubstring("compare path to root dir")))
+		Expect(store.requirePathInRoot("relOp", filepath.Join(root, "page.md"))).To(MatchError(relErr))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
-		swapTreeSeam(&treeFilepathAbs, func(string) (string, error) { return "", errors.New("abs failed") })
+		errFixtureAbsFailed := errors.New("abs failed")
+		swapTreeSeam(&treeFilepathAbs, func(string) (string, error) { return "", errFixtureAbsFailed })
 		_, err = resolvePathForContainment(root)
-		Expect(err).To(MatchError("abs failed"))
+		Expect(err).To(MatchError(errFixtureAbsFailed))
 
 		swapTreeSeam(&treeFilepathAbs, filepath.Abs)
 		swapTreeSeam(&treeFilepathEvalSymlinks, func(string) (string, error) { return "", os.ErrNotExist })
@@ -360,14 +383,14 @@ var _ = Describe("tree seam edge coverage", func() {
 
 		workspaceSection := edgeSectionNode("workspace-section", "workspace-section", "Workspace Section", parent)
 		workspaceSection.WorkspaceSourcePath = "Imported/Section"
-		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errors.New("read failed") })
+		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errFixtureReadFailed })
 		_, _, err = store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
-		Expect(err).To(MatchError("read failed"))
+		Expect(err).To(MatchError(errFixtureReadFailed))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return []os.DirEntry{}, nil })
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return errors.New("mkdir failed") })
 		_, err = store.contentPathForNodeWrite(workspaceSection)
-		Expect(err).To(MatchError(ContainSubstring("could not ensure folder")))
+		Expect(err).To(MatchError(ErrEnsureFolder))
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -387,8 +410,9 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resolvedNode.Kind).To(Equal(NodeKindSection))
 
-		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) { return nil, errors.New("stat failed") })
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError("stat failed"))
+		statErr := errors.New("stat failed")
+		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) { return nil, statErr })
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(statErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "section") {
@@ -396,20 +420,22 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errors.New("read failed") })
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError("read failed"))
+		readErr := errors.New("read failed")
+		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, readErr })
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(readErr))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{fakeTreeDirEntry{name: "index.md"}}, nil
 		})
-		swapTreeSeam(&treeOSRename, func(string, string) error { return errors.New("rename failed") })
+		convertRenameErr := errors.New("rename failed")
+		swapTreeSeam(&treeOSRename, func(string, string) error { return convertRenameErr })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "section") || strings.HasSuffix(path, "index.md") {
 				return fakeTreeFileInfo{mode: map[bool]os.FileMode{true: fs.ModeDir, false: 0}[strings.HasSuffix(path, "section")]}, nil
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(ContainSubstring("could not move index to page")))
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(convertRenameErr))
 	})
 
 	It("covers migration adapters, route mapping, and remaining content path branches", func() {
@@ -425,7 +451,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error {
 			return errors.New("snapshot failed")
 		})
-		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ContainSubstring("write legacy migration snapshot")))
+		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrWriteLegacyTreeSnapshot))
 
 		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error { return nil })
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
@@ -464,10 +490,11 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(Succeed())
 
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, MapWorkspaceMarkdownRoute)
+		workspaceRelErr := errors.New("rel failed")
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {
-			return "", errors.New("rel failed")
+			return "", workspaceRelErr
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("resolve workspace relative path")))
+		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(workspaceRelErr))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 		looseParent := edgeSectionNode("loose", "loose", "Loose", nil)
@@ -504,11 +531,12 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
+		errFixtureResolveReadFailed := errors.New("read failed")
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
-			return nil, errors.New("read failed")
+			return nil, errFixtureResolveReadFailed
 		})
 		_, err = store.resolveNode(section)
-		Expect(err).To(MatchError("read failed"))
+		Expect(err).To(MatchError(errFixtureResolveReadFailed))
 	})
 
 	It("covers remaining reconstruction duplicate, skip, and writeback branches", func() {
@@ -529,7 +557,7 @@ var _ = Describe("tree seam edge coverage", func() {
 			Expect(isDir).To(BeTrue())
 			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: "same", SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("duplicate section slug")))
+		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ErrDuplicateReconstructedSlug))
 
 		ids := []string{"same-id", "same-id"}
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) {
@@ -541,7 +569,7 @@ var _ = Describe("tree seam edge coverage", func() {
 			Expect(isDir).To(BeTrue())
 			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: RoutePathFromString(relPath), SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("duplicate leafwiki_id")))
+		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ErrDuplicateLeafwikiID))
 
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "section-id", nil })
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
@@ -557,13 +585,15 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Docs\n", markdown.Frontmatter{}), nil
 		})
+		writebackErr := errors.New("writeback failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("writeback failed")
+			return writebackErr
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("write reconstructed metadata")))
+		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(writebackErr))
 
+		materializeErr := errors.New("materialize failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("materialize failed")
+			return materializeErr
 		})
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			if path == root {
@@ -571,7 +601,7 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return []os.DirEntry{}, nil
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("materialize missing section index")))
+		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(materializeErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "file-id", nil })
@@ -607,10 +637,11 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Page\n", markdown.Frontmatter{}), nil
 		})
+		fileWritebackErr := errors.New("file writeback failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("file writeback failed")
+			return fileWritebackErr
 		})
-		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ContainSubstring("write reconstructed metadata")))
+		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(fileWritebackErr))
 	})
 
 	It("covers remaining store operation path and conversion branches", func() {
@@ -631,10 +662,11 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.CreateSection(parent, section)).To(matchInvalidOp("CreateSection"))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
+		sectionIndexWriteErr := errors.New("section index failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("section index failed")
+			return sectionIndexWriteErr
 		})
-		Expect(store.CreateSection(parent, section)).To(MatchError(ContainSubstring("could not write markdown file")))
+		Expect(store.CreateSection(parent, section)).To(MatchError(sectionIndexWriteErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		Expect(store.UpsertContentPreservingFrontmatter(loosePage, "body")).To(matchInvalidOp("dirPathForNode"))
@@ -646,11 +678,12 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
+		loadExistingErr := errors.New("load failed")
 		swapTreeSeam(&treeLoadMarkdownFile, func(string) (*markdown.MarkdownFile, error) {
-			return nil, errors.New("load failed")
+			return nil, loadExistingErr
 		})
-		Expect(store.UpsertContentPreservingFrontmatter(page, "body")).To(MatchError(ContainSubstring("could not load markdown file")))
-		Expect(store.UpsertContentReplacingMetadata(page, "body")).To(MatchError(ContainSubstring("could not load markdown file")))
+		Expect(store.UpsertContentPreservingFrontmatter(page, "body")).To(MatchError(loadExistingErr))
+		Expect(store.UpsertContentReplacingMetadata(page, "body")).To(MatchError(loadExistingErr))
 
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Page\n", markdown.Frontmatter{}), nil
@@ -668,13 +701,14 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.MoveNode(page, dest)).To(matchInvalidOp("MoveNode"))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
+		statSectionErr := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "section") {
-				return nil, errors.New("stat failed")
+				return nil, statSectionErr
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.MoveNode(section, parent)).To(MatchError(ContainSubstring("stat source dir")))
+		Expect(store.MoveNode(section, parent)).To(MatchError(statSectionErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "section") {
@@ -684,11 +718,12 @@ var _ = Describe("tree seam edge coverage", func() {
 		})
 		Expect(store.MoveNode(section, parent)).To(matchDrift("expected folder missing"))
 
+		statDeleteErr := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
-			return nil, errors.New("stat failed")
+			return nil, statDeleteErr
 		})
-		Expect(store.DeletePage(page)).To(MatchError(ContainSubstring("stat file")))
-		Expect(store.DeleteSection(section)).To(MatchError(ContainSubstring("stat dir")))
+		Expect(store.DeletePage(page)).To(MatchError(statDeleteErr))
+		Expect(store.DeleteSection(section)).To(MatchError(statDeleteErr))
 
 		Expect(store.DeletePage(loosePage)).To(matchInvalidOp("dirPathForNode"))
 		Expect(store.DeleteSection(looseSection)).To(matchInvalidOp("dirPathForNode"))
@@ -705,7 +740,7 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(ContainSubstring("already exists")))
+		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(ErrPageAlreadyExists))
 
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
@@ -744,13 +779,14 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
+		errFixtureContentReadFailed := errors.New("read failed")
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
-			return nil, errors.New("read failed")
+			return nil, errFixtureContentReadFailed
 		})
 		_, err = store.contentPathForNodeRead(section)
-		Expect(err).To(MatchError("read failed"))
+		Expect(err).To(MatchError(errFixtureContentReadFailed))
 		_, err = store.contentPathForNodeWrite(section)
-		Expect(err).To(MatchError("read failed"))
+		Expect(err).To(MatchError(errFixtureContentReadFailed))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{}, nil
@@ -759,7 +795,7 @@ var _ = Describe("tree seam edge coverage", func() {
 			return errors.New("mkdir failed")
 		})
 		_, err = store.contentPathForNodeWrite(section)
-		Expect(err).To(MatchError(ContainSubstring("could not ensure folder")))
+		Expect(err).To(MatchError(ErrEnsureFolder))
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		Expect(store.ConvertNode(loosePage, NodeKindSection)).To(matchInvalidOp("dirPathForNode"))
@@ -781,22 +817,25 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
+		convertMkdirErr := errors.New("mkdir failed")
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error {
-			return errors.New("mkdir failed")
+			return convertMkdirErr
 		})
-		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ContainSubstring("could not create folder")))
+		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(convertMkdirErr))
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
+		convertMoveErr := errors.New("rename failed")
 		swapTreeSeam(&treeOSRename, func(string, string) error {
-			return errors.New("rename failed")
+			return convertMoveErr
 		})
-		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ContainSubstring("could not move page into folder")))
+		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(convertMoveErr))
 
 		swapTreeSeam(&treeOSRename, func(string, string) error { return nil })
+		ensureIndexErr := errors.New("ensure failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("ensure failed")
+			return ensureIndexErr
 		})
-		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ContainSubstring("could not write markdown file")))
+		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ensureIndexErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		Expect(store.ConvertNode(looseSection, NodeKindPage)).To(matchInvalidOp("dirPathForNode"))
@@ -824,27 +863,30 @@ var _ = Describe("tree seam edge coverage", func() {
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{}, nil
 		})
+		writePageErr := errors.New("write page failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("write page failed")
+			return writePageErr
 		})
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(ContainSubstring("could not write page file")))
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(writePageErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
+		removeOrderErr := errors.New("remove order failed")
 		swapTreeSeam(&treeOSRemove, func(path string) error {
 			if strings.HasSuffix(path, orderFilename) {
-				return errors.New("remove order failed")
+				return removeOrderErr
 			}
 			return nil
 		})
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(ContainSubstring("could not remove child order file")))
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(removeOrderErr))
 
+		removeFolderErr := errors.New("remove folder failed")
 		swapTreeSeam(&treeOSRemove, func(path string) error {
 			if strings.HasSuffix(path, orderFilename) {
 				return os.ErrNotExist
 			}
-			return errors.New("remove folder failed")
+			return removeFolderErr
 		})
-		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError("remove folder failed"))
+		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(removeFolderErr))
 	})
 
 	It("covers final node store seam branches", func() {
@@ -860,19 +902,20 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.MoveNode(section, dest)).To(MatchError(ContainSubstring("already exists")))
+		Expect(store.MoveNode(section, dest)).To(MatchError(ErrPageAlreadyExists))
 
+		statRenameSectionErr := errors.New("stat section failed")
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch {
 			case strings.HasSuffix(path, "renamed-section"):
 				return nil, os.ErrNotExist
 			case strings.HasSuffix(path, "section"):
-				return nil, errors.New("stat section failed")
+				return nil, statRenameSectionErr
 			default:
 				return nil, os.ErrNotExist
 			}
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(ContainSubstring("stat source dir")))
+		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(statRenameSectionErr))
 		Expect(store.RenameNode(loosePage, "renamed")).To(matchInvalidOp("dirPathForNode"))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -912,16 +955,17 @@ var _ = Describe("tree seam edge coverage", func() {
 		_, err = store.contentPathForNodeWrite(workspaceWriteSection)
 		Expect(err).To(matchInvalidOp("contentPathForNodeWrite"))
 
+		errFixtureEvalFailed := errors.New("eval failed")
 		evalCalls := 0
 		swapTreeSeam(&treeFilepathEvalSymlinks, func(string) (string, error) {
 			evalCalls++
 			if evalCalls == 1 {
 				return "", os.ErrNotExist
 			}
-			return "", errors.New("eval failed")
+			return "", errFixtureEvalFailed
 		})
 		_, err = resolvePathForContainment(filepath.Join(root, "missing", "page.md"))
-		Expect(err).To(MatchError("eval failed"))
+		Expect(err).To(MatchError(errFixtureEvalFailed))
 
 		workspaceSection := edgeSectionNode("workspace-section", "workspace-section", "Workspace Section", parent)
 		workspaceSection.WorkspaceSourcePath = "../outside"
@@ -994,10 +1038,11 @@ var _ = Describe("tree seam edge coverage", func() {
 			}
 			return nil, os.ErrNotExist
 		})
+		missingFolderErr := errors.New("mkdir missing folder failed")
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error {
-			return errors.New("mkdir missing folder failed")
+			return missingFolderErr
 		})
-		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ContainSubstring("could not ensure folder exists")))
+		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(missingFolderErr))
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
@@ -1007,10 +1052,11 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.ConvertNode(page, NodeKindSection)).To(Succeed())
 
 		page.Kind = NodeKindPage
+		ensurePageIndexErr := errors.New("ensure index failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
-			return errors.New("ensure index failed")
+			return ensurePageIndexErr
 		})
-		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ContainSubstring("could not write markdown file")))
+		Expect(store.ConvertNode(page, NodeKindSection)).To(MatchError(ensurePageIndexErr))
 	})
 })
 
