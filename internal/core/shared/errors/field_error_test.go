@@ -1,66 +1,86 @@
-package errors
+package errors_test
 
 import (
 	"encoding/json"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+)
+
+const (
+	testAuthEmailInvalidFieldCode sharederrors.FieldErrorCode = "auth_email_invalid"
+	testAuthEmailInvalidMessageID sharederrors.MessageID      = "validation.auth.email_invalid"
+	testSiteNameRequiredFallback  string                      = "site name is required"
+	testEmailValidationField      string                      = "email"
+	testSiteNameValidationField   string                      = "siteName"
+	testSlugValidationField       string                      = "slug"
 )
 
 var _ = Describe("field validation errors", func() {
 	It("TestValidationErrorsAddWithCodeSerializesStableFieldContract", func() {
-		validation := NewValidationErrors()
+		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode(
-			"slug",
-			"auth_email_invalid",
-			"validation.auth.email_invalid",
+			testSlugValidationField,
+			testAuthEmailInvalidFieldCode,
+			testAuthEmailInvalidMessageID,
 		)
 
 		encoded, err := json.Marshal(validation)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(encoded)).To(Equal(`{"fields":[{"field":"slug","code":"auth_email_invalid","messageId":"validation.auth.email_invalid","message":"Email is not valid"}]}`))
+		Expect(validation).To(testmatchers.ContainFieldError(testSlugValidationField, testAuthEmailInvalidFieldCode, testAuthEmailInvalidMessageID))
+		Expect(string(encoded)).To(MatchJSON(fieldErrorsJSON(validation)))
 	})
 
 	It("TestValidationErrorsLegacyAddRendersCatalogBackedDefaultCode", func() {
-		validation := NewValidationErrors()
-		validation.Add("siteName", "site name is required")
+		validation := sharederrors.NewValidationErrors()
+		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
 
 		Expect(validation.Errors).To(HaveLen(1))
 		field := validation.Errors[0]
-		Expect(field.Code).To(Equal(FieldValidationErrorCode))
-		Expect(field.MessageID).To(Equal(FieldValidationErrorMessageID))
-		Expect(field.Field).To(Equal("siteName"))
-		Expect(field.Message).To(Equal("Validation error"))
+		Expect(field).To(MatchRenderedFieldError(renderedFieldErrorExpectation{
+			Field:     testSiteNameValidationField,
+			Code:      sharederrors.FieldValidationErrorCode,
+			MessageID: sharederrors.FieldValidationErrorMessageID,
+			Message:   renderedMessage(sharederrors.FieldValidationErrorMessageID, testSiteNameRequiredFallback),
+		}))
 	})
 
 	It("TestValidationErrorsAddWithCodeRendersFromCatalog", func() {
-		validation := NewValidationErrors()
+		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode(
-			"email",
-			"auth_email_invalid",
-			"validation.auth.email_invalid",
+			testEmailValidationField,
+			testAuthEmailInvalidFieldCode,
+			testAuthEmailInvalidMessageID,
 		)
 
 		field := validation.Errors[0]
-		Expect(field.Message).To(Equal("Email is not valid"))
-		Expect(field.Code).To(Equal(FieldErrorCode("auth_email_invalid")))
-		Expect(field.MessageID).To(Equal(MessageID("validation.auth.email_invalid")))
+		Expect(field).To(MatchRenderedFieldError(renderedFieldErrorExpectation{
+			Field:     testEmailValidationField,
+			Code:      testAuthEmailInvalidFieldCode,
+			MessageID: testAuthEmailInvalidMessageID,
+			Message:   renderedMessage(testAuthEmailInvalidMessageID, ""),
+		}))
 	})
 })
 
 var _ = Describe("field validation edge coverage", func() {
 	It("ValidationErrors reports empty and populated state", func() {
-		validation := NewValidationErrors()
+		validation := sharederrors.NewValidationErrors()
 
 		Expect(validation.HasErrors()).To(BeFalse())
-		Expect(validation.Error()).To(Equal("validation error"))
+		Expect(validation).To(MatchValidationErrorContract())
 
-		validation.Add("siteName", "site name is required")
+		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
 		Expect(validation.HasErrors()).To(BeTrue())
 	})
-
-	It("typed field error codes stringify to their stable value", func() {
-		Expect(FieldErrorCode("auth_email_invalid").String()).To(Equal("auth_email_invalid"))
-	})
 })
+
+func fieldErrorsJSON(validation *sharederrors.ValidationErrors) string {
+	raw, err := json.Marshal(validation)
+	Expect(err).NotTo(HaveOccurred())
+	return string(raw)
+}

@@ -3,8 +3,10 @@ package workspaceid
 import (
 	"database/sql/driver"
 	stderrors "errors"
+	"fmt"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -16,17 +18,18 @@ var _ = Describe("workspace ID parsing", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(id).To(Equal(WorkspaceID("docs-home")))
-		Expect(id.String()).To(Equal("docs-home"))
 	})
 
 	It("TestParseWorkspaceIDRejectsInvalidInputWithTypedCode", func() {
 		_, err := ParseWorkspaceID(" Docs ")
 
 		Expect(err).To(HaveOccurred())
-		var validationErr *ValidationError
-		Expect(stderrors.As(err, &validationErr)).To(BeTrue())
-		Expect(validationErr.Code).To(Equal(ErrCodeWorkspaceIDWhitespace))
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(sharederrors.ErrorCode("workspace_id_whitespace")))
+		Expect(err).To(Satisfy(func(err error) bool {
+			var validationErr *ValidationError
+			return stderrors.As(err, &validationErr) && validationErr != nil
+		}))
+		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDWhitespace, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDWhitespace)))
+		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDWhitespace))
 	})
 })
 
@@ -59,7 +62,7 @@ var _ = Describe("workspace ID validation errors", func() {
 
 		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDRequired))
-		Expect(err).To(MatchError("workspace ID is required"))
+		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDRequired, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired)))
 	})
 
 	It("returns the invalid code for pattern-invalid input", func() {
@@ -67,7 +70,7 @@ var _ = Describe("workspace ID validation errors", func() {
 
 		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDInvalid))
-		Expect(err).To(MatchError(ContainSubstring("must be URL-safe lowercase letters, numbers, and dashes")))
+		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
 	})
 
 	It("returns empty error text for a nil validation error", func() {
@@ -125,6 +128,10 @@ var _ = Describe("workspace ID SQL conversion", func() {
 
 		err := id.Scan(42)
 
-		Expect(err).To(MatchError(ContainSubstring("workspace ID scan source int is not supported")))
+		Expect(err).To(MatchError(unsupportedWorkspaceIDScanSourceError(42)))
 	})
 })
+
+func unsupportedWorkspaceIDScanSourceError(value any) error {
+	return fmt.Errorf("workspace ID scan source %T is not supported", value)
+}

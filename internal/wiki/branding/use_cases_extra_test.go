@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		})
 
 		Expect(out).To(BeNil())
-		expectBrandingLocalizedError(err, corebranding.ErrCodeBrandingLogoInvalidType)
+		Expect(err).To(MatchBrandingLocalizedError(corebranding.ErrCodeBrandingLogoInvalidType))
 	})
 
 	ginkgo.It("uploads and deletes favicon assets", func() {
@@ -104,7 +104,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		})
 
 		Expect(out).To(BeNil())
-		expectBrandingLocalizedError(err, corebranding.ErrCodeBrandingFaviconInvalidType)
+		Expect(err).To(MatchBrandingLocalizedError(corebranding.ErrCodeBrandingFaviconInvalidType))
 	})
 
 	ginkgo.It("wraps config reload failures after branding operations", func() {
@@ -113,33 +113,33 @@ var _ = ginkgo.Describe("branding use cases", func() {
 
 		getOut, err := (&GetBrandingUseCase{branding: svc}).Execute(context.Background())
 		Expect(getOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 
 		updateOut, err := (&UpdateBrandingUseCase{branding: svc}).Execute(context.Background(), UpdateBrandingInput{SiteName: "Docs"})
 		Expect(updateOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 
 		logoOut, err := (&UploadLogoUseCase{branding: svc}).Execute(context.Background(), UploadLogoInput{
 			File:     newBrandingUploadFile("logo-bytes"),
 			Filename: tree.AssetNameFromString("logo.png"),
 		})
 		Expect(logoOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 
 		deleteLogoOut, err := (&DeleteLogoUseCase{branding: svc}).Execute(context.Background())
 		Expect(deleteLogoOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 
 		faviconOut, err := (&UploadFaviconUseCase{branding: svc}).Execute(context.Background(), UploadFaviconInput{
 			File:     newBrandingUploadFile("favicon-bytes"),
 			Filename: tree.AssetNameFromString("favicon.ico"),
 		})
 		Expect(faviconOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 
 		deleteFaviconOut, err := (&DeleteFaviconUseCase{branding: svc}).Execute(context.Background())
 		Expect(deleteFaviconOut).To(BeNil())
-		expectBrandingLocalizedError(err, ErrCodeBrandingConfigUnavailable)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingConfigUnavailable))
 	})
 })
 
@@ -153,7 +153,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleUpdateBranding(ctx)
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body corebranding.BrandingConfigResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.SiteName).To(Equal("Docs Hub"))
@@ -168,8 +168,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleUpdateBranding(ctx)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("validation_error"))
+		Expect(rec).To(HaveBrandingValidationError(brandingSiteNameValidationField, corebranding.FieldCodeBrandingSiteNameRequired, corebranding.MessageIDBrandingSiteNameRequired))
 	})
 
 	ginkgo.It("uploads and deletes logos through the handlers", func() {
@@ -182,7 +181,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleUploadLogo(uploadCtx)
 
-		Expect(uploaded.Code).To(Equal(http.StatusOK), uploaded.Body.String())
+		Expect(uploaded).To(HaveHTTPStatus(http.StatusOK), uploaded.Body.String())
 		var uploadBody struct {
 			Path     string                              `json:"path"`
 			Branding corebranding.BrandingConfigResponse `json:"branding"`
@@ -194,8 +193,8 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		deleteCtx, deleted := ginTestContext()
 		deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
 		routes.handleDeleteLogo(deleteCtx)
-		Expect(deleted.Code).To(Equal(http.StatusOK), deleted.Body.String())
-		Expect(deleted.Body.String()).To(ContainSubstring(`"logoFile":""`))
+		Expect(deleted).To(HaveHTTPStatus(http.StatusOK), deleted.Body.String())
+		Expect(deleted).To(HaveHTTPBody(ContainSubstring(`"logoFile":""`)))
 	})
 
 	ginkgo.It("uploads and deletes favicons through the handlers", func() {
@@ -208,14 +207,14 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleUploadFavicon(uploadCtx)
 
-		Expect(uploaded.Code).To(Equal(http.StatusOK), uploaded.Body.String())
-		Expect(uploaded.Body.String()).To(ContainSubstring(`"path":"favicon.ico"`))
+		Expect(uploaded).To(HaveHTTPStatus(http.StatusOK), uploaded.Body.String())
+		Expect(uploaded).To(HaveHTTPBody(ContainSubstring(`"path":"favicon.ico"`)))
 
 		deleteCtx, deleted := ginTestContext()
 		deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/api/branding/favicon", nil)
 		routes.handleDeleteFavicon(deleteCtx)
-		Expect(deleted.Code).To(Equal(http.StatusOK), deleted.Body.String())
-		Expect(deleted.Body.String()).To(ContainSubstring(`"faviconFile":""`))
+		Expect(deleted).To(HaveHTTPStatus(http.StatusOK), deleted.Body.String())
+		Expect(deleted).To(HaveHTTPBody(ContainSubstring(`"faviconFile":""`)))
 	})
 
 	ginkgo.It("returns structured upload request errors", func() {
@@ -226,47 +225,41 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		badLogoCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/logo", strings.NewReader("bad multipart"))
 		badLogoCtx.Request.Header.Set("Content-Type", "multipart/form-data; boundary=missing")
 		routes.handleUploadLogo(badLogoCtx)
-		Expect(badLogo.Code).To(Equal(http.StatusRequestEntityTooLarge), badLogo.Body.String())
-		assertBrandingStructuredError(badLogo, "branding_logo_too_large", "errors.branding.logo_too_large")
+		Expect(badLogo).To(HaveBrandingStructuredError(http.StatusRequestEntityTooLarge, ErrCodeBrandingLogoTooLarge))
 
 		emptyLogoBody, emptyLogoContentType := brandingMultipartBody("", nil)
 		missingLogoCtx, missingLogo := ginTestContext()
 		missingLogoCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/logo", emptyLogoBody)
 		missingLogoCtx.Request.Header.Set("Content-Type", emptyLogoContentType)
 		routes.handleUploadLogo(missingLogoCtx)
-		Expect(missingLogo.Code).To(Equal(http.StatusBadRequest), missingLogo.Body.String())
-		assertBrandingStructuredError(missingLogo, "branding_logo_missing", "errors.branding.logo_missing")
+		Expect(missingLogo).To(HaveBrandingStructuredError(http.StatusBadRequest, ErrCodeBrandingLogoMissing))
 
 		invalidLogoBody, invalidLogoContentType := brandingMultipartBody("logo.exe", []byte("logo-bytes"))
 		invalidLogoCtx, invalidLogo := ginTestContext()
 		invalidLogoCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/logo", invalidLogoBody)
 		invalidLogoCtx.Request.Header.Set("Content-Type", invalidLogoContentType)
 		routes.handleUploadLogo(invalidLogoCtx)
-		Expect(invalidLogo.Code).To(Equal(http.StatusBadRequest), invalidLogo.Body.String())
-		assertBrandingStructuredError(invalidLogo, "branding_logo_invalid_type", "errors.branding.logo_invalid_type")
+		Expect(invalidLogo).To(HaveBrandingStructuredError(http.StatusBadRequest, ErrCodeBrandingLogoInvalidType))
 
 		badFaviconCtx, badFavicon := ginTestContext()
 		badFaviconCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/favicon", strings.NewReader("bad multipart"))
 		badFaviconCtx.Request.Header.Set("Content-Type", "multipart/form-data; boundary=missing")
 		routes.handleUploadFavicon(badFaviconCtx)
-		Expect(badFavicon.Code).To(Equal(http.StatusRequestEntityTooLarge), badFavicon.Body.String())
-		assertBrandingStructuredError(badFavicon, "branding_favicon_too_large", "errors.branding.favicon_too_large")
+		Expect(badFavicon).To(HaveBrandingStructuredError(http.StatusRequestEntityTooLarge, ErrCodeBrandingFaviconTooLarge))
 
 		emptyFaviconBody, emptyFaviconContentType := brandingMultipartBody("", nil)
 		missingFaviconCtx, missingFavicon := ginTestContext()
 		missingFaviconCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/favicon", emptyFaviconBody)
 		missingFaviconCtx.Request.Header.Set("Content-Type", emptyFaviconContentType)
 		routes.handleUploadFavicon(missingFaviconCtx)
-		Expect(missingFavicon.Code).To(Equal(http.StatusBadRequest), missingFavicon.Body.String())
-		assertBrandingStructuredError(missingFavicon, "branding_favicon_missing", "errors.branding.favicon_missing")
+		Expect(missingFavicon).To(HaveBrandingStructuredError(http.StatusBadRequest, ErrCodeBrandingFaviconMissing))
 
 		invalidFaviconBody, invalidFaviconContentType := brandingMultipartBody("favicon.jpg", []byte("favicon-bytes"))
 		invalidFaviconCtx, invalidFavicon := ginTestContext()
 		invalidFaviconCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/favicon", invalidFaviconBody)
 		invalidFaviconCtx.Request.Header.Set("Content-Type", invalidFaviconContentType)
 		routes.handleUploadFavicon(invalidFaviconCtx)
-		Expect(invalidFavicon.Code).To(Equal(http.StatusBadRequest), invalidFavicon.Body.String())
-		assertBrandingStructuredError(invalidFavicon, "branding_favicon_invalid_type", "errors.branding.favicon_invalid_type")
+		Expect(invalidFavicon).To(HaveBrandingStructuredError(http.StatusBadRequest, ErrCodeBrandingFaviconInvalidType))
 	})
 
 	ginkgo.It("returns internal errors when branding config cannot be loaded by handlers", func() {
@@ -276,30 +269,30 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		getCtx, getRec := ginTestContext()
 		getCtx.Request = httptest.NewRequest(http.MethodGet, "/api/branding", nil)
 		routes.handleGetBranding(getCtx)
-		Expect(getRec.Code).To(Equal(http.StatusInternalServerError), getRec.Body.String())
+		Expect(getRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingConfigUnavailable))
 
 		logoCtx, logoRec := ginTestContext()
 		logoCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/logo", nil)
 		routes.handleUploadLogo(logoCtx)
-		Expect(logoRec.Code).To(Equal(http.StatusInternalServerError), logoRec.Body.String())
+		Expect(logoRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingConfigUnavailable))
 
 		faviconCtx, faviconRec := ginTestContext()
 		faviconCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/favicon", nil)
 		routes.handleUploadFavicon(faviconCtx)
-		Expect(faviconRec.Code).To(Equal(http.StatusInternalServerError), faviconRec.Body.String())
+		Expect(faviconRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingConfigUnavailable))
 
 		assetCtx, assetRec := ginTestContext()
 		assetCtx.Params = gin.Params{{Key: "filename", Value: "logo.png"}}
 		assetCtx.Request = httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil)
 		routes.handleServeBrandingAsset(assetCtx)
 		assetCtx.Writer.WriteHeaderNow()
-		Expect(assetRec.Code).To(Equal(http.StatusInternalServerError), assetRec.Body.String())
+		Expect(assetRec).To(HaveHTTPStatus(http.StatusInternalServerError), assetRec.Body.String())
 
 		currentFaviconCtx, currentFaviconRec := ginTestContext()
 		currentFaviconCtx.Request = httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
 		routes.handleServeCurrentFavicon(currentFaviconCtx)
 		currentFaviconCtx.Writer.WriteHeaderNow()
-		Expect(currentFaviconRec.Code).To(Equal(http.StatusInternalServerError), currentFaviconRec.Body.String())
+		Expect(currentFaviconRec).To(HaveHTTPStatus(http.StatusInternalServerError), currentFaviconRec.Body.String())
 	})
 
 	ginkgo.It("logs multipart close errors after successful uploads", func() {
@@ -318,14 +311,14 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		logoCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/logo", logoBody)
 		logoCtx.Request.Header.Set("Content-Type", logoContentType)
 		routes.handleUploadLogo(logoCtx)
-		Expect(logoRec.Code).To(Equal(http.StatusOK), logoRec.Body.String())
+		Expect(logoRec).To(HaveHTTPStatus(http.StatusOK), logoRec.Body.String())
 
 		faviconBody, faviconContentType := brandingMultipartBody("favicon.ico", []byte("favicon-bytes"))
 		faviconCtx, faviconRec := ginTestContext()
 		faviconCtx.Request = httptest.NewRequest(http.MethodPost, "/api/branding/favicon", faviconBody)
 		faviconCtx.Request.Header.Set("Content-Type", faviconContentType)
 		routes.handleUploadFavicon(faviconCtx)
-		Expect(faviconRec.Code).To(Equal(http.StatusOK), faviconRec.Body.String())
+		Expect(faviconRec).To(HaveHTTPStatus(http.StatusOK), faviconRec.Body.String())
 	})
 
 	ginkgo.It("rejects branding asset paths when relative path validation fails", func() {
@@ -353,10 +346,10 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(Equal("logo-bytes"))
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
-		Expect(rec.Header().Get("Pragma")).To(Equal("no-cache"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPBody("logo-bytes"))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Cache-Control", "no-store"))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Pragma", "no-cache"))
 		Expect(rec.Header().Get("Expires")).NotTo(BeEmpty())
 	})
 
@@ -366,21 +359,21 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		defaultRec := httptest.NewRecorder()
 		router.ServeHTTP(defaultRec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
-		Expect(defaultRec.Code).To(Equal(http.StatusOK), defaultRec.Body.String())
-		Expect(defaultRec.Body.String()).To(Equal(httpinternal.DefaultFaviconSVG))
+		Expect(defaultRec).To(HaveHTTPStatus(http.StatusOK), defaultRec.Body.String())
+		Expect(defaultRec).To(HaveHTTPBody(httpinternal.DefaultFaviconSVG))
 
 		_, err := svc.UploadFavicon(newBrandingUploadFile("favicon-bytes"), "favicon.ico")
 		Expect(err).NotTo(HaveOccurred())
 		customRec := httptest.NewRecorder()
 		router.ServeHTTP(customRec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
-		Expect(customRec.Code).To(Equal(http.StatusOK), customRec.Body.String())
-		Expect(customRec.Body.String()).To(Equal("favicon-bytes"))
+		Expect(customRec).To(HaveHTTPStatus(http.StatusOK), customRec.Body.String())
+		Expect(customRec).To(HaveHTTPBody("favicon-bytes"))
 
 		Expect(os.Remove(svc.GetBrandingAssetsDir() + "/favicon.ico")).To(Succeed())
 		missingConfiguredRec := httptest.NewRecorder()
 		router.ServeHTTP(missingConfiguredRec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
-		Expect(missingConfiguredRec.Code).To(Equal(http.StatusOK), missingConfiguredRec.Body.String())
-		Expect(missingConfiguredRec.Body.String()).To(Equal(httpinternal.DefaultFaviconSVG))
+		Expect(missingConfiguredRec).To(HaveHTTPStatus(http.StatusOK), missingConfiguredRec.Body.String())
+		Expect(missingConfiguredRec).To(HaveHTTPBody(httpinternal.DefaultFaviconSVG))
 	})
 
 	ginkgo.It("returns static asset status codes for forbidden and missing assets", func() {
@@ -389,11 +382,11 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		forbidden := httptest.NewRecorder()
 		router.ServeHTTP(forbidden, httptest.NewRequest(http.MethodGet, "/branding/logo.exe", nil))
-		Expect(forbidden.Code).To(Equal(http.StatusForbidden), forbidden.Body.String())
+		Expect(forbidden).To(HaveHTTPStatus(http.StatusForbidden), forbidden.Body.String())
 
 		missing := httptest.NewRecorder()
 		router.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil))
-		Expect(missing.Code).To(Equal(http.StatusNotFound), missing.Body.String())
+		Expect(missing).To(HaveHTTPStatus(http.StatusNotFound), missing.Body.String())
 	})
 
 	ginkgo.It("returns structured delete errors when stored branding files cannot be removed", func() {
@@ -410,8 +403,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleDeleteLogo(logoCtx)
 
-		Expect(logoRec.Code).To(Equal(http.StatusInternalServerError), logoRec.Body.String())
-		assertBrandingStructuredError(logoRec, "branding_logo_delete_failed", "errors.branding.logo_delete_failed")
+		Expect(logoRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingLogoDeleteFailed))
 
 		_, err = svc.UploadFavicon(newBrandingUploadFile("favicon-bytes"), "favicon.ico")
 		Expect(err).NotTo(HaveOccurred())
@@ -423,8 +415,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 		routes.handleDeleteFavicon(faviconCtx)
 
-		Expect(faviconRec.Code).To(Equal(http.StatusInternalServerError), faviconRec.Body.String())
-		assertBrandingStructuredError(faviconRec, "branding_favicon_delete_failed", "errors.branding.favicon_delete_failed")
+		Expect(faviconRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingFaviconDeleteFailed))
 	})
 
 	ginkgo.It("returns internal errors for branding asset stat failures", func() {
@@ -435,7 +426,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(os.Symlink("logo.png", logoPath)).To(Succeed())
 		logoRec := httptest.NewRecorder()
 		router.ServeHTTP(logoRec, httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil))
-		Expect(logoRec.Code).To(Equal(http.StatusInternalServerError), logoRec.Body.String())
+		Expect(logoRec).To(HaveHTTPStatus(http.StatusInternalServerError), logoRec.Body.String())
 
 		_, err := svc.UploadFavicon(newBrandingUploadFile("favicon-bytes"), "favicon.ico")
 		Expect(err).NotTo(HaveOccurred())
@@ -444,7 +435,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(os.Symlink("favicon.ico", faviconPath)).To(Succeed())
 		faviconRec := httptest.NewRecorder()
 		router.ServeHTTP(faviconRec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
-		Expect(faviconRec.Code).To(Equal(http.StatusInternalServerError), faviconRec.Body.String())
+		Expect(faviconRec).To(HaveHTTPStatus(http.StatusInternalServerError), faviconRec.Body.String())
 	})
 })
 
@@ -514,13 +505,6 @@ func performBrandingCSRFRequest(router http.Handler, method string, path string,
 	req.AddCookie(&http.Cookie{Name: "leafwiki_csrf", Value: "test-csrf-token"})
 	router.ServeHTTP(rec, req)
 	return rec
-}
-
-func expectBrandingLocalizedError(err error, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
-	loc, ok := sharederrors.AsLocalizedError(err)
-	Expect(ok).To(BeTrue(), "error should be localized: %v", err)
-	Expect(loc.Code).To(Equal(code))
 }
 
 type fakeBrandingService struct {

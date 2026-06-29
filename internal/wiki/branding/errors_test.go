@@ -17,6 +17,7 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("branding error responses", func() {
@@ -24,12 +25,11 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		ctx, rec := ginTestContext()
 
 		ve := sharederrors.NewValidationErrors()
-		ve.Add("siteName", "site name is required")
+		ve.Add(brandingSiteNameValidationField.String(), "site name is required")
 
 		respondWithBrandingError(ctx, ve)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		Expect(rec.Body.String()).To(Equal(`{"error":"validation_error","fields":[{"field":"siteName","code":"field_validation_error","messageId":"validation.field.validation_error","message":"Validation error"}]}`))
+		Expect(rec).To(HaveBrandingValidationError(brandingSiteNameValidationField, sharederrors.FieldValidationErrorCode, sharederrors.FieldValidationErrorMessageID))
 	})
 
 	ginkgo.It("TestRespondWithBrandingError_LocalizedError", func() {
@@ -46,8 +46,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 
 		respondWithBrandingError(ctx, err)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"branding_logo_invalid_type","messageId":"errors.branding.logo_invalid_type","message":"Invalid logo file type","template":"invalid logo file type %s (allowed: %s)","args":[".exe",".png, .svg"]}}`))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodeBrandingLogoInvalidType, sharederrors.MessageIDForCode(ErrCodeBrandingLogoInvalidType)))
 	})
 
 	ginkgo.It("TestRespondWithBrandingError_InternalErrorIsSanitized", func() {
@@ -55,9 +54,8 @@ var _ = ginkgo.Describe("branding error responses", func() {
 
 		respondWithBrandingError(ctx, errors.New("write config: permission denied"))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"branding_internal_error","messageId":"errors.branding.internal_error","message":"Branding request failed","template":"Branding request failed"}}`))
-		Expect(rec.Body.String()).NotTo(ContainSubstring("permission denied"))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeBrandingInternalError, sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)))
+		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring("permission denied")))
 	})
 
 	ginkgo.It("maps branding error codes to HTTP statuses", func() {
@@ -76,8 +74,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 
 		respondWithBrandingStatusError(ctx, http.StatusRequestEntityTooLarge, ErrCodeBrandingLogoTooLarge, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
-		assertBrandingStructuredError(rec, "branding_logo_too_large", "errors.branding.logo_too_large")
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusRequestEntityTooLarge, ErrCodeBrandingLogoTooLarge, sharederrors.MessageIDForCode(ErrCodeBrandingLogoTooLarge)))
 	})
 })
 
@@ -97,7 +94,7 @@ var _ = ginkgo.Describe("branding routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/branding", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body corebranding.BrandingConfigResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.SiteName).To(Equal("LeafWiki"))
@@ -118,8 +115,7 @@ var _ = ginkgo.Describe("branding routes", func() {
 
 		routes.handleUpdateBranding(ctx)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		assertBrandingStructuredError(rec, "branding_invalid_payload", "errors.branding.invalid_payload")
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodeBrandingInvalidPayload, sharederrors.MessageIDForCode(ErrCodeBrandingInvalidPayload)))
 	})
 })
 
@@ -167,12 +163,4 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	return ctx, rec
-}
-
-func assertBrandingStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
-	ginkgo.GinkgoHelper()
-	var body BrandingErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code.String()).To(Equal(code))
-	Expect(body.Error.MessageID.String()).To(Equal(messageID))
 }

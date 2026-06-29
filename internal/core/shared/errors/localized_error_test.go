@@ -1,4 +1,4 @@
-package errors
+package errors_test
 
 import (
 	"encoding/json"
@@ -7,182 +7,229 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/localization"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 const (
-	testPageVersionConflictCode      ErrorCode = "page_version_conflict"
-	testPageVersionConflictMessageID MessageID = "errors.page.version_conflict"
-	testAuthInvalidCredentialsCode   ErrorCode = "auth_invalid_credentials"
-	testAuthInvalidCredentialsMsgID  MessageID = "errors.auth.invalid_credentials"
+	testPageVersionConflictCode        sharederrors.ErrorCode = "page_version_conflict"
+	testPageVersionConflictMessageID   sharederrors.MessageID = "errors.page.version_conflict"
+	testAuthInvalidCredentialsCode     sharederrors.ErrorCode = "auth_invalid_credentials"
+	testAuthInvalidCredentialsMsgID    sharederrors.MessageID = "errors.auth.invalid_credentials"
+	testUnknownMessageID               sharederrors.MessageID = "errors.unknown"
+	testCustomMissingCode              sharederrors.ErrorCode = "custom_missing"
+	testCustomMissingMessageID         sharederrors.MessageID = "errors.custom.missing"
+	testPageVersionConflictFallback    string                 = "page version conflict fallback"
+	testAuthInvalidCredentialsFallback string                 = "auth invalid credentials fallback"
+	testCustomMissingFallback          string                 = "fallback {{.Arg0}}"
+	testCustomMissingTemplate          string                 = "fallback template"
+	testDerivedLocalizedFallback       string                 = "fallback"
+	testPageVersionConflictTemplate    string                 = "page %s could not be saved before %s"
+	testVisibleLocalizedMessage        string                 = "visible message"
 )
 
 var _ = Describe("localized errors", func() {
 	It("TestNewDefinedLocalizedErrorExposesTypedCodeAndMessageID", func() {
 		cause := stderrors.New("storage failed")
-		definition := ErrorDefinition{
+		definition := sharederrors.ErrorDefinition{
 			Code:      testPageVersionConflictCode,
 			MessageID: testPageVersionConflictMessageID,
-			Message:   "Page was changed by another request",
-			Template:  "page was changed by another request",
+			Message:   renderedMessage(testPageVersionConflictMessageID, ""),
+			Template:  renderedMessage(testPageVersionConflictMessageID, ""),
 		}
 
-		err := NewDefinedLocalizedError(definition, cause, "page-1")
+		err := sharederrors.NewDefinedLocalizedError(definition, cause, "page-1")
 
-		Expect(err.Code).To(Equal(testPageVersionConflictCode))
-		Expect(err.MessageID).To(Equal(testPageVersionConflictMessageID))
-		Expect(err.Message).To(Equal("Page was changed by another request"))
-		Expect(err.Template).To(Equal("page was changed by another request"))
-		Expect(stderrors.Is(err, cause)).To(BeTrue())
+		Expect(err).To(testmatchers.MatchLocalizedError(testPageVersionConflictCode, testPageVersionConflictMessageID))
+		Expect(err).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testPageVersionConflictMessageID,
+			Message:   renderedMessage(testPageVersionConflictMessageID, ""),
+			Template:  renderedMessage(testPageVersionConflictMessageID, ""),
+		}))
+		Expect(err).To(MatchError(cause))
 		Expect(err.Args).To(Equal([]string{"page-1"}))
 	})
 
 	It("TestNewLocalizedErrorKeepsLegacyConstructorButAddsDefaultMessageID", func() {
-		err := NewLocalizedError(testAuthInvalidCredentialsCode, "Invalid credentials", "invalid credentials", nil)
+		err := sharederrors.NewLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsFallback, testAuthInvalidCredentialsFallback, nil)
 
-		Expect(err.Code).To(Equal(testAuthInvalidCredentialsCode))
-		Expect(err.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+		Expect(err).To(testmatchers.MatchLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})
 
 	It("TestNewLocalizedErrorFromCodeRendersCatalogMessage", func() {
 		cause := stderrors.New("storage failed")
 
-		err := NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
+		err := sharederrors.NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
 
-		Expect(err.Code).To(Equal(testPageVersionConflictCode))
-		Expect(err.MessageID).To(Equal(testPageVersionConflictMessageID))
-		Expect(err.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
-		Expect(err.Template).To(Equal(err.Message))
+		Expect(err).To(testmatchers.MatchLocalizedError(testPageVersionConflictCode, testPageVersionConflictMessageID))
+		expectedMessage := renderedMessage(testPageVersionConflictMessageID, "", "docs.md", "README.md")
+		Expect(err).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testPageVersionConflictMessageID,
+			Message:   expectedMessage,
+			Template:  expectedMessage,
+		}))
 		Expect(err.Args).To(Equal([]string{"docs.md", "README.md"}))
-		Expect(stderrors.Is(err, cause)).To(BeTrue())
+		Expect(err).To(MatchError(cause))
 	})
 
 	It("TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields", func() {
-		detail := NewLocalizedErrorDetail(
+		detail := sharederrors.NewLocalizedErrorDetail(
 			testPageVersionConflictCode,
-			"Page was changed by another request",
-			"page was changed by another request",
+			testPageVersionConflictFallback,
+			testPageVersionConflictFallback,
 			"page-1",
 		)
 
 		encoded, err := json.Marshal(detail)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(encoded)).To(Equal(`{"code":"page_version_conflict","messageId":"errors.page.version_conflict","message":"Page was changed by another request","template":"page was changed by another request","args":["page-1"]}`))
+		Expect(detail).To(testmatchers.HaveStructuredError(testPageVersionConflictCode, testPageVersionConflictMessageID))
+		Expect(string(encoded)).To(MatchJSON(localizedDetailJSON(detail)))
 	})
 
 	It("TestLocalizedErrorDetailRendersMessageFromCatalog", func() {
-		detail := NewLocalizedErrorDetail(
+		detail := sharederrors.NewLocalizedErrorDetail(
 			testAuthInvalidCredentialsCode,
-			"legacy fallback",
-			"legacy fallback",
+			testAuthInvalidCredentialsFallback,
+			testAuthInvalidCredentialsFallback,
 		)
 
-		Expect(detail.Message).To(Equal("Invalid credentials"))
-		Expect(detail.Template).To(Equal("legacy fallback"))
-		Expect(detail.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+		Expect(detail).To(testmatchers.HaveStructuredError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
+		Expect(detail).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testAuthInvalidCredentialsMsgID,
+			Message:   renderedMessage(testAuthInvalidCredentialsMsgID, testAuthInvalidCredentialsFallback),
+			Template:  testAuthInvalidCredentialsFallback,
+		}))
 	})
 
 	It("TestLocalizedErrorDetailUsesArgNBridgeAndPreservesArgs", func() {
-		err := NewDefinedLocalizedError(ErrorDefinition{
+		err := sharederrors.NewDefinedLocalizedError(sharederrors.ErrorDefinition{
 			Code:      testPageVersionConflictCode,
 			MessageID: testPageVersionConflictMessageID,
-			Message:   "legacy fallback",
-			Template:  "page %s could not be saved before %s",
+			Message:   testPageVersionConflictFallback,
+			Template:  testPageVersionConflictTemplate,
 		}, nil, "docs.md", "README.md")
 
-		detail := LocalizedErrorDetailFromError(err)
+		detail := sharederrors.LocalizedErrorDetailFromError(err)
 
-		Expect(detail.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
+		Expect(detail).To(testmatchers.HaveStructuredError(testPageVersionConflictCode, testPageVersionConflictMessageID))
+		Expect(detail).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testPageVersionConflictMessageID,
+			Message:   renderedMessage(testPageVersionConflictMessageID, testPageVersionConflictFallback, "docs.md", "README.md"),
+			Template:  testPageVersionConflictTemplate,
+		}))
 		Expect(detail.Args).To(Equal([]string{"docs.md", "README.md"}))
-		Expect(detail.Template).To(Equal("page %s could not be saved before %s"))
 	})
 })
 
 var _ = Describe("localized error edge coverage", func() {
 	It("MessageIDForCode handles empty, un-namespaced, and namespaced codes", func() {
-		Expect(MessageIDForCode("")).To(BeEmpty())
-		Expect(MessageIDForCode("  ")).To(BeEmpty())
-		Expect(MessageIDForCode("unknown")).To(Equal(MessageID("errors.unknown")))
-		Expect(MessageIDForCode("auth_invalid_credentials")).To(Equal(MessageID("errors.auth.invalid_credentials")))
-	})
-
-	It("typed error and message IDs stringify to their stable values", func() {
-		Expect(ErrorCode("page_version_conflict").String()).To(Equal("page_version_conflict"))
-		Expect(MessageID("errors.page.version_conflict").String()).To(Equal("errors.page.version_conflict"))
+		Expect(sharederrors.MessageIDForCode("")).To(BeEmpty())
+		Expect(sharederrors.MessageIDForCode("  ")).To(BeEmpty())
+		Expect(sharederrors.MessageIDForCode("unknown")).To(Equal(testUnknownMessageID))
+		Expect(sharederrors.MessageIDForCode(testAuthInvalidCredentialsCode)).To(Equal(testAuthInvalidCredentialsMsgID))
 	})
 
 	It("nil localized errors have empty Error text and no wrapped cause", func() {
-		var err *LocalizedError
+		var err *sharederrors.LocalizedError
 
 		Expect(err.Error()).To(BeEmpty())
-		Expect(err.Unwrap()).To(BeNil())
+		Expect(err.Unwrap()).To(Succeed())
 	})
 
 	It("localized errors include the cause in Error text when present", func() {
-		err := NewLocalizedError("test_code", "visible message", "visible message", stderrors.New("root cause"))
+		cause := stderrors.New("root cause")
+		err := sharederrors.NewLocalizedError(testCustomMissingCode, testVisibleLocalizedMessage, testVisibleLocalizedMessage, cause)
 
-		Expect(err.Error()).To(Equal("visible message: root cause"))
+		Expect(err).To(MatchError(cause))
+		Expect(err).To(HaveLocalizedErrorText(localizedErrorTextExpectation{
+			MessageID: testCustomMissingMessageID,
+			Text:      testVisibleLocalizedMessage,
+			Cause:     cause,
+		}))
 	})
 
 	It("NewLocalizedErrorFromCodeWithFallback renders using fallback when no catalog entry exists", func() {
 		cause := stderrors.New("cause")
 
-		err := NewLocalizedErrorFromCodeWithFallback("custom_missing", "fallback {{.Arg0}}", "fallback template", cause, "value")
+		err := sharederrors.NewLocalizedErrorFromCodeWithFallback(testCustomMissingCode, testCustomMissingFallback, testCustomMissingTemplate, cause, "value")
 
-		Expect(err.Code).To(Equal(ErrorCode("custom_missing")))
-		Expect(err.MessageID).To(Equal(MessageID("errors.custom.missing")))
-		Expect(err.Message).To(Equal("fallback value"))
-		Expect(err.Template).To(Equal("fallback template"))
+		Expect(err).To(testmatchers.MatchLocalizedError(testCustomMissingCode, testCustomMissingMessageID))
+		Expect(err).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testCustomMissingMessageID,
+			Message:   renderedMessage(testCustomMissingMessageID, testCustomMissingFallback, "value"),
+			Template:  testCustomMissingTemplate,
+		}))
 		Expect(err.Args).To(Equal([]string{"value"}))
-		Expect(stderrors.Is(err, cause)).To(BeTrue())
+		Expect(err).To(MatchError(cause))
 	})
 
 	It("NewDefinedLocalizedError derives message ID when omitted", func() {
-		err := NewDefinedLocalizedError(ErrorDefinition{
+		err := sharederrors.NewDefinedLocalizedError(sharederrors.ErrorDefinition{
 			Code:     testAuthInvalidCredentialsCode,
-			Message:  "Invalid credentials",
-			Template: "invalid credentials",
+			Message:  testAuthInvalidCredentialsFallback,
+			Template: testAuthInvalidCredentialsFallback,
 		}, nil)
 
-		Expect(err.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
+		Expect(err).To(testmatchers.MatchLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})
 
 	It("NewLocalizedErrorDetailFromCode renders catalog message and preserves args", func() {
-		detail := NewLocalizedErrorDetailFromCode(testPageVersionConflictCode, "docs.md", "README.md")
+		detail := sharederrors.NewLocalizedErrorDetailFromCode(testPageVersionConflictCode, "docs.md", "README.md")
 
-		Expect(detail.MessageID).To(Equal(testPageVersionConflictMessageID))
-		Expect(detail.Message).To(Equal("Page docs.md was changed by another request before README.md could be saved."))
-		Expect(detail.Template).To(Equal(detail.Message))
+		Expect(detail).To(testmatchers.HaveStructuredError(testPageVersionConflictCode, testPageVersionConflictMessageID))
+		expectedMessage := renderedMessage(testPageVersionConflictMessageID, "", "docs.md", "README.md")
+		Expect(detail).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testPageVersionConflictMessageID,
+			Message:   expectedMessage,
+			Template:  expectedMessage,
+		}))
 		Expect(detail.Args).To(Equal([]string{"docs.md", "README.md"}))
 	})
 
 	It("LocalizedErrorDetailFromError returns an empty detail for nil errors", func() {
-		Expect(LocalizedErrorDetailFromError(nil)).To(Equal(LocalizedErrorDetail{}))
+		Expect(sharederrors.LocalizedErrorDetailFromError(nil)).To(Equal(sharederrors.LocalizedErrorDetail{}))
 	})
 
 	It("LocalizedErrorDetailFromError derives message ID when the error omitted it", func() {
-		err := &LocalizedError{
+		err := &sharederrors.LocalizedError{
 			Code:     testAuthInvalidCredentialsCode,
-			Message:  "fallback",
-			Template: "fallback",
+			Message:  testDerivedLocalizedFallback,
+			Template: testDerivedLocalizedFallback,
 		}
 
-		detail := LocalizedErrorDetailFromError(err)
+		detail := sharederrors.LocalizedErrorDetailFromError(err)
 
-		Expect(detail.MessageID).To(Equal(testAuthInvalidCredentialsMsgID))
-		Expect(detail.Message).To(Equal("Invalid credentials"))
+		Expect(detail).To(testmatchers.HaveStructuredError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
+		Expect(detail).To(HaveLocalizedRendering(localizedRenderingExpectation{
+			MessageID: testAuthInvalidCredentialsMsgID,
+			Message:   renderedMessage(testAuthInvalidCredentialsMsgID, testDerivedLocalizedFallback),
+			Template:  testDerivedLocalizedFallback,
+		}))
 	})
 
 	It("AsLocalizedError recognizes wrapped localized errors and rejects ordinary errors", func() {
-		localized := NewLocalizedError(testAuthInvalidCredentialsCode, "Invalid credentials", "invalid credentials", nil)
+		localized := sharederrors.NewLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsFallback, testAuthInvalidCredentialsFallback, nil)
 		wrapped := fmt.Errorf("wrap: %w", localized)
 
-		got, ok := AsLocalizedError(wrapped)
+		got, ok := sharederrors.AsLocalizedError(wrapped)
 		Expect(ok).To(BeTrue())
 		Expect(got).To(BeIdenticalTo(localized))
 
-		got, ok = AsLocalizedError(stderrors.New("plain"))
+		got, ok = sharederrors.AsLocalizedError(stderrors.New("plain"))
 		Expect(ok).To(BeFalse())
-		Expect(got).To(BeNil())
+		Expect(got).To(BeZero())
 	})
 })
+
+func renderedMessage(messageID sharederrors.MessageID, defaultEnglish string, args ...string) string {
+	return localization.English.Render(messageID, defaultEnglish, args...).Message
+}
+
+func localizedDetailJSON(detail sharederrors.LocalizedErrorDetail) string {
+	raw, err := json.Marshal(detail)
+	Expect(err).NotTo(HaveOccurred())
+	return string(raw)
+}
