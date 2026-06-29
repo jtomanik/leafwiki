@@ -72,18 +72,46 @@ func SessionIDFromString[T ~string](raw T) SessionID {
 	return SessionID(raw)
 }
 
+func ProviderIDFromString[T ~string](raw T) ProviderID {
+	return ProviderID(raw)
+}
+
+func AgentToolNameFromString[T ~string](raw T) AgentToolName {
+	return AgentToolName(raw)
+}
+
+func (id ProviderID) Normalize() ProviderID {
+	return ProviderID(strings.ToLower(strings.TrimSpace(string(id))))
+}
+
+func (name AgentEventName) Normalize() AgentEventName {
+	return AgentEventName(strings.TrimSpace(string(name)))
+}
+
+func (name AgentToolName) Normalize() AgentToolName {
+	return AgentToolName(strings.TrimSpace(string(name)))
+}
+
+func (name AgentToolName) SanitizedMetadataValue(maxLen int) AgentToolName {
+	return AgentToolName(sanitizeMetadataValue(string(name), maxLen))
+}
+
+func (name AgentToolName) HasMCPPrefix() bool {
+	return strings.HasPrefix(string(name), "mcp__")
+}
+
 type envelope struct {
-	HookEventName        string    `json:"hook_event_name"`
-	SessionID            SessionID `json:"session_id"`
-	ConversationID       string    `json:"conversation_id"`
-	ParentConversationID string    `json:"parent_conversation_id"`
-	Model                string    `json:"model"`
-	Source               string    `json:"source"`
-	ToolName             string    `json:"tool_name"`
+	HookEventName        AgentEventName `json:"hook_event_name"`
+	SessionID            SessionID      `json:"session_id"`
+	ConversationID       string         `json:"conversation_id"`
+	ParentConversationID string         `json:"parent_conversation_id"`
+	Model                string         `json:"model"`
+	Source               string         `json:"source"`
+	ToolName             AgentToolName  `json:"tool_name"`
 }
 
 func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) {
-	providerID := ProviderID(strings.ToLower(strings.TrimSpace(string(provider))))
+	providerID := provider.Normalize()
 	if !isSupportedProvider(providerID) {
 		return Event{}, false
 	}
@@ -92,7 +120,7 @@ func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) 
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return Event{}, false
 	}
-	eventName := AgentEventName(strings.TrimSpace(payload.HookEventName))
+	eventName := payload.HookEventName.Normalize()
 	if !isSupportedEvent(providerID, eventName) {
 		return Event{}, false
 	}
@@ -101,8 +129,7 @@ func Normalize(provider ProviderID, raw []byte, seenAt time.Time) (Event, bool) 
 		return Event{}, false
 	}
 
-	toolName := strings.TrimSpace(payload.ToolName)
-	sanitizedToolName := AgentToolName(sanitizeMetadataValue(toolName, 160))
+	sanitizedToolName := payload.ToolName.Normalize().SanitizedMetadataValue(160)
 	return Event{
 		Provider:      providerID,
 		SessionIDHash: hashSessionID(providerID, sessionID),
@@ -167,10 +194,14 @@ func sanitizeMetadataValue(raw string, maxLen int) string {
 }
 
 func AllowResponse(provider string) []byte {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case string(ProviderCodex), string(ProviderClaude):
+	return AllowProviderResponse(ProviderIDFromString(provider))
+}
+
+func AllowProviderResponse(provider ProviderID) []byte {
+	switch provider.Normalize() {
+	case ProviderCodex, ProviderClaude:
 		return []byte("{}\n")
-	case string(ProviderCursor):
+	case ProviderCursor:
 		return []byte("{\"permission\":\"allow\"}\n")
 	default:
 		return nil
@@ -178,9 +209,9 @@ func AllowResponse(provider string) []byte {
 }
 
 func IsNormalizedEvent(event Event) bool {
-	provider := ProviderID(strings.TrimSpace(string(event.Provider)))
-	eventName := AgentEventName(strings.TrimSpace(string(event.EventName)))
-	toolName := AgentToolName(strings.TrimSpace(string(event.ToolName)))
+	provider := event.Provider.Normalize()
+	eventName := event.EventName.Normalize()
+	toolName := event.ToolName.Normalize()
 	if provider != event.Provider || eventName != event.EventName || toolName != event.ToolName {
 		return false
 	}
@@ -245,7 +276,7 @@ func sessionKey(provider ProviderID, eventName AgentEventName, payload envelope)
 }
 
 func isMCPToolEvent(eventName AgentEventName, toolName AgentToolName) bool {
-	return strings.HasPrefix(string(toolName), "mcp__") ||
+	return toolName.HasMCPPrefix() ||
 		eventName == "beforeMCPExecution" ||
 		eventName == "afterMCPExecution"
 }
