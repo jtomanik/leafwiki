@@ -1090,6 +1090,8 @@ func isEdgeAdapterFile(filename string) bool {
 func isSemanticOwnerAdapterFile(ctx *analysisContext, pos token.Pos) bool {
 	filename := ctx.filename(pos)
 	switch ctx.pass.Pkg.Path() {
+	case "github.com/perber/wiki/internal/agenthooks":
+		return strings.HasSuffix(filename, "/internal/agenthooks/agenthooks.go")
 	case "github.com/perber/wiki/internal/core/identity":
 		return strings.HasSuffix(filename, "/internal/core/identity/semantic_types.go")
 	case "github.com/perber/wiki/internal/core/tree":
@@ -1146,11 +1148,13 @@ var allowedSemanticOwnerAdapterFuncs = map[string]map[string]bool{
 	"NewSlugUnchecked":                {"Slug": true},
 	"NewUserIDUnchecked":              {"UserID": true},
 	"NewWorkspaceSourcePathUnchecked": {"WorkspaceSourcePath": true},
-	"Normalize":                       {"IssueCode": true, "IssueSeverity": true},
+	"HasMCPPrefix":                    {"AgentToolName": true},
+	"Normalize":                       {"AgentEventName": true, "AgentToolName": true, "IssueCode": true, "IssueSeverity": true, "ProviderID": true},
 	"ParseWorkspaceID":                {"WorkspaceID": true},
 	"RoutePath":                       {"MarkdownPath": true, "RoutePath": true},
 	"Scan":                            {"PageID": true, "WorkspaceID": true},
 	"Segments":                        {"RoutePath": true, "Slug": true},
+	"SanitizedMetadataValue":          {"AgentToolName": true},
 	"SlugKey":                         {"Slug": true},
 	"SourceDir":                       {"MarkdownPath": true},
 	"StorageKey":                      {"WorkspaceID": true},
