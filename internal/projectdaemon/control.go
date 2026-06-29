@@ -34,6 +34,11 @@ type Client struct {
 	httpClient *http.Client
 }
 
+var (
+	errDaemonHealthCheckFailed = errors.New("daemon health check failed")
+	errDaemonEmptySessionID    = errors.New("daemon returned empty session id")
+)
+
 type controlPath string
 
 func (path controlPath) String() string {
@@ -83,7 +88,7 @@ func (c *Client) Health(ctx context.Context) (*DaemonHealth, error) {
 		return nil, err
 	}
 	if !out.OK {
-		return nil, fmt.Errorf("daemon health check failed")
+		return nil, errDaemonHealthCheckFailed
 	}
 	return &out, nil
 }
@@ -94,7 +99,7 @@ func (c *Client) RegisterSession(ctx context.Context) (*SessionHandle, error) {
 		return nil, err
 	}
 	if out.ID == "" {
-		return nil, fmt.Errorf("daemon returned empty session id")
+		return nil, errDaemonEmptySessionID
 	}
 	return &out, nil
 }

@@ -26,13 +26,13 @@ func (f fakeUnixDescriptorFileInfo) Sys() any           { return f.sys }
 var _ = ginkgo.Describe("descriptor owner unix edges", func() {
 	ginkgo.It("rejects descriptors with unavailable or mismatched owners", func() {
 		unavailable := fakeUnixDescriptorFileInfo{mode: 0o600}
-		Expect(validateDescriptorOwner("descriptor.json", unavailable)).To(MatchError("project daemon descriptor owner is unavailable"))
+		Expect(validateDescriptorOwner("descriptor.json", unavailable)).To(MatchError(errDescriptorOwnerUnavailable))
 
 		mismatched := fakeUnixDescriptorFileInfo{
 			mode: 0o600,
 			sys:  &syscall.Stat_t{Uid: uint32(os.Geteuid() + 1)},
 		}
-		Expect(validateDescriptorOwner("descriptor.json", mismatched)).To(MatchError(ContainSubstring("project daemon descriptor owner uid")))
+		Expect(validateDescriptorOwner("descriptor.json", mismatched)).To(MatchError(errDescriptorOwnerMismatch))
 
 		originalLstatDescriptorFile := lstatDescriptorFile
 		lstatDescriptorFile = func(string) (os.FileInfo, error) {
@@ -43,6 +43,6 @@ var _ = ginkgo.Describe("descriptor owner unix edges", func() {
 		})
 
 		_, err := ReadTrustedDescriptor("descriptor.json")
-		Expect(err).To(MatchError("project daemon descriptor owner is unavailable"))
+		Expect(err).To(MatchError(errDescriptorOwnerUnavailable))
 	})
 })

@@ -2,6 +2,7 @@ package projectdaemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,10 @@ type descriptorTempFile interface {
 }
 
 var (
+	errDescriptorRequired       = errors.New("descriptor is required")
+	errDescriptorNotRegularFile = errors.New("project daemon descriptor is not a regular file")
+	ErrDescriptorSchemaMismatch = errors.New("project daemon descriptor schema version mismatch")
+
 	chmodDescriptorFile        = os.Chmod
 	createDescriptorTempFile   = func(dir string, pattern string) (descriptorTempFile, error) { return os.CreateTemp(dir, pattern) }
 	marshalDescriptorJSON      = json.MarshalIndent
@@ -33,7 +38,7 @@ func ReadTrustedDescriptor(path string) (*Descriptor, error) {
 		return nil, err
 	}
 	if !validateDescriptorFileMode(info).IsRegular() {
-		return nil, fmt.Errorf("project daemon descriptor is not a regular file")
+		return nil, errDescriptorNotRegularFile
 	}
 	if got := validateDescriptorFileMode(info).Perm(); got != 0o600 {
 		return nil, fmt.Errorf("project daemon descriptor mode = %04o, want 0600", got)
@@ -58,7 +63,7 @@ func ReadDescriptor(path string) (*Descriptor, error) {
 
 func WriteDescriptorAtomic(path string, desc *Descriptor) error {
 	if desc == nil {
-		return fmt.Errorf("descriptor is required")
+		return errDescriptorRequired
 	}
 	if err := mkdirAllDescriptorPath(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create descriptor directory: %w", err)

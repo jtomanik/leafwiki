@@ -35,7 +35,7 @@ var _ = ginkgo.It("TestControlServerRejectsUnauthorizedBeforeRouting", func() {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /sessions status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
-	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
+	assertControlStructuredError(t, resp, errCodeDaemonControlUnauthorized, sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized))
 	if sessions.Count() != 0 {
 		t.Fatalf("sessions count = %d, want 0 after unauthorized register", sessions.Count())
 	}
@@ -44,7 +44,7 @@ var _ = ginkgo.It("TestControlServerRejectsUnauthorizedBeforeRouting", func() {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /mcp status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
-	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
+	assertControlStructuredError(t, resp, errCodeDaemonControlUnauthorized, sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized))
 	if mcpCalled {
 		t.Fatalf("private MCP handler was called for unauthorized request")
 	}
@@ -86,7 +86,7 @@ var _ = ginkgo.It("TestControlServerSessionLifecycle", func() {
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("missing heartbeat status = %d, want %d", resp.Code, http.StatusNotFound)
 	}
-	assertControlStructuredError(t, resp, "daemon_session_not_found", "errors.daemon.session_not_found")
+	assertControlStructuredError(t, resp, errCodeDaemonSessionNotFound, sharederrors.MessageIDForCode(errCodeDaemonSessionNotFound))
 
 	resp = controlServerRequest(t, handler, http.MethodDelete, sessionPath(handle.ID), "control-token", nil)
 	if resp.Code != http.StatusOK {
@@ -130,7 +130,7 @@ var _ = ginkgo.It("TestControlServerAgentPresenceRequiresTokenAndRecordsSanitize
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized POST status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
-	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
+	assertControlStructuredError(t, resp, errCodeDaemonControlUnauthorized, sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized))
 	if presence.Count() != 0 {
 		t.Fatalf("presence count after unauthorized POST = %d, want 0", presence.Count())
 	}
@@ -138,7 +138,7 @@ var _ = ginkgo.It("TestControlServerAgentPresenceRequiresTokenAndRecordsSanitize
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized GET status = %d, want %d", resp.Code, http.StatusUnauthorized)
 	}
-	assertControlStructuredError(t, resp, "daemon_control_unauthorized", "errors.daemon.control_unauthorized")
+	assertControlStructuredError(t, resp, errCodeDaemonControlUnauthorized, sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized))
 
 	resp = controlServerRequest(t, handler, http.MethodPost, "/agent-presence/events", "control-token", bytes.NewReader(body))
 	if resp.Code != http.StatusOK {
@@ -203,8 +203,8 @@ type stdioAuthBoundaryCase struct {
 	verify        func(string) error
 	body          string
 	wantStatus    int
-	wantCode      string
-	wantMessageID string
+	wantCode      sharederrors.ErrorCode
+	wantMessageID sharederrors.MessageID
 }
 
 var _ = ginkgo.DescribeTable("TestControlServerVerifyStdioAuthBoundary",
@@ -223,8 +223,8 @@ var _ = ginkgo.DescribeTable("TestControlServerVerifyStdioAuthBoundary",
 		if tc.wantCode != "" {
 			var body struct {
 				Error struct {
-					Code      string `json:"code"`
-					MessageID string `json:"messageId"`
+					Code      sharederrors.ErrorCode `json:"code"`
+					MessageID sharederrors.MessageID `json:"messageId"`
 				} `json:"error"`
 			}
 			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
@@ -235,13 +235,13 @@ var _ = ginkgo.DescribeTable("TestControlServerVerifyStdioAuthBoundary",
 			}
 		}
 	},
-	ginkgo.Entry("malformed json", stdioAuthBoundaryCase{authDisabled: true, body: "{", wantStatus: http.StatusBadRequest, wantCode: "stdio_auth_invalid_request", wantMessageID: "errors.stdio.auth_invalid_request"}),
+	ginkgo.Entry("malformed json", stdioAuthBoundaryCase{authDisabled: true, body: "{", wantStatus: http.StatusBadRequest, wantCode: errCodeStdioAuthInvalidRequest, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthInvalidRequest)}),
 	ginkgo.Entry("disabled auth accepts empty key", stdioAuthBoundaryCase{authDisabled: true, body: `{}`, wantStatus: http.StatusOK}),
-	ginkgo.Entry("disabled auth rejects api key", stdioAuthBoundaryCase{authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict, wantCode: "stdio_auth_api_key_rejected", wantMessageID: "errors.stdio.auth_api_key_rejected"}),
-	ginkgo.Entry("enabled auth requires api key", stdioAuthBoundaryCase{body: `{}`, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_required", wantMessageID: "errors.stdio.auth_api_key_required"}),
-	ginkgo.Entry("enabled auth requires verifier", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError, wantCode: "stdio_auth_api_key_verifier_unavailable", wantMessageID: "errors.stdio.auth_api_key_verifier_unavailable"}),
-	ginkgo.Entry("enabled auth rejects invalid api key", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return ErrInvalidAPIKey }, wantStatus: http.StatusUnauthorized, wantCode: "stdio_auth_api_key_invalid", wantMessageID: "errors.stdio.auth_api_key_invalid"}),
-	ginkgo.Entry("enabled auth reports verifier storage failure", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return errors.New("database is locked") }, wantStatus: http.StatusServiceUnavailable, wantCode: "stdio_auth_api_key_verifier_failed", wantMessageID: "errors.stdio.auth_api_key_verifier_failed"}),
+	ginkgo.Entry("disabled auth rejects api key", stdioAuthBoundaryCase{authDisabled: true, body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusConflict, wantCode: errCodeStdioAuthAPIKeyRejected, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyRejected)}),
+	ginkgo.Entry("enabled auth requires api key", stdioAuthBoundaryCase{body: `{}`, wantStatus: http.StatusUnauthorized, wantCode: errCodeStdioAuthAPIKeyRequired, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyRequired)}),
+	ginkgo.Entry("enabled auth requires verifier", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, wantStatus: http.StatusInternalServerError, wantCode: errCodeStdioAuthAPIKeyVerifierUnavailable, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyVerifierUnavailable)}),
+	ginkgo.Entry("enabled auth rejects invalid api key", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return ErrInvalidAPIKey }, wantStatus: http.StatusUnauthorized, wantCode: errCodeStdioAuthAPIKeyInvalid, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyInvalid)}),
+	ginkgo.Entry("enabled auth reports verifier storage failure", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(string) error { return errors.New("database is locked") }, wantStatus: http.StatusServiceUnavailable, wantCode: errCodeStdioAuthAPIKeyVerifierFailed, wantMessageID: sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyVerifierFailed)}),
 	ginkgo.Entry("enabled auth accepts valid api key", stdioAuthBoundaryCase{body: `{"apiKey":"lwk_key"}`, verify: func(key string) error {
 		if key != "lwk_key" {
 			return errors.New("wrong key")
@@ -451,13 +451,13 @@ func controlServerRequest(t projectdaemonTestT, handler http.Handler, method str
 	return resp
 }
 
-func assertControlStructuredError(t projectdaemonTestT, resp *httptest.ResponseRecorder, code string, messageID string) {
+func assertControlStructuredError(t projectdaemonTestT, resp *httptest.ResponseRecorder, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 	var body struct {
 		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {

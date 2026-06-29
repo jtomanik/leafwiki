@@ -93,6 +93,21 @@ type Mismatch struct {
 	Got   string
 }
 
+type ConfigMismatchError struct {
+	Mismatches []Mismatch
+}
+
+func NewConfigMismatchError(mismatches []Mismatch) *ConfigMismatchError {
+	return &ConfigMismatchError{Mismatches: append([]Mismatch(nil), mismatches...)}
+}
+
+func (err *ConfigMismatchError) Error() string {
+	if err == nil {
+		return ""
+	}
+	return FormatConfigMismatch(err.Mismatches)
+}
+
 func CanonicalizeProject(dataDir, rootDir string) (string, string, error) {
 	canonicalData, err := canonicalPath(dataDir)
 	if err != nil {
@@ -109,8 +124,18 @@ func DescriptorPath(dataDir string) string {
 	return filepath.Join(dataDir, ".leafwiki", DescriptorFileName)
 }
 
+var globalDescriptorFilenames = map[RoleName]string{
+	RoleWikid:      "wikid.json",
+	RoleFrontd:     "frontd.json",
+	RoleWorkspaced: "workspaced.json",
+}
+
 func GlobalDescriptorPath(runtimeDir string, role RoleName) string {
-	return filepath.Join(runtimeDir, string(role)+".json")
+	filename, ok := globalDescriptorFilenames[role]
+	if !ok {
+		filename = "unknown-role.json"
+	}
+	return filepath.Join(runtimeDir, filename)
 }
 
 func ConfigHash(cfg Config) (string, error) {

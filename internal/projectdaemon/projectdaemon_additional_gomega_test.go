@@ -14,6 +14,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/agenthooks"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -84,23 +85,32 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		dataDir := t.TempDir()
 		path := DescriptorPath(dataDir)
 
-		Expect(WriteDescriptorAtomic(path, nil)).To(MatchError("descriptor is required"))
+		Expect(WriteDescriptorAtomic(path, nil)).To(MatchError(errDescriptorRequired))
 		Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
 		Expect(os.WriteFile(path, []byte("{"), 0o600)).To(Succeed())
 		_, err := ReadDescriptor(path)
 		Expect(err).To(HaveOccurred())
 		_, err = ReadDescriptor(filepath.Join(t.TempDir(), "missing.json"))
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = ReadTrustedDescriptor(filepath.Join(t.TempDir(), "missing.json"))
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		_, err = ReadTrustedDescriptor(filepath.Dir(path))
-		Expect(err).To(MatchError(ContainSubstring("not a regular file")))
+		Expect(err).To(MatchError(errDescriptorNotRegularFile))
 
 		parentFile := filepath.Join(t.TempDir(), "descriptor-parent-file")
 		Expect(os.WriteFile(parentFile, []byte("not a directory"), 0o600)).To(Succeed())
+		originalMkdirAllDescriptorPath := mkdirAllDescriptorPath
+		mkdirDescriptorErr := errors.New("descriptor mkdir failed")
+		mkdirAllDescriptorPath = func(string, os.FileMode) error {
+			return mkdirDescriptorErr
+		}
+		ginkgo.DeferCleanup(func() {
+			mkdirAllDescriptorPath = originalMkdirAllDescriptorPath
+		})
 		err = WriteDescriptorAtomic(filepath.Join(parentFile, "descriptor.json"), &Descriptor{SchemaVersion: DescriptorSchemaVersion})
-		Expect(err).To(MatchError(ContainSubstring("create descriptor directory")))
+		Expect(err).To(MatchError(mkdirDescriptorErr))
+		mkdirAllDescriptorPath = originalMkdirAllDescriptorPath
 
 		err = RemoveDescriptor(filepath.Join(parentFile, "descriptor.json"))
 		Expect(err).To(HaveOccurred())
@@ -118,12 +128,12 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(Succeed())
 
 		_, err := DecodeActorContext(" ", ActorContextValidation{Now: now})
-		Expect(err).To(MatchError("actor context is required"))
+		Expect(err).To(MatchError(errActorContextRequired))
 		_, err = DecodeActorContext("%%%invalid-base64", ActorContextValidation{Now: now})
-		Expect(err).To(MatchError(ContainSubstring("decode actor context")))
+		Expect(err).To(MatchError(errDecodeActorContext))
 		encodedJSON := base64.RawURLEncoding.EncodeToString([]byte("{"))
 		_, err = DecodeActorContext(encodedJSON, ActorContextValidation{Now: now})
-		Expect(err).To(MatchError(ContainSubstring("decode actor context json")))
+		Expect(err).To(MatchError(errDecodeActorContextJSON))
 
 		wire := actorContextWire{
 			Version:     1,
@@ -133,32 +143,40 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			ExpiresAt:   now.Add(time.Minute),
 		}
 		_, err = actorContextFromWire(wire)
-		Expect(err).To(MatchError(ContainSubstring("actor context workspace")))
+		Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
 
 		valid.Version = 2
-		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(ContainSubstring("version")))
+		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextVersion))
 		valid.Version = 1
 		valid.WorkspaceID = ""
-		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError("actor context workspace is required"))
+		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextWorkspaceRequired))
 		valid.WorkspaceID = "home"
 		valid.ExpiresAt = time.Time{}
-		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError("actor context is expired"))
+		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextExpired))
 	})
 
 	ginkgo.It("sorts agent presence, sanitizes metadata, and exits expiry loops on cancellation", func() {
 		registry := NewAgentPresenceRegistry(-1, nil)
 		Expect(registry.ttl).To(Equal(DefaultIdleTimeout))
-		registry.sessions[presenceKey("cursor", "b")] = AgentPresenceSession{Provider: agenthooks.ProviderCursor, SessionIDHash: "b"}
-		registry.sessions[presenceKey("codex", "z")] = AgentPresenceSession{Provider: agenthooks.ProviderCodex, SessionIDHash: "z"}
-		registry.sessions[presenceKey("codex", "a")] = AgentPresenceSession{Provider: agenthooks.ProviderCodex, SessionIDHash: "a"}
+		registry.sessions[presenceKey(agenthooks.ProviderCursor, "b")] = AgentPresenceSession{Provider: agenthooks.ProviderCursor, SessionIDHash: "b"}
+		registry.sessions[presenceKey(agenthooks.ProviderCodex, "z")] = AgentPresenceSession{Provider: agenthooks.ProviderCodex, SessionIDHash: "z"}
+		registry.sessions[presenceKey(agenthooks.ProviderCodex, "a")] = AgentPresenceSession{Provider: agenthooks.ProviderCodex, SessionIDHash: "a"}
 
 		sessions := registry.List()
-		Expect(sessions).To(HaveLen(3))
-		Expect([]string{
-			string(sessions[0].Provider) + "/" + sessions[0].SessionIDHash,
-			string(sessions[1].Provider) + "/" + sessions[1].SessionIDHash,
-			string(sessions[2].Provider) + "/" + sessions[2].SessionIDHash,
-		}).To(Equal([]string{"codex/a", "codex/z", "cursor/b"}))
+		Expect(sessions).To(HaveExactElements(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Provider":      Equal(agenthooks.ProviderCodex),
+				"SessionIDHash": Equal("a"),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Provider":      Equal(agenthooks.ProviderCodex),
+				"SessionIDHash": Equal("z"),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Provider":      Equal(agenthooks.ProviderCursor),
+				"SessionIDHash": Equal("b"),
+			}),
+		))
 
 		Expect(safeAgentSource("")).To(BeEmpty())
 		Expect(safeAgentSource("Startup")).To(Equal(agenthooks.AgentSourceStartup))
@@ -220,15 +238,16 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	})
 
 	ginkgo.It("handles control client and control error parsing edge cases", func() {
-		Expect((&ControlHTTPError{StatusCode: http.StatusTeapot}).Error()).To(Equal("daemon control request failed: status 418"))
+		Expect(IsControlStatus(&ControlHTTPError{StatusCode: http.StatusTeapot}, http.StatusTeapot)).To(BeTrue())
 		code, messageID, message := parseControlErrorBody([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))
 		Expect(code).To(Equal(errCodeDaemonControlUnauthorized))
-		Expect(messageID).To(Equal(sharederrors.MessageID("errors.daemon.control_unauthorized")))
+		Expect(messageID).To(Equal(sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized)))
 		Expect(message).To(Equal("unauthorized"))
-		code, messageID, message = parseControlErrorBody([]byte(" plain text "))
+		plainControlBody := " plain text "
+		code, messageID, message = parseControlErrorBody([]byte(plainControlBody))
 		Expect(code).To(BeEmpty())
 		Expect(messageID).To(BeEmpty())
-		Expect(message).To(Equal("plain text"))
+		Expect(message).To(Equal(strings.TrimSpace(plainControlBody)))
 
 		var seenControlToken string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -240,7 +259,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 
 		client := NewClient(server.URL, "control-token")
 		_, err := client.Health(context.Background())
-		Expect(err).To(MatchError("daemon health check failed"))
+		Expect(err).To(MatchError(errDaemonHealthCheckFailed))
 		Expect(seenControlToken).To(Equal("control-token"))
 
 		badURLClient := NewClient("http://127.0.0.1:1/%zz", "control-token")
@@ -248,11 +267,12 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(err).To(HaveOccurred())
 
 		failingClient := NewClient("http://127.0.0.1", "control-token")
+		transportErr := errors.New("projectdaemon transport failed")
 		failingClient.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return nil, errors.New("dial refused")
+			return nil, transportErr
 		})}
 		err = failingClient.ReleaseSession(context.Background(), "session")
-		Expect(err).To(MatchError(ContainSubstring("dial refused")))
+		Expect(err).To(MatchError(transportErr))
 
 		noBodyClient := NewClient(server.URL, "control-token")
 		err = noBodyClient.doJSON(context.Background(), http.MethodGet, "/health", nil, nil)
@@ -281,7 +301,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		raw, err := json.Marshal(wire)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = DecodeActorContext(base64.RawURLEncoding.EncodeToString(raw), ActorContextValidation{})
-		Expect(err).To(MatchError(ContainSubstring("actor context workspace")))
+		Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
 
 		Expect(validateActorContext(ActorContext{
 			Version:     1,
@@ -322,17 +342,19 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			evalSymlinks = originalEvalSymlinks
 		})
 
+		absErr := errors.New("projectdaemon data path failed")
 		absPath = func(string) (string, error) {
-			return "", errors.New("abs failed")
+			return "", absErr
 		}
 		_, _, err := CanonicalizeProject("data", "root")
-		Expect(err).To(MatchError(ContainSubstring("resolve data dir")))
+		Expect(err).To(MatchError(absErr))
 
 		calls := 0
+		rootAbsErr := errors.New("projectdaemon root path failed")
 		absPath = func(path string) (string, error) {
 			calls++
 			if calls == 2 {
-				return "", errors.New("root abs failed")
+				return "", rootAbsErr
 			}
 			return filepath.Join(string(filepath.Separator), "data"), nil
 		}
@@ -340,7 +362,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			return path, nil
 		}
 		_, _, err = CanonicalizeProject("data", "root")
-		Expect(err).To(MatchError(ContainSubstring("resolve root dir")))
+		Expect(err).To(MatchError(rootAbsErr))
 
 		absPath = func(string) (string, error) {
 			return filepath.Join(string(filepath.Separator), "denied"), nil
@@ -446,8 +468,10 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(ok).To(BeTrue())
 
 		presence.Record(event)
-		Expect(presence.List()[0].FirstSeenAt).To(Equal(now))
-		Expect(<-presenceChanges).To(Equal(1))
+		Expect(presence.List()).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"FirstSeenAt": BeTemporally("==", now),
+		})))
+		Eventually(presenceChanges).Should(Receive(Equal(1)))
 
 		now = now.Add(time.Hour)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -499,7 +523,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		req.Header.Set(ControlTokenHeader, "control-token")
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		readRandom = originalReadRandom
 
 		req = httptest.NewRequest(http.MethodPost, "/agent-presence/events", strings.NewReader("{"))
@@ -510,17 +534,17 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			Sessions:      NewSessionRegistry(time.Minute, nil),
 			AgentPresence: NewAgentPresenceRegistry(time.Minute, nil),
 		}).ServeHTTP(rec, req)
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
 
 		req = httptest.NewRequest(http.MethodGet, "/missing", nil)
 		req.Header.Set(ControlTokenHeader, "control-token")
 		rec = httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
 		rec = httptest.NewRecorder()
 		writeJSON(rec, func() {})
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 
 		marshalClient := NewClient("http://127.0.0.1", "control-token")
 		Expect(marshalClient.doJSON(context.Background(), http.MethodPost, "/bad", func() {}, nil)).To(HaveOccurred())
@@ -530,14 +554,14 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		}))
 		ginkgo.DeferCleanup(errorServer.Close)
 		err := NewClient(errorServer.URL, "control-token").doJSON(context.Background(), http.MethodGet, "/empty-error", nil, nil)
-		Expect(err).To(MatchError(ContainSubstring("503 Service Unavailable")))
+		Expect(IsControlStatus(err, http.StatusServiceUnavailable)).To(BeTrue())
 
 		emptySessionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			_ = json.NewEncoder(w).Encode(SessionHandle{})
 		}))
 		ginkgo.DeferCleanup(emptySessionServer.Close)
 		_, err = NewClient(emptySessionServer.URL, "control-token").RegisterSession(context.Background())
-		Expect(err).To(MatchError("daemon returned empty session id"))
+		Expect(err).To(MatchError(errDaemonEmptySessionID))
 
 		badStatusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "failed", http.StatusInternalServerError)

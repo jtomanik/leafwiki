@@ -3,6 +3,7 @@ package projectdaemon
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,15 @@ import (
 
 const ActorContextIssuerWikid = "wikid"
 
-var marshalActorContextJSON = json.Marshal
+var (
+	errActorContextRequired          = errors.New("actor context is required")
+	errActorContextVersion           = errors.New("actor context version")
+	errActorContextWorkspaceRequired = errors.New("actor context workspace is required")
+	errActorContextExpired           = errors.New("actor context is expired")
+	errDecodeActorContext            = errors.New("decode actor context")
+	errDecodeActorContextJSON        = errors.New("decode actor context json")
+	marshalActorContextJSON          = json.Marshal
+)
 
 type ActorContext struct {
 	Version     int                     `json:"version"`
@@ -60,15 +69,15 @@ func EncodeActorContext(ctx ActorContext) (string, error) {
 func DecodeActorContext(encoded string, validation ActorContextValidation) (ActorContext, error) {
 	trimmed := strings.TrimSpace(encoded)
 	if trimmed == "" {
-		return ActorContext{}, fmt.Errorf("actor context is required")
+		return ActorContext{}, errActorContextRequired
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(trimmed)
 	if err != nil {
-		return ActorContext{}, fmt.Errorf("decode actor context: %w", err)
+		return ActorContext{}, fmt.Errorf("%w: %w", errDecodeActorContext, err)
 	}
 	var wire actorContextWire
 	if err := json.Unmarshal(raw, &wire); err != nil {
-		return ActorContext{}, fmt.Errorf("decode actor context json: %w", err)
+		return ActorContext{}, fmt.Errorf("%w: %w", errDecodeActorContextJSON, err)
 	}
 	ctx, err := actorContextFromWire(wire)
 	if err != nil {
@@ -111,7 +120,7 @@ func (ctx ActorContext) SubjectID() string {
 
 func validateActorContext(ctx ActorContext, validation ActorContextValidation) error {
 	if ctx.Version != 1 {
-		return fmt.Errorf("actor context version = %d, want 1", ctx.Version)
+		return fmt.Errorf("%w: got %d, want 1", errActorContextVersion, ctx.Version)
 	}
 	if ctx.Issuer != ActorContextIssuerWikid {
 		return fmt.Errorf("actor context issuer = %q, want %q", ctx.Issuer, ActorContextIssuerWikid)
@@ -120,7 +129,7 @@ func validateActorContext(ctx ActorContext, validation ActorContextValidation) e
 		return fmt.Errorf("actor context subject is required")
 	}
 	if ctx.WorkspaceID == "" {
-		return fmt.Errorf("actor context workspace is required")
+		return errActorContextWorkspaceRequired
 	}
 	if validation.WorkspaceID != "" && ctx.WorkspaceID != validation.WorkspaceID {
 		return fmt.Errorf("actor context workspace = %q, want %q", ctx.WorkspaceID, validation.WorkspaceID)
@@ -130,7 +139,7 @@ func validateActorContext(ctx ActorContext, validation ActorContextValidation) e
 		now = time.Now().UTC()
 	}
 	if ctx.ExpiresAt.IsZero() || !now.Before(ctx.ExpiresAt) {
-		return fmt.Errorf("actor context is expired")
+		return errActorContextExpired
 	}
 	return nil
 }

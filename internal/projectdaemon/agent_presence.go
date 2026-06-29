@@ -25,11 +25,16 @@ type AgentPresenceSession struct {
 
 type AgentPresenceRegistry struct {
 	mu       sync.Mutex
-	sessions map[string]AgentPresenceSession
+	sessions map[agentPresenceKey]AgentPresenceSession
 	seen     bool
 	now      func() time.Time
 	ttl      time.Duration
 	onChange func(count int)
+}
+
+type agentPresenceKey struct {
+	provider      agenthooks.ProviderID
+	sessionIDHash string
 }
 
 func NewAgentPresenceRegistry(ttl time.Duration, onChange func(count int)) *AgentPresenceRegistry {
@@ -37,7 +42,7 @@ func NewAgentPresenceRegistry(ttl time.Duration, onChange func(count int)) *Agen
 		ttl = DefaultIdleTimeout
 	}
 	return &AgentPresenceRegistry{
-		sessions: map[string]AgentPresenceSession{},
+		sessions: map[agentPresenceKey]AgentPresenceSession{},
 		now:      time.Now,
 		ttl:      ttl,
 		onChange: onChange,
@@ -52,7 +57,7 @@ func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
 	if seenAt.IsZero() {
 		seenAt = r.now()
 	}
-	key := presenceKey(string(event.Provider), event.SessionIDHash)
+	key := presenceKey(event.Provider, event.SessionIDHash)
 
 	r.mu.Lock()
 	before := len(r.sessions)
@@ -84,10 +89,10 @@ func (r *AgentPresenceRegistry) Record(event agenthooks.Event) {
 	if model := safeAgentMetadata(event.Model, 80); model != "" {
 		session.Model = model
 	}
-	if source := safeAgentSource(string(event.Source)); source != "" {
+	if source := safeAgentEventSource(event.Source); source != "" {
 		session.Source = source
 	}
-	if toolName := safeAgentToolName(string(event.ToolName)); toolName != "" {
+	if toolName := event.ToolName.SanitizedMetadataValue(160); toolName != "" {
 		session.ToolName = toolName
 		session.IsMCPTool = event.IsMCPTool
 	}
@@ -180,8 +185,11 @@ func (r *AgentPresenceRegistry) notify(count int) {
 	}
 }
 
-func presenceKey(provider string, sessionIDHash string) string {
-	return provider + "\x00" + sessionIDHash
+func presenceKey(provider agenthooks.ProviderID, sessionIDHash string) agentPresenceKey {
+	return agentPresenceKey{
+		provider:      provider.Normalize(),
+		sessionIDHash: sessionIDHash,
+	}
 }
 
 func safeAgentSource(raw string) agenthooks.AgentSource {
@@ -210,8 +218,27 @@ func safeAgentSource(raw string) agenthooks.AgentSource {
 	}
 }
 
+func safeAgentEventSource(source agenthooks.AgentSource) agenthooks.AgentSource {
+	switch source {
+	case "":
+		return ""
+	case agenthooks.AgentSourceCLI,
+		agenthooks.AgentSourceStartup,
+		agenthooks.AgentSourceHook,
+		agenthooks.AgentSourceMCP,
+		agenthooks.AgentSourceTool,
+		agenthooks.AgentSourceUser,
+		agenthooks.AgentSourceIDE,
+		agenthooks.AgentSourceAgent,
+		agenthooks.AgentSourceUnknown:
+		return source
+	default:
+		return ""
+	}
+}
+
 func safeAgentToolName(raw string) agenthooks.AgentToolName {
-	return agenthooks.AgentToolName(safeAgentMetadata(raw, 160))
+	return agenthooks.AgentToolNameFromString(safeAgentMetadata(raw, 160))
 }
 
 func safeAgentMetadata(raw string, maxLen int) string {
