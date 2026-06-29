@@ -34,18 +34,18 @@ func (n *migrationNodeAdapter) Slug() string {
 	return n.node.Slug.FilesystemPath()
 }
 
-func (n *migrationNodeAdapter) Kind() string {
+func (n *migrationNodeAdapter) Kind() treemigration.NodeKind {
 	if n == nil || n.node == nil {
-		return ""
+		return treemigration.NodeKindUnknown
 	}
-	return string(n.node.Kind)
+	return migrationNodeKind(n.node.Kind)
 }
 
-func (n *migrationNodeAdapter) SetKind(kind string) {
+func (n *migrationNodeAdapter) SetKind(kind treemigration.NodeKind) {
 	if n == nil || n.node == nil {
 		return
 	}
-	n.node.Kind = NodeKind(kind)
+	n.node.Kind = treeNodeKind(kind)
 }
 
 func (n *migrationNodeAdapter) Metadata() treemigration.Metadata {
@@ -98,11 +98,33 @@ func (a *migrationStoreAdapter) ResolveNode(node treemigration.Node) (*treemigra
 		return nil, err
 	}
 	return &treemigration.ResolvedNode{
-		Kind:       string(resolved.Kind),
+		Kind:       migrationNodeKind(resolved.Kind),
 		DirPath:    resolved.DirPath,
 		FilePath:   resolved.FilePath,
 		HasContent: resolved.HasContent,
 	}, nil
+}
+
+func migrationNodeKind(kind NodeKind) treemigration.NodeKind {
+	switch kind {
+	case NodeKindPage:
+		return treemigration.NodeKindPage
+	case NodeKindSection:
+		return treemigration.NodeKindSection
+	default:
+		return treemigration.NodeKindUnknown
+	}
+}
+
+func treeNodeKind(kind treemigration.NodeKind) NodeKind {
+	switch kind {
+	case treemigration.NodeKindPage:
+		return NodeKindPage
+	case treemigration.NodeKindSection:
+		return NodeKindSection
+	default:
+		return ""
+	}
 }
 
 func (a *migrationStoreAdapter) ContentPathForRead(node treemigration.Node) (string, error) {
@@ -148,7 +170,7 @@ func (a *migrationStoreAdapter) ReadPageRaw(node treemigration.Node) (string, er
 func unwrapMigrationNode(node treemigration.Node) (*PageNode, error) {
 	adapted, ok := node.(*migrationNodeAdapter)
 	if !ok || adapted == nil || adapted.node == nil {
-		return nil, errors.New("invalid migration node")
+		return nil, ErrInvalidMigrationNode
 	}
 	return adapted.node, nil
 }
@@ -176,17 +198,17 @@ func (t *TreeService) migrationDependencies() treemigration.Dependencies {
 
 func (t *TreeService) persistLegacyTreeSnapshotLocked() error {
 	if t.tree == nil {
-		return fmt.Errorf("legacy migration snapshot requires loaded tree")
+		return ErrLegacySnapshotTreeRequired
 	}
 
 	raw, err := treeJSONMarshal(t.tree)
 	if err != nil {
-		return fmt.Errorf("marshal legacy migration snapshot: %w", err)
+		return fmt.Errorf("%w: %w", ErrMarshalLegacyTreeSnapshot, err)
 	}
 	raw = append(raw, byte(10))
 
 	if err := treeWriteFileAtomic(filepath.Join(t.dataDir, legacyTreeFilename), raw, 0o644); err != nil {
-		return fmt.Errorf("write legacy migration snapshot: %w", err)
+		return fmt.Errorf("%w: %w", ErrWriteLegacyTreeSnapshot, err)
 	}
 
 	return nil

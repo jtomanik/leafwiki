@@ -9,7 +9,28 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
+
+func HaveRemovedTreeIndexEntries(nodeID PageID, parentID PageID) OmegaMatcher {
+	return Satisfy(func(svc *TreeService) bool {
+		if svc == nil {
+			return false
+		}
+		_, hasNode := svc.nodesByID[nodeID]
+		_, hasChildSlugs := svc.childSlugs[parentID]
+		return !hasNode && !hasChildSlugs
+	})
+}
+
+func HaveEmptyTreeIndexState() OmegaMatcher {
+	return Satisfy(func(svc *TreeService) bool {
+		if svc == nil {
+			return false
+		}
+		return len(svc.nodesByID) == 0 && len(svc.childSlugs) == 0
+	})
+}
 
 var _ = Describe("tree service edge coverage", func() {
 	It("covers unloaded service errors without constructing disk state", func() {
@@ -74,21 +95,26 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(svc.findChildBySlugAndKindExactInParentLocked(docs, "Guide", NodeKindSection)).To(BeNil())
 
 		svc.removeNodeIndexLocked(docs)
-		Expect(svc.nodesByID).NotTo(HaveKey(PageID("guide")))
-		Expect(svc.childSlugs).NotTo(HaveKey(PageID("docs")))
+		Expect(svc).To(HaveRemovedTreeIndexEntries(newFixturePageID("guide"), newFixturePageID("docs")))
 
 		svc.tree = nil
 		svc.rebuildIndexesLocked()
-		Expect(svc.nodesByID).To(BeEmpty())
-		Expect(svc.childSlugs).To(BeEmpty())
+		Expect(svc).To(HaveEmptyTreeIndexState())
 
 		positions := snapshotChildPositions([]*PageNode{nil, guide})
 		Expect(positions).To(HaveKeyWithValue(PageID("guide"), guide.Position))
 		restoreChildSnapshot(nil, []*PageNode{guide}, positions)
 		orphanParent := edgeSectionNode("orphan-parent", "orphan-parent", "Orphan Parent", root)
 		restoreChildSnapshot(orphanParent, []*PageNode{nil, guide}, map[PageID]int{"guide": 7})
-		Expect(guide.Parent).To(BeIdenticalTo(orphanParent))
-		Expect(guide.Position).To(Equal(7))
+		Expect(guide).To(WithTransform(func(node *PageNode) PageNode {
+			if node == nil {
+				return PageNode{}
+			}
+			return *node
+		}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Parent":   BeIdenticalTo(orphanParent),
+			"Position": Equal(7),
+		})))
 	})
 
 	It("covers service lookup, read, and batch failure branches", func() {
@@ -96,18 +122,16 @@ var _ = Describe("tree service edge coverage", func() {
 
 		emptyLookup, err := svc.lookupPagePathLocked("", "")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(emptyLookup.Exists).To(BeFalse())
-		Expect(emptyLookup.CanCreate).To(BeFalse())
+		Expect(emptyLookup).To(MatchPathLookupState(false, false))
 
 		missingLookup, err := svc.lookupPagePathLocked("missing/!!!", "")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(missingLookup.Exists).To(BeFalse())
-		Expect(missingLookup.CanCreate).To(BeFalse())
+		Expect(missingLookup).To(MatchPathLookupState(false, false))
 
 		_, err = svc.FindPageByRoutePath("")
-		Expect(err).To(MatchError("missing path"))
+		Expect(err).To(MatchError(ErrMissingRoutePath))
 		_, err = svc.EnsurePagePath("user", "", "Empty", nil)
-		Expect(err).To(MatchError(ContainSubstring("could not ensure page path")))
+		Expect(err).To(MatchError(ErrEnsurePagePath))
 
 		pageID, err := svc.CreateNode("user", nil, "Page", "page", ptrKind(NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
@@ -130,20 +154,23 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(os.WriteFile(badCanonicalPath, []byte("<!-- leafwiki\nversion: 1\n"), 0o644)).To(Succeed())
 
 		errs := svc.BulkUpdateContent("bulk-user", []BulkContentUpdate{{ID: "missing", Content: "body"}, {ID: *pageID, Content: "new body"}})
-		Expect(errs[0]).To(MatchError(ErrPageNotFound))
-		Expect(errs[1]).To(HaveOccurred())
+		Expect(errs).To(HaveExactElements(
+			MatchError(ErrPageNotFound),
+			MatchError(ErrLoadMarkdownFile),
+		))
 		afterFailedBulk, err := svc.FindPageByID(*pageID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(afterFailedBulk.Version()).To(Equal(currentVersion))
 
 		gotPages, gotErrs := svc.GetPages([]PageID{"missing", *pageID})
-		Expect(gotPages[0]).To(BeNil())
-		Expect(gotErrs[0]).To(MatchError(ErrPageNotFound))
-		Expect(gotPages[1]).To(BeNil())
-		Expect(gotErrs[1]).To(MatchError(ContainSubstring("could not get page content")))
+		Expect(gotPages).To(HaveExactElements(BeNil(), BeNil()))
+		Expect(gotErrs).To(HaveExactElements(
+			MatchError(ErrPageNotFound),
+			MatchError(ErrGetPageContent),
+		))
 
 		_, err = svc.GetPage(*pageID)
-		Expect(err).To(MatchError(ContainSubstring("could not get page content")))
+		Expect(err).To(MatchError(ErrGetPageContent))
 		_, err = svc.ReadPageRaw(*pageID)
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -173,17 +200,17 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(matches).To(BeFalse())
 
 		_, err = collectRelativeFiles(filepath.Join(base, "missing"))
-		Expect(err).To(MatchError(ContainSubstring("collect legacy content files")))
+		Expect(err).To(MatchError(ErrCollectLegacyContentFiles))
 		_, err = filesHaveSameContent(filepath.Join(base, "missing.md"), filepath.Join(targetDir, "same.md"))
-		Expect(err).To(MatchError(ContainSubstring("read legacy content path")))
+		Expect(err).To(MatchError(ErrReadLegacyContentPath))
 
 		if runtime.GOOS != "windows" {
 			loop := filepath.Join(base, "loop")
 			Expect(os.Symlink("loop", loop)).To(Succeed())
 			_, err = directoryHasEntries(loop)
-			Expect(err).To(MatchError(ContainSubstring("read directory")))
+			Expect(err).To(MatchError(ErrReadDirectory))
 			_, err = filesHaveSameContent(filepath.Join(sourceDir, "same.md"), loop)
-			Expect(err).To(MatchError(ContainSubstring("read configured legacy content path")))
+			Expect(err).To(MatchError(ErrReadConfiguredLegacyContentPath))
 		}
 
 		Expect(sameCleanPath(filepath.Join(base, "a", "..", "source"), sourceDir)).To(BeTrue())
@@ -213,9 +240,9 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(paths).To(HaveLen(3))
 
 		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: "bad", Slug: "", Kind: NodeKindPage})
-		Expect(err).To(MatchError(ContainSubstring("empty slug")))
+		Expect(err).To(MatchError(ErrSlugEmpty))
 		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: "bad", Slug: "bad", Kind: NodeKind("unknown")})
-		Expect(err).To(MatchError(ContainSubstring("unknown kind")))
+		Expect(err).To(MatchError(ErrLegacyUnknownKind))
 
 		missing, err = svc.configuredRootMissingLegacyContent(legacy)
 		Expect(err).NotTo(HaveOccurred())

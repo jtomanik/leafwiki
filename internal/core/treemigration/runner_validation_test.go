@@ -10,8 +10,8 @@ type testNode struct{}
 func (testNode) ID() string           { return "root" }
 func (testNode) Title() string        { return "root" }
 func (testNode) Slug() string         { return "root" }
-func (testNode) Kind() string         { return NodeKindSection }
-func (testNode) SetKind(string)       {}
+func (testNode) Kind() NodeKind       { return NodeKindSection }
+func (testNode) SetKind(NodeKind)     {}
 func (testNode) Metadata() Metadata   { return Metadata{} }
 func (testNode) SetMetadata(Metadata) {}
 func (testNode) Children() []Node     { return nil }
@@ -44,6 +44,20 @@ func validDependencies() Dependencies {
 	}
 }
 
+type missingDependencyCase struct {
+	name   string
+	mutate func(*Dependencies)
+	want   string
+}
+
+var missingDependencyCases = []missingDependencyCase{
+	{name: "nil root", mutate: func(d *Dependencies) { d.Root = nil }, want: "tree not loaded"},
+	{name: "nil store", mutate: func(d *Dependencies) { d.Store = nil }, want: "migration store is required"},
+	{name: "nil log", mutate: func(d *Dependencies) { d.Log = nil }, want: "migration logger is required"},
+	{name: "nil save tree", mutate: func(d *Dependencies) { d.SaveTree = nil }, want: "save tree callback is required"},
+	{name: "nil save schema", mutate: func(d *Dependencies) { d.SaveSchema = nil }, want: "save schema callback is required"},
+}
+
 var _ = ginkgo.Describe("runner validation", func() {
 	ginkgo.It("TestRun_RejectsNegativeFromVersion", func() {
 		t := ginkgo.GinkgoT()
@@ -59,23 +73,13 @@ var _ = ginkgo.Describe("runner validation", func() {
 	})
 
 	ginkgo.Describe("TestRun_RejectsMissingRequiredDependencies", func() {
-		tests := []struct {
-			name string
-			deps Dependencies
-			want string
-		}{
-			{name: "nil root", deps: func() Dependencies { d := validDependencies(); d.Root = nil; return d }(), want: "tree not loaded"},
-			{name: "nil store", deps: func() Dependencies { d := validDependencies(); d.Store = nil; return d }(), want: "migration store is required"},
-			{name: "nil log", deps: func() Dependencies { d := validDependencies(); d.Log = nil; return d }(), want: "migration logger is required"},
-			{name: "nil save tree", deps: func() Dependencies { d := validDependencies(); d.SaveTree = nil; return d }(), want: "save tree callback is required"},
-			{name: "nil save schema", deps: func() Dependencies { d := validDependencies(); d.SaveSchema = nil; return d }(), want: "save schema callback is required"},
-		}
-
-		for _, tt := range tests {
+		for _, tt := range missingDependencyCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				t := ginkgo.GinkgoT()
-				err := Run(0, tt.deps)
+				deps := validDependencies()
+				tt.mutate(&deps)
+				err := Run(0, deps)
 				if err == nil {
 					t.Fatalf("expected error")
 				}

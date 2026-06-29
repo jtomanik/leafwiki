@@ -1,7 +1,6 @@
 package tree
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,7 +12,7 @@ import (
 
 var _ = Describe("tree edge coverage", func() {
 	It("asserts semantic value edge methods and slug filename helpers", func() {
-		Expect(RevisionIDFromString("rev-1")).To(Equal(NewRevisionIDUnchecked("rev-1")))
+		Expect(RevisionIDFromString("rev-1")).To(Equal(newFixtureRevisionID("rev-1")))
 		Expect(CleanMarkdownPath(".")).To(BeEmpty())
 		Expect(MarkdownPathFromString("readme.md").SourceDir()).To(BeEmpty())
 		Expect(equalFoldASCII("index", "index.md")).To(BeFalse())
@@ -23,8 +22,8 @@ var _ = Describe("tree edge coverage", func() {
 
 		Expect(RoutePathFromString("").Segments()).To(BeNil())
 		Expect(RoutePathFromString("docs//guide").Segments()).To(Equal([]Slug{
-			NewSlugUnchecked("docs"),
-			NewSlugUnchecked("guide"),
+			newFixtureSlug("docs"),
+			newFixtureSlug("guide"),
 		}))
 		Expect(RoutePathFromString("").WithLeafSlug("home")).To(Equal(RoutePathFromString("home")))
 		Expect(RoutePathFromString("docs").WithLeafSlug("guide")).To(Equal(RoutePathFromString("guide")))
@@ -34,12 +33,12 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(WorkspaceSourcePathFromString("readme.md").Dir()).To(BeEmpty())
 
 		assetName := AssetNameFromString(" icon.svg ")
-		Expect(assetName.String()).To(Equal(" icon.svg "))
+		Expect(assetName).To(Equal(AssetNameFromString(" icon.svg ")))
 		Expect(assetName.Clean().Filename()).To(Equal("icon.svg"))
 
 		parsedSlug, err := ParseSlug("valid-slug")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(parsedSlug).To(Equal(NewSlugUnchecked("valid-slug")))
+		Expect(parsedSlug).To(Equal(newFixtureSlug("valid-slug")))
 		_, err = ParseSlug("api")
 		Expect(err).To(HaveOccurred())
 
@@ -98,10 +97,10 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(nilAdapter.ID()).To(BeEmpty())
 		Expect(nilAdapter.Title()).To(BeEmpty())
 		Expect(nilAdapter.Slug()).To(BeEmpty())
-		Expect(nilAdapter.Kind()).To(BeEmpty())
+		Expect(nilAdapter.Kind()).To(Equal(treemigration.NodeKindUnknown))
 		Expect(nilAdapter.Metadata().CreatorID).To(BeEmpty())
 		Expect(nilAdapter.Children()).To(BeNil())
-		nilAdapter.SetKind(string(NodeKindSection))
+		nilAdapter.SetKind(treemigration.NodeKindSection)
 		nilAdapter.SetMetadata(emptyTreemigrationMetadata())
 
 		createdAt := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
@@ -123,8 +122,8 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(adapter.ID()).To(Equal("docs"))
 		Expect(adapter.Title()).To(Equal("Docs"))
 		Expect(adapter.Slug()).To(Equal("docs"))
-		Expect(adapter.Kind()).To(Equal(string(NodeKindPage)))
-		adapter.SetKind(string(NodeKindSection))
+		Expect(adapter.Kind()).To(Equal(treemigration.NodeKindPage))
+		adapter.SetKind(treemigration.NodeKindSection)
 		Expect(node.Kind).To(Equal(NodeKindSection))
 
 		metadata := emptyTreemigrationMetadata()
@@ -135,8 +134,8 @@ var _ = Describe("tree edge coverage", func() {
 		adapter.SetMetadata(metadata)
 		Expect(adapter.Metadata().CreatorID).To(Equal("alice"))
 		Expect(adapter.Metadata().LastAuthorID).To(Equal("bob"))
-		Expect(adapter.Metadata().CreatedAt).To(Equal(createdAt))
-		Expect(adapter.Metadata().UpdatedAt).To(Equal(updatedAt))
+		Expect(adapter.Metadata().CreatedAt).To(BeTemporally("==", createdAt))
+		Expect(adapter.Metadata().UpdatedAt).To(BeTemporally("==", updatedAt))
 
 		children := adapter.Children()
 		Expect(children).To(HaveLen(1))
@@ -182,14 +181,11 @@ var _ = Describe("tree edge coverage", func() {
 
 		lookup, err := svc.LookupPagePathForKind("restored", NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lookup.Exists).To(BeTrue())
-		Expect(lookup.Segments).To(HaveLen(1))
-		Expect(*lookup.Segments[0].Kind).To(Equal(NodeKindPage))
+		Expect(lookup).To(MatchExistingPathLookupWithKind(NodeKindPage))
 
 		sectionLookup, err := svc.LookupPagePathForKind("restored", NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(sectionLookup.Exists).To(BeFalse())
-		Expect(sectionLookup.CanCreate).To(BeTrue())
+		Expect(sectionLookup).To(MatchPathLookupState(false, true))
 
 		plainUpdate := "plain unchecked body"
 		Expect(svc.UpdateNodeUncheckedVersion(
@@ -237,7 +233,7 @@ var _ = Describe("tree edge coverage", func() {
 
 		Expect(svc.DeleteNodeUncheckedVersion(newFixtureUserID("carol"), restored.ID, false)).To(Succeed())
 		_, err = svc.ReadPageRaw(restored.ID)
-		Expect(errors.Is(err, ErrPageNotFound)).To(BeTrue())
+		Expect(err).To(MatchError(ErrPageNotFound))
 	})
 
 	It("covers helper no-op filesystem branches", func() {

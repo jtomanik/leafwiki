@@ -10,13 +10,18 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
+type NodeKind string
+
 const (
-	NodeKindPage    = "page"
-	NodeKindSection = "section"
+	NodeKindUnknown NodeKind = ""
+	NodeKindPage    NodeKind = "page"
+	NodeKindSection NodeKind = "section"
 )
 
 var (
 	statFile = os.Stat
+
+	ErrStoredSchemaVersionNewer = errors.New("stored schema version is newer than current schema version")
 
 	writeMarkdownFile = func(mdFile *markdown.MarkdownFile) error {
 		return mdFile.WriteToFile()
@@ -31,7 +36,7 @@ type Metadata struct {
 }
 
 type ResolvedNode struct {
-	Kind       string
+	Kind       NodeKind
 	DirPath    string
 	FilePath   string
 	HasContent bool
@@ -41,8 +46,8 @@ type Node interface {
 	ID() string
 	Title() string
 	Slug() string
-	Kind() string
-	SetKind(kind string)
+	Kind() NodeKind
+	SetKind(kind NodeKind)
 	Metadata() Metadata
 	SetMetadata(metadata Metadata)
 	Children() []Node
@@ -120,7 +125,7 @@ func validateDependencies(fromVersion int, deps Dependencies) error {
 		return errors.New("save schema callback is required")
 	}
 	if deps.CurrentSchemaVersion < fromVersion {
-		return fmt.Errorf("current schema version %d is older than stored version %d", deps.CurrentSchemaVersion, fromVersion)
+		return fmt.Errorf("%w: current=%d stored=%d", ErrStoredSchemaVersionNewer, deps.CurrentSchemaVersion, fromVersion)
 	}
 
 	for version := fromVersion; version < deps.CurrentSchemaVersion; version++ {
