@@ -19,4 +19,5 @@ var _ = ginkgo.DescribeTable("TestAnalyzerFixtures",
 	ginkgo.Entry("wiki/mcp", "github.com/perber/wiki/internal/wiki/mcp"),
 	ginkgo.Entry("repotests", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests"),
 	ginkgo.Entry("e2e/semanticfixture", "github.com/perber/wiki/e2e/semanticfixture"),
+	ginkgo.Entry("e2e-proxy", "github.com/perber/wiki/e2e-proxy"),
 )

@@ -149,7 +149,8 @@ func checkStringKeyValue(ctx *analysisContext, expr ast.Expr, typeName string, k
 	if isAllowedStringBoundaryFile(ctx.filename(expr.Pos())) ||
 		inJSONCompositeLiteral(ctx, expr) ||
 		isAllowedPersistenceRowKeyValue(ctx, expr) ||
-		isAllowedAdapterStringKeyValue(ctx, expr) {
+		isAllowedAdapterStringKeyValue(ctx, expr) ||
+		isAllowedGinRouteParamKeyValue(ctx, kv) {
 		return
 	}
 	if containsNode(kv.Key, expr) {
@@ -161,6 +162,14 @@ func checkStringKeyValue(ctx *analysisContext, expr ast.Expr, typeName string, k
 		return
 	}
 	ctx.pass.Reportf(expr.Pos(), "%s", stringFieldDiagnostic(typeName, fieldName))
+}
+
+func isAllowedGinRouteParamKeyValue(ctx *analysisContext, kv *ast.KeyValueExpr) bool {
+	if !isTestFile(ctx.filename(kv.Pos())) || keyName(kv.Key) != "Value" {
+		return false
+	}
+	lit, ok := ctx.parent(kv).(*ast.CompositeLit)
+	return ok && isNamedTypeFromPackage(ctx.pass.TypesInfo.TypeOf(lit), "github.com/gin-gonic/gin", "Param")
 }
 
 func checkStringReturn(ctx *analysisContext, expr ast.Expr, typeName string) {

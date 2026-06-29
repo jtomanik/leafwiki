@@ -80,23 +80,43 @@ func conversionSemanticTypeName(pass *analysis.Pass, expr ast.Expr) (string, boo
 
 var semanticTypeNames = map[string]bool{
 	"APIKeyID":             true,
+	"ActorID":              true,
+	"AgentEventName":       true,
+	"AgentSource":          true,
+	"AgentToolName":        true,
 	"AssetName":            true,
 	"CommitHash":           true,
+	"EntryKind":            true,
 	"ErrorCode":            true,
 	"FieldErrorCode":       true,
+	"GrantRole":            true,
+	"ImportErrorCode":      true,
 	"IssueCode":            true,
 	"IssueSeverity":        true,
 	"MarkdownPath":         true,
+	"MarkdownSourceKind":   true,
+	"MCPSessionID":         true,
 	"MessageID":            true,
+	"NodeKind":             true,
 	"PageID":               true,
 	"PageVersion":          true,
+	"ProviderID":           true,
 	"RevisionID":           true,
 	"RoutePath":            true,
+	"RoleName":             true,
+	"SectionEditErrorCode": true,
 	"SessionID":            true,
+	"SessionMode":          true,
+	"SessionState":         true,
+	"SessionType":          true,
 	"Slug":                 true,
+	"TargetKind":           true,
 	"ToolDescriptionID":    true,
 	"ToolID":               true,
+	"ToolMessageID":        true,
+	"ToolProtocolName":     true,
 	"UserID":               true,
+	"WebSessionID":         true,
 	"WorkspaceID":          true,
 	"WorkspaceSourcePath":  true,
 	"WorkspaceSyncIssueID": true,
@@ -104,28 +124,49 @@ var semanticTypeNames = map[string]bool{
 
 var semanticNameTypes = map[string]string{
 	"apikeyid":             "APIKeyID",
+	"actorid":              "ActorID",
+	"agenteventname":       "AgentEventName",
+	"agentsource":          "AgentSource",
+	"agenttoolname":        "AgentToolName",
 	"assetname":            "AssetName",
 	"commithash":           "CommitHash",
 	"currentpath":          "RoutePath",
+	"entrykind":            "EntryKind",
 	"errorcode":            "ErrorCode",
 	"fieldcode":            "FieldErrorCode",
 	"fieldvalidationcode":  "FieldErrorCode",
 	"filename":             "AssetName",
+	"grantrole":            "GrantRole",
+	"importerrorcode":      "ImportErrorCode",
 	"issuecode":            "IssueCode",
+	"markdownsourcekind":   "MarkdownSourceKind",
+	"mcpsessionid":         "MCPSessionID",
 	"messageid":            "MessageID",
+	"nodekind":             "NodeKind",
 	"oldpath":              "RoutePath",
 	"pagepath":             "RoutePath",
 	"pageid":               "PageID",
 	"pageversion":          "PageVersion",
+	"providerid":           "ProviderID",
 	"revisionid":           "RevisionID",
 	"routepath":            "RoutePath",
+	"rolename":             "RoleName",
+	"sectionediterrorcode": "SectionEditErrorCode",
 	"sessionid":            "SessionID",
+	"sessionmode":          "SessionMode",
+	"sessionstate":         "SessionState",
+	"sessiontype":          "SessionType",
 	"slug":                 "Slug",
 	"sourcepath":           "WorkspaceSourcePath",
+	"targetkind":           "TargetKind",
 	"targetpath":           "RoutePath",
 	"topath":               "RoutePath",
 	"toolid":               "ToolID",
+	"toolmessageid":        "ToolMessageID",
+	"toolname":             "AgentToolName",
+	"toolprotocolname":     "ToolProtocolName",
 	"userid":               "UserID",
+	"websessionid":         "WebSessionID",
 	"workspaceid":          "WorkspaceID",
 	"workspacesourcepath":  "WorkspaceSourcePath",
 	"workspacesyncissueid": "WorkspaceSyncIssueID",
@@ -183,6 +224,9 @@ func semanticTypeForFieldName(fieldName string, typeName string) (string, bool) 
 	if canonicalName(fieldName) == "id" && pageIdentityContext(typeName) {
 		return "PageID", true
 	}
+	if canonicalName(fieldName) == "hash" && commitHashContext(typeName) {
+		return "CommitHash", true
+	}
 	return "", false
 }
 
@@ -192,6 +236,9 @@ func semanticTypeForParamName(paramName string, funcName string) (string, bool) 
 	}
 	if canonicalName(paramName) == "id" {
 		return semanticTypeForBareIDContext(funcName)
+	}
+	if canonicalName(paramName) == "hash" {
+		return semanticTypeForBareHashContext(funcName)
 	}
 	return "", false
 }
@@ -223,6 +270,19 @@ func pageIdentityContext(name string) bool {
 	return strings.Contains(canonical, "page") ||
 		strings.Contains(canonical, "node") ||
 		strings.Contains(canonical, "permalink")
+}
+
+func commitHashContext(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "commit") ||
+		strings.Contains(canonical, "revision")
+}
+
+func semanticTypeForBareHashContext(name string) (string, bool) {
+	if commitHashContext(name) {
+		return "CommitHash", true
+	}
+	return "", false
 }
 
 func semanticName(name string) bool {
@@ -448,6 +508,535 @@ func isTestFile(filename string) bool {
 	return strings.HasSuffix(filename, "_test.go")
 }
 
+func isAllowedTestDescriptionLiteral(ctx *analysisContext, lit *ast.BasicLit) bool {
+	call, index, ok := directCallArg(ctx, lit)
+	if !ok {
+		return false
+	}
+	name := callName(call)
+	return (index == 0 && isBDDDescriptionCall(name)) ||
+		(index > 0 && isGomegaAnnotationCall(name))
+}
+
+func isStableTestContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value string) bool {
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	return isStableMessageLikeLiteral(value) && isTestContractLiteralContext(ctx, lit)
+}
+
+func isTestContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			name := callName(n)
+			if isBDDDescriptionCall(name) {
+				return isBDDContractDataLiteral(ctx, n, lit)
+			}
+			if isTestAssertionMatcherContractContext(ctx, n) ||
+				isTestSemanticAssertionHelper(name) ||
+				isTestContractAssertionCall(ctx, n) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func isTestLocalizedProseContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			name := callName(n)
+			if isBDDDescriptionCall(name) {
+				return isBDDRenderedProseDataLiteral(ctx, n, lit)
+			}
+			if isTestAssertionMatcherLocalizedProseContext(ctx, n) ||
+				isTestSemanticAssertionHelper(name) ||
+				isTestContractAssertionCall(ctx, n) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func directCallArg(ctx *analysisContext, lit *ast.BasicLit) (*ast.CallExpr, int, bool) {
+	call, ok := ctx.parent(lit).(*ast.CallExpr)
+	if !ok {
+		return nil, 0, false
+	}
+	index, ok := directArgIndex(call, lit)
+	if !ok {
+		return nil, 0, false
+	}
+	return call, index, true
+}
+
+func directArgIndex(call *ast.CallExpr, lit *ast.BasicLit) (int, bool) {
+	for i, arg := range call.Args {
+		if arg == lit {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func isBDDContractDataLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
+	if !isBDDEntryCall(callName(call)) {
+		return false
+	}
+	if keyName, ok := bddEntryDataKeyName(ctx, call, lit); ok {
+		return testTableParamSuggestsContract(keyName)
+	}
+	index, ok := bddEntryDataArgIndex(ctx, call, lit)
+	if !ok || index == 0 {
+		return false
+	}
+	paramName, ok := bddEntryTableParamName(ctx, call, index-1)
+	if !ok {
+		return false
+	}
+	return testTableParamSuggestsContract(paramName)
+}
+
+func isBDDRenderedProseDataLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
+	if !isBDDEntryCall(callName(call)) {
+		return false
+	}
+	if keyName, ok := bddEntryDataKeyName(ctx, call, lit); ok {
+		return testTableParamSuggestsRenderedProseContract(keyName)
+	}
+	index, ok := bddEntryDataArgIndex(ctx, call, lit)
+	if !ok || index == 0 {
+		return false
+	}
+	paramName, ok := bddEntryTableParamName(ctx, call, index-1)
+	if !ok {
+		return false
+	}
+	return testTableParamSuggestsRenderedProseContract(paramName)
+}
+
+func bddEntryDataKeyName(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) (string, bool) {
+	key, ok := enclosingKeyValueWithin(ctx, lit, call)
+	if !ok {
+		return "", false
+	}
+	return exprName(key.Key), true
+}
+
+func enclosingKeyValueWithin(ctx *analysisContext, node ast.Node, stop ast.Node) (*ast.KeyValueExpr, bool) {
+	for current := ast.Node(node); current != nil && current != stop; current = ctx.parent(current) {
+		key, ok := current.(*ast.KeyValueExpr)
+		if ok {
+			return key, true
+		}
+	}
+	return nil, false
+}
+
+func bddEntryDataArgIndex(ctx *analysisContext, call *ast.CallExpr, node ast.Node) (int, bool) {
+	child := directChildWithin(ctx, node, call)
+	if child == nil {
+		return 0, false
+	}
+	for i, arg := range call.Args {
+		if arg == child {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func directChildWithin(ctx *analysisContext, node ast.Node, parent ast.Node) ast.Node {
+	current := ast.Node(node)
+	for current != nil {
+		next := ctx.parent(current)
+		if next == parent {
+			return current
+		}
+		current = next
+	}
+	return nil
+}
+
+func isBDDEntryCall(name string) bool {
+	switch name {
+	case "Entry", "FEntry", "PEntry", "XEntry":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBDDDescriptionCall(name string) bool {
+	switch name {
+	case "Describe", "Context", "When", "It", "Specify", "DescribeTable", "Entry",
+		"FDescribe", "FContext", "FWhen", "FIt", "FSpecify", "FDescribeTable", "FEntry",
+		"PDescribe", "PContext", "PWhen", "PIt", "PSpecify", "PDescribeTable", "PEntry",
+		"XDescribe", "XContext", "XWhen", "XIt", "XSpecify", "XDescribeTable", "XEntry",
+		"By", "Label", "EntryDescription":
+		return true
+	default:
+		return false
+	}
+}
+
+func bddEntryTableParamName(ctx *analysisContext, entry *ast.CallExpr, dataIndex int) (string, bool) {
+	table, ok := enclosingDescribeTableCall(ctx, entry)
+	if !ok {
+		return "", false
+	}
+	body, ok := describeTableBody(table)
+	if !ok || body.Type.Params == nil {
+		return "", false
+	}
+	current := 0
+	for _, field := range body.Type.Params.List {
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if current == dataIndex {
+				return name.Name, true
+			}
+			current++
+		}
+	}
+	return "", false
+}
+
+func enclosingDescribeTableCall(ctx *analysisContext, entry *ast.CallExpr) (*ast.CallExpr, bool) {
+	for current := ctx.parent(entry); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if isDescribeTableCall(callName(n)) {
+				return n, true
+			}
+		case *ast.FuncDecl:
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
+func isDescribeTableCall(name string) bool {
+	switch name {
+	case "DescribeTable", "FDescribeTable", "PDescribeTable", "XDescribeTable":
+		return true
+	default:
+		return false
+	}
+}
+
+func describeTableBody(call *ast.CallExpr) (*ast.FuncLit, bool) {
+	for _, arg := range call.Args {
+		body, ok := arg.(*ast.FuncLit)
+		if ok {
+			return body, true
+		}
+	}
+	return nil, false
+}
+
+func isGomegaAnnotationCall(name string) bool {
+	switch name {
+	case "To", "NotTo", "ToNot", "Should", "ShouldNot", "Error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTestAssertionMatcherCall(name string) bool {
+	switch name {
+	case "Equal", "ContainSubstring", "HaveKeyWithValue", "HaveField", "MatchError":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTestAssertionMatcherContractContext(ctx *analysisContext, matcher *ast.CallExpr) bool {
+	if !isTestAssertionMatcherCall(callName(matcher)) {
+		return false
+	}
+	if matcherCallHasStructuredProtocolKey(matcher) {
+		return true
+	}
+	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
+		call, ok := current.(*ast.CallExpr)
+		if !ok {
+			if _, ok := current.(*ast.FuncDecl); ok {
+				return false
+			}
+			continue
+		}
+		if !isGomegaAssertionMethod(callName(call)) {
+			continue
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		expectCall, ok := selector.X.(*ast.CallExpr)
+		if !ok || !isGomegaExpectCall(callName(expectCall)) || len(expectCall.Args) == 0 {
+			return false
+		}
+		return exprSuggestsTestContract(expectCall.Args[0])
+	}
+	return false
+}
+
+func isTestAssertionMatcherLocalizedProseContext(ctx *analysisContext, matcher *ast.CallExpr) bool {
+	if !isTestAssertionMatcherCall(callName(matcher)) {
+		return false
+	}
+	if matcherCallHasRenderedProseProtocolKey(matcher) {
+		return true
+	}
+	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
+		call, ok := current.(*ast.CallExpr)
+		if !ok {
+			if _, ok := current.(*ast.FuncDecl); ok {
+				return false
+			}
+			continue
+		}
+		if !isGomegaAssertionMethod(callName(call)) {
+			continue
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		expectCall, ok := selector.X.(*ast.CallExpr)
+		if !ok || !isGomegaExpectCall(callName(expectCall)) || len(expectCall.Args) == 0 {
+			return false
+		}
+		return exprSuggestsTestRenderedProseContract(expectCall.Args[0])
+	}
+	return false
+}
+
+func matcherCallHasStructuredProtocolKey(call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "HaveKeyWithValue") || len(call.Args) == 0 {
+		return false
+	}
+	key, ok := stringArgValue(call.Args[0])
+	return ok && structuredProtocolKeyName(key)
+}
+
+func matcherCallHasRenderedProseProtocolKey(call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "HaveKeyWithValue") || len(call.Args) == 0 {
+		return false
+	}
+	key, ok := stringArgValue(call.Args[0])
+	if !ok {
+		return false
+	}
+	switch canonicalName(key) {
+	case "error", "message":
+		return true
+	default:
+		return false
+	}
+}
+
+func stringArgValue(expr ast.Expr) (string, bool) {
+	lit, ok := unparenExpr(expr).(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	value, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	return value, true
+}
+
+func isGomegaAssertionMethod(name string) bool {
+	switch name {
+	case "To", "NotTo", "ToNot", "Should", "ShouldNot", "Error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGomegaExpectCall(name string) bool {
+	switch name {
+	case "Expect", "ExpectWithOffset", "Ω":
+		return true
+	default:
+		return false
+	}
+}
+
+func exprSuggestsTestContract(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.Ident:
+			found = nameSuggestsTestSubjectContract(n.Name)
+		case *ast.SelectorExpr:
+			found = nameSuggestsTestSubjectContract(n.Sel.Name)
+		case *ast.CallExpr:
+			found = nameSuggestsTestSubjectContract(callName(n))
+		}
+		return !found
+	})
+	return found
+}
+
+func exprSuggestsTestRenderedProseContract(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.Ident:
+			found = nameSuggestsTestRenderedProseSubject(n.Name)
+		case *ast.SelectorExpr:
+			found = nameSuggestsTestRenderedProseSubject(n.Sel.Name)
+		case *ast.CallExpr:
+			found = nameSuggestsTestRenderedProseSubject(callName(n))
+		}
+		return !found
+	})
+	return found
+}
+
+func nameSuggestsTestSubjectContract(name string) bool {
+	canonical := canonicalName(name)
+	if strings.Contains(canonical, "diagnostic") {
+		return false
+	}
+	return canonical == "body" ||
+		strings.Contains(canonical, "code") ||
+		strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "message") ||
+		strings.Contains(canonical, "messageid") ||
+		strings.Contains(canonical, "toolid") ||
+		strings.Contains(canonical, "issue") ||
+		strings.Contains(canonical, "validation")
+}
+
+func nameSuggestsTestRenderedProseSubject(name string) bool {
+	canonical := canonicalName(name)
+	if strings.Contains(canonical, "diagnostic") {
+		return false
+	}
+	return canonical == "err" ||
+		canonical == "error" ||
+		canonical == "message" ||
+		strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "message") ||
+		strings.Contains(canonical, "stderr") ||
+		strings.Contains(canonical, "stdout")
+}
+
+func isTestContractAssertionCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	name := callName(call)
+	if !strings.HasPrefix(name, "assert") && !strings.HasPrefix(name, "expect") {
+		return false
+	}
+	return nameSuggestsTestContract(name)
+}
+
+func isTestSemanticAssertionHelper(name string) bool {
+	if !strings.HasPrefix(name, "assert") && !strings.HasPrefix(name, "expect") {
+		return false
+	}
+	return nameSuggestsTestContract(name)
+}
+
+func nameSuggestsTestContract(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "structured") ||
+		strings.Contains(canonical, "localized") ||
+		strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "message") ||
+		strings.Contains(canonical, "code") ||
+		strings.Contains(canonical, "validation") ||
+		strings.Contains(canonical, "issue") ||
+		strings.Contains(canonical, "tool")
+}
+
+func semanticTypeForTestHelperParamName(paramName string, funcName string) (string, bool) {
+	if typ, ok := semanticTypeForParamName(paramName, funcName); ok {
+		return typ, true
+	}
+	canonicalParam := canonicalName(paramName)
+	canonicalFunc := canonicalName(funcName)
+	switch {
+	case strings.Contains(canonicalParam, "messageid"):
+		return "MessageID", true
+	case strings.Contains(canonicalParam, "toolid") || strings.Contains(canonicalParam, "toolname"):
+		return "ToolID", true
+	case strings.Contains(canonicalParam, "code"):
+		switch {
+		case strings.Contains(canonicalFunc, "field"):
+			return "FieldErrorCode", true
+		case strings.Contains(canonicalFunc, "issue") || strings.Contains(canonicalFunc, "validationissue"):
+			return "IssueCode", true
+		default:
+			return "ErrorCode", true
+		}
+	default:
+		return "", false
+	}
+}
+
+func testHelperMessageParamName(paramName string, funcName string) bool {
+	if canonicalName(paramName) != "message" {
+		return false
+	}
+	canonicalFunc := canonicalName(funcName)
+	return strings.Contains(canonicalFunc, "structured") ||
+		strings.Contains(canonicalFunc, "localized") ||
+		strings.Contains(canonicalFunc, "error")
+}
+
+func testHelperFieldParamName(paramName string, funcName string) bool {
+	if canonicalName(paramName) != "field" {
+		return false
+	}
+	canonicalFunc := canonicalName(funcName)
+	return strings.Contains(canonicalFunc, "field") ||
+		strings.Contains(canonicalFunc, "validation") ||
+		strings.Contains(canonicalFunc, "error")
+}
+
+func testTableParamSuggestsContract(paramName string) bool {
+	if _, ok := semanticTypeForTestHelperParamName(paramName, ""); ok {
+		return true
+	}
+	canonical := canonicalName(paramName)
+	return strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "message")
+}
+
+func testTableParamSuggestsRenderedProseContract(paramName string) bool {
+	canonical := canonicalName(paramName)
+	if strings.Contains(canonical, "diagnostic") {
+		return false
+	}
+	return strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "message") ||
+		strings.Contains(canonical, "stderr") ||
+		strings.Contains(canonical, "stdout")
+}
+
 func isGeneratedOrVendored(filename string) bool {
 	return strings.Contains(filename, "/vendor/") || strings.Contains(filename, "/node_modules/")
 }
@@ -471,6 +1060,10 @@ func isMarkdownSerializationFile(filename string) bool {
 
 func isTestSupportFile(filename string) bool {
 	return strings.Contains(filename, "/internal/test_utils/")
+}
+
+func isTestMatcherSupportFile(filename string) bool {
+	return strings.Contains(filename, "/internal/test_utils/matchers/")
 }
 
 func isPersistenceAdapterFile(filename string) bool {
@@ -585,7 +1178,7 @@ func isAllowedSemanticOwnerAdapterFunc(ctx *analysisContext, node ast.Node, type
 }
 
 func isAllowedStringBoundaryFile(filename string) bool {
-	return isGeneratedOrVendored(filename)
+	return isGeneratedOrVendored(filename) || isTestMatcherSupportFile(filename)
 }
 
 func isAllowedDirectCastFile(filename string) bool {
@@ -885,8 +1478,19 @@ func isAllowedSignatureFile(filename string) bool {
 
 func isAllowedStructFieldFile(filename string) bool {
 	return isGeneratedOrVendored(filename) ||
-		isRepoTestBoundaryFile(filename) ||
 		isTestSupportFile(filename)
+}
+
+func isTestFixtureStructName(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "fixture") ||
+		strings.Contains(canonical, "stub") ||
+		strings.Contains(canonical, "mock") ||
+		strings.Contains(canonical, "fake") ||
+		strings.Contains(canonical, "wire") ||
+		strings.Contains(canonical, "dto") ||
+		strings.Contains(canonical, "request") ||
+		strings.Contains(canonical, "response")
 }
 
 func isDTOTypeName(name string) bool {

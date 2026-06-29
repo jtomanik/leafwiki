@@ -119,12 +119,22 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			Expect(isAllowedSignatureFile(filename)).To(Equal(signatureAllowed))
 			Expect(isAllowedStructFieldFile(filename)).To(Equal(structAllowed))
 		},
-		ginkgo.Entry("repo test boundary", "/repo/internal/analysis/semantichygiene/testdata/repotests/repo_test.go", true, true),
+		ginkgo.Entry("repo test boundary", "/repo/internal/analysis/semantichygiene/testdata/repotests/repo_test.go", true, false),
 		ginkgo.Entry("http dto", "/repo/internal/http/dto/page.go", true, false),
 		ginkgo.Entry("mcp wire types", "/repo/internal/wiki/mcp/types.go", true, false),
 		ginkgo.Entry("markdown serialization", "/repo/internal/core/markdown/metadata.go", true, false),
 		ginkgo.Entry("test support", "/repo/internal/test_utils/common.go", true, true),
 		ginkgo.Entry("ordinary production file", "/repo/internal/wiki/page.go", false, false),
+	)
+
+	ginkgo.DescribeTable("string boundary files stay narrower than general test support",
+		func(filename string, want bool) {
+			Expect(isAllowedStringBoundaryFile(filename)).To(Equal(want))
+		},
+		ginkgo.Entry("generated", "/repo/vendor/example/pkg/file.go", true),
+		ginkgo.Entry("test matcher support", "/repo/internal/test_utils/matchers/matchers.go", true),
+		ginkgo.Entry("ordinary test support", "/repo/internal/test_utils/common.go", false),
+		ginkgo.Entry("ordinary production", "/repo/internal/wiki/page.go", false),
 	)
 
 	ginkgo.It("classifies typed message-bearing structs and message ID fields", func() {

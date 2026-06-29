@@ -89,3 +89,223 @@ func stableLiteralDiagnostic(value string) string {
 func rawLocalizedProseDiagnostic(value string) string {
 	return fmt.Sprintf("raw localized prose %q used in Go contract code; use a catalog-backed message ID or definition", value)
 }
+
+func testStableLiteralDiagnostic(value string) string {
+	return fmt.Sprintf("raw stable contract literal %q used in test assertion code; use the typed constant or semantic helper", value)
+}
+
+func testRawLocalizedProseDiagnostic(value string) string {
+	return fmt.Sprintf("raw localized prose %q used in test assertion code; assert a semantic code/message ID instead", value)
+}
+
+func testHelperSemanticParameterDiagnostic(funcName string, paramName string, semanticType string) string {
+	return fmt.Sprintf("test helper %s parameter %s uses string for %s; use the semantic type in test helpers", funcName, paramName, semanticType)
+}
+
+func testHelperMessageParameterDiagnostic(funcName string, paramName string) string {
+	return fmt.Sprintf("test helper %s parameter %s accepts rendered prose; assert MessageID/catalog semantics instead", funcName, paramName)
+}
+
+func testHelperFieldParameterDiagnostic(funcName string, paramName string) string {
+	return fmt.Sprintf("test helper %s parameter %s uses string for validation field identity; use a semantic field-name type or helper constant", funcName, paramName)
+}
+
+func gomegaErrorStringMatcherDiagnostic() string {
+	return "assert error values with MatchError instead of matching err.Error()"
+}
+
+func gomegaRawStringMatchErrorDiagnostic() string {
+	return "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+}
+
+func dependencyDirectionDiagnostic() string {
+	return "e2e-proxy must not import LeafWiki internal packages; assert protocol semantics or define local black-box test helpers"
+}
+
+func gomegaStringsContainsMatcherDiagnostic() string {
+	return "use ContainSubstring matcher instead of asserting strings.Contains with BeTrue/BeFalse"
+}
+
+func gomegaErrorsIsMatcherDiagnostic() string {
+	return "use MatchError matcher instead of asserting errors.Is with BeTrue/BeFalse"
+}
+
+func gomegaErrorNilMatcherDiagnostic() string {
+	return "use HaveOccurred matcher instead of nil assertions on error values"
+}
+
+func gomegaInlineErrorSucceedDiagnostic() string {
+	return "use Succeed matcher for inline single-error calls instead of NotTo(HaveOccurred())"
+}
+
+func gomegaMultiReturnErrorMatcherDiagnostic() string {
+	return "use Error() or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
+}
+
+func gomegaBinaryBooleanMatcherDiagnostic() string {
+	return "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+}
+
+func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
+	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
+}
+
+func gomegaRegexpMatchStringDiagnostic() string {
+	return "use MatchRegexp matcher instead of asserting regexp.MatchString with BeTrue/BeFalse"
+}
+
+func gomegaLenMatcherDiagnostic() string {
+	return "use HaveLen matcher instead of asserting len() with Equal"
+}
+
+func gomegaMapIndexMatcherDiagnostic() string {
+	return "use HaveKeyWithValue matcher instead of asserting a direct map index value"
+}
+
+func gomegaHTTPStatusMatcherDiagnostic() string {
+	return "use HaveHTTPStatus matcher instead of asserting response status fields directly"
+}
+
+func gomegaHTTPBodyMatcherDiagnostic() string {
+	return "use HaveHTTPBody matcher instead of matching recorder body strings directly"
+}
+
+func gomegaRepeatedHTTPBodyMatcherDiagnostic() string {
+	return "compose repeated HaveHTTPBody assertions for the same response into one matcher"
+}
+
+func gomegaHTTPHeaderMatcherDiagnostic() string {
+	return "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
+}
+
+func gomegaAsyncCallbackExpectDiagnostic() string {
+	return "use the Gomega value passed into Eventually/Consistently callbacks instead of global Expect"
+}
+
+func gomegaAsyncNegativeReceiveDiagnostic() string {
+	return "use Consistently(...).ShouldNot(Receive()) to prove a channel stays quiet"
+}
+
+func gomegaAsyncBareValueDiagnostic() string {
+	return "wrap bare eventually-polled values in a function so polling re-reads changing state"
+}
+
+func gomegaHelperOffsetDiagnostic(funcName string) string {
+	return fmt.Sprintf("test assertion helper %s contains Gomega assertions without GinkgoHelper, WithOffset, ExpectWithOffset, or a Gomega parameter", funcName)
+}
+
+func gomegaStructuredErrorMatcherDiagnostic(fieldName string) string {
+	return fmt.Sprintf("assert structured error semantics with a typed domain matcher/helper instead of matching %s directly", fieldName)
+}
+
+func gomegaStructuredProtocolKeyMatcherDiagnostic(fieldName string) string {
+	return fmt.Sprintf("assert structured protocol semantics with a typed domain matcher/helper instead of matching key %s directly", fieldName)
+}
+
+func gomegaStructuredProtocolPayloadMatcherDiagnostic(matcherName string) string {
+	return fmt.Sprintf("assert structured protocol semantics with a typed domain matcher/helper instead of matching raw %s payload directly", matcherName)
+}
+
+func gomegaNumericEquivalentDiagnostic() string {
+	return "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
+}
+
+func gomegaTimeEqualDiagnostic() string {
+	return "use BeTemporally for time.Time equality assertions"
+}
+
+func customMatcherSemanticParameterDiagnostic(funcName string, paramName string, semanticType string) string {
+	return fmt.Sprintf("custom matcher %s parameter %s uses string for %s; use the semantic type in matcher constructors", funcName, paramName, semanticType)
+}
+
+func customMatcherMessageParameterDiagnostic(funcName string, paramName string) string {
+	return fmt.Sprintf("custom matcher %s parameter %s accepts rendered prose; assert MessageID/catalog semantics instead", funcName, paramName)
+}
+
+func customMatcherFieldParameterDiagnostic(funcName string, paramName string) string {
+	return fmt.Sprintf("custom matcher %s parameter %s uses string for validation field identity; use a semantic field-name type or helper constant", funcName, paramName)
+}
+
+func ginkgoContainerCallDiagnostic(name string) string {
+	return fmt.Sprintf("move %s out of Ginkgo container body; containers should only declare specs and setup nodes", name)
+}
+
+func ginkgoContainerStateInitializationDiagnostic() string {
+	return "move state initialization out of Ginkgo container body; declare variables in containers and initialize in setup nodes"
+}
+
+func ginkgoFocusDiagnostic() string {
+	return "do not commit focused Ginkgo specs; remove Focus/F-prefixed node"
+}
+
+func ginkgoPendingDiagnostic() string {
+	return "do not commit pending Ginkgo specs; finish or delete the spec instead"
+}
+
+func ginkgoFlakeAttemptsDiagnostic() string {
+	return "do not commit Ginkgo flake retries; fix the flake or quarantine it outside the suite"
+}
+
+func ginkgoRestrictedDecoratorDiagnostic(name string) string {
+	return fmt.Sprintf("avoid Ginkgo %s decorator unless the test suite policy explicitly allows it", name)
+}
+
+func ginkgoWideEntryDiagnostic() string {
+	return "use a row struct for Ginkgo table entries with many parameters"
+}
+
+func ginkgoEntrySetupValueDiagnostic() string {
+	return "Ginkgo Entry arguments are evaluated at construction time; pass stable row data instead of setup-initialized variables"
+}
+
+func ginkgoAsyncContextDiagnostic() string {
+	return "propagate the spec context into Eventually/Consistently with WithContext or positional context"
+}
+
+func ginkgoGoroutineRecoverDiagnostic() string {
+	return "goroutine with assertions must defer GinkgoRecover() or use GinkgoHelperGo"
+}
+
+func ginkgoBlockingReceiveDiagnostic() string {
+	return "avoid blocking channel receives in specs; use Eventually(...).Should(Receive(...)) so failures surface"
+}
+
+func ginkgoHelperFirstDiagnostic(funcName string) string {
+	return fmt.Sprintf("call GinkgoHelper() as the first statement in assertion helper %s", funcName)
+}
+
+func ginkgoReusableHelperMatcherDiagnostic(funcName string) string {
+	return fmt.Sprintf("prefer a custom Gomega matcher for reusable assertion helper %s", funcName)
+}
+
+func ginkgoGlobalStateCleanupDiagnostic(name string) string {
+	return fmt.Sprintf("restore global state changes with DeferCleanup next to %s", name)
+}
+
+func gomegaErrorsAsMatcherDiagnostic() string {
+	return "assert error type semantics with MatchError/Satisfy instead of errors.As(...) with BeTrue/BeFalse"
+}
+
+func gomegaOSIsNotExistMatcherDiagnostic() string {
+	return "assert error semantics with MatchError instead of os.IsNotExist(...) with BeTrue/BeFalse"
+}
+
+func gomegaAsyncBooleanMatcherDiagnostic() string {
+	return "poll a semantic value or assertion callback instead of Eventually/Consistently boolean results with BeTrue/BeFalse"
+}
+
+func gomegaEqualEmptyDiagnostic() string {
+	return "use BeEmpty matcher instead of Equal(empty) for empty collection/string assertions"
+}
+
+func gomegaEqualZeroDiagnostic() string {
+	return "use BeZero matcher instead of Equal(0) for zero-value assertions"
+}
+
+func gomegaRepeatedFieldAssertionDiagnostic() string {
+	return "compose repeated field assertions on the same value into a semantic matcher or MatchFields"
+}
+
+func gomegaCollectionIndexAssertionDiagnostic() string {
+	return "assert collections with ContainElement/ConsistOf/HaveExactElements instead of positional index field assertions"
+}

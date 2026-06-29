@@ -13,11 +13,41 @@ func checkTypeSpec(ctx *analysisContext, spec *ast.TypeSpec) {
 
 func checkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 	filename := ctx.filename(fn.Pos())
+	if isTestFile(filename) {
+		checkTestHelperSignature(ctx, fn)
+	}
 	if isAllowedSignatureFile(filename) {
 		return
 	}
 	checkLocalizedProseSinkSignature(ctx, fn)
 	checkSignatureParams(ctx, fn.Name.Name, semanticContextName(fn), fn.Type.Params)
+}
+
+func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {
+	if fn.Type.Params == nil || !isTestSemanticAssertionHelper(fn.Name.Name) {
+		return
+	}
+	for _, field := range fn.Type.Params.List {
+		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
+				ctx.pass.Reportf(name.Pos(), "%s", testHelperSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				continue
+			}
+			if testHelperMessageParamName(name.Name, fn.Name.Name) {
+				ctx.pass.Reportf(name.Pos(), "%s", testHelperMessageParameterDiagnostic(fn.Name.Name, name.Name))
+				continue
+			}
+			if testHelperFieldParamName(name.Name, fn.Name.Name) {
+				ctx.pass.Reportf(name.Pos(), "%s", testHelperFieldParameterDiagnostic(fn.Name.Name, name.Name))
+			}
+		}
+	}
 }
 
 func checkLocalizedProseSinkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -140,6 +170,9 @@ func semanticContextName(fn *ast.FuncDecl) string {
 func checkStructFields(ctx *analysisContext, spec *ast.TypeSpec) {
 	filename := ctx.filename(spec.Pos())
 	if isAllowedStructFieldFile(filename) || isPersistenceRowStruct(ctx, spec) {
+		return
+	}
+	if isRepoTestBoundaryFile(filename) && isTestFixtureStructName(spec.Name.Name) {
 		return
 	}
 	strct, ok := spec.Type.(*ast.StructType)
