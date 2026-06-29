@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -11,9 +10,12 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 func setupUpdateUserUseCase() (*UpdateUserUseCase, *coreauth.UserService) {
@@ -90,9 +92,11 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			RequesterIsAdmin: true,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.User.Username).To(Equal("ed-admin-updated"))
-		Expect(out.User.Email).To(Equal("ed-admin-updated@example.com"))
-		Expect(out.User.Role).To(Equal(coreauth.RoleEditor))
+		Expect(out.User).To(MatchAuthPublicUser(gstruct.Fields{
+			"Username": Equal("ed-admin-updated"),
+			"Email":    Equal("ed-admin-updated@example.com"),
+			"Role":     Equal(coreauth.RoleEditor),
+		}))
 	})
 
 	ginkgo.It("TestUpdateUser_NonAdminCannotEscalateRole", func() {
@@ -126,9 +130,11 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			RequesterIsAdmin: false,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.User.Username).To(Equal("ed-updated"))
-		Expect(out.User.Email).To(Equal("ed-updated@example.com"))
-		Expect(out.User.Role).To(Equal(coreauth.RoleEditor))
+		Expect(out.User).To(MatchAuthPublicUser(gstruct.Fields{
+			"Username": Equal("ed-updated"),
+			"Email":    Equal("ed-updated@example.com"),
+			"Role":     Equal(coreauth.RoleEditor),
+		}))
 	})
 
 	ginkgo.It("TestUpdateUser_LastAdminCannotSelfDemote", func() {
@@ -191,12 +197,12 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			Role:     "invalid",
 		})
 
-		var ve *sharederrors.ValidationErrors
-		Expect(errors.As(err, &ve)).To(BeTrue(), "error = %T %v, want ValidationErrors", err, err)
-		expectAuthFieldErrorCode(ve, "username", "auth_username_required", "validation.auth.username_required")
-		expectAuthFieldErrorCode(ve, "email", "auth_email_invalid", "validation.auth.email_invalid")
-		expectAuthFieldErrorCode(ve, "password", "auth_password_too_short", "validation.auth.password_too_short")
-		expectAuthFieldErrorCode(ve, "role", "auth_role_invalid", "validation.auth.role_invalid")
+		Expect(err).To(SatisfyAll(
+			HaveAuthFieldErrorCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired),
+			HaveAuthFieldErrorCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid),
+			HaveAuthFieldErrorCode("password", FieldCodeAuthPasswordTooShort, MessageIDAuthPasswordTooShort),
+			HaveAuthFieldErrorCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid),
+		))
 	})
 
 	ginkgo.It("TestCreateAPIKeyUseCaseValidationReturnsStableFieldCodes", func() {
@@ -204,9 +210,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 
 		_, err := uc.Execute(context.Background(), CreateAPIKeyInput{Name: ""})
 
-		var ve *sharederrors.ValidationErrors
-		Expect(errors.As(err, &ve)).To(BeTrue(), "error = %T %v, want ValidationErrors", err, err)
-		expectAuthFieldErrorCode(ve, "name", "auth_api_key_name_required", "validation.auth.api_key_name_required")
+		Expect(err).To(HaveAuthFieldErrorCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired))
 	})
 
 	ginkgo.It("TestAPIKeyUseCaseInputsUseSemanticIDs", func() {
@@ -246,8 +250,10 @@ var _ = ginkgo.Describe("auth use cases", func() {
 
 		userOut, err := NewGetUserByIDUseCase(userSvc).Execute(context.Background(), GetUserByIDInput{ID: newFixtureUserID(viewer.ID)})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(userOut.User.ID).To(Equal(viewer.ID))
-		Expect(userOut.User.Username).To(Equal("viewer"))
+		Expect(userOut.User).To(MatchAuthPublicUser(gstruct.Fields{
+			"ID":       Equal(viewer.ID),
+			"Username": Equal("viewer"),
+		}))
 	})
 
 	ginkgo.It("GetUsersUseCase returns storage errors", func() {
@@ -269,9 +275,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			OldPassword: "wrong-password",
 			NewPassword: "new-password",
 		})
-		var ve *sharederrors.ValidationErrors
-		Expect(errors.As(err, &ve)).To(BeTrue())
-		expectAuthFieldErrorCode(ve, "oldPassword", "auth_old_password_incorrect", "validation.auth.old_password_incorrect")
+		Expect(err).To(HaveAuthFieldErrorCode("oldPassword", FieldCodeAuthOldPasswordIncorrect, MessageIDAuthOldPasswordIncorrect))
 
 		err = uc.Execute(context.Background(), ChangeOwnPasswordInput{
 			UserID:      newFixtureUserID(user.ID),
@@ -314,8 +318,10 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			RequesterIsAdmin: true,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updateOut.User.Username).To(Equal("reload-user-updated"))
-		Expect(updateOut.User.Role).To(Equal(coreauth.RoleViewer))
+		Expect(updateOut.User).To(MatchAuthPublicUser(gstruct.Fields{
+			"Username": Equal("reload-user-updated"),
+			"Role":     Equal(coreauth.RoleViewer),
+		}))
 
 		err = (&DeleteUserUseCase{
 			user:     userSvc,
@@ -341,9 +347,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			CurrentPassword:        "wrong",
 			RequireCurrentPassword: true,
 		})
-		var ve *sharederrors.ValidationErrors
-		Expect(errors.As(err, &ve)).To(BeTrue())
-		expectAuthFieldErrorCode(ve, "currentPassword", "auth_current_password_incorrect", "validation.auth.current_password_incorrect")
+		Expect(err).To(HaveAuthFieldErrorCode("currentPassword", FieldCodeAuthCurrentPasswordIncorrect, MessageIDAuthCurrentPasswordIncorrect))
 
 		out, err := uc.Execute(context.Background(), CreateAPIKeyInput{
 			UserID:                 newFixtureUserID(user.ID),
@@ -367,8 +371,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 
 		listed, err := NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: newFixtureUserID(user.ID)})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(listed.Keys).To(HaveLen(1))
-		Expect(listed.Keys[0].ID).To(Equal(created.Key.ID))
+		Expect(listed.Keys).To(ConsistOf(HaveField("ID", Equal(created.Key.ID))))
 
 		err = NewRevokeAPIKeyUseCase(apiKeys).Execute(context.Background(), RevokeAPIKeyInput{
 			UserID: newFixtureUserID(user.ID),
@@ -414,17 +417,18 @@ var _ = ginkgo.Describe("auth use cases", func() {
 	})
 })
 
-func expectAuthFieldErrorCode(ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
-	ginkgo.GinkgoHelper()
-	for _, got := range ve.Errors {
-		if got.Field != field {
-			continue
+func HaveAuthFieldErrorCode(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		if !errors.As(err, &validation) {
+			return nil
 		}
-		Expect(fmt.Sprintf("%s", got.Code)).To(Equal(code))
-		Expect(fmt.Sprintf("%s", got.MessageID)).To(Equal(messageID))
-		return
-	}
-	ginkgo.Fail(fmt.Sprintf("field %q not found in %#v", field, ve.Errors))
+		return validation
+	}, testmatchers.ContainFieldError(field, code, messageID))
+}
+
+func MatchAuthPublicUser(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
 }
 
 type failingUserResolverReloader struct {
