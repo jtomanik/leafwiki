@@ -1,11 +1,17 @@
 package shell
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/perber/wiki/internal/localization"
+)
+
+var (
+	ErrRunMessageRenderedEmpty  = errors.New("rendered empty")
+	ErrGeneratedRunMessagesFile = errors.New("is stale; regenerate from localization catalog")
 )
 
 func GenerateRunMessages() (string, error) {
@@ -43,7 +49,7 @@ func GenerateRunMessages() (string, error) {
 	for _, message := range messages {
 		result := localization.English.Render(message.id, "")
 		if result.Message == "" {
-			return "", fmt.Errorf("%s rendered empty", message.id)
+			return "", fmt.Errorf("%s %w", message.id, ErrRunMessageRenderedEmpty)
 		}
 		rendered[message.name] = result.Message
 	}
@@ -70,7 +76,7 @@ func ValidateGeneratedRunMessages(path string) error {
 		return err
 	}
 	if string(got) != want {
-		return fmt.Errorf("%s is stale; regenerate from localization catalog", path)
+		return fmt.Errorf("%s %w", path, ErrGeneratedRunMessagesFile)
 	}
 	return nil
 }

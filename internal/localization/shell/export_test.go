@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ var _ = Describe("run message export edge coverage", func() {
 
 		err := ValidateGeneratedRunMessages(path)
 
-		Expect(err).To(MatchError(ContainSubstring("is stale; regenerate from localization catalog")))
+		Expect(err).To(MatchError(ErrGeneratedRunMessagesFile))
 	})
 
 	It("ValidateGeneratedRunMessages returns read errors for missing files", func() {
@@ -74,7 +75,7 @@ var _ = Describe("run message export edge coverage", func() {
 
 		err := ValidateGeneratedRunMessages(path)
 
-		Expect(err).To(MatchError(ContainSubstring("no such file or directory")))
+		Expect(err).To(MatchError(fs.ErrNotExist))
 	})
 
 	It("GenerateRunMessages fails when the English renderer cannot render messages", func() {
@@ -86,7 +87,7 @@ var _ = Describe("run message export edge coverage", func() {
 
 		generated, err := GenerateRunMessages()
 
-		Expect(err).To(MatchError(ContainSubstring("rendered empty")))
+		Expect(err).To(MatchError(ErrRunMessageRenderedEmpty))
 		Expect(generated).To(BeEmpty())
 	})
 
@@ -99,6 +100,6 @@ var _ = Describe("run message export edge coverage", func() {
 
 		err := ValidateGeneratedRunMessages(filepath.Join(GinkgoT().TempDir(), "missing.sh"))
 
-		Expect(err).To(MatchError(ContainSubstring("rendered empty")))
+		Expect(err).To(MatchError(ErrRunMessageRenderedEmpty))
 	})
 })
