@@ -88,6 +88,7 @@ var _ = ginkgo.Describe("importer error responses", func() {
 })
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	ginkgo.GinkgoHelper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -95,6 +96,7 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 func assertImporterStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	var body ImporterErrorResponse
 	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
 	Expect(body.Error.Code.String()).To(Equal(code))

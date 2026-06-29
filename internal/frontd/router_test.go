@@ -20,25 +20,25 @@ type publicRuntimeRouteCase struct {
 
 var _ = DescribeTable("TestRouterServesPublicRuntimeRoutes",
 	func(tc publicRuntimeRouteCase) {
-	t := GinkgoT()
-	w := newTestWiki(t)
-	defer w.Close()
-	router := NewRouter(w, httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-	})
+		t := GinkgoT()
+		w := newTestWiki(t)
+		DeferCleanup(w.Close)
+		router := NewRouter(w, httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
 
-	req := httptest.NewRequest(tc.method, tc.path, nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != tc.wantStatus {
-		t.Fatalf("%s %s status = %d, want %d: %s", tc.method, tc.path, rec.Code, tc.wantStatus, rec.Body.String())
-	}
-},
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != tc.wantStatus {
+			t.Fatalf("%s %s status = %d, want %d: %s", tc.method, tc.path, rec.Code, tc.wantStatus, rec.Body.String())
+		}
+	},
 	Entry("config", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/config", wantStatus: http.StatusOK}),
 	Entry("me", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/auth/me", wantStatus: http.StatusOK}),
 	Entry("branding", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/branding", wantStatus: http.StatusOK}),

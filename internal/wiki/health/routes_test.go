@@ -120,7 +120,9 @@ var _ = ginkgo.Describe("HealthUseCase", func() {
 	ginkgo.It("reports sqlite health for configured indexes and legacy constructor", func() {
 		index, err := search.NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer index.Close()
+		ginkgo.DeferCleanup(func() {
+			Expect(index.Close()).To(Succeed())
+		})
 
 		healthy, checks := NewLegacyHealthUseCase(index, nil, ginkgo.GinkgoT().TempDir()).Execute()
 
@@ -194,6 +196,7 @@ var _ = ginkgo.Describe("required role checks", func() {
 })
 
 func performHealthRequest(router http.Handler) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -204,6 +207,7 @@ func decodeHealthResponse(rec *httptest.ResponseRecorder) struct {
 	Status string            `json:"status"`
 	Checks map[string]string `json:"checks"`
 } {
+	ginkgo.GinkgoHelper()
 	var body struct {
 		Status string            `json:"status"`
 		Checks map[string]string `json:"checks"`

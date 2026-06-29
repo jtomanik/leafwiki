@@ -1,9 +1,10 @@
 package wikid
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
 var _ = ginkgo.It("TestAuthStorageOpensFreshStoresUnderWikidAuthRoot", func() {
@@ -14,7 +15,7 @@ var _ = ginkgo.It("TestAuthStorageOpensFreshStoresUnderWikidAuthRoot", func() {
 	if err != nil {
 		t.Fatalf("OpenAuthStores failed: %v", err)
 	}
-	defer stores.Close()
+	ginkgo.DeferCleanup(stores.Close)
 
 	paths := AuthStoragePaths(dataDir)
 	for _, path := range []string{paths.UsersDB, paths.SessionsDB, paths.APIKeysDB} {

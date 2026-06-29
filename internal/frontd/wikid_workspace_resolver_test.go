@@ -29,7 +29,7 @@ var _ = It("TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute", func() {
 			"status":{"workspaceId":"docs","state":"running","url":"http://127.0.0.1:49152"}
 		}`))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
 	if err != nil {
@@ -60,7 +60,7 @@ var _ = It("TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure", fu
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("invalid workspace ID unexpectedly reached wikid: %s", req.URL.Path)
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
 	if err != nil {
@@ -86,7 +86,7 @@ var _ = It("TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath", func() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"}]}`))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
 	if err != nil {
@@ -114,7 +114,7 @@ var _ = It("TestWikidSingleWorkspaceResolverRejectsAmbiguousWorkspaceList", func
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"},{"id":"docs"}]}`))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
 	if err != nil {
@@ -135,20 +135,20 @@ type workspaceResolverAccessErrorCase struct {
 
 var _ = DescribeTable("TestWikidWorkspaceResolverMapsAccessErrors",
 	func(tt workspaceResolverAccessErrorCase) {
-	t := GinkgoT()
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.WriteHeader(tt.code)
-	}))
-	defer upstream.Close()
-	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
-	if err != nil {
-		t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
-	}
-	_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
-	if err != tt.want {
-		t.Fatalf("err = %v, want %v", err, tt.want)
-	}
-},
+		t := GinkgoT()
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(tt.code)
+		}))
+		DeferCleanup(upstream.Close)
+		resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
+		if err != nil {
+			t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
+		}
+		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
+		if err != tt.want {
+			t.Fatalf("err = %v, want %v", err, tt.want)
+		}
+	},
 	Entry("not found", workspaceResolverAccessErrorCase{code: http.StatusNotFound, want: ErrWorkspaceNotFound}),
 	Entry("forbidden", workspaceResolverAccessErrorCase{code: http.StatusForbidden, want: ErrWorkspaceForbidden}),
 )

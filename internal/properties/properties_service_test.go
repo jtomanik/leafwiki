@@ -232,7 +232,7 @@ func setupPropertiesService(t propertiesTestT) (*PropertiesService, *tree.TreeSe
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	t.Cleanup(func() { closeStoreForTest(t, store) })
+	closeStoreForTest(t, store)
 
 	return NewPropertiesService(store), ts
 }

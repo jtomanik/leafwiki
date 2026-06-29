@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 		Expect(adminUser.Password).NotTo(BeEmpty())
 
 		store = openUserStore(storageDir)
-		defer closeUserStore(store)
+		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService = auth.NewUserService(store)
 		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 		Expect(adminUser.Password).NotTo(BeEmpty())
 
 		store := openUserStore(storageDir)
-		defer closeUserStore(store)
+		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService := auth.NewUserService(store)
 		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		store = openUserStore(storageDir)
-		defer closeUserStore(store)
+		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService = auth.NewUserService(store)
 		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", "oldpassword")
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 		Expect(adminUser.Password).NotTo(BeEmpty())
 
 		store := openUserStore(storageDir)
-		defer closeUserStore(store)
+		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService := auth.NewUserService(store)
 		persisted, err := userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
@@ -123,12 +123,16 @@ var _ = ginkgo.Describe("admin reset", func() {
 })
 
 func openUserStore(storageDir string) *auth.UserStore {
+	ginkgo.GinkgoHelper()
+
 	store, err := auth.NewUserStore(storageDir)
 	Expect(err).NotTo(HaveOccurred())
 	return store
 }
 
 func closeUserStore(store *auth.UserStore) {
+	ginkgo.GinkgoHelper()
+
 	Expect(store.Close()).To(Succeed())
 }
 

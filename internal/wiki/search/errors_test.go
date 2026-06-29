@@ -138,6 +138,7 @@ var _ = ginkgo.Describe("search use cases", func() {
 })
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	ginkgo.GinkgoHelper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -145,12 +146,14 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 func ginContextForTarget(target string) *gin.Context {
+	ginkgo.GinkgoHelper()
 	ctx, _ := ginTestContext()
 	ctx.Request = httptest.NewRequest(http.MethodGet, target, nil)
 	return ctx
 }
 
 func assertSearchStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	var body SearchErrorResponse
 	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
 	Expect(body.Error.Code.String()).To(Equal(code))

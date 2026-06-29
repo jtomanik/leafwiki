@@ -16,9 +16,9 @@ var _ = ginkgo.Describe("test utilities", func() {
 	ginkgo.It("CreateMultipartFile returns an opened file and original filename", func() {
 		file, filename, err := CreateMultipartFile("upload.txt", []byte("hello"))
 		Expect(err).NotTo(HaveOccurred())
-		defer func() {
+		ginkgo.DeferCleanup(func() {
 			Expect(file.Close()).To(Succeed())
-		}()
+		})
 
 		raw, err := io.ReadAll(file)
 		Expect(err).NotTo(HaveOccurred())
@@ -164,7 +164,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 		base := ginkgo.GinkgoT().TempDir()
 		Expect(os.MkdirAll(filepath.Join(base, "fixtures", "pages"), 0o755)).To(Succeed())
 		restore := restoreTestUtilsSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		getwd = func() (string, error) {
 			return base, nil
 		}
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 		restore()
 
 		restore = restoreTestUtilsSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		getwd = func() (string, error) {
 			return "/tmp/wiki", nil
 		}

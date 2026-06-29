@@ -177,7 +177,7 @@ var _ = ginkgo.Describe("user service", func() {
 	ginkgo.It("TestUserService_ResetAdminUserPassword", func() {
 		t := ginkgo.GinkgoT()
 		service := setupTestUserService(t)
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		// Create initial admin user
 		_, err := service.CreateUser("admin", "admin@example.com", "oldpassword", "admin")
@@ -219,7 +219,7 @@ var _ = ginkgo.Describe("user service", func() {
 	ginkgo.It("TestUserService_ResetAdminUserPassword_NoAdmin", func() {
 		t := ginkgo.GinkgoT()
 		service := setupTestUserService(t)
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		// Don't create an admin user first - test should create one
 

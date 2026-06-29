@@ -23,7 +23,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		// Testdata
 		path := "docs/test.md"
@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		if _, err := os.Stat(filepath.Join(tmpDir, "search.db")); err != nil {
 			t.Fatalf("expected search.db in storage dir, got err: %v", err)
@@ -99,7 +99,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		// Index two pages
 		err = index.IndexPage("notes/alpha", "notes/alpha.md", "alpha1", "Alpha Search Test", tree.NodeKindPage, "This content is about SQLite search.")
@@ -152,7 +152,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		// page with match in title
 		err = index.IndexPage(
@@ -219,7 +219,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		// page with match in heading (Markdown heading)
 		err = index.IndexPage(
@@ -277,7 +277,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha Page", tree.NodeKindPage, "Shared token in alpha.")
 		if err != nil {
@@ -320,7 +320,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage(
 			"docs/react-guide",
@@ -370,7 +370,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage(
 			"docs/react-guide",
@@ -405,7 +405,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage(
 			"docs/shoutout",
@@ -449,7 +449,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		if err != nil {
 			t.Fatalf("failed to create SQLiteIndex: %v", err)
 		}
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage(
 			"docs/markdown",
@@ -547,9 +547,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		t := ginkgo.GinkgoT()
 		index, err := NewSQLiteIndex(t.TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer func() {
-			Expect(index.Close()).To(Succeed())
-		}()
+		closeSQLiteIndex(index)
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -569,9 +567,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		t := ginkgo.GinkgoT()
 		index, err := NewSQLiteIndex(t.TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer func() {
-			Expect(index.Close()).To(Succeed())
-		}()
+		closeSQLiteIndex(index)
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -594,9 +590,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		t := ginkgo.GinkgoT()
 		index, err := NewSQLiteIndex(t.TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer func() {
-			Expect(index.Close()).To(Succeed())
-		}()
+		closeSQLiteIndex(index)
 
 		Expect(index.IndexPage("docs/zeta", "docs/zeta.md", "zeta", "Zeta", tree.NodeKindPage, "Zeta body")).To(Succeed())
 		Expect(index.IndexPage("docs/alpha-b", "docs/alpha-b.md", "alpha-b", "Alpha", tree.NodeKindPage, "Alpha B body")).To(Succeed())
@@ -623,9 +617,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		t := ginkgo.GinkgoT()
 		index, err := NewSQLiteIndex(t.TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer func() {
-			Expect(index.Close()).To(Succeed())
-		}()
+		closeSQLiteIndex(index)
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -655,7 +647,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		index, err := NewSQLiteIndex(storageDir)
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		Expect(index.Ping()).To(Succeed())
 	})
@@ -773,7 +765,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns empty results for empty nil-filter searches", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		result, err := index.Search("", nil, 7, 11)
 		Expect(err).NotTo(HaveOccurred())
@@ -790,7 +782,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns malformed markdown errors before indexing", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		err = index.IndexPage(
 			"docs/broken",
@@ -807,7 +799,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns database errors while indexing and removing pages", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(`DROP TABLE pages`)
@@ -817,7 +809,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		insertErrorIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(insertErrorIndex)
+		closeSQLiteIndex(insertErrorIndex)
 		Expect(insertErrorIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -835,7 +827,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns rows-affected errors while removing pages by filepath", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", "delete-error", "Delete Error", tree.NodeKindPage, "body")).To(Succeed())
 		previousRowsAffected := searchRowsAffected
 		rowsAffectedErr := errors.New("rows affected failed")
@@ -855,7 +847,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns database query errors from malformed search tables", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(`DROP TABLE pages`)
 			return err
@@ -869,7 +861,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		queryErrorIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(queryErrorIndex)
+		closeSQLiteIndex(queryErrorIndex)
 		Expect(queryErrorIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -885,7 +877,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns row scan errors from malformed search rows", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(
 				`INSERT INTO pages (path, filepath, pageID, kind, title, headings, content) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -905,7 +897,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		pageIDIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(pageIDIndex)
+		closeSQLiteIndex(pageIDIndex)
 		Expect(pageIDIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -924,7 +916,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("logs row close errors from search readers", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		previousCloseRows := closeSearchRows
 		closeRowsErr := errors.New("close rows failed")
@@ -948,7 +940,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns row iteration errors from search results", func() {
 		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeSQLiteIndex(index)
+		closeSQLiteIndex(index)
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		previousRowsErr := searchRowsErr
 		rowsErr := errors.New("rows failed")
@@ -978,5 +970,8 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 })
 
 func closeSQLiteIndex(index *SQLiteIndex) {
-	Expect(index.Close()).To(Succeed())
+	ginkgo.GinkgoHelper()
+	ginkgo.DeferCleanup(func() {
+		Expect(index.Close()).To(Succeed())
+	})
 }

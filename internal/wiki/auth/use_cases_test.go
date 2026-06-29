@@ -17,6 +17,7 @@ import (
 )
 
 func setupUpdateUserUseCase() (*UpdateUserUseCase, *coreauth.UserService) {
+	ginkgo.GinkgoHelper()
 	userSvc := setupUserService()
 	resolver, err := coreauth.NewUserResolver(userSvc)
 	Expect(err).NotTo(HaveOccurred())
@@ -24,6 +25,7 @@ func setupUpdateUserUseCase() (*UpdateUserUseCase, *coreauth.UserService) {
 }
 
 func setupUserService() *coreauth.UserService {
+	ginkgo.GinkgoHelper()
 	store, err := coreauth.NewUserStore(ginkgo.GinkgoT().TempDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
@@ -33,6 +35,7 @@ func setupUserService() *coreauth.UserService {
 }
 
 func setupUserServiceWithUnusableStorageDir() *coreauth.UserService {
+	ginkgo.GinkgoHelper()
 	storageDir := ginkgo.GinkgoT().TempDir()
 	store, err := coreauth.NewUserStore(storageDir)
 	Expect(err).NotTo(HaveOccurred())
@@ -46,6 +49,7 @@ func setupUserServiceWithUnusableStorageDir() *coreauth.UserService {
 }
 
 func setupAPIKeyService(userSvc *coreauth.UserService) *coreauth.APIKeyService {
+	ginkgo.GinkgoHelper()
 	store, err := coreauth.NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {

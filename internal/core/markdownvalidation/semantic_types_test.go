@@ -54,7 +54,6 @@ var _ = ginkgo.Describe("semantic types", func() {
 
 	ginkgo.It("TestIssueCarriesSemanticPathsAndPageIDs", func() {
 		t := ginkgo.GinkgoT()
-		t.Parallel()
 
 		sourceIssue := Issue{
 			Severity:     IssueSeverityError,

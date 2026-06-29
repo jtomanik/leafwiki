@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	ginkgo "github.com/onsi/ginkgo/v2"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -124,7 +125,7 @@ func deletePageForTest(t wikiTestT, w *Wiki, userID string, id tree.PageID, recu
 var _ = ginkgo.It("TestWiki_DeletePage_Simple", func() {
 	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 	page := createPageForTest(t, w, "system", nil, "Trash", "trash", pageNodeKind())
 	deletePageForTest(t, w, "system", page.ID, false)
 	if _, err := w.tree.GetPage(page.ID); err == nil {
@@ -145,7 +146,7 @@ var _ = ginkgo.It("TestWiki_DefaultWorkspaceKeepsExistingStorageLayout", func() 
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	if got := wikiInstance.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
@@ -170,7 +171,7 @@ var _ = ginkgo.It("TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDat
 		DataDir: dataDir,
 		RootDir: rootDir,
 	})
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	if got := w.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
@@ -208,11 +209,7 @@ var _ = ginkgo.It("TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDat
 	if err != nil {
 		t.Fatalf("CreateTemp logo failed: %v", err)
 	}
-	defer func() {
-		if err := logo.Close(); err != nil {
-			t.Fatalf("Close logo failed: %v", err)
-		}
-	}()
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, logo.Close)
 	if _, err := logo.Write([]byte("png")); err != nil {
 		t.Fatalf("Write logo failed: %v", err)
 	}
@@ -254,7 +251,7 @@ var _ = ginkgo.It("TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingSto
 	if err != nil {
 		t.Fatalf("NewWiki workspace-only failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	if w.UserService() != nil || w.AuthService() != nil || w.APIKeyService() != nil || w.OAuthService() != nil {
 		t.Fatalf("workspace-only wiki owns identity services: user=%v auth=%v apiKeys=%v oauth=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService())
@@ -306,7 +303,7 @@ var _ = ginkgo.It("TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores", func(
 	if err != nil {
 		t.Fatalf("NewWiki control-plane-only failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	if w.UserService() == nil || w.AuthService() == nil || w.APIKeyService() == nil || w.OAuthService() == nil || w.branding == nil {
 		t.Fatalf("control-plane-only wiki did not own identity/branding services: user=%v auth=%v apiKeys=%v oauth=%v branding=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService(), w.branding)
@@ -349,7 +346,7 @@ var _ = ginkgo.It("TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth", func()
 	if err != nil {
 		t.Fatalf("NewWiki control-plane-only failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	w.SetRuntimeRoleHealth([]projectdaemon.RoleName{
@@ -412,7 +409,7 @@ var _ = ginkgo.It("TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown", f
 	if err != nil {
 		t.Fatalf("NewWiki with invalid workspace sync state returned error: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	status := w.WorkspaceSyncStatus()
 	if status.LastCommitHash == "" {
@@ -501,7 +498,7 @@ var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsWebPageCreates", func() {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 	before := w.WorkspaceSyncStatus().LastCommitHash
 	if before == "" {
 		t.Fatalf("initial workspace sync commit hash is empty")
@@ -540,7 +537,7 @@ var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsImportedPages", func() {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 	before := w.WorkspaceSyncStatus().LastCommitHash
 	if before == "" {
 		t.Fatalf("initial workspace sync commit hash is empty")
@@ -601,7 +598,7 @@ var _ = ginkgo.It("TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes", func() 
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	raw := `---
 leafwiki_id: indexed-page
@@ -756,11 +753,11 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor", func() {
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ginkgo.DeferCleanup(cancel)
 	serverDone := make(chan error, 1)
 	go func() {
 		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
@@ -775,7 +772,9 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor", func() {
 	if err != nil {
 		t.Fatalf("Connect MCP client failed: %v", err)
 	}
-	defer session.Close()
+	ginkgo.DeferCleanup(func() {
+		_ = session.Close()
+	})
 
 	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
@@ -797,15 +796,10 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor", func() {
 		t.Fatalf("native stdio current user = %#v, want public-editor editor", currentUser)
 	}
 
-	session.Close()
-	select {
-	case err := <-serverDone:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("RunMCPStdio returned %v", err)
-		}
-	case <-ctx.Done():
-		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close MCP session failed: %v", err)
 	}
+	Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 })
 
 var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory", func() {
@@ -823,11 +817,11 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHisto
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ginkgo.DeferCleanup(cancel)
 	serverDone := make(chan error, 1)
 	go func() {
 		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
@@ -842,7 +836,9 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHisto
 	if err != nil {
 		t.Fatalf("Connect MCP client failed: %v", err)
 	}
-	defer session.Close()
+	ginkgo.DeferCleanup(func() {
+		_ = session.Close()
+	})
 
 	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
@@ -900,16 +896,15 @@ var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHisto
 		t.Fatalf("list_revisions structured content = %#v, want non-empty revisions", revisions.StructuredContent)
 	}
 
-	session.Close()
-	select {
-	case err := <-serverDone:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("RunMCPStdio returned %v", err)
-		}
-	case <-ctx.Done():
-		t.Fatalf("RunMCPStdio did not stop after client close: %v", ctx.Err())
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close MCP session failed: %v", err)
 	}
+	Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 })
+
+func mcpServerStoppedSuccessfully(err error) bool {
+	return err == nil || errors.Is(err, context.Canceled)
+}
 
 func mcpToolNamesContain(tools []*sdkmcp.Tool, name string) bool {
 	for _, tool := range tools {
@@ -978,7 +973,7 @@ var _ = ginkgo.It("TestWiki_NormalizesWorkspacePathsBeforeInitializingServices",
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	if got := w.GetStorageDir(); got != dataDir {
 		t.Fatalf("GetStorageDir() = %q, want normalized %q", got, dataDir)
@@ -997,7 +992,7 @@ var _ = ginkgo.It("TestWiki_NormalizesWorkspacePathsBeforeInitializingServices",
 var _ = ginkgo.It("TestWiki_DeletePage_WithChildren", func() {
 	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
 	createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
@@ -1013,7 +1008,7 @@ var _ = ginkgo.It("TestWiki_DeletePage_WithChildren", func() {
 var _ = ginkgo.It("TestWiki_DeletePage_Recursive", func() {
 	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
 	child := createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
@@ -1029,7 +1024,7 @@ var _ = ginkgo.It("TestWiki_DeletePage_Recursive", func() {
 var _ = ginkgo.It("TestWiki_InitDefaultAdmin_UsesGivenPassword", func() {
 	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	_, err := w.user.GetUserByEmailOrUsernameAndPassword("admin", "admin")
 	if err != nil {
@@ -1040,7 +1035,7 @@ var _ = ginkgo.It("TestWiki_InitDefaultAdmin_UsesGivenPassword", func() {
 var _ = ginkgo.It("TestWiki_Login_SuccessAndFailure", func() {
 	t := ginkgo.GinkgoT()
 	w := createWikiTestInstance(t)
-	defer closeWithErrorCheckForTest(t, w.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 	authSvc := w.auth
 	if authSvc == nil {
@@ -1072,7 +1067,7 @@ var _ = ginkgo.It("TestWiki_AuthDisabled_Initialization", func() {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	// Verify that the auth service is nil
 	if wikiInstance.auth != nil {
@@ -1090,7 +1085,7 @@ var _ = ginkgo.It("TestWiki_AuthDisabled_LoginUnavailable", func() {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
@@ -1108,7 +1103,7 @@ var _ = ginkgo.It("TestWiki_AuthDisabled_LogoutUnavailable", func() {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
@@ -1126,7 +1121,7 @@ var _ = ginkgo.It("TestWiki_AuthDisabled_RefreshTokenUnavailable", func() {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	// Auth operations are unavailable when auth is disabled.
 	if wikiInstance.auth != nil {
@@ -1144,7 +1139,7 @@ var _ = ginkgo.It("TestWiki_AuthDisabled_CoreFunctionalityWorks", func() {
 	if err != nil {
 		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
 	}
-	defer closeWithErrorCheckForTest(t, wikiInstance.Close)
+	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
 	// Test creating a page
 	page := createPageForTest(t, wikiInstance, "system", nil, "Test Page", "test-page", pageNodeKind())

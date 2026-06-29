@@ -31,7 +31,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 		restore := restoreSeedSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		var stderr bytes.Buffer
 		var exitCode int
 		users, apiKeys, services := newFakeSeedServices()
@@ -57,51 +57,38 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(apiKeys.revokedKeyID).To(Equal(apiKeys.created["E2E STDIO revoked"].Key.ID))
 	})
 
-	ginkgo.It("runSeedMCPAPIKeys reports command line and output errors", func() {
-		cases := []struct {
-			name      string
-			args      []string
-			configure func()
-			want      string
-		}{
-			{name: "parse", args: []string{"--unknown"}, want: "parse flags:"},
-			{name: "missing required", args: nil, want: "--data-dir and --output are required"},
-			{
-				name: "write output",
-				args: []string{"--data-dir", "/tmp/data", "--output", "/tmp/seeds.json"},
-				configure: func() {
-					_, _, services := newFakeSeedServices()
-					openSeedServices = func(string) (seedServices, error) {
-						return services, nil
-					}
-					seedWriteFile = func(string, []byte, os.FileMode) error {
-						return errors.New("write failed")
-					}
-				},
-				want: "write output: write failed",
-			},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("runSeedMCPAPIKeys reports command line and output errors",
+		func(tc runSeedErrorCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 			restore := restoreSeedSeams()
-			func() {
-				defer restore()
-				if tc.configure != nil {
-					tc.configure()
+			ginkgo.DeferCleanup(restore)
+			if tc.configure != nil {
+				tc.configure()
+			}
+			var stderr bytes.Buffer
+
+			code := runSeedMCPAPIKeys(tc.args, &stderr)
+
+			Expect(code).To(Equal(1))
+			Expect(stderr.String()).To(ContainSubstring(tc.want))
+		},
+		ginkgo.Entry("parse", runSeedErrorCase{args: []string{"--unknown"}, want: "parse flags:"}),
+		ginkgo.Entry("missing required", runSeedErrorCase{want: "--data-dir and --output are required"}),
+		ginkgo.Entry("write output", runSeedErrorCase{
+			args: []string{"--data-dir", "/tmp/data", "--output", "/tmp/seeds.json"},
+			configure: func() {
+				_, _, services := newFakeSeedServices()
+				openSeedServices = func(string) (seedServices, error) {
+					return services, nil
 				}
-				var stderr bytes.Buffer
-
-				code := runSeedMCPAPIKeys(tc.args, &stderr)
-
-				Expect(code).To(Equal(1))
-				Expect(stderr.String()).To(ContainSubstring(tc.want))
-			}()
-		}
-	})
+				seedWriteFile = func(string, []byte, os.FileMode) error {
+					return errors.New("write failed")
+				}
+			},
+			want: "write output: write failed",
+		}),
+	)
 
 	ginkgo.It("TestSeedMCPAPIKeysWritesWikidAuthStoreByDefault", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
@@ -122,7 +109,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 			_, err := seedMCPAPIKeys(ginkgo.GinkgoT().TempDir())
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("unknown environment variable: " + name))
+			Expect(err).To(MatchError(ContainSubstring("unknown environment variable: " + name)))
 		},
 		ginkgo.Entry("LEAFWIKI_RUNTIME_STACK", "LEAFWIKI_RUNTIME_STACK"),
 		ginkgo.Entry("LEAFWIKI_RUN_MCP_RUNTIME_STACK", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
@@ -202,124 +189,161 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(seeds.Admin.APIKey).NotTo(Equal(seeds.Editor.APIKey))
 	})
 
-	ginkgo.It("writeSeedMCPAPIKeysOutput wraps seed, marshal, and write failures", func() {
-		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
-		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-		restore := restoreSeedSeams()
-		openSeedServices = func(string) (seedServices, error) {
-			return seedServices{}, errors.New("open failed")
-		}
-		err := writeSeedMCPAPIKeysOutput("/tmp/data", "/tmp/out.json")
-		Expect(err).To(MatchError(ContainSubstring("seed MCP API keys: open failed")))
-		restore()
+	ginkgo.DescribeTable("writeSeedMCPAPIKeysOutput wraps failures",
+		func(tc seedOutputFailureCase) {
+			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
+			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
+			restore := restoreSeedSeams()
+			ginkgo.DeferCleanup(restore)
+			tc.configure()
 
-		restore = restoreSeedSeams()
-		_, _, services := newFakeSeedServices()
-		openSeedServices = func(string) (seedServices, error) {
-			return services, nil
-		}
-		seedMarshalIndent = func(any, string, string) ([]byte, error) {
-			return nil, errors.New("marshal failed")
-		}
-		err = writeSeedMCPAPIKeysOutput("/tmp/data", "/tmp/out.json")
-		Expect(err).To(MatchError(ContainSubstring("marshal output: marshal failed")))
-		restore()
+			err := writeSeedMCPAPIKeysOutput("/tmp/data", "/tmp/out.json")
 
-		restore = restoreSeedSeams()
-		_, _, services = newFakeSeedServices()
-		openSeedServices = func(string) (seedServices, error) {
-			return services, nil
-		}
-		seedWriteFile = func(string, []byte, os.FileMode) error {
-			return errors.New("write failed")
-		}
-		err = writeSeedMCPAPIKeysOutput("/tmp/data", "/tmp/out.json")
-		Expect(err).To(MatchError(ContainSubstring("write output: write failed")))
-		restore()
-	})
+			Expect(err).To(MatchError(ContainSubstring(tc.want)))
+		},
+		ginkgo.Entry("seed", seedOutputFailureCase{
+			configure: func() {
+				openSeedServices = func(string) (seedServices, error) {
+					return seedServices{}, errors.New("open failed")
+				}
+			},
+			want: "seed MCP API keys: open failed",
+		}),
+		ginkgo.Entry("marshal", seedOutputFailureCase{
+			configure: func() {
+				_, _, services := newFakeSeedServices()
+				openSeedServices = func(string) (seedServices, error) {
+					return services, nil
+				}
+				seedMarshalIndent = func(any, string, string) ([]byte, error) {
+					return nil, errors.New("marshal failed")
+				}
+			},
+			want: "marshal output: marshal failed",
+		}),
+		ginkgo.Entry("write", seedOutputFailureCase{
+			configure: func() {
+				_, _, services := newFakeSeedServices()
+				openSeedServices = func(string) (seedServices, error) {
+					return services, nil
+				}
+				seedWriteFile = func(string, []byte, os.FileMode) error {
+					return errors.New("write failed")
+				}
+			},
+			want: "write output: write failed",
+		}),
+	)
 
-	ginkgo.It("seedMCPAPIKeys reports service setup and user mutation failures", func() {
-		cases := []struct {
-			name      string
-			configure func(*fakeSeedUsers, *fakeSeedAPIKeys)
-			want      string
-		}{
-			{name: "init admin", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.initErr = errors.New("init failed") }, want: "init admin: init failed"},
-			{name: "load admin", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.getErr = errors.New("load failed") }, want: "load admin: load failed"},
-			{name: "create editor", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
+	ginkgo.DescribeTable("seedMCPAPIKeys reports service setup and user mutation failures",
+		func(tc seedServiceFailureCase) {
+			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
+			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
+			restore := restoreSeedSeams()
+			ginkgo.DeferCleanup(restore)
+			users, apiKeys, services := newFakeSeedServices()
+			tc.configure(users, apiKeys)
+			openSeedServices = func(string) (seedServices, error) {
+				return services, nil
+			}
+
+			_, err := seedMCPAPIKeys("/tmp/data")
+
+			Expect(err).To(MatchError(ContainSubstring(tc.want)))
+		},
+		ginkgo.Entry("init admin", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.initErr = errors.New("init failed") },
+			want:      "init admin: init failed",
+		}),
+		ginkgo.Entry("load admin", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.getErr = errors.New("load failed") },
+			want:      "load admin: load failed",
+		}),
+		ginkgo.Entry("create editor", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
 				users.createErrFor["stdio-editor"] = errors.New("create failed")
-			}, want: "create stdio-editor: create failed"},
-			{name: "create second editor", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
+			},
+			want: "create stdio-editor: create failed",
+		}),
+		ginkgo.Entry("create second editor", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
 				users.createErrFor["stdio-second-editor"] = errors.New("create failed")
-			}, want: "create stdio-second-editor: create failed"},
-			{name: "create viewer", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
+			},
+			want: "create stdio-second-editor: create failed",
+		}),
+		ginkgo.Entry("create viewer", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
 				users.createErrFor["stdio-viewer"] = errors.New("create failed")
-			}, want: "create stdio-viewer: create failed"},
-			{name: "create revoked", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
+			},
+			want: "create stdio-viewer: create failed",
+		}),
+		ginkgo.Entry("create revoked", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
 				users.createErrFor["stdio-revoked"] = errors.New("create failed")
-			}, want: "create stdio-revoked: create failed"},
-			{name: "create deleted", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
+			},
+			want: "create stdio-revoked: create failed",
+		}),
+		ginkgo.Entry("create deleted", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) {
 				users.createErrFor["stdio-deleted"] = errors.New("create failed")
-			}, want: "create stdio-deleted: create failed"},
-			{name: "revoke key", configure: func(_ *fakeSeedUsers, apiKeys *fakeSeedAPIKeys) { apiKeys.revokeErr = errors.New("revoke failed") }, want: "revoke seeded key: revoke failed"},
-			{name: "delete user", configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.deleteErr = errors.New("delete failed") }, want: "delete seeded user: delete failed"},
-		}
+			},
+			want: "create stdio-deleted: create failed",
+		}),
+		ginkgo.Entry("revoke key", seedServiceFailureCase{
+			configure: func(_ *fakeSeedUsers, apiKeys *fakeSeedAPIKeys) { apiKeys.revokeErr = errors.New("revoke failed") },
+			want:      "revoke seeded key: revoke failed",
+		}),
+		ginkgo.Entry("delete user", seedServiceFailureCase{
+			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys) { users.deleteErr = errors.New("delete failed") },
+			want:      "delete seeded user: delete failed",
+		}),
+	)
 
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("seedMCPAPIKeys reports every seeded API key creation failure",
+		func(tc seedAPIKeyCreationFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 			restore := restoreSeedSeams()
-			func() {
-				defer restore()
-				users, apiKeys, services := newFakeSeedServices()
-				tc.configure(users, apiKeys)
-				openSeedServices = func(string) (seedServices, error) {
-					return services, nil
-				}
+			ginkgo.DeferCleanup(restore)
+			_, apiKeys, services := newFakeSeedServices()
+			apiKeys.createErrFor[tc.keyName] = errors.New("key failed")
+			openSeedServices = func(string) (seedServices, error) {
+				return services, nil
+			}
 
-				_, err := seedMCPAPIKeys("/tmp/data")
+			_, err := seedMCPAPIKeys("/tmp/data")
 
-				Expect(err).To(MatchError(ContainSubstring(tc.want)))
-			}()
-		}
-	})
-
-	ginkgo.It("seedMCPAPIKeys reports every seeded API key creation failure", func() {
-		cases := []struct {
-			keyName string
-			user    string
-		}{
-			{keyName: "E2E STDIO admin", user: "admin"},
-			{keyName: "E2E STDIO editor", user: "stdio-editor"},
-			{keyName: "E2E STDIO second editor", user: "stdio-second-editor"},
-			{keyName: "E2E STDIO viewer", user: "stdio-viewer"},
-			{keyName: "E2E STDIO revoked", user: "stdio-revoked"},
-			{keyName: "E2E STDIO deleted", user: "stdio-deleted"},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.keyName)
-			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
-			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-			restore := restoreSeedSeams()
-			func() {
-				defer restore()
-				_, apiKeys, services := newFakeSeedServices()
-				apiKeys.createErrFor[tc.keyName] = errors.New("key failed")
-				openSeedServices = func(string) (seedServices, error) {
-					return services, nil
-				}
-
-				_, err := seedMCPAPIKeys("/tmp/data")
-
-				Expect(err).To(MatchError(ContainSubstring("create key for " + tc.user + ": key failed")))
-			}()
-		}
-	})
+			Expect(err).To(MatchError(ContainSubstring("create key for " + tc.user + ": key failed")))
+		},
+		ginkgo.Entry("admin", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO admin", user: "admin"}),
+		ginkgo.Entry("editor", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO editor", user: "stdio-editor"}),
+		ginkgo.Entry("second editor", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO second editor", user: "stdio-second-editor"}),
+		ginkgo.Entry("viewer", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO viewer", user: "stdio-viewer"}),
+		ginkgo.Entry("revoked", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO revoked", user: "stdio-revoked"}),
+		ginkgo.Entry("deleted", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO deleted", user: "stdio-deleted"}),
+	)
 })
+
+type runSeedErrorCase struct {
+	args      []string
+	configure func()
+	want      string
+}
+
+type seedOutputFailureCase struct {
+	configure func()
+	want      string
+}
+
+type seedServiceFailureCase struct {
+	configure func(*fakeSeedUsers, *fakeSeedAPIKeys)
+	want      string
+}
+
+type seedAPIKeyCreationFailureCase struct {
+	keyName string
+	user    string
+}
 
 func assertWikidSeededAPIKey(dataDir string, seeds seedOutput) {
 	ginkgo.GinkgoHelper()

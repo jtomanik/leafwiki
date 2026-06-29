@@ -11,6 +11,7 @@ import (
 )
 
 func signAuthClaims(service *AuthService, claims jwt.MapClaims) string {
+	ginkgo.GinkgoHelper()
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(service.secretKey)
 	Expect(err).NotTo(HaveOccurred())
 	return token
@@ -218,7 +219,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		ginkgo.It("treats expired, revoked, and missing sessions as inactive", func() {
 			store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
 			Expect(err).NotTo(HaveOccurred())
-			defer closeWithErrorCheck(store.Close)
+			ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 			userID := newFixtureUserID("session-user")
 			expiredID := newFixtureSessionID("expired-session")

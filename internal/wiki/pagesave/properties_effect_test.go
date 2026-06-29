@@ -20,7 +20,7 @@ func setupPropertiesEffectTest(t pagesaveTestT) (*tree.TreeService, *properties.
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	t.Cleanup(func() {
+	ginkgo.DeferCleanup(func() {
 		if err := store.Close(); err != nil {
 			t.Fatalf("PropertiesStore.Close: %v", err)
 		}

@@ -12,7 +12,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 	ginkgo.It("SessionStore.CleanupExpiredSessions removes expired sessions and keeps active sessions", func() {
 		store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
 		Expect(err).NotTo(HaveOccurred())
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		userID := newFixtureUserID("cleanup-user")
 		expiredID := newFixtureSessionID("expired-session")
@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 
 	ginkgo.It("UserResolver preloads, lazily resolves, handles empty IDs, and reloads changed labels", func() {
 		service := setupTestUserService(ginkgo.GinkgoT())
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		alice, err := service.CreateUser("alice", "alice@example.com", "alicepass", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 
 	ginkgo.It("UserService.DoesIDAndPasswordMatch handles success, invalid password, and missing user", func() {
 		service := setupTestUserService(ginkgo.GinkgoT())
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		user, err := service.CreateUser("charlie", "charlie@example.com", "correct-password", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 
 	ginkgo.It("UserService.GetUserByUsername and GetUserByIdentifier resolve username, email fallback, and not found", func() {
 		service := setupTestUserService(ginkgo.GinkgoT())
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		user, err := service.CreateUser("dana", "dana@example.com", "password", RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 
 	ginkgo.It("UserService.ChangeOwnPassword rejects the wrong old password and replaces the stored password", func() {
 		service := setupTestUserService(ginkgo.GinkgoT())
-		defer closeWithErrorCheck(service.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
 		user, err := service.CreateUser("erin", "erin@example.com", "old-password", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())

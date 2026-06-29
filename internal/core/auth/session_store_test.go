@@ -15,7 +15,7 @@ var _ = ginkgo.Describe("session store", func() {
 		if err != nil {
 			t.Fatalf("NewSessionStore err: %v", err)
 		}
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		expiresAt := time.Now().Add(time.Hour)
 		userID := newFixtureUserID("u1")
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("session store", func() {
 		if err != nil {
 			t.Fatalf("NewSessionStore err: %v", err)
 		}
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		if _, err := os.Stat(filepath.Join(tmp, "sessions.db")); err != nil {
 			t.Fatalf("expected sessions.db in storage dir, got err: %v", err)

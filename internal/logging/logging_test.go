@@ -109,7 +109,9 @@ var _ = Describe("opening loggers", func() {
 			Level:    slog.LevelInfo,
 		}, Streams{})
 		Expect(err).NotTo(HaveOccurred())
-		defer closer.Close()
+		DeferCleanup(func() {
+			_ = closer.Close()
+		})
 
 		logger.Info("Starting LeafWiki", "address", "127.0.0.1:0")
 		Expect(closer.Close()).To(Succeed())
@@ -183,11 +185,15 @@ var _ = Describe("opening loggers", func() {
 			Level:  slog.LevelInfo,
 		}, Streams{Stdout: &stdout, Stderr: &stderr})
 		Expect(err).NotTo(HaveOccurred())
-		defer closer.Close()
+		DeferCleanup(func() {
+			_ = closer.Close()
+		})
 
 		previous := slog.Default()
 		slog.SetDefault(logger)
-		defer slog.SetDefault(previous)
+		DeferCleanup(func() {
+			slog.SetDefault(previous)
+		})
 
 		slog.Default().Info("slog message")
 		log.Print("stdlib message")
@@ -205,7 +211,9 @@ var _ = Describe("opening loggers", func() {
 			Level:  slog.LevelError,
 		}, Streams{Stdout: &stdout})
 		Expect(err).NotTo(HaveOccurred())
-		defer closer.Close()
+		DeferCleanup(func() {
+			_ = closer.Close()
+		})
 
 		logger.Info("info message")
 		logger.Error("error message")

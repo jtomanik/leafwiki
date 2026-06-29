@@ -278,11 +278,11 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(tt.body))
 			}))
+			ginkgo.DeferCleanup(server.Close)
 			resolver, err := NewWikidSingleWorkspaceResolver(server.URL, "token")
 			Expect(err).ToNot(HaveOccurred())
 			_, err = resolver(httptest.NewRequest(http.MethodGet, "/mcp", nil))
 			Expect(err).To(MatchError(ContainSubstring(tt.wantErr)), tt.name)
-			server.Close()
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {}))
@@ -336,33 +336,33 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(tt.body))
 			}))
+			ginkgo.DeferCleanup(server.Close)
 			resolver, err := NewWikidWorkspaceResolver(server.URL, "token")
 			Expect(err).ToNot(HaveOccurred())
 			_, err = resolver(httptest.NewRequest(http.MethodGet, "/workspace", nil), "home")
 			Expect(err).To(MatchError(ContainSubstring(tt.wantErr)), tt.name)
-			server.Close()
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			_, _ = w.Write([]byte(`{"status":{"state":"running","url":"http://workspaced/"}}`))
 		}))
+		ginkgo.DeferCleanup(server.Close)
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
 		Expect(err).ToNot(HaveOccurred())
 		route, err := resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route.WorkspaceID).To(Equal(workspaceid.WorkspaceID("home")))
 		Expect(route.Upstream).To(Equal("http://workspaced"))
-		server.Close()
 
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			_, _ = w.Write([]byte(`{"workspace":{"id":"body-id"},"status":{"state":"running","url":"http://workspaced"}}`))
 		}))
+		ginkgo.DeferCleanup(server.Close)
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
 		Expect(err).ToNot(HaveOccurred())
 		route, err = resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route.WorkspaceID).To(Equal(workspaceid.WorkspaceID("body-id")))
-		server.Close()
 
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {}))
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")

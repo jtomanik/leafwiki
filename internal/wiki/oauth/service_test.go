@@ -1,8 +1,8 @@
 package oauth
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"

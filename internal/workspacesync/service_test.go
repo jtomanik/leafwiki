@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -473,11 +474,9 @@ var _ = It("ServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdenti
 	if err != nil {
 		t.Fatalf("NewLinksStore: %v", err)
 	}
-	defer func() {
-		if err := linkStore.Close(); err != nil {
-			t.Fatalf("Close link store: %v", err)
-		}
-	}()
+	DeferCleanup(func() {
+		Expect(linkStore.Close()).To(Succeed())
+	})
 	linkService := links.NewLinkService(dataDir, treeService, linkStore)
 	writeMarkdown(t, filepath.Join(rootDir, "docs", "a.md"), `---
 leafwiki_id: page-a-duplicate-syntax
@@ -757,7 +756,7 @@ leafwiki_title: Second Target
 	if err := os.Chmod(secondDir, 0o555); err != nil {
 		t.Fatalf("chmod readonly source dir: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		_ = os.Chmod(secondDir, 0o755)
 		_ = os.Chmod(secondPath, 0o644)
 	})
@@ -911,7 +910,7 @@ leafwiki_title: Page B
 	canonicalMarkdownRewriteWriter = func([]canonicalMarkdownRewrite) error {
 		return writeErr
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		canonicalMarkdownRewriteWriter = previousWriter
 	})
 
@@ -980,7 +979,7 @@ body
 	if err := os.Chmod(rootDir, 0o500); err != nil {
 		t.Fatalf("chmod read-only root: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		_ = os.Chmod(rootDir, 0o700)
 	})
 
@@ -1621,6 +1620,8 @@ var _ = It("ServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingC
 		listDone <- err
 	}()
 	<-store.changedPathsStarted
+	unblockChangedPaths := closeOnce(store.unblockChangedPaths)
+	DeferCleanup(unblockChangedPaths)
 
 	syncDone := make(chan error, 1)
 	go func() {
@@ -1632,34 +1633,18 @@ var _ = It("ServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingC
 		syncDone <- err
 	}()
 
-	time.Sleep(20 * time.Millisecond)
 	statusDone := make(chan SyncStatus, 1)
 	go func() {
 		statusDone <- service.Status()
 	}()
 
-	select {
-	case status := <-statusDone:
-		if !status.Enabled {
-			close(store.unblockChangedPaths)
-			<-listDone
-			<-syncDone
-			t.Fatalf("status.Enabled = false, want true")
-		}
-	case <-time.After(200 * time.Millisecond):
-		close(store.unblockChangedPaths)
-		<-listDone
-		<-syncDone
-		t.Fatalf("Status blocked behind SyncNow waiting for ListSnapshotPage changed-path read")
-	}
+	Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(WithTransform(func(status SyncStatus) bool {
+		return status.Enabled
+	}, BeTrue())))
 
-	close(store.unblockChangedPaths)
-	if err := <-listDone; err != nil {
-		t.Fatalf("ListSnapshotPage: %v", err)
-	}
-	if err := <-syncDone; err != nil {
-		t.Fatalf("SyncNow: %v", err)
-	}
+	unblockChangedPaths()
+	Eventually(listDone).Should(Receive(Succeed()))
+	Eventually(syncDone).Should(Receive(Succeed()))
 })
 
 var _ = It("ServiceSyncNowRunsAfterSyncWhenValidationWarningsExist", func() {
@@ -2742,26 +2727,19 @@ var _ = It("ServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore", func(
 		done <- err
 	}()
 	<-store.changedContentsStarted
+	unblockChangedContents := closeOnce(store.unblockChangedContents)
+	DeferCleanup(unblockChangedContents)
 
 	statusDone := make(chan SyncStatus, 1)
 	go func() {
 		statusDone <- service.Status()
 	}()
 
-	select {
-	case status := <-statusDone:
-		if !status.Enabled {
-			t.Fatalf("status.Enabled = false, want true")
-		}
-	case <-time.After(200 * time.Millisecond):
-		close(store.unblockChangedContents)
-		<-done
-		t.Fatalf("Status blocked behind ListPageRevisions store scan")
-	}
-	close(store.unblockChangedContents)
-	if err := <-done; err != nil {
-		t.Fatalf("ListPageRevisions: %v", err)
-	}
+	Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(WithTransform(func(status SyncStatus) bool {
+		return status.Enabled
+	}, BeTrue())))
+	unblockChangedContents()
+	Eventually(done).Should(Receive(Succeed()))
 })
 
 var _ = It("ServiceGetPageRevisionSnapshotRejectsUnrelatedCommit", func() {
@@ -2834,26 +2812,19 @@ var _ = It("ServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore", 
 		done <- err
 	}()
 	<-store.changedContentsStarted
+	unblockChangedContents := closeOnce(store.unblockChangedContents)
+	DeferCleanup(unblockChangedContents)
 
 	statusDone := make(chan SyncStatus, 1)
 	go func() {
 		statusDone <- service.Status()
 	}()
 
-	select {
-	case status := <-statusDone:
-		if !status.Enabled {
-			t.Fatalf("status.Enabled = false, want true")
-		}
-	case <-time.After(200 * time.Millisecond):
-		close(store.unblockChangedContents)
-		<-done
-		t.Fatalf("Status blocked behind GetPageRevisionSnapshot store read")
-	}
-	close(store.unblockChangedContents)
-	if err := <-done; err != nil {
-		t.Fatalf("GetPageRevisionSnapshot: %v", err)
-	}
+	Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(WithTransform(func(status SyncStatus) bool {
+		return status.Enabled
+	}, BeTrue())))
+	unblockChangedContents()
+	Eventually(done).Should(Receive(Succeed()))
 })
 
 var _ = It("ServiceRestoreDocumentRestoresPreRenameContentToCurrentPath", func() {
@@ -3471,7 +3442,7 @@ var _ = It("ServiceStartWatcherSyncsMarkdownEvents", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3517,7 +3488,7 @@ var _ = It("ServiceStartWatcherSyncsUppercaseMarkdownEvents", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3553,7 +3524,7 @@ var _ = It("ServiceStartWatcherCoalescesDuplicateMarkdownEvents", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3562,10 +3533,7 @@ var _ = It("ServiceStartWatcherCoalescesDuplicateMarkdownEvents", func() {
 	fakeWatcher.events <- watcherEvent{Path: "/workspace/docs/a.md"}
 
 	waitUntil(t, func() bool { return fakeTree.reconstructCount() == 1 })
-	time.Sleep(350 * time.Millisecond)
-	if fakeStore.captureCalls != 1 {
-		t.Fatalf("captureCalls = %d, want duplicate watcher events coalesced into one sync", fakeStore.captureCalls)
-	}
+	Consistently(func() int { return fakeStore.captureCalls }).WithTimeout(350 * time.Millisecond).Should(Equal(1))
 })
 
 var _ = It("ServiceStartWatcherDroppedEventRecordsStatusAndSyncs", func() {
@@ -3586,7 +3554,7 @@ var _ = It("ServiceStartWatcherDroppedEventRecordsStatusAndSyncs", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3622,7 +3590,7 @@ var _ = It("ServiceStartWatcherErrorRecordsStatusAndSyncs", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3656,7 +3624,7 @@ var _ = It("ServiceStartWatcherIgnoresTemporaryFiles", func() {
 		t.Fatalf("NewService: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	DeferCleanup(cancel)
 
 	if err := service.StartWatcher(ctx); err != nil {
 		t.Fatalf("StartWatcher: %v", err)
@@ -3664,10 +3632,7 @@ var _ = It("ServiceStartWatcherIgnoresTemporaryFiles", func() {
 	fakeWatcher.events <- watcherEvent{Path: "/workspace/page.md.swp"}
 	fakeWatcher.events <- watcherEvent{Path: "/workspace/.DS_Store"}
 
-	time.Sleep(50 * time.Millisecond)
-	if fakeStore.captureCalls != 0 {
-		t.Fatalf("captureCalls = %d, want temporary files ignored", fakeStore.captureCalls)
-	}
+	Consistently(func() int { return fakeStore.captureCalls }).WithTimeout(50 * time.Millisecond).Should(Equal(0))
 })
 
 var _ = It("ServiceStopWatcherClosesUnderlyingWatcher", func() {
@@ -4024,12 +3989,15 @@ func (f *fakeWatcher) closeCount() int {
 
 func waitUntil(t testHelper, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	GinkgoHelper()
+	Eventually(condition).WithTimeout(2 * time.Second).Should(BeTrue())
+}
+
+func closeOnce(ch chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(ch)
+		})
 	}
-	t.Fatalf("condition not met before timeout")
 }

@@ -594,11 +594,7 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_TitleExtractionError_AddsNote", 
 		if err := os.Chmod(abs, 0o000); err != nil {
 			t.Fatalf("chmod: %v", err)
 		}
-		defer func() {
-			if err := os.Chmod(abs, 0o644); err != nil { // restore for cleanup
-				t.Fatalf("chmod restore: %v", err)
-			}
-		}()
+		ginkgo.DeferCleanup(os.Chmod, abs, os.FileMode(0o644))
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -733,11 +729,7 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_RootIndexMd_EmptyWikiPath_UsesFa
 		if err := os.Chmod(abs, 0o000); err != nil {
 			t.Fatalf("chmod: %v", err)
 		}
-		defer func() {
-			if err := os.Chmod(abs, 0o644); err != nil { // restore for cleanup
-				t.Fatalf("chmod restore: %v", err)
-			}
-		}()
+		ginkgo.DeferCleanup(os.Chmod, abs, os.FileMode(0o644))
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)

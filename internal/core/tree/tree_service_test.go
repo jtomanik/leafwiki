@@ -3953,9 +3953,7 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_ReturnsErrorWhenS
 		if err := os.Chmod(sectionDir, 0o555); err != nil {
 			t.Fatalf("chmod section dir failed: %v", err)
 		}
-		defer func() {
-			_ = os.Chmod(sectionDir, 0o755)
-		}()
+		ginkgo.DeferCleanup(os.Chmod, sectionDir, os.FileMode(0o755))
 
 		if err := saveSchema(tmpDir, 3); err != nil {
 			t.Fatalf("saveSchema failed: %v", err)

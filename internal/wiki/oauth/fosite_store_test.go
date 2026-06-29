@@ -1,10 +1,10 @@
 package oauth
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"errors"
 	"fmt"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"sync"
 
 	"github.com/ory/fosite"

@@ -18,7 +18,7 @@ var _ = It("TestWorkspacesAPIForwardsListStatusAndEnsureToWikid", func() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	handler, err := NewWorkspacesAPI(upstream.URL, "daemon-token")
 	if err != nil {
@@ -60,7 +60,7 @@ var _ = It("TestWorkspacesAPIOverwritesSpoofedOriginalRequestHeaders", func() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	handler, err := NewWorkspacesAPI(upstream.URL, "daemon-token")
 	if err != nil {

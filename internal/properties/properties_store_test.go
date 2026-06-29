@@ -12,7 +12,6 @@ import (
 type propertiesTestT interface {
 	Helper()
 	TempDir() string
-	Cleanup(func())
 	Fatal(args ...any)
 	Fatalf(format string, args ...any)
 	Error(args ...any)
@@ -21,9 +20,11 @@ type propertiesTestT interface {
 
 func closeStoreForTest(t propertiesTestT, store *PropertiesStore) {
 	t.Helper()
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	ginkgo.DeferCleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	})
 }
 
 func newTestStore(t propertiesTestT) *PropertiesStore {
@@ -32,7 +33,7 @@ func newTestStore(t propertiesTestT) *PropertiesStore {
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	t.Cleanup(func() { closeStoreForTest(t, store) })
+	closeStoreForTest(t, store)
 	return store
 }
 
@@ -67,7 +68,7 @@ var _ = ginkgo.It("TestPropertiesStore_CreatesDatabaseInStorageDir", func() {
 	if err != nil {
 		t.Fatalf("NewPropertiesStore: %v", err)
 	}
-	defer closeStoreForTest(t, store)
+	closeStoreForTest(t, store)
 
 	if _, err := os.Stat(filepath.Join(tmp, "properties.db")); err != nil {
 		t.Fatalf("expected properties.db to exist: %v", err)

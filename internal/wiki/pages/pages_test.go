@@ -53,6 +53,11 @@ func newTestDeps(t pagesTestT) *testDeps {
 		t.Fatalf("failed to create links store: %v", err)
 	}
 	linkService := links.NewLinkService(storageDir, treeService, linksStore)
+	ginkgo.DeferCleanup(func() {
+		if err := linkService.Close(); err != nil {
+			t.Fatalf("failed to close link service: %v", err)
+		}
+	})
 
 	return &testDeps{
 		storageDir: storageDir,
@@ -1255,11 +1260,11 @@ var _ = ginkgo.It("TestCopyPageUseCase_WithAssets", func() {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	defer func() {
+	ginkgo.DeferCleanup(func() {
 		if err := file.Close(); err != nil {
 			t.Fatalf("failed to close test file: %v", err)
 		}
-	}()
+	})
 
 	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.AssetName("image.png"), 1024); err != nil {
 		t.Fatalf("Failed to save asset for original page: %v", err)
@@ -1837,11 +1842,11 @@ var _ = ginkgo.It("TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRaw
 	if err != nil {
 		t.Fatalf("NewSQLiteIndex failed: %v", err)
 	}
-	defer func() {
+	ginkgo.DeferCleanup(func() {
 		if err := searchIndex.Close(); err != nil {
 			t.Fatalf("failed to close search index: %v", err)
 		}
-	}()
+	})
 
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())

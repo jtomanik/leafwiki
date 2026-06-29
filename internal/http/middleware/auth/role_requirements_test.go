@@ -42,6 +42,7 @@ func performRoleRequirementRequest(middleware gin.HandlerFunc, scenario roleRequ
 }
 
 func expectAuthErrorCode(rec *httptest.ResponseRecorder, code string) {
+	GinkgoHelper()
 	var body struct {
 		Error struct {
 			Code string `json:"code"`

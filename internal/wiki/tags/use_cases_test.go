@@ -400,6 +400,7 @@ var _ = ginkgo.Describe("tags error responses", func() {
 })
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	return ctx, rec
@@ -440,6 +441,7 @@ func dropTagTables(dataDir string, statements ...string) {
 }
 
 func ginContextForTarget(target string) *gin.Context {
+	ginkgo.GinkgoHelper()
 	ctx, _ := ginTestContext()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	ctx.Request = req
@@ -447,6 +449,7 @@ func ginContextForTarget(target string) *gin.Context {
 }
 
 func assertTagsStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	var body struct {
 		Error struct {
 			Code      string `json:"code"`

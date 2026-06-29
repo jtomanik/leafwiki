@@ -239,6 +239,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 })
 
 func newPrivateRequest(method, path, token, actor string) *http.Request {
+	ginkgo.GinkgoHelper()
 	req := httptest.NewRequest(method, path, nil)
 	if token != "" {
 		req.Header.Set(projectdaemon.ControlTokenHeader, token)
@@ -250,6 +251,7 @@ func newPrivateRequest(method, path, token, actor string) *http.Request {
 }
 
 func requestWithRequest(router http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec

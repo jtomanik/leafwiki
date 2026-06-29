@@ -4,6 +4,7 @@ import (
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_NoConflict", func() {
@@ -99,7 +100,6 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_SpecialCharacters", func() 
 
 var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_EmptyDesiredUsesValidFallback", func() {
 	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
 		s := NewSlugService()
 		result := make(chan string, 1)
 
@@ -107,17 +107,8 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_EmptyDesiredUsesValidFallba
 			result <- s.GenerateUniqueChildSlug(&PageNode{}, "", "   ")
 		}()
 
-		select {
-		case got := <-result:
-			if got != "page" {
-				t.Fatalf("GenerateUniqueChildSlug(empty) = %q, want fallback slug page", got)
-			}
-			if err := s.IsValidSlug(got); err != nil {
-				t.Fatalf("GenerateUniqueChildSlug(empty) returned invalid slug %q: %v", got, err)
-			}
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("GenerateUniqueChildSlug(empty) did not return; empty normalized slug must not spin forever")
-		}
+		Eventually(result).WithTimeout(100 * time.Millisecond).Should(Receive(Equal("page")))
+		Expect(s.IsValidSlug("page")).To(Succeed())
 
 	})
 })

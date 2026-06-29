@@ -359,10 +359,12 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 })
 
 func newWorkspaceSyncTestRouter(cfg RoutesConfig) http.Handler {
+	ginkgo.GinkgoHelper()
 	return newWorkspaceSyncTestRouterWithOptions(cfg, httpinternal.RouterOptions{})
 }
 
 func newWorkspaceSyncTestRouterWithOptions(cfg RoutesConfig, opts httpinternal.RouterOptions) http.Handler {
+	ginkgo.GinkgoHelper()
 	opts.AllowInsecure = true
 	opts.AuthDisabled = true
 	opts.DisableFrontendRoutes = true
@@ -374,12 +376,14 @@ func newWorkspaceSyncTestRouterWithOptions(cfg RoutesConfig, opts httpinternal.R
 }
 
 func performWorkspaceSyncRequest(router http.Handler, method string, path string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
 	return rec
 }
 
 func performWorkspaceSyncCSRFRequest(router http.Handler, method string, path string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
 	req.Header.Set("X-CSRF-Token", "test-csrf-token")
@@ -389,6 +393,7 @@ func performWorkspaceSyncCSRFRequest(router http.Handler, method string, path st
 }
 
 func assertWorkspaceSyncStructuredError(rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+	ginkgo.GinkgoHelper()
 	var body struct {
 		Error struct {
 			Code      string `json:"code"`

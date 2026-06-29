@@ -401,7 +401,7 @@ var _ = It("LocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan", func(
 
 	embedFrontendOrig := httpinternal.EmbedFrontend
 	httpinternal.EmbedFrontend = "true"
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		httpinternal.EmbedFrontend = embedFrontendOrig
 	})
 
@@ -4545,7 +4545,7 @@ func newLocalMCPTestWikiWithOptionsAndStorage(t testing.TB, opts wiki.WikiOption
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		if err := w.Close(); err != nil {
 			t.Fatalf("Close wiki failed: %v", err)
 		}
@@ -4564,7 +4564,7 @@ func connectLocalMCP(t testing.TB, handler http.Handler, path string) *sdkmcp.Cl
 	t.Helper()
 
 	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	DeferCleanup(server.Close)
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
@@ -4575,7 +4575,7 @@ func connectLocalMCP(t testing.TB, handler http.Handler, path string) *sdkmcp.Cl
 	if err != nil {
 		t.Fatalf("Connect MCP client failed: %v", err)
 	}
-	t.Cleanup(func() { session.Close() })
+	DeferCleanup(func() { _ = session.Close() })
 	return session
 }
 

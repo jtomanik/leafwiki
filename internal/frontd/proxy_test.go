@@ -60,7 +60,7 @@ var _ = It("TestWorkspaceProxyStripsPublicCredentialsAndInjectsPrivateActorConte
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("proxied"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy, err := NewWorkspaceProxy(WorkspaceProxyOptions{
 		Upstream:    upstream.URL,
@@ -131,7 +131,7 @@ var _ = It("TestMCPProxyWithActorStripsPublicCredentialsAndInjectsPrivateActorCo
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("mcp-proxied"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy, err := NewMCPProxyWithActor(WorkspaceProxyOptions{
 		Upstream:    upstream.URL,
@@ -219,7 +219,7 @@ var _ = It("TestWorkspaceProxyReturnsStructuredActorResolutionError", func() {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("upstream should not be called")
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy, err := NewWorkspaceProxy(WorkspaceProxyOptions{
 		Upstream:    upstream.URL,
@@ -262,7 +262,7 @@ var _ = It("TestControlPlaneProxyPreservesPublicCredentialsAndAddsPrivateToken",
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("wikid"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy, err := NewControlPlaneProxy(upstream.URL, "private-token")
 	if err != nil {

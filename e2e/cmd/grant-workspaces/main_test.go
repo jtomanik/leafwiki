@@ -21,7 +21,7 @@ var _ = ginkgo.Describe("grant-workspaces command", func() {
 
 	ginkgo.It("main delegates to the runner and exits with its status", func() {
 		restore := restoreGrantWorkspaceSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		var stderr bytes.Buffer
 		var exitCode int
 		store := &fakeGrantStore{}
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("grant-workspaces command", func() {
 
 	ginkgo.It("upserts grants using a db path derived from the global data dir", func() {
 		restore := restoreGrantWorkspaceSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		var stderr bytes.Buffer
 		store := &fakeGrantStore{}
 		var storePath string
@@ -71,67 +71,56 @@ var _ = ginkgo.Describe("grant-workspaces command", func() {
 		}}))
 	})
 
-	ginkgo.It("returns formatted failures for invalid inputs and store errors", func() {
-		cases := []struct {
-			name    string
-			args    []string
-			stdin   io.Reader
-			store   *fakeGrantStore
-			wantErr string
-		}{
-			{
-				name:    "parse flags",
-				args:    []string{"--unknown"},
-				stdin:   strings.NewReader("[]"),
-				wantErr: "parse flags:",
-			},
-			{
-				name:    "missing storage path",
-				stdin:   strings.NewReader("[]"),
-				wantErr: "--db-path or --global-data-dir is required",
-			},
-			{
-				name:    "read stdin",
-				args:    []string{"--db-path", "/tmp/wikid.db"},
-				stdin:   grantWorkspaceErrorReader{err: errors.New("read failed")},
-				wantErr: "read grants input: read failed",
-			},
-			{
-				name:    "decode JSON",
-				args:    []string{"--db-path", "/tmp/wikid.db"},
-				stdin:   strings.NewReader("{"),
-				wantErr: "decode grants input:",
-			},
-			{
-				name:    "upsert",
-				args:    []string{"--db-path", "/tmp/wikid.db"},
-				stdin:   strings.NewReader(`[{"subject":"frontd","workspaceId":"home","role":"admin"}]`),
-				store:   &fakeGrantStore{err: errors.New("upsert failed")},
-				wantErr: "upsert grant frontd home: upsert failed",
-			},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("returns formatted failures for invalid inputs and store errors",
+		func(tc grantWorkspaceFailureCase) {
 			restore := restoreGrantWorkspaceSeams()
-			func() {
-				defer restore()
-				var stderr bytes.Buffer
-				if tc.store != nil {
-					newGrantStore = func(string) grantStore {
-						return tc.store
-					}
+			ginkgo.DeferCleanup(restore)
+			var stderr bytes.Buffer
+			if tc.store != nil {
+				newGrantStore = func(string) grantStore {
+					return tc.store
 				}
+			}
 
-				code := runGrantWorkspaces(tc.args, tc.stdin, &stderr)
+			code := runGrantWorkspaces(tc.args, tc.stdin, &stderr)
 
-				Expect(code).To(Equal(1))
-				Expect(stderr.String()).To(ContainSubstring(tc.wantErr))
-			}()
-		}
-	})
+			Expect(code).To(Equal(1))
+			Expect(stderr.String()).To(ContainSubstring(tc.wantErr))
+		},
+		ginkgo.Entry("parse flags", grantWorkspaceFailureCase{
+			args:    []string{"--unknown"},
+			stdin:   strings.NewReader("[]"),
+			wantErr: "parse flags:",
+		}),
+		ginkgo.Entry("missing storage path", grantWorkspaceFailureCase{
+			stdin:   strings.NewReader("[]"),
+			wantErr: "--db-path or --global-data-dir is required",
+		}),
+		ginkgo.Entry("read stdin", grantWorkspaceFailureCase{
+			args:    []string{"--db-path", "/tmp/wikid.db"},
+			stdin:   grantWorkspaceErrorReader{err: errors.New("read failed")},
+			wantErr: "read grants input: read failed",
+		}),
+		ginkgo.Entry("decode JSON", grantWorkspaceFailureCase{
+			args:    []string{"--db-path", "/tmp/wikid.db"},
+			stdin:   strings.NewReader("{"),
+			wantErr: "decode grants input:",
+		}),
+		ginkgo.Entry("upsert", grantWorkspaceFailureCase{
+			args:    []string{"--db-path", "/tmp/wikid.db"},
+			stdin:   strings.NewReader(`[{"subject":"frontd","workspaceId":"home","role":"admin"}]`),
+			store:   &fakeGrantStore{err: errors.New("upsert failed")},
+			wantErr: "upsert grant frontd home: upsert failed",
+		}),
+	)
 })
+
+type grantWorkspaceFailureCase struct {
+	args    []string
+	stdin   io.Reader
+	store   *fakeGrantStore
+	wantErr string
+}
 
 type fakeGrantStore struct {
 	grants []wikid.Grant

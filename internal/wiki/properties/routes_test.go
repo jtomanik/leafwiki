@@ -349,6 +349,7 @@ func replacePropertiesTableWithoutType(dataDir string) {
 }
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	ginkgo.GinkgoHelper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -356,12 +357,14 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 func assertLocalizedPropertiesError(err error, code sharederrors.ErrorCode) {
+	ginkgo.GinkgoHelper()
 	loc, ok := sharederrors.AsLocalizedError(err)
 	Expect(ok).To(BeTrue())
 	Expect(loc.Code).To(Equal(code))
 }
 
 func assertPropertiesStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	var body propertiesErrorResponse
 	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
 	Expect(body.Error.Code.String()).To(Equal(code))

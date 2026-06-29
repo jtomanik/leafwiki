@@ -554,9 +554,7 @@ Hello World
 		if err := os.Chmod(sectionDir, 0o555); err != nil {
 			t.Fatalf("chmod section dir failed: %v", err)
 		}
-		defer func() {
-			_ = os.Chmod(sectionDir, 0o755)
-		}()
+		ginkgo.DeferCleanup(os.Chmod, sectionDir, os.FileMode(0o755))
 		writeSchema(t, tmpDir, 3)
 
 		loaded := tree.NewTreeService(tmpDir)

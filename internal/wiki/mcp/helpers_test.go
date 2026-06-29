@@ -142,7 +142,7 @@ var _ = Describe("actor/request helpers", func() {
 		t := GinkgoT()
 		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
 		blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-		defer blocker.rollback(t)
+		DeferCleanup(blocker.rollback, t)
 		routes := &Routes{apiKeys: apiKeyService}
 
 		_, err := routes.verifyBearerToken(context.Background(), created.Secret, nil)
@@ -156,7 +156,7 @@ var _ = Describe("actor/request helpers", func() {
 		t := GinkgoT()
 		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
 		blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-		defer blocker.rollback(t)
+		DeferCleanup(blocker.rollback, t)
 		routes := &Routes{
 			apiKeys:     apiKeyService,
 			stdioAPIKey: created.Secret,
@@ -173,7 +173,6 @@ var _ = Describe("actor/request helpers", func() {
 type mcpHelperT interface {
 	Helper()
 	Fatalf(format string, args ...any)
-	Cleanup(func())
 	TempDir() string
 }
 
@@ -204,7 +203,7 @@ func newMCPAPIKeyAuthFixture(t mcpHelperT) (*coreauth.UserService, *coreauth.API
 	if err != nil {
 		t.Fatalf("NewUserStore failed: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		if err := store.Close(); err != nil {
 			t.Fatalf("close user store: %v", err)
 		}
@@ -221,7 +220,7 @@ func newMCPAPIKeyAuthFixture(t mcpHelperT) (*coreauth.UserService, *coreauth.API
 		t.Fatalf("NewAPIKeyStore failed: %v", err)
 	}
 	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		if err := apiKeyService.Close(); err != nil {
 			t.Fatalf("close api key service: %v", err)
 		}
@@ -244,7 +243,7 @@ func beginExclusiveMCPTestSQLiteTransaction(t mcpHelperT, path string) mcpTestSQ
 	if err != nil {
 		t.Fatalf("open blocking connection: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		_, _ = db.Exec("ROLLBACK")
 		_ = db.Close()
 	})

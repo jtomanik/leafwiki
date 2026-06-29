@@ -57,7 +57,7 @@ var _ = Describe("Revision tools", func() {
 			MCPToolListPageSize: 200,
 		})
 		server := httptest.NewServer(handler)
-		t.Cleanup(server.Close)
+		DeferCleanup(server.Close)
 		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
 		session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
 			Endpoint:             server.URL,
@@ -65,7 +65,7 @@ var _ = Describe("Revision tools", func() {
 			DisableStandaloneSSE: true,
 		}, nil)
 		Expect(err).NotTo(HaveOccurred())
-		t.Cleanup(func() { session.Close() })
+		DeferCleanup(func() { _ = session.Close() })
 
 		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
 			Name:      ToolListRevisions.String(),

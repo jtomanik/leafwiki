@@ -20,7 +20,7 @@ func setupTagsEffectTest(t pagesaveTestT) (*tree.TreeService, *tags.TagsService,
 	if err != nil {
 		t.Fatalf("NewTagsStore: %v", err)
 	}
-	t.Cleanup(func() {
+	ginkgo.DeferCleanup(func() {
 		if err := store.Close(); err != nil {
 			t.Fatalf("TagsStore.Close: %v", err)
 		}

@@ -333,11 +333,13 @@ func expectPresenceErrorCode(err error, code sharederrors.ErrorCode) {
 }
 
 func setupPresenceTree() (*tree.TreeService, *tree.PageID) {
+	ginkgo.GinkgoHelper()
 	treeService, pageID, _ := setupPresenceTreeWithRoot()
 	return treeService, pageID
 }
 
 func setupPresenceTreeWithRoot() (*tree.TreeService, *tree.PageID, string) {
+	ginkgo.GinkgoHelper()
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
 		DataDir: ginkgo.GinkgoT().TempDir(),
 		RootDir: ginkgo.GinkgoT().TempDir(),
@@ -350,6 +352,7 @@ func setupPresenceTreeWithRoot() (*tree.TreeService, *tree.PageID, string) {
 }
 
 func exerciseDeleteSession(routes *Routes, sessionID string, user *coreauth.User) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodDelete, "/presence/session/"+strings.TrimSpace(sessionID), nil)

@@ -401,14 +401,18 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(service.Status().PendingEventCount).To(Equal(0))
 
 		adapter := &fsWatcherAdapter{}
-		from := make(chan fswatcher.WatchEvent, 1)
+		from := make(chan fswatcher.WatchEvent)
 		to := make(chan watcherEvent)
-		from <- fswatcher.WatchEvent{Path: "/workspace/blocked.md"}
 		pumpCtx, cancelPump := context.WithCancel(ctx)
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go adapter.pump(pumpCtx, &wg, from, to, false)
-		time.Sleep(10 * time.Millisecond)
+		sent := make(chan struct{})
+		go func() {
+			from <- fswatcher.WatchEvent{Path: "/workspace/blocked.md"}
+			close(sent)
+		}()
+		Eventually(sent).Should(BeClosed())
 		cancelPump()
 		pumpDone := make(chan struct{})
 		go func() {
@@ -639,14 +643,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Eventually(timer.C).Should(Receive())
 		stopWorkspacesyncTimer(timer)
 		timer = time.NewTimer(time.Nanosecond)
-		Eventually(func() bool {
-			select {
-			case <-timer.C:
-				return true
-			default:
-				return false
-			}
-		}).Should(BeTrue())
+		Eventually(timer.C).Should(Receive())
 		drainWorkspacesyncTimer(timer)
 
 		preserveWorkspacesyncCoverageSeams()

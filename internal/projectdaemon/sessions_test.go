@@ -6,6 +6,7 @@ import (
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	gomega "github.com/onsi/gomega"
 )
 
 var _ = ginkgo.It("TestSessionRegistryNotifiesOnlyOnCountTransitions", func() {
@@ -95,26 +96,22 @@ var _ = ginkgo.It("TestSessionRegistryRunExpiryLoopPrunesExpiredSessions", func(
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ginkgo.DeferCleanup(cancel)
 	go registry.RunExpiryLoop(ctx, 5*time.Millisecond)
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if registry.Count() == 0 {
-			if registry.Heartbeat(id) {
-				t.Fatalf("expired session accepted heartbeat")
-			}
-			for time.Now().Before(deadline) {
-				if got := lockedJoinCounts(&countsMu, &counts); got == "1,0" {
-					return
-				}
-				time.Sleep(time.Millisecond)
-			}
-			t.Fatalf("counts = %s, want %s", lockedJoinCounts(&countsMu, &counts), "1,0")
-		}
-		time.Sleep(5 * time.Millisecond)
+	gomega.Eventually(registry.Count).
+		WithTimeout(500 * time.Millisecond).
+		WithPolling(5 * time.Millisecond).
+		Should(gomega.Equal(0))
+	if registry.Heartbeat(id) {
+		t.Fatalf("expired session accepted heartbeat")
 	}
-	t.Fatalf("session was not pruned before timeout; count=%d counts=%s", registry.Count(), lockedJoinCounts(&countsMu, &counts))
+	gomega.Eventually(func() string {
+		return lockedJoinCounts(&countsMu, &counts)
+	}).
+		WithTimeout(500 * time.Millisecond).
+		WithPolling(time.Millisecond).
+		Should(gomega.Equal("1,0"))
 
 })
 

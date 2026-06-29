@@ -35,7 +35,7 @@ var _ = ginkgo.Describe("user store", func() {
 		if err != nil {
 			t.Fatalf("Failed to create user store: %v", err)
 		}
-		defer closeWithErrorCheck(userStore.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, userStore.Close)
 
 		if _, err := os.Stat(filepath.Join(storageDir, "users.db")); err != nil {
 			t.Fatalf("expected users.db in storage dir, got err: %v", err)
@@ -45,7 +45,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_CreateUser", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user := &User{
 			ID:       "1",
@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_CreateUser_EmailAlreadyExists", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_CreateUser_UsernameAlreadyExists", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
@@ -153,7 +153,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_GetUserByID_NotExisting", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
@@ -188,7 +188,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_UpdateUser", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
@@ -240,7 +240,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_UpdateUser_LastAdminCannotBeDemoted", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		admin := &User{
 			ID:       "1",
@@ -263,7 +263,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_UpdateUser_EMailAlreadyExists", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -312,7 +312,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_UpdateUser_UsernameAlreadyExists", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -361,7 +361,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_DeleteUser", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
@@ -412,7 +412,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_DeleteUser_NotExisting", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		// Attempt to delete a non-existing user
 		err := store.DeleteUser(newFixtureUserID("non-existing-id"))
@@ -427,7 +427,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_GetAllUsers", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -488,7 +488,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_GetUserCount", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -530,7 +530,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_GetUserByEmail", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -582,7 +582,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStore_GetUserByUsername", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",
@@ -634,7 +634,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("TestUserStoreUpdatePassword", func() {
 		t := ginkgo.GinkgoT()
 		store := setupTestUserStore(t)
-		defer closeWithErrorCheck(store.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
 		user1 := &User{
 			ID:       "1",

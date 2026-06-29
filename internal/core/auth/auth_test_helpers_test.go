@@ -1,6 +1,9 @@
 package auth
 
-import . "github.com/onsi/gomega"
+import (
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
 
 type authTestT interface {
 	Helper()
@@ -11,5 +14,6 @@ type authTestT interface {
 }
 
 func closeWithErrorCheck(closer func() error) {
+	ginkgo.GinkgoHelper()
 	Expect(closer()).To(Succeed())
 }

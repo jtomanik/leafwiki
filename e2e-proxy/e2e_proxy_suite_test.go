@@ -4,6 +4,7 @@
 package e2eproxy
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -26,7 +27,7 @@ func TestE2EProxySuite(t *testing.T) {
 	RunSpecs(t, "E2E Proxy Suite")
 }
 
-var _ = BeforeSuite(func() {
+var _ = BeforeSuite(func(ctx SpecContext) {
 	proxyURL = envOr("E2E_PROXY_URL", "http://localhost:8095")
 	directURL = envOr("E2E_DIRECT_URL", "")
 
@@ -34,9 +35,9 @@ var _ = BeforeSuite(func() {
 		return
 	}
 
-	err := waitReachable(proxyURL+"/api/config", 60*time.Second)
+	err := waitReachable(ctx, proxyURL+"/api/config", 60*time.Second)
 	Expect(err).NotTo(HaveOccurred(), "LeafWiki proxy stack not reachable at %s", proxyURL)
-})
+}, NodeTimeout(65*time.Second))
 
 func ginkgoDryRunEnabled() bool {
 	f := flag.Lookup("ginkgo.dry-run")
@@ -50,15 +51,31 @@ func envOr(key, def string) string {
 	return def
 }
 
-func waitReachable(url string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(url) //nolint:gosec,noctx
+func waitReachable(ctx context.Context, url string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("timed out after %s waiting for %s: %w", timeout, url, lastErr)
+			}
+			return fmt.Errorf("timed out after %s waiting for %s: %w", timeout, url, ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	return fmt.Errorf("timed out after %s", timeout)
 }

@@ -8,9 +8,6 @@ import (
 
 var _ = ginkgo.Describe("semantic types", func() {
 	ginkgo.It("TestAuthUserIDUsesNeutralIdentityType", func() {
-		t := ginkgo.GinkgoT()
-		t.Parallel()
-
 		var _ identity.UserID = newFixtureUserID("user-1")
 	})
 })

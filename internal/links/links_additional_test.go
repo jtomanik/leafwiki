@@ -122,6 +122,7 @@ var _ = ginkgo.Describe("refactor prefix queries", func() {
 })
 
 func newAdditionalLinksStore() *LinksStore {
+	ginkgo.GinkgoHelper()
 	store, err := NewLinksStore(ginkgo.GinkgoT().TempDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {

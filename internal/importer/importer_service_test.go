@@ -12,6 +12,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	gomega "github.com/onsi/gomega"
 )
 
 // --- Helpers ----------------------------------------------------------------
@@ -44,19 +45,19 @@ func newServiceWithFakeWiki(t importerTestT, w *fakeWiki) *ImporterService {
 
 func waitForExecutionStatus(t importerTestT, is *ImporterService, want ExecutionStatus) *CurrentPlanState {
 	t.Helper()
+	ginkgo.GinkgoHelper()
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		state, err := is.GetCurrentPlan()
-		if err == nil && state.ExecutionStatus == want {
-			return state
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	state, err := is.GetCurrentPlan()
-	t.Fatalf("timed out waiting for execution status %q, state=%#v err=%v", want, state, err)
-	return nil
+	var state *CurrentPlanState
+	gomega.Eventually(func(g gomega.Gomega) {
+		var err error
+		state, err = is.GetCurrentPlan()
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(state.ExecutionStatus).To(gomega.Equal(want))
+	}).
+		WithTimeout(3 * time.Second).
+		WithPolling(10 * time.Millisecond).
+		Should(gomega.Succeed())
+	return state
 }
 
 // --- Tests ------------------------------------------------------------------

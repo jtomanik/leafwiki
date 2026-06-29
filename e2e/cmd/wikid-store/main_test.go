@@ -23,7 +23,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 
 	ginkgo.It("main delegates to the runner and exits with its status", func() {
 		restore := restoreWikidStoreSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		var exitCode int
@@ -47,152 +47,114 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 		Expect(stdout.String()).To(ContainSubstring(`"schemaVersion"`))
 	})
 
-	ginkgo.It("reads the registry and reports registry or output errors", func() {
-		readErr := errors.New("load failed")
-		cases := []struct {
-			name       string
-			store      registryStore
-			stdout     io.Writer
-			wantCode   int
-			wantStdout string
-			wantStderr string
-		}{
-			{
-				name:       "success",
-				store:      &fakeRegistryStore{doc: wikid.NewRegistryDocument()},
-				stdout:     &bytes.Buffer{},
-				wantCode:   0,
-				wantStdout: `"schemaVersion"`,
-			},
-			{
-				name:       "load error",
-				store:      &fakeRegistryStore{err: readErr},
-				stdout:     &bytes.Buffer{},
-				wantCode:   1,
-				wantStderr: "load registry: load failed",
-			},
-			{
-				name:       "write error",
-				store:      &fakeRegistryStore{doc: wikid.NewRegistryDocument()},
-				stdout:     errorWriter{err: errors.New("write failed")},
-				wantCode:   1,
-				wantStderr: "encode stdout JSON: write failed",
-			},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("reads the registry and reports registry or output errors",
+		func(tc wikidStoreReadRegistryCase) {
 			restore := restoreWikidStoreSeams()
-			func() {
-				defer restore()
-				var stderr bytes.Buffer
-				stdout := tc.stdout
-				var stdoutBuffer *bytes.Buffer
-				if buf, ok := stdout.(*bytes.Buffer); ok {
-					stdoutBuffer = buf
-				}
-				newRegistryStore = func(string) registryStore {
-					return tc.store
-				}
+			ginkgo.DeferCleanup(restore)
+			var stderr bytes.Buffer
+			stdout := tc.stdout()
+			stdoutBuffer, _ := stdout.(*bytes.Buffer)
+			newRegistryStore = func(string) registryStore {
+				return tc.store()
+			}
 
-				code := runWikidStore([]string{"read-registry", "--global-data-dir", "/tmp/global"}, strings.NewReader(""), stdout, &stderr)
+			code := runWikidStore([]string{"read-registry", "--global-data-dir", "/tmp/global"}, strings.NewReader(""), stdout, &stderr)
 
-				Expect(code).To(Equal(tc.wantCode))
-				if tc.wantStdout != "" {
-					Expect(stdoutBuffer).NotTo(BeNil())
-					Expect(stdoutBuffer.String()).To(ContainSubstring(tc.wantStdout))
-				}
-				if tc.wantStderr != "" {
-					Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
-				}
-			}()
-		}
-	})
+			Expect(code).To(Equal(tc.wantCode))
+			if tc.wantStdout != "" {
+				Expect(stdoutBuffer).NotTo(BeNil())
+				Expect(stdoutBuffer.String()).To(ContainSubstring(tc.wantStdout))
+			}
+			if tc.wantStderr != "" {
+				Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
+			}
+		},
+		ginkgo.Entry("success", wikidStoreReadRegistryCase{
+			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
+			stdout:     func() io.Writer { return &bytes.Buffer{} },
+			wantCode:   0,
+			wantStdout: `"schemaVersion"`,
+		}),
+		ginkgo.Entry("load error", wikidStoreReadRegistryCase{
+			store:      func() registryStore { return &fakeRegistryStore{err: errors.New("load failed")} },
+			stdout:     func() io.Writer { return &bytes.Buffer{} },
+			wantCode:   1,
+			wantStderr: "load registry: load failed",
+		}),
+		ginkgo.Entry("write error", wikidStoreReadRegistryCase{
+			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
+			stdout:     func() io.Writer { return errorWriter{err: errors.New("write failed")} },
+			wantCode:   1,
+			wantStderr: "encode stdout JSON: write failed",
+		}),
+	)
 
-	ginkgo.It("registers workspaces and reports input, service, and output errors", func() {
-		workspace := wikid.WorkspaceRecord{ID: workspaceid.WorkspaceID("home"), DisplayName: "Home", DataDir: "/data", RootDir: "/root"}
-		cases := []struct {
-			name       string
-			stdin      io.Reader
-			service    *fakeRegistryService
-			stdout     io.Writer
-			wantCode   int
-			wantStderr string
-		}{
-			{
-				name:     "success",
-				stdin:    strings.NewReader(`{"displayName":"Docs","dataDir":"/data","rootDir":"/root","markdownLinkRootPrefix":"/docs"}`),
-				service:  &fakeRegistryService{workspace: workspace},
-				stdout:   &bytes.Buffer{},
-				wantCode: 0,
-			},
-			{
-				name:       "read error",
-				stdin:      errorReader{err: errors.New("read failed")},
-				service:    &fakeRegistryService{workspace: workspace},
-				stdout:     &bytes.Buffer{},
-				wantCode:   1,
-				wantStderr: "read stdin: read failed",
-			},
-			{
-				name:       "decode error",
-				stdin:      strings.NewReader("{"),
-				service:    &fakeRegistryService{workspace: workspace},
-				stdout:     &bytes.Buffer{},
-				wantCode:   1,
-				wantStderr: "decode stdin JSON:",
-			},
-			{
-				name:       "service error",
-				stdin:      strings.NewReader(`{"displayName":"Docs"}`),
-				service:    &fakeRegistryService{err: errors.New("register failed")},
-				stdout:     &bytes.Buffer{},
-				wantCode:   1,
-				wantStderr: "register workspace: register failed",
-			},
-			{
-				name:       "write error",
-				stdin:      strings.NewReader(`{"displayName":"Docs"}`),
-				service:    &fakeRegistryService{workspace: workspace},
-				stdout:     errorWriter{err: errors.New("write failed")},
-				wantCode:   1,
-				wantStderr: "encode stdout JSON: write failed",
-			},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("registers workspaces and reports input, service, and output errors",
+		func(tc wikidStoreRegisterWorkspaceCase) {
 			restore := restoreWikidStoreSeams()
-			func() {
-				defer restore()
-				var stderr bytes.Buffer
-				var servicePath string
-				newRegistryService = func(path string, layout wikid.Layout) registryService {
-					servicePath = path
-					return tc.service
-				}
+			ginkgo.DeferCleanup(restore)
+			var stderr bytes.Buffer
+			var servicePath string
+			service := tc.service()
+			newRegistryService = func(path string, layout wikid.Layout) registryService {
+				servicePath = path
+				return service
+			}
 
-				code := runWikidStore([]string{"register-workspace", "--global-data-dir", "/tmp/global"}, tc.stdin, tc.stdout, &stderr)
+			code := runWikidStore([]string{"register-workspace", "--global-data-dir", "/tmp/global"}, tc.stdin(), tc.stdout(), &stderr)
 
-				Expect(code).To(Equal(tc.wantCode))
-				if tc.wantCode == 0 {
-					Expect(servicePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
-					Expect(tc.service.request.DisplayName).To(Equal("Docs"))
-					Expect(tc.service.request.MarkdownLinkRootPrefix).To(Equal("/docs"))
-				}
-				if tc.wantStderr != "" {
-					Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
-				}
-			}()
-		}
-	})
+			Expect(code).To(Equal(tc.wantCode))
+			if tc.wantCode == 0 {
+				Expect(servicePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
+				Expect(service.request.DisplayName).To(Equal("Docs"))
+				Expect(service.request.MarkdownLinkRootPrefix).To(Equal("/docs"))
+			}
+			if tc.wantStderr != "" {
+				Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
+			}
+		},
+		ginkgo.Entry("success", wikidStoreRegisterWorkspaceCase{
+			stdin: func() io.Reader {
+				return strings.NewReader(`{"displayName":"Docs","dataDir":"/data","rootDir":"/root","markdownLinkRootPrefix":"/docs"}`)
+			},
+			service:  func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:   func() io.Writer { return &bytes.Buffer{} },
+			wantCode: 0,
+		}),
+		ginkgo.Entry("read error", wikidStoreRegisterWorkspaceCase{
+			stdin:      func() io.Reader { return errorReader{err: errors.New("read failed")} },
+			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:     func() io.Writer { return &bytes.Buffer{} },
+			wantCode:   1,
+			wantStderr: "read stdin: read failed",
+		}),
+		ginkgo.Entry("decode error", wikidStoreRegisterWorkspaceCase{
+			stdin:      func() io.Reader { return strings.NewReader("{") },
+			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:     func() io.Writer { return &bytes.Buffer{} },
+			wantCode:   1,
+			wantStderr: "decode stdin JSON:",
+		}),
+		ginkgo.Entry("service error", wikidStoreRegisterWorkspaceCase{
+			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
+			service:    func() *fakeRegistryService { return &fakeRegistryService{err: errors.New("register failed")} },
+			stdout:     func() io.Writer { return &bytes.Buffer{} },
+			wantCode:   1,
+			wantStderr: "register workspace: register failed",
+		}),
+		ginkgo.Entry("write error", wikidStoreRegisterWorkspaceCase{
+			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
+			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:     func() io.Writer { return errorWriter{err: errors.New("write failed")} },
+			wantCode:   1,
+			wantStderr: "encode stdout JSON: write failed",
+		}),
+	)
 
 	ginkgo.It("upserts grants and reports grant input or store errors", func() {
 		store := &fakeWikidGrantStore{}
 		restore := restoreWikidStoreSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		newGrantStore = func(string) grantStore {
 			return store
 		}
@@ -237,7 +199,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 	ginkgo.It("replaces subject grants and reports missing subjects or store errors", func() {
 		store := &fakeWikidGrantStore{}
 		restore := restoreWikidStoreSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		newGrantStore = func(string) grantStore {
 			return store
 		}
@@ -285,30 +247,41 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 		Expect(stderr.String()).To(ContainSubstring("replace grants for frontd: replace failed"))
 	})
 
-	ginkgo.It("reports command line validation errors", func() {
-		cases := []struct {
-			name    string
-			args    []string
-			wantErr string
-		}{
-			{name: "usage", args: nil, wantErr: "usage: wikid-store"},
-			{name: "parse", args: []string{"read-registry", "--unknown"}, wantErr: "parse flags:"},
-			{name: "global data dir", args: []string{"read-registry"}, wantErr: "--global-data-dir is required"},
-			{name: "unknown command", args: []string{"nope", "--global-data-dir", "/tmp/global"}, wantErr: `unknown command "nope"`},
-		}
-
-		for _, tc := range cases {
-			tc := tc
-			ginkgo.By(tc.name)
+	ginkgo.DescribeTable("reports command line validation errors",
+		func(args []string, wantErr string) {
 			var stderr bytes.Buffer
 
-			code := runWikidStore(tc.args, strings.NewReader(""), io.Discard, &stderr)
+			code := runWikidStore(args, strings.NewReader(""), io.Discard, &stderr)
 
 			Expect(code).To(Equal(1))
-			Expect(stderr.String()).To(ContainSubstring(tc.wantErr))
-		}
-	})
+			Expect(stderr.String()).To(ContainSubstring(wantErr))
+		},
+		ginkgo.Entry("usage", nil, "usage: wikid-store"),
+		ginkgo.Entry("parse", []string{"read-registry", "--unknown"}, "parse flags:"),
+		ginkgo.Entry("global data dir", []string{"read-registry"}, "--global-data-dir is required"),
+		ginkgo.Entry("unknown command", []string{"nope", "--global-data-dir", "/tmp/global"}, `unknown command "nope"`),
+	)
 })
+
+type wikidStoreReadRegistryCase struct {
+	store      func() registryStore
+	stdout     func() io.Writer
+	wantCode   int
+	wantStdout string
+	wantStderr string
+}
+
+type wikidStoreRegisterWorkspaceCase struct {
+	stdin      func() io.Reader
+	service    func() *fakeRegistryService
+	stdout     func() io.Writer
+	wantCode   int
+	wantStderr string
+}
+
+func fakeWorkspaceRecord() wikid.WorkspaceRecord {
+	return wikid.WorkspaceRecord{ID: workspaceid.WorkspaceID("home"), DisplayName: "Home", DataDir: "/data", RootDir: "/root"}
+}
 
 type fakeRegistryStore struct {
 	doc wikid.RegistryDocument

@@ -19,7 +19,7 @@ var _ = ginkgo.Describe("TestLinksStore_CreatesDatabaseInStorageDir", func() {
 		if err != nil {
 			t.Fatalf("NewLinksStore err: %v", err)
 		}
-		defer closeLinksStoreForTest(store, t)
+		closeLinksStoreForTest(store, t)
 
 		if _, err := os.Stat(filepath.Join(tmp, "links.db")); err != nil {
 			t.Fatalf("expected links.db in storage dir, got err: %v", err)
@@ -48,7 +48,7 @@ var _ = ginkgo.Describe("TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInp
 		if err != nil {
 			t.Fatalf("NewLinksStore err: %v", err)
 		}
-		defer closeLinksStoreForTest(store, t)
+		closeLinksStoreForTest(store, t)
 
 		pageIDs := make([]tree.PageID, 0, maxOutgoingLinksQueryArgs+5)
 		for i := 0; i < maxOutgoingLinksQueryArgs+5; i++ {

@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_WritesPreservedF
 		integMustWrite(t, ws, "Imported.md", "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\ntitle: Imported Title\n---\n\n# Imported Title\nBody")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_IndexesTagsAndPr
 		integMustWrite(t, ws, "Imported.md", "---\ntags:\n  - React\n  - docs\nstatus: published\nowner: alice\npriority: 3\nowners:\n  - alice\n---\n\n# Imported Title\nBody")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 
 		if _, err := is.CreateImportPlanFromFolder(ws, ""); err != nil {
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_IndexesTagsAndPr
 		if err != nil {
 			t.Fatalf("NewTagsStore err: %v", err)
 		}
-		defer integWrapCloseWithErrorCheck(tagsStore.Close, t)
+		integWrapCloseWithErrorCheck(tagsStore.Close, t)
 
 		allTags, err := tagsStore.GetAllTags("", 20)
 		if err != nil {
@@ -218,7 +218,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_IndexesTagsAndPr
 		if err != nil {
 			t.Fatalf("NewPropertiesStore err: %v", err)
 		}
-		defer integWrapCloseWithErrorCheck(propsStore.Close, t)
+		integWrapCloseWithErrorCheck(propsStore.Close, t)
 
 		keys, err := propsStore.GetAllPropertyKeys("", 20)
 		if err != nil {
@@ -274,7 +274,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_RewritesLinksAnd
 		integMustWrite(t, ws, "shared/manual.pdf", "pdf-bytes")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 		probe := newImporterProbe(w)
 
@@ -324,7 +324,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsFixturePa
 		ws := integCopyFixtureToTemp(t, "link-assets-package")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 		probe := newImporterProbe(w)
 
@@ -395,7 +395,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiN
 		ws := integCopyFixtureToTemp(t, "leafwiki-nested-package")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 		probe := newImporterProbe(w)
 
@@ -511,7 +511,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsObsidianW
 		ws := integCopyFixtureToTemp(t, "obsidian-wikilinks-package")
 
 		w := newTestWiki(t)
-		defer integWrapCloseWithErrorCheck(w.Close, t)
+		integWrapCloseWithErrorCheck(w.Close, t)
 		is := newTestImporterService(t, w)
 		probe := newImporterProbe(w)
 

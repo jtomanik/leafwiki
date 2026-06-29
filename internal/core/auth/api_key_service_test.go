@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"path/filepath"
 	"strings"
 	"time"
@@ -220,19 +221,9 @@ var _ = ginkgo.Describe("api key service", func() {
 			errs <- nil
 		}()
 
-		time.Sleep(100 * time.Millisecond)
-		if _, err := blocker.Exec("ROLLBACK"); err != nil {
-			t.Fatalf("rollback blocking transaction: %v", err)
-		}
-
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Fatalf("VerifyAPIKey returned %v, want retry through transient last_used_at lock", err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatalf("VerifyAPIKey did not return after transient last_used_at lock was released")
-		}
+		Consistently(errs).WithTimeout(100 * time.Millisecond).ShouldNot(Receive())
+		Expect(blocker.Exec("ROLLBACK")).Error().NotTo(HaveOccurred())
+		Eventually(errs).WithTimeout(3 * time.Second).Should(Receive(BeNil()))
 	})
 
 	ginkgo.It("TestAPIKeyServiceVerifyRetriesTransientAPIKeyLookupLock", func() {
@@ -259,17 +250,9 @@ var _ = ginkgo.Describe("api key service", func() {
 			errs <- nil
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		Consistently(errs).WithTimeout(100 * time.Millisecond).ShouldNot(Receive())
 		blocker.rollback(t)
-
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Fatalf("VerifyAPIKey returned %v, want retry through transient api key lookup lock", err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatalf("VerifyAPIKey did not return after transient api key lookup lock was released")
-		}
+		Eventually(errs).WithTimeout(3 * time.Second).Should(Receive(BeNil()))
 	})
 
 	ginkgo.It("TestAPIKeyServiceVerifyRetriesTransientUserLookupLock", func() {
@@ -296,17 +279,9 @@ var _ = ginkgo.Describe("api key service", func() {
 			errs <- nil
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		Consistently(errs).WithTimeout(100 * time.Millisecond).ShouldNot(Receive())
 		blocker.rollback(t)
-
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Fatalf("VerifyAPIKey returned %v, want retry through transient user lookup lock", err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatalf("VerifyAPIKey did not return after transient user lookup lock was released")
-		}
+		Eventually(errs).WithTimeout(3 * time.Second).Should(Receive(BeNil()))
 	})
 
 	ginkgo.It("TestAPIKeyStoreRevocationIsScopedToUser", func() {

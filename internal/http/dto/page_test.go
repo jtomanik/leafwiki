@@ -196,6 +196,7 @@ func dtoTestTree() (*tree.PageNode, *tree.PageNode, *tree.PageNode) {
 }
 
 func newDTOUserResolver(nodes ...*tree.PageNode) *coreauth.UserResolver {
+	GinkgoHelper()
 	store, err := coreauth.NewUserStore(GinkgoT().TempDir())
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {

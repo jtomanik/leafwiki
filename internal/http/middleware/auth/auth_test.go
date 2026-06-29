@@ -216,11 +216,7 @@ var _ = It("TestRequireAuth_WithAuthEnabled_ValidToken", func() {
 	gin.SetMode(gin.TestMode)
 
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -279,11 +275,7 @@ var _ = It("TestRequireAuth_WithAuthEnabled_MissingToken", func() {
 	gin.SetMode(gin.TestMode)
 
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -344,11 +336,7 @@ var _ = It("TestRequireAuth_WithAuthEnabled_InvalidToken", func() {
 	gin.SetMode(gin.TestMode)
 
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -383,11 +371,7 @@ var _ = It("TestRequireAuth_WithAuthEnabled_UserSetInContext", func() {
 	gin.SetMode(gin.TestMode)
 
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -436,11 +420,7 @@ var _ = It("TestRequireAuth_NextNotCalledOnFailure", func() {
 	gin.SetMode(gin.TestMode)
 
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
@@ -477,70 +457,66 @@ var _ = It("TestRequireAuth_NextNotCalledOnFailure", func() {
 
 var _ = DescribeTable("TestRequireAuth_ComprehensiveScenarios",
 	func(tc requireAuthComprehensiveScenario) {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
+		t := GinkgoT()
+		gin.SetMode(gin.TestMode)
 
-	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close auth fixture: %v", err)
-		}
-	}()
+		fixture := createTestAuthFixture(t)
+		DeferCleanup(fixture.close)
 
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
-	router := gin.New()
+		router := gin.New()
 
-	// Inject user if needed
-	if tc.injectUser {
-		router.Use(func(c *gin.Context) {
-			c.Set("user", &coreauth.User{
-				ID:       "public-editor",
-				Username: "public-editor",
-				Role:     coreauth.RoleEditor,
+		// Inject user if needed
+		if tc.injectUser {
+			router.Use(func(c *gin.Context) {
+				c.Set("user", &coreauth.User{
+					ID:       "public-editor",
+					Username: "public-editor",
+					Role:     coreauth.RoleEditor,
+				})
+				c.Next()
 			})
-			c.Next()
-		})
-	}
-
-	// Apply RequireAuth
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, tc.authDisabled))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-
-	// Add token if needed
-	if tc.provideToken {
-		var token string
-		if tc.validToken {
-			authToken, err := fixture.auth.Login("admin", "admin")
-			if err != nil {
-				t.Fatalf("Failed to login: %v", err)
-			}
-			token = authToken.Token
-		} else {
-			token = "invalid-token"
 		}
-		req.AddCookie(&http.Cookie{
-			Name:  "leafwiki_at",
-			Value: token,
+
+		// Apply RequireAuth
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, tc.authDisabled))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
-	}
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+		req := httptest.NewRequest("GET", "/test", nil)
 
-	if w.Code != tc.expectedStatus {
-		t.Errorf("Expected status %d, got %d - %s", tc.expectedStatus, w.Code, w.Body.String())
-	}
+		// Add token if needed
+		if tc.provideToken {
+			var token string
+			if tc.validToken {
+				authToken, err := fixture.auth.Login("admin", "admin")
+				if err != nil {
+					t.Fatalf("Failed to login: %v", err)
+				}
+				token = authToken.Token
+			} else {
+				token = "invalid-token"
+			}
+			req.AddCookie(&http.Cookie{
+				Name:  "leafwiki_at",
+				Value: token,
+			})
+		}
 
-	if tc.expectedError != "" {
-		assertAuthMiddlewareErrorMessage(t, w, tc.expectedError)
-	}
-},
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != tc.expectedStatus {
+			t.Errorf("Expected status %d, got %d - %s", tc.expectedStatus, w.Code, w.Body.String())
+		}
+
+		if tc.expectedError != "" {
+			assertAuthMiddlewareErrorMessage(t, w, tc.expectedError)
+		}
+	},
 	Entry("authDisabled=true, user injected - should pass", requireAuthComprehensiveScenario{
 		authDisabled:   true,
 		injectUser:     true,
@@ -610,11 +586,7 @@ var _ = It("TestOptionalAuth_ValidToken_SetsUser", func() {
 	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 	authToken, err := fixture.auth.Login("admin", "admin")
@@ -656,11 +628,7 @@ var _ = It("TestOptionalAuth_InvalidToken_PassesThrough", func() {
 	t := GinkgoT()
 	gin.SetMode(gin.TestMode)
 	fixture := createTestAuthFixture(t)
-	defer func() {
-		if err := fixture.close(); err != nil {
-			t.Fatalf("close: %v", err)
-		}
-	}()
+	DeferCleanup(fixture.close)
 
 	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 	router := gin.New()

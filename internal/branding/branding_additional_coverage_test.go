@@ -14,120 +14,71 @@ import (
 )
 
 var _ = It("UpdateBranding accepts a trimmed site name at the maximum length", func() {
-	t := GinkgoT()
-	svc, dir := newTestBrandingService(t)
+	svc, dir := newTestBrandingService(GinkgoT())
 	exactName := strings.Repeat("x", 100)
 
-	if err := svc.UpdateBranding("  " + exactName + "  "); err != nil {
-		t.Fatalf("UpdateBranding() error: %v", err)
-	}
+	Expect(svc.UpdateBranding("  " + exactName + "  ")).To(Succeed())
 
 	cfg, err := NewBrandingStore(dir).Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg.SiteName != exactName {
-		t.Fatalf("SiteName = %q, want trimmed max-length name", cfg.SiteName)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(cfg.SiteName).To(Equal(exactName))
 })
 
 var _ = It("UpdateBranding allows common text whitespace in site names", func() {
-	t := GinkgoT()
-	svc, dir := newTestBrandingService(t)
+	svc, dir := newTestBrandingService(GinkgoT())
 	validName := "LeafWiki\tDocs\nTeam\rEdition"
 
-	if err := svc.UpdateBranding(validName); err != nil {
-		t.Fatalf("UpdateBranding() error: %v", err)
-	}
+	Expect(svc.UpdateBranding(validName)).To(Succeed())
 
 	cfg, err := NewBrandingStore(dir).Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg.SiteName != validName {
-		t.Fatalf("SiteName = %q, want %q", cfg.SiteName, validName)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(cfg.SiteName).To(Equal(validName))
 })
 
 var _ = It("UploadLogo accepts uppercase extensions and stores the normalized logo filename", func() {
-	t := GinkgoT()
-	svc, dir := newTestBrandingService(t)
+	svc, dir := newTestBrandingService(GinkgoT())
 
-	tmp, err := os.CreateTemp(t.TempDir(), "logo-*.PNG")
-	if err != nil {
-		t.Fatalf("CreateTemp() error: %v", err)
-	}
-	defer func() {
-		if err := tmp.Close(); err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
-	if _, err := tmp.Write([]byte("logo")); err != nil {
-		t.Fatalf("Write() error: %v", err)
-	}
-	if _, err := tmp.Seek(0, 0); err != nil {
-		t.Fatalf("Seek() error: %v", err)
-	}
+	tmp, err := os.CreateTemp(GinkgoT().TempDir(), "logo-*.PNG")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func() { Expect(tmp.Close()).To(Succeed()) })
+	_, err = tmp.Write([]byte("logo"))
+	Expect(err).NotTo(HaveOccurred())
+	_, err = tmp.Seek(0, 0)
+	Expect(err).NotTo(HaveOccurred())
 
 	got, err := svc.UploadLogo(tmp, "CUSTOM.PNG")
-	if err != nil {
-		t.Fatalf("UploadLogo() error: %v", err)
-	}
-	if got != "logo.png" {
-		t.Fatalf("UploadLogo() = %q, want logo.png", got)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "branding", "logo.png")); err != nil {
-		t.Fatalf("expected normalized logo.png to exist: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(got).To(Equal("logo.png"))
+	Expect(filepath.Join(dir, "branding", "logo.png")).To(BeAnExistingFile())
 })
 
 var _ = It("UploadFavicon accepts a file exactly at the configured size limit", func() {
-	t := GinkgoT()
-	svc, dir := newTestBrandingService(t)
+	svc, dir := newTestBrandingService(GinkgoT())
 	svc.brandingConfig.BrandingConstraints.MaxFaviconSize = 10
 
-	tmp, err := os.CreateTemp(t.TempDir(), "favicon-*.ico")
-	if err != nil {
-		t.Fatalf("CreateTemp() error: %v", err)
-	}
-	defer func() {
-		if err := tmp.Close(); err != nil {
-			t.Fatalf("Close() error: %v", err)
-		}
-	}()
-	if _, err := tmp.Write(bytes.Repeat([]byte("f"), 10)); err != nil {
-		t.Fatalf("Write() error: %v", err)
-	}
-	if _, err := tmp.Seek(0, 0); err != nil {
-		t.Fatalf("Seek() error: %v", err)
-	}
+	tmp, err := os.CreateTemp(GinkgoT().TempDir(), "favicon-*.ico")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func() { Expect(tmp.Close()).To(Succeed()) })
+	_, err = tmp.Write(bytes.Repeat([]byte("f"), 10))
+	Expect(err).NotTo(HaveOccurred())
+	_, err = tmp.Seek(0, 0)
+	Expect(err).NotTo(HaveOccurred())
 
 	got, err := svc.UploadFavicon(tmp, "favicon.ico")
-	if err != nil {
-		t.Fatalf("UploadFavicon() error: %v", err)
-	}
-	if got != "favicon.ico" {
-		t.Fatalf("UploadFavicon() = %q, want favicon.ico", got)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(got).To(Equal("favicon.ico"))
 
 	cfg, err := NewBrandingStore(dir).Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg.FaviconFile != "favicon.ico" {
-		t.Fatalf("FaviconFile = %q, want favicon.ico", cfg.FaviconFile)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(cfg.FaviconFile).To(Equal("favicon.ico"))
 })
 
 var _ = It("GetBrandingAssetsDir returns the package branding assets directory", func() {
-	t := GinkgoT()
-	svc, dir := newTestBrandingService(t)
+	svc, dir := newTestBrandingService(GinkgoT())
 
 	got := svc.GetBrandingAssetsDir()
 	want := filepath.Join(dir, "branding")
-	if got != want {
-		t.Fatalf("GetBrandingAssetsDir() = %q, want %q", got, want)
-	}
+	Expect(got).To(Equal(want))
 })
 
 var _ = It("Save returns marshal errors", func() {
@@ -148,19 +99,11 @@ var _ = It("Save returns marshal errors", func() {
 })
 
 var _ = It("NewBrandingService reports invalid persisted branding config", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{broken json"), 0644); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
-	}
+	dir := GinkgoT().TempDir()
+	Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{broken json"), 0644)).To(Succeed())
 
 	_, err := NewBrandingService(dir)
-	if err == nil {
-		t.Fatal("expected NewBrandingService error for invalid persisted branding config")
-	}
-	if !strings.Contains(err.Error(), "failed to load branding config") {
-		t.Fatalf("NewBrandingService error = %q, want load wrapper", err.Error())
-	}
+	Expect(err).To(MatchError(ContainSubstring("failed to load branding config")))
 })
 
 var _ = Describe("branding persistence edge coverage", func() {

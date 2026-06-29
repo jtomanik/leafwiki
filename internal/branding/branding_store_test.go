@@ -2,49 +2,33 @@ package branding
 
 import (
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 var _ = It("TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	store := NewBrandingStore(dir)
 
 	cfg, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	def := DefaultBrandingConfig()
 
-	if cfg.SiteName != def.SiteName {
-		t.Fatalf("expected SiteName %q, got %q", def.SiteName, cfg.SiteName)
-	}
-	if cfg.LogoFile != def.LogoFile {
-		t.Fatalf("expected LogoFile %q, got %q", def.LogoFile, cfg.LogoFile)
-	}
-	if cfg.FaviconFile != def.FaviconFile {
-		t.Fatalf("expected FaviconFile %q, got %q", def.FaviconFile, cfg.FaviconFile)
-	}
+	Expect(cfg.SiteName).To(Equal(def.SiteName))
+	Expect(cfg.LogoFile).To(Equal(def.LogoFile))
+	Expect(cfg.FaviconFile).To(Equal(def.FaviconFile))
 
 	// Constraints should be present (runtime-only)
-	if cfg.BrandingConstraints.MaxLogoSize != def.BrandingConstraints.MaxLogoSize {
-		t.Fatalf("expected MaxLogoSize %d, got %d", def.BrandingConstraints.MaxLogoSize, cfg.BrandingConstraints.MaxLogoSize)
-	}
-	if cfg.BrandingConstraints.MaxFaviconSize != def.BrandingConstraints.MaxFaviconSize {
-		t.Fatalf("expected MaxFaviconSize %d, got %d", def.BrandingConstraints.MaxFaviconSize, cfg.BrandingConstraints.MaxFaviconSize)
-	}
-	if len(cfg.BrandingConstraints.LogoExts) == 0 || len(cfg.BrandingConstraints.FaviconExts) == 0 {
-		t.Fatalf("expected non-empty constraints maps, got logo=%d favicon=%d", len(cfg.BrandingConstraints.LogoExts), len(cfg.BrandingConstraints.FaviconExts))
-	}
-
+	Expect(cfg.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
+	Expect(cfg.BrandingConstraints.MaxFaviconSize).To(Equal(def.BrandingConstraints.MaxFaviconSize))
+	Expect(cfg.BrandingConstraints.LogoExts).NotTo(BeEmpty())
+	Expect(cfg.BrandingConstraints.FaviconExts).NotTo(BeEmpty())
 })
 
 var _ = It("TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	store := NewBrandingStore(dir)
 
 	// Prepare config to save.
@@ -53,91 +37,54 @@ var _ = It("TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields", func() {
 	cfg.LogoFile = "logo.png"
 	cfg.FaviconFile = "favicon.ico"
 
-	if err := store.Save(cfg); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
+	Expect(store.Save(cfg)).To(Succeed())
 
 	got, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	if got.SiteName != "MyWiki" {
-		t.Fatalf("expected SiteName %q, got %q", "MyWiki", got.SiteName)
-	}
-	if got.LogoFile != "logo.png" {
-		t.Fatalf("expected LogoFile %q, got %q", "logo.png", got.LogoFile)
-	}
-	if got.FaviconFile != "favicon.ico" {
-		t.Fatalf("expected FaviconFile %q, got %q", "favicon.ico", got.FaviconFile)
-	}
+	Expect(got.SiteName).To(Equal("MyWiki"))
+	Expect(got.LogoFile).To(Equal("logo.png"))
+	Expect(got.FaviconFile).To(Equal("favicon.ico"))
 
 	// Runtime-only constraints should be injected on Load, even though they are not persisted.
 	def := DefaultBrandingConfig()
-	if got.BrandingConstraints.MaxLogoSize != def.BrandingConstraints.MaxLogoSize {
-		t.Fatalf("expected injected MaxLogoSize %d, got %d", def.BrandingConstraints.MaxLogoSize, got.BrandingConstraints.MaxLogoSize)
-	}
-	if got.BrandingConstraints.MaxFaviconSize != def.BrandingConstraints.MaxFaviconSize {
-		t.Fatalf("expected injected MaxFaviconSize %d, got %d", def.BrandingConstraints.MaxFaviconSize, got.BrandingConstraints.MaxFaviconSize)
-	}
-
+	Expect(got.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
+	Expect(got.BrandingConstraints.MaxFaviconSize).To(Equal(def.BrandingConstraints.MaxFaviconSize))
 })
 
 var _ = It("TestBrandingStore_Save_WritesFileToExpectedLocation", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	store := NewBrandingStore(dir)
 
 	cfg := DefaultBrandingConfig()
 	cfg.SiteName = "CheckFile"
 
-	if err := store.Save(cfg); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
+	Expect(store.Save(cfg)).To(Succeed())
 
 	p := filepath.Join(dir, "branding.json")
 	info, err := os.Stat(p)
-	if err != nil {
-		t.Fatalf("expected branding.json to exist: %v", err)
-	}
-	if info.IsDir() {
-		t.Fatalf("expected branding.json to be a file, got directory")
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(info.IsDir()).To(BeFalse())
 
 	// Basic sanity: file contains our siteName
 	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("ReadFile() error: %v", err)
-	}
-	if !strings.Contains(string(b), `"siteName": "CheckFile"`) {
-		t.Fatalf("expected branding.json to contain siteName, got:\n%s", string(b))
-	}
-
+	Expect(err).NotTo(HaveOccurred())
+	Expect(string(b)).To(ContainSubstring(`"siteName": "CheckFile"`))
 })
 
 var _ = It("TestBrandingStore_Load_WhenInvalidJSON_ReturnsError", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	store := NewBrandingStore(dir)
 
 	// Write broken JSON
-	if err := os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{not valid json"), 0644); err != nil {
-		t.Fatalf("setup write invalid json: %v", err)
-	}
+	Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{not valid json"), 0644)).To(Succeed())
 
 	_, err := store.Load()
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to parse branding config") {
-		t.Fatalf("expected parse error wrapper, got: %v", err)
-	}
-
+	Expect(err).To(MatchError(ContainSubstring("failed to parse branding config")))
 })
 
 var _ = It("TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile", func() {
-	t := GinkgoT()
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	store := NewBrandingStore(dir)
 
 	// Save JSON that includes only persisted fields. BrandingConstraints is json:"-" and should be injected.
@@ -146,23 +93,14 @@ var _ = It("TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile", func() {
   "logoFile": "logo.webp",
   "faviconFile": "favicon.png"
 }`
-	if err := os.WriteFile(filepath.Join(dir, "branding.json"), []byte(raw), 0644); err != nil {
-		t.Fatalf("setup write json: %v", err)
-	}
+	Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte(raw), 0644)).To(Succeed())
 
 	got, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	def := DefaultBrandingConfig()
 
 	// Ensure constraints are injected and usable
-	if got.BrandingConstraints.MaxLogoSize != def.BrandingConstraints.MaxLogoSize {
-		t.Fatalf("expected injected MaxLogoSize %d, got %d", def.BrandingConstraints.MaxLogoSize, got.BrandingConstraints.MaxLogoSize)
-	}
-	if got.BrandingConstraints.LogoExts[".png"] != def.BrandingConstraints.LogoExts[".png"] {
-		t.Fatalf("expected injected LogoExts to match default")
-	}
-
+	Expect(got.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
+	Expect(got.BrandingConstraints.LogoExts).To(HaveKeyWithValue(".png", def.BrandingConstraints.LogoExts[".png"]))
 })

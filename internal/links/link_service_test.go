@@ -47,7 +47,7 @@ func countMarkdownRootIndexBuilds(t linksTestT, index *markdownlinks.Index) *int
 		calls++
 		return index, nil
 	}
-	t.Cleanup(func() {
+	ginkgo.DeferCleanup(func() {
 		newMarkdownLinkIndexFromRoot = original
 	})
 	return &calls

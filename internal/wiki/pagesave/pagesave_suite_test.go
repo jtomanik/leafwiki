@@ -10,7 +10,6 @@ import (
 type pagesaveTestT interface {
 	Helper()
 	TempDir() string
-	Cleanup(func())
 	Fatal(args ...any)
 	Fatalf(format string, args ...any)
 	Error(args ...any)

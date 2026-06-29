@@ -1224,7 +1224,7 @@ func newLocalMCPAuthTestWikiWithOptions(t testing.TB, overrides wiki.WikiOptions
 	if err != nil {
 		t.Fatalf("NewWiki failed: %v", err)
 	}
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		if err := w.Close(); err != nil {
 			t.Fatalf("Close wiki failed: %v", err)
 		}
@@ -1488,7 +1488,7 @@ func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token st
 	t.Helper()
 
 	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	DeferCleanup(server.Close)
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
@@ -1500,7 +1500,7 @@ func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token st
 	if err != nil {
 		t.Fatalf("Connect MCP client with token failed: %v", err)
 	}
-	t.Cleanup(func() { session.Close() })
+	DeferCleanup(func() { _ = session.Close() })
 	return session
 }
 

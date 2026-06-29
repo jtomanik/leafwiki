@@ -469,18 +469,21 @@ var _ = Describe("asset service coverage additions", func() {
 })
 
 func createPageFile(root, slug, content string) {
+	GinkgoHelper()
 	pagePath := filepath.Join(root, slug)
 	Expect(os.MkdirAll(pagePath, 0o755)).To(Succeed())
 	Expect(os.WriteFile(filepath.Join(pagePath, "index.md"), []byte(content), 0o644)).To(Succeed())
 }
 
 func createMultipartFile(name string, content []byte) (multipart.File, string) {
+	GinkgoHelper()
 	file, filename, err := test_utils.CreateMultipartFile(name, content)
 	Expect(err).NotTo(HaveOccurred())
 	return file, filename
 }
 
 func writeAssetFile(service *AssetService, page *tree.PageNode, filename string, content []byte) string {
+	GinkgoHelper()
 	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 	Expect(os.MkdirAll(assetDir, 0o755)).To(Succeed())
 	assetPath := filepath.Join(assetDir, filename)
@@ -489,6 +492,7 @@ func writeAssetFile(service *AssetService, page *tree.PageNode, filename string,
 }
 
 func assertLocalizedCode(err error, want sharederrors.ErrorCode) {
+	GinkgoHelper()
 	Expect(err).To(HaveOccurred())
 	localized, ok := sharederrors.AsLocalizedError(err)
 	Expect(ok).To(BeTrue(), "expected localized error %s, got %T: %v", want, err, err)

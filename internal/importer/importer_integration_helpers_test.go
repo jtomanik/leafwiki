@@ -3,6 +3,8 @@ package importer_test
 import (
 	"os"
 	"path/filepath"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 )
 
 type importerIntegrationTestT interface {
@@ -31,7 +33,9 @@ func integFixturePathForT(t importerIntegrationTestT, rel string, candidates ...
 
 func integWrapCloseWithErrorCheck(closer func() error, t importerIntegrationTestT) {
 	t.Helper()
-	if err := closer(); err != nil {
-		t.Fatalf("failed to close resource: %v", err)
-	}
+	ginkgo.DeferCleanup(func() {
+		if err := closer(); err != nil {
+			t.Fatalf("failed to close resource: %v", err)
+		}
+	})
 }

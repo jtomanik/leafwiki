@@ -94,6 +94,7 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 })
 
 func newTestWiki() *wiki.Wiki {
+	ginkgo.GinkgoHelper()
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		StorageDir:          ginkgo.GinkgoT().TempDir(),
 		AdminPassword:       "admin",
@@ -107,6 +108,7 @@ func newTestWiki() *wiki.Wiki {
 }
 
 func workspacedRouterOptions() httpinternal.RouterOptions {
+	ginkgo.GinkgoHelper()
 	return httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -118,12 +120,14 @@ func workspacedRouterOptions() httpinternal.RouterOptions {
 }
 
 func workspacedRouterFactory(w *wiki.Wiki) http.Handler {
+	ginkgo.GinkgoHelper()
 	opts := workspacedRouterOptions()
 	opts.CustomStylesheet = "custom.css"
 	return NewRouter(w, opts)
 }
 
 func authenticatedWorkspacedRouterFactory(w *wiki.Wiki) http.Handler {
+	ginkgo.GinkgoHelper()
 	opts := workspacedRouterOptions()
 	opts.CustomStylesheet = "custom.css"
 	return NewAuthenticatedRouter(w, opts, PrivateAuthOptions{
@@ -134,6 +138,7 @@ func authenticatedWorkspacedRouterFactory(w *wiki.Wiki) http.Handler {
 }
 
 func request(router http.Handler, method, path string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
 	req := httptest.NewRequest(method, path, strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

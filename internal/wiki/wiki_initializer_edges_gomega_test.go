@@ -83,7 +83,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 	ginkgo.It("surfaces workspace directory creation failures", func() {
 		expected := errors.New("mkdir failed")
 		restore := restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiMkdirAll = func(string, os.FileMode) error {
 			return expected
 		}
@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 
 		restore()
 		restore = restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		callCount := 0
 		wikiMkdirAll = func(string, os.FileMode) error {
 			callCount++
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 
 		expected := errors.New("oauth failed")
 		restore := restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		newWikiOAuthService = func(wikioauth.ServiceConfig) (*wikioauth.Service, error) {
 			return nil, expected
 		}
@@ -132,7 +132,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 	ginkgo.It("surfaces core service and route service initializer failures", func() {
 		expected := errors.New("sync open failed")
 		restore := restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		newWikiWorkspaceSync = func(workspacesync.ServiceOptions) (workspaceSyncFacade, error) {
 			return nil, expected
 		}
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 
 		restore()
 		restore = restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		expected = errors.New("startup sync failed")
 		newWikiWorkspaceSync = func(workspacesync.ServiceOptions) (workspaceSyncFacade, error) {
 			return &fakeWorkspaceSyncFacade{syncErr: expected}, nil
@@ -172,19 +172,19 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 	ginkgo.It("logs non-fatal bootstrap and indexing failures", func() {
 		expected := errors.New("index failed")
 		restore := restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiLinksIndexAllPages = func(*links.LinkService) error { return expected }
 		Expect(newInitializerWiki().initLinkService()).To(Succeed())
 
 		restore()
 		restore = restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiRebuildTagsProperties = func(*Wiki) error { return expected }
 		newInitializerWiki().bootstrapTagsAndProperties()
 
 		restore()
 		restore = restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiSearchIndexAllPages = func(*pagesave.SearchIndexSideEffect) error { return expected }
 		w := newInitializerWiki()
 		Expect(w.initSearch()).To(Succeed())
@@ -237,7 +237,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 	ginkgo.It("covers rebuild tag/property warning branches and close error paths", func() {
 		expected := errors.New("edge failed")
 		restore := restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiTreeWalkNodes = func(_ *tree.TreeService, fn func(tree.PageID) error) error {
 			Expect(fn(newFixturePageID("missing"))).To(Succeed())
 			Expect(fn(newFixturePageID("indexed"))).To(Succeed())
@@ -281,7 +281,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 
 		restore()
 		restore = restoreWikiTestSeams()
-		defer restore()
+		ginkgo.DeferCleanup(restore)
 		wikiCloseLinksService = func(*links.LinkService) error { return expected }
 		Expect((&Wiki{
 			links: &links.LinkService{},

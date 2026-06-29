@@ -51,7 +51,6 @@ func pageNodeKind() *tree.NodeKind {
 type routerTestTB interface {
 	Helper()
 	TempDir() string
-	Cleanup(func())
 	Fatal(args ...any)
 	Fatalf(format string, args ...any)
 	Error(args ...any)
@@ -61,9 +60,11 @@ type routerTestTB interface {
 
 func wrapCloseWithErrorCheck(closer func() error, t routerTestTB) {
 	t.Helper()
-	if err := closer(); err != nil {
-		t.Fatalf("failed to close resource: %v", err)
-	}
+	DeferCleanup(func() {
+		if err := closer(); err != nil {
+			t.Fatalf("failed to close resource: %v", err)
+		}
+	})
 }
 
 func fixturePathForHTTPTests(t routerTestTB, rel string, candidates ...string) string {
@@ -175,7 +176,7 @@ func authenticatedRequest(t routerTestTB, router http.Handler, method, url strin
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -232,7 +233,7 @@ func authenticatedRequestAs(t routerTestTB, router http.Handler, username, passw
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -461,7 +462,7 @@ func uploadAssetViaAPI(t routerTestTB, router http.Handler, pageID, filename, co
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -573,7 +574,7 @@ func uploadBrandingLogoViaAPI(t routerTestTB, router http.Handler, filename stri
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -631,7 +632,7 @@ func uploadBrandingFaviconViaAPI(t routerTestTB, router http.Handler, filename s
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -714,7 +715,7 @@ var _ = It("TestDisableRequestLog_DoesNotCrash", func() {
 	t := GinkgoT()
 	logs := captureDefaultLogs(t)
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		AllowInsecure:           true,
 		AccessTokenTimeout:      15 * time.Minute,
@@ -740,7 +741,7 @@ var _ = It("TestRequestLogsGoToDefaultSlogSink", func() {
 	t := GinkgoT()
 	logs := captureDefaultLogs(t)
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		AllowInsecure:           true,
 		AccessTokenTimeout:      15 * time.Minute,
@@ -799,7 +800,7 @@ var _ = It("TestGinRecoveryLogsGoToDefaultSlogSink", func() {
 var _ = It("TestMeEndpoint_Unauthenticated_Returns200WithNullBody", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
@@ -818,7 +819,7 @@ var _ = It("TestMeEndpoint_Unauthenticated_Returns200WithNullBody", func() {
 var _ = It("TestMeEndpoint_Authenticated_ReturnsUser", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/auth/me", nil)
@@ -844,7 +845,7 @@ var _ = DescribeTable("TestMeEndpoint_HasNoCacheHeaders",
 	func(authenticated bool) {
 		t := GinkgoT()
 		w := createWikiTestInstance(t)
-		defer wrapCloseWithErrorCheck(w.Close, t)
+		wrapCloseWithErrorCheck(w.Close, t)
 		router := createRouterTestInstance(w, t)
 
 		var rec *httptest.ResponseRecorder
@@ -873,7 +874,7 @@ var _ = DescribeTable("TestMeEndpoint_HasNoCacheHeaders",
 var _ = It("TestCreatePageEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	title := "Getting Started"
@@ -909,7 +910,7 @@ var _ = It("TestCreatePageEndpoint", func() {
 var _ = It("TestConfigEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstanceWithAllowInsecure(w, false, t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -929,7 +930,7 @@ var _ = It("TestConfigEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
 var _ = It("TestLoginEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstanceWithAllowInsecure(w, false, t)
 
 	loginBody := `{"identifier": "admin", "password": "admin"}`
@@ -951,7 +952,7 @@ var _ = It("TestLoginEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
 var _ = It("TestCreatePageEndpoint_MissingTitle", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"title": ""}`
@@ -966,7 +967,7 @@ var _ = It("TestCreatePageEndpoint_MissingTitle", func() {
 var _ = It("TestCreatePageEndpoint_InvalidJSON", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `this is not valid json`
@@ -981,7 +982,7 @@ var _ = It("TestCreatePageEndpoint_InvalidJSON", func() {
 var _ = It("TestCreatePageEndpoint_PageAlreadyExists", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"title": "Page Exists", "slug": "page-exists"}`
@@ -1002,7 +1003,7 @@ var _ = It("TestCreatePageEndpoint_PageAlreadyExists", func() {
 var _ = It("TestGetTreeEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/tree", nil)
@@ -1038,7 +1039,7 @@ var _ = It("TestGetTreeEndpoint", func() {
 var _ = It("TestConfigEndpoint_IncludesMaxAssetUploadSizeBytes", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	const maxAssetUploadSizeBytes shared.MaxBytes = 123456
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
@@ -1078,7 +1079,7 @@ var _ = It("TestConfigEndpoint_IncludesMaxAssetUploadSizeBytes", func() {
 var _ = It("TestConfigEndpoint_IncludesEnableLinkRefactor", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
@@ -1118,7 +1119,7 @@ var _ = It("TestConfigEndpoint_IncludesEnableLinkRefactor", func() {
 var _ = It("TestConfigEndpoint_IncludesMarkdownLinkRootPrefix", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
@@ -1153,7 +1154,7 @@ var _ = It("TestConfigEndpoint_IncludesMarkdownLinkRootPrefix", func() {
 var _ = It("TestConfigEndpoint_IncludesEnableWorkspaceSyncWhenDisabled", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
@@ -1215,7 +1216,7 @@ var _ = It("TestWorkspaceSyncStatusEndpoint_WhenEnabled", func() {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
@@ -1265,7 +1266,7 @@ var _ = It("TestWorkspaceSyncRefreshEndpoint_SyncsDirectMarkdownCreate", func() 
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1331,7 +1332,7 @@ var _ = It("TestWorkspaceSyncSnapshotsEndpoint_WhenEnabled", func() {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1383,7 +1384,7 @@ var _ = It("TestWorkspaceSyncSnapshotsEndpoint_RespectsLimit", func() {
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644); err != nil {
 		t.Fatalf("write page update: %v", err)
 	}
@@ -1468,7 +1469,7 @@ var _ = It("TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit",
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	initialCommit := w.WorkspaceSyncStatus().LastCommitHash
 	if initialCommit == "" {
 		t.Fatalf("initial workspace commit is empty")
@@ -1568,7 +1569,7 @@ var _ = It("TestWorkspaceSyncStatusEndpoint_PublicAccessAllowsUnauthenticatedRea
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1609,7 +1610,7 @@ var _ = It("TestWorkspaceSyncSnapshotRestoreEndpoint_RestoresMarkdownOnly", func
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1689,7 +1690,7 @@ var _ = It("TestWorkspaceSyncPageRevisionsEndpoint_UsesGitBackedHistory", func()
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1774,7 +1775,7 @@ previous content`
 	if err != nil {
 		t.Fatalf("NewWiki: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		AllowInsecure:           true,
@@ -1861,7 +1862,7 @@ previous content`
 var _ = It("TestRefactorPreviewEndpoint_UsesFrontendJSONShape", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
@@ -1922,7 +1923,7 @@ var _ = It("TestRefactorPreviewEndpoint_UsesFrontendJSONShape", func() {
 var _ = It("TestRefactorPreviewEndpoint_IsDisabledWhenFlagIsOff", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
@@ -1947,7 +1948,7 @@ var _ = It("TestRefactorPreviewEndpoint_IsDisabledWhenFlagIsOff", func() {
 var _ = It("TestRefactorApply_UsesGitHistoryWithoutLegacyRevisionStorage", func() {
 	t := GinkgoT()
 	w := createWikiTestInstanceWithRevisionFlag(t, false)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
@@ -2005,7 +2006,7 @@ var _ = It("TestRefactorApply_UsesGitHistoryWithoutLegacyRevisionStorage", func(
 var _ = It("TestUploadAssetEndpoint_RejectsFilesExceedingConfiguredLimit", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
@@ -2085,7 +2086,7 @@ var _ = It("TestUploadAssetEndpoint_RejectsFilesExceedingConfiguredLimit", func(
 var _ = It("TestSuggestSlugEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstanceWithRevision(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/slug-suggestion?title=NewPage", nil)
@@ -2112,7 +2113,7 @@ var _ = It("TestSuggestSlugEndpoint", func() {
 var _ = It("TestCancelImportPlanEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	var body bytes.Buffer
@@ -2127,7 +2128,7 @@ var _ = It("TestCancelImportPlanEndpoint", func() {
 	if err != nil {
 		t.Fatalf("Open fixture zip failed: %v", err)
 	}
-	defer wrapCloseWithErrorCheck(zipFile.Close, t)
+	wrapCloseWithErrorCheck(zipFile.Close, t)
 
 	if _, err := io.Copy(fileWriter, zipFile); err != nil {
 		t.Fatalf("Copy zip fixture failed: %v", err)
@@ -2148,7 +2149,7 @@ var _ = It("TestCancelImportPlanEndpoint", func() {
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -2220,7 +2221,7 @@ var _ = It("TestCancelImportPlanEndpoint", func() {
 var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	fixtureDir := importerFixturePathForHTTPTests(t, "link-assets-package")
@@ -2237,7 +2238,7 @@ var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets",
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -2333,8 +2334,7 @@ var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets",
 		} `json:"execution_result"`
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	Eventually(func(g Gomega) {
 		statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
 		for _, cookie := range cookies {
 			statusReq.AddCookie(cookie)
@@ -2343,18 +2343,10 @@ var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets",
 		statusRec := httptest.NewRecorder()
 		router.ServeHTTP(statusRec, statusReq)
 
-		if statusRec.Code != http.StatusOK {
-			t.Fatalf("Expected status 200 when fetching import plan, got %d: %s", statusRec.Code, statusRec.Body.String())
-		}
-		if err := json.Unmarshal(statusRec.Body.Bytes(), &completedResp); err != nil {
-			t.Fatalf("Invalid import status response JSON: %v", err)
-		}
-		if completedResp.ExecutionStatus == "completed" {
-			break
-		}
-
-		time.Sleep(50 * time.Millisecond)
-	}
+		g.Expect(statusRec.Code).To(Equal(http.StatusOK), statusRec.Body.String())
+		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
+		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
+	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
 
 	if completedResp.ExecutionStatus != "completed" || completedResp.ExecutionResult == nil {
 		t.Fatalf("expected completed execution result, got %#v", completedResp)
@@ -2393,7 +2385,7 @@ var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets",
 var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstanceWithMaxAssetUploadSize(w, t, 1024)
 
 	fixtureDir := t.TempDir()
@@ -2420,7 +2412,7 @@ var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -2502,8 +2494,7 @@ var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 		} `json:"execution_result"`
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	Eventually(func(g Gomega) {
 		statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
 		for _, cookie := range cookies {
 			statusReq.AddCookie(cookie)
@@ -2512,18 +2503,10 @@ var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 		statusRec := httptest.NewRecorder()
 		router.ServeHTTP(statusRec, statusReq)
 
-		if statusRec.Code != http.StatusOK {
-			t.Fatalf("Expected status 200 when fetching import plan, got %d: %s", statusRec.Code, statusRec.Body.String())
-		}
-		if err := json.Unmarshal(statusRec.Body.Bytes(), &completedResp); err != nil {
-			t.Fatalf("Invalid import status response JSON: %v", err)
-		}
-		if completedResp.ExecutionStatus == "completed" {
-			break
-		}
-
-		time.Sleep(50 * time.Millisecond)
-	}
+		g.Expect(statusRec.Code).To(Equal(http.StatusOK), statusRec.Body.String())
+		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
+		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
+	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
 
 	if completedResp.ExecutionStatus != "completed" || completedResp.ExecutionResult == nil {
 		t.Fatalf("expected completed execution result, got %#v", completedResp)
@@ -2544,7 +2527,7 @@ var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 var _ = It("TestSuggestSlugEndpoint_MissingTitle", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/slug-suggestion", nil)
@@ -2558,7 +2541,7 @@ var _ = It("TestSuggestSlugEndpoint_MissingTitle", func() {
 var _ = It("TestDeletePageEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Delete Me", "delete-me", nil, pageNodeKind())
@@ -2578,7 +2561,7 @@ var _ = It("TestDeletePageEndpoint", func() {
 var _ = It("TestDeletePageEndpoint_NotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/pages/not-found-id", nil)
@@ -2592,7 +2575,7 @@ var _ = It("TestDeletePageEndpoint_NotFound", func() {
 var _ = It("TestDeletePageEndpoint_HasChildren", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	parent := createPageViaAPI(t, router, "Parent", "parent", nil, pageNodeKind())
@@ -2609,7 +2592,7 @@ var _ = It("TestDeletePageEndpoint_HasChildren", func() {
 var _ = It("TestDeletePageEndpoint_Recursive", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	parent := createPageViaAPI(t, router, "Parent", "parent", nil, pageNodeKind())
@@ -2630,7 +2613,7 @@ var _ = It("TestDeletePageEndpoint_Recursive", func() {
 var _ = It("TestUpdatePageEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -2669,7 +2652,7 @@ var _ = It("TestUpdatePageEndpoint", func() {
 var _ = It("TestUpdatePageEndpoint_WritesTagsAndStringProperties", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -2720,7 +2703,7 @@ var _ = It("TestUpdatePageEndpoint_WritesTagsAndStringProperties", func() {
 var _ = It("TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -2793,7 +2776,7 @@ var _ = It("TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent", func() {
 var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Metadata Preserve", "metadata-preserve", nil, pageNodeKind())
@@ -2933,7 +2916,7 @@ var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClear
 var _ = It("TestUpdatePageEndpoint_IndexesTagsForTagsEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -2974,7 +2957,7 @@ var _ = It("TestUpdatePageEndpoint_IndexesTagsForTagsEndpoint", func() {
 var _ = It("TestGetTagsEndpoint_CountsSuggestionsWithinSelectedTags", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	pageA := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
@@ -3025,7 +3008,7 @@ var _ = It("TestGetTagsEndpoint_CountsSuggestionsWithinSelectedTags", func() {
 var _ = It("TestGetTagsEndpoint_AcceptsRepeatedSelectedParams", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
@@ -3065,7 +3048,7 @@ var _ = It("TestGetTagsEndpoint_AcceptsRepeatedSelectedParams", func() {
 var _ = It("TestSearchEndpoint_FiltersResultsByTags", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	reactPage := createPageViaAPI(t, router, "React Search Match", "react-search-match", nil, pageNodeKind())
@@ -3127,7 +3110,7 @@ var _ = It("TestSearchEndpoint_FiltersResultsByTags", func() {
 var _ = It("TestSearchEndpoint_ReturnsTagMatchesWithoutQuery", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	reactPage := createPageViaAPI(t, router, "React Tag Match", "react-tag-match", nil, pageNodeKind())
@@ -3188,7 +3171,7 @@ var _ = It("TestSearchEndpoint_ReturnsTagMatchesWithoutQuery", func() {
 var _ = It("TestSearchEndpoint_NormalizesTagOnlyPaginationBounds", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "React Tag Match", "react-tag-match-bounds", nil, pageNodeKind())
@@ -3241,7 +3224,7 @@ var _ = It("TestSearchEndpoint_NormalizesTagOnlyPaginationBounds", func() {
 var _ = It("TestSearchEndpoint_TagFacetsShrinkWithAdditionalFilters", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	type searchResponse struct {
@@ -3332,7 +3315,7 @@ var _ = It("TestSearchEndpoint_TagFacetsShrinkWithAdditionalFilters", func() {
 var _ = It("TestGetPagesByTagsEndpoint_ReturnsExcerpt", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Excerpt Page", "excerpt-page", nil, pageNodeKind())
@@ -3387,7 +3370,7 @@ var _ = It("TestGetPagesByTagsEndpoint_ReturnsExcerpt", func() {
 var _ = It("TestGetPagesByTagsEndpoint_AcceptsRepeatedTagsParams", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	pageA := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
@@ -3433,7 +3416,7 @@ var _ = It("TestGetPagesByTagsEndpoint_AcceptsRepeatedTagsParams", func() {
 var _ = It("TestUpdatePage_NotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"version":"stale-version","title":"Updated","slug":"updated","content":"New content"}`
@@ -3447,7 +3430,7 @@ var _ = It("TestUpdatePage_NotFound", func() {
 var _ = It("TestUpdatePage_SlugRemainsIfUnchanged", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a page
@@ -3482,7 +3465,7 @@ var _ = It("TestUpdatePage_SlugRemainsIfUnchanged", func() {
 var _ = It("TestUpdatePage_PageAlreadyExists", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -3507,7 +3490,7 @@ var _ = It("TestUpdatePage_PageAlreadyExists", func() {
 var _ = It("TestUpdatePage_InvalidJSON", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `this is not valid json`
@@ -3522,7 +3505,7 @@ var _ = It("TestUpdatePage_InvalidJSON", func() {
 var _ = It("TestUpdatePage_MissingTitle", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"version":"required","slug":"updated","content":"New content"}`
@@ -3536,7 +3519,7 @@ var _ = It("TestUpdatePage_MissingTitle", func() {
 var _ = It("TestUpdatePage_MissingSlug", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"version":"required","title":"Updated","content":"New content"}`
@@ -3551,7 +3534,7 @@ var _ = It("TestUpdatePage_MissingSlug", func() {
 var _ = It("TestUpdatePage_InvalidProperties", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
@@ -3603,7 +3586,7 @@ var _ = It("TestGetPageEndpoint", func() {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	rootDir := filepath.Join(t.TempDir(), "content")
 	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a page
@@ -3679,7 +3662,7 @@ Body
 var _ = It("TestGetPageEndpoint_NotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/not-found-id", nil)
@@ -3693,7 +3676,7 @@ var _ = It("TestGetPageEndpoint_NotFound", func() {
 var _ = It("TestGetPageEndpoint_MissingID", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/", nil)
@@ -3707,7 +3690,7 @@ var _ = It("TestGetPageEndpoint_MissingID", func() {
 var _ = It("TestGetPageByPathEndpoint_MissingPath", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path", nil)
@@ -3732,7 +3715,7 @@ var _ = It("TestGetPageByPathEndpoint_ExplicitEmptyPathReturnsRootSection", func
 		t.Fatalf("write child: %v", err)
 	}
 	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=&kind=section", nil)
@@ -3756,7 +3739,7 @@ var _ = It("TestGetPageByPathEndpoint_ExplicitEmptyPathReturnsRootSection", func
 var _ = It("TestGetPageByPathEndpoint_NotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=does-not-exist", nil)
@@ -3770,7 +3753,7 @@ var _ = It("TestGetPageByPathEndpoint_NotFound", func() {
 var _ = It("TestGetPageByPathEndpoint_PageReturnsNoChildren", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a standalone page (no children – adding children auto-converts it to a section)
@@ -3800,7 +3783,7 @@ var _ = It("TestGetPageByPathEndpoint_PageReturnsNoChildren", func() {
 var _ = It("TestGetPageByPathEndpoint_SectionReturnsDirectChildrenOnly", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	sectionKind := tree.NodeKindSection
@@ -3856,7 +3839,7 @@ var _ = It("TestGetPageByPathEndpoint_KindDistinguishesSameBasenamePageAndSectio
 	write("docs/sync/index.md", "---\nleafwiki_id: sync-section\nleafwiki_title: Sync Section\n---\n# Sync Section\n")
 
 	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	pageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=page", nil)
@@ -3937,7 +3920,7 @@ var _ = It("TestGetPageByPathEndpoint_ReadmeMarkdownPathUsesFallbackOnlyWhenActi
 	write("docs/no-readme/index.md", "---\nleafwiki_id: no-readme-section\nleafwiki_title: No README\n---\n# No README\n")
 
 	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	fallbackRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md", nil)
@@ -4018,7 +4001,7 @@ var _ = It("TestGetTreeEndpoint_ContentPathUsesCaseInsensitiveIndexPrecedence", 
 	write("guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides README\n")
 
 	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	root := getTreeViaAPI(t, router)
@@ -4052,7 +4035,7 @@ var _ = It("TestGetTreeEndpoint_ContentPathUsesCaseInsensitiveIndexPrecedence", 
 var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	sectionKind := tree.NodeKindSection
@@ -4102,7 +4085,7 @@ var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func(
 var _ = It("TestGetPagePermalinkEndpoint_ReturnsCurrentPath", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	docs := createPageViaAPI(t, router, "Docs", "docs", nil, pageNodeKind())
@@ -4142,7 +4125,7 @@ var _ = It("TestGetPagePermalinkEndpoint_ReturnsCurrentPath", func() {
 var _ = It("TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            true,
 		InjectCodeInHeader:      "",
@@ -4179,7 +4162,7 @@ var _ = It("TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads"
 var _ = It("TestMovePageEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create two pages a and b
@@ -4204,7 +4187,7 @@ var _ = It("TestMovePageEndpoint", func() {
 var _ = It("TestMovePageEndpoint_NotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/not-found-id/move", strings.NewReader(`{"version":"missing","parentId":"root"}`))
@@ -4218,7 +4201,7 @@ var _ = It("TestMovePageEndpoint_NotFound", func() {
 var _ = It("TestMovePageEndpoint_InvalidJSON", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/invalid-id/move", strings.NewReader(`this is not valid json`))
@@ -4232,7 +4215,7 @@ var _ = It("TestMovePageEndpoint_InvalidJSON", func() {
 var _ = It("TestMovePageEndpoint_MissingParentID", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/missing-parent/move", strings.NewReader(`{"version":"missing","parentId":""}`))
@@ -4246,7 +4229,7 @@ var _ = It("TestMovePageEndpoint_MissingParentID", func() {
 var _ = It("TestMovePageEndpoint_ParentNotFound", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
@@ -4265,7 +4248,7 @@ var _ = It("TestMovePageEndpoint_ParentNotFound", func() {
 var _ = It("TestMovePageEndpoint_CircularReference", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
@@ -4283,7 +4266,7 @@ var _ = It("TestMovePageEndpoint_CircularReference", func() {
 var _ = It("TestMovePage_FailsIfTargetAlreadyHasPageWithSameSlug", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
@@ -4304,7 +4287,7 @@ var _ = It("TestMovePage_FailsIfTargetAlreadyHasPageWithSameSlug", func() {
 var _ = It("TestMovePage_InTheSamePlace", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
@@ -4320,7 +4303,7 @@ var _ = It("TestMovePage_InTheSamePlace", func() {
 var _ = It("TestSortPagesEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create pages
@@ -4374,7 +4357,7 @@ var _ = It("TestSortPagesEndpoint", func() {
 var _ = It("TestAuthLoginEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"identifier": "admin", "password": "admin"}`
@@ -4389,7 +4372,7 @@ var _ = It("TestAuthLoginEndpoint", func() {
 	}
 
 	res := rec.Result()
-	defer wrapCloseWithErrorCheck(res.Body.Close, t)
+	wrapCloseWithErrorCheck(res.Body.Close, t)
 
 	// Prüfen, ob Cookies gesetzt wurden
 	cookies := res.Cookies()
@@ -4402,7 +4385,7 @@ var _ = It("TestAuthLoginEndpoint", func() {
 var _ = It("TestAuthLogin_InvalidCredentials", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"identifier": "admin", "password": "wrong"}`
@@ -4421,7 +4404,7 @@ var _ = It("TestAuthLogin_InvalidCredentials", func() {
 var _ = It("TestAuthRefreshToken", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	type authResponse struct {
@@ -4448,7 +4431,7 @@ var _ = It("TestAuthRefreshToken", func() {
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 	cookies := loginRes.Cookies()
 
 	if len(cookies) == 0 {
@@ -4492,7 +4475,7 @@ var _ = It("TestAuthRefreshToken", func() {
 
 	// optional: check if new cookies are set
 	refreshRes := rec.Result()
-	defer wrapCloseWithErrorCheck(refreshRes.Body.Close, t)
+	wrapCloseWithErrorCheck(refreshRes.Body.Close, t)
 	newCookies := refreshRes.Cookies()
 	if len(newCookies) == 0 {
 		t.Fatalf("Expected new auth cookies on refresh")
@@ -4503,7 +4486,7 @@ var _ = It("TestAuthRefreshToken", func() {
 var _ = It("TestCreateUserEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"username": "john", "email": "john@example.com", "password": "secret123", "role": "editor"}`
@@ -4518,7 +4501,7 @@ var _ = It("TestCreateUserEndpoint", func() {
 var _ = It("TestCreateUser_DuplicateEmailOrUsername", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create initial user
@@ -4544,7 +4527,7 @@ var _ = It("TestCreateUser_DuplicateEmailOrUsername", func() {
 var _ = It("TestCreateUser_InvalidRole", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"username": "sam", "email": "sam@example.com", "password": "secret1234", "role": "undefined"}`
@@ -4559,7 +4542,7 @@ var _ = It("TestCreateUser_InvalidRole", func() {
 var _ = It("TestCreateUser_WithViewerRole", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	body := `{"username": "vieweruser", "email": "viewer@example.com", "password": "secret1234", "role": "viewer"}`
@@ -4574,7 +4557,7 @@ var _ = It("TestCreateUser_WithViewerRole", func() {
 var _ = It("TestUpdateUser_RoleToViewer", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create user
@@ -4601,7 +4584,7 @@ var _ = It("TestUpdateUser_RoleToViewer", func() {
 var _ = It("TestViewer_CannotCreatePage", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a viewer user
@@ -4621,7 +4604,7 @@ var _ = It("TestViewer_CannotCreatePage", func() {
 var _ = It("TestViewer_CannotUploadAsset", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a viewer user
@@ -4647,7 +4630,7 @@ var _ = It("TestViewer_CannotUploadAsset", func() {
 var _ = It("TestViewer_CannotUpdatePage", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a viewer user
@@ -4674,7 +4657,7 @@ var _ = It("TestViewer_CannotUpdatePage", func() {
 var _ = It("TestViewer_CannotDeletePage", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create a viewer user
@@ -4700,7 +4683,7 @@ var _ = It("TestViewer_CannotDeletePage", func() {
 var _ = It("TestGetUsersEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/users", nil)
@@ -4722,7 +4705,7 @@ var _ = It("TestGetUsersEndpoint", func() {
 var _ = It("TestUpdateUserEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create user
@@ -4749,7 +4732,7 @@ var _ = It("TestUpdateUserEndpoint", func() {
 var _ = It("TestChangeOwnPasswordEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
@@ -4797,7 +4780,7 @@ var _ = It("TestChangeOwnPasswordEndpoint", func() {
 var _ = It("TestMCPAPIKeys_AdminCreatesListsAndRevokesUserKey", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	createUser := `{"username": "keyuser", "email": "keyuser@example.com", "password": "secretpassword", "role": "editor"}`
@@ -4868,7 +4851,7 @@ var _ = It("TestMCPAPIKeys_AdminCreatesListsAndRevokesUserKey", func() {
 var _ = It("TestMCPAPIKeys_RoutePermissionsAndValidation", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	createEditor := `{"username": "editor-key-user", "email": "editor-key-user@example.com", "password": "secretpassword", "role": "editor"}`
@@ -4920,7 +4903,7 @@ var _ = It("TestMCPAPIKeys_RoutePermissionsAndValidation", func() {
 var _ = It("TestMCPAPIKeys_SelfServiceRequiresCurrentPasswordAndIsMCPOnly", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	createEditor := `{"username": "self-key-user", "email": "self-key-user@example.com", "password": "secretpassword", "role": "editor"}`
@@ -4975,7 +4958,7 @@ var _ = It("TestMCPAPIKeys_SelfServiceRequiresCurrentPasswordAndIsMCPOnly", func
 var _ = It("TestMCPAPIKeys_SelfCreateRateLimited", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	createEditor := `{"username": "rate-key-user", "email": "rate-key-user@example.com", "password": "secretpassword", "role": "editor"}`
@@ -4997,7 +4980,7 @@ var _ = It("TestMCPAPIKeys_SelfCreateRateLimited", func() {
 var _ = It("TestMCPAPIKeys_RemoteUserSelfCreateDisabled", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
 	if err != nil {
@@ -5077,7 +5060,7 @@ var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
 	func(tc authDisabledSelfAPIKeyRoute) {
 		t := GinkgoT()
 		w := createWikiTestInstance(t)
-		defer wrapCloseWithErrorCheck(w.Close, t)
+		wrapCloseWithErrorCheck(w.Close, t)
 
 		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 			PublicAccess:            false,
@@ -5141,7 +5124,7 @@ var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
 var _ = It("TestDeleteUserEndpoint", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Create user
@@ -5161,7 +5144,7 @@ var _ = It("TestDeleteUserEndpoint", func() {
 var _ = It("TestDeleteAdminUser_ShouldFail", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Get default admin
@@ -5191,7 +5174,7 @@ var _ = It("TestDeleteAdminUser_ShouldFail", func() {
 var _ = It("TestRequireAdminMiddleware", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Default Admin create user should succeed
@@ -5207,7 +5190,7 @@ var _ = It("TestRequireAdminMiddleware", func() {
 var _ = It("TestRequireAdminMiddleware_BlockedWhenAuthDisabled", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	// Create router with auth disabled
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
@@ -5254,7 +5237,7 @@ var _ = It("TestRequireAdminMiddleware_BlockedWhenAuthDisabled", func() {
 var _ = It("TestRequireAuthMiddleware_Unauthorized", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Request ohne Token
@@ -5273,7 +5256,7 @@ var _ = It("TestRequireAuthMiddleware_Unauthorized", func() {
 var _ = It("TestRequireAuthMiddleware_InvalidToken", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title": "Bad", "slug": "bad"}`))
@@ -5292,7 +5275,7 @@ var _ = It("TestRequireAuthMiddleware_InvalidToken", func() {
 var _ = It("TestAssetEndpoints", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Step 0: Login als Admin und Cookies holen
@@ -5308,7 +5291,7 @@ var _ = It("TestAssetEndpoints", func() {
 	}
 
 	loginRes := loginRec.Result()
-	defer wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
 
 	cookies := loginRes.Cookies()
 	if len(cookies) == 0 {
@@ -5439,7 +5422,7 @@ var _ = It("TestIndexingStatusEndpoint", func() {
 	t := GinkgoT()
 	// Lets call /api/search/status
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 	router := createRouterTestInstance(w, t)
 
 	// Default Admin holen
@@ -5588,7 +5571,7 @@ var _ = DescribeTable("TestAssetAccessControl",
 	func(tc assetAccessControlScenario) {
 		t := GinkgoT()
 		w := createWikiTestInstance(t)
-		defer wrapCloseWithErrorCheck(w.Close, t)
+		wrapCloseWithErrorCheck(w.Close, t)
 
 		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 			PublicAccess:            tc.publicAccess,
@@ -5883,7 +5866,7 @@ var _ = DescribeTable("TestBuildFrontendFaviconHref",
 var _ = It("TestCustomStylesheetRoute", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	customCSSPath := filepath.Join(w.GetStorageDir(), "custom.css")
 	if err := os.WriteFile(customCSSPath, []byte("body { color: red; }"), 0644); err != nil {
@@ -5922,7 +5905,7 @@ var _ = It("TestCustomStylesheetRoute", func() {
 var _ = It("TestCustomStylesheetRoute_RejectsPathOutsideStorageDir", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	outsideCSSPath := filepath.Join(t.TempDir(), "outside.css")
 	if err := os.WriteFile(outsideCSSPath, []byte("body { color: blue; }"), 0644); err != nil {
@@ -5953,7 +5936,7 @@ var _ = It("TestCustomStylesheetRoute_RejectsPathOutsideStorageDir", func() {
 var _ = It("TestCustomStylesheetRoute_RejectsNonCSSFile", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	textFilePath := filepath.Join(w.GetStorageDir(), "custom.txt")
 	if err := os.WriteFile(textFilePath, []byte("not css"), 0644); err != nil {
@@ -5984,7 +5967,7 @@ var _ = It("TestCustomStylesheetRoute_RejectsNonCSSFile", func() {
 var _ = It("TestBrandingAssetRoute_DisablesClientCache", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := createRouterTestInstance(w, t)
 	uploadBrandingLogoViaAPI(t, router, "logo.png", []byte("logo"))
@@ -6006,13 +5989,13 @@ var _ = It("TestBrandingAssetRoute_DisablesClientCache", func() {
 var _ = It("TestFaviconRoute_DisablesClientCache", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	EmbedFrontendOrig := httpinternal.EmbedFrontend
 	httpinternal.EmbedFrontend = "true"
-	defer func() {
+	DeferCleanup(func() {
 		httpinternal.EmbedFrontend = EmbedFrontendOrig
-	}()
+	})
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
@@ -6042,13 +6025,13 @@ var _ = It("TestFaviconRoute_DisablesClientCache", func() {
 var _ = It("TestOAuthApprovalFrontendRoute_HasApprovalSecurityHeaders", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	embedFrontendOrig := httpinternal.EmbedFrontend
 	httpinternal.EmbedFrontend = "true"
-	defer func() {
+	DeferCleanup(func() {
 		httpinternal.EmbedFrontend = embedFrontendOrig
-	}()
+	})
 
 	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		AllowInsecure:           true,
@@ -6080,7 +6063,7 @@ var _ = It("TestOAuthApprovalFrontendRoute_HasApprovalSecurityHeaders", func() {
 var _ = It("TestFaviconICORoute_ServesCustomBrandingFavicon", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := createRouterTestInstance(w, t)
 	uploadBrandingFaviconViaAPI(t, router, "favicon.ico", []byte("custom-favicon"))
@@ -6106,7 +6089,7 @@ var _ = It("TestFaviconICORoute_ServesCustomBrandingFavicon", func() {
 var _ = It("TestFaviconICORoute_FallsBackToDefaultSVG", func() {
 	t := GinkgoT()
 	w := createWikiTestInstance(t)
-	defer wrapCloseWithErrorCheck(w.Close, t)
+	wrapCloseWithErrorCheck(w.Close, t)
 
 	router := createRouterTestInstance(w, t)
 
@@ -6224,7 +6207,7 @@ func captureDefaultLogs(t routerTestTB) *bytes.Buffer {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		slog.SetDefault(previous)
 	})
 	return &logs

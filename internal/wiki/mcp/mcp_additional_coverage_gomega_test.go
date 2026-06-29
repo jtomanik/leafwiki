@@ -72,7 +72,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			userDir := t.TempDir()
 			store, err := coreauth.NewUserStore(userDir)
 			Expect(err).NotTo(HaveOccurred())
-			t.Cleanup(func() {
+			DeferCleanup(func() {
 				Expect(store.Close()).To(Succeed())
 			})
 			userService := coreauth.NewUserService(store)
@@ -90,7 +90,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			assertLocalizedErrorCode(t, err, errCodeMCPAuthenticatedUserNotFound, "errors.mcp.authenticated_user_not_found")
 
 			blocker := beginExclusiveMCPTestSQLiteTransaction(t, filepath.Join(userDir, "users.db"))
-			defer blocker.rollback(t)
+			DeferCleanup(blocker.rollback, t)
 
 			user, err = routes.actorForRequest(mcpTokenInfoRequest(editor.ID))
 			Expect(user).To(BeNil())
@@ -138,7 +138,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			actorHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/mcp", nil))
 
 			server := httptest.NewServer(actorHandler)
-			defer server.Close()
+			DeferCleanup(server.Close)
 			client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
 			session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{
 				Endpoint:             server.URL + "/mcp",
@@ -146,11 +146,11 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 				DisableStandaloneSSE: true,
 			}, nil)
 			Expect(err).NotTo(HaveOccurred())
-			defer session.Close()
+			DeferCleanup(func() { _ = session.Close() })
 
 			_, storageFailureService, _, storageFailureKey, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
 			blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-			defer blocker.rollback(t)
+			DeferCleanup(blocker.rollback, t)
 			failingHandler := (&Routes{apiKeys: storageFailureService}).requirePrivateStdioAPIKey(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
 			}))

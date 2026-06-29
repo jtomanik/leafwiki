@@ -21,11 +21,7 @@ var _ = ginkgo.Describe("TestZipExtractor_ValidateExtractedFiles", func() {
 		if err != nil {
 			t.Fatalf("ExtractToTemp failed: %v", err)
 		}
-		defer func() {
-			if err := ws.Cleanup(); err != nil {
-				t.Fatalf("Cleanup failed: %v", err)
-			}
-		}()
+		ginkgo.DeferCleanup(ws.Cleanup)
 
 		// Check if expected files exist
 		expectedFiles := []string{

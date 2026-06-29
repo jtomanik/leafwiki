@@ -159,17 +159,9 @@ var _ = It("TestRateLimiter_ReleasesLockAfterLimit", func() {
 		done <- w.Code
 	}()
 
-	timeout := 2 * time.Second
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case code := <-done:
-		if code != http.StatusOK {
-			t.Fatalf("Expected status 200 for different key after limit hit, got %d", code)
-		}
-	case <-timer.C:
-		t.Fatal("Request blocked after limit hit; mutex was not released")
-	}
+	Eventually(done).
+		WithTimeout(2*time.Second).
+		Should(Receive(Equal(http.StatusOK)), "request for a different key should not block after a limit hit")
 
 })
 
@@ -199,19 +191,16 @@ var _ = It("TestRateLimiter_WindowExpires", func() {
 		}
 	}
 
-	// Wait for the window to expire
-	time.Sleep(150 * time.Millisecond)
-
-	// Should be able to make another request
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.3:1234"
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200 after window expired, got %d", w.Code)
-	}
+	Eventually(func() int {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "192.168.1.3:1234"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code
+	}).
+		WithTimeout(500*time.Millisecond).
+		WithPolling(10*time.Millisecond).
+		Should(Equal(http.StatusOK), "request should succeed after the rate limit window expires")
 
 })
 

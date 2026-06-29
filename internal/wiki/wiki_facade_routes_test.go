@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	ginkgo.It("route registrar accessors expose the expected route groups", func() {
 		t := ginkgo.GinkgoT()
 		w := createWikiTestInstance(t)
-		defer closeWithErrorCheckForTest(t, w.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 		Expect(w.Registrars()).To(HaveLen(15))
 		Expect(w.FrontdRegistrars()).To(HaveLen(4))
@@ -148,7 +148,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	ginkgo.It("MCP handlers and presence accessors are available through the facade", func() {
 		t := ginkgo.GinkgoT()
 		w := createWikiTestInstance(t)
-		defer closeWithErrorCheckForTest(t, w.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 		Expect(w.MCPHTTPHandler(httpinternal.RouterOptions{})).NotTo(BeNil())
 		Expect(w.PrivateMCPHTTPHandler(httpinternal.RouterOptions{})).NotTo(BeNil())
@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	ginkgo.It("workspace sync actor lookup preserves IDs and enriches known users", func() {
 		t := ginkgo.GinkgoT()
 		w := createWikiTestInstance(t)
-		defer closeWithErrorCheckForTest(t, w.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
 		actor := (&Wiki{}).workspaceSyncActorForUser(tree.UserIDFromString("external-user"))
 		Expect(actor.ID.String()).To(Equal("external-user"))
@@ -257,7 +257,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	ginkgo.It("import adapter delegates tree, page, and asset operations", func() {
 		t := ginkgo.GinkgoT()
 		w := createWikiTestInstance(t)
-		defer closeWithErrorCheckForTest(t, w.Close)
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 		adapter := NewWikiImportAdapter(w)
 
 		Expect(adapter.TreeHash()).NotTo(BeEmpty())
@@ -320,7 +320,9 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(os.WriteFile(assetPath, []byte("asset"), 0o644)).To(Succeed())
 		file, err := os.Open(assetPath)
 		Expect(err).NotTo(HaveOccurred())
-		defer file.Close()
+		ginkgo.DeferCleanup(func() {
+			Expect(file.Close()).To(Succeed())
+		})
 
 		url, err := adapter.UploadAsset(tree.UserIDFromString("importer"), page.ID, file, tree.AssetNameFromString("asset.txt"), shared.MaxBytes(1024))
 		Expect(err).NotTo(HaveOccurred())

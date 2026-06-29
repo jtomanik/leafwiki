@@ -14,10 +14,12 @@ import (
 // Set testUser to non-empty to populate X-Test-User, which the proxy converts
 // to Remote-User.
 func doProxy(path, testUser string, extraHeaders map[string]string) *http.Response {
+	GinkgoHelper()
 	return doProxyRequest(http.MethodGet, path, testUser, nil, extraHeaders)
 }
 
 func doProxyRequest(method, path, testUser string, body io.Reader, extraHeaders map[string]string) *http.Response {
+	GinkgoHelper()
 	req, err := http.NewRequest(method, proxyURL+path, body)
 	Expect(err).NotTo(HaveOccurred())
 	if testUser != "" {
@@ -32,6 +34,7 @@ func doProxyRequest(method, path, testUser string, body io.Reader, extraHeaders 
 }
 
 func readBody(r *http.Response) string {
+	GinkgoHelper()
 	defer r.Body.Close()
 	b, err := io.ReadAll(r.Body)
 	Expect(err).NotTo(HaveOccurred())
@@ -39,6 +42,7 @@ func readBody(r *http.Response) string {
 }
 
 func assertStatus(resp *http.Response, want int) string {
+	GinkgoHelper()
 	body := readBody(resp)
 	Expect(resp.StatusCode).To(Equal(want), "body: %s", body)
 	return body
@@ -47,6 +51,7 @@ func assertStatus(resp *http.Response, want int) string {
 // loginAdmin obtains an access-token cookie by logging in as admin directly
 // via the proxy. The login endpoint is public and unaffected by proxy auth.
 func loginAdmin() string {
+	GinkgoHelper()
 	payload := `{"identifier":"admin","password":"admin"}`
 	req, err := http.NewRequest(http.MethodPost, proxyURL+"/api/auth/login", strings.NewReader(payload))
 	Expect(err).NotTo(HaveOccurred())
@@ -157,11 +162,13 @@ var _ = Describe("proxy authentication", func() {
 })
 
 func assertRefreshTokenWithoutSession(testUser string, extraHeaders map[string]string) string {
+	GinkgoHelper()
 	resp := doProxyRequest(http.MethodPost, "/api/auth/refresh-token", testUser, nil, extraHeaders)
 	return assertStatus(resp, http.StatusUnprocessableEntity)
 }
 
 func assertInvalidRefreshTokenBody(body string) {
+	GinkgoHelper()
 	var parsed struct {
 		Error struct {
 			Code string `json:"code"`

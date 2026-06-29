@@ -45,7 +45,7 @@ var _ = It("NewMCPProxy injects the daemon token and strips public actor context
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("mcp"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy, err := NewMCPProxy(upstream.URL, "daemon-token")
 	if err != nil {

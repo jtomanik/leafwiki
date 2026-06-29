@@ -1,9 +1,9 @@
 package pagesave
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"context"
 	"errors"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"log/slog"
 
 	"github.com/perber/wiki/internal/core/tree"
@@ -19,6 +19,11 @@ var _ = ginkgo.It("TestNewLinkIndexSideEffect_DefaultsLogger", func() {
 	if err != nil {
 		t.Fatalf("NewLinksStore failed: %v", err)
 	}
+	ginkgo.DeferCleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("LinksStore.Close: %v", err)
+		}
+	})
 	effect := NewLinkIndexSideEffect(links.NewLinkService(t.TempDir(), treeService, store), nil)
 	if effect.log == nil {
 		t.Fatal("expected default logger to be set")
@@ -40,7 +45,7 @@ var _ = ginkgo.It("LinkIndexSideEffect Apply create records outgoing markdown li
 	if err != nil {
 		t.Fatalf("NewLinksStore failed: %v", err)
 	}
-	t.Cleanup(func() {
+	ginkgo.DeferCleanup(func() {
 		if err := store.Close(); err != nil {
 			t.Errorf("LinksStore.Close: %v", err)
 		}
@@ -74,11 +79,11 @@ var _ = ginkgo.It("TestNewSearchIndexSideEffect_DefaultsLogger", func() {
 	if err != nil {
 		t.Fatalf("NewSQLiteIndex failed: %v", err)
 	}
-	defer func() {
+	ginkgo.DeferCleanup(func() {
 		if err := index.Close(); err != nil {
 			t.Fatalf("Close failed: %v", err)
 		}
-	}()
+	})
 
 	effect := NewSearchIndexSideEffect(index, treeService, nil)
 	if effect.log == nil {

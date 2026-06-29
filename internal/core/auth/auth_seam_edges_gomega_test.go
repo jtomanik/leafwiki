@@ -2,11 +2,13 @@ package auth
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gbytes"
 )
 
 var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
@@ -257,14 +259,19 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreAttempts()
 
 			restoreInterval := setAuthSeam(&authSessionCleanupInterval, time.Nanosecond)
+			ginkgo.DeferCleanup(restoreInterval)
+			logBuffer := gbytes.NewBuffer()
+			previousLogOutput := log.Writer()
+			log.SetOutput(logBuffer)
+			ginkgo.DeferCleanup(log.SetOutput, previousLogOutput)
+
 			store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
 			Expect(err).NotTo(HaveOccurred())
 			store.mu.Lock()
 			Expect(store.db.Close()).To(Succeed())
 			store.mu.Unlock()
-			time.Sleep(5 * time.Millisecond)
+			Eventually(logBuffer).WithTimeout(3 * time.Second).Should(gbytes.Say("failed to cleanup expired sessions"))
 			Expect(store.Close()).To(Succeed())
-			restoreInterval()
 		})
 	})
 

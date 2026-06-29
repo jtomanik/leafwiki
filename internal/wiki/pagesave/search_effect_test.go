@@ -21,7 +21,7 @@ func setupSearchTest(t pagesaveTestT) (*tree.TreeService, *search.SQLiteIndex, *
 	if err != nil {
 		t.Fatalf("NewSQLiteIndex: %v", err)
 	}
-	t.Cleanup(func() {
+	ginkgo.DeferCleanup(func() {
 		if err := index.Close(); err != nil {
 			t.Errorf("index.Close: %v", err)
 		}

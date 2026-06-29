@@ -34,7 +34,7 @@ var _ = It("TestWorkspaceRouterProxyResolvesWorkspaceAndRewritesAPIPath", func()
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("proxied"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
@@ -87,7 +87,7 @@ var _ = It("TestWorkspaceRouterProxyRewritesWorkspaceAssetPathsToStaticAssetRout
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("asset"))
 	}))
-	defer upstream.Close()
+	DeferCleanup(upstream.Close)
 
 	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
@@ -128,22 +128,22 @@ type workspaceRouterProxyResolverErrorCase struct {
 
 var _ = DescribeTable("TestWorkspaceRouterProxyMapsResolverErrors",
 	func(tt workspaceRouterProxyResolverErrorCase) {
-	t := GinkgoT()
-	proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
-		Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-			return WorkspaceRoute{}, tt.err
-		},
-		Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
-			return projectdaemon.ActorContext{}, nil
-		},
-	})
-	rec := httptest.NewRecorder()
-	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
-	if rec.Code != tt.wantStatus {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
-	}
-	assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
-},
+		t := GinkgoT()
+		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
+			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+				return WorkspaceRoute{}, tt.err
+			},
+			Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
+				return projectdaemon.ActorContext{}, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
+		if rec.Code != tt.wantStatus {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
+		}
+		assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
+	},
 	Entry("not found", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceNotFound, wantStatus: http.StatusNotFound, wantCode: "workspace_not_found", wantMessageID: "errors.workspace.not_found"}),
 	Entry("forbidden", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceForbidden, wantStatus: http.StatusForbidden, wantCode: "workspace_forbidden", wantMessageID: "errors.workspace.forbidden"}),
 )
@@ -175,15 +175,15 @@ type workspaceRouterProxyDependencyErrorCase struct {
 
 var _ = DescribeTable("TestWorkspaceRouterProxyReportsStructuredDependencyErrors",
 	func(tt workspaceRouterProxyDependencyErrorCase) {
-	t := GinkgoT()
-	proxy := NewWorkspaceRouterProxy(tt.opts)
-	rec := httptest.NewRecorder()
-	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
-	}
-	assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
-},
+		t := GinkgoT()
+		proxy := NewWorkspaceRouterProxy(tt.opts)
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/home/tree", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+		}
+		assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
+	},
 	Entry("resolver unavailable", workspaceRouterProxyDependencyErrorCase{
 		opts:          WorkspaceRouterProxyOptions{},
 		wantCode:      "workspace_resolver_unavailable",

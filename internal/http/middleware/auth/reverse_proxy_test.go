@@ -18,7 +18,7 @@ type proxyFixture struct {
 func cleanupWithErrorCheck(t testTB, name string, closeFn func() error) {
 	t.Helper()
 
-	t.Cleanup(func() {
+	DeferCleanup(func() {
 		if err := closeFn(); err != nil {
 			t.Errorf("close %s: %v", name, err)
 		}

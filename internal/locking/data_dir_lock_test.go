@@ -29,7 +29,7 @@ var _ = Describe("directory locking", func() {
 
 		first, err := AcquireDataDirLock(dataDir)
 		Expect(err).NotTo(HaveOccurred())
-		defer first.Release()
+		DeferCleanup(first.Release)
 
 		second, err := AcquireDataDirLock(dataDir)
 		if err == nil {
@@ -61,7 +61,7 @@ var _ = Describe("directory locking", func() {
 		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
 		dataLock, err := AcquireDataDirLock(dataDir)
 		Expect(err).NotTo(HaveOccurred())
-		defer dataLock.Release()
+		DeferCleanup(dataLock.Release)
 		_, dataErr := AcquireDataDirLock(dataDir)
 		Expect(dataErr).To(HaveOccurred())
 		wrappedDataErr := fmt.Errorf("acquire data directory lock: %w", dataErr)
@@ -72,7 +72,7 @@ var _ = Describe("directory locking", func() {
 		rootDir := filepath.Join(GinkgoT().TempDir(), "content")
 		rootLock, err := AcquireRootDirLock(rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		defer rootLock.Release()
+		DeferCleanup(rootLock.Release)
 		_, rootErr := AcquireRootDirLock(rootDir)
 		Expect(rootErr).To(HaveOccurred())
 		wrappedRootErr := fmt.Errorf("acquire root directory lock: %w", rootErr)
@@ -117,7 +117,7 @@ var _ = Describe("locking edge coverage", func() {
 
 		lock, err := AcquireRootDirLock(rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		defer lock.Release()
+		DeferCleanup(lock.Release)
 
 		Expect(lock.Path()).To(HavePrefix(filepath.Join(cacheDir, "leafwiki", "locks", "roots") + string(os.PathSeparator)))
 		Expect(lock.Path()).NotTo(HavePrefix(rootDir + string(os.PathSeparator)))

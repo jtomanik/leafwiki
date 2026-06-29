@@ -11,12 +11,12 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corebranding "github.com/perber/wiki/internal/branding"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
-	ginkgo "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("branding error responses", func() {
@@ -155,12 +155,14 @@ var _ = ginkgo.Describe("branding asset paths", func() {
 })
 
 func newBrandingTestService() *corebranding.BrandingService {
+	ginkgo.GinkgoHelper()
 	svc, err := corebranding.NewBrandingService(ginkgo.GinkgoT().TempDir())
 	Expect(err).NotTo(HaveOccurred())
 	return svc
 }
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	ginkgo.GinkgoHelper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -168,6 +170,7 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 func assertBrandingStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+	ginkgo.GinkgoHelper()
 	var body BrandingErrorResponse
 	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
 	Expect(body.Error.Code.String()).To(Equal(code))

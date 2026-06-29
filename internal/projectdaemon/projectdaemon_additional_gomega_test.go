@@ -181,11 +181,9 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			defer close(done)
 			registry.RunExpiryLoop(ctx, time.Hour)
 		}()
-		select {
-		case <-done:
-		case <-time.After(250 * time.Millisecond):
-			ginkgo.Fail("AgentPresenceRegistry RunExpiryLoop did not exit after context cancellation")
-		}
+		Eventually(done).
+			WithTimeout(250*time.Millisecond).
+			Should(BeClosed(), "AgentPresenceRegistry RunExpiryLoop should exit after context cancellation")
 
 		zeroTTLRegistry := NewAgentPresenceRegistry(0, nil)
 		ctx, cancel = context.WithCancel(context.Background())
@@ -195,11 +193,9 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			defer close(done)
 			zeroTTLRegistry.RunExpiryLoop(ctx, 0)
 		}()
-		select {
-		case <-done:
-		case <-time.After(250 * time.Millisecond):
-			ginkgo.Fail("AgentPresenceRegistry RunExpiryLoop did not exit after interval defaulting")
-		}
+		Eventually(done).
+			WithTimeout(250*time.Millisecond).
+			Should(BeClosed(), "AgentPresenceRegistry RunExpiryLoop should exit after interval defaulting")
 	})
 
 	ginkgo.It("uses default session registry TTLs and exits session expiry loops on cancellation", func() {
@@ -218,11 +214,9 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			defer close(done)
 			registry.RunExpiryLoop(ctx, 0)
 		}()
-		select {
-		case <-done:
-		case <-time.After(250 * time.Millisecond):
-			ginkgo.Fail("SessionRegistry RunExpiryLoop did not exit after context cancellation")
-		}
+		Eventually(done).
+			WithTimeout(250*time.Millisecond).
+			Should(BeClosed(), "SessionRegistry RunExpiryLoop should exit after context cancellation")
 	})
 
 	ginkgo.It("handles control client and control error parsing edge cases", func() {

@@ -7,7 +7,6 @@ import (
 var _ = ginkgo.Describe("issue codes", func() {
 	ginkgo.It("TestValidateWorkspaceStatusUsesTypedFallbackIssueCodeAndSeverity", func() {
 		t := ginkgo.GinkgoT()
-		t.Parallel()
 
 		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{{Path: "workspace", Message: "sync failed"}}, true)
 
@@ -25,7 +24,6 @@ var _ = ginkgo.Describe("issue codes", func() {
 
 	ginkgo.It("TestValidationIssueConstantsAreStable", func() {
 		t := ginkgo.GinkgoT()
-		t.Parallel()
 
 		if IssueCodeDuplicateLeafwikiID.String() != "duplicate_leafwiki_id" {
 			t.Fatalf("duplicate ID code = %q", IssueCodeDuplicateLeafwikiID)

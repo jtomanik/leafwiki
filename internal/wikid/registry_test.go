@@ -4,13 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/workspaceid"
 	_ "modernc.org/sqlite"
@@ -273,24 +275,12 @@ var _ = ginkgo.It("TestRegistryStoreUpdateSerializesAcrossStoreInstances", func(
 		secondDone <- err
 	}()
 
-	secondCompleted := false
-	select {
-	case err := <-secondDone:
-		if err != nil {
-			t.Fatalf("second update failed: %v", err)
-		}
-		secondCompleted = true
-	case <-time.After(50 * time.Millisecond):
-	}
+	Consistently(secondDone).WithTimeout(50 * time.Millisecond).ShouldNot(Receive())
 	close(releaseFirst)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first update failed: %v", err)
 	}
-	if !secondCompleted {
-		if err := <-secondDone; err != nil {
-			t.Fatalf("second update failed: %v", err)
-		}
-	}
+	Eventually(secondDone).Should(Receive(BeNil()))
 
 	loaded, err := NewRegistryStore(path).Load()
 	if err != nil {
