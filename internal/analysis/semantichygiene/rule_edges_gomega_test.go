@@ -299,7 +299,7 @@ var _ = ginkgo.Describe("semantichygiene edge coverage", func() {
 			gotNamed, gotStruct, gotLit, ok := enclosingNamedCompositeStructLiteral(ctx, litNode)
 			Expect(ok).To(BeTrue())
 			Expect(gotNamed.Obj().Name()).To(Equal("Payload"))
-			Expect(gotStruct.NumFields()).To(Equal(0))
+			Expect(gotStruct.NumFields()).To(BeZero())
 			Expect(gotLit).To(Equal(litNode))
 			wrappedNamed, wrappedStruct, ok := enclosingNamedCompositeStruct(ctx, litNode)
 			Expect(ok).To(BeTrue())

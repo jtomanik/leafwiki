@@ -10,6 +10,14 @@ import (
 )
 
 var _ = ginkgo.Describe("policy helpers", func() {
+	type fileBoundaryCase struct {
+		input             string
+		testFile          bool
+		generatedVendored bool
+		persistence       bool
+		edge              bool
+	}
+
 	ginkgo.DescribeTable("canonicalName normalizes semantic identifiers",
 		func(input string, want string) {
 			Expect(canonicalName(input)).To(Equal(want))
@@ -99,19 +107,19 @@ var _ = ginkgo.Describe("policy helpers", func() {
 	)
 
 	ginkgo.DescribeTable("file boundary helpers classify stable package paths",
-		func(filename string, testFile bool, generatedOrVendored bool, persistence bool, edge bool) {
-			Expect(isTestFile(filename)).To(Equal(testFile))
-			Expect(isGeneratedOrVendored(filename)).To(Equal(generatedOrVendored))
-			Expect(isPersistenceAdapterFile(filename)).To(Equal(persistence))
-			Expect(isEdgeAdapterFile(filename)).To(Equal(edge))
+		func(row fileBoundaryCase) {
+			Expect(isTestFile(row.input)).To(Equal(row.testFile))
+			Expect(isGeneratedOrVendored(row.input)).To(Equal(row.generatedVendored))
+			Expect(isPersistenceAdapterFile(row.input)).To(Equal(row.persistence))
+			Expect(isEdgeAdapterFile(row.input)).To(Equal(row.edge))
 		},
-		ginkgo.Entry("test file", "/repo/internal/core/page_test.go", true, false, false, false),
-		ginkgo.Entry("vendor file", "/repo/vendor/example/pkg/file.go", false, true, false, false),
-		ginkgo.Entry("node modules file", "/repo/ui/node_modules/pkg/file.go", false, true, false, false),
-		ginkgo.Entry("store file", "/repo/internal/core/page_store.go", false, false, true, false),
-		ginkgo.Entry("revision fs store", "/repo/internal/core/revision/fs_store.go", false, false, true, false),
-		ginkgo.Entry("wiki import adapter", "/repo/internal/wiki/import_adapter.go", false, false, false, true),
-		ginkgo.Entry("regular production file", "/repo/internal/core/page.go", false, false, false, false),
+		ginkgo.Entry("test file", fileBoundaryCase{input: "/repo/internal/core/page_test.go", testFile: true}),
+		ginkgo.Entry("vendor file", fileBoundaryCase{input: "/repo/vendor/example/pkg/file.go", generatedVendored: true}),
+		ginkgo.Entry("node modules file", fileBoundaryCase{input: "/repo/ui/node_modules/pkg/file.go", generatedVendored: true}),
+		ginkgo.Entry("store file", fileBoundaryCase{input: "/repo/internal/core/page_store.go", persistence: true}),
+		ginkgo.Entry("revision fs store", fileBoundaryCase{input: "/repo/internal/core/revision/fs_store.go", persistence: true}),
+		ginkgo.Entry("wiki import adapter", fileBoundaryCase{input: "/repo/internal/wiki/import_adapter.go", edge: true}),
+		ginkgo.Entry("regular production file", fileBoundaryCase{input: "/repo/internal/core/page.go"}),
 	)
 
 	ginkgo.DescribeTable("allowed signature and struct-field files stay narrow",
