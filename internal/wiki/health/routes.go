@@ -41,15 +41,15 @@ func (r *Routes) RegisterRoutes(ctx httpinternal.RouterContext) {
 func (r *Routes) handleHealth(c *gin.Context) {
 	healthy, checks := r.health.Execute()
 
-	status := "ok"
+	status := healthStatusOK
 	code := http.StatusOK
 	if !healthy {
-		status = "degraded"
+		status = healthStatusDegraded
 		code = http.StatusServiceUnavailable
 	}
 
 	c.JSON(code, gin.H{
 		"status": status,
-		"checks": checks,
+		"checks": checks.HTTPMap(),
 	})
 }

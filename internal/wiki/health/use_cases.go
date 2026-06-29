@@ -8,9 +8,52 @@ import (
 )
 
 type checkResult struct {
-	sqlite  string
-	dataDir string
-	search  string
+	sqlite  healthStatus
+	dataDir healthStatus
+	search  healthStatus
+}
+
+type healthCheckKey string
+type healthStatus string
+
+const (
+	healthCheckDataDir        healthCheckKey = "data_dir"
+	healthCheckSearch         healthCheckKey = "search"
+	healthCheckSQLite         healthCheckKey = "sqlite"
+	healthCheckRoleWikid      healthCheckKey = "role_wikid"
+	healthCheckRoleFrontd     healthCheckKey = "role_frontd"
+	healthCheckRoleWorkspaced healthCheckKey = "role_workspaced"
+	healthCheckRoleUnknown    healthCheckKey = "role_unknown"
+
+	healthStatusCrashed       healthStatus = "crashed"
+	healthStatusDegraded      healthStatus = "degraded"
+	healthStatusFailed        healthStatus = "failed"
+	healthStatusIndexing      healthStatus = "indexing"
+	healthStatusMissing       healthStatus = "missing"
+	healthStatusNotApplicable healthStatus = "not_applicable"
+	healthStatusOK            healthStatus = "ok"
+	healthStatusRestarting    healthStatus = "restarting"
+	healthStatusStarting      healthStatus = "starting"
+	healthStatusStopped       healthStatus = "stopped"
+	healthStatusUnknown       healthStatus = "unknown"
+)
+
+type healthChecks map[healthCheckKey]healthStatus
+
+func (key healthCheckKey) String() string {
+	return string(key)
+}
+
+func (status healthStatus) String() string {
+	return string(status)
+}
+
+func (checks healthChecks) HTTPMap() map[string]string {
+	out := make(map[string]string, len(checks))
+	for key, state := range checks {
+		out[key.String()] = state.String()
+	}
+	return out
 }
 
 type HealthUseCase struct {
@@ -52,41 +95,41 @@ func NewLegacyHealthUseCase(index *search.SQLiteIndex, status *search.IndexingSt
 	}
 }
 
-func (uc *HealthUseCase) Execute() (bool, map[string]string) {
+func (uc *HealthUseCase) Execute() (bool, healthChecks) {
 	r := checkResult{}
 
 	if uc.index == nil {
-		r.sqlite = "not_applicable"
+		r.sqlite = healthStatusNotApplicable
 	} else if err := uc.index.Ping(); err != nil {
-		r.sqlite = "failed"
+		r.sqlite = healthStatusFailed
 	} else {
-		r.sqlite = "ok"
+		r.sqlite = healthStatusOK
 	}
 
 	if info, err := os.Stat(uc.storageDir); err != nil || !info.IsDir() {
-		r.dataDir = "failed"
+		r.dataDir = healthStatusFailed
 	} else {
-		r.dataDir = "ok"
+		r.dataDir = healthStatusOK
 	}
 
 	switch {
 	case uc.status == nil:
-		r.search = "not_applicable"
+		r.search = healthStatusNotApplicable
 	case uc.status.IsFailed():
-		r.search = "failed"
+		r.search = healthStatusFailed
 	case uc.status.IsReady():
-		r.search = "ok"
+		r.search = healthStatusOK
 	default:
-		r.search = "indexing"
+		r.search = healthStatusIndexing
 	}
 
-	checks := map[string]string{
-		"sqlite":   r.sqlite,
-		"data_dir": r.dataDir,
-		"search":   r.search,
+	checks := healthChecks{
+		healthCheckSQLite:  r.sqlite,
+		healthCheckDataDir: r.dataDir,
+		healthCheckSearch:  r.search,
 	}
 
-	healthy := r.sqlite != "failed" && r.dataDir == "ok" && r.search != "failed"
+	healthy := r.sqlite != healthStatusFailed && r.dataDir == healthStatusOK && r.search != healthStatusFailed
 	if uc.roleHealth != nil && len(uc.requiredRoles) > 0 {
 		roleChecks, rolesHealthy := requiredRoleChecks(uc.requiredRoles, uc.roleHealth())
 		for name, state := range roleChecks {
@@ -97,31 +140,63 @@ func (uc *HealthUseCase) Execute() (bool, map[string]string) {
 	return healthy, checks
 }
 
-func requiredRoleChecks(required []projectdaemon.RoleName, roles []projectdaemon.RoleHealth) (map[string]string, bool) {
+func requiredRoleChecks(required []projectdaemon.RoleName, roles []projectdaemon.RoleHealth) (healthChecks, bool) {
 	byName := make(map[projectdaemon.RoleName]projectdaemon.RoleHealth, len(roles))
 	for _, role := range roles {
 		byName[role.Name] = role
 	}
-	checks := make(map[string]string, len(required))
+	checks := make(healthChecks, len(required))
 	healthy := true
 	for _, name := range required {
-		key := "role_" + string(name)
+		key := roleHealthCheckName(name)
 		role, ok := byName[name]
 		if !ok {
-			checks[key] = "missing"
+			checks[key] = healthStatusMissing
 			healthy = false
 			continue
 		}
 		if role.State == projectdaemon.RoleStateReady {
-			checks[key] = "ok"
+			checks[key] = healthStatusOK
 			continue
 		}
 		if role.State == "" {
-			checks[key] = "unknown"
+			checks[key] = healthStatusUnknown
 		} else {
-			checks[key] = string(role.State)
+			checks[key] = healthStatusForRoleState(role.State)
 		}
 		healthy = false
 	}
 	return checks, healthy
+}
+
+func roleHealthCheckName(role projectdaemon.RoleName) healthCheckKey {
+	switch role {
+	case projectdaemon.RoleWikid:
+		return healthCheckRoleWikid
+	case projectdaemon.RoleFrontd:
+		return healthCheckRoleFrontd
+	case projectdaemon.RoleWorkspaced:
+		return healthCheckRoleWorkspaced
+	default:
+		return healthCheckRoleUnknown
+	}
+}
+
+func healthStatusForRoleState(state projectdaemon.RoleState) healthStatus {
+	switch state {
+	case projectdaemon.RoleStateStarting:
+		return healthStatusStarting
+	case projectdaemon.RoleStateReady:
+		return healthStatusOK
+	case projectdaemon.RoleStateDegraded:
+		return healthStatusDegraded
+	case projectdaemon.RoleStateRestarting:
+		return healthStatusRestarting
+	case projectdaemon.RoleStateCrashed:
+		return healthStatusCrashed
+	case projectdaemon.RoleStateStopped:
+		return healthStatusStopped
+	default:
+		return healthStatusUnknown
+	}
 }
