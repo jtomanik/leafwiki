@@ -1,6 +1,7 @@
 package wikid
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,10 @@ import (
 )
 
 var (
-	wikidFilepathAbs  = filepath.Abs
-	wikidEvalSymlinks = filepath.EvalSymlinks
+	ErrRegistrySchemaVersion                        = errors.New("registry schema version mismatch")
+	ErrWorkspaceMarkdownLinkRootPrefixNotNormalized = errors.New("workspace markdown link root prefix must be normalized")
+	wikidFilepathAbs                                = filepath.Abs
+	wikidEvalSymlinks                               = filepath.EvalSymlinks
 )
 
 const RegistrySchemaVersion = 1
@@ -48,7 +51,7 @@ func (d RegistryDocument) Workspace(id workspaceid.WorkspaceID) (WorkspaceRecord
 
 func (d RegistryDocument) Validate() error {
 	if d.SchemaVersion != RegistrySchemaVersion {
-		return fmt.Errorf("registry schema version = %d, want %d", d.SchemaVersion, RegistrySchemaVersion)
+		return fmt.Errorf("registry schema version = %d, want %d: %w", d.SchemaVersion, RegistrySchemaVersion, ErrRegistrySchemaVersion)
 	}
 	ids := map[workspaceid.WorkspaceID]struct{}{}
 	for _, workspace := range d.Workspaces {
@@ -78,7 +81,7 @@ func validateWorkspaceRecord(workspace WorkspaceRecord) error {
 		return fmt.Errorf("workspace %q markdown link root prefix: %w", workspace.ID.String(), err)
 	}
 	if workspace.MarkdownLinkRootPrefix != prefix {
-		return fmt.Errorf("workspace %q markdown link root prefix must be normalized", workspace.ID.String())
+		return fmt.Errorf("workspace %q markdown link root prefix must be normalized: %w", workspace.ID.String(), ErrWorkspaceMarkdownLinkRootPrefixNotNormalized)
 	}
 	return nil
 }

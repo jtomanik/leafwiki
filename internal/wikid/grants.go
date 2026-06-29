@@ -1,6 +1,7 @@
 package wikid
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,12 @@ import (
 )
 
 const GrantSchemaVersion = 1
+
+var (
+	ErrGrantSchemaVersion   = errors.New("grant schema version mismatch")
+	ErrGrantSubjectRequired = errors.New("grant subject is required")
+	ErrUnknownGrantRole     = errors.New("unknown grant role")
+)
 
 type GrantRole string
 
@@ -34,7 +41,7 @@ func NewGrantDocument() GrantDocument {
 
 func (d GrantDocument) Validate() error {
 	if d.SchemaVersion != GrantSchemaVersion {
-		return fmt.Errorf("grant schema version = %d, want %d", d.SchemaVersion, GrantSchemaVersion)
+		return fmt.Errorf("grant schema version = %d, want %d: %w", d.SchemaVersion, GrantSchemaVersion, ErrGrantSchemaVersion)
 	}
 	for _, grant := range d.Grants {
 		if err := validateGrant(grant); err != nil {
@@ -46,13 +53,13 @@ func (d GrantDocument) Validate() error {
 
 func validateGrant(grant Grant) error {
 	if strings.TrimSpace(grant.Subject) == "" {
-		return fmt.Errorf("grant subject is required")
+		return ErrGrantSubjectRequired
 	}
 	if err := grant.WorkspaceID.Validate(); err != nil {
 		return fmt.Errorf("grant workspace ID: %w", err)
 	}
 	if !grant.Role.Valid() {
-		return fmt.Errorf("unknown grant role %q", grant.Role)
+		return fmt.Errorf("unknown grant role %q: %w", grant.Role, ErrUnknownGrantRole)
 	}
 	return nil
 }

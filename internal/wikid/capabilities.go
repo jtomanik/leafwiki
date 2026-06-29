@@ -17,6 +17,6 @@ func CapabilitiesForRole(role GrantRole) (RoleCapabilities, error) {
 	case GrantRoleAdmin:
 		return RoleCapabilities{ReadContent: true, WriteContent: true, AdministerGrants: true}, nil
 	default:
-		return RoleCapabilities{}, fmt.Errorf("unknown grant role %q", role)
+		return RoleCapabilities{}, fmt.Errorf("unknown grant role %q: %w", role, ErrUnknownGrantRole)
 	}
 }
