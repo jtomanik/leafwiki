@@ -28,23 +28,21 @@ var _ = ginkgo.Describe("revision errors", func() {
 
 	ginkgo.It("revision error helpers create localized not-found and blob-unavailable errors", func() {
 		notFound := NewRevisionNotFoundError("missing", "missing %s", "rev-1")
-		Expect(notFound.Code).To(Equal(ErrCodeRevisionNotFound))
+		Expect(notFound).To(MatchRevisionErrorCode(ErrCodeRevisionNotFound))
 		Expect(notFound.Args).To(Equal([]string{"rev-1"}))
 
 		cause := errors.New("blob missing")
 		blob := NewRevisionAssetBlobUnavailableError("asset.png", "page-1", "rev-1", cause)
-		Expect(blob.Code).To(Equal(ErrCodeRevisionPreviewAssetBlobUnavailable))
+		Expect(blob).To(MatchRevisionErrorCode(ErrCodeRevisionPreviewAssetBlobUnavailable))
 		Expect(blob.Args).To(Equal([]string{"asset.png", "page-1", "rev-1"}))
-		Expect(errors.Is(blob, cause)).To(BeTrue())
+		Expect(blob).To(MatchError(cause))
 	})
 
 	ginkgo.It("mapRevisionNotFoundError converts os.ErrNotExist and preserves other errors", func() {
 		Expect(mapRevisionNotFoundError(nil, "missing", "missing")).To(Succeed())
 
 		mapped := mapRevisionNotFoundError(os.ErrNotExist, "missing", "missing %s", "rev-1")
-		var localized *sharederrors.LocalizedError
-		Expect(errors.As(mapped, &localized)).To(BeTrue())
-		Expect(localized.Code).To(Equal(ErrCodeRevisionNotFound))
+		Expect(mapped).To(MatchRevisionErrorCode(ErrCodeRevisionNotFound))
 
 		other := errors.New("other")
 		Expect(mapRevisionNotFoundError(other, "missing", "missing")).To(MatchError(other))
@@ -56,19 +54,16 @@ var _ = ginkgo.Describe("revision errors", func() {
 		localizedRec := httptest.NewRecorder()
 		localizedCtx, _ := gin.CreateTestContext(localizedRec)
 		respondWithRevisionError(localizedCtx, sharederrors.NewLocalizedErrorFromCode(ErrCodeRevisionInvalidLimit, nil, "page-1"))
-		Expect(localizedRec.Code).To(Equal(http.StatusBadRequest))
-		Expect(localizedRec.Body.String()).To(ContainSubstring(string(ErrCodeRevisionInvalidLimit)))
+		Expect(localizedRec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidLimit))
 
 		missingRec := httptest.NewRecorder()
 		missingCtx, _ := gin.CreateTestContext(missingRec)
 		respondWithRevisionError(missingCtx, os.ErrNotExist)
-		Expect(missingRec.Code).To(Equal(http.StatusNotFound))
-		Expect(missingRec.Body.String()).To(ContainSubstring(string(ErrCodeRevisionNotFound)))
+		Expect(missingRec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound))
 
 		internalRec := httptest.NewRecorder()
 		internalCtx, _ := gin.CreateTestContext(internalRec)
 		respondWithRevisionError(internalCtx, errors.New("boom"))
-		Expect(internalRec.Code).To(Equal(http.StatusInternalServerError))
-		Expect(internalRec.Body.String()).To(ContainSubstring(string(ErrCodeRevisionInternalError)))
+		Expect(internalRec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError))
 	})
 })

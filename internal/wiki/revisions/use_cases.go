@@ -22,7 +22,7 @@ type RevisionResponse struct {
 	CreatedAt         string              `json:"createdAt"`
 	Title             string              `json:"title"`
 	Slug              string              `json:"slug"`
-	Kind              string              `json:"kind"`
+	Kind              tree.NodeKind       `json:"kind"`
 	Path              string              `json:"path"`
 	ContentHash       string              `json:"contentHash"`
 	AssetManifestHash string              `json:"assetManifestHash"`

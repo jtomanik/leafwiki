@@ -1,13 +1,10 @@
 package revisions
 
 import (
-	"errors"
-
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/revision"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -41,27 +38,20 @@ var _ = ginkgo.Describe("revision validation", func() {
 
 	ginkgo.It("ValidateRevisionCompare reports invalid page and compare request errors", func() {
 		_, _, _, err := ValidateRevisionCompare("", "base", "target")
-		expectRevisionErrorCode(err, ErrCodeRevisionInvalidPageID)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 
 		_, _, _, err = ValidateRevisionCompare(newFixturePageID("page-1"), "", "target")
-		expectRevisionErrorCode(err, ErrCodeRevisionCompareInvalidRequest)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionCompareInvalidRequest))
 
 		_, _, _, err = ValidateRevisionCompare(newFixturePageID("page-1"), "base", "")
-		expectRevisionErrorCode(err, ErrCodeRevisionCompareInvalidRequest)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionCompareInvalidRequest))
 	})
 
 	ginkgo.It("ValidateRevisionLookup and ValidateRevisionAsset propagate invalid lookup errors", func() {
 		_, _, err := ValidateRevisionLookup("", "rev-1")
-		expectRevisionErrorCode(err, ErrCodeRevisionInvalidPageID)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 
 		_, _, _, err = ValidateRevisionAsset("", "rev-1", "asset.png")
-		expectRevisionErrorCode(err, ErrCodeRevisionInvalidPageID)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 	})
 })
-
-func expectRevisionErrorCode(err error, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
-	var localized *sharederrors.LocalizedError
-	Expect(errors.As(err, &localized)).To(BeTrue(), "error = %T %v", err, err)
-	Expect(localized.Code).To(Equal(code))
-}

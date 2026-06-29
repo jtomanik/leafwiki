@@ -238,7 +238,7 @@ func (r *Routes) handleRestoreRevision(c *gin.Context) {
 		c.Request.Context(),
 		page,
 		revisionID,
-		workspacesync.Actor{ID: workspacesync.NewActorIDUnchecked(user.ID), Name: user.Username, Email: user.Email},
+		workspacesync.Actor{ID: workspacesync.ActorIDFromUserID(coreauth.UserIDFromString(user.ID)), Name: user.Username, Email: user.Email},
 		workspacesync.SourceWeb,
 	)
 	if err != nil {

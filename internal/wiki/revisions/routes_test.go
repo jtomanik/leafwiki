@@ -11,12 +11,15 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -31,7 +34,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/page-1/revisions", nil))
 
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 	})
 
 	ginkgo.It("TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor", func() {
@@ -61,7 +64,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 						AuthorID: "alice",
 						Title:    "Page A",
 						Slug:     "page-a",
-						Kind:     string(tree.NodeKindPage),
+						Kind:     tree.NodeKindPage,
 						Path:     "page-a",
 					}},
 					NextCursor: "rev-3",
@@ -78,7 +81,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 
 		routes.handleListRevisions(c)
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		Expect(seenCursor).To(Equal("rev-5"))
 		Expect(seenLimit).To(Equal(workspacesync.PageRevisionLimit(1)))
 		var body struct {
@@ -86,9 +89,10 @@ var _ = ginkgo.Describe("revision routes", func() {
 			NextCursor string              `json:"nextCursor"`
 		}
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body.Revisions).To(HaveLen(1))
-		Expect(body.Revisions[0].ID).To(Equal("rev-3"))
-		Expect(body.NextCursor).To(Equal("rev-3"))
+		Expect(body).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Revisions":  ConsistOf(HaveField("ID", Equal("rev-3"))),
+			"NextCursor": Equal("rev-3"),
+		}))
 	})
 
 	ginkgo.It("returns structured list revision errors for malformed requests and unavailable dependencies", func() {
@@ -101,7 +105,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: " "}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidPageID)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidPageID), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleListRevisions,
@@ -110,7 +114,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidLimit)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidLimit), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleListRevisions,
@@ -119,7 +123,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidLimit)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidLimit), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleListRevisions,
@@ -128,7 +132,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -142,7 +146,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -155,7 +159,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -169,7 +173,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: "missing-page"}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 	})
 
 	ginkgo.It("gets revisions and maps lookup failures", func() {
@@ -183,7 +187,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: " "}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidRevisionID)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidRevisionID), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleGetRevision,
@@ -192,7 +196,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -206,7 +210,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -220,7 +224,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			nil,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var snapshot RevisionSnapshotResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &snapshot)).To(Succeed())
 		Expect(snapshot.Content).To(Equal("snapshot body"))
@@ -238,7 +242,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: "missing-page"}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 	})
 
 	ginkgo.It("gets the latest revision and reports empty or unavailable history", func() {
@@ -251,7 +255,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: " "}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidPageID)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidPageID), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleGetLatestRevision,
@@ -260,7 +264,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -274,7 +278,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		revisionID := newFixtureRevisionID("rev-latest")
 		rec = performRevisionHandlerRequest(
@@ -289,7 +293,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var latest RevisionResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &latest)).To(Succeed())
 		Expect(latest.ID).To(Equal(revisionID.CommitID()))
@@ -307,7 +311,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionCompareInvalidRequest)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionCompareInvalidRequest), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleCompareRevisions,
@@ -316,7 +320,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -329,7 +333,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -343,7 +347,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -364,7 +368,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}},
 			nil,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var comparison RevisionComparisonResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &comparison)).To(Succeed())
 		Expect(comparison.ContentChanged).To(BeTrue())
@@ -383,7 +387,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}, {Key: "name", Value: "/"}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionPreviewAssetInvalidName)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionPreviewAssetInvalidName), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{}).handleGetRevisionAsset,
@@ -392,7 +396,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}, {Key: "name", Value: "/image.png"}},
 			nil,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionPreviewAssetNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionPreviewAssetNotFound), rec.Body.String())
 	})
 
 	ginkgo.It("restores revisions and maps auth, lookup, and backend failures", func() {
@@ -407,7 +411,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: " "}},
 			user,
 		)
-		expectRevisionRouteError(rec, http.StatusBadRequest, ErrCodeRevisionInvalidRevisionID)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusBadRequest, ErrCodeRevisionInvalidRevisionID), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{}).handleRestoreRevision,
@@ -416,7 +420,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			nil,
 		)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{TreeService: fixture.treeService}).handleRestoreRevision,
@@ -425,7 +429,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			user,
 		)
-		expectRevisionRouteError(rec, http.StatusInternalServerError, ErrCodeRevisionInternalError)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -439,7 +443,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			user,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
@@ -453,7 +457,7 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: "missing-page"}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			user,
 		)
-		expectRevisionRouteError(rec, http.StatusNotFound, ErrCodeRevisionNotFound)
+		Expect(rec).To(HaveRevisionRouteError(http.StatusNotFound, ErrCodeRevisionNotFound), rec.Body.String())
 
 		var seenActor workspacesync.Actor
 		var seenSource workspacesync.Source
@@ -472,10 +476,12 @@ var _ = ginkgo.Describe("revision routes", func() {
 			gin.Params{{Key: "id", Value: fixture.pageID.MetadataValue()}, {Key: "revisionId", Value: revisionID.CommitID()}},
 			user,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(seenActor.ID.String()).To(Equal("alice"))
-		Expect(seenActor.Name).To(Equal("Alice"))
-		Expect(seenActor.Email).To(Equal("alice@example.test"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+		Expect(seenActor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ID":    Equal(workspacesync.ActorIDFromUserID(coreauth.UserIDFromString("alice"))),
+			"Name":  Equal("Alice"),
+			"Email": Equal("alice@example.test"),
+		}))
 		Expect(seenSource).To(Equal(workspacesync.SourceWeb))
 	})
 })
@@ -518,7 +524,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 				CreatedAt:            createdAt,
 				Title:                "Title",
 				Slug:                 "title",
-				Kind:                 string(tree.NodeKindPage),
+				Kind:                 tree.NodeKindPage,
 				Path:                 "title",
 				ContentHash:          "content-hash",
 				AssetManifestHash:    "asset-hash",
@@ -538,20 +544,23 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 			}},
 		}
 
-		out := ToSnapshotResponse(snapshot, nil)
-		Expect(out.Content).To(Equal("body"))
-		Expect(out.Revision.ID).To(Equal("rev-1"))
-		Expect(out.Revision.PageID).To(Equal("page-1"))
-		Expect(out.Revision.ParentID).To(Equal("parent-1"))
-		Expect(out.Revision.CreatedAt).To(Equal(createdAt.Format(time.RFC3339)))
-		Expect(out.Revision.PageCreatedAt).To(Equal(createdAt.Format(time.RFC3339)))
-		Expect(out.Revision.PageUpdatedAt).To(Equal(createdAt.Add(time.Hour).Format(time.RFC3339)))
-		Expect(out.Assets).To(Equal([]RevisionAssetResponse{{
-			Name:      "asset.png",
-			SHA256:    "sha",
-			SizeBytes: 42,
-			MIMEType:  "image/png",
-		}}))
+		Expect(ToSnapshotResponse(snapshot, nil)).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Content": Equal("body"),
+			"Revision": gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ID":            Equal("rev-1"),
+				"PageID":        Equal("page-1"),
+				"ParentID":      Equal("parent-1"),
+				"CreatedAt":     Equal(createdAt.Format(time.RFC3339)),
+				"PageCreatedAt": Equal(createdAt.Format(time.RFC3339)),
+				"PageUpdatedAt": Equal(createdAt.Add(time.Hour).Format(time.RFC3339)),
+			})),
+			"Assets": Equal([]RevisionAssetResponse{{
+				Name:      "asset.png",
+				SHA256:    "sha",
+				SizeBytes: 42,
+				MIMEType:  "image/png",
+			}}),
+		})))
 	})
 
 	ginkgo.It("ToComparisonResponse returns nil for nil comparisons and maps asset deltas", func() {
@@ -567,14 +576,15 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 			},
 		}
 
-		out := ToComparisonResponse(cmp, nil)
-		Expect(out.Base.Content).To(Equal("old"))
-		Expect(out.Target.Content).To(Equal("new"))
-		Expect(out.ContentChanged).To(BeTrue())
-		Expect(out.AssetChanges).To(Equal([]RevisionAssetDeltaResponse{
-			{Name: "added.png", Status: "added"},
-			{Name: "removed.png", Status: "removed"},
-		}))
+		Expect(ToComparisonResponse(cmp, nil)).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Base":           gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{"Content": Equal("old")})),
+			"Target":         gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{"Content": Equal("new")})),
+			"ContentChanged": BeTrue(),
+			"AssetChanges": Equal([]RevisionAssetDeltaResponse{
+				{Name: "added.png", Status: "added"},
+				{Name: "removed.png", Status: "removed"},
+			}),
+		})))
 	})
 
 	ginkgo.It("NormalizeRevisionListLimit handles default, valid, and invalid limits", func() {
@@ -590,11 +600,11 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 
 		invalid := 0
 		_, err = NormalizeRevisionListLimit(&invalid, pageID)
-		expectRevisionErrorCode(err, ErrCodeRevisionInvalidLimit)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidLimit))
 
 		tooLarge := MaxRevisionListLimit + 1
 		_, err = NormalizeRevisionListLimit(&tooLarge, pageID)
-		expectRevisionErrorCode(err, ErrCodeRevisionInvalidLimit)
+		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidLimit))
 	})
 })
 
@@ -639,13 +649,12 @@ func performRevisionHandlerRequest(handler gin.HandlerFunc, method, target strin
 	return rec
 }
 
-func expectRevisionRouteError(rec *httptest.ResponseRecorder, status int, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
+func HaveRevisionRouteError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
 
-	Expect(rec.Code).To(Equal(status), rec.Body.String())
-	var body RevisionErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-	Expect(body.Error.Code).To(Equal(code))
+func MatchRevisionErrorCode(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
 }
 
 func revisionFor(pageID tree.PageID, revisionID revision.RevisionID) *revision.Revision {
@@ -659,7 +668,7 @@ func revisionFor(pageID tree.PageID, revisionID revision.RevisionID) *revision.R
 		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		Title:     "Page A",
 		Slug:      "page-a",
-		Kind:      string(tree.NodeKindPage),
+		Kind:      tree.NodeKindPage,
 		Path:      "page-a",
 	}
 }

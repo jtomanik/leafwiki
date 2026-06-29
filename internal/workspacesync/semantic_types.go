@@ -3,6 +3,7 @@ package workspacesync
 import (
 	"github.com/perber/wiki/internal/core/identity"
 	"github.com/perber/wiki/internal/core/revision"
+	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
 )
 
 type CommitHash = identity.CommitHash
@@ -20,4 +21,8 @@ func CommitHashFromString[T ~string](raw T) CommitHash {
 
 func CommitHashFromRevisionID(id revision.RevisionID) CommitHash {
 	return identity.NewCommitHashUnchecked(id.CommitID())
+}
+
+func ActorIDFromUserID(userID identity.UserID) ActorID {
+	return gitrevisions.NewActorIDUnchecked(userID.ActorID())
 }
