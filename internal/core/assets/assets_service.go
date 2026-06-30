@@ -52,14 +52,15 @@ func assetFileDiskPath(assetPath string, filename tree.AssetName) string {
 
 // validateFilename checks that a filename cannot escape its target directory.
 // Rejects empty strings, path separators, and dot-only components like "." or "..".
-func validateFilename(filename string) error {
-	if filename == "" {
+func validateFilename(filename tree.AssetName) error {
+	raw := filename.Filename()
+	if raw == "" {
 		return fmt.Errorf("filename must not be empty")
 	}
-	if strings.ContainsAny(filename, "/\\") {
+	if strings.ContainsAny(raw, "/\\") {
 		return fmt.Errorf("filename must not contain path separators")
 	}
-	if filename == "." || filename == ".." {
+	if raw == "." || raw == ".." {
 		return fmt.Errorf("filename must not be a dot component")
 	}
 	return nil

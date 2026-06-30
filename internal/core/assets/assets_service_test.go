@@ -2,7 +2,6 @@ package assets
 
 import (
 	"bytes"
-	"errors"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -12,9 +11,11 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/test_utils"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 )
 
 const testAssetMaxBytes shared.MaxBytes = 1024
@@ -125,7 +126,7 @@ var _ = Describe("asset service behavior", func() {
 
 		err := service.DeleteAsset(page, assetName("missing.png"))
 
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 	})
 })
 
@@ -144,7 +145,7 @@ var _ = DescribeTable("TestSaveAssetForPageRejectsInvalidNormalizedFilenames",
 
 		_, err := service.SaveAssetForPage(page, file, assetName(tc.originalName), testAssetMaxBytes)
 
-		assertLocalizedCode(err, tc.wantCode)
+		Expect(err).To(matchLocalizedAssetCode(tc.wantCode))
 		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 		entries, readErr := os.ReadDir(assetDir)
 		Expect(readErr).NotTo(HaveOccurred())
@@ -165,9 +166,9 @@ var _ = Describe("asset name validation guards", func() {
 		Expect(os.WriteFile(filepath.Join(pageAssetDir, "note.txt"), []byte("asset"), 0o644)).To(Succeed())
 
 		_, err := service.ReadAssetForPage(page, assetName("../note.txt"))
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		_, err = service.ReadAssetForPage(page, assetName(`..\note.txt`))
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 	})
 
 	It("TestDeleteAssetRejectsPathSeparators", func() {
@@ -178,9 +179,9 @@ var _ = Describe("asset name validation guards", func() {
 		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
-		err := service.DeleteAsset(page, assetName("../"+other.ID.String()+"/note.txt"))
+		err := service.DeleteAsset(page, siblingAssetName(other.ID, assetName("note.txt")))
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		Expect(otherAsset).To(BeAnExistingFile())
 	})
 
@@ -192,17 +193,17 @@ var _ = Describe("asset name validation guards", func() {
 		pageAsset := writeAssetFile(service, page, "note.txt", []byte("page asset"))
 		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
 
-		_, err := service.RenameAsset(page, assetName("../"+other.ID.String()+"/note.txt"), assetName("renamed.txt"))
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		_, err := service.RenameAsset(page, siblingAssetName(other.ID, assetName("note.txt")), assetName("renamed.txt"))
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		Expect(otherAsset).To(BeAnExistingFile())
-		_, err = service.RenameAsset(page, assetName("note.txt"), assetName("../"+other.ID.String()+"/renamed.txt"))
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		_, err = service.RenameAsset(page, assetName("note.txt"), siblingAssetName(other.ID, assetName("renamed.txt")))
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		Expect(pageAsset).To(BeAnExistingFile())
 	})
 })
 
 type assetNameCase struct {
-	filename string
+	filename tree.AssetName
 }
 
 var _ = DescribeTable("TestReadAssetForPageRejectsDotNames",
@@ -212,12 +213,12 @@ var _ = DescribeTable("TestReadAssetForPageRejectsDotNames",
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
-		_, err := service.ReadAssetForPage(page, assetName(tc.filename))
+		_, err := service.ReadAssetForPage(page, tc.filename)
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 	},
-	Entry(".", assetNameCase{filename: "."}),
-	Entry("..", assetNameCase{filename: ".."}),
+	Entry(".", assetNameCase{filename: assetName(".")}),
+	Entry("..", assetNameCase{filename: assetName("..")}),
 )
 
 var _ = DescribeTable("TestDeleteAssetRejectsDotNames",
@@ -228,13 +229,13 @@ var _ = DescribeTable("TestDeleteAssetRejectsDotNames",
 		pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 		Expect(os.MkdirAll(pageAssetDir, 0o755)).To(Succeed())
 
-		err := service.DeleteAsset(page, assetName(tc.filename))
+		err := service.DeleteAsset(page, tc.filename)
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		Expect(pageAssetDir).To(BeADirectory())
 	},
-	Entry(".", assetNameCase{filename: "."}),
-	Entry("..", assetNameCase{filename: ".."}),
+	Entry(".", assetNameCase{filename: assetName(".")}),
+	Entry("..", assetNameCase{filename: assetName("..")}),
 )
 
 type renameDotNameCase struct {
@@ -251,7 +252,7 @@ var _ = DescribeTable("TestRenameAssetRejectsDotNames",
 
 		_, err := service.RenameAsset(page, assetName(tc.oldFilename), assetName(tc.newFilename))
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 		Expect(pageAsset).To(BeAnExistingFile())
 	},
 	Entry("old .", renameDotNameCase{oldFilename: ".", newFilename: "renamed.txt"}),
@@ -278,23 +279,23 @@ var _ = DescribeTable("TestValidateFilename accepts good names",
 	func(tc assetNameCase) {
 		Expect(validateFilename(tc.filename)).To(Succeed())
 	},
-	Entry("my-image.png", assetNameCase{filename: "my-image.png"}),
-	Entry("file.jpg", assetNameCase{filename: "file.jpg"}),
-	Entry("a", assetNameCase{filename: "a"}),
-	Entry("foo-bar.webp", assetNameCase{filename: "foo-bar.webp"}),
+	Entry("my-image.png", assetNameCase{filename: assetName("my-image.png")}),
+	Entry("file.jpg", assetNameCase{filename: assetName("file.jpg")}),
+	Entry("a", assetNameCase{filename: assetName("a")}),
+	Entry("foo-bar.webp", assetNameCase{filename: assetName("foo-bar.webp")}),
 )
 
 var _ = DescribeTable("TestValidateFilename rejects bad names",
 	func(tc assetNameCase) {
 		Expect(validateFilename(tc.filename)).To(HaveOccurred())
 	},
-	Entry("empty", assetNameCase{filename: ""}),
-	Entry(".", assetNameCase{filename: "."}),
-	Entry("..", assetNameCase{filename: ".."}),
-	Entry("../etc/passwd", assetNameCase{filename: "../etc/passwd"}),
-	Entry("../../users.db", assetNameCase{filename: "../../users.db"}),
-	Entry("foo/bar.png", assetNameCase{filename: "foo/bar.png"}),
-	Entry(`foo\bar.png`, assetNameCase{filename: `foo\bar.png`}),
+	Entry("empty", assetNameCase{filename: assetName("")}),
+	Entry(".", assetNameCase{filename: assetName(".")}),
+	Entry("..", assetNameCase{filename: assetName("..")}),
+	Entry("../etc/passwd", assetNameCase{filename: assetName("../etc/passwd")}),
+	Entry("../../users.db", assetNameCase{filename: assetName("../../users.db")}),
+	Entry("foo/bar.png", assetNameCase{filename: assetName("foo/bar.png")}),
+	Entry(`foo\bar.png`, assetNameCase{filename: assetName(`foo\bar.png`)}),
 )
 
 var _ = DescribeTable("TestDeleteAsset_PathTraversal",
@@ -304,17 +305,17 @@ var _ = DescribeTable("TestDeleteAsset_PathTraversal",
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
-		err := service.DeleteAsset(page, assetName(tc.filename))
+		err := service.DeleteAsset(page, tc.filename)
 
-		assertLocalizedCode(err, tc.wantCode)
+		Expect(err).To(matchLocalizedAssetCode(tc.wantCode))
 	},
-	Entry("../../users.db", invalidAssetOperationCase{filename: "../../users.db", wantCode: ErrCodeAssetInvalidName}),
-	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: "../other-page/secret.png", wantCode: ErrCodeAssetInvalidName}),
-	Entry("..", invalidAssetOperationCase{filename: "..", wantCode: ErrCodeAssetInvalidName}),
-	Entry(".", invalidAssetOperationCase{filename: ".", wantCode: ErrCodeAssetInvalidName}),
-	Entry("foo/bar.png", invalidAssetOperationCase{filename: "foo/bar.png", wantCode: ErrCodeAssetInvalidName}),
-	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: `foo\bar.png`, wantCode: ErrCodeAssetInvalidName}),
-	Entry("empty", invalidAssetOperationCase{filename: "", wantCode: ErrCodeAssetMissingName}),
+	Entry("../../users.db", invalidAssetOperationCase{filename: assetName("../../users.db"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: assetName("../other-page/secret.png"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("..", invalidAssetOperationCase{filename: assetName(".."), wantCode: ErrCodeAssetInvalidName}),
+	Entry(".", invalidAssetOperationCase{filename: assetName("."), wantCode: ErrCodeAssetInvalidName}),
+	Entry("foo/bar.png", invalidAssetOperationCase{filename: assetName("foo/bar.png"), wantCode: ErrCodeAssetInvalidName}),
+	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: assetName(`foo\bar.png`), wantCode: ErrCodeAssetInvalidName}),
+	Entry("empty", invalidAssetOperationCase{filename: assetName(""), wantCode: ErrCodeAssetMissingName}),
 )
 
 var _ = DescribeTable("TestRenameAsset_OldFilenamePathTraversal",
@@ -324,21 +325,21 @@ var _ = DescribeTable("TestRenameAsset_OldFilenamePathTraversal",
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
-		_, err := service.RenameAsset(page, assetName(tc.filename), assetName("new-name.png"))
+		_, err := service.RenameAsset(page, tc.filename, assetName("new-name.png"))
 
-		assertLocalizedCode(err, tc.wantCode)
+		Expect(err).To(matchLocalizedAssetCode(tc.wantCode))
 	},
-	Entry("../../users.db", invalidAssetOperationCase{filename: "../../users.db", wantCode: ErrCodeAssetInvalidName}),
-	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: "../other-page/secret.png", wantCode: ErrCodeAssetInvalidName}),
-	Entry("..", invalidAssetOperationCase{filename: "..", wantCode: ErrCodeAssetInvalidName}),
-	Entry(".", invalidAssetOperationCase{filename: ".", wantCode: ErrCodeAssetInvalidName}),
-	Entry("foo/bar.png", invalidAssetOperationCase{filename: "foo/bar.png", wantCode: ErrCodeAssetInvalidName}),
-	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: `foo\bar.png`, wantCode: ErrCodeAssetInvalidName}),
-	Entry("empty", invalidAssetOperationCase{filename: "", wantCode: ErrCodeAssetMissingName}),
+	Entry("../../users.db", invalidAssetOperationCase{filename: assetName("../../users.db"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("../other-page/secret.png", invalidAssetOperationCase{filename: assetName("../other-page/secret.png"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("..", invalidAssetOperationCase{filename: assetName(".."), wantCode: ErrCodeAssetInvalidName}),
+	Entry(".", invalidAssetOperationCase{filename: assetName("."), wantCode: ErrCodeAssetInvalidName}),
+	Entry("foo/bar.png", invalidAssetOperationCase{filename: assetName("foo/bar.png"), wantCode: ErrCodeAssetInvalidName}),
+	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: assetName(`foo\bar.png`), wantCode: ErrCodeAssetInvalidName}),
+	Entry("empty", invalidAssetOperationCase{filename: assetName(""), wantCode: ErrCodeAssetMissingName}),
 )
 
 type invalidAssetOperationCase struct {
-	filename string
+	filename tree.AssetName
 	wantCode sharederrors.ErrorCode
 }
 
@@ -388,7 +389,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.ReadAssetForPage(page, assetName("missing.txt"))
 
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 	})
 
 	It("ReadAssetForPage returns asset_not_found when the page asset directory is missing", func() {
@@ -396,7 +397,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.ReadAssetForPage(&tree.PageNode{ID: "missing-page"}, assetName("missing.txt"))
 
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 	})
 
 	It("RenameAsset rejects extension changes", func() {
@@ -407,7 +408,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("note.png"))
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidExtension)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidExtension))
 	})
 
 	It("RenameAsset rejects invalid slug names", func() {
@@ -418,7 +419,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("Bad Name.txt"))
 
-		assertLocalizedCode(err, ErrCodeAssetInvalidName)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
 	})
 
 	It("RenameAsset rejects target collisions", func() {
@@ -430,7 +431,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.RenameAsset(page, assetName("old.txt"), assetName("new.txt"))
 
-		assertLocalizedCode(err, ErrCodeAssetAlreadyExists)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetAlreadyExists))
 	})
 
 	It("RenameAsset returns asset_not_found for a missing old filename", func() {
@@ -441,7 +442,7 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.RenameAsset(page, assetName("missing.txt"), assetName("new.txt"))
 
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 	})
 
 	It("DeleteAllAssetsForPage is a no-op when the page has no asset directory", func() {
@@ -459,8 +460,8 @@ var _ = Describe("asset service coverage additions", func() {
 
 		_, err := service.SaveAssetForPage(page, file, assetName(name), 8)
 
-		Expect(errors.Is(err, shared.ErrFileTooLarge)).To(BeTrue())
-		assertLocalizedCode(err, ErrCodeAssetFileTooLarge)
+		Expect(err).To(MatchError(shared.ErrFileTooLarge))
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetFileTooLarge))
 		assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 		entries, readErr := os.ReadDir(assetDir)
 		Expect(readErr).NotTo(HaveOccurred())
@@ -491,12 +492,9 @@ func writeAssetFile(service *AssetService, page *tree.PageNode, filename string,
 	return assetPath
 }
 
-func assertLocalizedCode(err error, want sharederrors.ErrorCode) {
+func matchLocalizedAssetCode(want sharederrors.ErrorCode) types.GomegaMatcher {
 	GinkgoHelper()
-	Expect(err).To(HaveOccurred())
-	localized, ok := sharederrors.AsLocalizedError(err)
-	Expect(ok).To(BeTrue(), "expected localized error %s, got %T: %v", want, err, err)
-	Expect(localized.Code).To(Equal(want))
+	return testmatchers.MatchLocalizedError(want, sharederrors.MessageIDForCode(want))
 }
 
 type testMultipartFile struct {
@@ -509,6 +507,10 @@ func newTestMultipartFile(content []byte) multipart.File {
 
 func assetName(raw string) tree.AssetName {
 	return newFixtureAssetName(raw)
+}
+
+func siblingAssetName(pageID tree.PageID, filename tree.AssetName) tree.AssetName {
+	return newFixtureAssetName("../" + pageID.MetadataValue() + "/" + filename.Filename())
 }
 
 func (f *testMultipartFile) Close() error {
