@@ -9,9 +9,41 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/auth"
 )
+
+const (
+	resetAdminUsername              = auth.DefaultAdminUsername
+	resetAdminEmail                 = auth.DefaultAdminEmail
+	resetAdminCloseStoreLogMessage  = "could not close store"
+	resetAdminCloseStoreFixtureText = "close failed"
+)
+
+func matchPasswordResetUser(username string) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Username": Equal(username),
+		"Password": Not(BeEmpty()),
+	}))
+}
+
+func matchDefaultAdminUser() types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Username": Equal(resetAdminUsername),
+		"Email":    Equal(resetAdminEmail),
+		"Role":     Equal(auth.RoleAdmin),
+		"Password": Not(BeEmpty()),
+	}))
+}
+
+func matchPersistedAdminUser() types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Email": Equal(resetAdminEmail),
+		"Role":  Equal(auth.RoleAdmin),
+	}))
+}
 
 var _ = ginkgo.Describe("admin reset", func() {
 	ginkgo.It("TestResetAdminPassword", func() {
@@ -25,14 +57,13 @@ var _ = ginkgo.Describe("admin reset", func() {
 		adminUser, err := ResetAdminPassword(storageDir)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(adminUser.Username).To(Equal("admin"))
-		Expect(adminUser.Password).NotTo(BeEmpty())
+		Expect(adminUser).To(matchPasswordResetUser(resetAdminUsername))
 
 		store = openUserStore(storageDir)
 		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService = auth.NewUserService(store)
-		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
+		_, err = userService.GetUserByEmailOrUsernameAndPassword(resetAdminUsername, adminUser.Password)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -42,15 +73,13 @@ var _ = ginkgo.Describe("admin reset", func() {
 		adminUser, err := ResetAdminPassword(storageDir)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(adminUser.Username).To(Equal("admin"))
-		Expect(adminUser.Email).To(Equal("admin@localhost"))
-		Expect(adminUser.Password).NotTo(BeEmpty())
+		Expect(adminUser).To(matchDefaultAdminUser())
 
 		store := openUserStore(storageDir)
 		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService := auth.NewUserService(store)
-		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
+		_, err = userService.GetUserByEmailOrUsernameAndPassword(resetAdminUsername, adminUser.Password)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -71,9 +100,9 @@ var _ = ginkgo.Describe("admin reset", func() {
 		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService = auth.NewUserService(store)
-		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", "oldpassword")
+		_, err = userService.GetUserByEmailOrUsernameAndPassword(resetAdminUsername, "oldpassword")
 		Expect(err).To(MatchError(auth.ErrUserInvalidCredentials))
-		_, err = userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
+		_, err = userService.GetUserByEmailOrUsernameAndPassword(resetAdminUsername, adminUser.Password)
 		Expect(err).NotTo(HaveOccurred())
 		editor, err := userService.GetUserByEmailOrUsernameAndPassword("editor", "editorpassword")
 		Expect(err).NotTo(HaveOccurred())
@@ -86,19 +115,15 @@ var _ = ginkgo.Describe("admin reset", func() {
 		adminUser, err := ResetAdminPassword(storageDir)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(adminUser.Username).To(Equal("admin"))
-		Expect(adminUser.Email).To(Equal("admin@localhost"))
-		Expect(adminUser.Role).To(Equal(auth.RoleAdmin))
-		Expect(adminUser.Password).NotTo(BeEmpty())
+		Expect(adminUser).To(matchDefaultAdminUser())
 
 		store := openUserStore(storageDir)
 		ginkgo.DeferCleanup(closeUserStore, store)
 
 		userService := auth.NewUserService(store)
-		persisted, err := userService.GetUserByEmailOrUsernameAndPassword("admin", adminUser.Password)
+		persisted, err := userService.GetUserByEmailOrUsernameAndPassword(resetAdminUsername, adminUser.Password)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(persisted.Email).To(Equal("admin@localhost"))
-		Expect(persisted.Role).To(Equal(auth.RoleAdmin))
+		Expect(persisted).To(matchPersistedAdminUser())
 	})
 
 	ginkgo.It("returns an error and nil user when the auth store cannot open", func() {
@@ -115,10 +140,12 @@ var _ = ginkgo.Describe("admin reset", func() {
 		var logOutput bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logOutput, nil))
 
-		logUserStoreClose(logger, closeErrorStore{err: errors.New("close failed")})
+		logUserStoreClose(logger, closeErrorStore{err: errors.New(resetAdminCloseStoreFixtureText)})
 
-		Expect(logOutput.String()).To(ContainSubstring("could not close store"))
-		Expect(logOutput.String()).To(ContainSubstring("close failed"))
+		Expect(logOutput.String()).To(SatisfyAll(
+			ContainSubstring(resetAdminCloseStoreLogMessage),
+			ContainSubstring(resetAdminCloseStoreFixtureText),
+		))
 	})
 })
 

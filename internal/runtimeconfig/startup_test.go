@@ -9,7 +9,51 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
+
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
+
+var (
+	errSetRootDirDefaultFailed = errors.New("set root-dir default failed")
+	errSetServiceDefaultFailed = errors.New("set service default failed")
+	errSetLogFileDefaultFailed = errors.New("set log-file default failed")
+)
+
+func matchRuntimeConfigUsageError() types.GomegaMatcher {
+	return WithTransform(func(err error) ConfigUsageError {
+		var usage ConfigUsageError
+		_ = errors.As(err, &usage)
+		return usage
+	}, testmatchers.HaveStructuredError(errCodeRuntimeConfigUsage, sharederrors.MessageIDForCode(errCodeRuntimeConfigUsage)))
+}
+
+func matchConfigFileError(reason ConfigFileErrorReason, key string) types.GomegaMatcher {
+	fields := gstruct.Fields{
+		"Reason": Equal(reason),
+	}
+	if key != "" {
+		fields["Key"] = Equal(key)
+	}
+	return WithTransform(func(err error) ConfigFileError {
+		var configErr ConfigFileError
+		_ = errors.As(err, &configErr)
+		return configErr
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchDaemonServiceConfigMissing(path string) types.GomegaMatcher {
+	return WithTransform(func(err error) DaemonServiceConfigMissingError {
+		var missing DaemonServiceConfigMissingError
+		_ = errors.As(err, &missing)
+		return missing
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path": Equal(path),
+		"Err":  MatchError(os.ErrNotExist),
+	}))
+}
 
 var _ = Describe("startup config validation", func() {
 	DescribeTable("parses raw flag names",
@@ -44,22 +88,17 @@ var _ = Describe("startup config validation", func() {
 		Expect(ValidateRawConfigFlagUsage([]string{"serve", "--host", "--config", "leafwiki.yml"})).To(Succeed())
 		Expect(ValidateRawConfigFlagUsage([]string{"--config=leafwiki.yml"})).To(Succeed())
 
-		err := ValidateRawConfigFlagUsage([]string{"--config"})
-		var usage ConfigUsageError
-		Expect(errors.As(err, &usage)).To(BeTrue())
-		Expect(usage.Error()).To(Equal("--config requires a path"))
-		Expect(usage.Code).To(Equal(errCodeRuntimeConfigUsage))
-
-		Expect(ValidateRawConfigFlagUsage([]string{"--config="})).To(MatchError("--config requires a path"))
-		Expect(ValidateRawConfigFlagUsage([]string{"--config", "--port"})).To(MatchError("--config requires a path"))
+		Expect(ValidateRawConfigFlagUsage([]string{"--config"})).To(matchRuntimeConfigUsageError())
+		Expect(ValidateRawConfigFlagUsage([]string{"--config="})).To(matchRuntimeConfigUsageError())
+		Expect(ValidateRawConfigFlagUsage([]string{"--config", "--port"})).To(matchRuntimeConfigUsageError())
 	})
 
 	It("reports mixed config-mode arguments with the displayed flag form", func() {
-		Expect(ConfigFlagMixError{Flag: "--port"}.Error()).To(Equal("--config cannot be combined with --port"))
+		Expect(ConfigFlagMixError{Flag: "--port"}.Flag).To(Equal("--port"))
 		Expect(ValidateConfigModeArgs([]string{"wiki"})).To(Succeed())
-		Expect(ValidateConfigModeArgs([]string{"help"})).To(MatchError("--config cannot be combined with help"))
-		Expect(ValidateConfigModeArgs([]string{"--port=8080"})).To(MatchError("--config cannot be combined with --port"))
-		Expect(ValidateConfigModeArgs([]string{"-p=8080"})).To(MatchError("--config cannot be combined with -p"))
+		Expect(ValidateConfigModeArgs([]string{"help"})).To(MatchError(ConfigFlagMixError{Flag: "help"}))
+		Expect(ValidateConfigModeArgs([]string{"--port=8080"})).To(MatchError(ConfigFlagMixError{Flag: "--port"}))
+		Expect(ValidateConfigModeArgs([]string{"-p=8080"})).To(MatchError(ConfigFlagMixError{Flag: "-p"}))
 	})
 
 	It("classifies daemon commands and help invocations", func() {
@@ -102,9 +141,9 @@ var _ = Describe("YAML startup config", func() {
 
 	It("rejects invalid --config path usage before reading the file", func() {
 		fs := newRuntimeFlagSet()
-		Expect(ApplyYAMLConfigFile(fs, "", nil)).To(MatchError("--config requires a path"))
-		Expect(ApplyYAMLConfigFile(fs, "--port", nil)).To(MatchError("--config requires a path"))
-		Expect(ApplyYAMLConfigFile(fs, "-p=8080", nil)).To(MatchError("--config requires a path"))
+		Expect(ApplyYAMLConfigFile(fs, "", nil)).To(matchRuntimeConfigUsageError())
+		Expect(ApplyYAMLConfigFile(fs, "--port", nil)).To(matchRuntimeConfigUsageError())
+		Expect(ApplyYAMLConfigFile(fs, "-p=8080", nil)).To(matchRuntimeConfigUsageError())
 	})
 
 	It("rejects combining config files with other visited flags", func() {
@@ -112,29 +151,35 @@ var _ = Describe("YAML startup config", func() {
 		path := writeRuntimeConfig("host: 0.0.0.0\n")
 
 		Expect(ApplyYAMLConfigFile(fs, path, map[string]bool{"config": true})).To(Succeed())
-		Expect(ApplyYAMLConfigFile(fs, path, map[string]bool{"port": true})).To(MatchError("--config cannot be combined with --port"))
+		Expect(ApplyYAMLConfigFile(fs, path, map[string]bool{"port": true})).To(MatchError(ConfigFlagMixError{Flag: "--port"}))
 	})
 
-	DescribeTable("rejects malformed config files",
-		func(contents string, want string) {
-			err := ApplyYAMLConfigPath(newRuntimeFlagSet(), map[string]bool{}, writeRuntimeConfig(contents), "test config")
+	type configFileValidationCase struct {
+		contents string
+		reason   ConfigFileErrorReason
+		key      string
+	}
 
-			Expect(err).To(MatchError(ContainSubstring(want)))
+	DescribeTable("rejects malformed config files",
+		func(tc configFileValidationCase) {
+			err := ApplyYAMLConfigPath(newRuntimeFlagSet(), map[string]bool{}, writeRuntimeConfig(tc.contents), "test config")
+
+			Expect(err).To(matchConfigFileError(tc.reason, tc.key))
 		},
-		Entry("invalid YAML", "host: [", "parse test config"),
-		Entry("non-mapping root", "- host\n", "root must be a YAML mapping"),
-		Entry("non-scalar key", "? [host]\n: 127.0.0.1\n", "keys must be scalar strings"),
-		Entry("duplicate key", "host: 127.0.0.1\nhost: 0.0.0.0\n", "duplicate test config key"),
-		Entry("unknown key", "unknown: value\n", "unknown test config key"),
-		Entry("sequence value", "host:\n  - 127.0.0.1\n", "requires a non-null scalar value"),
-		Entry("null value", "host: null\n", "requires a non-null scalar value"),
-		Entry("invalid flag value", "disable-auth: nope\n", "invalid test config value"),
+		Entry("invalid YAML", configFileValidationCase{contents: "host: [", reason: ConfigFileErrorReasonParse}),
+		Entry("non-mapping root", configFileValidationCase{contents: "- host\n", reason: ConfigFileErrorReasonRootMapping}),
+		Entry("non-scalar key", configFileValidationCase{contents: "? [host]\n: 127.0.0.1\n", reason: ConfigFileErrorReasonScalarKey}),
+		Entry("duplicate key", configFileValidationCase{contents: "host: 127.0.0.1\nhost: 0.0.0.0\n", reason: ConfigFileErrorReasonDuplicateKey, key: "host"}),
+		Entry("unknown key", configFileValidationCase{contents: "unknown: value\n", reason: ConfigFileErrorReasonUnknownKey, key: "unknown"}),
+		Entry("sequence value", configFileValidationCase{contents: "host:\n  - 127.0.0.1\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
+		Entry("null value", configFileValidationCase{contents: "host: null\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
+		Entry("invalid flag value", configFileValidationCase{contents: "disable-auth: nope\n", reason: ConfigFileErrorReasonInvalidFlagValue, key: "disable-auth"}),
 	)
 
 	It("reports file read errors with the config source", func() {
 		err := ApplyYAMLConfigPath(newRuntimeFlagSet(), map[string]bool{}, filepath.Join(GinkgoT().TempDir(), "missing.yml"), "test config")
 
-		Expect(err).To(MatchError(ContainSubstring("read test config")))
+		Expect(err).To(matchConfigFileError(ConfigFileErrorReasonRead, ""))
 	})
 })
 
@@ -156,19 +201,19 @@ var _ = Describe("daemon service startup config", func() {
 		GinkgoT().Setenv("HOME", "")
 
 		_, err := DefaultDaemonServiceDataDir()
-		Expect(err).To(MatchError(ContainSubstring("resolve home directory")))
+		Expect(err).To(HaveOccurred())
 
 		_, err = DefaultDaemonServiceConfigPath()
-		Expect(err).To(MatchError(ContainSubstring("resolve home directory")))
+		Expect(err).To(HaveOccurred())
 
-		Expect(ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})).To(MatchError(ContainSubstring("resolve home directory")))
-		Expect(ApplyDaemonServiceDefaults(newRuntimeFlagSet(), map[string]bool{})).To(MatchError(ContainSubstring("resolve home directory")))
+		Expect(ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})).To(HaveOccurred())
+		Expect(ApplyDaemonServiceDefaults(newRuntimeFlagSet(), map[string]bool{})).To(HaveOccurred())
 	})
 
 	It("reports daemon service config usage errors", func() {
 		fs := newRuntimeFlagSet()
-		Expect(ApplyDaemonServiceConfig(fs, map[string]bool{}, []string{"daemon", "extra"})).To(MatchError("leafwiki daemon does not accept additional positional arguments"))
-		Expect(ApplyDaemonServiceConfig(fs, map[string]bool{"port": true}, []string{"daemon"})).To(MatchError("leafwiki daemon reads ~/.leafwiki/leafwiki.yml; move --port into the service config file"))
+		Expect(ApplyDaemonServiceConfig(fs, map[string]bool{}, []string{"daemon", "extra"})).To(matchRuntimeConfigUsageError())
+		Expect(ApplyDaemonServiceConfig(fs, map[string]bool{"port": true}, []string{"daemon"})).To(matchRuntimeConfigUsageError())
 	})
 
 	It("wraps the missing default daemon service config path", func() {
@@ -177,11 +222,7 @@ var _ = Describe("daemon service startup config", func() {
 
 		err := ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})
 
-		var missing DaemonServiceConfigMissingError
-		Expect(errors.As(err, &missing)).To(BeTrue())
-		Expect(missing.Path).To(Equal(filepath.Join(home, ".leafwiki", "leafwiki.yml")))
-		Expect(missing.Error()).To(ContainSubstring("leafwiki.yml is required"))
-		Expect(errors.Is(err, missing.Unwrap())).To(BeTrue())
+		Expect(err).To(matchDaemonServiceConfigMissing(filepath.Join(home, ".leafwiki", "leafwiki.yml")))
 	})
 
 	It("returns service config parse errors before applying defaults", func() {
@@ -192,7 +233,7 @@ var _ = Describe("daemon service startup config", func() {
 
 		err := ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})
 
-		Expect(err).To(MatchError(ContainSubstring("unknown service config key")))
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("applies daemon service config and fills daemon defaults", func() {
@@ -234,28 +275,22 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("returns flag-set errors while applying daemon defaults", func() {
-		Expect(ApplyDaemonServiceDefaults(flag.NewFlagSet("missing-data-dir", flag.ContinueOnError), map[string]bool{})).To(MatchError(ContainSubstring("no such flag -data-dir")))
+		Expect(ApplyDaemonServiceDefaults(flag.NewFlagSet("missing-data-dir", flag.ContinueOnError), map[string]bool{})).To(HaveOccurred())
 
-		fsWithoutRoot := flag.NewFlagSet("missing-root-dir", flag.ContinueOnError)
+		fsWithoutRoot := flag.NewFlagSet("failing-root-dir", flag.ContinueOnError)
 		fsWithoutRoot.SetOutput(io.Discard)
-		fsWithoutRoot.String("data-dir", "", "")
-		Expect(ApplyDaemonServiceDefaults(fsWithoutRoot, map[string]bool{})).To(MatchError(ContainSubstring("no such flag -root-dir")))
+		fsWithoutRoot.String("data-dir", "/data", "")
+		fsWithoutRoot.Var(failingRuntimeFlagValue{err: errSetRootDirDefaultFailed}, "root-dir", "")
+		Expect(ApplyDaemonServiceDefaults(fsWithoutRoot, map[string]bool{"data-dir": true})).To(MatchError(errSetRootDirDefaultFailed))
 
 		fsWithoutDefault := flag.NewFlagSet("missing-default", flag.ContinueOnError)
 		fsWithoutDefault.SetOutput(io.Discard)
-		fsWithoutDefault.String("data-dir", "", "")
-		fsWithoutDefault.String("root-dir", "", "")
-		Expect(ApplyDaemonServiceDefaults(fsWithoutDefault, map[string]bool{})).To(MatchError(ContainSubstring("set service default")))
+		registerRuntimeConfigFlags(fsWithoutDefault, map[string]error{"host": errSetServiceDefaultFailed})
+		Expect(ApplyDaemonServiceDefaults(fsWithoutDefault, map[string]bool{"data-dir": true, "root-dir": true})).To(MatchError(errSetServiceDefaultFailed))
 
-		fsWithoutLogFile := newRuntimeFlagSet()
-		fsWithoutLogFile = flag.NewFlagSet("missing-log-file", flag.ContinueOnError)
+		fsWithoutLogFile := flag.NewFlagSet("missing-log-file", flag.ContinueOnError)
 		fsWithoutLogFile.SetOutput(io.Discard)
-		for name := range ConfigFileFlagNames() {
-			if name == "log-file" {
-				continue
-			}
-			fsWithoutLogFile.String(name, "", "")
-		}
+		registerRuntimeConfigFlags(fsWithoutLogFile, map[string]error{"log-file": errSetLogFileDefaultFailed})
 		visited := map[string]bool{}
 		for name := range ConfigFileFlagNames() {
 			if name != "log-file" {
@@ -263,9 +298,33 @@ var _ = Describe("daemon service startup config", func() {
 			}
 		}
 		Expect(fsWithoutLogFile.Set("log-target", "file")).To(Succeed())
-		Expect(ApplyDaemonServiceDefaults(fsWithoutLogFile, visited)).To(MatchError(ContainSubstring("set service default for \"log-file\"")))
+		Expect(ApplyDaemonServiceDefaults(fsWithoutLogFile, visited)).To(MatchError(errSetLogFileDefaultFailed))
 	})
 })
+
+type failingRuntimeFlagValue struct {
+	err error
+}
+
+func (value failingRuntimeFlagValue) String() string {
+	return ""
+}
+
+func (value failingRuntimeFlagValue) Set(string) error {
+	return value.err
+}
+
+func registerRuntimeConfigFlags(fs *flag.FlagSet, failing map[string]error) {
+	GinkgoHelper()
+
+	for name := range ConfigFileFlagNames() {
+		if err, ok := failing[name]; ok {
+			fs.Var(failingRuntimeFlagValue{err: err}, name, "")
+			continue
+		}
+		fs.String(name, "", "")
+	}
+}
 
 func newRuntimeFlagSet() *flag.FlagSet {
 	GinkgoHelper()

@@ -24,6 +24,7 @@ func (err ConfigFlagMixError) Error() string {
 type ConfigUsageError struct {
 	Code            sharederrors.ErrorCode
 	MessageID       sharederrors.MessageID
+	Reason          ConfigUsageReason
 	RenderedMessage string
 }
 
@@ -33,12 +34,69 @@ func (err ConfigUsageError) Error() string {
 
 const errCodeRuntimeConfigUsage sharederrors.ErrorCode = "runtime_config_usage"
 
-func newConfigUsageError(message string) ConfigUsageError {
+type ConfigUsageReason string
+
+const (
+	ConfigUsageReasonConfigPathRequired     ConfigUsageReason = "config_path_required"
+	ConfigUsageReasonDaemonPositionalArgs   ConfigUsageReason = "daemon_positional_args"
+	ConfigUsageReasonDaemonFlagInConfigFile ConfigUsageReason = "daemon_flag_in_config_file"
+)
+
+func newConfigUsageError(reason ConfigUsageReason, message string) ConfigUsageError {
 	return ConfigUsageError{
 		Code:            errCodeRuntimeConfigUsage,
 		MessageID:       sharederrors.MessageIDForCode(errCodeRuntimeConfigUsage),
+		Reason:          reason,
 		RenderedMessage: message,
 	}
+}
+
+type ConfigFileErrorReason string
+
+const (
+	ConfigFileErrorReasonRead             ConfigFileErrorReason = "read"
+	ConfigFileErrorReasonParse            ConfigFileErrorReason = "parse"
+	ConfigFileErrorReasonRootMapping      ConfigFileErrorReason = "root_mapping"
+	ConfigFileErrorReasonScalarKey        ConfigFileErrorReason = "scalar_key"
+	ConfigFileErrorReasonDuplicateKey     ConfigFileErrorReason = "duplicate_key"
+	ConfigFileErrorReasonUnknownKey       ConfigFileErrorReason = "unknown_key"
+	ConfigFileErrorReasonScalarValue      ConfigFileErrorReason = "scalar_value"
+	ConfigFileErrorReasonInvalidFlagValue ConfigFileErrorReason = "invalid_flag_value"
+)
+
+type ConfigFileError struct {
+	Reason ConfigFileErrorReason
+	Source string
+	Path   string
+	Key    string
+	Err    error
+}
+
+func (err ConfigFileError) Error() string {
+	switch err.Reason {
+	case ConfigFileErrorReasonRead:
+		return fmt.Sprintf("read %s %q: %v", err.Source, err.Path, err.Err)
+	case ConfigFileErrorReasonParse:
+		return fmt.Sprintf("parse %s %q: %v", err.Source, err.Path, err.Err)
+	case ConfigFileErrorReasonRootMapping:
+		return fmt.Sprintf("%s root must be a YAML mapping", err.Source)
+	case ConfigFileErrorReasonScalarKey:
+		return fmt.Sprintf("%s keys must be scalar strings", err.Source)
+	case ConfigFileErrorReasonDuplicateKey:
+		return fmt.Sprintf("duplicate %s key %q", err.Source, err.Key)
+	case ConfigFileErrorReasonUnknownKey:
+		return fmt.Sprintf("unknown %s key %q", err.Source, err.Key)
+	case ConfigFileErrorReasonScalarValue:
+		return fmt.Sprintf("%s key %q requires a non-null scalar value", err.Source, err.Key)
+	case ConfigFileErrorReasonInvalidFlagValue:
+		return fmt.Sprintf("invalid %s value for %q: %v", err.Source, err.Key, err.Err)
+	default:
+		return "invalid config file"
+	}
+}
+
+func (err ConfigFileError) Unwrap() error {
+	return err.Err
 }
 
 type DaemonServiceConfigMissingError struct {
@@ -69,10 +127,10 @@ func ValidateRawConfigFlagUsage(args []string) error {
 			if hasInlineValue {
 				_, value, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 				if IsInvalidBareConfigPathValue(value) {
-					return newConfigUsageError("--config requires a path")
+					return newConfigUsageError(ConfigUsageReasonConfigPathRequired, "--config requires a path")
 				}
 			} else if i+1 >= len(args) || IsInvalidBareConfigPathValue(args[i+1]) {
-				return newConfigUsageError("--config requires a path")
+				return newConfigUsageError(ConfigUsageReasonConfigPathRequired, "--config requires a path")
 			}
 		}
 		if _, takesValue := ValueTakingFlagNames()[name]; takesValue && !hasInlineValue {
@@ -170,7 +228,7 @@ func DefaultDaemonServiceConfigPath() (string, error) {
 func ApplyYAMLConfigFile(fs *flag.FlagSet, configPath string, visited map[string]bool) error {
 	path := strings.TrimSpace(configPath)
 	if IsInvalidBareConfigPathValue(path) {
-		return newConfigUsageError("--config requires a path")
+		return newConfigUsageError(ConfigUsageReasonConfigPathRequired, "--config requires a path")
 	}
 	for name := range visited {
 		if name == "config" {
@@ -184,14 +242,14 @@ func ApplyYAMLConfigFile(fs *flag.FlagSet, configPath string, visited map[string
 func ApplyYAMLConfigPath(fs *flag.FlagSet, visited map[string]bool, path string, source string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read %s %q: %w", source, path, err)
+		return ConfigFileError{Reason: ConfigFileErrorReasonRead, Source: source, Path: path, Err: err}
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return fmt.Errorf("parse %s %q: %w", source, path, err)
+		return ConfigFileError{Reason: ConfigFileErrorReasonParse, Source: source, Path: path, Err: err}
 	}
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("%s root must be a YAML mapping", source)
+		return ConfigFileError{Reason: ConfigFileErrorReasonRootMapping, Source: source, Path: path}
 	}
 
 	root := doc.Content[0]
@@ -201,21 +259,21 @@ func ApplyYAMLConfigPath(fs *flag.FlagSet, visited map[string]bool, path string,
 		keyNode := root.Content[i]
 		valueNode := root.Content[i+1]
 		if keyNode.Kind != yaml.ScalarNode {
-			return fmt.Errorf("%s keys must be scalar strings", source)
+			return ConfigFileError{Reason: ConfigFileErrorReasonScalarKey, Source: source, Path: path}
 		}
 		key := keyNode.Value
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate %s key %q", source, key)
+			return ConfigFileError{Reason: ConfigFileErrorReasonDuplicateKey, Source: source, Path: path, Key: key}
 		}
 		seen[key] = struct{}{}
 		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("unknown %s key %q", source, key)
+			return ConfigFileError{Reason: ConfigFileErrorReasonUnknownKey, Source: source, Path: path, Key: key}
 		}
 		if valueNode.Kind != yaml.ScalarNode || valueNode.Tag == "!!null" {
-			return fmt.Errorf("%s key %q requires a non-null scalar value", source, key)
+			return ConfigFileError{Reason: ConfigFileErrorReasonScalarValue, Source: source, Path: path, Key: key}
 		}
 		if err := fs.Set(key, valueNode.Value); err != nil {
-			return fmt.Errorf("invalid %s value for %q: %w", source, key, err)
+			return ConfigFileError{Reason: ConfigFileErrorReasonInvalidFlagValue, Source: source, Path: path, Key: key, Err: err}
 		}
 		visited[key] = true
 	}
@@ -224,10 +282,10 @@ func ApplyYAMLConfigPath(fs *flag.FlagSet, visited map[string]bool, path string,
 
 func ApplyDaemonServiceConfig(fs *flag.FlagSet, visited map[string]bool, args []string) error {
 	if len(args) != 1 || args[0] != "daemon" {
-		return fmt.Errorf("leafwiki daemon does not accept additional positional arguments")
+		return newConfigUsageError(ConfigUsageReasonDaemonPositionalArgs, "leafwiki daemon does not accept additional positional arguments")
 	}
 	for name := range visited {
-		return fmt.Errorf("leafwiki daemon reads ~/.leafwiki/leafwiki.yml; move --%s into the service config file", name)
+		return newConfigUsageError(ConfigUsageReasonDaemonFlagInConfigFile, fmt.Sprintf("leafwiki daemon reads ~/.leafwiki/leafwiki.yml; move --%s into the service config file", name))
 	}
 	path, err := DefaultDaemonServiceConfigPath()
 	if err != nil {

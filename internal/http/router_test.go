@@ -300,7 +300,7 @@ func assertAPIKeyNullMetadata(t routerTestTB, key map[string]any) {
 	}
 }
 
-type apiPage struct {
+type apiPageDTO struct {
 	ID             string                 `json:"id"`
 	Title          string                 `json:"title"`
 	Slug           string                 `json:"slug"`
@@ -310,30 +310,42 @@ type apiPage struct {
 	Kind           tree.NodeKind          `json:"kind"`
 	ContentPath    string                 `json:"contentPath"`
 	ReadmeFallback bool                   `json:"readmeFallback"`
-	Children       []*apiPage             `json:"children"`
+	Children       []*apiPageDTO          `json:"children"`
 	Tags           []string               `json:"tags"`
 	Properties     map[string]interface{} `json:"properties"`
 }
 
-type apiPermalinkTarget struct {
+type apiPermalinkTargetDTO struct {
 	ID   string        `json:"id"`
 	Slug string        `json:"slug"`
 	Path string        `json:"path"`
 	Kind tree.NodeKind `json:"kind"`
 }
 
-func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPage {
+type apiTaggedPageSummaryDTO struct {
+	Kind    tree.NodeKind `json:"kind"`
+	Excerpt string        `json:"excerpt"`
+}
+
+type createPagePayloadDTO struct {
+	Title    string        `json:"title"`
+	Slug     string        `json:"slug"`
+	ParentID string        `json:"parentId,omitempty"`
+	Kind     tree.NodeKind `json:"kind,omitempty"`
+}
+
+func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPageDTO {
 	t.Helper()
 
-	payload := map[string]any{
-		"title": title,
-		"slug":  slug,
+	payload := createPagePayloadDTO{
+		Title: title,
+		Slug:  slug,
 	}
 	if parentID != nil {
-		payload["parentId"] = *parentID
+		payload.ParentID = *parentID
 	}
 	if kind != nil {
-		payload["kind"] = string(*kind)
+		payload.Kind = *kind
 	}
 
 	body, err := json.Marshal(payload)
@@ -346,7 +358,7 @@ func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, p
 		t.Fatalf("Expected 201 Created, got %d - %s", rec.Code, rec.Body.String())
 	}
 
-	var page apiPage
+	var page apiPageDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("Unmarshal(create page response) failed: %v", err)
 	}
@@ -354,7 +366,7 @@ func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, p
 	return &page
 }
 
-func getPageByPathViaAPI(t routerTestTB, router http.Handler, path string) *apiPage {
+func getPageByPathViaAPI(t routerTestTB, router http.Handler, path string) *apiPageDTO {
 	t.Helper()
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path="+path, nil)
@@ -362,7 +374,7 @@ func getPageByPathViaAPI(t routerTestTB, router http.Handler, path string) *apiP
 		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 	}
 
-	var page apiPage
+	var page apiPageDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("Unmarshal(get page by path response) failed: %v", err)
 	}
@@ -370,7 +382,7 @@ func getPageByPathViaAPI(t routerTestTB, router http.Handler, path string) *apiP
 	return &page
 }
 
-func getPermalinkTargetViaAPI(t routerTestTB, router http.Handler, id string) *apiPermalinkTarget {
+func getPermalinkTargetViaAPI(t routerTestTB, router http.Handler, id string) *apiPermalinkTargetDTO {
 	t.Helper()
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/permalink/"+id, nil)
@@ -378,7 +390,7 @@ func getPermalinkTargetViaAPI(t routerTestTB, router http.Handler, id string) *a
 		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 	}
 
-	var target apiPermalinkTarget
+	var target apiPermalinkTargetDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &target); err != nil {
 		t.Fatalf("Unmarshal(get permalink target response) failed: %v", err)
 	}
@@ -386,7 +398,7 @@ func getPermalinkTargetViaAPI(t routerTestTB, router http.Handler, id string) *a
 	return &target
 }
 
-func getTreeViaAPI(t routerTestTB, router http.Handler) *apiPage {
+func getTreeViaAPI(t routerTestTB, router http.Handler) *apiPageDTO {
 	t.Helper()
 
 	rec := authenticatedRequest(t, router, http.MethodGet, "/api/tree", nil)
@@ -394,7 +406,7 @@ func getTreeViaAPI(t routerTestTB, router http.Handler) *apiPage {
 		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 	}
 
-	var node apiPage
+	var node apiPageDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &node); err != nil {
 		t.Fatalf("Unmarshal(tree response) failed: %v", err)
 	}
@@ -538,7 +550,7 @@ func getAdminUserIDViaAPI(t routerTestTB, router http.Handler) string {
 	return ""
 }
 
-func writePageMarkdownForTest(t routerTestTB, w *wiki.Wiki, page *apiPage, raw string) {
+func writePageMarkdownForTest(t routerTestTB, w *wiki.Wiki, page *apiPageDTO, raw string) {
 	t.Helper()
 
 	pagePath := filepath.Join(w.GetRootDir(), filepath.FromSlash(page.Path)+".md")
@@ -1301,7 +1313,7 @@ var _ = It("TestWorkspaceSyncRefreshEndpoint_SyncsDirectMarkdownCreate", func() 
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("GET synced page = %d: %s", pageRec.Code, pageRec.Body.String())
 	}
-	var page apiPage
+	var page apiPageDTO
 	if err := json.Unmarshal(pageRec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("decode synced page: %v", err)
 	}
@@ -1718,7 +1730,7 @@ var _ = It("TestWorkspaceSyncPageRevisionsEndpoint_UsesGitBackedHistory", func()
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("POST page = %d: %s", createRec.Code, createRec.Body.String())
 	}
-	var page apiPage
+	var page apiPageDTO
 	if err := json.Unmarshal(createRec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("decode page: %v", err)
 	}
@@ -2343,7 +2355,7 @@ var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets",
 		statusRec := httptest.NewRecorder()
 		router.ServeHTTP(statusRec, statusReq)
 
-		g.Expect(statusRec.Code).To(Equal(http.StatusOK), statusRec.Body.String())
+		g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
 		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
 		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
 	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
@@ -2503,7 +2515,7 @@ var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
 		statusRec := httptest.NewRecorder()
 		router.ServeHTTP(statusRec, statusReq)
 
-		g.Expect(statusRec.Code).To(Equal(http.StatusOK), statusRec.Body.String())
+		g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
 		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
 		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
 	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
@@ -2680,7 +2692,7 @@ var _ = It("TestUpdatePageEndpoint_WritesTagsAndStringProperties", func() {
 		t.Fatalf("Expected 200 OK on get, got %d", getRec.Code)
 	}
 
-	var fetched apiPage
+	var fetched apiPageDTO
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("Invalid get response JSON: %v", err)
 	}
@@ -2722,7 +2734,7 @@ var _ = It("TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent", func() {
 		t.Fatalf("Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
 	}
 
-	var updated apiPage
+	var updated apiPageDTO
 	if err := json.Unmarshal(firstRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("Invalid first update response JSON: %v", err)
 	}
@@ -2746,7 +2758,7 @@ var _ = It("TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent", func() {
 		t.Fatalf("Expected 200 OK on get, got %d", getRec.Code)
 	}
 
-	var fetched apiPage
+	var fetched apiPageDTO
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("Invalid get response JSON: %v", err)
 	}
@@ -2796,7 +2808,7 @@ var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClear
 	if firstRec.Code != http.StatusOK {
 		t.Fatalf("Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
 	}
-	var firstUpdated apiPage
+	var firstUpdated apiPageDTO
 	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstUpdated); err != nil {
 		t.Fatalf("Invalid first update response JSON: %v", err)
 	}
@@ -2836,7 +2848,7 @@ var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClear
 	if metadataOnlyRec.Code != http.StatusOK {
 		t.Fatalf("Expected metadata-only update to return 200 OK, got %d - %s", metadataOnlyRec.Code, metadataOnlyRec.Body.String())
 	}
-	var metadataOnlyUpdated apiPage
+	var metadataOnlyUpdated apiPageDTO
 	if err := json.Unmarshal(metadataOnlyRec.Body.Bytes(), &metadataOnlyUpdated); err != nil {
 		t.Fatalf("Invalid metadata-only update response JSON: %v", err)
 	}
@@ -2861,7 +2873,7 @@ var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClear
 	if omittedRec.Code != http.StatusOK {
 		t.Fatalf("Expected omitted metadata update to return 200 OK, got %d - %s", omittedRec.Code, omittedRec.Body.String())
 	}
-	var omittedUpdated apiPage
+	var omittedUpdated apiPageDTO
 	if err := json.Unmarshal(omittedRec.Body.Bytes(), &omittedUpdated); err != nil {
 		t.Fatalf("Invalid omitted update response JSON: %v", err)
 	}
@@ -2885,7 +2897,7 @@ var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClear
 	if clearRec.Code != http.StatusOK {
 		t.Fatalf("Expected explicit clear update to return 200 OK, got %d - %s", clearRec.Code, clearRec.Body.String())
 	}
-	var cleared apiPage
+	var cleared apiPageDTO
 	if err := json.Unmarshal(clearRec.Body.Bytes(), &cleared); err != nil {
 		t.Fatalf("Invalid clear update response JSON: %v", err)
 	}
@@ -2964,7 +2976,7 @@ var _ = It("TestGetTagsEndpoint_CountsSuggestionsWithinSelectedTags", func() {
 	pageB := createPageViaAPI(t, router, "Page B", "page-b", nil, pageNodeKind())
 	pageC := createPageViaAPI(t, router, "Page C", "page-c", nil, pageNodeKind())
 
-	updatePageTags := func(page *apiPage, title, slug string, tags []string) {
+	updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
 			"title":   title,
@@ -3054,7 +3066,7 @@ var _ = It("TestSearchEndpoint_FiltersResultsByTags", func() {
 	reactPage := createPageViaAPI(t, router, "React Search Match", "react-search-match", nil, pageNodeKind())
 	plainPage := createPageViaAPI(t, router, "Plain Search Match", "plain-search-match", nil, pageNodeKind())
 
-	updatePage := func(page *apiPage, title, slug, content string, tags []string) {
+	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
 			"title":   title,
@@ -3116,7 +3128,7 @@ var _ = It("TestSearchEndpoint_ReturnsTagMatchesWithoutQuery", func() {
 	reactPage := createPageViaAPI(t, router, "React Tag Match", "react-tag-match", nil, pageNodeKind())
 	plainPage := createPageViaAPI(t, router, "Plain Tag Match", "plain-tag-match", nil, pageNodeKind())
 
-	updatePage := func(page *apiPage, title, slug, content string, tags []string) {
+	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
 			"title":   title,
@@ -3235,7 +3247,7 @@ var _ = It("TestSearchEndpoint_TagFacetsShrinkWithAdditionalFilters", func() {
 		} `json:"tag_facets"`
 	}
 
-	updatePage := func(page *apiPage, title, slug, content string, tags []string) {
+	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
 			"title":   title,
@@ -3339,7 +3351,7 @@ var _ = It("TestGetPagesByTagsEndpoint_ReturnsExcerpt", func() {
 		t.Fatalf("Expected 200 OK from tags pages endpoint, got %d - %s", pagesRec.Code, pagesRec.Body.String())
 	}
 
-	var pagesResp []map[string]interface{}
+	var pagesResp []apiTaggedPageSummaryDTO
 	if err := json.Unmarshal(pagesRec.Body.Bytes(), &pagesResp); err != nil {
 		t.Fatalf("Invalid pages response JSON: %v", err)
 	}
@@ -3347,11 +3359,11 @@ var _ = It("TestGetPagesByTagsEndpoint_ReturnsExcerpt", func() {
 	if len(pagesResp) != 1 {
 		t.Fatalf("expected 1 tagged page, got %#v", pagesResp)
 	}
-	if pagesResp[0]["kind"] != string(tree.NodeKindPage) {
-		t.Fatalf("expected tagged page kind page, got %#v", pagesResp[0]["kind"])
+	if pagesResp[0].Kind != tree.NodeKindPage {
+		t.Fatalf("expected tagged page kind page, got %#v", pagesResp[0].Kind)
 	}
 
-	excerpt, _ := pagesResp[0]["excerpt"].(string)
+	excerpt := pagesResp[0].Excerpt
 	if excerpt == "" {
 		t.Fatalf("expected excerpt to be present, got %#v", pagesResp[0])
 	}
@@ -3376,7 +3388,7 @@ var _ = It("TestGetPagesByTagsEndpoint_AcceptsRepeatedTagsParams", func() {
 	pageA := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
 	pageB := createPageViaAPI(t, router, "Page B", "page-b", nil, pageNodeKind())
 
-	updatePageTags := func(page *apiPage, title, slug string, tags []string) {
+	updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
 			"title":   title,
@@ -4005,7 +4017,7 @@ var _ = It("TestGetTreeEndpoint_ContentPathUsesCaseInsensitiveIndexPrecedence", 
 	router := createRouterTestInstance(w, t)
 
 	root := getTreeViaAPI(t, router)
-	var docs, guides *apiPage
+	var docs, guides *apiPageDTO
 	for _, child := range root.Children {
 		if child.Path == "docs" {
 			docs = child
@@ -4045,7 +4057,7 @@ var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func(
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK on ensure, got %d - %s", rec.Code, rec.Body.String())
 	}
-	var ensured apiPage
+	var ensured apiPageDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &ensured); err != nil {
 		t.Fatalf("Unmarshal(ensure response) failed: %v", err)
 	}
@@ -4060,7 +4072,7 @@ var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func(
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("Expected page twin lookup status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
 	}
-	var pageTwin apiPage
+	var pageTwin apiPageDTO
 	if err := json.Unmarshal(pageRec.Body.Bytes(), &pageTwin); err != nil {
 		t.Fatalf("Unmarshal(page twin response) failed: %v", err)
 	}
@@ -4072,7 +4084,7 @@ var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func(
 	if sectionRec.Code != http.StatusOK {
 		t.Fatalf("Expected section twin lookup status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
 	}
-	var sectionTwin apiPage
+	var sectionTwin apiPageDTO
 	if err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionTwin); err != nil {
 		t.Fatalf("Unmarshal(section twin response) failed: %v", err)
 	}
@@ -4146,7 +4158,7 @@ var _ = It("TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads"
 		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 	}
 
-	var target apiPermalinkTarget
+	var target apiPermalinkTargetDTO
 	if err := json.Unmarshal(rec.Body.Bytes(), &target); err != nil {
 		t.Fatalf("Unmarshal(permalink response) failed: %v", err)
 	}
@@ -5522,7 +5534,7 @@ func uploadTestAsset(t routerTestTB, router *gin.Engine, w *wiki.Wiki, content s
 			t.Fatalf("Expected 201 Created on page creation, got %d - %s", createRec.Code, createRec.Body.String())
 		}
 
-		var pageResp apiPage
+		var pageResp apiPageDTO
 		if err := json.Unmarshal(createRec.Body.Bytes(), &pageResp); err != nil {
 			t.Fatalf("Invalid page creation JSON: %v", err)
 		}
@@ -5747,7 +5759,7 @@ var _ = Describe("router edge coverage", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
 
 	It("returns the relative path error while validating a custom stylesheet", func() {
@@ -5775,7 +5787,7 @@ var _ = Describe("router edge coverage", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/custom.css", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
 
 	It("returns 500 for a configured custom stylesheet that cannot be statted", func() {
@@ -5786,7 +5798,7 @@ var _ = Describe("router edge coverage", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/custom.css", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 	})
 
 	It("applies base path SPA fallback routing and index rewrites", func() {
@@ -5811,21 +5823,23 @@ var _ = Describe("router edge coverage", func() {
 
 		outsideBasePath := httptest.NewRecorder()
 		router.ServeHTTP(outsideBasePath, httptest.NewRequest(http.MethodGet, "/outside", nil))
-		Expect(outsideBasePath.Code).To(Equal(http.StatusNotFound))
-		Expect(outsideBasePath.Body.String()).To(Equal("Page not found"))
+		Expect(outsideBasePath).To(HaveHTTPStatus(http.StatusNotFound))
+		Expect(outsideBasePath).To(HaveHTTPBody("Page not found"))
 
 		spaRoot := httptest.NewRecorder()
 		router.ServeHTTP(spaRoot, httptest.NewRequest(http.MethodGet, "/wiki", nil))
-		Expect(spaRoot.Code).To(Equal(http.StatusOK))
-		Expect(spaRoot.Body.String()).To(ContainSubstring("Test Wiki"))
-		Expect(spaRoot.Body.String()).To(ContainSubstring(`/wiki/custom.css`))
-		Expect(spaRoot.Body.String()).To(ContainSubstring(`/wiki/branding/favicon.ico`))
-		Expect(spaRoot.Body.String()).To(ContainSubstring(`test-injection`))
+		Expect(spaRoot).To(HaveHTTPStatus(http.StatusOK))
+		Expect(spaRoot).To(HaveHTTPBody(SatisfyAll(
+			ContainSubstring("Test Wiki"),
+			ContainSubstring(`/wiki/custom.css`),
+			ContainSubstring(`/wiki/branding/favicon.ico`),
+			ContainSubstring(`test-injection`),
+		)))
 
 		nonGet := httptest.NewRecorder()
 		router.ServeHTTP(nonGet, httptest.NewRequest(http.MethodPost, "/wiki/docs", nil))
-		Expect(nonGet.Code).To(Equal(http.StatusNotFound))
-		Expect(nonGet.Body.String()).To(Equal("Page not found"))
+		Expect(nonGet).To(HaveHTTPStatus(http.StatusNotFound))
+		Expect(nonGet).To(HaveHTTPBody("Page not found"))
 	})
 })
 

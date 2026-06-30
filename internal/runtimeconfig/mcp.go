@@ -10,6 +10,30 @@ type MCPTransports struct {
 	Stdio bool
 }
 
+type MCPTransportErrorReason string
+
+const (
+	MCPTransportErrorReasonInvalid   MCPTransportErrorReason = "invalid"
+	MCPTransportErrorReasonDuplicate MCPTransportErrorReason = "duplicate"
+	MCPTransportErrorReasonNoneMixed MCPTransportErrorReason = "none_mixed"
+)
+
+type MCPTransportError struct {
+	Reason MCPTransportErrorReason
+	Value  string
+}
+
+func (err MCPTransportError) Error() string {
+	switch err.Reason {
+	case MCPTransportErrorReasonDuplicate:
+		return fmt.Sprintf("duplicate MCP transport %q", err.Value)
+	case MCPTransportErrorReasonNoneMixed:
+		return "none cannot be combined with other MCP transports"
+	default:
+		return fmt.Sprintf("invalid MCP transport %q", err.Value)
+	}
+}
+
 func ParseMCPTransports(raw string) (MCPTransports, error) {
 	value := strings.TrimSpace(strings.ToLower(raw))
 	if value == "" {
@@ -18,7 +42,7 @@ func ParseMCPTransports(raw string) (MCPTransports, error) {
 
 	parts := strings.Split(value, ",")
 	if len(parts) > 2 {
-		return MCPTransports{}, fmt.Errorf("invalid MCP transport %q", raw)
+		return MCPTransports{}, MCPTransportError{Reason: MCPTransportErrorReasonInvalid, Value: raw}
 	}
 
 	var transports MCPTransports
@@ -26,10 +50,10 @@ func ParseMCPTransports(raw string) (MCPTransports, error) {
 	for _, part := range parts {
 		name := strings.TrimSpace(part)
 		if name == "" {
-			return MCPTransports{}, fmt.Errorf("invalid MCP transport %q", raw)
+			return MCPTransports{}, MCPTransportError{Reason: MCPTransportErrorReasonInvalid, Value: raw}
 		}
 		if seen[name] {
-			return MCPTransports{}, fmt.Errorf("duplicate MCP transport %q", name)
+			return MCPTransports{}, MCPTransportError{Reason: MCPTransportErrorReasonDuplicate, Value: name}
 		}
 		seen[name] = true
 		switch name {
@@ -39,12 +63,12 @@ func ParseMCPTransports(raw string) (MCPTransports, error) {
 		case "stdio":
 			transports.Stdio = true
 		default:
-			return MCPTransports{}, fmt.Errorf("invalid MCP transport %q", name)
+			return MCPTransports{}, MCPTransportError{Reason: MCPTransportErrorReasonInvalid, Value: name}
 		}
 	}
 
 	if seen["none"] && len(seen) > 1 {
-		return MCPTransports{}, fmt.Errorf("none cannot be combined with other MCP transports")
+		return MCPTransports{}, MCPTransportError{Reason: MCPTransportErrorReasonNoneMixed}
 	}
 	return transports, nil
 }

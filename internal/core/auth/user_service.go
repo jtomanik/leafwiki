@@ -26,7 +26,7 @@ func (s *UserService) InitDefaultAdmin(newPassword string) error {
 		return nil
 	}
 
-	if _, err := s.CreateUser("admin", "admin@localhost", newPassword, "admin"); err != nil {
+	if _, err := s.CreateUser(DefaultAdminUsername, DefaultAdminEmail, newPassword, RoleAdmin); err != nil {
 		return fmt.Errorf("failed to create default admin: %w", err)
 	}
 
@@ -294,7 +294,7 @@ func (s *UserService) ResetAdminUserPassword() (*User, error) {
 	if err != nil {
 		if err == ErrUserNotFound {
 			// Create default admin user
-			adminUser, err = s.CreateUser("admin", "admin@localhost", password, RoleAdmin)
+			adminUser, err = s.CreateUser(DefaultAdminUsername, DefaultAdminEmail, password, RoleAdmin)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create default admin: %w", err)
 			}

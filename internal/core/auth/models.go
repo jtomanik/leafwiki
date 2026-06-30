@@ -37,6 +37,11 @@ const (
 	RoleViewer = "viewer"
 )
 
+const (
+	DefaultAdminUsername = "admin"
+	DefaultAdminEmail    = "admin@localhost"
+)
+
 var validRoles = map[string]bool{
 	RoleAdmin:  true,
 	RoleEditor: true,
