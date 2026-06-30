@@ -54,7 +54,7 @@ var _ = Describe("SQLite file cleanup", func() {
 
 		for _, path := range paths {
 			_, err := os.Stat(path)
-			Expect(os.IsNotExist(err)).To(BeTrue(), "expected %q to be removed, err=%v", path, err)
+			Expect(err).To(MatchError(os.ErrNotExist), "expected %q to be removed", path)
 		}
 	})
 
@@ -66,7 +66,7 @@ var _ = Describe("SQLite file cleanup", func() {
 
 		for _, path := range []string{dbPath, dbPath + "-journal", dbPath + "-wal", dbPath + "-shm"} {
 			_, err := os.Stat(path)
-			Expect(os.IsNotExist(err)).To(BeTrue(), "expected %q to remain absent, err=%v", path, err)
+			Expect(err).To(MatchError(os.ErrNotExist), "expected %q to remain absent", path)
 		}
 	})
 
@@ -83,7 +83,7 @@ var _ = Describe("SQLite file cleanup", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(info.IsDir()).To(BeTrue())
 		_, err = os.Stat(dbPath + "-wal")
-		Expect(os.IsNotExist(err)).To(BeTrue(), "expected removable sidecar to be deleted, err=%v", err)
+		Expect(err).To(MatchError(os.ErrNotExist), "expected removable sidecar to be deleted")
 	})
 })
 

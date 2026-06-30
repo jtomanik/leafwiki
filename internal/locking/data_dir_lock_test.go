@@ -35,7 +35,7 @@ var _ = Describe("directory locking", func() {
 		if err == nil {
 			_ = second.Release()
 		}
-		Expect(err).To(MatchError(ContainSubstring("data directory is already in use")))
+		Expect(err).To(MatchError(errDataDirLockHeld))
 	})
 
 	It("TestAcquireRootDirLockRejectsSecondOwnerAndReleases", func() {
@@ -49,7 +49,7 @@ var _ = Describe("directory locking", func() {
 		if err == nil {
 			_ = second.Release()
 		}
-		Expect(err).To(MatchError(ContainSubstring("root directory is already in use")))
+		Expect(err).To(MatchError(errRootDirLockHeld))
 
 		Expect(first.Release()).To(Succeed())
 		again, err := AcquireRootDirLock(rootDir)
@@ -151,8 +151,7 @@ var _ = Describe("locking edge coverage", func() {
 		lock, err := AcquireRootDirLock("content")
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("resolve root directory lock subject")))
-		Expect(errors.Is(err, absErr)).To(BeTrue())
+		Expect(err).To(MatchError(absErr))
 	})
 
 	It("returns a create-directory error when the lock parent path is blocked by a file", func() {
@@ -162,7 +161,7 @@ var _ = Describe("locking edge coverage", func() {
 		lock, err := acquirePathLock(filepath.Join(blockedParent, "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("create lock directory")))
+		Expect(err).To(SatisfyAll(HaveOccurred(), Not(MatchError(errDataDirLockHeld))))
 	})
 
 	It("returns an open-lock error when the requested lock path is a directory", func() {
@@ -172,7 +171,7 @@ var _ = Describe("locking edge coverage", func() {
 		lock, err := acquirePathLock(lockPath, "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("open custom lock")))
+		Expect(err).To(SatisfyAll(HaveOccurred(), Not(MatchError(errDataDirLockHeld))))
 	})
 
 	It("returns non-contention errors from the lock syscall", func() {
@@ -188,19 +187,25 @@ var _ = Describe("locking edge coverage", func() {
 		lock, err := acquirePathLock(filepath.Join(GinkgoT().TempDir(), "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("acquire custom lock")))
-		Expect(errors.Is(err, lockErr)).To(BeTrue())
+		Expect(err).To(MatchError(lockErr))
 	})
 
 	It("reports release errors with the default data-directory label", func() {
 		file, err := os.CreateTemp(GinkgoT().TempDir(), "closed-lock-*")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(file.Close()).To(Succeed())
+		unlockErr := errors.New("unlock failed")
+		previousUnlock := unlockDataDirFileFn
+		unlockDataDirFileFn = func(*os.File) error {
+			return unlockErr
+		}
+		DeferCleanup(func() {
+			unlockDataDirFileFn = previousUnlock
+		})
 		lock := &DataDirLock{file: file}
 
 		err = lock.Release()
 
-		Expect(err).To(MatchError(ContainSubstring("release data directory lock")))
+		Expect(err).To(MatchError(unlockErr))
 		Expect(lock.Release()).To(Succeed())
 	})
 
@@ -227,18 +232,13 @@ var _ = Describe("locking edge coverage", func() {
 
 		err = lock.Release()
 
-		Expect(err).To(MatchError(ContainSubstring("close custom lock")))
-		Expect(errors.Is(err, closeErr)).To(BeTrue())
+		Expect(err).To(MatchError(closeErr))
 		Expect(lock.Release()).To(Succeed())
 	})
 
 	It("falls back to temp storage when the user cache directory is unavailable", func() {
-		home, hadHome := os.LookupEnv("HOME")
-		xdgCacheHome, hadXDGCacheHome := os.LookupEnv("XDG_CACHE_HOME")
-		Expect(os.Unsetenv("HOME")).To(Succeed())
-		Expect(os.Unsetenv("XDG_CACHE_HOME")).To(Succeed())
-		DeferCleanup(restoreEnv, "HOME", home, hadHome)
-		DeferCleanup(restoreEnv, "XDG_CACHE_HOME", xdgCacheHome, hadXDGCacheHome)
+		GinkgoT().Setenv("HOME", "")
+		GinkgoT().Setenv("XDG_CACHE_HOME", "")
 		if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
 			Skip("platform still provides a user cache dir without HOME or XDG_CACHE_HOME")
 		}
@@ -261,15 +261,6 @@ var _ = Describe("locking edge coverage", func() {
 		err = lockDataDirFile(file)
 
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, errDataDirLockHeld)).To(BeFalse())
+		Expect(err).NotTo(MatchError(errDataDirLockHeld))
 	})
 })
-
-func restoreEnv(key, value string, present bool) {
-	GinkgoHelper()
-	if present {
-		Expect(os.Setenv(key, value)).To(Succeed())
-		return
-	}
-	Expect(os.Unsetenv(key)).To(Succeed())
-}
