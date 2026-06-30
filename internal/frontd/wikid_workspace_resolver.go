@@ -72,7 +72,7 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 			if msg == "" {
 				msg = resp.Status
 			}
-			return "", fmt.Errorf("list workspaces failed: %s", msg)
+			return "", fmt.Errorf("%w: %s", ErrWorkspaceListFailed, msg)
 		}
 		var out wikidWorkspaceListResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -137,7 +137,7 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 			if msg == "" {
 				msg = resp.Status
 			}
-			return WorkspaceRoute{}, fmt.Errorf("ensure workspace %q failed: %s", workspaceID.String(), msg)
+			return WorkspaceRoute{}, fmt.Errorf("%w: workspace %q: %s", ErrWorkspaceEnsureFailed, workspaceID.String(), msg)
 		}
 		var out wikidWorkspaceStatusResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -164,7 +164,7 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 			routeID = workspaceID
 		}
 		if !strings.EqualFold(strings.TrimSpace(out.Status.State), "running") || strings.TrimSpace(out.Status.URL) == "" {
-			return WorkspaceRoute{}, fmt.Errorf("workspace %q is not running", workspaceID.String())
+			return WorkspaceRoute{}, fmt.Errorf("%w: %s", ErrWorkspaceNotRunning, workspaceID.String())
 		}
 		upstreamURL := strings.TrimRight(out.Status.URL, "/")
 		return WorkspaceRoute{

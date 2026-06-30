@@ -14,9 +14,12 @@ import (
 )
 
 var (
-	ErrWorkspaceNotFound  = errors.New("workspace not found")
-	ErrWorkspaceForbidden = errors.New("workspace forbidden")
-	ErrWorkspaceAmbiguous = errors.New("workspace ambiguous")
+	ErrWorkspaceNotFound     = errors.New("workspace not found")
+	ErrWorkspaceForbidden    = errors.New("workspace forbidden")
+	ErrWorkspaceAmbiguous    = errors.New("workspace ambiguous")
+	ErrWorkspaceListFailed   = errors.New("list workspaces failed")
+	ErrWorkspaceEnsureFailed = errors.New("ensure workspace failed")
+	ErrWorkspaceNotRunning   = errors.New("workspace is not running")
 )
 
 const (

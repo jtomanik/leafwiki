@@ -2,6 +2,7 @@ package frontd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
@@ -261,17 +264,17 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		newFrontdRequestWithContext = originalNewRequest
 
 		cases := []struct {
-			name    string
-			status  int
-			body    string
-			wantErr string
+			name   string
+			status int
+			body   string
+			want   types.GomegaMatcher
 		}{
-			{name: "forbidden", status: http.StatusForbidden, wantErr: ErrWorkspaceForbidden.Error()},
-			{name: "empty server error", status: http.StatusInternalServerError, wantErr: "500 Internal Server Error"},
-			{name: "bad json", status: http.StatusOK, body: "{", wantErr: "decode workspace list response"},
-			{name: "empty list", status: http.StatusOK, body: `{"workspaces":[]}`, wantErr: ErrWorkspaceForbidden.Error()},
-			{name: "invalid workspace", status: http.StatusOK, body: `{"workspaces":[{"id":"bad id"}]}`, wantErr: ErrWorkspaceNotFound.Error()},
-			{name: "ambiguous", status: http.StatusOK, body: `{"workspaces":[{"id":"one"},{"id":"two"}]}`, wantErr: ErrWorkspaceAmbiguous.Error()},
+			{name: "forbidden", status: http.StatusForbidden, want: MatchError(ErrWorkspaceForbidden)},
+			{name: "empty server error", status: http.StatusInternalServerError, want: MatchError(ErrWorkspaceListFailed)},
+			{name: "bad json", status: http.StatusOK, body: "{", want: matchFrontdJSONDecodeError()},
+			{name: "empty list", status: http.StatusOK, body: `{"workspaces":[]}`, want: MatchError(ErrWorkspaceForbidden)},
+			{name: "invalid workspace", status: http.StatusOK, body: `{"workspaces":[{"id":"bad id"}]}`, want: MatchError(ErrWorkspaceNotFound)},
+			{name: "ambiguous", status: http.StatusOK, body: `{"workspaces":[{"id":"one"},{"id":"two"}]}`, want: MatchError(ErrWorkspaceAmbiguous)},
 		}
 
 		for _, tt := range cases {
@@ -284,7 +287,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 			resolver, err := NewWikidSingleWorkspaceResolver(server.URL, "token")
 			Expect(err).ToNot(HaveOccurred())
 			_, err = resolver(httptest.NewRequest(http.MethodGet, "/mcp", nil))
-			Expect(err).To(MatchError(ContainSubstring(tt.wantErr)), tt.name)
+			Expect(err).To(tt.want, tt.name)
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {}))
@@ -319,18 +322,18 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		newFrontdRequestWithContext = originalNewRequest
 
 		cases := []struct {
-			name    string
-			status  int
-			body    string
-			wantErr string
+			name   string
+			status int
+			body   string
+			want   types.GomegaMatcher
 		}{
-			{name: "not found", status: http.StatusNotFound, wantErr: ErrWorkspaceNotFound.Error()},
-			{name: "forbidden", status: http.StatusForbidden, wantErr: ErrWorkspaceForbidden.Error()},
-			{name: "empty server error", status: http.StatusInternalServerError, wantErr: "500 Internal Server Error"},
-			{name: "bad json", status: http.StatusOK, body: "{", wantErr: "decode workspace ensure response"},
-			{name: "bad status workspace id", status: http.StatusOK, body: `{"status":{"workspaceId":"bad id","state":"running","url":"http://workspaced"}}`, wantErr: "decode workspace ensure response ID"},
-			{name: "bad workspace id fallback", status: http.StatusOK, body: `{"workspace":{"id":"bad id"},"status":{"state":"running","url":"http://workspaced"}}`, wantErr: "decode workspace ensure response ID"},
-			{name: "not running", status: http.StatusOK, body: `{"status":{"state":"stopped","url":"http://workspaced"}}`, wantErr: "is not running"},
+			{name: "not found", status: http.StatusNotFound, want: MatchError(ErrWorkspaceNotFound)},
+			{name: "forbidden", status: http.StatusForbidden, want: MatchError(ErrWorkspaceForbidden)},
+			{name: "empty server error", status: http.StatusInternalServerError, want: MatchError(ErrWorkspaceEnsureFailed)},
+			{name: "bad json", status: http.StatusOK, body: "{", want: matchFrontdJSONDecodeError()},
+			{name: "bad status workspace id", status: http.StatusOK, body: `{"status":{"workspaceId":"bad id","state":"running","url":"http://workspaced"}}`, want: matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDInvalid)},
+			{name: "bad workspace id fallback", status: http.StatusOK, body: `{"workspace":{"id":"bad id"},"status":{"state":"running","url":"http://workspaced"}}`, want: matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDInvalid)},
+			{name: "not running", status: http.StatusOK, body: `{"status":{"state":"stopped","url":"http://workspaced"}}`, want: MatchError(ErrWorkspaceNotRunning)},
 		}
 
 		for _, tt := range cases {
@@ -343,7 +346,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 			resolver, err := NewWikidWorkspaceResolver(server.URL, "token")
 			Expect(err).ToNot(HaveOccurred())
 			_, err = resolver(httptest.NewRequest(http.MethodGet, "/workspace", nil), "home")
-			Expect(err).To(MatchError(ContainSubstring(tt.wantErr)), tt.name)
+			Expect(err).To(tt.want, tt.name)
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -398,3 +401,16 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(target.Header).NotTo(HaveKey(http.CanonicalHeaderKey("X-LeafWiki-Original-Remote-Addr")))
 	})
 })
+
+func matchFrontdJSONDecodeError() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var syntaxErr *json.SyntaxError
+		return errors.As(err, &syntaxErr) || errors.Is(err, io.ErrUnexpectedEOF)
+	})
+}
+
+func matchFrontdWorkspaceIDError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(code))
+}
