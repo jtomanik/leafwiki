@@ -14,15 +14,35 @@ var (
 	ErrGrantSchemaVersion   = errors.New("grant schema version mismatch")
 	ErrGrantSubjectRequired = errors.New("grant subject is required")
 	ErrUnknownGrantRole     = errors.New("unknown grant role")
+	ErrGrantSubjectMismatch = errors.New("replacement grant subject mismatch")
 )
 
 type GrantRole string
 
 const (
-	GrantRoleViewer GrantRole = "viewer"
-	GrantRoleEditor GrantRole = "editor"
-	GrantRoleAdmin  GrantRole = "admin"
+	grantRoleViewerValue = "viewer"
+	grantRoleEditorValue = "editor"
+	grantRoleAdminValue  = "admin"
 )
+
+const (
+	GrantRoleViewer GrantRole = grantRoleViewerValue
+	GrantRoleEditor GrantRole = grantRoleEditorValue
+	GrantRoleAdmin  GrantRole = grantRoleAdminValue
+)
+
+func ParseGrantRole(raw string) (GrantRole, error) {
+	switch strings.TrimSpace(raw) {
+	case grantRoleViewerValue:
+		return GrantRoleViewer, nil
+	case grantRoleEditorValue:
+		return GrantRoleEditor, nil
+	case grantRoleAdminValue:
+		return GrantRoleAdmin, nil
+	default:
+		return "", fmt.Errorf("unknown grant role %q: %w", raw, ErrUnknownGrantRole)
+	}
+}
 
 type GrantDocument struct {
 	SchemaVersion int     `json:"schemaVersion"`

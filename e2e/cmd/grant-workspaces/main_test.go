@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("grant-workspaces command", func() {
 
 		Expect(func() { main() }).To(PanicWith("exit"))
 
-		Expect(exitCode).To(Equal(0))
+		Expect(exitCode).To(BeZero())
 		Expect(stderr.String()).To(BeEmpty())
 	})
 
@@ -62,12 +62,12 @@ var _ = ginkgo.Describe("grant-workspaces command", func() {
 			&stderr,
 		)
 
-		Expect(code).To(Equal(0), stderr.String())
+		Expect(code).To(BeZero(), stderr.String())
 		Expect(storePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
 		Expect(store.grants).To(Equal([]wikid.Grant{{
 			Subject:     "frontd",
 			WorkspaceID: workspaceid.WorkspaceID("home"),
-			Role:        wikid.GrantRole("admin"),
+			Role:        wikid.GrantRoleAdmin,
 		}}))
 	})
 

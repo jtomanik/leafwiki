@@ -64,7 +64,7 @@ func (s *GrantStore) ReplaceSubjectGrants(subject string, grants []Grant) error 
 				grant.Subject = subject
 			}
 			if grant.Subject != subject {
-				return fmt.Errorf("replacement grant subject %q does not match %q", grant.Subject, subject)
+				return fmt.Errorf("replacement grant subject %q does not match %q: %w", grant.Subject, subject, ErrGrantSubjectMismatch)
 			}
 			if err := upsertGrant(ctx, conn, grant); err != nil {
 				return err

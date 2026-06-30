@@ -60,10 +60,14 @@ func runGrantWorkspaces(args []string, stdin io.Reader, stderr io.Writer) int {
 	}
 	store := newGrantStore(storePath)
 	for _, input := range inputs {
+		role, err := wikid.ParseGrantRole(input.Role)
+		if err != nil {
+			return fatalf(stderr, "parse grant role %s %s: %v", input.Subject, input.WorkspaceID, err)
+		}
 		if err := store.Upsert(wikid.Grant{
 			Subject:     input.Subject,
 			WorkspaceID: input.WorkspaceID,
-			Role:        wikid.GrantRole(input.Role),
+			Role:        role,
 		}); err != nil {
 			return fatalf(stderr, "upsert grant %s %s: %v", input.Subject, input.WorkspaceID, err)
 		}

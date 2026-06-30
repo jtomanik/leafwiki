@@ -10,15 +10,28 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/markdownlinks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/frontd"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	"github.com/perber/wiki/internal/workspaceid"
 	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+)
+
+const (
+	wikidWorkspaceInsertBlockedFixture = "workspace insert blocked"
+	wikidWorkspaceUpdateBlockedFixture = "workspace update blocked"
 )
 
 var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
@@ -29,19 +42,19 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(os.Mkdir(legacyUsersDB, 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(legacyUsersDB, "child"), []byte("x"), 0o644)).To(Succeed())
 
-			Expect(CleanupLegacyAuthDBs(dataDir)).To(MatchError(ContainSubstring("remove legacy auth DB")))
-			Expect(OpenAuthStores(dataDir)).Error().To(MatchError(ContainSubstring("remove legacy auth DB")))
+			Expect(CleanupLegacyAuthDBs(dataDir)).To(MatchError(syscall.ENOTEMPTY))
+			Expect(OpenAuthStores(dataDir)).Error().To(MatchError(syscall.ENOTEMPTY))
 
 			blockedAuthDirData := ginkgo.GinkgoT().TempDir()
 			Expect(os.Mkdir(filepath.Join(blockedAuthDirData, ".leafwiki"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(blockedAuthDirData, ".leafwiki", "wikid"), []byte("x"), 0o644)).To(Succeed())
-			Expect(OpenAuthStores(blockedAuthDirData)).Error().To(MatchError(ContainSubstring("create wikid auth dir")))
+			Expect(OpenAuthStores(blockedAuthDirData)).Error().To(MatchError(syscall.ENOTDIR))
 
 			blockedOAuthDirData := ginkgo.GinkgoT().TempDir()
 			wikidDir := filepath.Join(blockedOAuthDirData, ".leafwiki", "wikid")
 			Expect(os.MkdirAll(filepath.Join(wikidDir, "auth"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(wikidDir, "oauth"), []byte("x"), 0o644)).To(Succeed())
-			Expect(OpenAuthStores(blockedOAuthDirData)).Error().To(MatchError(ContainSubstring("create wikid oauth dir")))
+			Expect(OpenAuthStores(blockedOAuthDirData)).Error().To(MatchError(syscall.ENOTDIR))
 		})
 
 		ginkgo.It("treats nil auth store collections as already closed", func() {
@@ -53,26 +66,29 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			restore := captureWikidAuthSeams()
 			ginkgo.DeferCleanup(restore)
 
+			userStoreErr := errors.New("user store failed")
 			wikidNewUserStore = func(string) (*coreauth.UserStore, error) {
-				return nil, errors.New("user store failed")
+				return nil, userStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(ContainSubstring("open wikid user store")))
+			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(userStoreErr))
 
 			restore()
 			restore = captureWikidAuthSeams()
 			ginkgo.DeferCleanup(restore)
+			sessionStoreErr := errors.New("session store failed")
 			wikidNewSessionStore = func(string) (*coreauth.SessionStore, error) {
-				return nil, errors.New("session store failed")
+				return nil, sessionStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(ContainSubstring("open wikid session store")))
+			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(sessionStoreErr))
 
 			restore()
 			restore = captureWikidAuthSeams()
 			ginkgo.DeferCleanup(restore)
+			apiKeyStoreErr := errors.New("api key store failed")
 			wikidNewAPIKeyStore = func(string) (*coreauth.APIKeyStore, error) {
-				return nil, errors.New("api key store failed")
+				return nil, apiKeyStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(ContainSubstring("open wikid API key store")))
+			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(apiKeyStoreErr))
 		})
 	})
 
@@ -88,27 +104,27 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				UpdatedAt:   now,
 			}
 
-			Expect((RegistryDocument{}).Validate()).To(MatchError(ContainSubstring("registry schema version")))
+			Expect((RegistryDocument{}).Validate()).To(MatchError(ErrRegistrySchemaVersion))
 			Expect(RegistryDocument{
 				SchemaVersion: RegistrySchemaVersion,
 				Workspaces: []WorkspaceRecord{
 					valid,
 					{ID: HomeWorkspaceID, DisplayName: "Other", DataDir: "/tmp/other-data", RootDir: "/tmp/other-root", CreatedAt: now, UpdatedAt: now},
 				},
-			}.Validate()).To(MatchError(ContainSubstring("duplicate workspace ID")))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: "bad/id", DataDir: "/tmp/data", RootDir: "/tmp/root"})).To(MatchError(ContainSubstring("workspace ID")))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, RootDir: "/tmp/root"})).To(MatchError(ContainSubstring("data dir is required")))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data"})).To(MatchError(ContainSubstring("root dir is required")))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data", RootDir: "/tmp/root", MarkdownLinkRootPrefix: "docs/"})).To(MatchError(ContainSubstring("must be normalized")))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data", RootDir: "/tmp/root", MarkdownLinkRootPrefix: "../docs"})).To(MatchError(ContainSubstring("markdown link root prefix")))
+			}.Validate()).To(MatchError(ErrDuplicateWorkspaceID))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: "bad/id", DataDir: "/tmp/data", RootDir: "/tmp/root"})).To(testmatchers.HaveStructuredError(workspaceid.ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(workspaceid.ErrCodeWorkspaceIDInvalid)))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, RootDir: "/tmp/root"})).To(MatchError(ErrWorkspaceDataDirRequired))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data"})).To(MatchError(ErrWorkspaceRootDirRequired))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data", RootDir: "/tmp/root", MarkdownLinkRootPrefix: "docs/"})).To(MatchError(ErrWorkspaceMarkdownLinkRootPrefixNotNormalized))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data", RootDir: "/tmp/root", MarkdownLinkRootPrefix: "../docs"})).To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 		})
 
 		ginkgo.It("reports grant document validation failures", func() {
-			Expect((GrantDocument{}).Validate()).To(MatchError(ContainSubstring("grant schema version")))
-			Expect(validateGrant(Grant{WorkspaceID: HomeWorkspaceID, Role: GrantRoleViewer})).To(MatchError("grant subject is required"))
-			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer})).To(MatchError(ContainSubstring("grant workspace ID")))
-			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: HomeWorkspaceID, Role: GrantRole("owner")})).To(MatchError(`unknown grant role "owner"`))
-			Expect(CapabilitiesForRole(GrantRole("owner"))).Error().To(MatchError(`unknown grant role "owner"`))
+			Expect((GrantDocument{}).Validate()).To(MatchError(ErrGrantSchemaVersion))
+			Expect(validateGrant(Grant{WorkspaceID: HomeWorkspaceID, Role: GrantRoleViewer})).To(MatchError(ErrGrantSubjectRequired))
+			Expect(workspaceid.WorkspaceIDErrorCode(validateGrant(Grant{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}))).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
+			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: HomeWorkspaceID, Role: GrantRole("owner")})).To(MatchError(ErrUnknownGrantRole))
+			Expect(CapabilitiesForRole(GrantRole("owner"))).Error().To(MatchError(ErrUnknownGrantRole))
 		})
 
 		ginkgo.It("canonicalizes paths through existing symlink ancestors and missing suffixes", func() {
@@ -133,18 +149,20 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		ginkgo.It("surfaces canonical path resolver failures", func() {
 			restore := captureWikidPathSeams()
 			ginkgo.DeferCleanup(restore)
+			absErr := errors.New("abs failed")
 			wikidFilepathAbs = func(string) (string, error) {
-				return "", errors.New("abs failed")
+				return "", absErr
 			}
-			Expect(canonicalRegistryPath("docs")).Error().To(MatchError("abs failed"))
+			Expect(canonicalRegistryPath("docs")).Error().To(MatchError(absErr))
 
 			restore()
 			restore = captureWikidPathSeams()
 			ginkgo.DeferCleanup(restore)
+			permissionErr := errors.New("permission denied")
 			wikidEvalSymlinks = func(string) (string, error) {
-				return "", errors.New("permission denied")
+				return "", permissionErr
 			}
-			Expect(canonicalRegistryPath("/tmp/docs")).Error().To(MatchError("permission denied"))
+			Expect(canonicalRegistryPath("/tmp/docs")).Error().To(MatchError(permissionErr))
 
 			restore()
 			restore = captureWikidPathSeams()
@@ -163,14 +181,15 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			restore = captureWikidPathSeams()
 			ginkgo.DeferCleanup(restore)
 			calls := 0
+			ancestorPermissionErr := errors.New("ancestor permission denied")
 			wikidEvalSymlinks = func(string) (string, error) {
 				calls++
 				if calls == 1 {
 					return "", os.ErrNotExist
 				}
-				return "", errors.New("ancestor permission denied")
+				return "", ancestorPermissionErr
 			}
-			Expect(canonicalRegistryPath("/tmp/missing/path")).Error().To(MatchError("ancestor permission denied"))
+			Expect(canonicalRegistryPath("/tmp/missing/path")).Error().To(MatchError(ancestorPermissionErr))
 		})
 	})
 
@@ -209,14 +228,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			store := NewGrantStore(layout.DBPath)
 
-			Expect(store.Save(GrantDocument{})).To(MatchError(ContainSubstring("grant schema version")))
+			Expect(store.Save(GrantDocument{})).To(MatchError(ErrGrantSchemaVersion))
 			Expect(store.Save(GrantDocument{
 				SchemaVersion: GrantSchemaVersion,
 				Grants:        []Grant{{Subject: "user:missing", WorkspaceID: "missing", Role: GrantRoleViewer}},
 			})).To(HaveOccurred())
-			Expect(store.ReplaceSubjectGrants(" \t ", nil)).To(MatchError("grant subject is required"))
-			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{Subject: "user:2", WorkspaceID: home.ID, Role: GrantRoleViewer}})).To(MatchError(ContainSubstring("does not match")))
-			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: GrantRole("owner")}})).To(MatchError(`unknown grant role "owner"`))
+			Expect(store.ReplaceSubjectGrants(" \t ", nil)).To(MatchError(ErrGrantSubjectRequired))
+			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{Subject: "user:2", WorkspaceID: home.ID, Role: GrantRoleViewer}})).To(MatchError(ErrGrantSubjectMismatch))
+			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: GrantRole("owner")}})).To(MatchError(ErrUnknownGrantRole))
 		})
 
 		ginkgo.It("surfaces grant delete failures from SQLite triggers", func() {
@@ -229,8 +248,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			db := mustOpenInitializedWikidDB(layout.DBPath)
 			Expect(execRawSQL(db, `CREATE TRIGGER fail_grant_delete BEFORE DELETE ON workspace_grants BEGIN SELECT RAISE(FAIL, 'grant delete blocked'); END`)).To(Succeed())
 
-			Expect(store.Save(NewGrantDocument())).To(MatchError(ContainSubstring("grant delete blocked")))
-			Expect(store.ReplaceSubjectGrants("user:1", nil)).To(MatchError(ContainSubstring("grant delete blocked")))
+			Expect(store.Save(NewGrantDocument())).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
+			Expect(store.ReplaceSubjectGrants("user:1", nil)).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 		})
 
 		ginkgo.It("reports invalid persisted grant rows while loading and listing grants", func() {
@@ -246,7 +265,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			badRoleDB := rawGrantDB()
 			Expect(execRawSQL(badRoleDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', 'home', 'owner')`)).To(Succeed())
-			Expect(loadGrantDocument(context.Background(), badRoleDB)).Error().To(MatchError(ContainSubstring("unknown grant role")))
+			Expect(loadGrantDocument(context.Background(), badRoleDB)).Error().To(MatchError(ErrUnknownGrantRole))
 
 			layout := newWikidEdgeLayout()
 			db := mustOpenInitializedWikidDB(layout.DBPath)
@@ -267,8 +286,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(scanErrorDB.Close()).To(Succeed())
 			Expect(NewGrantStore(scanErrorLayout.DBPath).GrantsForSubject("user:1")).Error().To(HaveOccurred())
 
-			Expect(grantsForSubjectRows(errRows{err: errors.New("grant rows failed")})).Error().To(MatchError("grant rows failed"))
-			Expect(loadGrantRows(errRows{err: errors.New("load grant rows failed")})).Error().To(MatchError("load grant rows failed"))
+			grantRowsErr := errors.New("grant rows failed")
+			Expect(grantsForSubjectRows(errRows{err: grantRowsErr})).Error().To(MatchError(grantRowsErr))
+			loadGrantRowsErr := errors.New("load grant rows failed")
+			Expect(loadGrantRows(errRows{err: loadGrantRowsErr})).Error().To(MatchError(loadGrantRowsErr))
 		})
 
 		ginkgo.It("rolls back registry updates when callbacks or next documents fail", func() {
@@ -284,7 +305,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			_, err = store.Update(func(RegistryDocument) (RegistryDocument, error) {
 				return RegistryDocument{}, nil
 			})
-			Expect(err).To(MatchError(ContainSubstring("registry schema version")))
+			Expect(err).To(MatchError(ErrRegistrySchemaVersion))
 		})
 
 		ginkgo.It("uses store defaults and grant callbacks while registering workspaces", func() {
@@ -336,7 +357,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			_, err = store.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, func(RegisterWorkspaceResult) ([]Grant, error) {
 				return []Grant{{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}}, nil
 			})
-			Expect(err).To(MatchError(ContainSubstring("grant workspace ID")))
+			Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
 		})
 
 		ginkgo.It("normalizes replace helpers and workspace slugs", func() {
@@ -350,9 +371,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				UpdatedAt:   now,
 			})
 
-			Expect(doc.Workspaces).To(HaveLen(1))
-			Expect(doc.Workspaces[0].DisplayName).To(Equal("Home"))
-			Expect(doc.Workspaces[0].DataDir).To(Equal("/tmp/home-data"))
+			Expect(doc.Workspaces).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"DisplayName": Equal("Home"),
+				"DataDir":     Equal("/tmp/home-data"),
+			})))
 			doc = replaceWorkspaceRecord(doc, WorkspaceRecord{
 				ID:          HomeWorkspaceID,
 				DisplayName: "Home Renamed",
@@ -361,10 +383,13 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			})
-			Expect(doc.Workspaces).To(HaveLen(1))
-			Expect(doc.Workspaces[0].DisplayName).To(Equal("Home Renamed"))
+			Expect(doc.Workspaces).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"DisplayName": Equal("Home Renamed"),
+			})))
 			Expect(workspaceSlug(" -_- ")).To(Equal("workspace"))
-			Expect(workspaceIDFor("Docs", "/tmp/data", "/tmp/root").String()).To(HavePrefix("docs-"))
+			workspaceID, err := workspaceIDFor("Docs", "/tmp/data", "/tmp/root")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(workspaceID.StorageKey()).To(HavePrefix("docs-"))
 		})
 
 		ginkgo.It("reports invalid direct store registration inputs before opening a transaction", func() {
@@ -379,7 +404,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				RootDir:                "/tmp/root",
 				MarkdownLinkRootPrefix: "docs/",
 			}, time.Now, nil)
-			Expect(err).To(MatchError(ContainSubstring("must be normalized")))
+			Expect(err).To(MatchError(ErrWorkspaceMarkdownLinkRootPrefixNotNormalized))
 		})
 
 		ginkgo.It("updates an existing home workspace and surfaces registry service load errors", func() {
@@ -389,8 +414,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			updated, err := service.BootstrapHomeWorkspace(filepath.Join(ginkgo.GinkgoT().TempDir(), "new-data"), filepath.Join(ginkgo.GinkgoT().TempDir(), "new-root"))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updated.ID).To(Equal(home.ID))
-			Expect(updated.DataDir).NotTo(Equal(home.DataDir))
+			Expect(updated).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ID":      Equal(home.ID),
+				"DataDir": Not(Equal(home.DataDir)),
+			}))
 
 			badService := NewRegistryService(NewRegistryStore(wikidDBPathInsideFile()), Layout{})
 			Expect(badService.BootstrapHome()).Error().To(HaveOccurred())
@@ -402,7 +429,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				DataDir:                filepath.Join(ginkgo.GinkgoT().TempDir(), "bad-prefix-data"),
 				RootDir:                filepath.Join(ginkgo.GinkgoT().TempDir(), "bad-prefix-root"),
 				MarkdownLinkRootPrefix: "../docs",
-			}, nil)).Error().To(MatchError(ContainSubstring("normalize markdown link root prefix")))
+			}, nil)).Error().To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 		})
 
 		ginkgo.It("handles workspace request defaults, ordering ties, and path/prefix errors", func() {
@@ -414,16 +441,16 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(record.DisplayName).To(Equal("Workspace"))
-			Expect(record.ID.String()).To(HavePrefix("workspace-"))
+			Expect(record.ID.StorageKey()).To(HavePrefix("workspace-"))
 
 			blocker := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-dir")
 			Expect(os.WriteFile(blocker, []byte("x"), 0o644)).To(Succeed())
 			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(blocker, "data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root")})
-			Expect(err).To(MatchError(ContainSubstring("resolve data dir")))
+			Expect(err).To(MatchError(syscall.ENOTDIR))
 			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"), RootDir: filepath.Join(blocker, "root")})
-			Expect(err).To(MatchError(ContainSubstring("resolve root dir")))
+			Expect(err).To(MatchError(syscall.ENOTDIR))
 			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root"), MarkdownLinkRootPrefix: "../docs"})
-			Expect(err).To(MatchError(ContainSubstring("normalize markdown link root prefix")))
+			Expect(err).To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 
 			_, err = service.BootstrapHome()
 			Expect(err).NotTo(HaveOccurred())
@@ -433,8 +460,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			workspaces, err := service.ListWorkspaces()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(workspaces[0].ID).To(Equal(HomeWorkspaceID))
-			Expect(strings.EqualFold(workspaces[1].DisplayName, workspaces[2].DisplayName)).To(BeTrue())
+			Expect(workspaces).To(haveHomeWorkspaceFirstAndEqualFoldTie())
 		})
 
 		ginkgo.It("reports invalid persisted registry rows while loading workspaces", func() {
@@ -446,17 +472,18 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			createdAtDB := rawRegistryDB()
 			Expect(execRawSQL(createdAtDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', 'Home', '/tmp/data', '/tmp/root', '', 'bad-time', '2026-06-27T12:00:00Z')`)).To(Succeed())
-			Expect(loadRegistryDocument(context.Background(), createdAtDB)).Error().To(MatchError(ContainSubstring("created_at")))
+			Expect(loadRegistryDocument(context.Background(), createdAtDB)).Error().To(matchWikidTimeParseError())
 
 			updatedAtDB := rawRegistryDB()
 			Expect(execRawSQL(updatedAtDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', 'Home', '/tmp/data', '/tmp/root', '', '2026-06-27T12:00:00Z', 'bad-time')`)).To(Succeed())
-			Expect(loadRegistryDocument(context.Background(), updatedAtDB)).Error().To(MatchError(ContainSubstring("updated_at")))
+			Expect(loadRegistryDocument(context.Background(), updatedAtDB)).Error().To(matchWikidTimeParseError())
 
 			validateDB := rawRegistryDB()
 			Expect(execRawSQL(validateDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', 'Home', '/tmp/data', '/tmp/root', 'docs/', '2026-06-27T12:00:00Z', '2026-06-27T12:00:00Z')`)).To(Succeed())
-			Expect(loadRegistryDocument(context.Background(), validateDB)).Error().To(MatchError(ContainSubstring("must be normalized")))
+			Expect(loadRegistryDocument(context.Background(), validateDB)).Error().To(MatchError(ErrWorkspaceMarkdownLinkRootPrefixNotNormalized))
 
-			Expect(loadRegistryRows(errRows{err: errors.New("registry rows failed")})).Error().To(MatchError("registry rows failed"))
+			registryRowsErr := errors.New("registry rows failed")
+			Expect(loadRegistryRows(errRows{err: registryRowsErr})).Error().To(MatchError(registryRowsErr))
 		})
 
 		ginkgo.It("surfaces low-level registry save and upsert errors", func() {
@@ -494,9 +521,9 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			insertFailLayout := newWikidEdgeLayout()
 			insertFailDB := mustOpenInitializedWikidDB(insertFailLayout.DBPath)
-			Expect(execRawSQL(insertFailDB, `CREATE TRIGGER fail_workspace_insert BEFORE INSERT ON workspaces BEGIN SELECT RAISE(FAIL, 'workspace insert blocked'); END`)).To(Succeed())
+			Expect(execRawSQL(insertFailDB, `CREATE TRIGGER fail_workspace_insert BEFORE INSERT ON workspaces BEGIN SELECT RAISE(FAIL, '`+wikidWorkspaceInsertBlockedFixture+`'); END`)).To(Succeed())
 			_, err = NewRegistryStore(insertFailLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord("insert-fail"), time.Now, nil)
-			Expect(err).To(MatchError(ContainSubstring("workspace insert blocked")))
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 
 			updateFailLayout := newWikidEdgeLayout()
 			updateStore := NewRegistryStore(updateFailLayout.DBPath)
@@ -504,9 +531,9 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			_, err = updateStore.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, nil)
 			Expect(err).NotTo(HaveOccurred())
 			updateFailDB := mustOpenInitializedWikidDB(updateFailLayout.DBPath)
-			Expect(execRawSQL(updateFailDB, `CREATE TRIGGER fail_workspace_update BEFORE UPDATE ON workspaces BEGIN SELECT RAISE(FAIL, 'workspace update blocked'); END`)).To(Succeed())
+			Expect(execRawSQL(updateFailDB, `CREATE TRIGGER fail_workspace_update BEFORE UPDATE ON workspaces BEGIN SELECT RAISE(FAIL, '`+wikidWorkspaceUpdateBlockedFixture+`'); END`)).To(Succeed())
 			_, err = updateStore.RegisterWorkspaceWithResultAndGrants(workspace, nil, nil)
-			Expect(err).To(MatchError(ContainSubstring("workspace update blocked")))
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 		})
 	})
 
@@ -545,8 +572,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 				rec := privateWorkspaceAPIRecorder(api, http.MethodGet, PrivateWorkspacesPrefix)
 
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Body.String()).To(ContainSubstring(string(errCodePrivateSubjectResolveFailed)))
+				Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, errCodePrivateSubjectResolveFailed, sharederrors.MessageIDForCode(errCodePrivateSubjectResolveFailed)))
 			}
 		})
 
@@ -556,8 +582,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				Subject:  validWorkspaceSubject,
 			})
 			registryRec := privateWorkspaceAPIRecorder(registryErrorAPI, http.MethodGet, PrivateWorkspacesPrefix)
-			Expect(registryRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(registryRec.Body.String()).To(ContainSubstring(string(errCodePrivateRegistryLoadFailed)))
+			Expect(registryRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateRegistryLoadFailed, sharederrors.MessageIDForCode(errCodePrivateRegistryLoadFailed)))
 
 			layout := newWikidEdgeLayout()
 			Expect(NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome()).Error().NotTo(HaveOccurred())
@@ -567,8 +592,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				Subject:  validWorkspaceSubject,
 			})
 			grantsRec := privateWorkspaceAPIRecorder(grantsErrorAPI, http.MethodGet, PrivateWorkspacesPrefix)
-			Expect(grantsRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(grantsRec.Body.String()).To(ContainSubstring(string(errCodePrivateGrantsLoadFailed)))
+			Expect(grantsRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateGrantsLoadFailed, sharederrors.MessageIDForCode(errCodePrivateGrantsLoadFailed)))
 		})
 
 		ginkgo.It("handles status and default ensure branches without a supervisor", func() {
@@ -584,13 +608,17 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				Subject:  validWorkspaceSubject,
 			})
 
-			statusRec := privateWorkspaceAPIRecorder(api, http.MethodGet, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/status")
-			Expect(statusRec.Code).To(Equal(http.StatusOK))
-			Expect(statusRec.Body.String()).To(ContainSubstring(string(WorkspaceStateRegistered)))
+			statusRec := privateWorkspaceAPIRecorderForWorkspace(api, http.MethodGet, home.ID, "status")
+			Expect(statusRec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody(ContainSubstring(string(WorkspaceStateRegistered))),
+			))
 
-			ensureRec := privateWorkspaceAPIRecorder(api, http.MethodPost, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/ensure")
-			Expect(ensureRec.Code).To(Equal(http.StatusOK))
-			Expect(ensureRec.Body.String()).To(ContainSubstring(string(WorkspaceStateRegistered)))
+			ensureRec := privateWorkspaceAPIRecorderForWorkspace(api, http.MethodPost, home.ID, "ensure")
+			Expect(ensureRec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody(ContainSubstring(string(WorkspaceStateRegistered))),
+			))
 		})
 
 		ginkgo.It("returns supervisor status from default ensure when available", func() {
@@ -609,10 +637,12 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				Supervisor: supervisor,
 			})
 
-			rec := privateWorkspaceAPIRecorder(api, http.MethodPost, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/ensure")
+			rec := privateWorkspaceAPIRecorderForWorkspace(api, http.MethodPost, home.ID, "ensure")
 
-			Expect(rec.Code).To(Equal(http.StatusOK))
-			Expect(rec.Body.String()).To(ContainSubstring(string(WorkspaceStateStarting)))
+			Expect(rec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody(ContainSubstring(string(WorkspaceStateStarting))),
+			))
 		})
 
 		ginkgo.It("reports authorization and ensure failures from workspace actions", func() {
@@ -628,27 +658,24 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 					return WorkspaceSubject{}, errors.New("subject failed")
 				},
 			})
-			subjectRec := privateWorkspaceAPIRecorder(subjectErrorAPI, http.MethodGet, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/status")
-			Expect(subjectRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(subjectRec.Body.String()).To(ContainSubstring(string(errCodePrivateWorkspaceAuthFailed)))
+			subjectRec := privateWorkspaceAPIRecorderForWorkspace(subjectErrorAPI, http.MethodGet, home.ID, "status")
+			Expect(subjectRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateWorkspaceAuthFailed, sharederrors.MessageIDForCode(errCodePrivateWorkspaceAuthFailed)))
 
 			grantsErrorAPI := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 				Registry: registry,
 				Grants:   NewGrantStore(wikidDBPathInsideFile()),
 				Subject:  validWorkspaceSubject,
 			})
-			grantsRec := privateWorkspaceAPIRecorder(grantsErrorAPI, http.MethodGet, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/status")
-			Expect(grantsRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(grantsRec.Body.String()).To(ContainSubstring(string(errCodePrivateWorkspaceAuthFailed)))
+			grantsRec := privateWorkspaceAPIRecorderForWorkspace(grantsErrorAPI, http.MethodGet, home.ID, "status")
+			Expect(grantsRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateWorkspaceAuthFailed, sharederrors.MessageIDForCode(errCodePrivateWorkspaceAuthFailed)))
 
 			registryErrorAPI := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 				Registry: NewRegistryService(NewRegistryStore(wikidDBPathInsideFile()), Layout{}),
 				Grants:   NewGrantStore(layout.DBPath),
 				Subject:  validWorkspaceSubject,
 			})
-			registryRec := privateWorkspaceAPIRecorder(registryErrorAPI, http.MethodGet, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/status")
-			Expect(registryRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(registryRec.Body.String()).To(ContainSubstring(string(errCodePrivateWorkspaceAuthFailed)))
+			registryRec := privateWorkspaceAPIRecorderForWorkspace(registryErrorAPI, http.MethodGet, home.ID, "status")
+			Expect(registryRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateWorkspaceAuthFailed, sharederrors.MessageIDForCode(errCodePrivateWorkspaceAuthFailed)))
 
 			ensureErrorAPI := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 				Registry: registry,
@@ -660,12 +687,11 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 					return WorkspaceStatus{}, errors.New("ensure failed")
 				},
 			})
-			ensureRec := privateWorkspaceAPIRecorder(ensureErrorAPI, http.MethodPost, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/ensure")
-			Expect(ensureRec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(ensureRec.Body.String()).To(ContainSubstring(string(errCodePrivateWorkspaceEnsureFailed)))
+			ensureRec := privateWorkspaceAPIRecorderForWorkspace(ensureErrorAPI, http.MethodPost, home.ID, "ensure")
+			Expect(ensureRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateWorkspaceEnsureFailed, sharederrors.MessageIDForCode(errCodePrivateWorkspaceEnsureFailed)))
 
-			defaultRec := privateWorkspaceAPIRecorder(ensureErrorAPI, http.MethodPatch, PrivateWorkspacesPrefix+"/"+home.ID.String()+"/status")
-			Expect(defaultRec.Code).To(Equal(http.StatusNotFound))
+			defaultRec := privateWorkspaceAPIRecorderForWorkspace(ensureErrorAPI, http.MethodPatch, home.ID, "status")
+			Expect(defaultRec).To(HaveHTTPStatus(http.StatusNotFound))
 		})
 
 		ginkgo.It("falls back to a structured encoding error when JSON encoding fails", func() {
@@ -673,8 +699,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			writeJSON(rec, map[string]any{"bad": make(chan int)})
 
-			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(rec.Body.String()).To(ContainSubstring(string(errCodePrivateEncodeResponseFailed)))
+			Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateEncodeResponseFailed, sharederrors.MessageIDForCode(errCodePrivateEncodeResponseFailed)))
 		})
 	})
 
@@ -692,14 +717,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			for _, path := range []string{"/__leafwiki/actor-context", "/__leafwiki/token/verify", PrivateWorkspacesPrefix} {
 				rec := privateHandlerRecorder(handler, http.MethodGet, path, "")
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized), path)
+				Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, errCodePrivateUnauthorized, sharederrors.MessageIDForCode(errCodePrivateUnauthorized)), path)
 			}
-			Expect(privateHandlerRecorder(handler, http.MethodGet, frontd.ControlPlanePrefix+"/status", "").Code).To(Equal(http.StatusUnauthorized))
+			Expect(privateHandlerRecorder(handler, http.MethodGet, frontd.ControlPlanePrefix+"/status", "")).To(testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, errCodePrivateUnauthorized, sharederrors.MessageIDForCode(errCodePrivateUnauthorized)))
 
-			Expect(privateHandlerRecorder(handler, http.MethodGet, "/__leafwiki/actor-context", token).Body.String()).To(Equal("actor"))
-			Expect(privateHandlerRecorder(handler, http.MethodGet, "/__leafwiki/token/verify", token).Body.String()).To(Equal("verify"))
-			Expect(privateHandlerRecorder(handler, http.MethodGet, PrivateWorkspacesPrefix, token).Body.String()).To(Equal("workspaces"))
-			Expect(privateHandlerRecorder(handler, http.MethodGet, "/public", "").Body.String()).To(Equal("control"))
+			Expect(privateHandlerRecorder(handler, http.MethodGet, "/__leafwiki/actor-context", token)).To(HaveHTTPBody("actor"))
+			Expect(privateHandlerRecorder(handler, http.MethodGet, "/__leafwiki/token/verify", token)).To(HaveHTTPBody("verify"))
+			Expect(privateHandlerRecorder(handler, http.MethodGet, PrivateWorkspacesPrefix, token)).To(HaveHTTPBody("workspaces"))
+			Expect(privateHandlerRecorder(handler, http.MethodGet, "/public", "")).To(HaveHTTPBody("control"))
 			Expect(called).To(Equal(map[string]int{"actor": 1, "verify": 1, "workspaces": 1, "control": 1}))
 		})
 
@@ -714,7 +739,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				"/public",
 			} {
 				rec := privateHandlerRecorder(handler, http.MethodGet, path, "daemon-token")
-				Expect(rec.Code).To(Equal(http.StatusNotFound), path)
+				Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), path)
 			}
 		})
 
@@ -739,8 +764,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			handler.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusOK))
-			Expect(rec.Body.String()).To(Equal("/base/status"))
+			Expect(rec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody("/base/status"),
+			))
 		})
 
 		ginkgo.It("keeps well-known control-plane paths outside the workspace base path", func() {
@@ -759,8 +786,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				ControlPlane: controlPlane,
 			}).ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusOK))
-			Expect(rec.Body.String()).To(Equal("127.0.0.1:9999"))
+			Expect(rec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody("127.0.0.1:9999"),
+			))
 		})
 
 		ginkgo.It("forwards the control-plane prefix itself as the root path", func() {
@@ -774,61 +803,68 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				ControlPlane: controlPlane,
 			}), http.MethodGet, frontd.ControlPlanePrefix, "daemon-token")
 
-			Expect(rec.Code).To(Equal(http.StatusOK))
-			Expect(rec.Body.String()).To(Equal("/base/"))
+			Expect(rec).To(SatisfyAll(
+				HaveHTTPStatus(http.StatusOK),
+				HaveHTTPBody("/base/"),
+			))
 		})
 	})
 
 	ginkgo.Describe("sqlite helpers", func() {
 		ginkgo.It("returns open errors for invalid database paths", func() {
 			_, err := openWikidDB(wikidDBPathInsideFile())
-			Expect(err).To(MatchError(ContainSubstring("create wikid db directory")))
+			Expect(err).To(MatchError(syscall.ENOTDIR))
 
 			dirPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "as-directory")
 			Expect(os.Mkdir(dirPath, 0o755)).To(Succeed())
 			_, err = openWikidDB(dirPath)
-			Expect(err).To(MatchError(ContainSubstring("create wikid db")))
+			Expect(err).To(MatchError(syscall.EISDIR))
 		})
 
 		ginkgo.It("surfaces injected file, chmod, SQL open, and initialization failures", func() {
 			restore := captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			closeErr := errors.New("close failed")
 			wikidOpenFile = func(string, int, os.FileMode) (wikidCloseFile, error) {
-				return closeErrorFile{err: errors.New("close failed")}, nil
+				return closeErrorFile{err: closeErr}, nil
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(ContainSubstring("close wikid db handle")))
+			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(closeErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			chmodErr := errors.New("chmod failed")
 			wikidChmod = func(string, os.FileMode) error {
-				return errors.New("chmod failed")
+				return chmodErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(ContainSubstring("secure wikid db")))
+			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(chmodErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			sqlOpenErr := errors.New("sql open failed")
 			wikidSQLOpen = func(string, string) (*sql.DB, error) {
-				return nil, errors.New("sql open failed")
+				return nil, sqlOpenErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError("sql open failed"))
+			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(sqlOpenErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			initErr := errors.New("init failed")
 			wikidInitializeWikidDB = func(*sql.DB) error {
-				return errors.New("init failed")
+				return initErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError("init failed"))
+			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(initErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			pragmaErr := errors.New("pragma failed")
 			wikidExecSQLiteWithLockRetry = func(context.Context, wikidSQLiteExecer, string, ...any) (sql.Result, error) {
-				return nil, errors.New("pragma failed")
+				return nil, pragmaErr
 			}
-			Expect(initializeWikidDB(rawSQLiteDB())).To(MatchError(ContainSubstring("initialize wikid db")))
+			Expect(initializeWikidDB(rawSQLiteDB())).To(MatchError(pragmaErr))
 		})
 
 		ginkgo.It("rolls back immediate transactions when callbacks fail", func() {
@@ -858,13 +894,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			beginErr := errors.New("begin failed")
 			wikidInitializeWikidDB = func(*sql.DB) error { return nil }
 			wikidExecSQLiteWithLockRetry = func(context.Context, wikidSQLiteExecer, string, ...any) (sql.Result, error) {
-				return nil, errors.New("begin failed")
+				return nil, beginErr
 			}
 			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
-			})).To(MatchError("begin failed"))
+			})).To(MatchError(beginErr))
 
 			restore()
 			err := withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(ctx context.Context, conn *sql.Conn) error {
@@ -876,22 +913,24 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			connCloseErr := errors.New("conn close failed")
 			wikidCloseConn = func(*sql.Conn) error {
-				return errors.New("conn close failed")
+				return connCloseErr
 			}
 			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
-			})).To(MatchError("conn close failed"))
+			})).To(MatchError(connCloseErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
+			dbCloseErr := errors.New("db close failed")
 			wikidCloseDB = func(*sql.DB) error {
-				return errors.New("db close failed")
+				return dbCloseErr
 			}
 			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
-			})).To(MatchError("db close failed"))
+			})).To(MatchError(dbCloseErr))
 		})
 
 		ginkgo.It("returns context cancellation while retrying transient SQLite lock errors", func() {
@@ -921,7 +960,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parsed.Location()).To(Equal(time.UTC))
-			Expect(parsed).To(Equal(timestamp.UTC()))
+			Expect(parsed).To(BeTemporally("==", timestamp.UTC()))
 			Expect(parseWikidTime("not-a-time")).Error().To(HaveOccurred())
 		})
 	})
@@ -1020,6 +1059,14 @@ func privateWorkspaceAPIRecorder(api http.Handler, method string, path string) *
 	return rec
 }
 
+func privateWorkspaceAPIRecorderForWorkspace(api http.Handler, method string, id workspaceid.WorkspaceID, action string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
+	req := httptest.NewRequest(method, PrivateWorkspacesPrefix+"/"+id.URLPathSegment()+"/"+action, nil)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	return rec
+}
+
 func privateHandlerRecorder(handler http.Handler, method string, path string, token string) *httptest.ResponseRecorder {
 	ginkgo.GinkgoHelper()
 	req := httptest.NewRequest(method, path, nil)
@@ -1058,6 +1105,55 @@ func wikidSQLiteErrorWithCode(code int) error {
 	v := reflect.ValueOf(e).Elem().FieldByName("code")
 	reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().SetInt(int64(code))
 	return e
+}
+
+type workspaceOrderSnapshot struct {
+	FirstID           workspaceid.WorkspaceID
+	SecondDisplayName string
+	ThirdDisplayName  string
+}
+
+func haveHomeWorkspaceFirstAndEqualFoldTie() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return SatisfyAll(
+		HaveLen(3),
+		WithTransform(func(workspaces []WorkspaceRecord) workspaceOrderSnapshot {
+			if len(workspaces) < 3 {
+				return workspaceOrderSnapshot{}
+			}
+			return workspaceOrderSnapshot{
+				FirstID:           workspaces[0].ID,
+				SecondDisplayName: workspaces[1].DisplayName,
+				ThirdDisplayName:  workspaces[2].DisplayName,
+			}
+		}, SatisfyAll(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"FirstID": Equal(HomeWorkspaceID),
+			}),
+			WithTransform(func(snapshot workspaceOrderSnapshot) bool {
+				return strings.EqualFold(snapshot.SecondDisplayName, snapshot.ThirdDisplayName)
+			}, BeTrue()),
+		)),
+	)
+}
+
+func matchWikidSQLitePrimaryError(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return -1
+		}
+		return sqliteErr.Code() & 0xFF
+	}, Equal(code))
+}
+
+func matchWikidTimeParseError() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var parseErr *time.ParseError
+		return errors.As(err, &parseErr)
+	})
 }
 
 type errRows struct {

@@ -14,6 +14,9 @@ import (
 
 var (
 	ErrRegistrySchemaVersion                        = errors.New("registry schema version mismatch")
+	ErrDuplicateWorkspaceID                         = errors.New("duplicate workspace ID")
+	ErrWorkspaceDataDirRequired                     = errors.New("workspace data dir is required")
+	ErrWorkspaceRootDirRequired                     = errors.New("workspace root dir is required")
 	ErrWorkspaceMarkdownLinkRootPrefixNotNormalized = errors.New("workspace markdown link root prefix must be normalized")
 	wikidFilepathAbs                                = filepath.Abs
 	wikidEvalSymlinks                               = filepath.EvalSymlinks
@@ -59,7 +62,7 @@ func (d RegistryDocument) Validate() error {
 			return err
 		}
 		if _, exists := ids[workspace.ID]; exists {
-			return fmt.Errorf("duplicate workspace ID %q", workspace.ID.String())
+			return fmt.Errorf("duplicate workspace ID %q: %w", workspace.ID.String(), ErrDuplicateWorkspaceID)
 		}
 		ids[workspace.ID] = struct{}{}
 	}
@@ -71,10 +74,10 @@ func validateWorkspaceRecord(workspace WorkspaceRecord) error {
 		return err
 	}
 	if strings.TrimSpace(workspace.DataDir) == "" {
-		return fmt.Errorf("workspace %q data dir is required", workspace.ID.String())
+		return fmt.Errorf("workspace %q data dir is required: %w", workspace.ID.String(), ErrWorkspaceDataDirRequired)
 	}
 	if strings.TrimSpace(workspace.RootDir) == "" {
-		return fmt.Errorf("workspace %q root dir is required", workspace.ID.String())
+		return fmt.Errorf("workspace %q root dir is required: %w", workspace.ID.String(), ErrWorkspaceRootDirRequired)
 	}
 	prefix, err := markdownlinks.NormalizeMarkdownLinkRootPrefix(workspace.MarkdownLinkRootPrefix)
 	if err != nil {

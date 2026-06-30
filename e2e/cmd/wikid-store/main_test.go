@@ -8,9 +8,34 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaceid"
+)
+
+const (
+	wikidStoreSchemaVersionJSON             = `"schemaVersion"`
+	wikidStoreLoadRegistryContext           = "load registry"
+	wikidStoreEncodeStdoutJSONContext       = "encode stdout JSON"
+	wikidStoreReadStdinContext              = "read stdin"
+	wikidStoreDecodeStdinJSONContext        = "decode stdin JSON"
+	wikidStoreRegisterWorkspaceContext      = "register workspace"
+	wikidStoreUpsertGrantFrontdHomeContext  = "upsert grant frontd home"
+	wikidStoreSubjectRequiredErrorFragment  = "--subject is required"
+	wikidStoreReplaceGrantsFrontdContext    = "replace grants for frontd"
+	wikidStoreFixtureDisplayName            = "Docs"
+	wikidStoreFixtureMarkdownLinkRootPrefix = "/docs"
+)
+
+var (
+	errWikidStoreLoadFailed     = errors.New("load failed")
+	errWikidStoreWriteFailed    = errors.New("write failed")
+	errWikidStoreReadFailed     = errors.New("read failed")
+	errWikidStoreRegisterFailed = errors.New("register failed")
+	errWikidStoreUpsertFailed   = errors.New("upsert failed")
+	errWikidStoreReplaceFailed  = errors.New("replace failed")
 )
 
 var _ = ginkgo.Describe("wikid-store command", func() {
@@ -43,8 +68,8 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 
 		Expect(func() { main() }).To(PanicWith("exit"))
 
-		Expect(exitCode).To(Equal(0), stderr.String())
-		Expect(stdout.String()).To(ContainSubstring(`"schemaVersion"`))
+		Expect(exitCode).To(BeZero(), stderr.String())
+		Expect(stdout.String()).To(ContainSubstring(wikidStoreSchemaVersionJSON))
 	})
 
 	ginkgo.DescribeTable("reads the registry and reports registry or output errors",
@@ -65,27 +90,27 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 				Expect(stdoutBuffer).NotTo(BeNil())
 				Expect(stdoutBuffer.String()).To(ContainSubstring(tc.wantStdout))
 			}
-			if tc.wantStderr != "" {
-				Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
+			if tc.wantStderr != nil {
+				Expect(stderr.String()).To(tc.wantStderr)
 			}
 		},
 		ginkgo.Entry("success", wikidStoreReadRegistryCase{
 			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   0,
-			wantStdout: `"schemaVersion"`,
+			wantStdout: wikidStoreSchemaVersionJSON,
 		}),
 		ginkgo.Entry("load error", wikidStoreReadRegistryCase{
-			store:      func() registryStore { return &fakeRegistryStore{err: errors.New("load failed")} },
+			store:      func() registryStore { return &fakeRegistryStore{err: errWikidStoreLoadFailed} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   1,
-			wantStderr: "load registry: load failed",
+			wantStderr: haveWikidStoreStderr(wikidStoreLoadRegistryContext, errWikidStoreLoadFailed),
 		}),
 		ginkgo.Entry("write error", wikidStoreReadRegistryCase{
 			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
-			stdout:     func() io.Writer { return errorWriter{err: errors.New("write failed")} },
+			stdout:     func() io.Writer { return errorWriter{err: errWikidStoreWriteFailed} },
 			wantCode:   1,
-			wantStderr: "encode stdout JSON: write failed",
+			wantStderr: haveWikidStoreStderr(wikidStoreEncodeStdoutJSONContext, errWikidStoreWriteFailed),
 		}),
 	)
 
@@ -106,11 +131,13 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			Expect(code).To(Equal(tc.wantCode))
 			if tc.wantCode == 0 {
 				Expect(servicePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
-				Expect(service.request.DisplayName).To(Equal("Docs"))
-				Expect(service.request.MarkdownLinkRootPrefix).To(Equal("/docs"))
+				Expect(service.request).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"DisplayName":            Equal(wikidStoreFixtureDisplayName),
+					"MarkdownLinkRootPrefix": Equal(wikidStoreFixtureMarkdownLinkRootPrefix),
+				}))
 			}
-			if tc.wantStderr != "" {
-				Expect(stderr.String()).To(ContainSubstring(tc.wantStderr))
+			if tc.wantStderr != nil {
+				Expect(stderr.String()).To(tc.wantStderr)
 			}
 		},
 		ginkgo.Entry("success", wikidStoreRegisterWorkspaceCase{
@@ -122,32 +149,32 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			wantCode: 0,
 		}),
 		ginkgo.Entry("read error", wikidStoreRegisterWorkspaceCase{
-			stdin:      func() io.Reader { return errorReader{err: errors.New("read failed")} },
+			stdin:      func() io.Reader { return errorReader{err: errWikidStoreReadFailed} },
 			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   1,
-			wantStderr: "read stdin: read failed",
+			wantStderr: haveWikidStoreStderr(wikidStoreReadStdinContext, errWikidStoreReadFailed),
 		}),
 		ginkgo.Entry("decode error", wikidStoreRegisterWorkspaceCase{
 			stdin:      func() io.Reader { return strings.NewReader("{") },
 			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   1,
-			wantStderr: "decode stdin JSON:",
+			wantStderr: ContainSubstring(wikidStoreDecodeStdinJSONContext),
 		}),
 		ginkgo.Entry("service error", wikidStoreRegisterWorkspaceCase{
 			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
-			service:    func() *fakeRegistryService { return &fakeRegistryService{err: errors.New("register failed")} },
+			service:    func() *fakeRegistryService { return &fakeRegistryService{err: errWikidStoreRegisterFailed} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   1,
-			wantStderr: "register workspace: register failed",
+			wantStderr: haveWikidStoreStderr(wikidStoreRegisterWorkspaceContext, errWikidStoreRegisterFailed),
 		}),
 		ginkgo.Entry("write error", wikidStoreRegisterWorkspaceCase{
 			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
 			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
-			stdout:     func() io.Writer { return errorWriter{err: errors.New("write failed")} },
+			stdout:     func() io.Writer { return errorWriter{err: errWikidStoreWriteFailed} },
 			wantCode:   1,
-			wantStderr: "encode stdout JSON: write failed",
+			wantStderr: haveWikidStoreStderr(wikidStoreEncodeStdoutJSONContext, errWikidStoreWriteFailed),
 		}),
 	)
 
@@ -167,14 +194,14 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 
-		Expect(code).To(Equal(0), stderr.String())
+		Expect(code).To(BeZero(), stderr.String())
 		Expect(store.upserts).To(Equal([]wikid.Grant{{
 			Subject:     "frontd",
 			WorkspaceID: workspaceid.WorkspaceID("home"),
-			Role:        wikid.GrantRole("admin"),
+			Role:        wikid.GrantRoleAdmin,
 		}}))
 
-		store.upsertErr = errors.New("upsert failed")
+		store.upsertErr = errWikidStoreUpsertFailed
 		stderr.Reset()
 		code = runWikidStore(
 			[]string{"upsert-grants", "--global-data-dir", "/tmp/global"},
@@ -183,7 +210,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring("upsert grant frontd home: upsert failed"))
+		Expect(stderr.String()).To(haveWikidStoreStderr(wikidStoreUpsertGrantFrontdHomeContext, errWikidStoreUpsertFailed))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -193,7 +220,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring("decode stdin JSON:"))
+		Expect(stderr.String()).To(ContainSubstring(wikidStoreDecodeStdinJSONContext))
 	})
 
 	ginkgo.It("replaces subject grants and reports missing subjects or store errors", func() {
@@ -212,7 +239,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring("--subject is required"))
+		Expect(stderr.String()).To(ContainSubstring(wikidStoreSubjectRequiredErrorFragment))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -221,9 +248,8 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(0), stderr.String())
-		Expect(store.replaceSubject).To(Equal("frontd"))
-		Expect(store.replaceGrants).To(HaveLen(1))
+		Expect(code).To(BeZero(), stderr.String())
+		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -233,9 +259,9 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring("decode stdin JSON:"))
+		Expect(stderr.String()).To(ContainSubstring(wikidStoreDecodeStdinJSONContext))
 
-		store.replaceErr = errors.New("replace failed")
+		store.replaceErr = errWikidStoreReplaceFailed
 		stderr.Reset()
 		code = runWikidStore(
 			[]string{"replace-subject-grants", "--global-data-dir", "/tmp/global", "--subject", "frontd"},
@@ -244,7 +270,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring("replace grants for frontd: replace failed"))
+		Expect(stderr.String()).To(haveWikidStoreStderr(wikidStoreReplaceGrantsFrontdContext, errWikidStoreReplaceFailed))
 	})
 
 	ginkgo.DescribeTable("reports command line validation errors",
@@ -268,7 +294,7 @@ type wikidStoreReadRegistryCase struct {
 	stdout     func() io.Writer
 	wantCode   int
 	wantStdout string
-	wantStderr string
+	wantStderr types.GomegaMatcher
 }
 
 type wikidStoreRegisterWorkspaceCase struct {
@@ -276,7 +302,33 @@ type wikidStoreRegisterWorkspaceCase struct {
 	service    func() *fakeRegistryService
 	stdout     func() io.Writer
 	wantCode   int
-	wantStderr string
+	wantStderr types.GomegaMatcher
+}
+
+type wikidStoreReplaceSnapshot struct {
+	Subject string
+	Grants  []wikid.Grant
+}
+
+func haveWikidStoreStderr(context string, cause error) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return SatisfyAll(
+		ContainSubstring(context),
+		ContainSubstring(cause.Error()),
+	)
+}
+
+func haveRecordedWikidStoreReplace(subject string, grants types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(store *fakeWikidGrantStore) wikidStoreReplaceSnapshot {
+		return wikidStoreReplaceSnapshot{
+			Subject: store.replaceSubject,
+			Grants:  store.replaceGrants,
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Subject": Equal(subject),
+		"Grants":  grants,
+	}))
 }
 
 func fakeWorkspaceRecord() wikid.WorkspaceRecord {

@@ -136,10 +136,14 @@ func readGrantInputs(stdin io.Reader) ([]wikid.Grant, error) {
 	}
 	grants := make([]wikid.Grant, 0, len(inputs))
 	for _, input := range inputs {
+		role, err := wikid.ParseGrantRole(input.Role)
+		if err != nil {
+			return nil, err
+		}
 		grants = append(grants, wikid.Grant{
 			Subject:     input.Subject,
 			WorkspaceID: input.WorkspaceID,
-			Role:        wikid.GrantRole(input.Role),
+			Role:        role,
 		})
 	}
 	return grants, nil

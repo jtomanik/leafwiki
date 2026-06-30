@@ -181,7 +181,7 @@ var _ = ginkgo.It("TestGrantStoreConcurrentUpsertsAcrossProcessesUseSQLiteAuthor
 				"WIKID_HELPER_HOME":         layout.HomeDir,
 				"WIKID_HELPER_SUBJECT":      fmt.Sprintf("user:%02d", i),
 				"WIKID_HELPER_WORKSPACE_ID": home.ID.StorageKey(),
-				"WIKID_HELPER_ROLE":         string(GrantRoleEditor),
+				"WIKID_HELPER_ROLE":         grantRoleEditorValue,
 			})
 		}()
 	}

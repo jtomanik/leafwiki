@@ -6,6 +6,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
@@ -40,15 +41,17 @@ var _ = ginkgo.Describe("wikid helper coverage", func() {
 		supervisor.MarkReady(projectdaemon.RoleFrontd, 101, "http://127.0.0.1:8080", true)
 		supervisor.MarkReady(projectdaemon.RoleWorkspaced, 202, "http://127.0.0.1:9090", false)
 
-		roles := supervisor.Roles()
-		Expect(roles).To(HaveLen(2))
-		byName := map[projectdaemon.RoleName]projectdaemon.RoleHealth{}
-		for _, role := range roles {
-			byName[role.Name] = role
-		}
-		Expect(byName[projectdaemon.RoleFrontd].PID).To(Equal(101))
-		Expect(byName[projectdaemon.RoleFrontd].UpdatedAt).To(Equal(now))
-		Expect(byName[projectdaemon.RoleWorkspaced].URL).To(Equal("http://127.0.0.1:9090"))
+		Expect(supervisor.Roles()).To(ConsistOf(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Name":      Equal(projectdaemon.RoleFrontd),
+				"PID":       Equal(101),
+				"UpdatedAt": BeTemporally("==", now),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Name": Equal(projectdaemon.RoleWorkspaced),
+				"URL":  Equal("http://127.0.0.1:9090"),
+			}),
+		))
 	})
 
 	ginkgo.It("WorkspaceSupervisor marks starting/status entries and returns statuses ordered by workspace ID", func() {
@@ -59,13 +62,17 @@ var _ = ginkgo.Describe("wikid helper coverage", func() {
 		supervisor.MarkStarting(workspaceid.WorkspaceID("alpha"))
 		supervisor.MarkStatus(WorkspaceStatus{})
 
-		statuses := supervisor.Statuses()
-		Expect(statuses).To(HaveLen(2))
-		Expect(statuses[0].WorkspaceID).To(Equal(workspaceid.WorkspaceID("alpha")))
-		Expect(statuses[0].State).To(Equal(WorkspaceStateStarting))
-		Expect(statuses[0].UpdatedAt).To(Equal(now))
-		Expect(statuses[1].WorkspaceID).To(Equal(workspaceid.WorkspaceID("zulu")))
-		Expect(statuses[1].UpdatedAt).To(Equal(now))
+		Expect(supervisor.Statuses()).To(HaveExactElements(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"WorkspaceID": Equal(workspaceid.WorkspaceID("alpha")),
+				"State":       Equal(WorkspaceStateStarting),
+				"UpdatedAt":   BeTemporally("==", now),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"WorkspaceID": Equal(workspaceid.WorkspaceID("zulu")),
+				"UpdatedAt":   BeTemporally("==", now),
+			}),
+		))
 	})
 })
 

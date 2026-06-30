@@ -256,16 +256,17 @@ var _ = ginkgo.It("TestRegistryStoreUpdateSerializesAcrossStoreInstances", func(
 	firstDone := make(chan error, 1)
 
 	go func() {
+		defer ginkgo.GinkgoRecover()
 		_, err := firstStore.Update(func(doc RegistryDocument) (RegistryDocument, error) {
 			close(firstEntered)
-			<-releaseFirst
+			Eventually(releaseFirst).Should(BeClosed())
 			doc.Workspaces = append(doc.Workspaces, testWorkspaceRecord("first"))
 			return doc, nil
 		})
 		firstDone <- err
 	}()
 
-	<-firstEntered
+	Eventually(firstEntered).Should(BeClosed())
 	secondDone := make(chan error, 1)
 	go func() {
 		_, err := secondStore.Update(func(doc RegistryDocument) (RegistryDocument, error) {
@@ -277,9 +278,7 @@ var _ = ginkgo.It("TestRegistryStoreUpdateSerializesAcrossStoreInstances", func(
 
 	Consistently(secondDone).WithTimeout(50 * time.Millisecond).ShouldNot(Receive())
 	close(releaseFirst)
-	if err := <-firstDone; err != nil {
-		t.Fatalf("first update failed: %v", err)
-	}
+	Eventually(firstDone).Should(Receive(Succeed()))
 	Eventually(secondDone).Should(Receive(BeNil()))
 
 	loaded, err := NewRegistryStore(path).Load()
@@ -474,10 +473,15 @@ func runWikidStoreHelperProcessForTest() bool {
 			fmt.Fprintf(os.Stderr, "ParseWorkspaceID failed: %v\n", err)
 			os.Exit(1)
 		}
+		role, err := ParseGrantRole(os.Getenv("WIKID_HELPER_ROLE"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ParseGrantRole failed: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.Upsert(Grant{
 			Subject:     os.Getenv("WIKID_HELPER_SUBJECT"),
 			WorkspaceID: workspaceID,
-			Role:        GrantRole(os.Getenv("WIKID_HELPER_ROLE")),
+			Role:        role,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "GrantStore.Upsert failed: %v\n", err)
 			os.Exit(1)
