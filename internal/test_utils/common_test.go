@@ -12,6 +12,10 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+const wrapCloseFailurePrefix = "failed to close resource"
+
+var errFixtureCloseFailed = errors.New("close failed")
+
 var _ = ginkgo.Describe("test utilities", func() {
 	ginkgo.It("CreateMultipartFile returns an opened file and original filename", func() {
 		file, filename, err := CreateMultipartFile("upload.txt", []byte("hello"))
@@ -203,8 +207,11 @@ var _ = ginkgo.Describe("test utilities", func() {
 		Expect(tb.helperCalls).To(Equal(1))
 
 		Expect(func() {
-			WrapCloseWithErrorCheck(func() error { return errors.New("close failed") }, &fakeTestHelper{panicOnFatal: true})
-		}).To(PanicWith(ContainSubstring("failed to close resource: close failed")))
+			WrapCloseWithErrorCheck(func() error { return errFixtureCloseFailed }, &fakeTestHelper{panicOnFatal: true})
+		}).To(PanicWith(SatisfyAll(
+			ContainSubstring(wrapCloseFailurePrefix),
+			ContainSubstring(errFixtureCloseFailed.Error()),
+		)))
 	})
 })
 

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -75,8 +74,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		err := CopyWithLimit(&dst, strings.NewReader("hello!"), 5)
 
-		Expect(err).To(MatchError(ContainSubstring("file too large")))
-		Expect(errors.Is(err, ErrFileTooLarge)).To(BeTrue())
+		Expect(err).To(MatchError(ErrFileTooLarge))
 	})
 
 	It("CopyWithLimit preserves reader copy errors", func() {
@@ -84,7 +82,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		err := CopyWithLimit(io.Discard, errorReader{err: copyErr}, 5)
 
-		Expect(errors.Is(err, copyErr)).To(BeTrue())
+		Expect(err).To(MatchError(copyErr))
 	})
 
 	It("GenerateRandomPassword returns the requested length using the allowed charset", func() {
@@ -107,7 +105,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		password, err := GenerateRandomPassword(1)
 
-		Expect(errors.Is(err, entropyErr)).To(BeTrue())
+		Expect(err).To(MatchError(entropyErr))
 		Expect(password).To(BeEmpty())
 	})
 
@@ -136,7 +134,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		id, err := GenerateUniqueID()
 
-		Expect(errors.Is(err, generateErr)).To(BeTrue())
+		Expect(err).To(MatchError(generateErr))
 		Expect(id).To(BeEmpty())
 	})
 
@@ -165,29 +163,31 @@ var _ = Describe("shared utility edge coverage", func() {
 			return removeErr
 		}
 		err := atomicReplace("src", "dst")
-		Expect(errors.Is(err, removeErr)).To(BeTrue())
-		Expect(err).To(MatchError(ContainSubstring("remove existing file")))
+		Expect(err).To(MatchError(removeErr))
 	})
 
 	It("WriteFileAtomic reports temp-file creation failures", func() {
-		blockedParent := filepath.Join(GinkgoT().TempDir(), "blocked")
-		Expect(os.WriteFile(blockedParent, []byte("not a directory"), 0o600)).To(Succeed())
+		DeferCleanup(restoreSharedUtilitySeams())
+		createErr := errors.New("create failed")
+		createTempFile = func(string, string) (atomicTempFile, error) {
+			return nil, createErr
+		}
 
-		err := WriteFileAtomic(filepath.Join(blockedParent, "page.md"), []byte("hello"), 0o644)
+		err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "page.md"), []byte("hello"), 0o644)
 
-		Expect(err).To(MatchError(ContainSubstring("create temp file")))
+		Expect(err).To(MatchError(createErr))
 	})
 
 	It("WriteFileAtomic reports rename failures after closing the temp file", func() {
-		if runtime.GOOS == "windows" {
-			Skip("windows removes an empty target directory before rename")
+		DeferCleanup(restoreSharedUtilitySeams())
+		renameErr := errors.New("rename failed")
+		renameFile = func(string, string) error {
+			return renameErr
 		}
-		target := filepath.Join(GinkgoT().TempDir(), "target-dir")
-		Expect(os.Mkdir(target, 0o755)).To(Succeed())
 
-		err := WriteFileAtomic(target, []byte("hello"), 0o644)
+		err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "target"), []byte("hello"), 0o644)
 
-		Expect(err).To(MatchError(ContainSubstring("rename temp file")))
+		Expect(err).To(MatchError(renameErr))
 	})
 
 	It("WriteFileAtomic reports chmod, write, sync, and close failures from the temp file", func() {
@@ -195,7 +195,6 @@ var _ = Describe("shared utility edge coverage", func() {
 			name      string
 			perm      os.FileMode
 			configure func(*fakeAtomicTempFile, error)
-			want      string
 		}{
 			{
 				name: "chmod",
@@ -204,7 +203,6 @@ var _ = Describe("shared utility edge coverage", func() {
 					file.chmodErr = err
 					file.closeErr = errors.New("close after chmod failed")
 				},
-				want: "chmod temp file",
 			},
 			{
 				name: "write",
@@ -212,7 +210,6 @@ var _ = Describe("shared utility edge coverage", func() {
 					file.writeErr = err
 					file.closeErr = errors.New("close after write failed")
 				},
-				want: "write temp file",
 			},
 			{
 				name: "sync",
@@ -220,14 +217,12 @@ var _ = Describe("shared utility edge coverage", func() {
 					file.syncErr = err
 					file.closeErr = errors.New("close after sync failed")
 				},
-				want: "sync temp file",
 			},
 			{
 				name: "close",
 				configure: func(file *fakeAtomicTempFile, err error) {
 					file.closeErr = err
 				},
-				want: "close temp file",
 			},
 		}
 
@@ -246,20 +241,22 @@ var _ = Describe("shared utility edge coverage", func() {
 
 				err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "target"), []byte("hello"), tc.perm)
 
-				Expect(errors.Is(err, failure)).To(BeTrue())
-				Expect(err).To(MatchError(ContainSubstring(tc.want)))
+				Expect(err).To(MatchError(failure))
 				Expect(fakeFile.closeCalls).To(BeNumerically(">=", 1))
 			}()
 		}
 	})
 
 	It("WriteStreamAtomic reports temp-file creation failures", func() {
-		blockedParent := filepath.Join(GinkgoT().TempDir(), "blocked")
-		Expect(os.WriteFile(blockedParent, []byte("not a directory"), 0o600)).To(Succeed())
+		DeferCleanup(restoreSharedUtilitySeams())
+		createErr := errors.New("stream create failed")
+		createTempFile = func(string, string) (atomicTempFile, error) {
+			return nil, createErr
+		}
 
-		err := WriteStreamAtomic(filepath.Join(blockedParent, "asset.bin"), strings.NewReader("hello"), 1024)
+		err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(createErr))
 	})
 
 	It("WriteStreamAtomic preserves reader errors and removes the target", func() {
@@ -268,7 +265,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		err := WriteStreamAtomic(target, errorReader{err: copyErr}, 1024)
 
-		Expect(errors.Is(err, copyErr)).To(BeTrue())
+		Expect(err).To(MatchError(copyErr))
 		Expect(target).NotTo(BeAnExistingFile())
 	})
 
@@ -277,20 +274,20 @@ var _ = Describe("shared utility edge coverage", func() {
 
 		err := WriteStreamAtomic(target, strings.NewReader("hello!"), 5)
 
-		Expect(errors.Is(err, ErrFileTooLarge)).To(BeTrue())
+		Expect(err).To(MatchError(ErrFileTooLarge))
 		Expect(target).NotTo(BeAnExistingFile())
 	})
 
 	It("WriteStreamAtomic reports rename failures after closing the temp file", func() {
-		if runtime.GOOS == "windows" {
-			Skip("windows removes an empty target directory before rename")
+		DeferCleanup(restoreSharedUtilitySeams())
+		renameErr := errors.New("stream rename failed")
+		renameFile = func(string, string) error {
+			return renameErr
 		}
-		target := filepath.Join(GinkgoT().TempDir(), "target-dir")
-		Expect(os.Mkdir(target, 0o755)).To(Succeed())
 
-		err := WriteStreamAtomic(target, strings.NewReader("hello"), 1024)
+		err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(renameErr))
 	})
 
 	It("WriteStreamAtomic reports temp-file write, sync, and close failures", func() {
@@ -334,7 +331,7 @@ var _ = Describe("shared utility edge coverage", func() {
 
 				err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "target"), strings.NewReader("hello"), 1024)
 
-				Expect(errors.Is(err, failure)).To(BeTrue())
+				Expect(err).To(MatchError(failure))
 				Expect(fakeFile.closeCalls).To(BeNumerically(">=", 1))
 			}()
 		}

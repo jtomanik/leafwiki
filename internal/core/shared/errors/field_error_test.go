@@ -31,7 +31,7 @@ var _ = Describe("field validation errors", func() {
 		encoded, err := json.Marshal(validation)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(validation).To(testmatchers.ContainFieldError(testSlugValidationField, testAuthEmailInvalidFieldCode, testAuthEmailInvalidMessageID))
+		Expect(validation).To(testmatchers.ContainFieldError(testmatchers.ValidationFieldName(testSlugValidationField), testAuthEmailInvalidFieldCode, testAuthEmailInvalidMessageID))
 		Expect(string(encoded)).To(MatchJSON(fieldErrorsJSON(validation)))
 	})
 
