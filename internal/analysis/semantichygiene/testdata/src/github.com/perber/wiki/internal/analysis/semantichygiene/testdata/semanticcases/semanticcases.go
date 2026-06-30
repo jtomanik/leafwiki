@@ -155,6 +155,22 @@ func forbiddenStringReturn(pageID PageID) string {
 	return pageID.String() // want "semantic value PageID returned as string from internal function forbiddenStringReturn; return PageID or serialize only at a boundary"
 }
 
+type semanticError struct {
+	code ErrorCode
+}
+
+func (err semanticError) Error() string {
+	return err.code.String()
+}
+
+func (err semanticError) forbiddenStringMethod() string {
+	return err.code.String() // want "semantic value ErrorCode returned as string from internal function forbiddenStringMethod; return ErrorCode or serialize only at a boundary"
+}
+
+func Error(code ErrorCode) string {
+	return code.String() // want "semantic value ErrorCode returned as string from internal function Error; return ErrorCode or serialize only at a boundary"
+}
+
 func forbiddenCompositeAssignment(pageID PageID) domainRecord {
 	return domainRecord{PageID: pageID.String()} // want "semantic value PageID converted to string for semantic field PageID; keep the field typed or convert only at a boundary"
 }

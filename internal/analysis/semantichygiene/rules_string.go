@@ -73,7 +73,8 @@ func reportSemanticStringEscape(ctx *analysisContext, expr ast.Expr, typeName st
 			ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, "map index"))
 			return
 		case *ast.ReturnStmt:
-			if isAllowedAdapterStringReturn(ctx, expr) {
+			if isAllowedAdapterStringReturn(ctx, expr) ||
+				isAllowedErrorInterfaceStringReturn(ctx, expr) {
 				return
 			}
 			checkStringReturn(ctx, expr, typeName)
@@ -357,6 +358,20 @@ func isAllowedAdapterStringReturn(ctx *analysisContext, node ast.Node) bool {
 	default:
 		return false
 	}
+}
+
+func isAllowedErrorInterfaceStringReturn(ctx *analysisContext, node ast.Node) bool {
+	fn := enclosingFunc(ctx, node)
+	if fn == nil || fn.Name.Name != "Error" || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return false
+	}
+	if fn.Type.Params != nil && len(fn.Type.Params.List) != 0 {
+		return false
+	}
+	if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+		return false
+	}
+	return isBuiltinString(ctx.pass.TypesInfo.TypeOf(fn.Type.Results.List[0].Type))
 }
 
 func isAllowedAdapterStringKeyValue(ctx *analysisContext, node ast.Node) bool {
