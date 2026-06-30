@@ -16,7 +16,11 @@ const (
 	canonicalMetadataCloseMarker = "-->"
 )
 
-var ErrMetadataParse = errors.New("metadata parse error")
+var (
+	ErrMetadataParse              = errors.New("metadata parse error")
+	ErrMetadataPageIDRequired     = errors.New("page.id is required")
+	ErrUnsupportedMetadataVersion = errors.New("unsupported metadata version")
+)
 
 type canonicalMetadataYAMLEncoder interface {
 	SetIndent(int)
@@ -163,7 +167,7 @@ func parseCanonicalMetadataYAML(yamlPart string) (PageMetadata, error) {
 		return PageMetadata{}, errors.Join(ErrMetadataParse, err)
 	}
 	if raw.Version != 1 {
-		return PageMetadata{}, errors.Join(ErrMetadataParse, fmt.Errorf("unsupported metadata version %d", raw.Version))
+		return PageMetadata{}, errors.Join(ErrMetadataParse, fmt.Errorf("%w %d", ErrUnsupportedMetadataVersion, raw.Version))
 	}
 	if raw.Fields == nil {
 		raw.Fields = map[string]interface{}{}
@@ -194,7 +198,7 @@ func parseCanonicalMetadataYAML(yamlPart string) (PageMetadata, error) {
 
 func validateCanonicalMetadata(meta PageMetadata) error {
 	if meta.Version != 1 {
-		return errors.Join(ErrMetadataParse, fmt.Errorf("unsupported metadata version %d", meta.Version))
+		return errors.Join(ErrMetadataParse, fmt.Errorf("%w %d", ErrUnsupportedMetadataVersion, meta.Version))
 	}
 	if err := validateCanonicalPageID(meta.Page.ID); err != nil {
 		return err
@@ -207,7 +211,7 @@ func validateCanonicalMetadata(meta PageMetadata) error {
 
 func validateCanonicalPageID(id string) error {
 	if strings.TrimSpace(id) == "" {
-		return errors.Join(ErrMetadataParse, errors.New("page.id is required"))
+		return errors.Join(ErrMetadataParse, ErrMetadataPageIDRequired)
 	}
 	if strings.ContainsAny(id, `/\`) {
 		return errors.Join(ErrMetadataParse, errors.New("page.id must not contain path separators"))

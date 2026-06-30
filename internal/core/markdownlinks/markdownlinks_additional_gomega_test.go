@@ -7,6 +7,8 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark/ast"
@@ -17,14 +19,45 @@ type nilLineBlock struct{}
 
 func (nilLineBlock) Lines() *text.Segments { return nil }
 
+var errRelMarkdownLinkPathFailed = errors.New("rel markdown link path failed")
+
+type indexEntryMapCounts struct {
+	PageCount  int
+	AssetCount int
+}
+
+func haveEmptyIndexEntryMaps() types.GomegaMatcher {
+	return WithTransform(func(index *Index) indexEntryMapCounts {
+		return indexEntryMapCounts{
+			PageCount:  len(index.pages),
+			AssetCount: len(index.assets),
+		}
+	}, gstruct.MatchAllFields(gstruct.Fields{
+		"PageCount":  BeZero(),
+		"AssetCount": BeZero(),
+	}))
+}
+
+func matchResolution(kind TargetKind, code IssueCode) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Kind": Equal(kind),
+		"Code": Equal(code),
+	})
+}
+
+func matchLinkOccurrenceHref(href string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Href": Equal(href),
+	})
+}
+
 var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 	ginkgo.It("handles index construction and root walking edge cases", func() {
 		index := NewIndexWithOptions([]Entry{
 			{Kind: EntryKindPage},
 			{Kind: EntryKindAsset},
 		}, Options{MarkdownLinkRootPrefix: "/wiki"})
-		Expect(index.pages).To(BeEmpty())
-		Expect(index.assets).To(BeEmpty())
+		Expect(index).To(haveEmptyIndexEntryMaps())
 
 		_, err := NewIndexFromRootWithOptions(filepath.Join(ginkgo.GinkgoT().TempDir(), "missing"), Options{})
 		Expect(err).To(HaveOccurred())
@@ -38,13 +71,13 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 
 		originalRelMarkdownLinkPath := relMarkdownLinkPath
 		relMarkdownLinkPath = func(string, string) (string, error) {
-			return "", errors.New("rel failed")
+			return "", errRelMarkdownLinkPathFailed
 		}
 		ginkgo.DeferCleanup(func() {
 			relMarkdownLinkPath = originalRelMarkdownLinkPath
 		})
 		_, err = NewIndexFromRootWithOptions(rootDir, Options{})
-		Expect(err).To(MatchError("rel failed"))
+		Expect(err).To(MatchError(errRelMarkdownLinkPathFailed))
 		relMarkdownLinkPath = originalRelMarkdownLinkPath
 
 		index, err = NewIndexFromRootWithOptions(rootDir, Options{})
@@ -83,18 +116,13 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 			{Kind: EntryKindSection, RoutePath: "docs/section"},
 		})
 
-		Expect(index.Resolve("docs/source.md", "?query")).To(Equal(Resolution{
-			Kind: TargetKindUnresolved,
-			Code: IssueCodeEmpty,
-		}))
+		Expect(index.Resolve("docs/source.md", "?query")).To(matchResolution(TargetKindUnresolved, IssueCodeEmpty))
 
 		trailing := index.Resolve("docs/source.md", "/missing/")
-		Expect(trailing.Kind).To(Equal(TargetKindUnresolved))
-		Expect(trailing.Code).To(Equal(IssueCodeBrokenLink))
+		Expect(trailing).To(matchResolution(TargetKindUnresolved, IssueCodeBrokenLink))
 
 		missing := index.Resolve("docs/source.md", "/missing")
-		Expect(missing.Kind).To(Equal(TargetKindUnresolved))
-		Expect(missing.Code).To(Equal(IssueCodeBrokenLink))
+		Expect(missing).To(matchResolution(TargetKindUnresolved, IssueCodeBrokenLink))
 	})
 
 	ginkgo.It("covers code-range, inline-link, and reference-definition scanner edges", func() {
@@ -123,11 +151,11 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 
 		occurrence, ok := parseReferenceDestination("<docs/page.md>", 0, len("<docs/page.md>"))
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal("docs/page.md"))
+		Expect(occurrence).To(matchLinkOccurrenceHref("docs/page.md"))
 
 		occurrence, ok = parseReferenceDestination("docs/page.md \"title\"", 0, len("docs/page.md \"title\""))
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal("docs/page.md"))
+		Expect(occurrence).To(matchLinkOccurrenceHref("docs/page.md"))
 
 		_, ok = parseReferenceDestination("", 0, 0)
 		Expect(ok).To(BeFalse())
@@ -141,22 +169,22 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 
 		occurrence, ok := parseDestination(`<a\>b>)`, 0)
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal(`a\>b`))
+		Expect(occurrence).To(matchLinkOccurrenceHref(`a\>b`))
 
 		occurrence, ok = parseDestination(`a\(b\))`, 0)
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal(`a\(b\)`))
+		Expect(occurrence).To(matchLinkOccurrenceHref(`a\(b\)`))
 
 		occurrence, ok = parseDestination(`a(b))`, 0)
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal("a(b)"))
+		Expect(occurrence).To(matchLinkOccurrenceHref("a(b)"))
 
 		occurrence, ok = parseDestination(`target "escaped \" title")`, 0)
 		Expect(ok).To(BeTrue())
-		Expect(occurrence.Href).To(Equal("target"))
+		Expect(occurrence).To(matchLinkOccurrenceHref("target"))
 
 		tailEnd, ok := inlineLinkTailEnd("   ", 0)
-		Expect(tailEnd).To(Equal(0))
+		Expect(tailEnd).To(BeZero())
 		Expect(ok).To(BeFalse())
 		Expect(parseInlineLinkTitleEnd(`"a\"b"`, 0)).To(Equal(len(`"a\"b"`)))
 		Expect(parseInlineLinkTitleEnd(`(a\(b))`, 0)).To(Equal(len(`(a\(b)`)))
@@ -189,7 +217,7 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 
 		originalRelMarkdownLinkPath := relMarkdownLinkPath
 		relMarkdownLinkPath = func(string, string) (string, error) {
-			return "", errors.New("rel failed")
+			return "", errRelMarkdownLinkPathFailed
 		}
 		ginkgo.DeferCleanup(func() {
 			relMarkdownLinkPath = originalRelMarkdownLinkPath
@@ -210,12 +238,12 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 
 	ginkgo.It("rejects additional invalid markdown link root prefixes", func() {
 		_, err := NormalizeMarkdownLinkRootPrefix("%zz")
-		Expect(err).To(MatchError(ContainSubstring("parse markdown link root prefix")))
+		Expect(err).To(MatchError(ErrMarkdownLinkRootPrefixParse))
 
 		_, err = NormalizeMarkdownLinkRootPrefix("?query")
-		Expect(err).To(MatchError("markdown link root prefix must not contain query or fragment"))
+		Expect(err).To(MatchError(ErrMarkdownLinkRootPrefixQueryOrFragment))
 
 		_, err = NormalizeMarkdownLinkRootPrefix("#fragment")
-		Expect(err).To(MatchError("markdown link root prefix must not contain query or fragment"))
+		Expect(err).To(MatchError(ErrMarkdownLinkRootPrefixQueryOrFragment))
 	})
 })

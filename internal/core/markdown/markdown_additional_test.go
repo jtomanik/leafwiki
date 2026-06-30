@@ -1,13 +1,26 @@
 package markdown
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 )
+
+func matchPageMetadata(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchPageMetadataPage(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchPageDocument(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
 
 var _ = ginkgo.Describe("metadata and file helpers", func() {
 	ginkgo.It("NewMarkdownFile constructs canonical metadata from explicit legacy frontmatter", func() {
@@ -24,14 +37,20 @@ var _ = ginkgo.Describe("metadata and file helpers", func() {
 		})
 
 		meta := mf.GetMetadata()
-		Expect(meta.Version).To(Equal(1))
-		Expect(meta.Page.ID).To(Equal("page-123"))
-		Expect(meta.Page.Title).To(Equal("Example"))
-		Expect(meta.Page.CreatedAt).To(Equal("2026-06-13T10:00:00Z"))
-		Expect(meta.Tags).To(Equal([]string{"research", "draft"}))
-		Expect(meta.Fields).To(HaveKeyWithValue("status", "open"))
-		Expect(meta.Extra).To(HaveKeyWithValue("aliases", []interface{}{"old"}))
-		Expect(meta.Extra).To(HaveKeyWithValue("leafwiki_status", "reserved"))
+		Expect(meta).To(matchPageMetadata(gstruct.Fields{
+			"Version": Equal(1),
+			"Page": matchPageMetadataPage(gstruct.Fields{
+				"ID":        Equal("page-123"),
+				"Title":     Equal("Example"),
+				"CreatedAt": Equal("2026-06-13T10:00:00Z"),
+			}),
+			"Tags":   Equal([]string{"research", "draft"}),
+			"Fields": HaveKeyWithValue("status", "open"),
+			"Extra": SatisfyAll(
+				HaveKeyWithValue("aliases", []interface{}{"old"}),
+				HaveKeyWithValue("leafwiki_status", "reserved"),
+			),
+		}))
 	})
 
 	ginkgo.It("MarkdownFile accessors update content and expose path and writeback state", func() {
@@ -61,9 +80,11 @@ var _ = ginkgo.Describe("metadata and file helpers", func() {
 		meta.Extra["aliases"] = []interface{}{"changed"}
 
 		fresh := mf.GetMetadata()
-		Expect(fresh.Tags).To(Equal([]string{"original"}))
-		Expect(fresh.Fields).To(HaveKeyWithValue("status", "draft"))
-		Expect(fresh.Extra).To(HaveKeyWithValue("aliases", []interface{}{"old"}))
+		Expect(fresh).To(matchPageMetadata(gstruct.Fields{
+			"Tags":   Equal([]string{"original"}),
+			"Fields": HaveKeyWithValue("status", "draft"),
+			"Extra":  HaveKeyWithValue("aliases", []interface{}{"old"}),
+		}))
 	})
 
 	ginkgo.It("SetRawContentReplacingManagedMetadata creates empty versioned metadata for raw body content", func() {
@@ -72,9 +93,15 @@ var _ = ginkgo.Describe("metadata and file helpers", func() {
 		Expect(mf.SetRawContentReplacingManagedMetadata("plain body")).To(Succeed())
 
 		Expect(mf.GetContent()).To(Equal("plain body"))
-		Expect(mf.RequiresWriteback()).To(BeFalse())
-		Expect(mf.GetMetadata().Version).To(Equal(1))
-		Expect(mf.GetMetadata().Page.ID).To(BeEmpty())
+		Expect(mf).To(SatisfyAll(
+			HaveField("RequiresWriteback()", BeFalse()),
+			HaveField("GetMetadata()", matchPageMetadata(gstruct.Fields{
+				"Version": Equal(1),
+				"Page": matchPageMetadataPage(gstruct.Fields{
+					"ID": BeEmpty(),
+				}),
+			})),
+		))
 	})
 
 	ginkgo.It("SetRawContentReplacingManagedMetadata replaces identity from parse result and preserves writeback requirement", func() {
@@ -87,10 +114,16 @@ leafwiki_title: New Title
 New body`)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mf.GetMetadata().Page.ID).To(Equal("new-page"))
-		Expect(mf.GetMetadata().Page.Title).To(Equal("New Title"))
-		Expect(mf.GetContent()).To(Equal("New body"))
-		Expect(mf.RequiresWriteback()).To(BeTrue())
+		Expect(mf).To(SatisfyAll(
+			HaveField("GetMetadata()", matchPageMetadata(gstruct.Fields{
+				"Page": matchPageMetadataPage(gstruct.Fields{
+					"ID":    Equal("new-page"),
+					"Title": Equal("New Title"),
+				}),
+			})),
+			HaveField("GetContent()", Equal("New body")),
+			HaveField("RequiresWriteback()", BeTrue()),
+		))
 	})
 
 	ginkgo.It("SetLeafWikiMetadataIdentity trims values and initializes metadata", func() {
@@ -99,9 +132,13 @@ New body`)
 		mf.SetLeafWikiMetadataIdentity(" page-123 ", " Example Title ")
 
 		meta := mf.GetMetadata()
-		Expect(meta.Version).To(Equal(1))
-		Expect(meta.Page.ID).To(Equal("page-123"))
-		Expect(meta.Page.Title).To(Equal("Example Title"))
+		Expect(meta).To(matchPageMetadata(gstruct.Fields{
+			"Version": Equal(1),
+			"Page": matchPageMetadataPage(gstruct.Fields{
+				"ID":    Equal("page-123"),
+				"Title": Equal("Example Title"),
+			}),
+		}))
 	})
 
 	ginkgo.It("SetLeafWikiMetadata trims audit fields and initializes metadata", func() {
@@ -110,11 +147,15 @@ New body`)
 		mf.SetLeafWikiMetadata(" 2026-06-13T10:00:00Z ", " 2026-06-13T11:00:00Z ", " alice ", " bob ")
 
 		meta := mf.GetMetadata()
-		Expect(meta.Version).To(Equal(1))
-		Expect(meta.Page.CreatedAt).To(Equal("2026-06-13T10:00:00Z"))
-		Expect(meta.Page.UpdatedAt).To(Equal("2026-06-13T11:00:00Z"))
-		Expect(meta.Page.CreatorID).To(Equal("alice"))
-		Expect(meta.Page.LastAuthorID).To(Equal("bob"))
+		Expect(meta).To(matchPageMetadata(gstruct.Fields{
+			"Version": Equal(1),
+			"Page": matchPageMetadataPage(gstruct.Fields{
+				"CreatedAt":    Equal("2026-06-13T10:00:00Z"),
+				"UpdatedAt":    Equal("2026-06-13T11:00:00Z"),
+				"CreatorID":    Equal("alice"),
+				"LastAuthorID": Equal("bob"),
+			}),
+		}))
 	})
 
 	ginkgo.It("BuildMarkdownWithMetadata renders frontmatter-derived canonical metadata", func() {
@@ -131,18 +172,24 @@ New body`)
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc.Metadata.Page.ID).To(Equal("page-123"))
-		Expect(doc.Metadata.Page.Title).To(Equal("Example"))
-		Expect(doc.Metadata.Tags).To(Equal([]string{"demo"}))
-		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("status", "ready"))
-		Expect(doc.Body).To(Equal("# Body\n"))
+		Expect(doc).To(matchPageDocument(gstruct.Fields{
+			"Metadata": matchPageMetadata(gstruct.Fields{
+				"Page": matchPageMetadataPage(gstruct.Fields{
+					"ID":    Equal("page-123"),
+					"Title": Equal("Example"),
+				}),
+				"Tags":   Equal([]string{"demo"}),
+				"Fields": HaveKeyWithValue("status", "ready"),
+			}),
+			"Body": Equal("# Body\n"),
+		}))
 	})
 
 	ginkgo.It("BuildMarkdownWithMetadata returns metadata validation errors", func() {
 		_, err := BuildMarkdownWithMetadata(Frontmatter{}, "body")
 
-		Expect(err).To(MatchError(ContainSubstring("page.id is required")))
-		Expect(errors.Is(err, ErrMetadataParse)).To(BeTrue())
+		Expect(err).To(MatchError(ErrMetadataPageIDRequired))
+		Expect(err).To(MatchError(ErrMetadataParse))
 	})
 
 	ginkgo.It("LoadMarkdownFile rejects non-markdown extensions", func() {
@@ -152,7 +199,7 @@ New body`)
 		mf, err := LoadMarkdownFile(path)
 
 		Expect(mf).To(BeNil())
-		Expect(err).To(MatchError("file is not a markdown file"))
+		Expect(err).To(MatchError(ErrNotMarkdownFile))
 	})
 
 	ginkgo.It("LoadMarkdownFile propagates missing file errors", func() {

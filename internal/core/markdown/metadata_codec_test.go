@@ -5,6 +5,148 @@ import (
 	"strings"
 )
 
+type pageDocumentRawErrorCase struct {
+	name string
+	raw  string
+}
+
+var canonicalMetadataSchemaErrorCases = []pageDocumentRawErrorCase{
+	{
+		name: "unsupported top level key",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: page-123
+document:
+  type: note
+-->
+Body`,
+	},
+	{
+		name: "list field value",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: page-123
+fields:
+  aliases:
+    - old-example
+-->
+Body`,
+	},
+	{
+		name: "reserved field prefix",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: page-123
+fields:
+  leafwiki_status: hidden
+-->
+Body`,
+	},
+	{
+		name: "reserved field prefix mixed case",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: page-123
+fields:
+  LeafWiki_status: hidden
+-->
+Body`,
+	},
+	{
+		name: "missing page id",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  title: Missing ID
+-->
+Body`,
+	},
+	{
+		name: "path separator page id",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: ../other
+-->
+Body`,
+	},
+	{
+		name: "dot page id",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: .
+-->
+Body`,
+	},
+}
+
+var metadataLookingMarkerVariantErrorCases = []pageDocumentRawErrorCase{
+	{
+		name: "opening marker with extra text",
+		raw: `<!-- leafwiki extra
+version: 1
+page:
+  id: page-123
+-->
+Body`,
+	},
+	{
+		name: "indented opening marker",
+		raw: ` <!-- leafwiki
+version: 1
+page:
+  id: page-123
+-->
+Body`,
+	},
+	{
+		name: "non standalone closing marker",
+		raw: `<!-- leafwiki
+version: 1
+page:
+  id: page-123
+--> trailing
+Body`,
+	},
+}
+
+type renderPageDocumentErrorCase struct {
+	name string
+	doc  PageDocument
+}
+
+var invalidCanonicalMetadataRenderCases = []renderPageDocumentErrorCase{
+	{
+		name: "missing version",
+		doc:  PageDocument{Metadata: PageMetadata{Page: PageMetadataPage{ID: "page-123"}}},
+	},
+	{
+		name: "missing page id",
+		doc:  PageDocument{Metadata: PageMetadata{Version: 1}},
+	},
+	{
+		name: "list field value",
+		doc: PageDocument{Metadata: PageMetadata{
+			Version: 1,
+			Page:    PageMetadataPage{ID: "page-123"},
+			Fields:  map[string]interface{}{"aliases": []interface{}{"old-example"}},
+		}},
+	},
+	{
+		name: "reserved field prefix",
+		doc: PageDocument{Metadata: PageMetadata{
+			Version: 1,
+			Page:    PageMetadataPage{ID: "page-123"},
+			Fields:  map[string]interface{}{"leafwiki_status": "hidden"},
+		}},
+	},
+}
+
 var _ = ginkgo.Describe("metadata codec", func() {
 	ginkgo.It("TestParsePageDocument_CanonicalMetadataComment", func() {
 		t := ginkgo.GinkgoT()
@@ -147,85 +289,7 @@ Body text.
 	})
 
 	ginkgo.Describe("TestParsePageDocument_CanonicalMetadataSchemaErrors", func() {
-		tests := []struct {
-			name string
-			raw  string
-		}{
-			{
-				name: "unsupported top level key",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: page-123
-document:
-  type: note
--->
-Body`,
-			},
-			{
-				name: "list field value",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: page-123
-fields:
-  aliases:
-    - old-example
--->
-Body`,
-			},
-			{
-				name: "reserved field prefix",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: page-123
-fields:
-  leafwiki_status: hidden
--->
-Body`,
-			},
-			{
-				name: "reserved field prefix mixed case",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: page-123
-fields:
-  LeafWiki_status: hidden
--->
-Body`,
-			},
-			{
-				name: "missing page id",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  title: Missing ID
--->
-Body`,
-			},
-			{
-				name: "path separator page id",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: ../other
--->
-Body`,
-			},
-			{
-				name: "dot page id",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: .
--->
-Body`,
-			},
-		}
-
-		for _, tt := range tests {
+		for _, tt := range canonicalMetadataSchemaErrorCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				t := ginkgo.GinkgoT()
@@ -238,40 +302,7 @@ Body`,
 	})
 
 	ginkgo.Describe("TestParsePageDocument_MetadataLookingMarkerVariantsFail", func() {
-		tests := []struct {
-			name string
-			raw  string
-		}{
-			{
-				name: "opening marker with extra text",
-				raw: `<!-- leafwiki extra
-version: 1
-page:
-  id: page-123
--->
-Body`,
-			},
-			{
-				name: "indented opening marker",
-				raw: ` <!-- leafwiki
-version: 1
-page:
-  id: page-123
--->
-Body`,
-			},
-			{
-				name: "non standalone closing marker",
-				raw: `<!-- leafwiki
-version: 1
-page:
-  id: page-123
---> trailing
-Body`,
-			},
-		}
-
-		for _, tt := range tests {
+		for _, tt := range metadataLookingMarkerVariantErrorCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				t := ginkgo.GinkgoT()
@@ -283,37 +314,7 @@ Body`,
 	})
 
 	ginkgo.Describe("TestRenderPageDocument_RejectsInvalidCanonicalMetadata", func() {
-		tests := []struct {
-			name string
-			doc  PageDocument
-		}{
-			{
-				name: "missing version",
-				doc:  PageDocument{Metadata: PageMetadata{Page: PageMetadataPage{ID: "page-123"}}},
-			},
-			{
-				name: "missing page id",
-				doc:  PageDocument{Metadata: PageMetadata{Version: 1}},
-			},
-			{
-				name: "list field value",
-				doc: PageDocument{Metadata: PageMetadata{
-					Version: 1,
-					Page:    PageMetadataPage{ID: "page-123"},
-					Fields:  map[string]interface{}{"aliases": []interface{}{"old-example"}},
-				}},
-			},
-			{
-				name: "reserved field prefix",
-				doc: PageDocument{Metadata: PageMetadata{
-					Version: 1,
-					Page:    PageMetadataPage{ID: "page-123"},
-					Fields:  map[string]interface{}{"leafwiki_status": "hidden"},
-				}},
-			},
-		}
-
-		for _, tt := range tests {
+		for _, tt := range invalidCanonicalMetadataRenderCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				t := ginkgo.GinkgoT()

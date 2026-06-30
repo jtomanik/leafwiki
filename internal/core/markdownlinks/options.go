@@ -1,10 +1,20 @@
 package markdownlinks
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
 	"strings"
+)
+
+var (
+	ErrMarkdownLinkRootPrefixBackslash       = errors.New("markdown link root prefix must use forward slashes")
+	ErrMarkdownLinkRootPrefixNotPath         = errors.New("markdown link root prefix must be a path prefix")
+	ErrMarkdownLinkRootPrefixParse           = errors.New("parse markdown link root prefix")
+	ErrMarkdownLinkRootPrefixQueryOrFragment = errors.New("markdown link root prefix must not contain query or fragment")
+	ErrMarkdownLinkRootPrefixTraversal       = errors.New("markdown link root prefix must not traverse directories")
+	ErrMarkdownLinkRootPrefixRoot            = errors.New("markdown link root prefix must name a non-root path under the repository root")
 )
 
 type Options struct {
@@ -17,25 +27,25 @@ func NormalizeMarkdownLinkRootPrefix(value string) (string, error) {
 		return "", nil
 	}
 	if strings.Contains(trimmed, "\\") {
-		return "", fmt.Errorf("markdown link root prefix must use forward slashes")
+		return "", ErrMarkdownLinkRootPrefixBackslash
 	}
 	if strings.Contains(trimmed, "://") || strings.HasPrefix(trimmed, "//") {
-		return "", fmt.Errorf("markdown link root prefix must be a path prefix")
+		return "", ErrMarkdownLinkRootPrefixNotPath
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return "", fmt.Errorf("parse markdown link root prefix: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrMarkdownLinkRootPrefixParse, err)
 	}
 	if parsed.Scheme != "" || parsed.Opaque != "" {
-		return "", fmt.Errorf("markdown link root prefix must be a path prefix")
+		return "", ErrMarkdownLinkRootPrefixNotPath
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("markdown link root prefix must not contain query or fragment")
+		return "", ErrMarkdownLinkRootPrefixQueryOrFragment
 	}
 	prefix := parsed.Path
 	for _, segment := range strings.Split(prefix, "/") {
 		if segment == ".." {
-			return "", fmt.Errorf("markdown link root prefix must not traverse directories")
+			return "", ErrMarkdownLinkRootPrefixTraversal
 		}
 	}
 	if !strings.HasPrefix(prefix, "/") {
@@ -43,7 +53,7 @@ func NormalizeMarkdownLinkRootPrefix(value string) (string, error) {
 	}
 	prefix = path.Clean(prefix)
 	if prefix == "/" || prefix == "." || strings.Contains(prefix, "/../") || strings.HasSuffix(prefix, "/..") {
-		return "", fmt.Errorf("markdown link root prefix must name a non-root path under the repository root")
+		return "", ErrMarkdownLinkRootPrefixRoot
 	}
 	return strings.TrimRight(prefix, "/"), nil
 }

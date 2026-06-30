@@ -15,7 +15,7 @@ var _ = ginkgo.Describe("markdown parser and renderer edge branches", func() {
 	ginkgo.It("returns stable errors for malformed legacy frontmatter fallbacks", func() {
 		_, err := parseFrontmatterYAML("leafwiki_title: {{title}}\nbroken: [")
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, ErrFrontmatterParse)).To(BeTrue())
+		Expect(err).To(MatchError(ErrFrontmatterParse))
 
 		fm, err := parseFrontmatterYAML("")
 		Expect(err).NotTo(HaveOccurred())
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("markdown parser and renderer edge branches", func() {
 
 		_, _, _, err = ParseFrontmatter("<!-- leafwiki")
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, ErrMetadataParse)).To(BeTrue())
+		Expect(err).To(MatchError(ErrMetadataParse))
 
 		_, err = toYAMLNode(failingYAMLValue{})
 		Expect(err).To(HaveOccurred())
@@ -47,8 +47,8 @@ var _ = ginkgo.Describe("markdown parser and renderer edge branches", func() {
 		Expect(mf.GetContent()).To(Equal("plain body"))
 		Expect(mf.GetMetadata().Page.ID).To(Equal("page-123"))
 
-		Expect(mf.SetRawContentPreservingManagedMetadata("<!-- leafwiki")).To(MatchError(ContainSubstring("canonical metadata closing marker missing")))
-		Expect(mf.SetRawContentReplacingManagedMetadata("<!-- leafwiki")).To(MatchError(ContainSubstring("canonical metadata closing marker missing")))
+		Expect(mf.SetRawContentPreservingManagedMetadata("<!-- leafwiki")).To(MatchError(ErrMetadataParse))
+		Expect(mf.SetRawContentReplacingManagedMetadata("<!-- leafwiki")).To(MatchError(ErrMetadataParse))
 
 		canonicalNoFields := `<!-- leafwiki
 version: 1
@@ -87,7 +87,7 @@ Legacy body`
 			path: filepath.Join(ginkgo.GinkgoT().TempDir(), "page.md"),
 			doc:  PageDocument{Metadata: PageMetadata{Version: 1}},
 		}
-		Expect(invalid.WriteToFile()).To(MatchError(ContainSubstring("page.id is required")))
+		Expect(invalid.WriteToFile()).To(MatchError(ErrMetadataPageIDRequired))
 
 		blocker := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-directory")
 		Expect(os.WriteFile(blocker, []byte("file"), 0o600)).To(Succeed())
@@ -110,7 +110,7 @@ Legacy body`
 	ginkgo.It("reports canonical metadata parser and renderer edge errors", func() {
 		_, _, err := ParsePageDocument("<!-- leafwiki")
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, ErrMetadataParse)).To(BeTrue())
+		Expect(err).To(MatchError(ErrMetadataParse))
 
 		_, _, err = ParsePageDocument(`<!-- leafwiki
 version: 2
@@ -118,7 +118,7 @@ page:
   id: page-123
 -->
 Body`)
-		Expect(err).To(MatchError(ContainSubstring("unsupported metadata version 2")))
+		Expect(err).To(MatchError(ErrUnsupportedMetadataVersion))
 
 		_, err = RenderPageDocument(PageDocument{
 			Body: "body",
@@ -162,8 +162,8 @@ Body`)
 		}
 		_, err := renderCanonicalMetadataYAML(validMetadata)
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, ErrMetadataParse)).To(BeTrue())
-		Expect(errors.Is(err, encodeErr)).To(BeTrue())
+		Expect(err).To(MatchError(ErrMetadataParse))
+		Expect(err).To(MatchError(encodeErr))
 
 		closeErr := errors.New("close failed")
 		newCanonicalMetadataYAMLEncoder = func(io.Writer) canonicalMetadataYAMLEncoder {
@@ -171,8 +171,8 @@ Body`)
 		}
 		_, err = renderCanonicalMetadataYAML(validMetadata)
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, ErrMetadataParse)).To(BeTrue())
-		Expect(errors.Is(err, closeErr)).To(BeTrue())
+		Expect(err).To(MatchError(ErrMetadataParse))
+		Expect(err).To(MatchError(closeErr))
 	})
 
 	ginkgo.It("round-trips metadata migration helpers for empty, tag, and default cases", func() {

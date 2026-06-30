@@ -23,7 +23,7 @@ type MarkdownFile struct {
 // filename or later write-back to the same path.
 func LoadMarkdownFile(filePath string) (*MarkdownFile, error) {
 	if !strings.EqualFold(filepath.Ext(filePath), ".md") {
-		return nil, errors.New("file is not a markdown file")
+		return nil, ErrNotMarkdownFile
 	}
 
 	raw, err := os.ReadFile(filePath)
