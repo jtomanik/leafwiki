@@ -8,28 +8,86 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/markdownlinks"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
+type workspaceResolverResult struct {
+	PageID tree.PageID
+	Kind   tree.NodeKind
+	OK     bool
+	Code   IssueCode
+}
+
+func matchValidationResult(ok types.GomegaMatcher, issues types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"OK":     ok,
+		"Issues": issues,
+	})
+}
+
+func matchValidationSummary(errorCount int, warningCount int) types.GomegaMatcher {
+	return gstruct.MatchAllFields(gstruct.Fields{
+		"Errors":   Equal(errorCount),
+		"Warnings": Equal(warningCount),
+	})
+}
+
+func matchIssue(sourcePath tree.MarkdownPath, code IssueCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"SourcePath": Equal(sourcePath),
+		"Code":       Equal(code),
+		"MessageID":  Equal(messageID),
+	})
+}
+
+func matchWorkspaceScanIssue(sourcePath tree.MarkdownPath) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"SourcePath": Equal(sourcePath),
+		"Code":       Equal(IssueCodeWorkspaceScanError),
+	})
+}
+
+func resolveWorkspaceMarkdownLink(
+	resolver func(string) (tree.PageID, tree.NodeKind, bool, IssueCode),
+	destination string,
+) workspaceResolverResult {
+	pageID, kind, ok, code := resolver(destination)
+	return workspaceResolverResult{
+		PageID: pageID,
+		Kind:   kind,
+		OK:     ok,
+		Code:   code,
+	}
+}
+
+func matchWorkspaceResolverResult(kind tree.NodeKind, code IssueCode) types.GomegaMatcher {
+	return gstruct.MatchAllFields(gstruct.Fields{
+		"PageID": BeEmpty(),
+		"Kind":   Equal(kind),
+		"OK":     BeFalse(),
+		"Code":   Equal(code),
+	})
+}
+
 var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	ginkgo.It("ValidateMarkdownContent legacy wrapper returns OK for simple canonical content", func() {
 		result := ValidateMarkdownContent("docs/page", string(canonicalValidationMarkdown("page-1", "Page", "# Page\n")), "page-1")
 
-		Expect(result.OK).To(BeTrue())
-		Expect(result.Issues).To(BeEmpty())
+		Expect(result).To(matchValidationResult(BeTrue(), BeEmpty()))
 	})
 
 	ginkgo.It("ValidateMarkdownContent legacy wrapper reports invalid paths and metadata parse errors", func() {
 		result := ValidateMarkdownContent("../bad", "---\nleafwiki_id: [broken\n---\nBody", "page-1")
 
-		Expect(result.OK).To(BeFalse())
-		Expect(result.Issues).To(ConsistOf(
+		Expect(result).To(matchValidationResult(BeFalse(), ConsistOf(
 			WithTransform(func(issue Issue) IssueCode { return issue.Code }, Equal(IssueCodeInvalidPath)),
 			WithTransform(func(issue Issue) IssueCode { return issue.Code }, Equal(IssueCodeMetadataParseError)),
-		))
+		)))
 	})
 
 	ginkgo.It("ValidateMarkdownContentWithOptions reports root routes, path conflicts, and reserved extra metadata", func() {
@@ -136,13 +194,14 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 
 		result := Combine(first, second)
 
-		Expect(result.OK).To(BeFalse())
-		Expect(result.Summary.Errors).To(Equal(1))
-		Expect(result.Summary.Warnings).To(Equal(2))
-		Expect(result.Issues).To(Equal([]Issue{
-			{Severity: IssueSeverityWarning, Code: IssueCodeHiddenMarkdownPath, Message: "hidden"},
-			{Severity: IssueSeverityError, Code: IssueCodeBrokenLink, Message: "broken"},
-			{Severity: IssueSeverityWarning, Code: IssueCodeWorkspaceSyncValidation, Message: "sync"},
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"OK":      BeFalse(),
+			"Summary": matchValidationSummary(1, 2),
+			"Issues": Equal([]Issue{
+				{Severity: IssueSeverityWarning, Code: IssueCodeHiddenMarkdownPath, Message: "hidden"},
+				{Severity: IssueSeverityError, Code: IssueCodeBrokenLink, Message: "broken"},
+				{Severity: IssueSeverityWarning, Code: IssueCodeWorkspaceSyncValidation, Message: "sync"},
+			}),
 		}))
 	})
 
@@ -176,28 +235,19 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 		Expect(isExtensionlessWikiDestination("section/")).To(BeFalse())
 		Expect(isExtensionlessWikiDestination("page")).To(BeTrue())
 
-		pageID, kind, ok, code := newWorkspaceMarkdownLinkResolver("source.md", nil, nil)("missing.md")
-		Expect(pageID).To(BeEmpty())
-		Expect(kind).To(BeEmpty())
-		Expect(ok).To(BeFalse())
-		Expect(code).To(Equal(IssueCodeBrokenLink))
+		resolverResult := resolveWorkspaceMarkdownLink(newWorkspaceMarkdownLinkResolver("source.md", nil, nil), "missing.md")
+		Expect(resolverResult).To(matchWorkspaceResolverResult("", IssueCodeBrokenLink))
 
 		index := markdownlinks.NewIndex([]markdownlinks.Entry{
 			{Kind: markdownlinks.EntryKindPage, RoutePath: "docs/page", Path: "docs/page.md"},
 			{Kind: markdownlinks.EntryKindSection, RoutePath: "docs/section"},
 		})
 		resolver := newWorkspaceMarkdownLinkResolver("docs/source.md", index, map[workspaceValidationRouteKey]tree.PageID{})
-		pageID, kind, ok, code = resolver("/docs/page.md")
-		Expect(pageID).To(BeEmpty())
-		Expect(kind).To(Equal(tree.NodeKindPage))
-		Expect(ok).To(BeFalse())
-		Expect(code).To(Equal(IssueCodeBrokenLink))
+		resolverResult = resolveWorkspaceMarkdownLink(resolver, "/docs/page.md")
+		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindPage, IssueCodeBrokenLink))
 
-		pageID, kind, ok, code = resolver("/docs/section")
-		Expect(pageID).To(BeEmpty())
-		Expect(kind).To(Equal(tree.NodeKindSection))
-		Expect(ok).To(BeFalse())
-		Expect(code).To(Equal(IssueCodeBrokenLink))
+		resolverResult = resolveWorkspaceMarkdownLink(resolver, "/docs/section")
+		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindSection, IssueCodeBrokenLink))
 
 		Expect(resolveReferencePath(tree.RoutePath("docs/source"), "%zz")).To(BeEmpty())
 		Expect(resolveReferencePath("", "/")).To(BeEmpty())
@@ -211,15 +261,13 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	})
 
 	ginkgo.It("ValidateWorkspaceStatus filters warnings and preserves explicit message IDs", func() {
+		customMessageID := sharederrors.MessageID("custom.message")
 		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{
 			{Path: "warn.md", Severity: IssueSeverityWarning, Message: "warning"},
-			{Path: "error.md", Code: IssueCodeBrokenLink, MessageID: sharederrors.MessageID("custom.message"), Severity: IssueSeverityError, Message: "error"},
+			{Path: "error.md", Code: IssueCodeBrokenLink, MessageID: customMessageID, Severity: IssueSeverityError, Message: "error"},
 		}, false)
 
-		Expect(result.Issues).To(HaveLen(1))
-		Expect(result.Issues[0].SourcePath).To(Equal(tree.MarkdownPath("error.md")))
-		Expect(result.Issues[0].Code).To(Equal(IssueCodeBrokenLink))
-		Expect(result.Issues[0].MessageID).To(Equal(sharederrors.MessageID("custom.message")))
+		Expect(result.Issues).To(ConsistOf(matchIssue(tree.MarkdownPath("error.md"), IssueCodeBrokenLink, customMessageID)))
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles handles empty roots, hidden markdown warnings, and workspace asset callbacks", func() {
@@ -278,10 +326,10 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeFalse())
-		Expect(issueCodes(result)).To(ContainElements(IssueCodeWorkspaceScanError, IssueCodeWorkspaceScanError))
-		Expect(result.Issues[0].SourcePath).To(Equal(tree.MarkdownPath("broken.md")))
-		Expect(result.Issues[1].SourcePath).To(Equal(tree.MarkdownPath("workspace")))
+		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+			matchWorkspaceScanIssue(tree.MarkdownPath("broken.md")),
+			matchWorkspaceScanIssue(tree.MarkdownPath("workspace")),
+		)))
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles skips hidden, static, and non-markdown entries while reporting scan failures", func() {
