@@ -418,21 +418,28 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(WriteDescriptorAtomic(filepath.Join(tmp, "marshal.json"), desc)).To(MatchError(marshalErr))
 		marshalDescriptorJSON = originalMarshalDescriptor
 
+		createErr := errors.New("create failed")
+		chmodTempErr := errors.New("chmod failed")
+		writeErr := errors.New("write failed")
+		newlineErr := errors.New("newline failed")
+		closeErr := errors.New("close failed")
+		renameErr := errors.New("rename failed")
+		finalChmodErr := errors.New("final chmod failed")
 		cases := []struct {
 			name      string
 			temp      *fakeDescriptorTempFile
 			createErr error
 			renameErr error
 			chmodErr  error
-			want      string
+			wantErr   error
 		}{
-			{name: "create", createErr: errors.New("create failed"), want: "create temporary descriptor"},
-			{name: "chmod temp", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "chmod.tmp"), chmodErr: errors.New("chmod failed")}, want: "secure temporary descriptor"},
-			{name: "write body", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "write.tmp"), writeErrs: map[int]error{1: errors.New("write failed")}}, want: "write temporary descriptor"},
-			{name: "write newline", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "newline.tmp"), writeErrs: map[int]error{2: errors.New("newline failed")}}, want: "finish temporary descriptor"},
-			{name: "close", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "close.tmp"), closeErr: errors.New("close failed")}, want: "close temporary descriptor"},
-			{name: "rename", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "rename.tmp")}, renameErr: errors.New("rename failed"), want: "replace descriptor"},
-			{name: "chmod final", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "final.tmp")}, chmodErr: errors.New("final chmod failed"), want: "secure descriptor"},
+			{name: "create", createErr: createErr, wantErr: createErr},
+			{name: "chmod temp", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "chmod.tmp"), chmodErr: chmodTempErr}, wantErr: chmodTempErr},
+			{name: "write body", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "write.tmp"), writeErrs: map[int]error{1: writeErr}}, wantErr: writeErr},
+			{name: "write newline", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "newline.tmp"), writeErrs: map[int]error{2: newlineErr}}, wantErr: newlineErr},
+			{name: "close", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "close.tmp"), closeErr: closeErr}, wantErr: closeErr},
+			{name: "rename", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "rename.tmp")}, renameErr: renameErr, wantErr: renameErr},
+			{name: "chmod final", temp: &fakeDescriptorTempFile{name: filepath.Join(tmp, "final.tmp")}, chmodErr: finalChmodErr, wantErr: finalChmodErr},
 		}
 
 		for _, tt := range cases {
@@ -451,7 +458,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			}
 
 			err := WriteDescriptorAtomic(filepath.Join(tmp, tt.name+".json"), desc)
-			Expect(err).To(MatchError(ContainSubstring(tt.want)))
+			Expect(err).To(MatchError(tt.wantErr))
 		}
 	})
 

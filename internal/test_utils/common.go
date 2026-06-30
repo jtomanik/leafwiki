@@ -2,7 +2,7 @@ package test_utils
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 	"mime/multipart"
 	"os"
@@ -25,7 +25,8 @@ type multipartFormReader interface {
 }
 
 var (
-	newMultipartWriter = func(w io.Writer) multipartFormWriter {
+	errMultipartFormFileRequired = errors.New("no file found in form")
+	newMultipartWriter           = func(w io.Writer) multipartFormWriter {
 		return multipart.NewWriter(w)
 	}
 	newMultipartReader = func(r io.Reader, boundary string) multipartFormReader {
@@ -64,7 +65,7 @@ func CreateMultipartFile(filename string, content []byte) (multipart.File, strin
 
 	files := form.File["file"]
 	if len(files) == 0 {
-		return nil, "", fmt.Errorf("no file found in form")
+		return nil, "", errMultipartFormFileRequired
 	}
 
 	f, err := openMultipartFile(files[0])

@@ -34,7 +34,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 		cases := []struct {
 			name      string
 			configure func(error)
-			want      string
+			wantErr   error
 			filename  string
 		}{
 			{
@@ -44,7 +44,6 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return &fakeMultipartWriter{createErr: err}
 					}
 				},
-				want: "create failed",
 			},
 			{
 				name: "write part",
@@ -53,7 +52,6 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return &fakeMultipartWriter{part: errorWriter{err: err}}
 					}
 				},
-				want: "write failed",
 			},
 			{
 				name: "close writer",
@@ -62,7 +60,6 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return &fakeMultipartWriter{closeErr: err}
 					}
 				},
-				want: "close failed",
 			},
 			{
 				name: "read form",
@@ -71,7 +68,6 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return &fakeMultipartReader{err: err}
 					}
 				},
-				want: "read form failed",
 			},
 			{
 				name: "empty form",
@@ -80,7 +76,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return &fakeMultipartReader{form: &multipart.Form{File: map[string][]*multipart.FileHeader{}}}
 					}
 				},
-				want: "no file found in form",
+				wantErr: errMultipartFormFileRequired,
 			},
 			{
 				name: "open file",
@@ -89,7 +85,6 @@ var _ = ginkgo.Describe("test utilities", func() {
 						return nil, err
 					}
 				},
-				want:     "open failed",
 				filename: "upload.txt",
 			},
 		}
@@ -100,14 +95,18 @@ var _ = ginkgo.Describe("test utilities", func() {
 			restore := restoreTestUtilsSeams()
 			func() {
 				defer restore()
-				failure := errors.New(tc.want)
+				failure := errors.New(tc.name + " failed")
 				tc.configure(failure)
+				wantErr := failure
+				if tc.wantErr != nil {
+					wantErr = tc.wantErr
+				}
 
 				file, filename, err := CreateMultipartFile("upload.txt", []byte("hello"))
 
 				Expect(file).To(BeNil())
 				Expect(filename).To(Equal(tc.filename))
-				Expect(err).To(MatchError(ContainSubstring(tc.want)))
+				Expect(err).To(MatchError(wantErr))
 			}()
 		}
 	})
