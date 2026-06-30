@@ -27,39 +27,6 @@ const (
 	ErrCodePresenceModeInvalid         sharederrors.ErrorCode = "presence_mode_invalid"
 )
 
-type SessionType string
-type SessionMode string
-type SessionState string
-
-const (
-	SessionTypeWeb   SessionType = "web"
-	SessionTypeAgent SessionType = "agent"
-)
-
-const (
-	SessionModeView     SessionMode = "view"
-	SessionModeEdit     SessionMode = "edit"
-	SessionModeHistory  SessionMode = "history"
-	SessionModeAssets   SessionMode = "assets"
-	SessionModeSettings SessionMode = "settings"
-	SessionModeImport   SessionMode = "import"
-	SessionModeUnknown  SessionMode = "unknown"
-)
-
-const (
-	SessionStateActive SessionState = "active"
-)
-
-var validModes = map[SessionMode]struct{}{
-	SessionModeView:     {},
-	SessionModeEdit:     {},
-	SessionModeHistory:  {},
-	SessionModeAssets:   {},
-	SessionModeSettings: {},
-	SessionModeImport:   {},
-	SessionModeUnknown:  {},
-}
-
 type Heartbeat struct {
 	SessionID WebSessionID `json:"sessionId"`
 	Mode      SessionMode  `json:"mode"`
@@ -103,7 +70,7 @@ func (mode *SessionMode) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	*mode = SessionMode(value)
+	*mode = SessionModeFromString(value)
 	return nil
 }
 
@@ -111,16 +78,6 @@ type storedSession struct {
 	session Session
 	email   string
 	userID  coreauth.UserID
-}
-
-type WebSessionID string
-
-func (id WebSessionID) String() string {
-	return string(id)
-}
-
-func WebSessionIDFromString(raw string) WebSessionID {
-	return WebSessionID(strings.TrimSpace(raw))
 }
 
 type WebPresenceRegistry struct {
@@ -191,7 +148,7 @@ func (r *WebPresenceRegistry) Remove(sessionID WebSessionID, user *coreauth.User
 	if r == nil {
 		return false
 	}
-	if sessionID == "" {
+	if sessionID.IsZero() {
 		return false
 	}
 	r.mu.Lock()
@@ -228,24 +185,24 @@ func (r *WebPresenceRegistry) List(viewer *coreauth.User) []Session {
 		out = append(out, session)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].SessionID < out[j].SessionID
+		return out[i].SessionID.Less(out[j].SessionID)
 	})
 	return out
 }
 
 func normalizeHeartbeat(heartbeat Heartbeat) (Heartbeat, error) {
-	heartbeat.SessionID = WebSessionIDFromString(heartbeat.SessionID.String())
-	if heartbeat.SessionID == "" {
+	heartbeat.SessionID = heartbeat.SessionID.Normalize()
+	if heartbeat.SessionID.IsZero() {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDRequired, nil)
 	}
-	if len(heartbeat.SessionID.String()) > 256 {
+	if heartbeat.SessionID.Length() > 256 {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceSessionIDTooLong, nil)
 	}
-	heartbeat.Mode = SessionMode(strings.TrimSpace(string(heartbeat.Mode)))
+	heartbeat.Mode = heartbeat.Mode.Normalize()
 	if heartbeat.Mode == "" {
 		heartbeat.Mode = SessionModeUnknown
 	}
-	if _, ok := validModes[heartbeat.Mode]; !ok {
+	if !heartbeat.Mode.IsValid() {
 		return Heartbeat{}, sharederrors.NewLocalizedErrorFromCode(ErrCodePresenceModeInvalid, nil)
 	}
 	heartbeat.PageID = tree.PageIDFromString(strings.TrimSpace(heartbeat.PageID.MetadataValue()))
