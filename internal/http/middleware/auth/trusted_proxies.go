@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 )
+
+var ErrInvalidTrustedProxy = errors.New("invalid trusted proxy")
 
 // TrustedProxies holds a set of trusted IP addresses and CIDR ranges.
 // Only requests originating from these addresses will have Remote-User headers honoured.
@@ -25,13 +28,13 @@ func ParseTrustedProxies(raw string) (*TrustedProxies, error) {
 		if strings.Contains(entry, "/") {
 			_, ipNet, err := net.ParseCIDR(entry)
 			if err != nil {
-				return nil, fmt.Errorf("invalid CIDR %q: %w", entry, err)
+				return nil, fmt.Errorf("%w: invalid CIDR %q: %w", ErrInvalidTrustedProxy, entry, err)
 			}
 			tp.nets = append(tp.nets, ipNet)
 		} else {
 			ip := net.ParseIP(entry)
 			if ip == nil {
-				return nil, fmt.Errorf("invalid IP address %q", entry)
+				return nil, fmt.Errorf("%w: invalid IP address %q", ErrInvalidTrustedProxy, entry)
 			}
 			tp.ips = append(tp.ips, ip)
 		}

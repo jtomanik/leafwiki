@@ -24,7 +24,7 @@ var _ = It("TestMustGetUserReturnsStructuredErrorWhenMissing", func() {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/me", nil))
 
-	assertAuthMiddlewareError(t, rec, "auth_user_not_authenticated", "errors.auth.user_not_authenticated", "User not authenticated")
+	assertAuthMiddlewareError(t, rec, expectedAuthUserNotAuthenticated)
 
 })
 
@@ -45,7 +45,7 @@ var _ = It("TestMustGetUserReturnsStructuredErrorForInvalidContext", func() {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/me", nil))
 
-	assertAuthMiddlewareError(t, rec, "auth_invalid_user_context", "errors.auth.invalid_user_context", "Invalid user context")
+	assertAuthMiddlewareError(t, rec, expectedAuthInvalidUserContext)
 
 })
 
@@ -67,5 +67,5 @@ var _ = It("MustGetUser returns the typed user from context", func() {
 	ctx.Set("user", user)
 
 	Expect(authmw.MustGetUser(ctx)).To(BeIdenticalTo(user))
-	Expect(rec.Code).To(Equal(http.StatusOK))
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 })

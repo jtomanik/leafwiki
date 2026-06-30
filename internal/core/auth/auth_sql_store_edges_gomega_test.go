@@ -21,6 +21,8 @@ var (
 	authScriptedScriptsMu  sync.Mutex
 	authScriptedScriptSeq  int
 	authScriptedScripts    = map[string]*authScriptedDBScript{}
+	errAPIKeyScanFailed    = errors.New("api key scan failed")
+	errPlainConstraint     = errors.New("plain error")
 )
 
 type authScriptedDBScript struct {
@@ -133,7 +135,7 @@ func (s authFakeScanner) Scan(dest ...any) error {
 	for i, value := range s.values {
 		switch target := dest[i].(type) {
 		case *APIKeyID:
-			*target = NewAPIKeyIDUnchecked(value.(string))
+			*target = APIKeyIDFromString(value.(string))
 		case *UserID:
 			*target = UserIDFromString(value.(string))
 		case *string:
@@ -181,16 +183,17 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 
 			Expect((&APIKeyStore{}).Close()).To(Succeed())
 
+			apiKeyCloseErr := errors.New("api key close failed")
 			store := &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
 				close: func() error {
-					return errors.New("api key close failed")
+					return apiKeyCloseErr
 				},
 			})}
 			Expect(store.db.Ping()).To(Succeed())
-			Expect(store.Close()).To(MatchError("api key close failed"))
+			Expect(store.Close()).To(MatchError(apiKeyCloseErr))
 
-			_, err = scanAPIKey(authFakeScanner{err: errors.New("api key scan failed")})
-			Expect(err).To(MatchError("api key scan failed"))
+			_, err = scanAPIKey(authFakeScanner{err: errAPIKeyScanFailed})
+			Expect(err).To(MatchError(errAPIKeyScanFailed))
 			_, err = scanAPIKey(newAPIKeyScannerWithScopes("{not-json"))
 			Expect(err).To(HaveOccurred())
 			_, _, err = scanStoredAPIKey(newStoredAPIKeyScannerWithScopes("{not-json"))
@@ -292,14 +295,15 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 			Expect(store.withDB(func(*sql.DB) error { return nil })).To(MatchError(openErr))
 			restoreOpen()
 
+			sessionCloseErr := errors.New("session close failed")
 			store = &SessionStore{
-				db:     openAuthScriptedDB(&authScriptedDBScript{close: func() error { return errors.New("session close failed") }}),
+				db:     openAuthScriptedDB(&authScriptedDBScript{close: func() error { return sessionCloseErr }}),
 				cancel: func() {},
 				done:   make(chan struct{}),
 			}
 			close(store.done)
 			Expect(store.db.Ping()).To(Succeed())
-			Expect(store.Close()).To(MatchError("session close failed"))
+			Expect(store.Close()).To(MatchError(sessionCloseErr))
 
 			store = &SessionStore{
 				db: openAuthScriptedDB(&authScriptedDBScript{
@@ -311,7 +315,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 					},
 				}),
 			}
-			active, err := store.IsActive(NewSessionIDUnchecked("session-1"), UserIDFromString("user-1"), "refresh", time.Now())
+			active, err := store.IsActive(newFixtureSessionID("session-1"), UserIDFromString("user-1"), "refresh", time.Now())
 			Expect(active).To(BeFalse())
 			Expect(err).To(HaveOccurred())
 		})
@@ -384,15 +388,16 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 			})}
 			Expect(store.ensureSchema()).To(MatchError(schemaErr))
 
+			userCloseErr := errors.New("user close failed")
 			store = &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
 				close: func() error {
-					return errors.New("user close failed")
+					return userCloseErr
 				},
 			})}
 			Expect(store.db.Ping()).To(Succeed())
-			Expect(store.Close()).To(MatchError("user close failed"))
+			Expect(store.Close()).To(MatchError(userCloseErr))
 
-			Expect((&UserStore{}).mapConstraintViolationToError(errors.New("plain error"))).To(MatchError("plain error"))
+			Expect((&UserStore{}).mapConstraintViolationToError(errPlainConstraint)).To(MatchError(errPlainConstraint))
 		})
 
 		ginkgo.It("covers query, scan, result, and exec errors", func() {
@@ -499,7 +504,7 @@ func fixtureAPIKey() *APIKey {
 	ginkgo.GinkgoHelper()
 
 	return &APIKey{
-		ID:              NewAPIKeyIDUnchecked("api-key-1"),
+		ID:              newFixtureAPIKeyID("api-key-1"),
 		UserID:          UserIDFromString("user-1"),
 		Name:            "automation",
 		Prefix:          "lwk",

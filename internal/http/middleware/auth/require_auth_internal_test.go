@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = It("maps unexpected RequireAuth errors to a generic token failure", func() {
@@ -18,14 +19,9 @@ var _ = It("maps unexpected RequireAuth errors to a generic token failure", func
 
 	abortRequireAuthError(ctx, errors.New("unexpected auth failure"))
 
-	Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-		} `json:"error"`
-	}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code).To(Equal("auth_token_invalid"))
-	Expect(body.Error.MessageID).To(Equal("errors.auth.token_invalid"))
+	Expect(rec).To(testmatchers.HaveHTTPStructuredError(
+		http.StatusInternalServerError,
+		errCodeAuthTokenInvalid,
+		sharederrors.MessageIDForCode(errCodeAuthTokenInvalid),
+	))
 })

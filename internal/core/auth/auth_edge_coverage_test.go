@@ -37,13 +37,13 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 	})
 
 	ginkgo.Describe("semantic auth types", func() {
-		ginkgo.It("round-trips unchecked constructors and string renderers", func() {
-			Expect(NewUserIDUnchecked("user-1").String()).To(Equal("user-1"))
-			Expect(UserIDFromString("user-2").String()).To(Equal("user-2"))
-			Expect(NewAPIKeyIDUnchecked("key-1").String()).To(Equal("key-1"))
-			Expect(APIKeyIDFromString("key-2").String()).To(Equal("key-2"))
-			Expect(NewSessionIDUnchecked("session-1").String()).To(Equal("session-1"))
-			Expect(SessionIDFromString("session-2").String()).To(Equal("session-2"))
+		ginkgo.It("parses semantic auth identifiers", func() {
+			Expect(UserIDFromString("user-1")).To(Equal(newFixtureUserID("user-1")))
+			Expect(UserIDFromString("user-2")).To(Equal(newFixtureUserID("user-2")))
+			Expect(APIKeyIDFromString("key-1")).To(Equal(newFixtureAPIKeyID("key-1")))
+			Expect(APIKeyIDFromString("key-2")).To(Equal(newFixtureAPIKeyID("key-2")))
+			Expect(SessionIDFromString("session-1")).To(Equal(newFixtureSessionID("session-1")))
+			Expect(SessionIDFromString("session-2")).To(Equal(newFixtureSessionID("session-2")))
 		})
 	})
 
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 			Expect(err).To(Equal(ErrAPIKeyNotFound))
 			_, err = (&APIKeyService{}).ListAPIKeys(newFixtureUserID("user-1"))
 			Expect(err).To(Equal(ErrAPIKeyNotFound))
-			Expect((&APIKeyService{}).RevokeAPIKey(newFixtureUserID("user-1"), NewAPIKeyIDUnchecked("key-1"))).To(Equal(ErrAPIKeyNotFound))
+			Expect((&APIKeyService{}).RevokeAPIKey(newFixtureUserID("user-1"), newFixtureAPIKeyID("key-1"))).To(Equal(ErrAPIKeyNotFound))
 			_, err = (&APIKeyService{}).VerifyAPIKey("lwk_key_secret")
 			Expect(err).To(Equal(ErrInvalidToken))
 
@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 
 			id, err := parseAPIKeyID("lwk_key_secret")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(id).To(Equal(NewAPIKeyIDUnchecked("key")))
+			Expect(id).To(Equal(newFixtureAPIKeyID("key")))
 
 			for _, raw := range []string{"", "not-lwk", "lwk_", "lwk_key_", "lwk__secret"} {
 				_, err := parseAPIKeyID(raw)
@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 
 			_, err = service.ListAPIKeys(newFixtureUserID("missing-user"))
 			Expect(err).To(Equal(ErrUserNotFound))
-			Expect(service.RevokeAPIKey(newFixtureUserID("missing-user"), NewAPIKeyIDUnchecked("key-1"))).To(Equal(ErrUserNotFound))
+			Expect(service.RevokeAPIKey(newFixtureUserID("missing-user"), newFixtureAPIKeyID("key-1"))).To(Equal(ErrUserNotFound))
 		})
 	})
 
@@ -195,9 +195,9 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 			Expect(service.sessionStore.CreateSession(sessionID, missingUserID, "refresh", time.Now().Add(time.Hour))).To(Succeed())
 
 			token := signAuthClaims(service, jwt.MapClaims{
-				"sub": string(missingUserID),
+				"sub": missingUserID,
 				"typ": "refresh",
-				"jti": sessionID.String(),
+				"jti": sessionID,
 				"exp": time.Now().Add(time.Hour).Unix(),
 			})
 			_, err := service.RefreshToken(token)
@@ -268,8 +268,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 
 			users, err := service.GetUsers()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(users).To(HaveLen(1))
-			Expect(users[0].Username).To(Equal("admin"))
+			Expect(users).To(HaveExactElements(HaveField("Username", Equal("admin"))))
 		})
 
 		ginkgo.It("rejects conflicting profile updates before touching the stored user", func() {

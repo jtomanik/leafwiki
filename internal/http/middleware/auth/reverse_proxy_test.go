@@ -199,7 +199,7 @@ var _ = It("TestInjectRemoteUser_TrustedIP_UnknownUser", func() {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for unknown user, got %d", w.Code)
 	}
-	assertAuthMiddlewareError(t, w, "auth_remote_user_not_found", "errors.auth.remote_user_not_found", "reverse proxy auth: user not found")
+	assertAuthMiddlewareError(t, w, expectedAuthRemoteUserNotFound)
 
 })
 
@@ -275,7 +275,7 @@ var _ = It("TestInjectRemoteUser_MisconfiguredTrustedProxies", func() {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 for missing trusted proxies config, got %d", w.Code)
 	}
-	assertAuthMiddlewareError(t, w, "auth_reverse_proxy_misconfigured", "errors.auth.reverse_proxy_misconfigured", "Reverse proxy authentication misconfigured")
+	assertAuthMiddlewareError(t, w, expectedAuthReverseProxyMisconfigured)
 
 })
 
@@ -298,7 +298,7 @@ var _ = It("TestInjectRemoteUser_MisconfiguredUserService", func() {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 for missing user service config, got %d", w.Code)
 	}
-	assertAuthMiddlewareError(t, w, "auth_reverse_proxy_misconfigured", "errors.auth.reverse_proxy_misconfigured", "Reverse proxy authentication misconfigured")
+	assertAuthMiddlewareError(t, w, expectedAuthReverseProxyMisconfigured)
 
 })
 

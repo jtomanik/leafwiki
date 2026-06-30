@@ -17,18 +17,20 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			_, _, _, service, user := setupTestAPIKeyService(ginkgo.GinkgoT())
 			userID := newFixtureUserID(user.ID)
 
+			idRandomErr := errors.New("id random failed")
 			restoreRand := setAuthSeam(&authRandRead, func([]byte) (int, error) {
-				return 0, errors.New("id random failed")
+				return 0, idRandomErr
 			})
 			_, err := service.CreateAPIKey(userID, "automation", userID)
-			Expect(err).To(MatchError("id random failed"))
+			Expect(err).To(MatchError(idRandomErr))
 			restoreRand()
 
 			call := 0
+			secretRandomErr := errors.New("secret random failed")
 			restoreRand = setAuthSeam(&authRandRead, func(buf []byte) (int, error) {
 				call++
 				if call == 2 {
-					return 0, errors.New("secret random failed")
+					return 0, secretRandomErr
 				}
 				for i := range buf {
 					buf[i] = byte(i + 1)
@@ -36,21 +38,22 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				return len(buf), nil
 			})
 			_, err = service.CreateAPIKey(userID, "automation", userID)
-			Expect(err).To(MatchError("secret random failed"))
+			Expect(err).To(MatchError(secretRandomErr))
 			restoreRand()
 
+			storeCreateErr := errors.New("store create failed")
 			restoreCreate := setAuthSeam(&authAPIKeyStoreCreateAPIKey, func(*APIKeyStore, *APIKey, string) error {
-				return errors.New("store create failed")
+				return storeCreateErr
 			})
 			_, err = service.CreateAPIKey(userID, "automation", userID)
-			Expect(err).To(MatchError("store create failed"))
+			Expect(err).To(MatchError(storeCreateErr))
 			restoreCreate()
 		})
 
 		ginkgo.It("maps verification store and user failures through token semantics", func() {
 			_, _, _, service, _ := setupTestAPIKeyService(ginkgo.GinkgoT())
 			raw := "lwk_key_secret"
-			key := &APIKey{ID: NewAPIKeyIDUnchecked("key"), UserID: newFixtureUserID("user-1")}
+			key := &APIKey{ID: newFixtureAPIKeyID("key"), UserID: newFixtureUserID("user-1")}
 			stored := &storedAPIKey{key: key, secretHash: hashAPIKey(raw)}
 
 			restoreGet := setAuthSeam(&authAPIKeyStoreGetAPIKeyByID, func(*APIKeyStore, APIKeyID) (*storedAPIKey, error) {
@@ -60,11 +63,12 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			Expect(err).To(Equal(ErrInvalidToken))
 			restoreGet()
 
+			storeUnavailableErr := errors.New("store unavailable")
 			restoreGet = setAuthSeam(&authAPIKeyStoreGetAPIKeyByID, func(*APIKeyStore, APIKeyID) (*storedAPIKey, error) {
-				return nil, errors.New("store unavailable")
+				return nil, storeUnavailableErr
 			})
 			_, err = service.VerifyAPIKey(raw)
-			Expect(err).To(MatchError("store unavailable"))
+			Expect(err).To(MatchError(storeUnavailableErr))
 			restoreGet()
 
 			revokedAt := time.Now().UTC()
@@ -85,11 +89,12 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			Expect(err).To(Equal(ErrInvalidToken))
 			restoreUser()
 
+			userStoreErr := errors.New("user store failed")
 			restoreUser = setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
-				return nil, errors.New("user store failed")
+				return nil, userStoreErr
 			})
 			_, err = service.VerifyAPIKey(raw)
-			Expect(err).To(MatchError("user store failed"))
+			Expect(err).To(MatchError(userStoreErr))
 			restoreUser()
 
 			restoreUser = setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
@@ -102,11 +107,12 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			Expect(err).To(Equal(ErrInvalidToken))
 			restoreMark()
 
+			markErr := errors.New("mark failed")
 			restoreMark = setAuthSeam(&authAPIKeyStoreMarkAPIKeyUsed, func(*APIKeyStore, APIKeyID, time.Time) error {
-				return errors.New("mark failed")
+				return markErr
 			})
 			_, err = service.VerifyAPIKey(raw)
-			Expect(err).To(MatchError("mark failed"))
+			Expect(err).To(MatchError(markErr))
 			restoreMark()
 			restoreUser()
 			restoreGet()
@@ -121,18 +127,20 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				Expect(service.userService.Close()).To(Succeed())
 			})
 
+			jtiErr := errors.New("jti failed")
 			restoreRand := setAuthSeam(&authRandRead, func([]byte) (int, error) {
-				return 0, errors.New("jti failed")
+				return 0, jtiErr
 			})
 			_, err := service.Login("testuser", "securepass")
-			Expect(err).To(MatchError("jti failed"))
+			Expect(err).To(MatchError(jtiErr))
 			restoreRand()
 
 			call := 0
+			refreshJTIErr := errors.New("refresh jti failed")
 			restoreRand = setAuthSeam(&authRandRead, func(buf []byte) (int, error) {
 				call++
 				if call == 2 {
-					return 0, errors.New("refresh jti failed")
+					return 0, refreshJTIErr
 				}
 				for i := range buf {
 					buf[i] = byte(i + 1)
@@ -140,21 +148,23 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				return len(buf), nil
 			})
 			_, err = service.Login("testuser", "securepass")
-			Expect(err).To(MatchError("refresh jti failed"))
+			Expect(err).To(MatchError(refreshJTIErr))
 			restoreRand()
 
+			signErr := errors.New("sign failed")
 			restoreSign := setAuthSeam(&authSignJWT, func(*jwt.Token, []byte) (string, error) {
-				return "", errors.New("sign failed")
+				return "", signErr
 			})
 			_, err = service.Login("testuser", "securepass")
-			Expect(err).To(MatchError("sign failed"))
+			Expect(err).To(MatchError(signErr))
 			restoreSign()
 
+			sessionCreateErr := errors.New("session create failed")
 			restoreSession := setAuthSeam(&authSessionStoreCreateSession, func(*SessionStore, SessionID, UserID, string, time.Time) error {
-				return errors.New("session create failed")
+				return sessionCreateErr
 			})
 			_, err = service.Login("testuser", "securepass")
-			Expect(err).To(MatchError("session create failed"))
+			Expect(err).To(MatchError(sessionCreateErr))
 			restoreSession()
 		})
 
@@ -167,18 +177,20 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			tokens, err := service.Login("testuser", "securepass")
 			Expect(err).NotTo(HaveOccurred())
 
+			accessJTIErr := errors.New("access jti failed")
 			restoreRand := setAuthSeam(&authRandRead, func([]byte) (int, error) {
-				return 0, errors.New("access jti failed")
+				return 0, accessJTIErr
 			})
 			_, err = service.RefreshToken(tokens.RefreshToken)
-			Expect(err).To(MatchError("access jti failed"))
+			Expect(err).To(MatchError(accessJTIErr))
 			restoreRand()
 
 			call := 0
+			refreshJTIErr := errors.New("refresh jti failed")
 			restoreRand = setAuthSeam(&authRandRead, func(buf []byte) (int, error) {
 				call++
 				if call == 2 {
-					return 0, errors.New("refresh jti failed")
+					return 0, refreshJTIErr
 				}
 				for i := range buf {
 					buf[i] = byte(i + 1)
@@ -186,14 +198,15 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				return len(buf), nil
 			})
 			_, err = service.RefreshToken(tokens.RefreshToken)
-			Expect(err).To(MatchError("refresh jti failed"))
+			Expect(err).To(MatchError(refreshJTIErr))
 			restoreRand()
 
+			sessionCreateErr := errors.New("session create failed")
 			restoreSession := setAuthSeam(&authSessionStoreCreateSession, func(*SessionStore, SessionID, UserID, string, time.Time) error {
-				return errors.New("session create failed")
+				return sessionCreateErr
 			})
 			_, err = service.RefreshToken(tokens.RefreshToken)
-			Expect(err).To(MatchError("session create failed"))
+			Expect(err).To(MatchError(sessionCreateErr))
 			restoreSession()
 
 			restoreRevoke := setAuthSeam(&authSessionStoreRevokeSession, func(*SessionStore, SessionID) error {
@@ -212,20 +225,22 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				Expect(service.userService.Close()).To(Succeed())
 			})
 
+			randomErr := errors.New("random failed")
 			restoreRand := setAuthSeam(&authRandRead, func([]byte) (int, error) {
-				return 0, errors.New("random failed")
+				return 0, randomErr
 			})
 			_, err := generateJTI()
-			Expect(err).To(MatchError("random failed"))
+			Expect(err).To(MatchError(randomErr))
 			_, _, _, err = service.generateToken(&User{ID: "user-1"}, time.Minute, "access")
-			Expect(err).To(MatchError("random failed"))
+			Expect(err).To(MatchError(randomErr))
 			restoreRand()
 
+			signErr := errors.New("sign failed")
 			restoreSign := setAuthSeam(&authSignJWT, func(*jwt.Token, []byte) (string, error) {
-				return "", errors.New("sign failed")
+				return "", signErr
 			})
 			_, _, _, err = service.generateToken(&User{ID: "user-1"}, time.Minute, "access")
-			Expect(err).To(MatchError("sign failed"))
+			Expect(err).To(MatchError(signErr))
 			restoreSign()
 		})
 
@@ -250,10 +265,11 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreTransient := setAuthSeam(&authIsSQLiteTransientLock, func(error) bool {
 				return true
 			})
+			stillLockedErr := errors.New("still locked")
 			_, err = retryAPIKeyTransientLocks(func() (struct{}, error) {
-				return struct{}{}, errors.New("still locked")
+				return struct{}{}, stillLockedErr
 			})
-			Expect(err).To(MatchError("still locked"))
+			Expect(err).To(MatchError(stillLockedErr))
 			restoreTransient()
 			restoreDelay()
 			restoreAttempts()
@@ -282,94 +298,106 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 				Expect(service.Close()).To(Succeed())
 			})
 
+			hashErr := errors.New("hash failed")
 			restoreHash := setAuthSeam(&authGeneratePasswordHash, func([]byte, int) ([]byte, error) {
-				return nil, errors.New("hash failed")
+				return nil, hashErr
 			})
 			_, err := service.CreateUser("hash", "hash@example.com", "password", RoleEditor)
-			Expect(err).To(MatchError("hash failed"))
+			Expect(err).To(MatchError(hashErr))
 			restoreHash()
 
+			idErr := errors.New("id failed")
 			restoreID := setAuthSeam(&authGenerateUniqueID, func() (string, error) {
-				return "", errors.New("id failed")
+				return "", idErr
 			})
 			_, err = service.CreateUser("id", "id@example.com", "password", RoleEditor)
-			Expect(err).To(MatchError("id failed"))
+			Expect(err).To(MatchError(idErr))
 			restoreID()
 
+			storeCreateErr := errors.New("store create failed")
 			restoreCreate := setAuthSeam(&authUserStoreCreateUser, func(*UserStore, *User) error {
-				return errors.New("store create failed")
+				return storeCreateErr
 			})
 			_, err = service.CreateUser("store", "store@example.com", "password", RoleEditor)
-			Expect(err).To(MatchError("store create failed"))
+			Expect(err).To(MatchError(storeCreateErr))
 			restoreCreate()
 
 			admin, err := service.CreateUser("admin", "admin@example.com", "password", RoleAdmin)
 			Expect(err).NotTo(HaveOccurred())
 			adminID := newFixtureUserID(admin.ID)
 
+			countErr := errors.New("count failed")
 			restoreCount := setAuthSeam(&authUserStoreCountAdminUsers, func(*UserStore) (int, error) {
-				return 0, errors.New("count failed")
+				return 0, countErr
 			})
 			_, err = service.UpdateUser(adminID, "admin", "admin@example.com", "", RoleEditor)
-			Expect(err).To(MatchError("count failed"))
+			Expect(err).To(MatchError(countErr))
 			restoreCount()
 
+			updateHashErr := errors.New("update hash failed")
 			restoreHash = setAuthSeam(&authGeneratePasswordHash, func([]byte, int) ([]byte, error) {
-				return nil, errors.New("update hash failed")
+				return nil, updateHashErr
 			})
 			_, err = service.UpdateUser(adminID, "admin", "admin@example.com", "new-password", RoleAdmin)
-			Expect(err).To(MatchError("update hash failed"))
-			Expect(service.UpdatePassword(adminID, "new-password")).To(MatchError("update hash failed"))
+			Expect(err).To(MatchError(updateHashErr))
+			Expect(service.UpdatePassword(adminID, "new-password")).To(MatchError(updateHashErr))
 			restoreHash()
 
+			storeUpdateErr := errors.New("store update failed")
 			restoreUpdate := setAuthSeam(&authUserStoreUpdateUser, func(*UserStore, *User) error {
-				return errors.New("store update failed")
+				return storeUpdateErr
 			})
 			_, err = service.UpdateUser(adminID, "admin", "admin@example.com", "", RoleAdmin)
-			Expect(err).To(MatchError("store update failed"))
+			Expect(err).To(MatchError(storeUpdateErr))
 			restoreUpdate()
 
+			passwordUpdateErr := errors.New("password update failed")
 			restorePassword := setAuthSeam(&authUserStoreUpdatePassword, func(*UserStore, UserID, string) error {
-				return errors.New("password update failed")
+				return passwordUpdateErr
 			})
-			Expect(service.UpdatePassword(adminID, "new-password")).To(MatchError("password update failed"))
-			Expect(service.ChangeOwnPassword(adminID, "password", "new-password")).To(MatchError("password update failed"))
+			Expect(service.UpdatePassword(adminID, "new-password")).To(MatchError(passwordUpdateErr))
+			Expect(service.ChangeOwnPassword(adminID, "password", "new-password")).To(MatchError(passwordUpdateErr))
 			restorePassword()
 
 			editor, err := service.CreateUser("editor", "editor@example.com", "password", RoleEditor)
 			Expect(err).NotTo(HaveOccurred())
+			deleteErr := errors.New("delete failed")
 			restoreDelete := setAuthSeam(&authUserStoreDeleteUser, func(*UserStore, UserID) error {
-				return errors.New("delete failed")
+				return deleteErr
 			})
-			Expect(service.DeleteUser(newFixtureUserID(editor.ID))).To(MatchError("delete failed"))
+			Expect(service.DeleteUser(newFixtureUserID(editor.ID))).To(MatchError(deleteErr))
 			restoreDelete()
 
+			listErr := errors.New("list failed")
 			restoreUsers := setAuthSeam(&authUserStoreGetAllUsers, func(*UserStore) ([]*User, error) {
-				return nil, errors.New("list failed")
+				return nil, listErr
 			})
 			_, err = service.GetUsers()
-			Expect(err).To(MatchError("list failed"))
+			Expect(err).To(MatchError(listErr))
 			restoreUsers()
 
+			passwordGenerationErr := errors.New("password generation failed")
 			restoreGenerate := setAuthSeam(&authGenerateRandomPassword, func(int) (string, error) {
-				return "", errors.New("password generation failed")
+				return "", passwordGenerationErr
 			})
 			_, err = service.ResetAdminUserPassword()
-			Expect(err).To(MatchError(ContainSubstring("failed to generate password")))
+			Expect(err).To(MatchError(passwordGenerationErr))
 			restoreGenerate()
 
+			adminLookupErr := errors.New("admin lookup failed")
 			restoreAdmin := setAuthSeam(&authUserStoreGetAdminUser, func(*UserStore) (*User, error) {
-				return nil, errors.New("admin lookup failed")
+				return nil, adminLookupErr
 			})
 			_, err = service.ResetAdminUserPassword()
-			Expect(err).To(MatchError("admin lookup failed"))
+			Expect(err).To(MatchError(adminLookupErr))
 			restoreAdmin()
 
+			resetUpdateErr := errors.New("reset update failed")
 			restorePassword = setAuthSeam(&authUserStoreUpdatePassword, func(*UserStore, UserID, string) error {
-				return errors.New("reset update failed")
+				return resetUpdateErr
 			})
 			_, err = service.ResetAdminUserPassword()
-			Expect(err).To(MatchError(ContainSubstring("failed to update admin password")))
+			Expect(err).To(MatchError(resetUpdateErr))
 			restorePassword()
 		})
 
@@ -382,12 +410,13 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreAdmin := setAuthSeam(&authUserStoreGetAdminUser, func(*UserStore) (*User, error) {
 				return nil, ErrUserNotFound
 			})
+			createAdminErr := errors.New("create admin failed")
 			restoreCreate := setAuthSeam(&authUserStoreCreateUser, func(*UserStore, *User) error {
-				return errors.New("create admin failed")
+				return createAdminErr
 			})
-			Expect(service.InitDefaultAdmin("password")).To(MatchError(ContainSubstring("failed to create default admin")))
+			Expect(service.InitDefaultAdmin("password")).To(MatchError(createAdminErr))
 			_, err := service.ResetAdminUserPassword()
-			Expect(err).To(MatchError(ContainSubstring("failed to create default admin")))
+			Expect(err).To(MatchError(createAdminErr))
 			restoreCreate()
 			restoreAdmin()
 		})
@@ -397,25 +426,27 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			ginkgo.DeferCleanup(func() {
 				Expect(service.Close()).To(Succeed())
 			})
+			backendErr := errors.New("backend failed")
 			restoreGet := setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
-				return nil, errors.New("backend failed")
+				return nil, backendErr
 			})
 
 			_, err := service.GetUserByID(newFixtureUserID("missing"))
-			Expect(err).To(MatchError("backend failed"))
+			Expect(err).To(MatchError(backendErr))
 			_, err = service.UpdateUser(newFixtureUserID("missing"), "missing", "missing@example.com", "", RoleEditor)
 			Expect(err).To(Equal(ErrUserNotFound))
-			Expect(service.UpdatePassword(newFixtureUserID("missing"), "password")).To(MatchError("backend failed"))
+			Expect(service.UpdatePassword(newFixtureUserID("missing"), "password")).To(MatchError(backendErr))
 			Expect(service.DeleteUser(newFixtureUserID("missing"))).To(Equal(ErrUserNotFound))
 			Expect(service.ChangeOwnPassword(newFixtureUserID("missing"), "old", "new")).To(Equal(ErrUserNotFound))
 			restoreGet()
 
 			user, err := service.CreateUser("owner", "owner@example.com", "old", RoleEditor)
 			Expect(err).NotTo(HaveOccurred())
+			ownHashErr := errors.New("own hash failed")
 			restoreHash := setAuthSeam(&authGeneratePasswordHash, func([]byte, int) ([]byte, error) {
-				return nil, errors.New("own hash failed")
+				return nil, ownHashErr
 			})
-			Expect(service.ChangeOwnPassword(newFixtureUserID(user.ID), "old", "new")).To(MatchError("own hash failed"))
+			Expect(service.ChangeOwnPassword(newFixtureUserID(user.ID), "old", "new")).To(MatchError(ownHashErr))
 			restoreHash()
 		})
 	})

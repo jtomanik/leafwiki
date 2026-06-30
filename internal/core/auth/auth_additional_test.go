@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("additional auth coverage", func() {
 		Expect(store.withDB(func(db *sql.DB) error {
 			return db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = ?`, expiredID).Scan(&expiredRows)
 		})).To(Succeed())
-		Expect(expiredRows).To(Equal(0))
+		Expect(expiredRows).To(BeZero())
 	})
 
 	ginkgo.It("UserResolver preloads, lazily resolves, handles empty IDs, and reloads changed labels", func() {

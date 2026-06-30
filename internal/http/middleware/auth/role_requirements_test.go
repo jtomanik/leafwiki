@@ -1,7 +1,6 @@
 package auth_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 
@@ -9,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
@@ -19,7 +19,7 @@ type roleRequirementScenario struct {
 	route          string
 	target         string
 	expectedStatus int
-	expectedCode   string
+	expectedCode   sharederrors.ErrorCode
 }
 
 func performRoleRequirementRequest(middleware gin.HandlerFunc, scenario roleRequirementScenario) *httptest.ResponseRecorder {
@@ -41,17 +41,6 @@ func performRoleRequirementRequest(middleware gin.HandlerFunc, scenario roleRequ
 	return rec
 }
 
-func expectAuthErrorCode(rec *httptest.ResponseRecorder, code string) {
-	GinkgoHelper()
-	var body struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-	Expect(body.Error.Code).To(Equal(code))
-}
-
 func testUser(id string, role string) *coreauth.User {
 	return &coreauth.User{
 		ID:       id,
@@ -63,9 +52,9 @@ func testUser(id string, role string) *coreauth.User {
 var _ = DescribeTable("RequireAdmin",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireAdmin(scenario.authDisabled), scenario)
-		Expect(rec.Code).To(Equal(scenario.expectedStatus))
+		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			expectAuthErrorCode(rec, scenario.expectedCode)
+			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
@@ -80,13 +69,13 @@ var _ = DescribeTable("RequireAdmin",
 		route:          "/admin",
 		target:         "/admin",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_admin_disabled",
+		expectedCode:   expectedAuthAdminDisabled,
 	}),
 	Entry("rejects a missing user", roleRequirementScenario{
 		route:          "/admin",
 		target:         "/admin",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_user_not_authenticated",
+		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 	Entry("rejects a non-admin user", roleRequirementScenario{
 		user:           testUser("viewer", coreauth.RoleViewer),
@@ -94,7 +83,7 @@ var _ = DescribeTable("RequireAdmin",
 		route:          "/admin",
 		target:         "/admin",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_admin_privileges_required",
+		expectedCode:   expectedAuthAdminPrivilegesRequired,
 	}),
 	Entry("rejects an invalid user context", roleRequirementScenario{
 		user:           "not-a-user",
@@ -102,16 +91,16 @@ var _ = DescribeTable("RequireAdmin",
 		route:          "/admin",
 		target:         "/admin",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_admin_privileges_required",
+		expectedCode:   expectedAuthAdminPrivilegesRequired,
 	}),
 )
 
 var _ = DescribeTable("RequireSelfOrAdmin",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelfOrAdmin(scenario.authDisabled), scenario)
-		Expect(rec.Code).To(Equal(scenario.expectedStatus))
+		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			expectAuthErrorCode(rec, scenario.expectedCode)
+			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
@@ -134,20 +123,20 @@ var _ = DescribeTable("RequireSelfOrAdmin",
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_admin_privileges_required",
+		expectedCode:   expectedAuthAdminPrivilegesRequired,
 	}),
 	Entry("rejects user management while auth is disabled", roleRequirementScenario{
 		authDisabled:   true,
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_admin_disabled",
+		expectedCode:   expectedAuthAdminDisabled,
 	}),
 	Entry("rejects a missing user", roleRequirementScenario{
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_user_not_authenticated",
+		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 	Entry("rejects an invalid user context", roleRequirementScenario{
 		user:           "not-a-user",
@@ -155,16 +144,16 @@ var _ = DescribeTable("RequireSelfOrAdmin",
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_invalid_user",
+		expectedCode:   expectedAuthInvalidUser,
 	}),
 )
 
 var _ = DescribeTable("RequireEditorOrAdmin",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireEditorOrAdmin(), scenario)
-		Expect(rec.Code).To(Equal(scenario.expectedStatus))
+		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			expectAuthErrorCode(rec, scenario.expectedCode)
+			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
@@ -187,13 +176,13 @@ var _ = DescribeTable("RequireEditorOrAdmin",
 		route:          "/edit",
 		target:         "/edit",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_editor_privileges_required",
+		expectedCode:   expectedAuthEditorPrivilegesRequired,
 	}),
 	Entry("rejects a missing user", roleRequirementScenario{
 		route:          "/edit",
 		target:         "/edit",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_user_not_authenticated",
+		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 	Entry("rejects an invalid user context", roleRequirementScenario{
 		user:           "not-a-user",
@@ -201,16 +190,16 @@ var _ = DescribeTable("RequireEditorOrAdmin",
 		route:          "/edit",
 		target:         "/edit",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_user_not_authenticated",
+		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 )
 
 var _ = DescribeTable("RequireSelf",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelf(), scenario)
-		Expect(rec.Code).To(Equal(scenario.expectedStatus))
+		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			expectAuthErrorCode(rec, scenario.expectedCode)
+			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
@@ -226,13 +215,13 @@ var _ = DescribeTable("RequireSelf",
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_self_required",
+		expectedCode:   expectedAuthSelfRequired,
 	}),
 	Entry("rejects a missing user", roleRequirementScenario{
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_user_not_authenticated",
+		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 	Entry("rejects an invalid user context", roleRequirementScenario{
 		user:           "not-a-user",
@@ -240,7 +229,7 @@ var _ = DescribeTable("RequireSelf",
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusForbidden,
-		expectedCode:   "auth_self_required",
+		expectedCode:   expectedAuthSelfRequired,
 	}),
 )
 
