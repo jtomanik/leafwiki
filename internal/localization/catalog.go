@@ -15,6 +15,55 @@ type catalogMessage struct {
 	Other       string `toml:"other"`
 }
 
+type CatalogMessageID string
+
+func (id CatalogMessageID) String() string {
+	return string(id)
+}
+
+type CommittedCatalogDefaultMismatchError struct {
+	ID              CatalogMessageID
+	CatalogDefault  string
+	RegistryDefault string
+}
+
+func (e *CommittedCatalogDefaultMismatchError) Error() string {
+	if e == nil {
+		return ErrCommittedCatalogDefaultMismatch.Error()
+	}
+	return fmt.Sprintf("catalog %s other = %q, want %q: %v", e.ID, e.CatalogDefault, e.RegistryDefault, ErrCommittedCatalogDefaultMismatch)
+}
+
+func (e *CommittedCatalogDefaultMismatchError) Unwrap() error {
+	return ErrCommittedCatalogDefaultMismatch
+}
+
+type CommittedCatalogMissingMessagesError struct {
+	IDs []CatalogMessageID
+}
+
+func (e *CommittedCatalogMissingMessagesError) Error() string {
+	if e == nil {
+		return ErrCommittedCatalogMissingMessage.Error()
+	}
+	ids := make([]string, 0, len(e.IDs))
+	for _, id := range e.IDs {
+		ids = append(ids, id.String())
+	}
+	return fmt.Sprintf("catalog missing message IDs: %s: %v", strings.Join(ids, ", "), ErrCommittedCatalogMissingMessage)
+}
+
+func (e *CommittedCatalogMissingMessagesError) Unwrap() error {
+	return ErrCommittedCatalogMissingMessage
+}
+
+func (e *CommittedCatalogMissingMessagesError) MessageIDs() []CatalogMessageID {
+	if e == nil {
+		return nil
+	}
+	return append([]CatalogMessageID(nil), e.IDs...)
+}
+
 var (
 	ErrCommittedCatalogDefaultMismatch  = errors.New("committed catalog default mismatch")
 	ErrCommittedCatalogMissingMessage   = errors.New("committed catalog missing message")
@@ -35,20 +84,26 @@ func ValidateCommittedCatalog() error {
 	if err != nil {
 		return err
 	}
-	var missing []string
+	var missing []CatalogMessageID
 	for _, definition := range definitions {
 		entry, ok := catalog[definition.ID]
 		if !ok {
-			missing = append(missing, definition.ID)
+			missing = append(missing, CatalogMessageID(definition.ID))
 			continue
 		}
 		if entry.Other != definition.Default {
-			return fmt.Errorf("catalog %s other = %q, want %q: %w", definition.ID, entry.Other, definition.Default, ErrCommittedCatalogDefaultMismatch)
+			return &CommittedCatalogDefaultMismatchError{
+				ID:              CatalogMessageID(definition.ID),
+				CatalogDefault:  entry.Other,
+				RegistryDefault: definition.Default,
+			}
 		}
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("catalog missing message IDs: %s: %w", strings.Join(missing, ", "), ErrCommittedCatalogMissingMessage)
+		sort.Slice(missing, func(i, j int) bool {
+			return missing[i] < missing[j]
+		})
+		return &CommittedCatalogMissingMessagesError{IDs: missing}
 	}
 	return nil
 }

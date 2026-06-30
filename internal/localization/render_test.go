@@ -2,6 +2,7 @@ package localization
 
 import (
 	"embed"
+	"errors"
 	"io/fs"
 	"sync"
 	"testing/fstest"
@@ -250,10 +251,7 @@ var _ = Describe("localization edge coverage", func() {
 
 		err := ValidateCommittedCatalog()
 
-		Expect(err).To(SatisfyAll(
-			MatchError(ErrCommittedCatalogMissingMessage),
-			MatchError(ContainSubstring(testCatalogMissingID)),
-		))
+		Expect(err).To(matchCommittedCatalogMissingMessage(CatalogMessageID(testCatalogMissingID)))
 	})
 
 	It("ValidateCommittedCatalog reports committed catalog default mismatches", func() {
@@ -270,10 +268,7 @@ var _ = Describe("localization edge coverage", func() {
 
 		err := ValidateCommittedCatalog()
 
-		Expect(err).To(SatisfyAll(
-			MatchError(ErrCommittedCatalogDefaultMismatch),
-			MatchError(ContainSubstring(string(MessageIDCLIHelpUsage))),
-		))
+		Expect(err).To(matchCommittedCatalogDefaultMismatch(CatalogMessageID(MessageIDCLIHelpUsage)))
 	})
 
 	It("catalog readers return errors when the embedded catalog is unavailable", func() {
@@ -371,5 +366,34 @@ func (fsys *sequentialCatalogFS) Open(name string) (fs.File, error) {
 }
 
 func matchRenderResult(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchCommittedCatalogMissingMessage(id CatalogMessageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		MatchError(ErrCommittedCatalogMissingMessage),
+		WithTransform(func(err error) []CatalogMessageID {
+			var catalogErr *CommittedCatalogMissingMessagesError
+			if !errors.As(err, &catalogErr) {
+				return nil
+			}
+			return catalogErr.MessageIDs()
+		}, ContainElement(id)),
+	)
+}
+
+func matchCommittedCatalogDefaultMismatch(id CatalogMessageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		MatchError(ErrCommittedCatalogDefaultMismatch),
+		WithTransform(func(err error) CatalogMessageID {
+			var catalogErr *CommittedCatalogDefaultMismatchError
+			if !errors.As(err, &catalogErr) {
+				return ""
+			}
+			return catalogErr.ID
+		}, Equal(id)),
+	)
 }
