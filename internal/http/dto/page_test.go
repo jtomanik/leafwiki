@@ -6,11 +6,40 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
 	coreprop "github.com/perber/wiki/internal/properties"
 )
+
+func matchAPIPage(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchAPINode(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchAPINodeID(expected tree.PageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(raw string) tree.PageID {
+		return tree.PageIDFromString(raw)
+	}, Equal(expected))
+}
+
+func matchPropertyPage(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchTaggedPage(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
 
 var _ = Describe("page DTO mapping", func() {
 	It("maps a full page with metadata, content, path, and initialized collections", func() {
@@ -19,16 +48,20 @@ var _ = Describe("page DTO mapping", func() {
 
 		page := ToAPIPage(&tree.Page{PageNode: child, Content: "# Intro"}, resolver)
 
-		Expect(page.Content).To(Equal("# Intro"))
-		Expect(page.Path).To(Equal("docs/intro"))
-		Expect(page.Tags).To(BeEmpty())
-		Expect(page.Tags).NotTo(BeNil())
-		Expect(page.Properties).To(BeEmpty())
-		Expect(page.Properties).NotTo(BeNil())
-		Expect(page.Node.ID).To(Equal("intro"))
-		Expect(page.Node.Path).To(Equal("docs/intro"))
-		Expect(page.Node.Metadata.Creator).To(Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID.String(), Username: "creator"}))
-		Expect(page.Node.Metadata.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
+		Expect(page).To(matchAPIPage(gstruct.Fields{
+			"Content":    Equal("# Intro"),
+			"Path":       Equal("docs/intro"),
+			"Tags":       SatisfyAll(BeEmpty(), Not(BeNil())),
+			"Properties": SatisfyAll(BeEmpty(), Not(BeNil())),
+			"Node": matchAPINode(gstruct.Fields{
+				"ID":   Equal("intro"),
+				"Path": Equal("docs/intro"),
+				"Metadata": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"Creator":    Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID.String(), Username: "creator"}),
+					"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
+				}),
+			}),
+		}))
 	})
 
 	It("prunes page children when converting a page with depth zero", func() {
@@ -46,16 +79,19 @@ var _ = Describe("page DTO mapping", func() {
 			if node == root {
 				return "docs/README.md", nil
 			}
-			return "docs/" + node.Slug.String() + ".md", nil
+			return "docs/" + node.Slug.FilesystemPath() + ".md", nil
 		})
 
-		Expect(apiNode.Path).To(Equal("docs"))
-		Expect(apiNode.ContentPath).To(Equal("docs/README.md"))
-		Expect(apiNode.ReadmeFallback).To(BeTrue())
-		Expect(apiNode.Children).To(HaveLen(1))
-		Expect(apiNode.Children[0].ID).To(Equal(child.ID.String()))
-		Expect(apiNode.Children[0].ContentPath).To(Equal("docs/intro.md"))
-		Expect(apiNode.Children[0].ReadmeFallback).To(BeFalse())
+		Expect(apiNode).To(matchAPINode(gstruct.Fields{
+			"Path":           Equal("docs"),
+			"ContentPath":    Equal("docs/README.md"),
+			"ReadmeFallback": BeTrue(),
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"ID":             matchAPINodeID(child.ID),
+				"ContentPath":    Equal("docs/intro.md"),
+				"ReadmeFallback": BeFalse(),
+			})),
+		}))
 	})
 
 	It("omits content paths when the resolver fails", func() {
@@ -78,13 +114,27 @@ var _ = Describe("page DTO mapping", func() {
 		}, 0)
 		withContentPathUnlimited := ToAPINodeWithContentPathsAndDepth(root, "", nil, nil, -1)
 
-		Expect(depthOne.Children).To(HaveLen(1))
-		Expect(depthOne.Children[0].Children).To(BeEmpty())
-		Expect(unlimited.Children[0].Children).To(HaveLen(1))
-		Expect(unlimited.Children[0].Children[0].ID).To(Equal(grandchild.ID.String()))
-		Expect(withContentPathDepthZero.Children).To(BeEmpty())
-		Expect(withContentPathDepthZero.ContentPath).To(Equal("docs.md"))
-		Expect(withContentPathUnlimited.Children[0].ID).To(Equal(child.ID.String()))
+		Expect(depthOne).To(matchAPINode(gstruct.Fields{
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"Children": BeEmpty(),
+			})),
+		}))
+		Expect(unlimited).To(matchAPINode(gstruct.Fields{
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"Children": ConsistOf(matchAPINode(gstruct.Fields{
+					"ID": matchAPINodeID(grandchild.ID),
+				})),
+			})),
+		}))
+		Expect(withContentPathDepthZero).To(matchAPINode(gstruct.Fields{
+			"Children":    BeEmpty(),
+			"ContentPath": Equal("docs.md"),
+		}))
+		Expect(withContentPathUnlimited).To(matchAPINode(gstruct.Fields{
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"ID": matchAPINodeID(child.ID),
+			})),
+		}))
 	})
 
 	It("handles nil and unlimited pruning defensively", func() {
@@ -115,15 +165,17 @@ var _ = Describe("property and tag DTO mapping", func() {
 			"status": {Value: "draft", Type: "text"},
 		}, resolver)
 
-		Expect(page.ID).To(Equal("intro"))
-		Expect(page.Title).To(Equal("Intro"))
-		Expect(page.Path).To(Equal("docs/intro"))
-		Expect(page.Properties).To(Equal(map[string]PropertyEntry{
-			"status": {Value: "draft", Type: "text"},
+		Expect(page).To(matchPropertyPage(gstruct.Fields{
+			"ID":    Equal("intro"),
+			"Title": Equal("Intro"),
+			"Path":  Equal("docs/intro"),
+			"Properties": Equal(map[string]PropertyEntry{
+				"status": {Value: "draft", Type: "text"},
+			}),
+			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
+			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
+			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
 		}))
-		Expect(page.CreatedAt).To(Equal("2026-06-26T10:00:00Z"))
-		Expect(page.UpdatedAt).To(Equal("2026-06-26T11:00:00Z"))
-		Expect(page.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
 	})
 
 	It("leaves optional property timestamps empty when metadata times are zero", func() {
@@ -131,9 +183,11 @@ var _ = Describe("property and tag DTO mapping", func() {
 
 		page := ToPropertyPage(node, nil, nil)
 
-		Expect(page.CreatedAt).To(BeEmpty())
-		Expect(page.UpdatedAt).To(BeEmpty())
-		Expect(page.Properties).To(BeEmpty())
+		Expect(page).To(matchPropertyPage(gstruct.Fields{
+			"CreatedAt":  BeEmpty(),
+			"UpdatedAt":  BeEmpty(),
+			"Properties": BeEmpty(),
+		}))
 	})
 
 	It("maps tagged pages and normalizes nil tags to an empty slice", func() {
@@ -143,16 +197,19 @@ var _ = Describe("property and tag DTO mapping", func() {
 		tagged := ToTaggedPage(child, []string{"go", "wiki"}, "Intro excerpt", resolver)
 		emptyTags := ToTaggedPage(root, nil, "", nil)
 
-		Expect(tagged.ID).To(Equal("intro"))
-		Expect(tagged.Kind).To(Equal(tree.NodeKindPage))
-		Expect(tagged.Path).To(Equal("docs/intro"))
-		Expect(tagged.Excerpt).To(Equal("Intro excerpt"))
-		Expect(tagged.Tags).To(Equal([]string{"go", "wiki"}))
-		Expect(tagged.CreatedAt).To(Equal("2026-06-26T10:00:00Z"))
-		Expect(tagged.UpdatedAt).To(Equal("2026-06-26T11:00:00Z"))
-		Expect(tagged.LastAuthor).To(Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}))
-		Expect(emptyTags.Tags).To(BeEmpty())
-		Expect(emptyTags.Tags).NotTo(BeNil())
+		Expect(tagged).To(matchTaggedPage(gstruct.Fields{
+			"ID":         Equal("intro"),
+			"Kind":       Equal(tree.NodeKindPage),
+			"Path":       Equal("docs/intro"),
+			"Excerpt":    Equal("Intro excerpt"),
+			"Tags":       Equal([]string{"go", "wiki"}),
+			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
+			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
+			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
+		}))
+		Expect(emptyTags).To(matchTaggedPage(gstruct.Fields{
+			"Tags": SatisfyAll(BeEmpty(), Not(BeNil())),
+		}))
 	})
 })
 

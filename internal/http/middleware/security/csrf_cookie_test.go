@@ -197,7 +197,7 @@ var _ = It("returns token generation errors from Issue", func() {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	Expect(rec.Code).To(Equal(http.StatusTeapot))
+	Expect(rec).To(HaveHTTPStatus(http.StatusTeapot))
 	Expect(rec.Result().Cookies()).To(BeEmpty())
 	Expect(rec.Result().Header.Get("X-CSRF-Token")).To(BeEmpty())
 })
@@ -390,9 +390,9 @@ var _ = Describe("CSRF cookie edge coverage", func() {
 
 		router.ServeHTTP(w, req)
 
-		Expect(w.Code).To(Equal(http.StatusOK))
-		Expect(w.Body.String()).To(Equal("existing-token"))
-		Expect(w.Result().Header.Get("X-CSRF-Token")).To(Equal("existing-token"))
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w).To(HaveHTTPBody("existing-token"))
+		Expect(w).To(HaveHTTPHeaderWithValue("X-CSRF-Token", "existing-token"))
 		Expect(w.Result().Cookies()).To(BeEmpty())
 	})
 

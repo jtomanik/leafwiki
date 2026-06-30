@@ -2,7 +2,6 @@ package security
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	. "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = It("TestCSRFMiddleware_AllowsSafeMethodsWithoutToken", func() {
@@ -57,7 +58,7 @@ var _ = It("TestCSRFMiddleware_BlocksPostWithoutCookie", func() {
 		t.Fatalf("expected status 403 for POST without CSRF cookie, got %d", w.Code)
 	}
 
-	assertCSRFStructuredError(t, w, "csrf_token_missing", "errors.csrf.token_missing", "CSRF token missing")
+	assertCSRFStructuredError(t, w, errCodeCSRFTokenMissing)
 
 })
 
@@ -88,7 +89,7 @@ var _ = It("TestCSRFMiddleware_BlocksPostWithCookieButNoHeader", func() {
 		t.Fatalf("expected status 403 for POST with cookie but no header, got %d", w.Code)
 	}
 
-	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
+	assertCSRFStructuredError(t, w, errCodeCSRFTokenInvalid)
 
 })
 
@@ -120,7 +121,7 @@ var _ = It("TestCSRFMiddleware_BlocksPostWithMismatchingTokens", func() {
 		t.Fatalf("expected status 403 for POST with mismatching tokens, got %d", w.Code)
 	}
 
-	assertCSRFStructuredError(t, w, "csrf_token_invalid", "errors.csrf.token_invalid", "Invalid CSRF token")
+	assertCSRFStructuredError(t, w, errCodeCSRFTokenInvalid)
 
 })
 
@@ -186,19 +187,14 @@ type securityTestTB interface {
 	Fatalf(format string, args ...any)
 }
 
-func assertCSRFStructuredError(t securityTestTB, rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+func assertCSRFStructuredError(t securityTestTB, rec *httptest.ResponseRecorder, code sharederrors.ErrorCode) {
 	t.Helper()
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
-		} `json:"error"`
+	matcher := testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code))
+	matched, err := matcher.Match(rec.Body.Bytes())
+	if err != nil {
+		t.Fatalf("match csrf error: %v; body=%s", err, rec.Body.String())
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode csrf error: %v; body=%s", err, rec.Body.String())
-	}
-	if body.Error.Code != code || body.Error.MessageID != messageID || body.Error.Message != message {
-		t.Fatalf("csrf error = %#v, want code=%q messageId=%q message=%q", body.Error, code, messageID, message)
+	if !matched {
+		t.Fatalf("%s", matcher.FailureMessage(rec.Body.String()))
 	}
 }

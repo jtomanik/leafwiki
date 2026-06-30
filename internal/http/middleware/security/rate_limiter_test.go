@@ -223,7 +223,7 @@ var _ = Describe("rate limiter edge coverage", func() {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		Expect(w.Code).To(Equal(http.StatusTooManyRequests))
+		Expect(w).To(HaveHTTPStatus(http.StatusTooManyRequests))
 	})
 
 	It("resets the request count after successful responses when configured", func() {
@@ -240,7 +240,7 @@ var _ = Describe("rate limiter edge coverage", func() {
 			req.RemoteAddr = "192.0.2.11:1234"
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			Expect(w.Code).To(Equal(http.StatusOK))
+			Expect(w).To(HaveHTTPStatus(http.StatusOK))
 		}
 	})
 })
