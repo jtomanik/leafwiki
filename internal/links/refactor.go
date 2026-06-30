@@ -6,13 +6,13 @@ type RefactorLinkMatch struct {
 	FromPageID tree.PageID
 	FromTitle  string
 	ToPath     tree.RoutePath
-	ToKind     string
+	ToKind     TargetKind
 	Broken     bool
 }
 
 type RewriteRule struct {
 	OldPath    tree.RoutePath
 	NewPath    tree.RoutePath
-	Kind       string
-	OutputKind string
+	Kind       TargetKind
+	OutputKind TargetKind
 }

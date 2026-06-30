@@ -264,7 +264,7 @@ func rewriteLinkDestination(currentPath tree.RoutePath, sourceKind MarkdownSourc
 	}
 
 	outputPageLink := canonicalPageLink
-	if matchedRule.OutputKind != "" {
+	if !matchedRule.OutputKind.IsZero() {
 		outputPageLink = storedTargetKind(matchedRule.OutputKind) == defaultStoredTargetKind
 	}
 
@@ -277,7 +277,7 @@ func rewriteLinkDestination(currentPath tree.RoutePath, sourceKind MarkdownSourc
 		rewrittenBase = addMarkdownLinkRootPrefix(rewrittenBase, markdownLinkRootPrefix)
 	} else {
 		currentPathForRelative := currentPath
-		if nextCurrentPath, rewrittenCurrentPath := applyRewriteRulesForKind(currentPath, string(sourceKind), rules); rewrittenCurrentPath {
+		if nextCurrentPath, rewrittenCurrentPath := applyRewriteRulesForKind(currentPath, sourceKind.TargetKind(), rules); rewrittenCurrentPath {
 			currentPathForRelative = nextCurrentPath
 		}
 		rewrittenBase = relativeMarkdownDestinationForSource(currentPathForRelative, sourceKind, newResolvedPath, outputPageLink)
@@ -355,7 +355,7 @@ func rewriteRelativeLinkForPathChange(oldCurrentPath tree.RoutePath, newCurrentP
 	outputPageLink := canonicalPageLink
 	if rewrittenTarget, matchedRule, ok := applyRewriteRulesForKindWithRule(resolvedPath, targetKind, rules); ok {
 		targetPath = rewrittenTarget
-		if matchedRule.OutputKind != "" {
+		if !matchedRule.OutputKind.IsZero() {
 			outputPageLink = storedTargetKind(matchedRule.OutputKind) == defaultStoredTargetKind
 		}
 	}
@@ -487,15 +487,16 @@ func isExternalLinkDestination(destination string) bool {
 }
 
 func applyRewriteRules(resolvedPath tree.RoutePath, rules []RewriteRule) (tree.RoutePath, bool) {
-	return applyRewriteRulesForKind(resolvedPath, "", rules)
+	var targetKind TargetKind
+	return applyRewriteRulesForKind(resolvedPath, targetKind, rules)
 }
 
-func applyRewriteRulesForKind(resolvedPath tree.RoutePath, targetKind string, rules []RewriteRule) (tree.RoutePath, bool) {
+func applyRewriteRulesForKind(resolvedPath tree.RoutePath, targetKind TargetKind, rules []RewriteRule) (tree.RoutePath, bool) {
 	newPath, _, ok := applyRewriteRulesForKindWithRule(resolvedPath, targetKind, rules)
 	return newPath, ok
 }
 
-func applyRewriteRulesForKindWithRule(resolvedPath tree.RoutePath, targetKind string, rules []RewriteRule) (tree.RoutePath, RewriteRule, bool) {
+func applyRewriteRulesForKindWithRule(resolvedPath tree.RoutePath, targetKind TargetKind, rules []RewriteRule) (tree.RoutePath, RewriteRule, bool) {
 	resolved := resolvedPath.Clean()
 	for _, rule := range rules {
 		oldPath := rule.OldPath.Clean()
@@ -507,10 +508,10 @@ func applyRewriteRulesForKindWithRule(resolvedPath tree.RoutePath, targetKind st
 		}
 		oldPrefix := oldPath.Child("")
 		if strings.HasPrefix(resolved.FilesystemPath(), oldPrefix.FilesystemPath()) {
-			if rule.OutputKind != "" {
+			if !rule.OutputKind.IsZero() {
 				continue
 			}
-			if rule.Kind != "" && storedTargetKind(rule.Kind) != "section" {
+			if !rule.Kind.IsZero() && storedTargetKind(rule.Kind) != TargetKindSection {
 				continue
 			}
 			suffix := strings.TrimPrefix(resolved.FilesystemPath(), oldPath.FilesystemPath())
@@ -520,21 +521,21 @@ func applyRewriteRulesForKindWithRule(resolvedPath tree.RoutePath, targetKind st
 	return "", RewriteRule{}, false
 }
 
-func rewriteRuleMatchesExactKind(rule RewriteRule, targetKind string) bool {
-	if rule.Kind == "" {
+func rewriteRuleMatchesExactKind(rule RewriteRule, targetKind TargetKind) bool {
+	if rule.Kind.IsZero() {
 		return true
 	}
-	if targetKind == "" {
+	if targetKind.IsZero() {
 		return false
 	}
 	return storedTargetKind(rule.Kind) == storedTargetKind(targetKind)
 }
 
-func markdownLinkTargetKind(pageLink bool) string {
+func markdownLinkTargetKind(pageLink bool) TargetKind {
 	if pageLink {
-		return "page"
+		return TargetKindPage
 	}
-	return "section"
+	return TargetKindSection
 }
 
 func relativeWikiLinkPath(currentPath string, targetPath string) string {

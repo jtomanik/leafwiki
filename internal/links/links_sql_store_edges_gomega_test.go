@@ -12,10 +12,27 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
 const linksScriptedDriverName = "leafwiki_links_scripted"
+
+type linksReadMethodErrors struct {
+	TableColumns                       error
+	Backlinks                          error
+	OutgoingForPage                    error
+	OutgoingForPages                   error
+	RefactorMatches                    error
+	RefactorMatchesForPageKind         error
+	RefactorMatchesForSectionKind      error
+	RefactorSourceIDs                  error
+	RefactorSourceIDsForPageKind       error
+	RefactorSourceIDsForSectionKind    error
+	BrokenIncomingForPath              error
+	BrokenIncomingForPathAndTargetKind error
+}
 
 var (
 	linksScriptedDriverOnce sync.Once
@@ -327,9 +344,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 			rollbackErr: rollbackErr,
 		})
 		err = store.migrateLinksTableToKindAware(nil)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring(migrateErr.Error()))
-		Expect(err.Error()).To(ContainSubstring(rollbackErr.Error()))
+		Expect(err).To(SatisfyAll(MatchError(migrateErr), MatchError(rollbackErr)))
 
 		closeErr := errors.New("links close failed")
 		db := openLinksScriptedDB(&linksScriptedDBScript{closeErr: closeErr})
@@ -343,48 +358,42 @@ var _ = Describe("links SQL store edge coverage", func() {
 		targetLink := TargetLink{
 			TargetPageID:   newFixturePageID("target-page"),
 			TargetPagePath: "/docs/target",
-			TargetKind:     string(tree.NodeKindPage),
+			TargetKind:     TargetKindPage,
 		}
 
 		deleteErr := errors.New("links delete failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("DELETE FROM links WHERE from_page_id", deleteErr),
-		}).AddLinks(fromPageID, "Source", nil)).To(MatchError(ContainSubstring(deleteErr.Error())))
+		}).AddLinks(fromPageID, "Source", nil)).To(MatchError(deleteErr))
 
 		rollbackErr := errors.New("links rollback failed")
 		err := newScriptedLinksStore(&linksScriptedDBScript{
 			exec:        execErrorWhen("DELETE FROM links WHERE from_page_id", deleteErr),
 			rollbackErr: rollbackErr,
 		}).AddLinks(fromPageID, "Source", nil)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring(deleteErr.Error()))
-		Expect(err.Error()).To(ContainSubstring(rollbackErr.Error()))
+		Expect(err).To(SatisfyAll(MatchError(deleteErr), MatchError(rollbackErr)))
 
 		prepareInsertErr := errors.New("links prepare insert failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			prepare: prepareErrorWhen("INSERT OR REPLACE INTO links", prepareInsertErr),
-		}).AddLinks(fromPageID, "Source", nil)).To(MatchError(ContainSubstring(prepareInsertErr.Error())))
+		}).AddLinks(fromPageID, "Source", nil)).To(MatchError(prepareInsertErr))
 
 		err = newScriptedLinksStore(&linksScriptedDBScript{
 			prepare:     prepareErrorWhen("INSERT OR REPLACE INTO links", prepareInsertErr),
 			rollbackErr: rollbackErr,
 		}).AddLinks(fromPageID, "Source", nil)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring(prepareInsertErr.Error()))
-		Expect(err.Error()).To(ContainSubstring(rollbackErr.Error()))
+		Expect(err).To(SatisfyAll(MatchError(prepareInsertErr), MatchError(rollbackErr)))
 
 		insertErr := errors.New("links insert failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("INSERT OR REPLACE INTO links", insertErr),
-		}).AddLinks(fromPageID, "Source", []TargetLink{targetLink})).To(MatchError(ContainSubstring(insertErr.Error())))
+		}).AddLinks(fromPageID, "Source", []TargetLink{targetLink})).To(MatchError(insertErr))
 
 		err = newScriptedLinksStore(&linksScriptedDBScript{
 			exec:        execErrorWhen("INSERT OR REPLACE INTO links", insertErr),
 			rollbackErr: rollbackErr,
 		}).AddLinks(fromPageID, "Source", []TargetLink{targetLink})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring(insertErr.Error()))
-		Expect(err.Error()).To(ContainSubstring(rollbackErr.Error()))
+		Expect(err).To(SatisfyAll(MatchError(insertErr), MatchError(rollbackErr)))
 
 		restoreCloseStatement := setLinksSeam(&linksCloseStatement, func(interface{ Close() error }) error {
 			return errors.New("links statement close failed")
@@ -398,7 +407,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 			FromPageID: fromPageID,
 			FromTitle:  "Source",
 			ToPath:     "/docs/source",
-			ToKind:     string(tree.NodeKindPage),
+			ToKind:     tree.NodeKindPage,
 			Targets: []TargetLink{{
 				TargetPageID:   targetLink.TargetPageID,
 				TargetPagePath: targetLink.TargetPagePath,
@@ -411,49 +420,47 @@ var _ = Describe("links SQL store edge coverage", func() {
 		prepareDeleteErr := errors.New("links prepare delete failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			prepare: prepareErrorWhen("DELETE FROM links WHERE from_page_id", prepareDeleteErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(prepareDeleteErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(prepareDeleteErr))
 
 		err = newScriptedLinksStore(&linksScriptedDBScript{
 			prepare:     prepareErrorWhen("DELETE FROM links WHERE from_page_id", prepareDeleteErr),
 			rollbackErr: rollbackErr,
 		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring(prepareDeleteErr.Error()))
-		Expect(err.Error()).To(ContainSubstring(rollbackErr.Error()))
+		Expect(err).To(SatisfyAll(MatchError(prepareDeleteErr), MatchError(rollbackErr)))
 
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			prepare: prepareErrorWhen("INSERT OR REPLACE INTO links", prepareInsertErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(prepareInsertErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(prepareInsertErr))
 
 		prepareHealErr := errors.New("links prepare heal failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			prepare: prepareErrorWhen("WHERE to_path = ? AND to_kind = ? AND broken = 1", prepareHealErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(prepareHealErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(prepareHealErr))
 
 		prepareSectionHealErr := errors.New("links prepare section heal failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			prepare: prepareErrorWhen("UPDATE OR REPLACE links", prepareSectionHealErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(prepareSectionHealErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(prepareSectionHealErr))
 
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("DELETE FROM links WHERE from_page_id", deleteErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(deleteErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(deleteErr))
 
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("INSERT OR REPLACE INTO links", insertErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(insertErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(insertErr))
 
 		healPageErr := errors.New("links heal page failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("WHERE to_path = ? AND to_kind = ? AND broken = 1", healPageErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(ContainSubstring(healPageErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{update})).To(MatchError(healPageErr))
 
 		sectionUpdate := update
-		sectionUpdate.ToKind = string(tree.NodeKindSection)
+		sectionUpdate.ToKind = tree.NodeKindSection
 		healSectionErr := errors.New("links heal section failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
 			exec: execErrorWhen("UPDATE OR REPLACE links", healSectionErr),
-		}).ReplaceLinksAndHeal([]PageLinkUpdate{sectionUpdate})).To(MatchError(ContainSubstring(healSectionErr.Error())))
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{sectionUpdate})).To(MatchError(healSectionErr))
 
 		beginErr := errors.New("links begin failed")
 		loadedTree := newLoadedLinksTreeService()
@@ -475,7 +482,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 				return linksRows([]string{"bad1", "bad2"}, []driver.Value{"one", "two"}), nil
 			},
 		})
-		expectAllReadMethodsFail(scanStore)
+		Expect(scanStore).To(HaveAllReadMethodsFail())
 
 		rowsErr := errors.New("links rows failed")
 		rowsErrStore := newScriptedLinksStore(&linksScriptedDBScript{
@@ -483,7 +490,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 				return &linksScriptedRows{columns: []string{"bad"}, nextErr: rowsErr}, nil
 			},
 		})
-		expectAllReadMethodsFail(rowsErrStore)
+		Expect(rowsErrStore).To(HaveAllReadMethodsFail())
 
 		nullRowsStore := newScriptedLinksStore(&linksScriptedDBScript{
 			query: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
@@ -499,25 +506,32 @@ var _ = Describe("links SQL store edge coverage", func() {
 		})
 		backlinks, err := nullRowsStore.GetBacklinksForPage(newFixturePageID("target-page"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(backlinks[0].ToPageID).To(BeEmpty())
+		Expect(backlinks).To(ContainElement(matchBacklink(gstruct.Fields{
+			"ToPageID": BeEmpty(),
+		})))
 		outgoing, err := nullRowsStore.GetOutgoingLinksForPage(newFixturePageID("source-page"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(outgoing[0].ToPageID).To(BeEmpty())
-		broken, err := nullRowsStore.GetBrokenIncomingForPathAndKind("/docs/target", string(tree.NodeKindPage))
+		Expect(outgoing).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ToPageID": BeEmpty(),
+		})))
+		broken, err := nullRowsStore.GetBrokenIncomingForPathAndKind("/docs/target", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(broken[0].ToPageID).To(BeEmpty())
+		Expect(broken).To(ContainElement(matchBacklink(gstruct.Fields{
+			"ToPageID": BeEmpty(),
+		})))
 
 		validBrokenStore := newAdditionalLinksStore()
 		Expect(validBrokenStore.AddLinks("broken-source", "Broken Source", []TargetLink{{
 			TargetPageID:   "target-page",
 			TargetPagePath: "/docs/target",
-			TargetKind:     string(tree.NodeKindPage),
+			TargetKind:     TargetKindPage,
 			Broken:         true,
 		}})).To(Succeed())
-		broken, err = validBrokenStore.GetBrokenIncomingForPathAndKind("/docs/target", string(tree.NodeKindPage))
+		broken, err = validBrokenStore.GetBrokenIncomingForPathAndKind("/docs/target", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(broken).To(HaveLen(1))
-		Expect(broken[0].ToPageID).To(Equal(newFixturePageID("target-page")))
+		Expect(broken).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"ToPageID": Equal(newFixturePageID("target-page")),
+		})))
 
 		statusTree := newLoadedLinksTreeService()
 		sourcePage := createLoadedLinksPage(statusTree, "Source", "source", "")
@@ -525,12 +539,14 @@ var _ = Describe("links SQL store edge coverage", func() {
 		Expect(store.AddLinks(sourcePage.ID, sourcePage.Title, []TargetLink{{
 			TargetPageID:   targetPage.ID,
 			TargetPagePath: targetPage.CalculateRoutePath().WikiPath(),
-			TargetKind:     string(tree.NodeKindPage),
+			TargetKind:     TargetKindPage,
 		}})).To(Succeed())
 		status, err := NewLinkService("", statusTree, store).GetLinkStatusForPage(sourcePage.ID, sourcePage.CalculateRoutePath())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(status.Outgoings).To(HaveLen(1))
-		Expect(status.BrokenOutgoings).To(BeEmpty())
+		Expect(status).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Outgoings":       HaveLen(1),
+			"BrokenOutgoings": BeEmpty(),
+		})))
 
 		brokenErr := errors.New("broken incoming failed")
 		statusStore := newScriptedLinksStore(&linksScriptedDBScript{
@@ -645,35 +661,41 @@ func expectAllReadMethodsSucceed(store *LinksStore) {
 	Expect(err).NotTo(HaveOccurred())
 	_, err = store.GetBrokenIncomingForPath("/docs")
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetBrokenIncomingForPathAndKind("/docs", string(tree.NodeKindPage))
+	_, err = store.GetBrokenIncomingForPathAndKind("/docs", tree.NodeKindPage)
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func expectAllReadMethodsFail(store *LinksStore) {
+func HaveAllReadMethodsFail() types.GomegaMatcher {
 	GinkgoHelper()
+	return WithTransform(collectLinksReadMethodErrors, gstruct.MatchAllFields(gstruct.Fields{
+		"TableColumns":                       HaveOccurred(),
+		"Backlinks":                          HaveOccurred(),
+		"OutgoingForPage":                    HaveOccurred(),
+		"OutgoingForPages":                   HaveOccurred(),
+		"RefactorMatches":                    HaveOccurred(),
+		"RefactorMatchesForPageKind":         HaveOccurred(),
+		"RefactorMatchesForSectionKind":      HaveOccurred(),
+		"RefactorSourceIDs":                  HaveOccurred(),
+		"RefactorSourceIDsForPageKind":       HaveOccurred(),
+		"RefactorSourceIDsForSectionKind":    HaveOccurred(),
+		"BrokenIncomingForPath":              HaveOccurred(),
+		"BrokenIncomingForPathAndTargetKind": HaveOccurred(),
+	}))
+}
 
-	_, err := store.linksTableColumns()
-	Expect(err).To(HaveOccurred(), "linksTableColumns")
-	_, err = store.GetBacklinksForPage("target-page")
-	Expect(err).To(HaveOccurred(), "GetBacklinksForPage")
-	_, err = store.GetOutgoingLinksForPage("source-page")
-	Expect(err).To(HaveOccurred(), "GetOutgoingLinksForPage")
-	_, err = store.GetOutgoingLinksForPages([]tree.PageID{"source-page"})
-	Expect(err).To(HaveOccurred(), "GetOutgoingLinksForPages")
-	_, err = store.GetRefactorMatchesForPrefix("/docs")
-	Expect(err).To(HaveOccurred(), "GetRefactorMatchesForPrefix")
-	_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
-	Expect(err).To(HaveOccurred(), "GetRefactorMatchesForPrefixAndKind page")
-	_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
-	Expect(err).To(HaveOccurred(), "GetRefactorMatchesForPrefixAndKind section")
-	_, err = store.GetRefactorSourcePageIDsForPrefix("/docs")
-	Expect(err).To(HaveOccurred(), "GetRefactorSourcePageIDsForPrefix")
-	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
-	Expect(err).To(HaveOccurred(), "GetRefactorSourcePageIDsForPrefixAndKind page")
-	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
-	Expect(err).To(HaveOccurred(), "GetRefactorSourcePageIDsForPrefixAndKind section")
-	_, err = store.GetBrokenIncomingForPath("/docs")
-	Expect(err).To(HaveOccurred(), "GetBrokenIncomingForPath")
-	_, err = store.GetBrokenIncomingForPathAndKind("/docs", string(tree.NodeKindPage))
-	Expect(err).To(HaveOccurred(), "GetBrokenIncomingForPathAndKind")
+func collectLinksReadMethodErrors(store *LinksStore) linksReadMethodErrors {
+	var errs linksReadMethodErrors
+	_, errs.TableColumns = store.linksTableColumns()
+	_, errs.Backlinks = store.GetBacklinksForPage("target-page")
+	_, errs.OutgoingForPage = store.GetOutgoingLinksForPage("source-page")
+	_, errs.OutgoingForPages = store.GetOutgoingLinksForPages([]tree.PageID{"source-page"})
+	_, errs.RefactorMatches = store.GetRefactorMatchesForPrefix("/docs")
+	_, errs.RefactorMatchesForPageKind = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
+	_, errs.RefactorMatchesForSectionKind = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
+	_, errs.RefactorSourceIDs = store.GetRefactorSourcePageIDsForPrefix("/docs")
+	_, errs.RefactorSourceIDsForPageKind = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
+	_, errs.RefactorSourceIDsForSectionKind = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
+	_, errs.BrokenIncomingForPath = store.GetBrokenIncomingForPath("/docs")
+	_, errs.BrokenIncomingForPathAndTargetKind = store.GetBrokenIncomingForPathAndKind("/docs", tree.NodeKindPage)
+	return errs
 }

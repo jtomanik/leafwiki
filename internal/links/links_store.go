@@ -26,16 +26,9 @@ type PageLinkUpdate struct {
 	FromPageID tree.PageID
 	FromTitle  string
 	ToPath     tree.RoutePath
-	ToKind     string
+	ToKind     tree.NodeKind
 	Targets    []TargetLink
 }
-
-const (
-	defaultStoredTargetKind      = "page"
-	sectionStoredTargetKind      = "section"
-	unknownStoredTargetKind      = "unknown"
-	nonCanonicalPageStoredTarget = "non_canonical_page"
-)
 
 func linksDatabasePath(storageDir string, filename string) string {
 	normalizedStorageDir := filepath.FromSlash(strings.ReplaceAll(storageDir, `\`, `/`))
@@ -188,9 +181,9 @@ func (s *LinksStore) migrateLinksTableToKindAware(columns []linksTableColumn) er
 	if err != nil {
 		return err
 	}
-	kindExpr := "'" + defaultStoredTargetKind + "'"
+	kindExpr := fmt.Sprintf("'%s'", defaultStoredTargetKind)
 	if linksTableHasColumn(columns, "to_kind") {
-		kindExpr = "COALESCE(NULLIF(to_kind, ''), '" + defaultStoredTargetKind + "')"
+		kindExpr = fmt.Sprintf("COALESCE(NULLIF(to_kind, ''), '%s')", defaultStoredTargetKind)
 	}
 	_, err = tx.Exec(linksTableSchemaSQL("links_migration") + fmt.Sprintf(`
 		INSERT OR REPLACE INTO links_migration(from_page_id, to_page_id, to_path, to_kind, from_title, broken)
@@ -220,19 +213,6 @@ func linksTableSchemaSQL(tableName string) string {
             PRIMARY KEY (from_page_id, to_path, to_kind)
         );
 	`, tableName, defaultStoredTargetKind)
-}
-
-func storedTargetKind(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case sectionStoredTargetKind:
-		return sectionStoredTargetKind
-	case unknownStoredTargetKind:
-		return unknownStoredTargetKind
-	case nonCanonicalPageStoredTarget:
-		return nonCanonicalPageStoredTarget
-	default:
-		return defaultStoredTargetKind
-	}
 }
 
 // DeleteOutgoingLinks removes all links originating from the given page.
@@ -280,7 +260,7 @@ func (s *LinksStore) MarkLinksBrokenForPath(toPath tree.RoutePath) error {
 }
 
 // MarkLinksBrokenForPathAndKind marks links that point to an exact path and target kind as broken.
-func (s *LinksStore) MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind string) error {
+func (s *LinksStore) MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind tree.NodeKind) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -291,7 +271,7 @@ func (s *LinksStore) MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind
 		WHERE to_path = ?
 		  AND to_kind = ?
 		  AND broken  = 0
-	`, toPath.WikiPath(), storedTargetKind(toKind))
+	`, toPath.WikiPath(), TargetKindFromNodeKind(toKind).Stored())
 
 	return err
 }
@@ -318,11 +298,11 @@ func (s *LinksStore) MarkLinksBrokenForPrefix(oldPrefix string) error {
 
 // MarkLinksBrokenForPrefixAndKind marks links under a moved/deleted subtree.
 // Exact links to the subtree root must match the root kind; descendants remain path-bound.
-func (s *LinksStore) MarkLinksBrokenForPrefixAndKind(oldPrefix string, rootKind string) error {
+func (s *LinksStore) MarkLinksBrokenForPrefixAndKind(oldPrefix string, rootKind tree.NodeKind) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storedKind := storedTargetKind(rootKind)
+	storedKind := TargetKindFromNodeKind(rootKind).Stored()
 	if storedKind != sectionStoredTargetKind {
 		_, err := s.db.Exec(`
 			UPDATE links
@@ -391,7 +371,7 @@ func (s *LinksStore) AddLinks(fromPageID tree.PageID, fromTitle string, toLinks 
 			brokenInt = 1
 		}
 
-		_, err := stmt.Exec(fromPageID, link.TargetPageID, link.TargetPagePath, storedTargetKind(link.TargetKind), fromTitle, brokenInt)
+		_, err := stmt.Exec(fromPageID, link.TargetPageID, link.TargetPagePath, link.TargetKind.Stored(), fromTitle, brokenInt)
 		if err != nil {
 			rbErr := tx.Rollback()
 			base := fmt.Errorf("failed to insert link from %s to %s", fromPageID, link.TargetPageID)
@@ -486,14 +466,14 @@ func (s *LinksStore) replaceLinksAndHealTx(tx *sql.Tx, updates []PageLinkUpdate)
 			if link.Broken {
 				brokenInt = 1
 			}
-			if _, err := insertStmt.Exec(update.FromPageID, link.TargetPageID, link.TargetPagePath, storedTargetKind(link.TargetKind), update.FromTitle, brokenInt); err != nil {
+			if _, err := insertStmt.Exec(update.FromPageID, link.TargetPageID, link.TargetPagePath, link.TargetKind.Stored(), update.FromTitle, brokenInt); err != nil {
 				return fmt.Errorf("failed to insert link from %s to %s: %w", update.FromPageID, link.TargetPageID, err)
 			}
 		}
 	}
 
 	for _, update := range updates {
-		toKind := storedTargetKind(update.ToKind)
+		toKind := TargetKindFromNodeKind(update.ToKind).Stored()
 		if toKind == sectionStoredTargetKind {
 			if _, err := healSectionStmt.Exec(update.FromPageID, toKind, update.ToPath, toKind, unknownStoredTargetKind); err != nil {
 				return fmt.Errorf("failed to heal links for path %s: %w", update.ToPath, err)
@@ -693,7 +673,7 @@ func (s *LinksStore) GetRefactorMatchesForPrefixAndKind(oldPrefix tree.RoutePath
 	defer s.mu.Unlock()
 
 	oldPrefixPath := oldPrefix.WikiPath()
-	storedKind := storedTargetKind(string(rootKind))
+	storedKind := TargetKindFromNodeKind(rootKind).Stored()
 	query := `
 		SELECT from_page_id, from_title, to_path, to_kind, broken
 		FROM links
@@ -776,7 +756,7 @@ func (s *LinksStore) GetRefactorSourcePageIDsForPrefixAndKind(oldPrefix tree.Rou
 	defer s.mu.Unlock()
 
 	oldPrefixPath := oldPrefix.WikiPath()
-	storedKind := storedTargetKind(string(rootKind))
+	storedKind := TargetKindFromNodeKind(rootKind).Stored()
 	query := `
 		SELECT DISTINCT from_page_id
 		FROM links
@@ -857,7 +837,7 @@ func (s *LinksStore) GetBrokenIncomingForPath(toPath tree.RoutePath) ([]Backlink
 	return backlinks, nil
 }
 
-func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath tree.RoutePath, toKind string) ([]Backlink, error) {
+func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath tree.RoutePath, toKind tree.NodeKind) ([]Backlink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -866,7 +846,7 @@ func (s *LinksStore) GetBrokenIncomingForPathAndKind(toPath tree.RoutePath, toKi
 		FROM links
 		WHERE to_path = ? AND to_kind IN (?, ?) AND broken = 1
 		ORDER BY from_title ASC
-	`, toPath.WikiPath(), storedTargetKind(toKind), unknownStoredTargetKind)
+	`, toPath.WikiPath(), TargetKindFromNodeKind(toKind).Stored(), unknownStoredTargetKind)
 	if err != nil {
 		return nil, err
 	}
@@ -911,11 +891,11 @@ func (s *LinksStore) HealLinksForPath(toPath string, pageID tree.PageID) error {
 	return err
 }
 
-func (s *LinksStore) HealLinksForPathAndKind(toPath string, toKind string, pageID tree.PageID) error {
+func (s *LinksStore) HealLinksForPathAndKind(toPath string, toKind tree.NodeKind, pageID tree.PageID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storedKind := storedTargetKind(toKind)
+	storedKind := TargetKindFromNodeKind(toKind).Stored()
 	if storedKind == sectionStoredTargetKind {
 		_, err := s.db.Exec(`
 			UPDATE OR REPLACE links

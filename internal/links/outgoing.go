@@ -7,7 +7,7 @@ type Outgoing struct {
 	ToPageID   tree.PageID
 	FromTitle  string
 	ToPath     tree.RoutePath // Path of the target page
-	ToKind     string
+	ToKind     TargetKind
 	Broken     bool // Indicates if the link is broken
 }
 
@@ -20,7 +20,7 @@ type OutgoingResultItem struct {
 	ToPageID    tree.PageID    `json:"to_page_id"`
 	ToPageTitle string         `json:"to_page_title"`
 	ToPath      tree.RoutePath `json:"to_path"`
-	ToKind      string         `json:"to_kind"`
+	ToKind      TargetKind     `json:"to_kind"`
 	Broken      bool           `json:"broken"`
 	FromPageID  tree.PageID    `json:"from_page_id"`
 }

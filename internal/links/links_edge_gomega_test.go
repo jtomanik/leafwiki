@@ -7,8 +7,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdownlinks"
 	"github.com/perber/wiki/internal/core/tree"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 func newManualLinksStore(storageDir string) *LinksStore {
@@ -25,16 +28,34 @@ func newManualLinksStore(storageDir string) *LinksStore {
 	return store
 }
 
-func expectOutgoingKinds(store *LinksStore, pageID tree.PageID, kinds ...string) {
+func HaveOutgoingKindsForPage(pageID tree.PageID, kinds ...TargetKind) types.GomegaMatcher {
 	GinkgoHelper()
+	return WithTransform(func(store *LinksStore) ([]TargetKind, error) {
+		outgoing, err := store.GetOutgoingLinksForPage(pageID)
+		if err != nil {
+			return nil, err
+		}
+		got := make([]TargetKind, 0, len(outgoing))
+		for _, link := range outgoing {
+			got = append(got, link.ToKind)
+		}
+		return got, nil
+	}, ConsistOf(kinds))
+}
 
-	outgoing, err := store.GetOutgoingLinksForPage(pageID)
-	Expect(err).NotTo(HaveOccurred())
-	got := make([]string, 0, len(outgoing))
-	for _, link := range outgoing {
-		got = append(got, link.ToKind)
-	}
-	Expect(got).To(ConsistOf(kinds))
+func matchBacklink(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchOutgoingResultItem(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchRewriteResult(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
 var _ = Describe("links edge coverage", func() {
@@ -60,7 +81,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(linksTableKindAware(columns)).To(BeTrue())
 		Expect(linksTableHasColumn(columns, "to_kind")).To(BeTrue())
-		expectOutgoingKinds(store, newFixturePageID("legacy-source"), defaultStoredTargetKind)
+		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("legacy-source"), defaultStoredTargetKind))
 	})
 
 	It("migrates a legacy links table with non-key target kind values", func() {
@@ -84,8 +105,8 @@ var _ = Describe("links edge coverage", func() {
 
 		Expect(store.ensureLinksTable()).To(Succeed())
 
-		expectOutgoingKinds(store, newFixturePageID("blank-kind-source"), defaultStoredTargetKind)
-		expectOutgoingKinds(store, newFixturePageID("section-kind-source"), sectionStoredTargetKind)
+		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("blank-kind-source"), defaultStoredTargetKind))
+		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("section-kind-source"), sectionStoredTargetKind))
 	})
 
 	It("exercises unfiltered prefix queries and non-kind broken-link wrappers", func() {
@@ -106,11 +127,12 @@ var _ = Describe("links edge coverage", func() {
 		))
 
 		Expect(service.MarkIncomingLinksBrokenForPage(newFixturePageID("target-page"))).To(Succeed())
-		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", string(tree.NodeKindPage))
+		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(brokenPage).To(HaveLen(1))
-		Expect(brokenPage[0].FromPageID).To(Equal(newFixturePageID("source-page")))
-		Expect(brokenPage[0].Broken).To(BeTrue())
+		Expect(brokenPage).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"FromPageID": Equal(newFixturePageID("source-page")),
+			"Broken":     BeTrue(),
+		})))
 
 		Expect(store.HealLinksForPath("/docs/topic", newFixturePageID("healed-page"))).To(Succeed())
 		healed, err := store.GetBacklinksForPage(newFixturePageID("healed-page"))
@@ -158,10 +180,10 @@ var _ = Describe("links edge coverage", func() {
 		Expect(isExtensionlessWikiDestination("docs/page/")).To(BeFalse())
 		Expect(isExtensionlessWikiDestination("docs/page.md?x=1")).To(BeFalse())
 
-		Expect(unresolvedStoredTargetKind(markdownlinksResolution("broken_page"), "docs/page")).To(Equal(string(tree.NodeKindPage)))
-		Expect(unresolvedStoredTargetKind(markdownlinksResolution("other"), "docs/section/")).To(Equal(string(tree.NodeKindSection)))
-		Expect(unresolvedStoredTargetKind(markdownlinksResolution("other"), "docs/page.md")).To(Equal(string(tree.NodeKindPage)))
-		Expect(unresolvedStoredTargetKind(markdownlinksResolution("other"), "docs/unknown")).To(Equal(unknownStoredTargetKind))
+		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenPage), "docs/page")).To(Equal(TargetKindPage))
+		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/section/")).To(Equal(TargetKindSection))
+		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/page.md")).To(Equal(TargetKindPage))
+		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/unknown")).To(Equal(unknownStoredTargetKind))
 
 		Expect(storedTargetMarkdownHref("/", defaultStoredTargetKind)).To(Equal("/"))
 		Expect(storedTargetMarkdownHref("/docs/page.md", defaultStoredTargetKind)).To(Equal("/docs/page.md"))
@@ -196,21 +218,21 @@ var _ = Describe("links edge coverage", func() {
 		Expect(ok).To(BeTrue())
 		Expect(rewritten).To(Equal(tree.RoutePathFromString("/docs/new").Clean()))
 
-		_, ok = applyRewriteRulesForKind("/docs/old/child", string(tree.NodeKindPage), []RewriteRule{{
+		_, ok = applyRewriteRulesForKind("/docs/old/child", TargetKindPage, []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/docs/new",
-			Kind:    string(tree.NodeKindPage),
+			Kind:    TargetKindPage,
 		}})
 		Expect(ok).To(BeFalse())
 
-		_, ok = applyRewriteRulesForKind("/docs/old/child", string(tree.NodeKindPage), []RewriteRule{{
+		_, ok = applyRewriteRulesForKind("/docs/old/child", TargetKindPage, []RewriteRule{{
 			OldPath:    "/docs/old",
 			NewPath:    "/docs/new",
-			OutputKind: string(tree.NodeKindPage),
+			OutputKind: TargetKindPage,
 		}})
 		Expect(ok).To(BeFalse())
 
-		Expect(rewriteRuleMatchesExactKind(RewriteRule{Kind: string(tree.NodeKindPage)}, "")).To(BeFalse())
+		Expect(rewriteRuleMatchesExactKind(RewriteRule{Kind: TargetKindPage}, "")).To(BeFalse())
 	})
 
 	It("uses the in-memory markdown index fallback for loaded trees", func() {
@@ -264,8 +286,10 @@ var _ = Describe("links edge coverage", func() {
 			ToPath:     "/docs/target",
 			ToKind:     nonCanonicalPageStoredTarget,
 		})
-		Expect(outgoing.ToKind).To(Equal(defaultStoredTargetKind))
-		Expect(outgoing.ToPageTitle).To(BeEmpty())
+		Expect(outgoing).To(matchOutgoingResultItem(gstruct.Fields{
+			"ToKind":      Equal(defaultStoredTargetKind),
+			"ToPageTitle": BeEmpty(),
+		}))
 
 		outgoing = toOutgoingResultItem(loadedTree, Outgoing{
 			FromPageID: newFixturePageID("source-page"),
@@ -273,7 +297,9 @@ var _ = Describe("links edge coverage", func() {
 			ToPath:     "/docs/target",
 			ToKind:     defaultStoredTargetKind,
 		})
-		Expect(outgoing.ToPageTitle).To(BeEmpty())
+		Expect(outgoing).To(matchOutgoingResultItem(gstruct.Fields{
+			"ToPageTitle": BeEmpty(),
+		}))
 	})
 
 	It("returns service errors from a closed database without relying on nil-store panics", func() {
@@ -305,20 +331,20 @@ var _ = Describe("links edge coverage", func() {
 		Expect(store.DeleteOutgoingLinks(pageID)).To(HaveOccurred())
 		Expect(store.MarkIncomingLinksBroken(newFixturePageID("target-page"))).To(HaveOccurred())
 		Expect(store.MarkLinksBrokenForPath(target)).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPathAndKind(target, string(tree.NodeKindPage))).To(HaveOccurred())
+		Expect(store.MarkLinksBrokenForPathAndKind(target, tree.NodeKindPage)).To(HaveOccurred())
 		Expect(store.MarkLinksBrokenForPrefix("/docs")).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", string(tree.NodeKindPage))).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", string(tree.NodeKindSection))).To(HaveOccurred())
+		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindPage)).To(HaveOccurred())
+		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindSection)).To(HaveOccurred())
 		Expect(store.AddLinks(pageID, "Source", []TargetLink{{
 			TargetPageID:   newFixturePageID("target-page"),
 			TargetPagePath: target.WikiPath(),
-			TargetKind:     string(tree.NodeKindPage),
+			TargetKind:     TargetKindPage,
 		}})).To(HaveOccurred())
 		Expect(store.ReplaceLinksAndHeal([]PageLinkUpdate{{
 			FromPageID: pageID,
 			FromTitle:  "Source",
 			ToPath:     "/docs/source",
-			ToKind:     string(tree.NodeKindPage),
+			ToKind:     tree.NodeKindPage,
 		}})).To(HaveOccurred())
 
 		_, err = store.GetBacklinksForPage(newFixturePageID("target-page"))
@@ -341,7 +367,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 		_, err = store.GetBrokenIncomingForPath(target)
 		Expect(err).To(HaveOccurred())
-		_, err = store.GetBrokenIncomingForPathAndKind(target, string(tree.NodeKindPage))
+		_, err = store.GetBrokenIncomingForPathAndKind(target, tree.NodeKindPage)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -358,9 +384,13 @@ var _ = Describe("links edge coverage", func() {
 		Expect(engine.RewriteRelativeLinksForPathChange("[No links text]", "/docs/old", "/docs/new", rules).Content).To(Equal("[No links text]"))
 
 		result := engine.RewriteRelativeLinksForPathChange("[Bad](../../escape.md)", "/docs/source", "/docs/moved", nil)
-		Expect(result.Content).To(Equal("[Bad](../index.md)"))
-		Expect(result.Count()).To(Equal(1))
-		Expect(result.Warnings).To(BeEmpty())
+		Expect(result).To(SatisfyAll(
+			matchRewriteResult(gstruct.Fields{
+				"Content":  Equal("[Bad](../index.md)"),
+				"Warnings": BeEmpty(),
+			}),
+			HaveField("Count()", Equal(1)),
+		))
 	})
 
 	It("covers defensive markdown resolution and index fallback branches", func() {
@@ -377,7 +407,7 @@ var _ = Describe("links edge coverage", func() {
 		})
 		Expect(targets).To(Equal([]TargetLink{{
 			TargetPagePath: "/ghost",
-			TargetKind:     string(tree.NodeKindPage),
+			TargetKind:     TargetKindPage,
 			Broken:         true,
 		}}))
 
@@ -410,13 +440,12 @@ var _ = Describe("links edge coverage", func() {
 			[]markdownlinks.InlineDestination{{Destination: "../../../escape.md"}},
 			"",
 		)
-		Expect(warnings).To(HaveLen(1))
-		Expect(warnings[0].MessageID).To(Equal(rewriteWarningUnresolved))
+		Expect(warnings).To(ConsistOf(testmatchers.HaveMessageID(rewriteWarningUnresolved)))
 
 		_, changed, warning := rewriteLinkDestination("/docs/source", MarkdownSourceKindPage, "../../../escape.md", rules, "")
 		Expect(changed).To(BeFalse())
 		Expect(warning).NotTo(BeNil())
-		Expect(warning.MessageID).To(Equal(rewriteWarningUnresolved))
+		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningUnresolved))
 
 		_, warnings = buildPathChangeRewritePlan(
 			"/docs/source",
@@ -426,8 +455,7 @@ var _ = Describe("links edge coverage", func() {
 			[]rewriteCandidate{{Destination: "broken.md"}},
 			[]markdownlinks.InlineDestination{{Destination: "broken.md"}},
 		)
-		Expect(warnings).To(HaveLen(1))
-		Expect(warnings[0].MessageID).To(Equal(rewriteWarningUnresolved))
+		Expect(warnings).To(ConsistOf(testmatchers.HaveMessageID(rewriteWarningUnresolved)))
 		restoreResolve()
 
 		_, warnings = buildPathChangeRewritePlan(
@@ -438,8 +466,7 @@ var _ = Describe("links edge coverage", func() {
 			[]rewriteCandidate{{Destination: "reference.md"}},
 			nil,
 		)
-		Expect(warnings).To(HaveLen(1))
-		Expect(warnings[0].MessageID).To(Equal(rewriteWarningUnsupportedSyntax))
+		Expect(warnings).To(ConsistOf(testmatchers.HaveMessageID(rewriteWarningUnsupportedSyntax)))
 
 		Expect(normalizeCandidateDestination("")).To(BeEmpty())
 
@@ -449,7 +476,7 @@ var _ = Describe("links edge coverage", func() {
 		}}, "")
 		Expect(changed).To(BeFalse())
 		Expect(warning).NotTo(BeNil())
-		Expect(warning.MessageID).To(Equal(rewriteWarningEmptyDestination))
+		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningEmptyDestination))
 
 		Expect(addMarkdownLinkRootPrefix("/", "wiki")).To(Equal("/wiki"))
 		Expect(stripMarkdownLinkRootPrefix("/wiki", "wiki")).To(Equal("/"))
@@ -481,7 +508,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(rewritten).To(Equal("../../../escape.md"))
 		Expect(changed).To(BeFalse())
 		Expect(warning).NotTo(BeNil())
-		Expect(warning.MessageID).To(Equal(rewriteWarningUnresolved))
+		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningUnresolved))
 		restoreResolve()
 
 		rewritten, changed, warning = rewriteRelativeLinkForPathChange(
@@ -492,7 +519,7 @@ var _ = Describe("links edge coverage", func() {
 			[]RewriteRule{{
 				OldPath:    "/docs/old",
 				NewPath:    "/docs/new-section",
-				OutputKind: string(tree.NodeKindSection),
+				OutputKind: TargetKindSection,
 			}},
 		)
 		Expect(warning).To(BeNil())
@@ -523,7 +550,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(rewritten).To(Equal("old"))
 		Expect(changed).To(BeFalse())
 		Expect(warning).NotTo(BeNil())
-		Expect(warning.MessageID).To(Equal(rewriteWarningEmptyDestination))
+		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningEmptyDestination))
 	})
 
 	It("covers remaining service-level error and no-op branches", func() {
@@ -542,8 +569,8 @@ var _ = Describe("links edge coverage", func() {
 	})
 })
 
-func markdownlinksResolution(code string) markdownlinks.Resolution {
-	return markdownlinks.Resolution{Code: markdownlinks.IssueCode(code)}
+func markdownlinksResolution(code markdownlinks.IssueCode) markdownlinks.Resolution {
+	return markdownlinks.Resolution{Code: code}
 }
 
 func newLoadedLinksTreeService() *tree.TreeService {

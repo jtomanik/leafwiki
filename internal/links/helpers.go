@@ -14,7 +14,7 @@ import (
 type TargetLink struct {
 	TargetPageID   tree.PageID
 	TargetPagePath string
-	TargetKind     string
+	TargetKind     TargetKind
 	Broken         bool
 }
 
@@ -163,7 +163,7 @@ func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownl
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   page.ID,
 				TargetPagePath: resolvedPath,
-				TargetKind:     string(page.Kind),
+				TargetKind:     TargetKindFromNodeKind(page.Kind),
 				Broken:         false,
 			})
 		} else {
@@ -171,7 +171,7 @@ func resolveTargetLinksWithIndex(treeService *tree.TreeService, index *markdownl
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   "",
 				TargetPagePath: resolvedPath,
-				TargetKind:     string(targetKind),
+				TargetKind:     TargetKindFromNodeKind(targetKind),
 				Broken:         true,
 			})
 		}
@@ -203,16 +203,16 @@ func isExtensionlessWikiDestination(destination string) bool {
 	return path.Ext(dest) == ""
 }
 
-func unresolvedStoredTargetKind(resolved markdownlinks.Resolution, href string) string {
+func unresolvedStoredTargetKind(resolved markdownlinks.Resolution, href string) TargetKind {
 	if resolved.Code == "broken_page" {
-		return string(tree.NodeKindPage)
+		return TargetKindPage
 	}
 	base, _ := splitLinkDestinationSuffix(strings.TrimSpace(href))
 	if strings.HasSuffix(strings.TrimRight(base, " \t\r\n"), "/") {
-		return string(tree.NodeKindSection)
+		return TargetKindSection
 	}
 	if strings.EqualFold(path.Ext(strings.TrimRight(base, "/")), ".md") {
-		return string(tree.NodeKindPage)
+		return TargetKindPage
 	}
 	return unknownStoredTargetKind
 }
@@ -329,7 +329,7 @@ func toBacklinkResultItem(treeService *tree.TreeService, backlink Backlink) Back
 		FromPageID: backlink.FromPageID,
 		FromTitle:  backlink.FromTitle,
 		FromPath:   page.CalculatePath(),
-		FromKind:   string(page.Kind),
+		FromKind:   page.Kind,
 		ToPageID:   backlink.ToPageID,
 		Broken:     backlink.Broken,
 	}

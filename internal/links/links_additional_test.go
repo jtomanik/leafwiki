@@ -3,6 +3,7 @@ package links
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -44,12 +45,13 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 
 		Expect(service.MarkLinksBrokenForPathAndKind("docs/topic", tree.NodeKindPage)).To(Succeed())
 
-		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", string(tree.NodeKindPage))
+		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(brokenPage).To(HaveLen(1))
-		Expect(brokenPage[0].FromPageID).To(Equal(newFixturePageID("source-page")))
+		Expect(brokenPage).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"FromPageID": Equal(newFixturePageID("source-page")),
+		})))
 
-		brokenSection, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", string(tree.NodeKindSection))
+		brokenSection, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(brokenSection).To(BeEmpty())
 	})
@@ -61,19 +63,21 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 
 		Expect(service.MarkLinksBrokenForPrefixAndKind("docs/topic", tree.NodeKindSection)).To(Succeed())
 
-		brokenPageRoot, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", string(tree.NodeKindPage))
+		brokenPageRoot, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(brokenPageRoot).To(BeEmpty())
 
-		brokenSectionRoot, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", string(tree.NodeKindSection))
+		brokenSectionRoot, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(brokenSectionRoot).To(HaveLen(1))
-		Expect(brokenSectionRoot[0].FromPageID).To(Equal(newFixturePageID("section-source")))
+		Expect(brokenSectionRoot).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"FromPageID": Equal(newFixturePageID("section-source")),
+		})))
 
 		descendant, err := store.GetBrokenIncomingForPath("/docs/topic/child")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(descendant).To(HaveLen(1))
-		Expect(descendant[0].FromPageID).To(Equal(newFixturePageID("child-source")))
+		Expect(descendant).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"FromPageID": Equal(newFixturePageID("child-source")),
+		})))
 	})
 })
 
@@ -89,7 +93,7 @@ var _ = ginkgo.Describe("refactor prefix queries", func() {
 			FromPageID: newFixturePageID("source-page"),
 			FromTitle:  "Source Page",
 			ToPath:     tree.RoutePathFromString("/docs/topic").Clean(),
-			ToKind:     string(tree.NodeKindPage),
+			ToKind:     TargetKindPage,
 			Broken:     false,
 		}))
 
@@ -100,14 +104,14 @@ var _ = ginkgo.Describe("refactor prefix queries", func() {
 				FromPageID: newFixturePageID("section-source"),
 				FromTitle:  "Section Source",
 				ToPath:     tree.RoutePathFromString("/docs/topic").Clean(),
-				ToKind:     string(tree.NodeKindSection),
+				ToKind:     TargetKindSection,
 				Broken:     false,
 			},
 			RefactorLinkMatch{
 				FromPageID: newFixturePageID("child-source"),
 				FromTitle:  "Child Source",
 				ToPath:     tree.RoutePathFromString("/docs/topic/child").Clean(),
-				ToKind:     string(tree.NodeKindPage),
+				ToKind:     TargetKindPage,
 				Broken:     false,
 			},
 		))
@@ -135,21 +139,21 @@ func seedAdditionalLinks(store *LinksStore) error {
 	if err := store.AddLinks("source-page", "Source Page", []TargetLink{{
 		TargetPageID:   "target-page",
 		TargetPagePath: "/docs/topic",
-		TargetKind:     string(tree.NodeKindPage),
+		TargetKind:     TargetKindPage,
 	}}); err != nil {
 		return err
 	}
 	if err := store.AddLinks("section-source", "Section Source", []TargetLink{{
 		TargetPageID:   "target-section",
 		TargetPagePath: "/docs/topic",
-		TargetKind:     string(tree.NodeKindSection),
+		TargetKind:     TargetKindSection,
 	}}); err != nil {
 		return err
 	}
 	return store.AddLinks("child-source", "Child Source", []TargetLink{{
 		TargetPageID:   "target-child",
 		TargetPagePath: "/docs/topic/child",
-		TargetKind:     string(tree.NodeKindPage),
+		TargetKind:     TargetKindPage,
 	}})
 }
 

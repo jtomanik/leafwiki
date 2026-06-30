@@ -124,7 +124,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
 			ToPath:     pageRoutePath,
-			ToKind:     string(page.Kind),
+			ToKind:     page.Kind,
 			Targets:    targets,
 		})
 	}
@@ -153,7 +153,7 @@ func (b *LinkService) GetLinkStatusForPage(pageID tree.PageID, pagePath tree.Rou
 	validBacklinksResult := toBacklinkResult(b.treeService, validBacklinks)
 
 	// 2) Broken inbound
-	brokenIncoming, err := b.store.GetBrokenIncomingForPathAndKind(pagePath, string(pageKind))
+	brokenIncoming, err := b.store.GetBrokenIncomingForPathAndKind(pagePath, pageKind)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 			FromPageID: page.ID,
 			FromTitle:  page.Title,
 			ToPath:     pagePath,
-			ToKind:     string(page.Kind),
+			ToKind:     page.Kind,
 			Targets:    targets,
 		})
 	}
@@ -252,7 +252,7 @@ func (b *LinkService) MarkLinksBrokenForPath(toPath tree.RoutePath) error {
 // MarkLinksBrokenForPathAndKind marks links pointing to an exact path and kind as broken.
 func (b *LinkService) MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind tree.NodeKind) error {
 	toPath = tree.RoutePathFromString(normalizeWikiPath(toPath.WikiPath())).Clean()
-	return b.store.MarkLinksBrokenForPathAndKind(toPath, string(toKind))
+	return b.store.MarkLinksBrokenForPathAndKind(toPath, toKind)
 }
 
 // MarkLinksBrokenForPrefix marks all links under a prefix as broken (subtree move/delete).
@@ -264,12 +264,12 @@ func (b *LinkService) MarkLinksBrokenForPrefix(prefix string) error {
 // MarkLinksBrokenForPrefixAndKind marks a subtree root by kind while preserving same-path twins.
 func (b *LinkService) MarkLinksBrokenForPrefixAndKind(prefix string, rootKind tree.NodeKind) error {
 	prefix = normalizeWikiPath(prefix)
-	return b.store.MarkLinksBrokenForPrefixAndKind(prefix, string(rootKind))
+	return b.store.MarkLinksBrokenForPrefixAndKind(prefix, rootKind)
 }
 
 func (b *LinkService) HealLinksForExactPath(page *tree.Page) error {
 	toPath := normalizeWikiPath(page.CalculatePath())
-	return b.store.HealLinksForPathAndKind(toPath, string(page.Kind), page.ID)
+	return b.store.HealLinksForPathAndKind(toPath, page.Kind, page.ID)
 }
 
 func (b *LinkService) Close() error {
@@ -307,9 +307,9 @@ func rewriteResolvedTargets(currentPath tree.RoutePath, sourceKind tree.NodeKind
 	return resolveTargetLinksWithIndex(treeService, markdownIndex, currentPath, sourceKind, paths)
 }
 
-func storedTargetMarkdownHref(targetPath tree.RoutePath, targetKind string) string {
+func storedTargetMarkdownHref(targetPath tree.RoutePath, targetKind TargetKind) string {
 	wikiPath := targetPath.WikiPath()
-	if storedTargetKind(targetKind) != "page" || wikiPath == "/" {
+	if storedTargetKind(targetKind) != TargetKindPage || wikiPath == "/" {
 		return wikiPath
 	}
 	if strings.EqualFold(path.Ext(wikiPath), ".md") {

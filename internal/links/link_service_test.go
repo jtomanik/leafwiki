@@ -123,8 +123,8 @@ var _ = ginkgo.Describe("TestLinkService_GetRefactorMatchesForPrefixAndKindAccep
 		}
 
 		if err := store.AddLinks(newFixturePageID("source"), "Source", []TargetLink{
-			{TargetPageID: newFixturePageID("target"), TargetPagePath: "/docs/guide", TargetKind: string(tree.NodeKindSection)},
-			{TargetPageID: newFixturePageID("child"), TargetPagePath: "/docs/guide/child", TargetKind: string(tree.NodeKindSection)},
+			{TargetPageID: newFixturePageID("target"), TargetPagePath: "/docs/guide", TargetKind: TargetKindSection},
+			{TargetPageID: newFixturePageID("child"), TargetPagePath: "/docs/guide/child", TargetKind: TargetKindSection},
 		}); err != nil {
 			t.Fatalf("AddLinks failed: %v", err)
 		}
@@ -818,11 +818,11 @@ leafwiki_title: Sync Section
 		if pageBacklinks.Count != 2 {
 			t.Fatalf("expected 2 page backlinks, got %d: %#v", pageBacklinks.Count, pageBacklinks.Backlinks)
 		}
-		pageBacklinkKinds := map[string]bool{}
+		pageBacklinkKinds := map[tree.NodeKind]bool{}
 		for _, backlink := range pageBacklinks.Backlinks {
 			pageBacklinkKinds[backlink.FromKind] = true
 		}
-		if !pageBacklinkKinds[string(tree.NodeKindPage)] || !pageBacklinkKinds[string(tree.NodeKindSection)] {
+		if !pageBacklinkKinds[tree.NodeKindPage] || !pageBacklinkKinds[tree.NodeKindSection] {
 			t.Fatalf("page backlink FromKind values = %#v, want page and section", pageBacklinkKinds)
 		}
 		sectionBacklinks, err := svc.GetBacklinksForPage(newFixturePageID("sync-section"))
@@ -832,7 +832,7 @@ leafwiki_title: Sync Section
 		if sectionBacklinks.Count != 1 {
 			t.Fatalf("expected 1 section backlink, got %d: %#v", sectionBacklinks.Count, sectionBacklinks.Backlinks)
 		}
-		if sectionBacklinks.Backlinks[0].FromKind != string(tree.NodeKindPage) {
+		if sectionBacklinks.Backlinks[0].FromKind != tree.NodeKindPage {
 			t.Fatalf("section backlink FromKind = %q, want page", sectionBacklinks.Backlinks[0].FromKind)
 		}
 
