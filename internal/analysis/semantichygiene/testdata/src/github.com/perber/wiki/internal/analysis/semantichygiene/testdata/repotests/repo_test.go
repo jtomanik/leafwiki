@@ -395,6 +395,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(err).NotTo(BeNil())                                   // want "use HaveOccurred matcher instead of nil assertions on error values"
 	Expect(err).To(Equal(nil))                                   // want "use HaveOccurred matcher instead of nil assertions on error values"
 	Expect(strings.Contains(text, "a")).To(BeTrue())             // want "use ContainSubstring matcher instead of asserting strings.Contains with BeTrue/BeFalse"
+	_ = strings.Contains(err.Error(), messageFixture)            // want "assert error values with MatchError instead of matching err.Error\\(\\)"
 	Expect(strings.HasPrefix(text, "a")).To(BeTrue())            // want "use HavePrefix matcher instead of asserting strings.HasPrefix with BeTrue/BeFalse"
 	Expect(strings.HasSuffix(text, "c")).To(BeFalse())           // want "use HaveSuffix matcher instead of asserting strings.HasSuffix with BeTrue/BeFalse"
 	Expect(regexp.MatchString("a+", text)).To(BeTrue())          // want "use MatchRegexp matcher instead of asserting regexp.MatchString with BeTrue/BeFalse"

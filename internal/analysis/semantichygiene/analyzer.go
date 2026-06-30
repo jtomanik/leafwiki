@@ -45,6 +45,7 @@ func run(pass *analysis.Pass) (any, error) {
 			checkGomegaSemanticMatcher(ctx, n)
 			checkGomegaAsyncAssertion(ctx, n)
 			checkGomegaAsyncCallback(ctx, n)
+			checkErrorStringPredicate(ctx, n)
 		case *ast.FuncDecl:
 			checkSignature(ctx, n)
 			checkValidatorReturn(ctx, n)

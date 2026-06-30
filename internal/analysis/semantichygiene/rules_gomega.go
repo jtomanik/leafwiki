@@ -358,7 +358,25 @@ func isNegativeAssertionMethod(name string) bool {
 }
 
 func assertionUsesErrError(ctx *analysisContext, assertion gomegaAssertion) bool {
-	call, ok := assertion.actual.(*ast.CallExpr)
+	return exprIsErrorStringCall(ctx, assertion.actual)
+}
+
+func checkErrorStringPredicate(ctx *analysisContext, call *ast.CallExpr) {
+	if !isTestFile(ctx.filename(call.Pos())) {
+		return
+	}
+	packagePath, name := calleePackageAndName(ctx, call)
+	if packagePath != "strings" || name != "Contains" || len(call.Args) == 0 {
+		return
+	}
+	if exprIsErrorStringCall(ctx, call.Args[0]) {
+		ctx.pass.Reportf(call.Args[0].Pos(), "%s", gomegaErrorStringMatcherDiagnostic())
+	}
+}
+
+func exprIsErrorStringCall(ctx *analysisContext, expr ast.Expr) bool {
+	expr = unparenExpr(expr)
+	call, ok := expr.(*ast.CallExpr)
 	if !ok || callName(call) != "Error" {
 		return false
 	}
