@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
@@ -14,13 +15,13 @@ var _ = It("TestMCPSessionBindingsRejectWorkspaceMismatch", func() {
 	t := GinkgoT()
 	bindings := NewMCPSessionBindings()
 
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID("alpha")); err != nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")); err != nil {
 		t.Fatalf("Bind alpha failed: %v", err)
 	}
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID("alpha")); err != nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")); err != nil {
 		t.Fatalf("Bind same workspace failed: %v", err)
 	}
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID("beta")); err == nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("beta")); err == nil {
 		t.Fatalf("expected workspace mismatch")
 	}
 
@@ -30,10 +31,10 @@ var _ = It("TestMCPSessionBindingsRejectInvalidWorkspaceID", func() {
 	t := GinkgoT()
 	bindings := NewMCPSessionBindings()
 
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID(" alpha ")); err == nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha ")); err == nil {
 		t.Fatal("Bind accepted a workspace ID that should have been parsed at the edge")
 	}
-	if _, ok := bindings.Workspace("session-1"); ok {
+	if _, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1")); ok {
 		t.Fatal("invalid workspace ID was bound")
 	}
 
@@ -67,7 +68,7 @@ var _ = It("TestWorkspaceMCPHandlerRoutesExplicitWorkspaceAndBindsSession", func
 	if seenPath != "/mcp" {
 		t.Fatalf("proxied path = %q, want /mcp", seenPath)
 	}
-	if workspace, ok := bindings.Workspace("session-1"); !ok || workspace != workspaceid.WorkspaceID("home") {
+	if workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1")); !ok || workspace != workspaceid.WorkspaceID("home") {
 		t.Fatalf("session binding = %q/%v, want home/true", workspace, ok)
 	}
 
@@ -78,7 +79,7 @@ var _ = It("TestWorkspaceMCPHandlerRoutesExplicitWorkspaceAndBindsSession", func
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("mismatch status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
-	assertStructuredMCPWorkspaceError(t, rec, "mcp_session_workspace_mismatch", "errors.mcp.session_workspace_mismatch")
+	assertStructuredMCPWorkspaceError(t, rec, errCodeMCPSessionWorkspaceMismatch, sharederrors.MessageIDForCode(errCodeMCPSessionWorkspaceMismatch))
 
 })
 
@@ -108,7 +109,7 @@ var _ = It("TestWorkspaceMCPHandlerBindsServerIssuedSessionAfterProxy", func() {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if workspace, ok := bindings.Workspace("server-session-1"); !ok || workspace != workspaceid.WorkspaceID("alpha") {
+	if workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("server-session-1")); !ok || workspace != workspaceid.WorkspaceID("alpha") {
 		t.Fatalf("server session binding = %q/%v, want alpha/true", workspace, ok)
 	}
 
@@ -117,7 +118,7 @@ var _ = It("TestWorkspaceMCPHandlerBindsServerIssuedSessionAfterProxy", func() {
 var _ = It("TestWorkspaceMCPHandlerRootMCPUsesExistingSessionBinding", func() {
 	t := GinkgoT()
 	bindings := NewMCPSessionBindings()
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID("alpha")); err != nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")); err != nil {
 		t.Fatalf("Bind failed: %v", err)
 	}
 	var seenID workspaceid.WorkspaceID
@@ -155,7 +156,7 @@ var _ = It("TestWorkspaceMCPHandlerRootMCPUsesExistingSessionBinding", func() {
 var _ = It("TestWorkspaceMCPHandlerSuccessfulDeleteClearsSessionBinding", func() {
 	t := GinkgoT()
 	bindings := NewMCPSessionBindings()
-	if err := bindings.Bind("session-1", workspaceid.WorkspaceID("alpha")); err != nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")); err != nil {
 		t.Fatalf("Bind failed: %v", err)
 	}
 	handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -181,7 +182,7 @@ var _ = It("TestWorkspaceMCPHandlerSuccessfulDeleteClearsSessionBinding", func()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if workspace, ok := bindings.Workspace("session-1"); ok {
+	if workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1")); ok {
 		t.Fatalf("session binding = %q/%v, want cleared", workspace, ok)
 	}
 
@@ -218,7 +219,7 @@ var _ = It("TestWorkspaceMCPHandlerResolvesBeforeBindingSession", func() {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
-	if _, ok := bindings.Workspace("forbidden-session"); ok {
+	if _, ok := bindings.Workspace(MCPSessionIDFromHeader("forbidden-session")); ok {
 		t.Fatalf("forbidden session was bound before authorization")
 	}
 
@@ -233,45 +234,45 @@ type rootMCPWorkspaceResolutionCase struct {
 
 var _ = DescribeTable("TestWorkspaceMCPHandlerRootMCPRequiresExactlyOneWorkspace",
 	func(tc rootMCPWorkspaceResolutionCase) {
-	t := GinkgoT()
-	var seenID workspaceid.WorkspaceID
-	handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
-		ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) {
-			return tc.rootID, tc.rootErr
-		},
-		Resolve: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-			seenID = workspaceID
-			return WorkspaceRoute{WorkspaceID: workspaceID, Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
-		},
-		Proxy: func(route WorkspaceRoute) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusAccepted)
-			})
-		},
-	})
+		t := GinkgoT()
+		var seenID workspaceid.WorkspaceID
+		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
+			ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) {
+				return tc.rootID, tc.rootErr
+			},
+			Resolve: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+				seenID = workspaceID
+				return WorkspaceRoute{WorkspaceID: workspaceID, Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
+			},
+			Proxy: func(route WorkspaceRoute) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusAccepted)
+				})
+			},
+		})
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", nil))
 
-	if rec.Code != tc.wantStatus {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
-	}
-	if tc.wantStatus >= http.StatusBadRequest {
-		want := map[int]struct {
-			code      string
-			messageID string
-		}{
-			http.StatusForbidden:          {code: "workspace_forbidden", messageID: "errors.workspace.forbidden"},
-			http.StatusConflict:           {code: "workspace_ambiguous", messageID: "errors.workspace.ambiguous"},
-			http.StatusNotFound:           {code: "workspace_not_found", messageID: "errors.workspace.not_found"},
-			http.StatusServiceUnavailable: {code: "workspace_unavailable", messageID: "errors.workspace.unavailable"},
-		}[tc.wantStatus]
-		assertStructuredMCPWorkspaceError(t, rec, want.code, want.messageID)
-	}
-	if seenID != tc.wantSeenID {
-		t.Fatalf("resolved workspace = %q, want %q", seenID, tc.wantSeenID)
-	}
-},
+		if rec.Code != tc.wantStatus {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
+		}
+		if tc.wantStatus >= http.StatusBadRequest {
+			want := map[int]struct {
+				code      sharederrors.ErrorCode
+				messageID sharederrors.MessageID
+			}{
+				http.StatusForbidden:          {code: errCodeWorkspaceForbidden, messageID: sharederrors.MessageIDForCode(errCodeWorkspaceForbidden)},
+				http.StatusConflict:           {code: errCodeWorkspaceAmbiguous, messageID: sharederrors.MessageIDForCode(errCodeWorkspaceAmbiguous)},
+				http.StatusNotFound:           {code: errCodeWorkspaceNotFound, messageID: sharederrors.MessageIDForCode(errCodeWorkspaceNotFound)},
+				http.StatusServiceUnavailable: {code: errCodeWorkspaceUnavailable, messageID: sharederrors.MessageIDForCode(errCodeWorkspaceUnavailable)},
+			}[tc.wantStatus]
+			assertStructuredMCPWorkspaceError(t, rec, want.code, want.messageID)
+		}
+		if seenID != tc.wantSeenID {
+			t.Fatalf("resolved workspace = %q, want %q", seenID, tc.wantSeenID)
+		}
+	},
 	Entry("one", rootMCPWorkspaceResolutionCase{
 		rootID:     workspaceid.WorkspaceID("only"),
 		wantStatus: http.StatusAccepted,
@@ -305,17 +306,17 @@ var _ = It("TestWorkspaceMCPHandlerReportsStructuredDependencyErrors", func() {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
 	}
-	assertStructuredMCPWorkspaceError(t, rec, "mcp_workspace_router_unavailable", "errors.mcp.workspace_router_unavailable")
+	assertStructuredMCPWorkspaceError(t, rec, errCodeMCPWorkspaceRouterUnavailable, sharederrors.MessageIDForCode(errCodeMCPWorkspaceRouterUnavailable))
 
 })
 
-func assertStructuredMCPWorkspaceError(t frontdTestTB, rec *httptest.ResponseRecorder, code string, messageID string) {
+func assertStructuredMCPWorkspaceError(t frontdTestTB, rec *httptest.ResponseRecorder, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 	var body struct {
 		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

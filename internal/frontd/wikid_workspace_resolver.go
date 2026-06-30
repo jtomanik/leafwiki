@@ -36,11 +36,11 @@ var newFrontdRequestWithContext = http.NewRequestWithContext
 func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request) (workspaceid.WorkspaceID, error), error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid wikid upstream %q", wikidURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWikidUpstream, wikidURL)
 	}
 	daemonToken = strings.TrimSpace(daemonToken)
 	if daemonToken == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")
@@ -96,11 +96,11 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error), error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid wikid upstream %q", wikidURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWikidUpstream, wikidURL)
 	}
 	daemonToken = strings.TrimSpace(daemonToken)
 	if daemonToken == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")

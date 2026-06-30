@@ -1,6 +1,7 @@
 package frontd
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -26,7 +27,14 @@ type IngressOptions struct {
 
 const ControlPlanePrefix = "/__leafwiki/control-plane"
 
-var encodeActorContext = projectdaemon.EncodeActorContext
+var (
+	errInvalidWikidUpstream         = errors.New("invalid wikid upstream")
+	errInvalidWorkspacedUpstream    = errors.New("invalid workspaced upstream")
+	errDaemonTokenRequired          = errors.New("daemon token is required")
+	errActorContextResolverRequired = errors.New("actor context resolver is required")
+	errWorkspaceRouteIncomplete     = errors.New("workspace route is incomplete")
+	encodeActorContext              = projectdaemon.EncodeActorContext
+)
 
 func NewIngressHandler(public http.Handler, opts IngressOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -62,10 +70,10 @@ func NewIngressHandler(public http.Handler, opts IngressOptions) http.Handler {
 func NewControlPlaneProxy(upstreamURL string, daemonToken string) (http.Handler, error) {
 	upstream, err := url.Parse(strings.TrimSpace(upstreamURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid wikid upstream %q", upstreamURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWikidUpstream, upstreamURL)
 	}
 	if strings.TrimSpace(daemonToken) == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.ErrorHandler = retryableUnavailable
@@ -89,13 +97,13 @@ func NewControlPlaneProxy(upstreamURL string, daemonToken string) (http.Handler,
 func NewWorkspaceProxy(opts WorkspaceProxyOptions) (http.Handler, error) {
 	upstream, err := url.Parse(strings.TrimSpace(opts.Upstream))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid workspaced upstream %q", opts.Upstream)
+		return nil, fmt.Errorf("%w: %q", errInvalidWorkspacedUpstream, opts.Upstream)
 	}
 	if strings.TrimSpace(opts.DaemonToken) == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	if opts.Actor == nil {
-		return nil, fmt.Errorf("actor context resolver is required")
+		return nil, errActorContextResolverRequired
 	}
 
 	proxy := newPrivateActorProxy(upstream, func(*http.Request) string {
@@ -123,10 +131,10 @@ func NewWorkspaceProxy(opts WorkspaceProxyOptions) (http.Handler, error) {
 func NewMCPProxy(upstreamURL string, daemonToken string) (http.Handler, error) {
 	upstream, err := url.Parse(strings.TrimSpace(upstreamURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid workspaced upstream %q", upstreamURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWorkspacedUpstream, upstreamURL)
 	}
 	if strings.TrimSpace(daemonToken) == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.ErrorHandler = retryableUnavailable

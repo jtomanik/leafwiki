@@ -107,7 +107,7 @@ var _ = DescribeTable("parseWorkspaceMCPPath rejects invalid path shapes",
 var _ = It("WorkspaceMCPHandler does not unbind an empty DELETE session", func() {
 	t := GinkgoT()
 	bindings := NewMCPSessionBindings()
-	if err := bindings.Bind("session-1", "alpha"); err != nil {
+	if err := bindings.Bind(MCPSessionIDFromHeader("session-1"), "alpha"); err != nil {
 		t.Fatalf("Bind failed: %v", err)
 	}
 	handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -128,7 +128,7 @@ var _ = It("WorkspaceMCPHandler does not unbind an empty DELETE session", func()
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204: %s", rec.Code, rec.Body.String())
 	}
-	if workspace, ok := bindings.Workspace("session-1"); !ok || workspace != "alpha" {
+	if workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1")); !ok || workspace != "alpha" {
 		t.Fatalf("existing session binding = %q/%v, want alpha/true", workspace, ok)
 	}
 })

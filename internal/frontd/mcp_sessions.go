@@ -15,14 +15,24 @@ type MCPSessionBindings struct {
 	sessions map[MCPSessionID]workspaceid.WorkspaceID
 }
 
-type MCPSessionID string
+type MCPSessionID struct {
+	value string
+}
 
 func (id MCPSessionID) String() string {
-	return string(id)
+	return id.value
+}
+
+func (id MCPSessionID) IsZero() bool {
+	return id.value == ""
+}
+
+func MCPSessionIDFromString(raw string) MCPSessionID {
+	return MCPSessionID{value: raw}
 }
 
 func MCPSessionIDFromHeader(raw string) MCPSessionID {
-	return MCPSessionID(strings.TrimSpace(raw))
+	return MCPSessionIDFromString(strings.TrimSpace(raw))
 }
 
 func NewMCPSessionBindings() *MCPSessionBindings {
@@ -30,7 +40,7 @@ func NewMCPSessionBindings() *MCPSessionBindings {
 }
 
 func (b *MCPSessionBindings) Bind(sessionID MCPSessionID, workspaceID workspaceid.WorkspaceID) error {
-	if sessionID == "" || workspaceID == "" {
+	if sessionID.IsZero() || workspaceID == "" {
 		return nil
 	}
 	if err := workspaceID.Validate(); err != nil {
@@ -53,7 +63,7 @@ func (b *MCPSessionBindings) Workspace(sessionID MCPSessionID) (workspaceid.Work
 }
 
 func (b *MCPSessionBindings) Unbind(sessionID MCPSessionID) {
-	if sessionID == "" {
+	if sessionID.IsZero() {
 		return
 	}
 	b.mu.Lock()

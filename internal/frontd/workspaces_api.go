@@ -15,10 +15,10 @@ const PublicWorkspacesPrefix = "/api/workspaces"
 func NewWorkspacesAPI(wikidURL string, daemonToken string) (http.Handler, error) {
 	upstream, err := url.Parse(strings.TrimSpace(wikidURL))
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid wikid upstream %q", wikidURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWikidUpstream, wikidURL)
 	}
 	if strings.TrimSpace(daemonToken) == "" {
-		return nil, fmt.Errorf("daemon token is required")
+		return nil, errDaemonTokenRequired
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.ErrorHandler = retryableUnavailable

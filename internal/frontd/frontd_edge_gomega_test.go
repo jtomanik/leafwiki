@@ -10,6 +10,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
@@ -28,25 +29,25 @@ func validFrontdActor(workspaceID workspaceid.WorkspaceID) projectdaemon.ActorCo
 var _ = ginkgo.Describe("frontd edge coverage", func() {
 	ginkgo.It("validates proxy constructors and small path helpers", func() {
 		_, err := NewControlPlaneProxy("://bad", "token")
-		Expect(err).To(MatchError(ContainSubstring("invalid wikid upstream")))
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewControlPlaneProxy("http://127.0.0.1:1", " ")
-		Expect(err).To(MatchError("daemon token is required"))
+		Expect(err).To(MatchError(errDaemonTokenRequired))
 
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "://bad", DaemonToken: "token", Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
 			return validFrontdActor("home"), nil
 		}})
-		Expect(err).To(MatchError(ContainSubstring("invalid workspaced upstream")))
+		Expect(err).To(MatchError(errInvalidWorkspacedUpstream))
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "http://127.0.0.1:1", DaemonToken: " ", Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
 			return validFrontdActor("home"), nil
 		}})
-		Expect(err).To(MatchError("daemon token is required"))
+		Expect(err).To(MatchError(errDaemonTokenRequired))
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "http://127.0.0.1:1", DaemonToken: "token"})
-		Expect(err).To(MatchError("actor context resolver is required"))
+		Expect(err).To(MatchError(errActorContextResolverRequired))
 
 		_, err = NewWorkspacesAPI("://bad", "token")
-		Expect(err).To(MatchError(ContainSubstring("invalid wikid upstream")))
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWorkspacesAPI("http://127.0.0.1:1", " ")
-		Expect(err).To(MatchError("daemon token is required"))
+		Expect(err).To(MatchError(errDaemonTokenRequired))
 
 		path, ok := stripBasePath("", "")
 		Expect(path).To(Equal("/"))
@@ -74,7 +75,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).ToNot(HaveOccurred())
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 
 		originalEncodeActorContext := encodeActorContext
 		encodeActorContext = func(projectdaemon.ActorContext) (string, error) {
@@ -92,7 +93,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).ToNot(HaveOccurred())
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		encodeActorContext = originalEncodeActorContext
 	})
 
@@ -106,7 +107,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, request)
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+		Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
 
 		handler = NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
@@ -118,7 +119,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, request)
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 
 		originalEncodeActorContext := encodeActorContext
 		encodeActorContext = func(projectdaemon.ActorContext) (string, error) {
@@ -137,7 +138,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, request)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		encodeActorContext = originalEncodeActorContext
 
 		for _, route := range []WorkspaceRoute{
@@ -155,7 +156,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 			})
 			rec = httptest.NewRecorder()
 			handler.ServeHTTP(rec, request)
-			Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+			Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
 		}
 
 		workspaceID, upstreamPath, ok := parseWorkspaceAPIPath(PublicWorkspacesPrefix + "/bad id/tree")
@@ -176,7 +177,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/not-mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
 		handler = NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) {
@@ -185,7 +186,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusConflict))
+		Expect(rec).To(HaveHTTPStatus(http.StatusConflict))
 
 		bindings := NewMCPSessionBindings()
 		handler = NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -197,7 +198,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp/workspaces/home", nil))
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+		Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
 
 		handler = NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
@@ -214,11 +215,11 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		req := httptest.NewRequest(http.MethodGet, "/mcp/workspaces/home", nil)
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		_, ok := bindings.Workspace("server-session")
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
+		_, ok := bindings.Workspace(MCPSessionIDFromHeader("server-session"))
 		Expect(ok).To(BeFalse())
 
-		Expect(bindings.Bind("server-session", "other")).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("server-session"), "other")).To(Succeed())
 		handler = NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
@@ -233,21 +234,22 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		})
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp/workspaces/home", nil))
-		Expect(rec.Code).To(Equal(http.StatusNoContent))
-		workspace, ok := bindings.Workspace("server-session")
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
+		workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("server-session"))
 		Expect(ok).To(BeTrue())
 		Expect(workspace).To(Equal(workspaceid.WorkspaceID("other")))
 	})
 
 	ginkgo.It("covers wikid single-workspace resolver response mapping", func() {
 		_, err := NewWikidSingleWorkspaceResolver("://bad", "token")
-		Expect(err).To(MatchError(ContainSubstring("invalid wikid upstream")))
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", " ")
-		Expect(err).To(MatchError("daemon token is required"))
+		Expect(err).To(MatchError(errDaemonTokenRequired))
 
 		originalNewRequest := newFrontdRequestWithContext
+		requestErr := errors.New("frontd request failed")
 		newFrontdRequestWithContext = func(context.Context, string, string, io.Reader) (*http.Request, error) {
-			return nil, errors.New("request failed")
+			return nil, requestErr
 		}
 		ginkgo.DeferCleanup(func() {
 			newFrontdRequestWithContext = originalNewRequest
@@ -255,7 +257,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		resolver, err := NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", "token")
 		Expect(err).ToNot(HaveOccurred())
 		_, err = resolver(nil)
-		Expect(err).To(MatchError("request failed"))
+		Expect(err).To(MatchError(requestErr))
 		newFrontdRequestWithContext = originalNewRequest
 
 		cases := []struct {
@@ -295,9 +297,9 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 
 	ginkgo.It("covers wikid workspace resolver response mapping", func() {
 		_, err := NewWikidWorkspaceResolver("://bad", "token")
-		Expect(err).To(MatchError(ContainSubstring("invalid wikid upstream")))
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidWorkspaceResolver("http://127.0.0.1:1", " ")
-		Expect(err).To(MatchError("daemon token is required"))
+		Expect(err).To(MatchError(errDaemonTokenRequired))
 
 		resolver, err := NewWikidWorkspaceResolver("http://127.0.0.1:1", "token")
 		Expect(err).ToNot(HaveOccurred())
@@ -305,14 +307,15 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).To(MatchError(ErrWorkspaceNotFound))
 
 		originalNewRequest := newFrontdRequestWithContext
+		requestErr := errors.New("frontd request failed")
 		newFrontdRequestWithContext = func(context.Context, string, string, io.Reader) (*http.Request, error) {
-			return nil, errors.New("request failed")
+			return nil, requestErr
 		}
 		ginkgo.DeferCleanup(func() {
 			newFrontdRequestWithContext = originalNewRequest
 		})
 		_, err = resolver(nil, "home")
-		Expect(err).To(MatchError("request failed"))
+		Expect(err).To(MatchError(requestErr))
 		newFrontdRequestWithContext = originalNewRequest
 
 		cases := []struct {
@@ -351,8 +354,10 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).ToNot(HaveOccurred())
 		route, err := resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
-		Expect(route.WorkspaceID).To(Equal(workspaceid.WorkspaceID("home")))
-		Expect(route.Upstream).To(Equal("http://workspaced"))
+		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WorkspaceID": Equal(workspaceid.WorkspaceID("home")),
+			"Upstream":    Equal("http://workspaced"),
+		}))
 
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			_, _ = w.Write([]byte(`{"workspace":{"id":"body-id"},"status":{"state":"running","url":"http://workspaced"}}`))
@@ -362,7 +367,9 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).ToNot(HaveOccurred())
 		route, err = resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
-		Expect(route.WorkspaceID).To(Equal(workspaceid.WorkspaceID("body-id")))
+		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WorkspaceID": Equal(workspaceid.WorkspaceID("body-id")),
+		}))
 
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {}))
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
@@ -380,14 +387,14 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 
 		source := &http.Request{Method: http.MethodPatch, Header: http.Header{}, RemoteAddr: "127.0.0.1:1234"}
 		preserveOriginalRequestHeaders(target, source)
-		Expect(target.Header.Get("X-LeafWiki-Original-Method")).To(Equal(http.MethodPatch))
-		Expect(target.Header.Get("X-LeafWiki-Original-Path")).To(BeEmpty())
-		Expect(target.Header.Get("X-LeafWiki-Original-Remote-Addr")).To(Equal("127.0.0.1:1234"))
+		Expect(target.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey("X-LeafWiki-Original-Method"), ConsistOf(http.MethodPatch)))
+		Expect(target.Header).NotTo(HaveKey(http.CanonicalHeaderKey("X-LeafWiki-Original-Path")))
+		Expect(target.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey("X-LeafWiki-Original-Remote-Addr"), ConsistOf("127.0.0.1:1234")))
 
 		setOriginalRequestHeaders(nil, http.MethodGet, "/x", "remote")
 		setOriginalRequestHeaders(target, " ", " ", " ")
-		Expect(target.Header.Get("X-LeafWiki-Original-Method")).To(BeEmpty())
-		Expect(target.Header.Get("X-LeafWiki-Original-Path")).To(BeEmpty())
-		Expect(target.Header.Get("X-LeafWiki-Original-Remote-Addr")).To(BeEmpty())
+		Expect(target.Header).NotTo(HaveKey(http.CanonicalHeaderKey("X-LeafWiki-Original-Method")))
+		Expect(target.Header).NotTo(HaveKey(http.CanonicalHeaderKey("X-LeafWiki-Original-Path")))
+		Expect(target.Header).NotTo(HaveKey(http.CanonicalHeaderKey("X-LeafWiki-Original-Remote-Addr")))
 	})
 })

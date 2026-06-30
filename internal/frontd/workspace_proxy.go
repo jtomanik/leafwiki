@@ -120,11 +120,11 @@ func (p *workspaceRouterProxy) proxy(route WorkspaceRoute) (http.Handler, error)
 	upstreamURL := strings.TrimSpace(route.Upstream)
 	daemonToken := strings.TrimSpace(route.DaemonToken)
 	if upstreamURL == "" || daemonToken == "" {
-		return nil, fmt.Errorf("workspace route is incomplete")
+		return nil, errWorkspaceRouteIncomplete
 	}
 	upstream, err := url.Parse(upstreamURL)
 	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
-		return nil, fmt.Errorf("invalid workspaced upstream %q", upstreamURL)
+		return nil, fmt.Errorf("%w: %q", errInvalidWorkspacedUpstream, upstreamURL)
 	}
 	return newPrivateActorProxy(upstream, func(req *http.Request) string {
 		return req.Header.Get(projectdaemon.ControlTokenHeader)

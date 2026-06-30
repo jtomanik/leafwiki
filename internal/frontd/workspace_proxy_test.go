@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
@@ -122,8 +123,8 @@ var _ = It("TestWorkspaceRouterProxyRewritesWorkspaceAssetPathsToStaticAssetRout
 type workspaceRouterProxyResolverErrorCase struct {
 	err           error
 	wantStatus    int
-	wantCode      string
-	wantMessageID string
+	wantCode      sharederrors.ErrorCode
+	wantMessageID sharederrors.MessageID
 }
 
 var _ = DescribeTable("TestWorkspaceRouterProxyMapsResolverErrors",
@@ -144,8 +145,8 @@ var _ = DescribeTable("TestWorkspaceRouterProxyMapsResolverErrors",
 		}
 		assertStructuredFrontdError(t, rec, tt.wantCode, tt.wantMessageID)
 	},
-	Entry("not found", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceNotFound, wantStatus: http.StatusNotFound, wantCode: "workspace_not_found", wantMessageID: "errors.workspace.not_found"}),
-	Entry("forbidden", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceForbidden, wantStatus: http.StatusForbidden, wantCode: "workspace_forbidden", wantMessageID: "errors.workspace.forbidden"}),
+	Entry("not found", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceNotFound, wantStatus: http.StatusNotFound, wantCode: errCodeWorkspaceNotFound, wantMessageID: sharederrors.MessageIDForCode(errCodeWorkspaceNotFound)}),
+	Entry("forbidden", workspaceRouterProxyResolverErrorCase{err: ErrWorkspaceForbidden, wantStatus: http.StatusForbidden, wantCode: errCodeWorkspaceForbidden, wantMessageID: sharederrors.MessageIDForCode(errCodeWorkspaceForbidden)}),
 )
 
 var _ = It("TestWorkspaceRouterProxyMapsResolverErrors unavailable", func() {
@@ -163,14 +164,14 @@ var _ = It("TestWorkspaceRouterProxyMapsResolverErrors unavailable", func() {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
 	}
-	assertStructuredFrontdError(t, rec, "workspace_unavailable", "errors.workspace.unavailable")
+	assertStructuredFrontdError(t, rec, errCodeWorkspaceUnavailable, sharederrors.MessageIDForCode(errCodeWorkspaceUnavailable))
 
 })
 
 type workspaceRouterProxyDependencyErrorCase struct {
 	opts          WorkspaceRouterProxyOptions
-	wantCode      string
-	wantMessageID string
+	wantCode      sharederrors.ErrorCode
+	wantMessageID sharederrors.MessageID
 }
 
 var _ = DescribeTable("TestWorkspaceRouterProxyReportsStructuredDependencyErrors",
@@ -186,8 +187,8 @@ var _ = DescribeTable("TestWorkspaceRouterProxyReportsStructuredDependencyErrors
 	},
 	Entry("resolver unavailable", workspaceRouterProxyDependencyErrorCase{
 		opts:          WorkspaceRouterProxyOptions{},
-		wantCode:      "workspace_resolver_unavailable",
-		wantMessageID: "errors.workspace.resolver_unavailable",
+		wantCode:      errCodeWorkspaceResolverUnavailable,
+		wantMessageID: sharederrors.MessageIDForCode(errCodeWorkspaceResolverUnavailable),
 	}),
 	Entry("actor resolver unavailable", workspaceRouterProxyDependencyErrorCase{
 		opts: WorkspaceRouterProxyOptions{
@@ -195,18 +196,18 @@ var _ = DescribeTable("TestWorkspaceRouterProxyReportsStructuredDependencyErrors
 				return WorkspaceRoute{WorkspaceID: "home", Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
 			},
 		},
-		wantCode:      "workspace_actor_context_unavailable",
-		wantMessageID: "errors.workspace.actor_context_unavailable",
+		wantCode:      errCodeWorkspaceActorContextUnavailable,
+		wantMessageID: sharederrors.MessageIDForCode(errCodeWorkspaceActorContextUnavailable),
 	}),
 )
 
-func assertStructuredFrontdError(t frontdTestTB, rec *httptest.ResponseRecorder, code string, messageID string) {
+func assertStructuredFrontdError(t frontdTestTB, rec *httptest.ResponseRecorder, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 	var body struct {
 		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

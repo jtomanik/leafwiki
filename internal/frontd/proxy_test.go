@@ -10,19 +10,20 @@ import (
 	"strings"
 	"time"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
-func assertFrontdProxyError(t frontdTestTB, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+func assertFrontdProxyError(t frontdTestTB, rec *httptest.ResponseRecorder, wantStatus int, wantCode sharederrors.ErrorCode, wantMessageID sharederrors.MessageID) {
 	t.Helper()
 	if rec.Code != wantStatus {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
 	}
 	var body struct {
 		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -207,7 +208,7 @@ var _ = It("TestWorkspaceProxyReturnsRetryableUnavailableWhenUpstreamIsDown", fu
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
 
-	assertFrontdProxyError(t, rec, http.StatusServiceUnavailable, "workspaced_unavailable", "errors.workspaced.unavailable")
+	assertFrontdProxyError(t, rec, http.StatusServiceUnavailable, errCodeWorkspacedUnavailable, sharederrors.MessageIDForCode(errCodeWorkspacedUnavailable))
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("Retry-After header missing")
 	}
@@ -235,7 +236,7 @@ var _ = It("TestWorkspaceProxyReturnsStructuredActorResolutionError", func() {
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil))
 
-	assertFrontdProxyError(t, rec, http.StatusUnauthorized, "workspace_actor_context_failed", "errors.workspace.actor_context_failed")
+	assertFrontdProxyError(t, rec, http.StatusUnauthorized, errCodeWorkspaceActorContextFailed, sharederrors.MessageIDForCode(errCodeWorkspaceActorContextFailed))
 
 })
 
