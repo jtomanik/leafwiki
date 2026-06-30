@@ -51,7 +51,7 @@ func HaveBrandingValidationError(
 		if body.Error != brandingValidationErrorCode {
 			return false, nil
 		}
-		matched, err := testmatchers.ContainFieldError(field.String(), code, messageID).Match(body.Fields)
+		matched, err := testmatchers.ContainFieldError(testmatchers.ValidationFieldName(field.String()), code, messageID).Match(body.Fields)
 		return matched, err
 	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} have branding validation error\n{{format .Data 1}}", expected)
 }

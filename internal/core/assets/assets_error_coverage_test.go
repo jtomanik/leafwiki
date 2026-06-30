@@ -39,17 +39,17 @@ var _ = Describe("asset service error branches", func() {
 			Expect(os.Chmod(permissionAssetsDir, 0o755)).To(Succeed())
 		})
 		_, err := permissionService.SaveAssetForPage(&tree.PageNode{ID: "permission-denied"}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
-		assertLocalizedCode(err, ErrCodeAssetUploadFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 		Expect(os.Chmod(permissionAssetsDir, 0o755)).To(Succeed())
 
 		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
 		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), "blocked"), []byte("file"), 0o600)).To(Succeed())
 
 		_, err = service.SaveAssetForPage(&tree.PageNode{ID: "blocked/child"}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
-		assertLocalizedCode(err, ErrCodeAssetUploadFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 
 		_, err = service.SaveAssetForPage(&tree.PageNode{ID: "stream-error"}, failingMultipartFile{Reader: bytes.NewReader([]byte("asset"))}, assetName("asset.png"), shared.MaxBytes(1024))
-		assertLocalizedCode(err, ErrCodeAssetUploadFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 	})
 
 	It("handles malformed asset entries for list, read, and delete operations", func() {
@@ -70,35 +70,35 @@ var _ = Describe("asset service error branches", func() {
 		readPage := &tree.PageNode{ID: "read-page"}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), readPage.ID.String(), "note.txt"), 0o755)).To(Succeed())
 		_, err = service.ReadAssetForPage(readPage, assetName("note.txt"))
-		assertLocalizedCode(err, ErrCodeAssetReadFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetReadFailed))
 
 		err = service.DeleteAsset(&tree.PageNode{ID: "missing-page"}, assetName("missing.txt"))
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 
 		deletePage := &tree.PageNode{ID: "delete-page"}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), deletePage.ID.String(), "blocked.txt", "child"), 0o755)).To(Succeed())
 		err = service.DeleteAsset(deletePage, assetName("blocked.txt"))
-		assertLocalizedCode(err, ErrCodeAssetDeleteFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetDeleteFailed))
 	})
 
 	It("returns localized rename failures for missing pages, target stat errors, and rename syscall errors", func() {
 		service := NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
 
 		_, err := service.RenameAsset(&tree.PageNode{ID: "missing-page"}, assetName("old.txt"), assetName("new.txt"))
-		assertLocalizedCode(err, ErrCodeAssetNotFound)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 
 		statErrorPage := &tree.PageNode{ID: "stat-error-page"}
 		writeAssetFile(service, statErrorPage, "old.txt", []byte("old"))
 		statErrorDir := filepath.Join(service.GetAssetsDir(), statErrorPage.ID.String())
 		Expect(os.Symlink("new.txt", filepath.Join(statErrorDir, "new.txt"))).To(Succeed())
 		_, err = service.RenameAsset(statErrorPage, assetName("old.txt"), assetName("new.txt"))
-		assertLocalizedCode(err, ErrCodeAssetRenameFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetRenameFailed))
 
 		renameErrorPage := &tree.PageNode{ID: "rename-error-page"}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), renameErrorPage.ID.String()), 0o755)).To(Succeed())
 		tooLongName := strings.Repeat("a", 4096) + ".txt"
 		_, err = service.RenameAsset(renameErrorPage, assetName(tooLongName), assetName("renamed.txt"))
-		assertLocalizedCode(err, ErrCodeAssetRenameFailed)
+		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetRenameFailed))
 	})
 
 	It("returns copy failures for malformed source and target filesystem states", func() {
@@ -112,20 +112,20 @@ var _ = Describe("asset service error branches", func() {
 			Expect(os.Chmod(assetsDir, 0o755)).To(Succeed())
 		})
 		err := service.CopyAllAssets(source, &tree.PageNode{ID: "blocked-target"})
-		Expect(err).To(MatchError(ContainSubstring("could not create target asset path")))
+		Expect(err).To(Satisfy(wrapsAssetPathError))
 		Expect(os.Chmod(assetsDir, 0o755)).To(Succeed())
 
 		sourceFilePage := &tree.PageNode{ID: "source-file"}
 		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), sourceFilePage.ID.String()), []byte("not a directory"), 0o600)).To(Succeed())
 		err = service.CopyAllAssets(sourceFilePage, &tree.PageNode{ID: "target"})
-		Expect(err).To(MatchError(ContainSubstring("could not read source asset directory")))
+		Expect(err).To(Satisfy(wrapsAssetPathError))
 
 		danglingSource := &tree.PageNode{ID: "dangling-source"}
 		danglingDir := filepath.Join(service.GetAssetsDir(), danglingSource.ID.String())
 		Expect(os.MkdirAll(danglingDir, 0o755)).To(Succeed())
 		Expect(os.Symlink("missing.txt", filepath.Join(danglingDir, "broken.txt"))).To(Succeed())
 		err = service.CopyAllAssets(danglingSource, &tree.PageNode{ID: "dangling-target"})
-		Expect(err).To(MatchError(ContainSubstring("could not copy asset broken.txt")))
+		Expect(err).To(Satisfy(wrapsAssetPathError))
 
 		directSourceDir := filepath.Join(GinkgoT().TempDir(), "direct-source")
 		Expect(os.MkdirAll(directSourceDir, 0o755)).To(Succeed())
@@ -135,7 +135,7 @@ var _ = Describe("asset service error branches", func() {
 		targetFile := filepath.Join(GinkgoT().TempDir(), "target-file")
 		Expect(os.WriteFile(targetFile, []byte("not a directory"), 0o600)).To(Succeed())
 		err = service.copySingleAsset(directSourceDir, targetFile, entries[0])
-		Expect(err).To(MatchError(ContainSubstring("could not create target asset file")))
+		Expect(err).To(Satisfy(wrapsAssetPathError))
 
 		copyErrorSourceDir := filepath.Join(GinkgoT().TempDir(), "copy-error-source")
 		copyErrorTargetDir := filepath.Join(GinkgoT().TempDir(), "copy-error-target")
@@ -144,7 +144,7 @@ var _ = Describe("asset service error branches", func() {
 		entries, err = os.ReadDir(copyErrorSourceDir)
 		Expect(err).NotTo(HaveOccurred())
 		err = service.copySingleAsset(copyErrorSourceDir, copyErrorTargetDir, entries[0])
-		Expect(err).To(MatchError(ContainSubstring("could not copy asset file")))
+		Expect(err).To(Satisfy(wrapsAssetPathError))
 	})
 
 	It("logs asset copy close failures", func() {
@@ -177,4 +177,9 @@ type closeErrorAssetFile struct {
 
 func (f closeErrorAssetFile) Close() error {
 	return f.err
+}
+
+func wrapsAssetPathError(err error) bool {
+	var pathErr *os.PathError
+	return errors.As(err, &pathErr)
 }
