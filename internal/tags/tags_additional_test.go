@@ -77,6 +77,6 @@ var _ = ginkgo.Describe("TagsStore duplicate tag writes", func() {
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got[newFixturePageID("page-1")]).To(Equal([]string{"go", "rust"}))
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), []string{"go", "rust"}))
 	})
 })

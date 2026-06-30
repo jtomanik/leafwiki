@@ -2,6 +2,7 @@ package properties
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -34,6 +35,9 @@ type PropertiesStore struct {
 type propertyKeyCountScanner interface {
 	Scan(dest ...any) error
 }
+
+var ErrPropertiesBeginTransaction = errors.New("begin properties transaction")
+var ErrPropertiesScanRow = errors.New("scan properties row")
 
 var (
 	openPropertiesDB = func(dbPath string) (*sql.DB, error) {
@@ -107,7 +111,7 @@ func (s *PropertiesStore) SetPropertiesForPage(pageID tree.PageID, props map[str
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrPropertiesBeginTransaction, err)
 	}
 
 	if _, err := tx.Exec(`DELETE FROM page_properties WHERE page_id = ?`, pageID); err != nil {
@@ -202,7 +206,7 @@ func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID
 	for rows.Next() {
 		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrPropertiesScanRow, err)
 		}
 		pageIDs = append(pageIDs, id)
 	}
@@ -239,7 +243,7 @@ func (s *PropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree
 		var pageID tree.PageID
 		var key, value, typ string
 		if err := rows.Scan(&pageID, &key, &value, &typ); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrPropertiesScanRow, err)
 		}
 		if result[pageID] == nil {
 			result[pageID] = make(map[string]PropertyEntry)

@@ -8,6 +8,10 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
+	"github.com/perber/wiki/internal/core/tree"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
@@ -24,8 +28,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
 
 		Expect(store).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("failed to open properties database")))
-		Expect(errors.Is(err, openErr)).To(BeTrue())
+		Expect(err).To(MatchError(openErr))
 	})
 
 	ginkgo.It("recovers from a corrupt properties database during initialization", func() {
@@ -76,8 +79,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
 
 		Expect(store).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("failed to reopen properties database after recovery")))
-		Expect(errors.Is(err, reopenErr)).To(BeTrue())
+		Expect(err).To(MatchError(reopenErr))
 		Expect(openCalls).To(Equal(2))
 		Expect(removed).To(BeTrue())
 	})
@@ -116,7 +118,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
 
 		Expect(store).To(BeNil())
-		Expect(errors.Is(err, finalErr)).To(BeTrue())
+		Expect(err).To(MatchError(finalErr))
 		Expect(openCalls).To(Equal(2))
 		Expect(ensureCalls).To(Equal(2))
 	})
@@ -136,7 +138,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 
 		store, err := NewPropertiesStore(storageDir)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_BUSY))
 		Expect(store).To(BeNil())
 	})
 
@@ -146,7 +148,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 
 		err := store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
 
-		Expect(err).To(MatchError("sql: database is closed"))
+		Expect(err).To(MatchError(ErrPropertiesBeginTransaction))
 	})
 
 	ginkgo.It("returns write errors from malformed property tables", func() {
@@ -154,7 +156,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		execPropertiesSQL(store, `DROP TABLE page_properties`)
 
 		err := store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
-		Expect(err).To(MatchError(ContainSubstring("no such table")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 		prepareErrorStore := newTestStore(ginkgo.GinkgoT())
 		execPropertiesSQL(prepareErrorStore,
@@ -162,7 +164,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			`CREATE TABLE page_properties (page_id TEXT PRIMARY KEY)`,
 		)
 		err = prepareErrorStore.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
-		Expect(err).To(MatchError(ContainSubstring("no column named key")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 		insertErrorStore := newTestStore(ginkgo.GinkgoT())
 		execPropertiesSQL(insertErrorStore,
@@ -173,7 +175,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			 END`,
 		)
 		err = insertErrorStore.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
-		Expect(err).To(MatchError(ContainSubstring("insert blocked")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 	})
 
 	ginkgo.It("returns read query errors from missing property tables", func() {
@@ -182,15 +184,15 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 
 		keys, err := store.GetAllPropertyKeys("", 50)
 		Expect(keys).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 		pageIDs, err := store.GetPageIDsByProperty("status", "draft")
 		Expect(pageIDs).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 		byPage, err := store.GetPropertiesForPages(testPageIDs("page-1"))
 		Expect(byPage).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table")))
+		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns scan errors from malformed property rows", func() {
@@ -202,7 +204,10 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		)
 		pageIDs, err := pageIDStore.GetPageIDsByProperty("status", "draft")
 		Expect(pageIDs).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("cannot scan int64 into PageID")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrPropertiesScanRow),
+			MatchError(tree.ErrScanPageID),
+		))
 
 		propertiesStore := newTestStore(ginkgo.GinkgoT())
 		execPropertiesSQL(propertiesStore,
@@ -212,7 +217,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		)
 		byPage, err := propertiesStore.GetPropertiesForPages(testPageIDs("page-1"))
 		Expect(byPage).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrPropertiesScanRow))
 	})
 
 	ginkgo.It("returns key-count scan errors", func() {
@@ -230,7 +235,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		keys, err := store.GetAllPropertyKeys("", 0)
 
 		Expect(keys).To(BeNil())
-		Expect(errors.Is(err, scanErr)).To(BeTrue())
+		Expect(err).To(MatchError(scanErr))
 	})
 
 	ginkgo.It("returns close errors without clearing the database handle", func() {
@@ -248,7 +253,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 
 		err = store.Close()
 
-		Expect(errors.Is(err, closeErr)).To(BeTrue())
+		Expect(err).To(MatchError(closeErr))
 		Expect(store.db).NotTo(BeNil())
 	})
 })
@@ -259,4 +264,15 @@ func execPropertiesSQL(store *PropertiesStore, statements ...string) {
 		_, err := store.db.Exec(statement)
 		Expect(err).NotTo(HaveOccurred())
 	}
+}
+
+func matchPropertiesSQLitePrimaryError(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return -1
+		}
+		return sqliteErr.Code() & 0xFF
+	}, Equal(code))
 }

@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,12 @@ const (
 	TargetStderr Target = "stderr"
 	TargetStdout Target = "stdout"
 )
+
+var ErrInvalidLogTarget = errors.New("invalid log target")
+var ErrLogFileRequiresFileTarget = errors.New("log file requires file target")
+var ErrLogDataDirRequired = errors.New("log data dir required")
+var ErrLogFilePathOutsideDataDir = errors.New("log file path outside data dir")
+var ErrOpenLogFile = errors.New("open log file")
 
 type ConfigInput struct {
 	Target          string
@@ -48,7 +55,7 @@ func Resolve(input ConfigInput) (Config, error) {
 	}
 
 	if input.FilePathSet && target != TargetFile {
-		return Config{}, fmt.Errorf("--log-file requires --log-target file")
+		return Config{}, ErrLogFileRequiresFileTarget
 	}
 
 	level := parseLevel(input.LevelFromConfig)
@@ -58,7 +65,7 @@ func Resolve(input ConfigInput) (Config, error) {
 
 	dataDir := strings.TrimSpace(input.DataDir)
 	if dataDir == "" {
-		return Config{}, fmt.Errorf("data dir is required for file logging")
+		return Config{}, ErrLogDataDirRequired
 	}
 
 	filePath := strings.TrimSpace(input.FilePath)
@@ -67,7 +74,7 @@ func Resolve(input ConfigInput) (Config, error) {
 	} else if !filepath.IsAbs(filePath) {
 		cleanRel := filepath.Clean(filePath)
 		if !filepath.IsLocal(cleanRel) {
-			return Config{}, fmt.Errorf("log file path must stay within data dir")
+			return Config{}, ErrLogFilePathOutsideDataDir
 		}
 		filePath = filepath.Join(dataDir, cleanRel)
 	}
@@ -100,7 +107,7 @@ func parseTarget(raw string) (Target, error) {
 	case TargetStdout:
 		return TargetStdout, nil
 	default:
-		return "", fmt.Errorf("invalid log target %q (expected file, stderr, or stdout)", raw)
+		return "", fmt.Errorf("%w %q (expected file, stderr, or stdout)", ErrInvalidLogTarget, raw)
 	}
 }
 
@@ -121,11 +128,11 @@ func openSink(cfg Config, streams Streams) (io.Writer, io.Closer, error) {
 	switch cfg.Target {
 	case TargetFile:
 		if err := os.MkdirAll(filepath.Dir(cfg.FilePath), 0o755); err != nil {
-			return nil, nil, fmt.Errorf("failed to open log file: create parent directory: %w", err)
+			return nil, nil, fmt.Errorf("%w: create parent directory: %w", ErrOpenLogFile, err)
 		}
 		file, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open log file: %w", err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrOpenLogFile, err)
 		}
 		return file, file, nil
 	case TargetStderr:
@@ -139,7 +146,7 @@ func openSink(cfg Config, streams Streams) (io.Writer, io.Closer, error) {
 		}
 		return streams.Stdout, noopCloser{}, nil
 	default:
-		return nil, nil, fmt.Errorf("invalid log target %q (expected file, stderr, or stdout)", cfg.Target)
+		return nil, nil, fmt.Errorf("%w %q (expected file, stderr, or stdout)", ErrInvalidLogTarget, cfg.Target)
 	}
 }
 

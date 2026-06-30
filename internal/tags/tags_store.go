@@ -2,6 +2,7 @@ package tags
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -27,6 +28,9 @@ type TagCount struct {
 type tagCountScanner interface {
 	Scan(dest ...any) error
 }
+
+var ErrTagsBeginTransaction = errors.New("begin tags transaction")
+var ErrTagsScanRow = errors.New("scan tags row")
 
 var (
 	openTagsDB = func(dbPath string) (*sql.DB, error) {
@@ -100,7 +104,7 @@ func (s *TagsStore) SetTagsForPage(pageID tree.PageID, tags []string) error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrTagsBeginTransaction, err)
 	}
 
 	if _, err := tx.Exec(`DELETE FROM page_tags WHERE page_id = ?`, pageID); err != nil {
@@ -143,7 +147,7 @@ func (s *TagsStore) SetPageIndex(pageID tree.PageID, tags []string, excerpt stri
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrTagsBeginTransaction, err)
 	}
 
 	if _, err := tx.Exec(`DELETE FROM page_tags WHERE page_id = ?`, pageID); err != nil {
@@ -186,7 +190,7 @@ func (s *TagsStore) DeletePageIndex(pageID tree.PageID) error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrTagsBeginTransaction, err)
 	}
 
 	if _, err := tx.Exec(`DELETE FROM page_tags WHERE page_id = ?`, pageID); err != nil {
@@ -229,7 +233,7 @@ func (s *TagsStore) GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]
 		var pageID tree.PageID
 		var excerpt string
 		if err := rows.Scan(&pageID, &excerpt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrTagsScanRow, err)
 		}
 		result[pageID] = excerpt
 	}
@@ -242,7 +246,7 @@ func (s *TagsStore) Clear() error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrTagsBeginTransaction, err)
 	}
 	if _, err := tx.Exec(`DELETE FROM page_tags`); err != nil {
 		_ = tx.Rollback()
@@ -379,7 +383,7 @@ func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	for rows.Next() {
 		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrTagsScanRow, err)
 		}
 		pageIDs = append(pageIDs, id)
 	}
@@ -445,7 +449,7 @@ func (s *TagsStore) GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]st
 		var pageID tree.PageID
 		var tag string
 		if err := rows.Scan(&pageID, &tag); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrTagsScanRow, err)
 		}
 		result[pageID] = append(result[pageID], tag)
 	}

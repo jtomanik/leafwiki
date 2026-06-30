@@ -11,7 +11,26 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 )
+
+const (
+	testLogStartupMessage = "Starting LeafWiki"
+	testLogPreviousLine   = "previous line"
+	testLogSlogMessage    = "slog message"
+	testLogStdlibMessage  = "stdlib message"
+	testLogInfoMessage    = "info message"
+	testLogErrorMessage   = "error message"
+)
+
+func matchResolvedConfig(target Target, filePath types.GomegaMatcher, level slog.Level) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Target":   Equal(target),
+		"FilePath": filePath,
+		"Level":    Equal(level),
+	})
+}
 
 var _ = Describe("logging configuration", func() {
 	It("TestResolve_DefaultsToFileUnderDataDir", func() {
@@ -20,9 +39,11 @@ var _ = Describe("logging configuration", func() {
 		cfg, err := Resolve(ConfigInput{DataDir: dataDir})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg.Target).To(Equal(TargetFile))
-		Expect(cfg.FilePath).To(Equal(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")))
-		Expect(cfg.Level).To(Equal(slog.LevelInfo))
+		Expect(cfg).To(matchResolvedConfig(
+			TargetFile,
+			Equal(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")),
+			slog.LevelInfo,
+		))
 	})
 
 	It("TestResolve_RelativeLogFileResolvesUnderDataDir", func() {
@@ -38,8 +59,7 @@ var _ = Describe("logging configuration", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg.FilePath).To(Equal(filepath.Join(dataDir, "logs", "custom.log")))
-		Expect(cfg.Level).To(Equal(slog.LevelDebug))
+		Expect(cfg).To(matchResolvedConfig(TargetFile, Equal(filepath.Join(dataDir, "logs", "custom.log")), slog.LevelDebug))
 	})
 
 	It("TestResolve_RejectsRelativeLogFileEscapingDataDir", func() {
@@ -49,7 +69,7 @@ var _ = Describe("logging configuration", func() {
 			FilePathSet: true,
 		})
 
-		Expect(err).To(MatchError(ContainSubstring("log file path must stay within data dir")))
+		Expect(err).To(MatchError(ErrLogFilePathOutsideDataDir))
 	})
 
 	It("TestResolve_AbsoluteLogFileIsUsedAsIs", func() {
@@ -68,14 +88,14 @@ var _ = Describe("logging configuration", func() {
 
 type resolveErrorCase struct {
 	input ConfigInput
-	want  string
+	want  types.GomegaMatcher
 }
 
 var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile",
 	func(tc resolveErrorCase) {
 		_, err := Resolve(tc.input)
 
-		Expect(err).To(MatchError(ContainSubstring(tc.want)))
+		Expect(err).To(tc.want)
 	},
 	Entry("invalid target", resolveErrorCase{
 		input: ConfigInput{
@@ -83,7 +103,7 @@ var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile"
 			Target:    "system",
 			TargetSet: true,
 		},
-		want: "invalid log target",
+		want: MatchError(ErrInvalidLogTarget),
 	}),
 	Entry("stderr with file", resolveErrorCase{
 		input: ConfigInput{
@@ -93,7 +113,7 @@ var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile"
 			FilePath:    "custom.log",
 			FilePathSet: true,
 		},
-		want: "--log-file requires --log-target file",
+		want: MatchError(ErrLogFileRequiresFileTarget),
 	}),
 )
 
@@ -101,7 +121,7 @@ var _ = Describe("opening loggers", func() {
 	It("TestOpenLogger_FileCreatesParentAndAppendsJSON", func() {
 		logPath := filepath.Join(GinkgoT().TempDir(), "nested", "leafwiki.log")
 		err := os.WriteFile(logPath, []byte("previous line\n"), 0o600)
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		logger, closer, err := Open(Config{
 			Target:   TargetFile,
@@ -113,7 +133,7 @@ var _ = Describe("opening loggers", func() {
 			_ = closer.Close()
 		})
 
-		logger.Info("Starting LeafWiki", "address", "127.0.0.1:0")
+		logger.Info(testLogStartupMessage, "address", "127.0.0.1:0")
 		Expect(closer.Close()).To(Succeed())
 
 		info, err := os.Stat(logPath)
@@ -129,12 +149,12 @@ var _ = Describe("opening loggers", func() {
 		for _, key := range []string{"time", "level", "msg", "source"} {
 			Expect(entry).To(HaveKey(key))
 		}
-		Expect(entry["msg"]).To(Equal("Starting LeafWiki"))
+		Expect(entry).To(HaveKeyWithValue("msg", testLogStartupMessage))
 	})
 
 	It("TestOpenLogger_AppendsExistingFile", func() {
 		logPath := filepath.Join(GinkgoT().TempDir(), "leafwiki.log")
-		Expect(os.WriteFile(logPath, []byte("previous line\n"), 0o600)).To(Succeed())
+		Expect(os.WriteFile(logPath, []byte(testLogPreviousLine+"\n"), 0o600)).To(Succeed())
 
 		logger, closer, err := Open(Config{
 			Target:   TargetFile,
@@ -142,13 +162,15 @@ var _ = Describe("opening loggers", func() {
 			Level:    slog.LevelInfo,
 		}, Streams{})
 		Expect(err).NotTo(HaveOccurred())
-		logger.Info("Starting LeafWiki")
+		logger.Info(testLogStartupMessage)
 		Expect(closer.Close()).To(Succeed())
 
 		raw, err := os.ReadFile(logPath)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(raw)).To(ContainSubstring("previous line"))
-		Expect(string(raw)).To(ContainSubstring("Starting LeafWiki"))
+		Expect(string(raw)).To(SatisfyAll(
+			ContainSubstring(testLogPreviousLine),
+			ContainSubstring(testLogStartupMessage),
+		))
 	})
 
 	It("TestOpenLogger_FileOpenFailureIsVisible", func() {
@@ -161,7 +183,7 @@ var _ = Describe("opening loggers", func() {
 			Level:    slog.LevelInfo,
 		}, Streams{})
 
-		Expect(err).To(MatchError(ContainSubstring("failed to open log file")))
+		Expect(err).To(MatchError(ErrOpenLogFile))
 	})
 
 	It("returns file open errors after parent creation succeeds", func() {
@@ -173,7 +195,7 @@ var _ = Describe("opening loggers", func() {
 			Level:    slog.LevelInfo,
 		}, Streams{})
 
-		Expect(err).To(MatchError(ContainSubstring("failed to open log file")))
+		Expect(err).To(MatchError(ErrOpenLogFile))
 	})
 
 	It("TestOpenLogger_StdoutStderrAndStdlibBridgeUseSelectedSink", func() {
@@ -195,12 +217,15 @@ var _ = Describe("opening loggers", func() {
 			slog.SetDefault(previous)
 		})
 
-		slog.Default().Info("slog message")
-		log.Print("stdlib message")
+		slog.Default().Info(testLogSlogMessage)
+		log.Print(testLogStdlibMessage)
 
 		Expect(stdout.String()).To(BeEmpty())
-		Expect(stderr.String()).To(ContainSubstring("slog message"))
-		Expect(stderr.String()).To(ContainSubstring("stdlib message"))
+		Expect(strings.Split(strings.TrimSpace(stderr.String()), "\n")).To(HaveLen(2))
+		Expect(stderr.String()).To(SatisfyAll(
+			ContainSubstring(testLogSlogMessage),
+			ContainSubstring(testLogStdlibMessage),
+		))
 	})
 
 	It("TestOpenLogger_StreamTargetsRespectLevel", func() {
@@ -215,11 +240,14 @@ var _ = Describe("opening loggers", func() {
 			_ = closer.Close()
 		})
 
-		logger.Info("info message")
-		logger.Error("error message")
+		logger.Info(testLogInfoMessage)
+		logger.Error(testLogErrorMessage)
 
-		Expect(stdout.String()).NotTo(ContainSubstring("info message"))
-		Expect(stdout.String()).To(ContainSubstring("error message"))
+		Expect(strings.Split(strings.TrimSpace(stdout.String()), "\n")).To(HaveLen(1))
+		Expect(stdout.String()).To(SatisfyAll(
+			Not(ContainSubstring(testLogInfoMessage)),
+			ContainSubstring(testLogErrorMessage),
+		))
 	})
 })
 
@@ -227,15 +255,14 @@ var _ = Describe("logging edge coverage", func() {
 	It("rejects blank data dir when file logging is required", func() {
 		_, err := Resolve(ConfigInput{Target: "file", TargetSet: true, DataDir: " \t\n "})
 
-		Expect(err).To(MatchError(ContainSubstring("data dir is required for file logging")))
+		Expect(err).To(MatchError(ErrLogDataDirRequired))
 	})
 
 	It("trims and case-normalizes stream targets", func() {
 		cfg, err := Resolve(ConfigInput{Target: " StDeRr ", TargetSet: true})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg.Target).To(Equal(TargetStderr))
-		Expect(cfg.FilePath).To(BeEmpty())
+		Expect(cfg).To(matchResolvedConfig(TargetStderr, BeEmpty(), slog.LevelInfo))
 	})
 
 	It("trims and case-normalizes warning level config", func() {
@@ -262,7 +289,7 @@ var _ = Describe("logging edge coverage", func() {
 	It("rejects an invalid already-resolved target in Open", func() {
 		_, _, err := Open(Config{Target: Target("system"), Level: slog.LevelInfo}, Streams{})
 
-		Expect(err).To(MatchError(ContainSubstring("invalid log target")))
+		Expect(err).To(MatchError(ErrInvalidLogTarget))
 	})
 
 	It("uses default stdout writer for nil stdout stream", func() {

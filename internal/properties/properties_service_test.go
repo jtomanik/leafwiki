@@ -510,8 +510,8 @@ var _ = ginkgo.Describe("PropertiesService store delegation", func() {
 
 		got, err := svc.GetPropertiesForPages(testPageIDs("page-1", "page-2"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got[newFixturePageID("page-1")]).To(BeNil())
-		Expect(got[newFixturePageID("page-2")]).To(Equal(props("status", "published")))
+		Expect(got).NotTo(HaveKey(newFixturePageID("page-1")))
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-2"), props("status", "published")))
 	})
 
 	ginkgo.It("returns an empty properties map for an empty service selection", func() {
@@ -521,7 +521,7 @@ var _ = ginkgo.Describe("PropertiesService store delegation", func() {
 
 		got, err := svc.GetPropertiesForPages(nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(map[tree.PageID]map[string]PropertyEntry{}))
+		Expect(got).To(BeEmpty())
 	})
 })
 
