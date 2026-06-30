@@ -2,6 +2,7 @@ package branding
 
 import (
 	"bytes"
+	"encoding/json"
 	stderrors "errors"
 	"os"
 	"path/filepath"
@@ -9,8 +10,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = It("UpdateBranding accepts a trimmed site name at the maximum length", func() {
@@ -94,8 +97,7 @@ var _ = It("Save returns marshal errors", func() {
 
 	err := store.Save(DefaultBrandingConfig())
 
-	Expect(err).To(MatchError(ContainSubstring("failed to marshal branding config")))
-	Expect(stderrors.Is(err, marshalErr)).To(BeTrue())
+	Expect(err).To(MatchError(marshalErr))
 })
 
 var _ = It("NewBrandingService reports invalid persisted branding config", func() {
@@ -103,7 +105,7 @@ var _ = It("NewBrandingService reports invalid persisted branding config", func(
 	Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{broken json"), 0644)).To(Succeed())
 
 	_, err := NewBrandingService(dir)
-	Expect(err).To(MatchError(ContainSubstring("failed to load branding config")))
+	Expect(err).To(Satisfy(wrapsJSONSyntaxError))
 })
 
 var _ = Describe("branding persistence edge coverage", func() {
@@ -114,7 +116,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 		svc, err := NewBrandingService(storageFile)
 
 		Expect(svc).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("failed to create branding assets directory")))
+		Expect(err).To(Satisfy(wrapsPathError))
 	})
 
 	It("BrandingStore reports read and write errors", func() {
@@ -124,10 +126,10 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		loaded, err := store.Load()
 		Expect(loaded).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("failed to read branding config")))
+		Expect(err).To(Satisfy(wrapsPathError))
 
 		err = store.Save(DefaultBrandingConfig())
-		Expect(err).To(MatchError(ContainSubstring("failed to write branding config")))
+		Expect(err).To(Satisfy(wrapsPathOrLinkError))
 	})
 
 	It("UpdateBranding returns localized persistence errors", func() {
@@ -136,7 +138,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		err := svc.UpdateBranding("LeafWiki Docs")
 
-		expectBrandingLocalizedError(err, ErrCodeBrandingUpdateFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingUpdateFailed))
 	})
 
 	It("UploadLogo returns localized persistence errors after writing the logo", func() {
@@ -147,7 +149,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 		got, err := svc.UploadLogo(logo, "logo.png")
 
 		Expect(got).To(BeEmpty())
-		expectBrandingLocalizedError(err, ErrCodeBrandingLogoUploadFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingLogoUploadFailed))
 		Expect(filepath.Join(dir, "branding", "logo.png")).To(BeAnExistingFile())
 	})
 
@@ -159,7 +161,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 		got, err := svc.UploadFavicon(favicon, "favicon.ico")
 
 		Expect(got).To(BeEmpty())
-		expectBrandingLocalizedError(err, ErrCodeBrandingFaviconUploadFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingFaviconUploadFailed))
 		Expect(filepath.Join(dir, "branding", "favicon.ico")).To(BeAnExistingFile())
 	})
 
@@ -171,7 +173,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		err := fileFailureSvc.DeleteLogo()
 
-		expectBrandingLocalizedError(err, ErrCodeBrandingLogoDeleteFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingLogoDeleteFailed))
 
 		saveFailureSvc, saveFailureDir := newTestBrandingService(GinkgoT())
 		saveFailureSvc.brandingConfig.LogoFile = "logo.png"
@@ -180,7 +182,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		err = saveFailureSvc.DeleteLogo()
 
-		expectBrandingLocalizedError(err, ErrCodeBrandingLogoDeleteFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingLogoDeleteFailed))
 	})
 
 	It("DeleteFavicon returns localized file removal and persistence errors", func() {
@@ -191,7 +193,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		err := fileFailureSvc.DeleteFavicon()
 
-		expectBrandingLocalizedError(err, ErrCodeBrandingFaviconDeleteFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingFaviconDeleteFailed))
 
 		saveFailureSvc, saveFailureDir := newTestBrandingService(GinkgoT())
 		saveFailureSvc.brandingConfig.FaviconFile = "favicon.ico"
@@ -200,7 +202,7 @@ var _ = Describe("branding persistence edge coverage", func() {
 
 		err = saveFailureSvc.DeleteFavicon()
 
-		expectBrandingLocalizedError(err, ErrCodeBrandingFaviconDeleteFailed)
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingFaviconDeleteFailed))
 	})
 
 	It("removeOtherMatches tolerates glob and remove errors", func() {
@@ -238,9 +240,21 @@ func brandingTempUpload(contents []byte, pattern string) *os.File {
 	return file
 }
 
-func expectBrandingLocalizedError(err error, code sharederrors.ErrorCode) {
-	GinkgoHelper()
-	var localized *sharederrors.LocalizedError
-	Expect(stderrors.As(err, &localized)).To(BeTrue(), "error should be localized: %v", err)
-	Expect(localized.Code).To(Equal(code))
+func MatchBrandingLocalizedError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
+}
+
+func wrapsJSONSyntaxError(err error) bool {
+	var syntaxErr *json.SyntaxError
+	return stderrors.As(err, &syntaxErr)
+}
+
+func wrapsPathError(err error) bool {
+	var pathErr *os.PathError
+	return stderrors.As(err, &pathErr)
+}
+
+func wrapsPathOrLinkError(err error) bool {
+	var linkErr *os.LinkError
+	return wrapsPathError(err) || stderrors.As(err, &linkErr)
 }

@@ -395,7 +395,7 @@ var _ = It("TestBrandingService_UpdateBranding_EmptySiteName_ReturnsValidationEr
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
-	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
+	assertBrandingFieldErrorCode(t, ve, FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired)
 
 })
 
@@ -415,7 +415,7 @@ var _ = It("TestBrandingService_UpdateBranding_WhitespaceOnlySiteName_ReturnsVal
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
-	assertBrandingFieldErrorCode(t, ve, "branding_site_name_required", "validation.branding.site_name_required")
+	assertBrandingFieldErrorCode(t, ve, FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired)
 
 })
 
@@ -438,7 +438,7 @@ var _ = It("TestBrandingService_UpdateBranding_TooLongSiteName_ReturnsValidation
 	if len(ve.Errors) != 1 || ve.Errors[0].Field != "siteName" {
 		t.Fatalf("expected validation error for siteName, got %v", ve.Errors)
 	}
-	assertBrandingFieldErrorCode(t, ve, "branding_site_name_too_long", "validation.branding.site_name_too_long")
+	assertBrandingFieldErrorCode(t, ve, FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong)
 	if !strings.Contains(ve.Errors[0].Message, "must not exceed") {
 		t.Fatalf("expected length validation error message, got %q", ve.Errors[0].Message)
 	}

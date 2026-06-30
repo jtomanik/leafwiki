@@ -3,9 +3,19 @@ package branding
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"os"
 	"path/filepath"
 )
+
+func matchBrandingConfig(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchBrandingConstraints(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
 
 var _ = It("TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault", func() {
 	dir := GinkgoT().TempDir()
@@ -16,15 +26,17 @@ var _ = It("TestBrandingStore_Load_WhenConfigMissing_ReturnsDefault", func() {
 
 	def := DefaultBrandingConfig()
 
-	Expect(cfg.SiteName).To(Equal(def.SiteName))
-	Expect(cfg.LogoFile).To(Equal(def.LogoFile))
-	Expect(cfg.FaviconFile).To(Equal(def.FaviconFile))
-
-	// Constraints should be present (runtime-only)
-	Expect(cfg.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
-	Expect(cfg.BrandingConstraints.MaxFaviconSize).To(Equal(def.BrandingConstraints.MaxFaviconSize))
-	Expect(cfg.BrandingConstraints.LogoExts).NotTo(BeEmpty())
-	Expect(cfg.BrandingConstraints.FaviconExts).NotTo(BeEmpty())
+	Expect(cfg).To(matchBrandingConfig(gstruct.Fields{
+		"SiteName":    Equal(def.SiteName),
+		"LogoFile":    Equal(def.LogoFile),
+		"FaviconFile": Equal(def.FaviconFile),
+		"BrandingConstraints": matchBrandingConstraints(gstruct.Fields{
+			"MaxLogoSize":    Equal(def.BrandingConstraints.MaxLogoSize),
+			"MaxFaviconSize": Equal(def.BrandingConstraints.MaxFaviconSize),
+			"LogoExts":       Not(BeEmpty()),
+			"FaviconExts":    Not(BeEmpty()),
+		}),
+	}))
 })
 
 var _ = It("TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields", func() {
@@ -42,14 +54,16 @@ var _ = It("TestBrandingStore_SaveThenLoad_RoundTrip_PersistsFields", func() {
 	got, err := store.Load()
 	Expect(err).NotTo(HaveOccurred())
 
-	Expect(got.SiteName).To(Equal("MyWiki"))
-	Expect(got.LogoFile).To(Equal("logo.png"))
-	Expect(got.FaviconFile).To(Equal("favicon.ico"))
-
-	// Runtime-only constraints should be injected on Load, even though they are not persisted.
 	def := DefaultBrandingConfig()
-	Expect(got.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
-	Expect(got.BrandingConstraints.MaxFaviconSize).To(Equal(def.BrandingConstraints.MaxFaviconSize))
+	Expect(got).To(matchBrandingConfig(gstruct.Fields{
+		"SiteName":    Equal("MyWiki"),
+		"LogoFile":    Equal("logo.png"),
+		"FaviconFile": Equal("favicon.ico"),
+		"BrandingConstraints": matchBrandingConstraints(gstruct.Fields{
+			"MaxLogoSize":    Equal(def.BrandingConstraints.MaxLogoSize),
+			"MaxFaviconSize": Equal(def.BrandingConstraints.MaxFaviconSize),
+		}),
+	}))
 })
 
 var _ = It("TestBrandingStore_Save_WritesFileToExpectedLocation", func() {
@@ -80,7 +94,7 @@ var _ = It("TestBrandingStore_Load_WhenInvalidJSON_ReturnsError", func() {
 	Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{not valid json"), 0644)).To(Succeed())
 
 	_, err := store.Load()
-	Expect(err).To(MatchError(ContainSubstring("failed to parse branding config")))
+	Expect(err).To(Satisfy(wrapsJSONSyntaxError))
 })
 
 var _ = It("TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile", func() {
@@ -100,7 +114,10 @@ var _ = It("TestBrandingStore_Load_InsertsConstraintsEvenIfZeroInFile", func() {
 
 	def := DefaultBrandingConfig()
 
-	// Ensure constraints are injected and usable
-	Expect(got.BrandingConstraints.MaxLogoSize).To(Equal(def.BrandingConstraints.MaxLogoSize))
-	Expect(got.BrandingConstraints.LogoExts).To(HaveKeyWithValue(".png", def.BrandingConstraints.LogoExts[".png"]))
+	Expect(got).To(matchBrandingConfig(gstruct.Fields{
+		"BrandingConstraints": matchBrandingConstraints(gstruct.Fields{
+			"MaxLogoSize": Equal(def.BrandingConstraints.MaxLogoSize),
+			"LogoExts":    HaveKeyWithValue(".png", def.BrandingConstraints.LogoExts[".png"]),
+		}),
+	}))
 })
