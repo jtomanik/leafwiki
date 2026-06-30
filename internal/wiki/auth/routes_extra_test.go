@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -21,7 +24,72 @@ import (
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/security"
 	mwutils "github.com/perber/wiki/internal/http/middleware/utils"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
+
+const (
+	authValidationFieldUsername    testmatchers.ValidationField = "username"
+	authValidationFieldEmail       testmatchers.ValidationField = "email"
+	authValidationFieldPassword    testmatchers.ValidationField = "password"
+	authValidationFieldNewPassword testmatchers.ValidationField = "newPassword"
+	authValidationFieldName        testmatchers.ValidationField = "name"
+)
+
+type authValidationResponse struct {
+	Status     int
+	Error      string
+	FieldCount int
+}
+
+type authFieldErrorExpectation struct {
+	Field     testmatchers.ValidationField
+	Code      sharederrors.FieldErrorCode
+	MessageID sharederrors.MessageID
+}
+
+func matchAuthRouteError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func matchAuthValidationResponse() types.GomegaMatcher {
+	return WithTransform(func(rec *httptest.ResponseRecorder) authValidationResponse {
+		var body struct {
+			Error  string            `json:"error"`
+			Fields []json.RawMessage `json:"fields"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		return authValidationResponse{
+			Status:     rec.Code,
+			Error:      body.Error,
+			FieldCount: len(body.Fields),
+		}
+	}, gstruct.MatchAllFields(gstruct.Fields{
+		"Status":     Equal(http.StatusBadRequest),
+		"Error":      Equal(authValidationErrorCode),
+		"FieldCount": BeNumerically(">", 0),
+	}))
+}
+
+func matchAuthUseCaseValidationError(fields ...authFieldErrorExpectation) types.GomegaMatcher {
+	matchers := make([]types.GomegaMatcher, 0, len(fields))
+	for _, field := range fields {
+		field := field
+		matchers = append(matchers, testmatchers.ContainFieldError(field.Field, field.Code, field.MessageID))
+	}
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		_ = errors.As(err, &validation)
+		return validation
+	}, SatisfyAll(matchers...))
+}
+
+func expectAuthFieldError(
+	field testmatchers.ValidationField,
+	code sharederrors.FieldErrorCode,
+	messageID sharederrors.MessageID,
+) authFieldErrorExpectation {
+	return authFieldErrorExpectation{Field: field, Code: code, MessageID: messageID}
+}
 
 var _ = ginkgo.Describe("auth routes", func() {
 	ginkgo.It("RegisterRoutes wires auth endpoints for both refresh-token limiter modes", func() {
@@ -50,33 +118,33 @@ var _ = ginkgo.Describe("auth routes", func() {
 
 	ginkgo.It("requireAuthEnabled allows enabled auth and rejects disabled auth", func() {
 		rec := performAuthHandlerRequest(requireAuthEnabled(true), http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, nil, false)
-		expectAuthRouteError(rec, http.StatusForbidden, ErrCodeAuthDisabled)
+		Expect(rec).To(matchAuthRouteError(http.StatusForbidden, ErrCodeAuthDisabled), rec.Body.String())
 
 		rec = performAuthHandlerRequest(requireAuthEnabled(false), http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
 	ginkgo.It("writeAuthCookieError maps HTTPS and unexpected cookie failures", func() {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		writeAuthCookieError(c, mwutils.ErrHTTPSRequired, "https required", "internal", "log")
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		rec = httptest.NewRecorder()
 		c, _ = gin.CreateTestContext(rec)
 		writeAuthCookieError(c, errors.New("cookie store down"), "https required", "internal", "log")
-		expectAuthRouteError(rec, http.StatusInternalServerError, ErrCodeAuthInternalError)
+		Expect(rec).To(matchAuthRouteError(http.StatusInternalServerError, ErrCodeAuthInternalError), rec.Body.String())
 	})
 
 	ginkgo.It("respondWithAuthError maps localized, validation, core, API-key, and fallback errors", func() {
 		localized := sharederrors.NewLocalizedErrorFromCode(ErrCodeAuthInvalidPayload, nil)
 		rec := respondWithAuthErrorRecorder(localized)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidPayload)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidPayload), rec.Body.String())
 
 		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired)
 		rec = respondWithAuthErrorRecorder(validation)
-		expectAuthValidationError(rec)
+		Expect(rec).To(matchAuthValidationResponse(), rec.Body.String())
 
 		cases := []struct {
 			err    error
@@ -99,7 +167,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		for _, tc := range cases {
 			tc := tc
 			rec = respondWithAuthErrorRecorder(tc.err)
-			expectAuthRouteError(rec, tc.status, tc.code)
+			Expect(rec).To(matchAuthRouteError(tc.status, tc.code), rec.Body.String())
 		}
 
 		Expect(authErrorStatus(ErrCodeAuthTokenExpired)).To(Equal(http.StatusUnauthorized))
@@ -122,9 +190,9 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Header().Get("X-CSRF-Token")).NotTo(BeEmpty())
-		Expect(rec.Body.String()).To(ContainSubstring(`"authDisabled":false`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", Not(BeEmpty())))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"authDisabled":false`)))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleConfig(fixture.routerContext(false)),
@@ -135,16 +203,16 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleMe, http.MethodGet, "/api/auth/me", nil, nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(strings.TrimSpace(rec.Body.String())).To(Equal("null"))
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody("null"))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Cache-Control", "no-store"))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleMe, http.MethodGet, "/api/auth/me", nil, nil, fixture.admin, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"username":"admin"`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"admin"`)))
 	})
 
 	ginkgo.It("handles login, logout, and refresh-token requests", func() {
@@ -152,7 +220,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		rctx := fixture.routerContext(true)
 
 		rec := performAuthHandlerRequest(fixture.routes.handleLogin(rctx), http.MethodPost, "/api/auth/login", []byte(`{`), nil, nil, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidPayload)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidPayload), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleLogin(rctx),
@@ -163,7 +231,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusUnauthorized, ErrCodeAuthInvalidCredentials)
+		Expect(rec).To(matchAuthRouteError(http.StatusUnauthorized, ErrCodeAuthInvalidCredentials), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleLogin(rctx),
@@ -174,8 +242,8 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(string(MessageIDAuthLoginSuccess)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Body.Bytes()).To(testmatchers.HaveMessageID(MessageIDAuthLoginSuccess))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleLogin(fixture.routerContextWithCookieSecurity(true, false)),
@@ -186,7 +254,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleLogin(fixture.routerContextWithCookieSecurity(false, true)),
@@ -197,7 +265,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		originalSetAuthCookies := setAuthCookies
 		ginkgo.DeferCleanup(func() {
@@ -215,11 +283,11 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 		setAuthCookies = originalSetAuthCookies
 
 		rec = performAuthHandlerRequest(fixture.routes.handleRefreshToken(rctx), http.MethodPost, "/api/auth/refresh-token", nil, nil, nil, false)
-		expectAuthRouteError(rec, http.StatusUnprocessableEntity, ErrCodeAuthInvalidRefreshToken)
+		Expect(rec).To(matchAuthRouteError(http.StatusUnprocessableEntity, ErrCodeAuthInvalidRefreshToken), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleRefreshToken(rctx),
@@ -231,7 +299,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: "invalid-refresh-token"},
 		)
-		expectAuthRouteError(rec, http.StatusUnprocessableEntity, ErrCodeAuthInvalidRefreshToken)
+		Expect(rec).To(matchAuthRouteError(http.StatusUnprocessableEntity, ErrCodeAuthInvalidRefreshToken), rec.Body.String())
 
 		token, err := fixture.authService.Login("admin", "password123")
 		Expect(err).NotTo(HaveOccurred())
@@ -245,8 +313,8 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: token.RefreshToken},
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(string(MessageIDAuthRefreshTokenSuccess)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Body.Bytes()).To(testmatchers.HaveMessageID(MessageIDAuthRefreshTokenSuccess))
 
 		csrfFailureToken, err := fixture.authService.Login("admin", "password123")
 		Expect(err).NotTo(HaveOccurred())
@@ -260,7 +328,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: csrfFailureToken.RefreshToken},
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		refreshHTTPSFailureToken, err := fixture.authService.Login("admin", "password123")
 		Expect(err).NotTo(HaveOccurred())
@@ -277,7 +345,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: refreshHTTPSFailureToken.RefreshToken},
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		refreshSetFailureToken, err := fixture.authService.Login("admin", "password123")
 		Expect(err).NotTo(HaveOccurred())
@@ -294,7 +362,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: refreshSetFailureToken.RefreshToken},
 		)
-		expectAuthRouteError(rec, http.StatusInternalServerError, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusInternalServerError, ErrCodeAuthCookieFailed), rec.Body.String())
 		setAuthCookies = originalSetAuthCookies
 
 		rec = performAuthHandlerRequest(
@@ -307,7 +375,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: token.RefreshToken},
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 
 		logoutErrorRoutes := *fixture.routes
 		logoutErrorRoutes.logout = NewLogoutUseCase(nil)
@@ -321,24 +389,24 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 			&http.Cookie{Name: "leafwiki_rt", Value: token.RefreshToken},
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleLogout(fixture.routerContextWithCookieSecurity(false, true)), http.MethodPost, "/api/auth/logout", nil, nil, nil, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCookieFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCookieFailed), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleLogout(fixture.routerContextWithCookieSecurity(true, false)), http.MethodPost, "/api/auth/logout", nil, nil, nil, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthCsrfFailed)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthCsrfFailed), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleLogout(rctx), http.MethodPost, "/api/auth/logout", nil, nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(string(MessageIDAuthLogoutSuccess)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Body.Bytes()).To(testmatchers.HaveMessageID(MessageIDAuthLogoutSuccess))
 	})
 
 	ginkgo.It("handles admin user CRUD and own password changes", func() {
 		fixture := newAuthRouteFixture()
 
 		rec := performAuthHandlerRequest(fixture.routes.handleCreateUser, http.MethodPost, "/api/users", []byte(`{`), nil, fixture.admin, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidRequest)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUser,
@@ -349,7 +417,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthValidationError(rec)
+		Expect(rec).To(matchAuthValidationResponse(), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUser,
@@ -360,8 +428,8 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"username":"new-user"`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"new-user"`)))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUser,
@@ -372,16 +440,16 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusConflict, ErrCodeAuthUserAlreadyExists)
+		Expect(rec).To(matchAuthRouteError(http.StatusConflict, ErrCodeAuthUserAlreadyExists), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleGetUsers, http.MethodGet, "/api/users", nil, nil, fixture.admin, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"username":"admin"`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"admin"`)))
 
 		errorRoutes := *fixture.routes
 		errorRoutes.getUsers = NewGetUsersUseCase(setupUserServiceWithUnusableStorageDir())
 		rec = performAuthHandlerRequest(errorRoutes.handleGetUsers, http.MethodGet, "/api/users", nil, nil, fixture.admin, false)
-		expectAuthRouteError(rec, http.StatusInternalServerError, ErrCodeAuthInternalError)
+		Expect(rec).To(matchAuthRouteError(http.StatusInternalServerError, ErrCodeAuthInternalError), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
@@ -392,7 +460,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
@@ -403,7 +471,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidRequest)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
@@ -414,8 +482,8 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"role":"admin"`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"role":"admin"`)))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
@@ -426,7 +494,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 
 		deleteTarget, err := fixture.userService.CreateUser("delete-me", "delete@example.test", "password123", coreauth.RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
@@ -439,7 +507,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusNoContent), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleDeleteUser,
@@ -450,13 +518,13 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthAdminCannotDelete)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthAdminCannotDelete), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleChangeOwnPassword, http.MethodPut, "/api/users/me/password", nil, nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleChangeOwnPassword, http.MethodPut, "/api/users/me/password", []byte(`{`), nil, fixture.editor, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidRequest)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleChangeOwnPassword,
@@ -467,7 +535,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.editor,
 			false,
 		)
-		expectAuthValidationError(rec)
+		Expect(rec).To(matchAuthValidationResponse(), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleChangeOwnPassword,
@@ -478,7 +546,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.editor,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusNoContent), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 	})
 
 	ginkgo.It("handles admin and self API key flows", func() {
@@ -493,8 +561,8 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(strings.TrimSpace(rec.Body.String())).To(Equal("[]"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody("[]"))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
@@ -505,7 +573,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			nil,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
@@ -516,7 +584,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
@@ -527,26 +595,26 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidRequest)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
 		created, err := fixture.apiKeys.CreateAPIKey(newFixtureUserID(fixture.editor.ID), "to-revoke", newFixtureUserID(fixture.admin.ID))
 		Expect(err).NotTo(HaveOccurred())
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleRevokeUserAPIKey,
 			http.MethodDelete,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys/"+created.Key.ID.String(),
+			authUserAPIKeyPath(fixture.editor.ID, created.Key.ID),
 			nil,
-			gin.Params{{Key: "id", Value: fixture.editor.ID}, {Key: "keyId", Value: created.Key.ID.String()}},
+			authUserAPIKeyParams(fixture.editor.ID, created.Key.ID),
 			fixture.admin,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusNoContent), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleListOwnAPIKeys, http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleListOwnAPIKeys, http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, fixture.editor, false)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 
 		errorRoutes := *fixture.routes
 		errorRoutes.listAPIKeys = NewListAPIKeysUseCase(nil)
@@ -559,22 +627,22 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 
 		rec = performAuthHandlerRequest(errorRoutes.handleListOwnAPIKeys, http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, fixture.editor, false)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleCreateOwnAPIKey, http.MethodPost, "/api/users/me/mcp-api-keys", jsonBody(gin.H{"name": "self"}), nil, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
 		rec = performAuthHandlerRequest(fixture.routes.handleCreateOwnAPIKey, http.MethodPost, "/api/users/me/mcp-api-keys", jsonBody(gin.H{"name": "self"}), nil, fixture.editor, true)
-		expectAuthRouteError(rec, http.StatusForbidden, ErrCodeAuthForbidden)
+		Expect(rec).To(matchAuthRouteError(http.StatusForbidden, ErrCodeAuthForbidden), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleCreateOwnAPIKey, http.MethodPost, "/api/users/me/mcp-api-keys", []byte(`{`), nil, fixture.editor, false)
-		expectAuthRouteError(rec, http.StatusBadRequest, ErrCodeAuthInvalidRequest)
+		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
 		rec = performAuthHandlerRequest(fixture.routes.handleCreateOwnAPIKey, http.MethodPost, "/api/users/me/mcp-api-keys", jsonBody(gin.H{"name": "self"}), nil, fixture.editor, false)
-		expectAuthValidationError(rec)
+		Expect(rec).To(matchAuthValidationResponse(), rec.Body.String())
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateOwnAPIKey,
@@ -585,16 +653,16 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.editor,
 			false,
 		)
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Cache-Control", "no-store"))
 
 		ownKey, err := fixture.apiKeys.CreateAPIKey(newFixtureUserID(fixture.editor.ID), "own-revoke", newFixtureUserID(fixture.editor.ID))
 		Expect(err).NotTo(HaveOccurred())
-		rec = performAuthHandlerRequest(fixture.routes.handleRevokeOwnAPIKey, http.MethodDelete, "/api/users/me/mcp-api-keys/"+ownKey.Key.ID.String(), nil, gin.Params{{Key: "keyId", Value: ownKey.Key.ID.String()}}, nil, false)
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		rec = performAuthHandlerRequest(fixture.routes.handleRevokeOwnAPIKey, http.MethodDelete, authOwnAPIKeyPath(ownKey.Key.ID), nil, authOwnAPIKeyParams(ownKey.Key.ID), nil, false)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 
-		rec = performAuthHandlerRequest(fixture.routes.handleRevokeOwnAPIKey, http.MethodDelete, "/api/users/me/mcp-api-keys/"+ownKey.Key.ID.String(), nil, gin.Params{{Key: "keyId", Value: ownKey.Key.ID.String()}}, fixture.editor, false)
-		Expect(rec.Code).To(Equal(http.StatusNoContent), rec.Body.String())
+		rec = performAuthHandlerRequest(fixture.routes.handleRevokeOwnAPIKey, http.MethodDelete, authOwnAPIKeyPath(ownKey.Key.ID), nil, authOwnAPIKeyParams(ownKey.Key.ID), fixture.editor, false)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 
 		errorRoutes = *fixture.routes
 		errorRoutes.createAPIKey = NewCreateAPIKeyUseCase(nil, fixture.userService)
@@ -607,7 +675,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 
 		errorRoutes = *fixture.routes
 		errorRoutes.revokeAPIKey = NewRevokeAPIKeyUseCase(nil)
@@ -620,10 +688,10 @@ var _ = ginkgo.Describe("auth routes", func() {
 			fixture.admin,
 			false,
 		)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 
 		rec = performAuthHandlerRequest(errorRoutes.handleRevokeOwnAPIKey, http.MethodDelete, "/api/users/me/mcp-api-keys/missing-key", nil, gin.Params{{Key: "keyId", Value: "missing-key"}}, fixture.editor, false)
-		expectAuthRouteError(rec, http.StatusNotFound, ErrCodeAuthUserNotFound)
+		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 	})
 
 	ginkgo.It("covers remaining auth use-case validation edges", func() {
@@ -633,7 +701,10 @@ var _ = ginkgo.Describe("auth routes", func() {
 			Username: "requires-fields",
 			Role:     coreauth.RoleViewer,
 		})
-		expectAuthUseCaseValidationError(err, "email", "password")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldEmail, FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired),
+			expectAuthFieldError(authValidationFieldPassword, FieldCodeAuthPasswordRequired, MessageIDAuthPasswordRequired),
+		))
 
 		_, err = fixture.routes.updateUser.Execute(context.Background(), UpdateUserInput{
 			ID:               newFixtureUserID(fixture.editor.ID),
@@ -641,27 +712,36 @@ var _ = ginkgo.Describe("auth routes", func() {
 			Role:             coreauth.RoleViewer,
 			RequesterIsAdmin: true,
 		})
-		expectAuthUseCaseValidationError(err, "username", "email")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldUsername, FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired),
+			expectAuthFieldError(authValidationFieldEmail, FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid),
+		))
 
 		_, err = fixture.routes.updateUser.Execute(context.Background(), UpdateUserInput{
 			ID:               newFixtureUserID(fixture.editor.ID),
 			Username:         "editor-missing-email",
 			RequesterIsAdmin: true,
 		})
-		expectAuthUseCaseValidationError(err, "email")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldEmail, FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired),
+		))
 
 		err = fixture.routes.changeOwnPassword.Execute(context.Background(), ChangeOwnPasswordInput{
 			UserID:      newFixtureUserID(fixture.editor.ID),
 			OldPassword: "password123",
 		})
-		expectAuthUseCaseValidationError(err, "newPassword")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldNewPassword, FieldCodeAuthNewPasswordRequired, MessageIDAuthNewPasswordRequired),
+		))
 
 		err = fixture.routes.changeOwnPassword.Execute(context.Background(), ChangeOwnPasswordInput{
 			UserID:      newFixtureUserID(fixture.editor.ID),
 			OldPassword: "password123",
 			NewPassword: "short",
 		})
-		expectAuthUseCaseValidationError(err, "newPassword")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldNewPassword, FieldCodeAuthNewPasswordTooShort, MessageIDAuthNewPasswordTooShort),
+		))
 
 		_, err = fixture.routes.getUserByID.Execute(context.Background(), GetUserByIDInput{ID: newFixtureUserID("missing-user")})
 		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
@@ -671,7 +751,9 @@ var _ = ginkgo.Describe("auth routes", func() {
 			Name:            strings.Repeat("x", maxAPIKeyNameLength+1),
 			CreatedByUserID: newFixtureUserID(fixture.admin.ID),
 		})
-		expectAuthUseCaseValidationError(err, "name")
+		Expect(err).To(matchAuthUseCaseValidationError(
+			expectAuthFieldError(authValidationFieldName, FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong),
+		))
 	})
 })
 
@@ -794,34 +876,24 @@ func jsonBody(v interface{}) []byte {
 	return body
 }
 
-func expectAuthRouteError(rec *httptest.ResponseRecorder, status int, code interface{}) {
-	ginkgo.GinkgoHelper()
-
-	Expect(rec.Code).To(Equal(status), rec.Body.String())
-	var body AuthErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-	Expect(body.Error.Code).To(Equal(code))
+func authUserAPIKeyPath(userID string, keyID coreauth.APIKeyID) string {
+	return "/api/users/" + userID + "/mcp-api-keys/" + url.PathEscape(keyID.String())
 }
 
-func expectAuthValidationError(rec *httptest.ResponseRecorder) {
-	ginkgo.GinkgoHelper()
-
-	Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-	var body map[string]interface{}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-	Expect(body["error"]).To(Equal(authValidationErrorCode))
-	Expect(body["fields"]).NotTo(BeEmpty())
+func authOwnAPIKeyPath(keyID coreauth.APIKeyID) string {
+	return "/api/users/me/mcp-api-keys/" + url.PathEscape(keyID.String())
 }
 
-func expectAuthUseCaseValidationError(err error, fields ...string) {
-	ginkgo.GinkgoHelper()
+func authUserAPIKeyParams(userID string, keyID coreauth.APIKeyID) gin.Params {
+	return gin.Params{{Key: "id", Value: userID}, authAPIKeyParam(keyID)}
+}
 
-	var validation *sharederrors.ValidationErrors
-	Expect(errors.As(err, &validation)).To(BeTrue(), "error = %T %v", err, err)
-	for _, field := range fields {
-		field := field
-		Expect(validation.Errors).To(ContainElement(HaveField("Field", field)))
-	}
+func authOwnAPIKeyParams(keyID coreauth.APIKeyID) gin.Params {
+	return gin.Params{authAPIKeyParam(keyID)}
+}
+
+func authAPIKeyParam(keyID coreauth.APIKeyID) gin.Param {
+	return gin.Param{Key: "keyId", Value: keyID.String()}
 }
 
 func respondWithAuthErrorRecorder(err error) *httptest.ResponseRecorder {

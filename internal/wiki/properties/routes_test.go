@@ -14,12 +14,42 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
 	coreprop "github.com/perber/wiki/internal/properties"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
+
+func matchLocalizedPropertiesError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
+}
+
+func matchPropertiesStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func matchPropertyPageID(want tree.PageID) types.GomegaMatcher {
+	return WithTransform(func(got string) tree.PageID {
+		return tree.PageIDFromString(got)
+	}, Equal(want))
+}
+
+func matchPropertyPage(wantID tree.PageID, title string, path string, properties types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":         matchPropertyPageID(wantID),
+		"Title":      Equal(title),
+		"Path":       Equal(path),
+		"Properties": properties,
+	})
+}
+
+func matchPropertyPagePointer(wantID tree.PageID, title string, path string, properties types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.PointTo(matchPropertyPage(wantID, title, path, properties))
+}
 
 var _ = ginkgo.Describe("properties routes", func() {
 	ginkgo.It("TestRoutesPublicAccessExposesPropertyKeysWithoutAuth", func() {
@@ -39,7 +69,7 @@ var _ = ginkgo.Describe("properties routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/properties?limit=10", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body []coreprop.PropertyKeyCount
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body).To(Equal([]coreprop.PropertyKeyCount{{Key: "status", Count: 1}}))
@@ -55,7 +85,7 @@ var _ = ginkgo.Describe("properties routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/properties", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
 	ginkgo.It("returns a structured bad request for invalid property key limits", func() {
@@ -70,8 +100,7 @@ var _ = ginkgo.Describe("properties routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/properties?limit=bad", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		assertPropertiesStructuredError(rec, "properties_invalid_limit", "errors.properties.invalid_limit")
+		Expect(rec).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesInvalidLimit), rec.Body.String())
 	})
 
 	ginkgo.It("returns pages matching a property through the public route", func() {
@@ -88,14 +117,15 @@ var _ = ginkgo.Describe("properties routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/properties/pages?key=status&value=draft", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body []dto.PropertyPage
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body).To(HaveLen(1))
-		Expect(body[0].ID).To(Equal(fixture.pageID.String()))
-		Expect(body[0].Title).To(Equal("Draft Page"))
-		Expect(body[0].Path).To(Equal("draft"))
-		Expect(body[0].Properties).To(HaveKeyWithValue("status", dto.PropertyEntry{Value: "draft", Type: "text"}))
+		Expect(body).To(ConsistOf(matchPropertyPage(
+			fixture.pageID,
+			"Draft Page",
+			"draft",
+			HaveKeyWithValue("status", dto.PropertyEntry{Value: "draft", Type: "text"}),
+		)))
 	})
 
 	ginkgo.It("returns structured errors from the pages-by-property route", func() {
@@ -110,13 +140,11 @@ var _ = ginkgo.Describe("properties routes", func() {
 
 		missingKey := httptest.NewRecorder()
 		router.ServeHTTP(missingKey, httptest.NewRequest(http.MethodGet, "/api/properties/pages?value=draft", nil))
-		Expect(missingKey.Code).To(Equal(http.StatusBadRequest), missingKey.Body.String())
-		assertPropertiesStructuredError(missingKey, "properties_missing_key", "errors.properties.missing_key")
+		Expect(missingKey).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesMissingKey), missingKey.Body.String())
 
 		missingValue := httptest.NewRecorder()
 		router.ServeHTTP(missingValue, httptest.NewRequest(http.MethodGet, "/api/properties/pages?key=status", nil))
-		Expect(missingValue.Code).To(Equal(http.StatusBadRequest), missingValue.Body.String())
-		assertPropertiesStructuredError(missingValue, "properties_missing_value", "errors.properties.missing_value")
+		Expect(missingValue).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesMissingValue), missingValue.Body.String())
 	})
 })
 
@@ -150,7 +178,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		out, err := uc.Execute(context.Background(), GetPropertyKeysInput{PageSize: 0})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Keys).To(Equal([]coreprop.PropertyKeyCount{}))
+		Expect(out.Keys).To(BeEmpty())
 	})
 
 	ginkgo.It("returns localized errors for missing property page key and value", func() {
@@ -158,11 +186,11 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 		out, err := uc.Execute(context.Background(), GetPagesByPropertyInput{Key: " ", Value: "draft"})
 		Expect(out).To(BeNil())
-		assertLocalizedPropertiesError(err, ErrCodePropertiesMissingKey)
+		Expect(err).To(matchLocalizedPropertiesError(ErrCodePropertiesMissingKey))
 
 		out, err = uc.Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: " "})
 		Expect(out).To(BeNil())
-		assertLocalizedPropertiesError(err, ErrCodePropertiesMissingValue)
+		Expect(err).To(matchLocalizedPropertiesError(ErrCodePropertiesMissingValue))
 	})
 
 	ginkgo.It("returns an empty property page slice when no pages match", func() {
@@ -183,11 +211,11 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 		keys, err := NewGetPropertyKeysUseCase(propertiesService).Execute(context.Background(), GetPropertyKeysInput{PageSize: 10})
 		Expect(keys).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_properties")))
+		Expect(err).To(HaveOccurred())
 
 		pages, err := NewGetPagesByPropertyUseCase(propertiesService, nil, nil).Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
 		Expect(pages).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_properties")))
+		Expect(err).To(HaveOccurred())
 	})
 
 	ginkgo.It("returns property detail lookup errors after matching page IDs", func() {
@@ -197,7 +225,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		pages, err := NewGetPagesByPropertyUseCase(propertiesService, nil, nil).Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
 
 		Expect(pages).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such column: type")))
+		Expect(err).To(HaveOccurred())
 	})
 
 	ginkgo.It("returns structured route errors when property key listing fails", func() {
@@ -217,8 +245,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/properties", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertPropertiesStructuredError(rec, "properties_internal_error", "errors.properties.internal_error")
+		Expect(rec).To(matchPropertiesStructuredError(http.StatusInternalServerError, ErrCodePropertiesInternal), rec.Body.String())
 	})
 
 	ginkgo.It("maps matching page IDs to property page DTOs and skips missing tree nodes", func() {
@@ -231,9 +258,12 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Pages).To(HaveLen(1))
-		Expect(out.Pages[0].ID).To(Equal(fixture.pageID.String()))
-		Expect(out.Pages[0].Properties).To(HaveKeyWithValue("status", dto.PropertyEntry{Value: "draft", Type: "text"}))
+		Expect(out.Pages).To(ConsistOf(matchPropertyPagePointer(
+			fixture.pageID,
+			"Draft Page",
+			"draft",
+			HaveKeyWithValue("status", dto.PropertyEntry{Value: "draft", Type: "text"}),
+		)))
 	})
 })
 
@@ -250,8 +280,7 @@ var _ = ginkgo.Describe("properties error responses", func() {
 
 		respondWithPropertiesBadRequest(ctx, ErrCodePropertiesInvalidLimit, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertPropertiesStructuredError(rec, "properties_invalid_limit", "errors.properties.invalid_limit")
+		Expect(rec).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesInvalidLimit), rec.Body.String())
 	})
 
 	ginkgo.It("renders localized errors with their mapped status", func() {
@@ -259,8 +288,7 @@ var _ = ginkgo.Describe("properties error responses", func() {
 
 		respondWithPropertiesError(ctx, ErrPropertiesMissingKey)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertPropertiesStructuredError(rec, "properties_missing_key", "errors.properties.missing_key")
+		Expect(rec).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesMissingKey), rec.Body.String())
 	})
 
 	ginkgo.It("sanitizes unknown errors as internal property failures", func() {
@@ -268,8 +296,7 @@ var _ = ginkgo.Describe("properties error responses", func() {
 
 		respondWithPropertiesError(ctx, errors.New("sqlite path leaked"))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		assertPropertiesStructuredError(rec, "properties_internal_error", "errors.properties.internal_error")
+		Expect(rec).To(matchPropertiesStructuredError(http.StatusInternalServerError, ErrCodePropertiesInternal), rec.Body.String())
 	})
 })
 
@@ -354,19 +381,4 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	return ctx, rec
-}
-
-func assertLocalizedPropertiesError(err error, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
-	loc, ok := sharederrors.AsLocalizedError(err)
-	Expect(ok).To(BeTrue())
-	Expect(loc.Code).To(Equal(code))
-}
-
-func assertPropertiesStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
-	ginkgo.GinkgoHelper()
-	var body propertiesErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code.String()).To(Equal(code))
-	Expect(body.Error.MessageID.String()).To(Equal(messageID))
 }

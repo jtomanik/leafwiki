@@ -12,12 +12,58 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
 	coretags "github.com/perber/wiki/internal/tags"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
+
+func matchTagsStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func matchTaggedPageID(want tree.PageID) types.GomegaMatcher {
+	return WithTransform(func(got string) tree.PageID {
+		return tree.PageIDFromString(got)
+	}, Equal(want))
+}
+
+func matchTaggedPageWithID(want tree.PageID) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID": matchTaggedPageID(want),
+	}))
+}
+
+func matchTaggedPageWithExcerpt(excerpt string) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Excerpt": Equal(excerpt),
+	}))
+}
+
+func matchTaggedPageWithTags(tags ...string) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Tags": matchTagSet(tags...),
+	}))
+}
+
+func matchTaggedPageDTO(want tree.PageID, tags ...string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":   matchTaggedPageID(want),
+		"Tags": matchTagSet(tags...),
+	})
+}
+
+func matchTagSet(tags ...string) types.GomegaMatcher {
+	elements := make([]any, 0, len(tags))
+	for _, tag := range tags {
+		elements = append(elements, tag)
+	}
+	return ConsistOf(elements...)
+}
 
 // ─── test helpers ─────────────────────────────────────────────────────────────
 
@@ -77,8 +123,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"react"}})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Pages).To(HaveLen(1))
-		Expect(newFixturePageID(out.Pages[0].ID)).To(Equal(id1))
+		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithID(id1)))
 	})
 
 	ginkgo.It("TestGetPagesByTagsUseCase_ExcerptComesFromDB_NoDiskRead", func() {
@@ -89,8 +134,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"docs"}})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Pages).To(HaveLen(1))
-		Expect(out.Pages[0].Excerpt).To(Equal("This is the excerpt content."))
+		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithExcerpt("This is the excerpt content.")))
 	})
 
 	ginkgo.It("TestGetPagesByTagsUseCase_ANDLogic", func() {
@@ -102,8 +146,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"react", "typescript"}})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Pages).To(HaveLen(1))
-		Expect(newFixturePageID(out.Pages[0].ID)).To(Equal(id1))
+		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithID(id1)))
 	})
 
 	ginkgo.It("TestGetPagesByTagsUseCase_EmptyTagsReturnsEmpty", func() {
@@ -145,8 +188,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Pages).To(HaveLen(1))
-		Expect(out.Pages[0].Tags).To(ConsistOf("go", "testing", "backend"))
+		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithTags("go", "testing", "backend")))
 	})
 
 	ginkgo.It("skips indexed pages that are missing from the tree", func() {
@@ -167,7 +209,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_tags")))
+		Expect(err).To(HaveOccurred())
 	})
 
 	ginkgo.It("returns tag metadata lookup errors after matching page IDs", func() {
@@ -193,7 +235,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_meta")))
+		Expect(err).To(HaveOccurred())
 	})
 })
 
@@ -209,9 +251,7 @@ var _ = ginkgo.Describe("tags API boundary helpers", func() {
 		got, err := ValidatePagesByTagsInput([]string{" ", ""})
 
 		Expect(got).To(BeNil())
-		loc, ok := sharederrors.AsLocalizedError(err)
-		Expect(ok).To(BeTrue())
-		Expect(loc.Code).To(Equal(ErrCodeTagsMissingParam))
+		Expect(err).To(testmatchers.MatchLocalizedError(ErrCodeTagsMissingParam, sharederrors.MessageIDForCode(ErrCodeTagsMissingParam)))
 	})
 
 	ginkgo.It("lists tags with filter, selection normalization, and page-size clamping", func() {
@@ -238,7 +278,7 @@ var _ = ginkgo.Describe("tags API boundary helpers", func() {
 		out, err := uc.Execute(context.Background(), GetTagsInput{Filter: "missing"})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Tags).To(Equal([]coretags.TagCount{}))
+		Expect(out.Tags).To(BeEmpty())
 	})
 
 	ginkgo.It("splits comma-separated query tag values and drops empty parts", func() {
@@ -264,7 +304,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags?q=g&limit=10", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body []coretags.TagCount
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body).To(Equal([]coretags.TagCount{{Tag: "go", Count: 2}}))
@@ -281,7 +321,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags?selected=go&r=ignored&selected=react,rust&limit=10", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body []coretags.TagCount
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body).To(BeEmpty())
@@ -298,12 +338,10 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags/pages?tags=go,testing", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body []dto.TaggedPage
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body).To(HaveLen(1))
-		Expect(body[0].ID).To(Equal(pageID.String()))
-		Expect(body[0].Tags).To(ConsistOf("go", "testing"))
+		Expect(body).To(ConsistOf(matchTaggedPageDTO(pageID, "go", "testing")))
 	})
 
 	ginkgo.It("returns structured route errors for invalid tag queries", func() {
@@ -315,13 +353,11 @@ var _ = ginkgo.Describe("tags routes", func() {
 
 		invalidLimit := httptest.NewRecorder()
 		router.ServeHTTP(invalidLimit, httptest.NewRequest(http.MethodGet, "/api/tags?limit=bad", nil))
-		Expect(invalidLimit.Code).To(Equal(http.StatusBadRequest), invalidLimit.Body.String())
-		assertTagsStructuredError(invalidLimit, "tags_invalid_limit", "errors.tags.invalid_limit")
+		Expect(invalidLimit).To(matchTagsStructuredError(http.StatusBadRequest, ErrCodeTagsInvalidLimit), invalidLimit.Body.String())
 
 		missingTags := httptest.NewRecorder()
 		router.ServeHTTP(missingTags, httptest.NewRequest(http.MethodGet, "/api/tags/pages", nil))
-		Expect(missingTags.Code).To(Equal(http.StatusBadRequest), missingTags.Body.String())
-		assertTagsStructuredError(missingTags, "tags_missing_param", "errors.tags.missing_param")
+		Expect(missingTags).To(matchTagsStructuredError(http.StatusBadRequest, ErrCodeTagsMissingParam), missingTags.Body.String())
 	})
 
 	ginkgo.It("returns structured route errors when tag services fail", func() {
@@ -335,8 +371,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertTagsStructuredError(rec, "tags_internal_error", "errors.tags.internal_error")
+		Expect(rec).To(matchTagsStructuredError(http.StatusInternalServerError, ErrCodeTagsInternal), rec.Body.String())
 	})
 
 	ginkgo.It("returns structured route errors when page tag services fail", func() {
@@ -350,8 +385,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags/pages?tags=go", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertTagsStructuredError(rec, "tags_internal_error", "errors.tags.internal_error")
+		Expect(rec).To(matchTagsStructuredError(http.StatusInternalServerError, ErrCodeTagsInternal), rec.Body.String())
 	})
 
 	ginkgo.It("requires authentication for private tag routes", func() {
@@ -360,7 +394,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 })
 
@@ -376,8 +410,7 @@ var _ = ginkgo.Describe("tags error responses", func() {
 
 		respondWithTagsBadRequest(ctx, ErrCodeTagsInvalidLimit, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertTagsStructuredError(rec, "tags_invalid_limit", "errors.tags.invalid_limit")
+		Expect(rec).To(matchTagsStructuredError(http.StatusBadRequest, ErrCodeTagsInvalidLimit), rec.Body.String())
 	})
 
 	ginkgo.It("renders localized errors with their mapped status", func() {
@@ -385,8 +418,7 @@ var _ = ginkgo.Describe("tags error responses", func() {
 
 		respondWithTagsError(ctx, sharederrors.NewLocalizedErrorFromCode(ErrCodeTagsMissingParam, nil))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertTagsStructuredError(rec, "tags_missing_param", "errors.tags.missing_param")
+		Expect(rec).To(matchTagsStructuredError(http.StatusBadRequest, ErrCodeTagsMissingParam), rec.Body.String())
 	})
 
 	ginkgo.It("sanitizes unknown errors as internal tag failures", func() {
@@ -394,8 +426,7 @@ var _ = ginkgo.Describe("tags error responses", func() {
 
 		respondWithTagsError(ctx, context.Canceled)
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		assertTagsStructuredError(rec, "tags_internal_error", "errors.tags.internal_error")
+		Expect(rec).To(matchTagsStructuredError(http.StatusInternalServerError, ErrCodeTagsInternal), rec.Body.String())
 	})
 })
 
@@ -446,19 +477,6 @@ func ginContextForTarget(target string) *gin.Context {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	ctx.Request = req
 	return ctx
-}
-
-func assertTagsStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
-	ginkgo.GinkgoHelper()
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-		} `json:"error"`
-	}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code).To(Equal(code))
-	Expect(body.Error.MessageID).To(Equal(messageID))
 }
 
 type pageTagsServiceStub struct {

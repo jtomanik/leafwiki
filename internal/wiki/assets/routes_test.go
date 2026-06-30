@@ -28,8 +28,8 @@ var _ = ginkgo.Describe("asset routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/page-1/note.txt", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(Equal("hello"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPBody("hello"))
 	})
 
 	ginkgo.It("TestRoutesRequireAuthForPrivateStaticAssets", func() {
@@ -43,7 +43,7 @@ var _ = ginkgo.Describe("asset routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/page-1/note.txt", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
 	ginkgo.It("TestRoutesRequireCSRFForAssetMutations", func() {
@@ -59,6 +59,6 @@ var _ = ginkgo.Describe("asset routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/pages/page-1/assets", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
 	})
 })
