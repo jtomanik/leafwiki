@@ -113,7 +113,7 @@ func (s *Service) registerDynamicClient(client registeredClient) (string, error)
 		s.clientsMu.Unlock()
 		return clientID, nil
 	}
-	return "", fmt.Errorf("generate unique oauth client id")
+	return "", ErrOAuthClientIDUnavailable
 }
 
 func randomClientID() (string, error) {
@@ -126,7 +126,7 @@ func randomClientID() (string, error) {
 
 func normalizeRedirectURIs(values []string) ([]string, error) {
 	if len(values) == 0 {
-		return nil, fmt.Errorf("redirect_uris is required")
+		return nil, ErrOAuthRedirectURIsRequired
 	}
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -156,7 +156,7 @@ func normalizeRegistrationGrantTypes(values []string) ([]string, error) {
 		case string(fosite.GrantTypeRefreshToken):
 			hasRefreshToken = true
 		default:
-			return nil, fmt.Errorf("unsupported grant_type %q", value)
+			return nil, fmt.Errorf("%w %q", ErrOAuthUnsupportedGrantType, value)
 		}
 	}
 	if !hasAuthorizationCode {
@@ -187,7 +187,7 @@ func normalizeRegistrationScope(scope string) (string, error) {
 		return "", nil
 	}
 	if !requestedScopeAllowed(scope) {
-		return "", fmt.Errorf("unsupported scope")
+		return "", ErrOAuthUnsupportedScope
 	}
 	return ScopeMCP, nil
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/ory/fosite"
 
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -32,7 +34,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		)
 		rec := httptest.NewRecorder()
 		inactiveRouter.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
-		Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
 		service, err := NewService(ServiceConfig{})
 		Expect(err).NotTo(HaveOccurred())
@@ -49,19 +51,25 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 
 		rec = httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server/wiki", nil))
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"authorization_endpoint"`))
-		Expect(rec.Body.String()).To(ContainSubstring(`/wiki/oauth/authorize`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusOK),
+			HaveHTTPBody(SatisfyAll(
+				ContainSubstring(`"authorization_endpoint"`),
+				ContainSubstring(`/wiki/oauth/authorize`),
+			)),
+		))
 
 		rec = httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/wiki/mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Header().Get("Access-Control-Allow-Origin")).To(Equal("*"))
-		Expect(rec.Body.String()).To(ContainSubstring(`"resource"`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusOK),
+			HaveHTTPHeaderWithValue("Access-Control-Allow-Origin", "*"),
+			HaveHTTPBody(ContainSubstring(`"resource"`)),
+		))
 
 		rec = httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/.well-known/oauth-protected-resource/wiki/mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusNoContent), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 	})
 
 	ginkgo.It("metadata URL helpers derive absolute URLs from TLS, URL, and host state", func() {
@@ -80,21 +88,27 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		rec := performOAuthResponseRequest(func(c *gin.Context) {
 			writeOAuthBadRequest(c, errors.New("bad oauth request"))
 		})
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("bad oauth request"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring("bad oauth request")),
+		))
 
 		rec = performOAuthResponseRequest(func(c *gin.Context) {
 			writeRegistrationError(c, "redirect_uris is required")
 		})
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorInvalidClientMetadata))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		rec = performOAuthResponseRequest(func(c *gin.Context) {
 			writeTokenError(c, fosite.ErrInvalidGrant)
 		})
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorInvalidGrant))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusUnauthorized),
+			HaveHTTPHeaderWithValue("Cache-Control", "no-store"),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidGrant)),
+		))
 
 		rec = performOAuthResponseRequest(func(c *gin.Context) {
 			writeTokenResponse(c, &oauthAccessResponderStub{
@@ -104,9 +118,11 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 				},
 			})
 		})
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Header().Get("Pragma")).To(Equal("no-cache"))
-		Expect(rec.Body.String()).To(ContainSubstring(`"token_type":"Bearer"`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusOK),
+			HaveHTTPHeaderWithValue("Pragma", "no-cache"),
+			HaveHTTPBody(ContainSubstring(`"token_type":"Bearer"`)),
+		))
 	})
 
 	ginkgo.It("registers dynamic public clients and rejects unsupported metadata", func() {
@@ -115,22 +131,28 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		routes := NewRoutes(service)
 
 		rec := performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", []byte(`{`))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorInvalidClientMetadata))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(gin.H{
 			"client_secret": "unsupported",
 			"redirect_uris": []string{"http://127.0.0.1:49152/callback"},
 		}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("client_secret is not supported"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring("client_secret is not supported")),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(gin.H{
 			"token_endpoint_auth_method": "client_secret_basic",
 			"redirect_uris":              []string{"http://127.0.0.1:49152/callback"},
 		}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("only public clients"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring("only public clients")),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(gin.H{
 			"client_name":                "Native Client",
@@ -140,9 +162,13 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 			"scope":                      ScopeMCP,
 			"token_endpoint_auth_method": "none",
 		}))
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"client_name":"Native Client"`))
-		Expect(rec.Body.String()).To(ContainSubstring(`"scope":"` + ScopeMCP + `"`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusCreated),
+			HaveHTTPBody(SatisfyAll(
+				ContainSubstring(`"client_name":"Native Client"`),
+				ContainSubstring(`"scope":"`+ScopeMCP+`"`),
+			)),
+		))
 
 		var body struct {
 			ClientID string `json:"client_id"`
@@ -214,18 +240,18 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		Expect(validateAuthorizeResource(req, "")).To(Succeed())
 
 		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?resource=a&resource=b", nil)
-		Expect(validateAuthorizeResource(req, "")).To(MatchError(ContainSubstring("resource must be supplied once")))
+		Expect(validateAuthorizeResource(req, "")).To(MatchError(ErrOAuthResourceMustBeSingular))
 
 		req = httptest.NewRequest(http.MethodGet, "http://leafwiki.test/oauth/authorize?resource=http://wrong.test/mcp", nil)
-		Expect(validateAuthorizeResource(req, "")).To(MatchError(ContainSubstring("resource must match")))
+		Expect(validateAuthorizeResource(req, "")).To(MatchError(ErrOAuthResourceMismatch))
 
 		req = httptest.NewRequest(http.MethodGet, "http://leafwiki.test/oauth/authorize?resource=http://leafwiki.test/mcp", nil)
 		Expect(validateAuthorizeResource(req, "")).To(Succeed())
 
-		Expect(validateLoopbackRedirectURI("https://127.0.0.1:49152/callback")).To(MatchError(ContainSubstring("must use http")))
-		Expect(validateLoopbackRedirectURI("http://127.0.0.1/callback")).To(MatchError(ContainSubstring("explicit port")))
-		Expect(validateLoopbackRedirectURI("http://127.0.0.1:49152/callback#fragment")).To(MatchError(ContainSubstring("fragment")))
-		Expect(validateLoopbackRedirectURI("http://example.com:49152/callback")).To(MatchError(ContainSubstring("loopback")))
+		Expect(validateLoopbackRedirectURI("https://127.0.0.1:49152/callback")).To(MatchError(ErrOAuthRedirectURIMustUseHTTP))
+		Expect(validateLoopbackRedirectURI("http://127.0.0.1/callback")).To(MatchError(ErrOAuthRedirectURIPortRequired))
+		Expect(validateLoopbackRedirectURI("http://127.0.0.1:49152/callback#fragment")).To(MatchError(ErrOAuthRedirectURIHasFragment))
+		Expect(validateLoopbackRedirectURI("http://example.com:49152/callback")).To(MatchError(ErrOAuthRedirectURINotLoopback))
 
 		client := registeredClient{RedirectURIs: []string{"http://127.0.0.1:49152/callback"}, Scope: ScopeMCP}
 		Expect(clientRedirectURIAllowed(registeredClient{}, "http://anything.test/callback")).To(BeTrue())
@@ -271,8 +297,8 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		Expect(service.validateTokenSubject(request)).To(Succeed())
 
 		rec := performOAuthResponseRequest(NewRoutes(service).handleToken)
-		Expect(rec.Code).NotTo(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
+		Expect(rec).NotTo(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Cache-Control", "no-store"))
 	})
 
 	ginkgo.It("maps approval page data and writes authorization redirects", func() {
@@ -288,29 +314,33 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		ar.RedirectURI = redirectURI
 		ar.AppendRequestedScope(ScopeMCP)
 		details := service.approvalPageData(req, ar, "/wiki")
-		Expect(details.ClientID).To(Equal(ClientID))
-		Expect(details.ClientLabel).To(Equal("LeafWiki local MCP"))
-		Expect(details.RedirectURI).To(Equal(redirectURI.String()))
-		Expect(details.Scope).To(Equal(ScopeMCP))
-		Expect(details.Resource).To(Equal("http://leafwiki.test/wiki/mcp"))
+		Expect(details).To(haveOAuthApprovalPageData(gstruct.Fields{
+			"ClientID":    Equal(ClientID),
+			"ClientLabel": Equal(fixedOAuthClient().name),
+			"RedirectURI": Equal(redirectURI.String()),
+			"Scope":       Equal(ScopeMCP),
+			"Resource":    Equal(MCPResourceURL(req, "/wiki")),
+		}))
 
 		service.clients[ClientID] = registeredClient{}
 		ar.RequestedScope = nil
 		req = httptest.NewRequest(http.MethodGet, "http://leafwiki.test/wiki/oauth/authorize", nil)
 		details = service.approvalPageData(req, ar, "/wiki")
-		Expect(details.ClientLabel).To(Equal(ClientID))
-		Expect(details.Scope).To(Equal(ScopeMCP))
-		Expect(details.Resource).To(Equal("http://leafwiki.test/wiki/mcp"))
+		Expect(details).To(haveOAuthApprovalPageData(gstruct.Fields{
+			"ClientLabel": Equal(ClientID),
+			"Scope":       Equal(ScopeMCP),
+			"Resource":    Equal(MCPResourceURL(req, "/wiki")),
+		}))
 
 		rec := performOAuthResponseRequest(func(c *gin.Context) {
 			routes.redirectAuthorizeError(c, ":", "state", fosite.ErrInvalidRequest)
 		})
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
 
 		rec = performOAuthResponseRequest(func(c *gin.Context) {
 			routes.redirectAuthorizeError(c, "http://127.0.0.1:49152/callback?existing=1", "state", fosite.ErrInvalidRequest)
 		})
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusFound))
 		location := rec.Header().Get("Location")
 		Expect(location).To(ContainSubstring("error=invalid_request"))
 		Expect(location).To(ContainSubstring("state=state"))
@@ -324,9 +354,11 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 				},
 			})
 		})
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("X-Test")).To(Equal("yes"))
-		Expect(rec.Header().Get("Cache-Control")).To(Equal("no-store"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("X-Test", "yes"),
+			HaveHTTPHeaderWithValue("Cache-Control", "no-store"),
+		))
 		location = rec.Header().Get("Location")
 		Expect(location).To(ContainSubstring("code=code-1"))
 		Expect(location).To(ContainSubstring("state=state-1"))
@@ -357,6 +389,11 @@ func performOAuthJSONRequest(handler gin.HandlerFunc, method, target string, bod
 	handler(c)
 	c.Writer.WriteHeaderNow()
 	return rec
+}
+
+func haveOAuthApprovalPageData(fields gstruct.Fields) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
 func oauthJSONBody(v interface{}) []byte {

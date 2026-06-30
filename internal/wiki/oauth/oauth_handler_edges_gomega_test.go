@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/ory/fosite"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -47,8 +48,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(values))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("unknown oauth client"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring("unknown oauth client")),
+		))
 	})
 
 	It("redirects authorize request creation and validation failures back to the client", func() {
@@ -57,9 +60,13 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(values))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("error=invalid_request"))
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("state=native-parser-state"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", SatisfyAll(
+				ContainSubstring("error="+fosite.ErrInvalidRequest.ErrorField),
+				ContainSubstring("state=native-parser-state"),
+			)),
+		))
 
 		values = validAuthorizeRequestValues(redirectURI)
 		values.Del("code_challenge")
@@ -67,8 +74,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(values))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("error=invalid_request"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", ContainSubstring("error="+fosite.ErrInvalidRequest.ErrorField)),
+		))
 	})
 
 	It("redirects anonymous authorize requests to login", func() {
@@ -77,8 +86,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(validAuthorizeRequestValues(redirectURI)))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(HavePrefix("/wiki/login?returnTo="))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", HavePrefix("/wiki/login?returnTo=")),
+		))
 	})
 
 	It("treats resolver failures as anonymous web users", func() {
@@ -96,8 +107,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(validAuthorizeRequestValues(redirectURI)))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("error=invalid_request"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", ContainSubstring("error="+fosite.ErrInvalidRequest.ErrorField)),
+		))
 		oauthAuthorizeApprovalValues = authorizeApprovalValues
 
 		values := validAuthorizeRequestValues(redirectURI)
@@ -108,8 +121,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizePOST(values))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("invalid_request"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(fosite.ErrInvalidRequest.ErrorField)),
+		))
 
 		values = validAuthorizeRequestValues(redirectURI)
 		values.Set("decision", "deny")
@@ -118,8 +133,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizePOST(values))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("error=access_denied"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", ContainSubstring("error="+fosite.ErrAccessDenied.ErrorField)),
+		))
 	})
 
 	It("issues approval redirects and surfaces approval-token entropy failures", func() {
@@ -131,8 +148,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(validAuthorizeRequestValues(redirectURI)))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("create oauth approval token"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring("create oauth approval token")),
+		))
 
 		withOAuthAuthorizeRequest(newValidAuthorizeRequester(redirectURI), nil)
 		withOAuthResolvedUser(currentUser, nil)
@@ -140,9 +159,13 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizeGET(validAuthorizeRequestValues(redirectURI)))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("/wiki/oauth/approve?"))
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("approval_token="))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", SatisfyAll(
+				ContainSubstring("/wiki/oauth/approve?"),
+				ContainSubstring("approval_token="),
+			)),
+		))
 		Expect(service.approvals).NotTo(BeEmpty())
 	})
 
@@ -157,8 +180,10 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizePOST(values))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("error=server_error"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("Location", ContainSubstring("error="+oauthErrorServerError)),
+		))
 
 		values = validAuthorizeRequestValues(redirectURI)
 		seedOAuthApproval(service, "approved-success", currentUser, values)
@@ -173,10 +198,14 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleAuthorize(routerCtx), newOAuthAuthorizePOST(values))
 
-		Expect(rec.Code).To(Equal(http.StatusFound), rec.Body.String())
-		Expect(rec.Header().Get("X-Authorize")).To(Equal("ok"))
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("code=code-1"))
-		Expect(rec.Header().Get("Location")).To(ContainSubstring("state=state-1"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusFound),
+			HaveHTTPHeaderWithValue("X-Authorize", "ok"),
+			HaveHTTPHeaderWithValue("Location", SatisfyAll(
+				ContainSubstring("code=code-1"),
+				ContainSubstring("state=state-1"),
+			)),
+		))
 	})
 
 	It("returns approval details only for authenticated matching approval tokens", func() {
@@ -184,15 +213,19 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleApprovalDetails(routerCtx), httptest.NewRequest(http.MethodGet, "/wiki/oauth/approval?approval_token=missing", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorUnauthorized))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusUnauthorized),
+			HaveHTTPBody(ContainSubstring(oauthErrorUnauthorized)),
+		))
 
 		withOAuthResolvedUser(currentUser, nil)
 
 		rec = performOAuthRequest(routes.handleApprovalDetails(routerCtx), httptest.NewRequest(http.MethodGet, "/wiki/oauth/approval?approval_token=missing", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorInvalidApproval))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidApproval)),
+		))
 
 		details := approvalPageData{
 			ClientLabel: "Native Client",
@@ -211,9 +244,13 @@ var _ = Describe("OAuth handler edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleApprovalDetails(routerCtx), httptest.NewRequest(http.MethodGet, "/wiki/oauth/approval?approval_token=approval-details", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"clientLabel":"Native Client"`))
-		Expect(rec.Body.String()).To(ContainSubstring(`"redirectUri":"` + redirectURI + `"`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusOK),
+			HaveHTTPBody(SatisfyAll(
+				ContainSubstring(`"clientLabel":"Native Client"`),
+				ContainSubstring(`"redirectUri":"`+redirectURI+`"`),
+			)),
+		))
 	})
 })
 
@@ -227,16 +264,20 @@ var _ = Describe("OAuth token and bearer edge coverage", func() {
 
 		rec := performOAuthRequest(routes.handleToken, httptest.NewRequest(http.MethodPost, "/oauth/token", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorInvalidGrant))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusUnauthorized),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidGrant)),
+		))
 
 		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil)
 		withOAuthAccessResponse(nil, fosite.ErrServerError)
 
 		rec = performOAuthRequest(routes.handleToken, httptest.NewRequest(http.MethodPost, "/oauth/token", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorServerError))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusInternalServerError),
+			HaveHTTPBody(ContainSubstring(oauthErrorServerError)),
+		))
 
 		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil)
 		withOAuthAccessResponse(&oauthAccessResponderStub{
@@ -248,9 +289,13 @@ var _ = Describe("OAuth token and bearer edge coverage", func() {
 
 		rec = performOAuthRequest(routes.handleToken, httptest.NewRequest(http.MethodPost, "/oauth/token", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(`"access_token":"access-1"`))
-		Expect(rec.Body.String()).To(ContainSubstring(`"token_type":"Bearer"`))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusOK),
+			HaveHTTPBody(SatisfyAll(
+				ContainSubstring(`"access_token":"access-1"`),
+				ContainSubstring(`"token_type":"Bearer"`),
+			)),
+		))
 	})
 
 	It("verifies bearer tokens through every introspection outcome", func() {
@@ -294,29 +339,32 @@ var _ = Describe("OAuth token and bearer edge coverage", func() {
 		info, err = service.VerifyBearerToken(context.Background(), "opaque", req)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(info.UserID).To(Equal(user.ID))
-		Expect(info.Scopes).To(Equal([]string{ScopeMCP}))
+		Expect(info).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"UserID": Equal(user.ID),
+			"Scopes": Equal([]string{ScopeMCP}),
+		})))
 	})
 })
 
 var _ = Describe("OAuth deterministic service seams", func() {
 	It("surfaces random source failures from service, client ID, and approval token generation", func() {
+		entropyExhaustedErr := errors.New("entropy exhausted")
 		withOAuthRandomRead(func([]byte) (int, error) {
-			return 0, errors.New("entropy exhausted")
+			return 0, entropyExhaustedErr
 		})
 
 		service, err := NewService(ServiceConfig{})
 		Expect(service).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("create fosite oauth secret")))
+		Expect(err).To(MatchError(entropyExhaustedErr))
 
 		clientID, err := randomClientID()
 		Expect(clientID).To(BeEmpty())
-		Expect(err).To(MatchError(ContainSubstring("create oauth client id")))
+		Expect(err).To(MatchError(entropyExhaustedErr))
 
 		service = &Service{approvals: map[string]oauthApproval{}}
 		token, err := service.issueApproval(coreauth.UserIDFromString("user-1"), "request", approvalPageData{})
 		Expect(token).To(BeEmpty())
-		Expect(err).To(MatchError(ContainSubstring("create oauth approval token")))
+		Expect(err).To(MatchError(entropyExhaustedErr))
 	})
 
 	It("surfaces fixed-client store initialization failures", func() {
@@ -327,7 +375,7 @@ var _ = Describe("OAuth deterministic service seams", func() {
 		service, err := NewService(ServiceConfig{})
 
 		Expect(service).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("register fixed oauth client")))
+		Expect(err).To(MatchError(fosite.ErrServerError))
 	})
 
 	It("retries dynamic client ID collisions and reports exhausted or failed registration", func() {
@@ -355,17 +403,18 @@ var _ = Describe("OAuth deterministic service seams", func() {
 		clientID, err = service.registerDynamicClient(client)
 
 		Expect(clientID).To(BeEmpty())
-		Expect(err).To(MatchError("generate unique oauth client id"))
+		Expect(err).To(MatchError(ErrOAuthClientIDUnavailable))
 
 		service = newOAuthServiceForSpec(ServiceConfig{})
+		entropyExhaustedErr := errors.New("entropy exhausted")
 		withOAuthRandomRead(func([]byte) (int, error) {
-			return 0, errors.New("entropy exhausted")
+			return 0, entropyExhaustedErr
 		})
 
 		clientID, err = service.registerDynamicClient(client)
 
 		Expect(clientID).To(BeEmpty())
-		Expect(err).To(MatchError(ContainSubstring("create oauth client id")))
+		Expect(err).To(MatchError(entropyExhaustedErr))
 
 		withOAuthRandomBytes(4)
 		service = newOAuthServiceForSpec(ServiceConfig{})

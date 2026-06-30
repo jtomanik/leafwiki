@@ -100,9 +100,9 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		Expect(fositeScopesForRegisteredClient(registeredClient{Scope: "  alpha   beta  "})).To(Equal([]string{"alpha", "beta"}))
 
 		_, err := normalizeRedirectURIs(nil)
-		Expect(err).To(MatchError("redirect_uris is required"))
+		Expect(err).To(MatchError(ErrOAuthRedirectURIsRequired))
 		_, err = normalizeRedirectURIs([]string{"http://example.com:49152/callback"})
-		Expect(err).To(MatchError(ContainSubstring("loopback")))
+		Expect(err).To(MatchError(ErrOAuthRedirectURINotLoopback))
 
 		grants, err := normalizeRegistrationGrantTypes([]string{string(fosite.GrantTypeAuthorizationCode)})
 		Expect(err).NotTo(HaveOccurred())
@@ -111,13 +111,13 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(grants).To(Equal([]string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)}))
 		_, err = normalizeRegistrationGrantTypes([]string{"client_credentials"})
-		Expect(err).To(MatchError(ContainSubstring("unsupported grant_type")))
+		Expect(err).To(MatchError(ErrOAuthUnsupportedGrantType))
 
 		scope, err := normalizeRegistrationScope("")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(scope).To(BeEmpty())
 		_, err = normalizeRegistrationScope(ScopeMCP + " other")
-		Expect(err).To(MatchError("unsupported scope"))
+		Expect(err).To(MatchError(ErrOAuthUnsupportedScope))
 
 		service, err := NewService(ServiceConfig{})
 		Expect(err).NotTo(HaveOccurred())
@@ -125,16 +125,16 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 
 		req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=missing&redirect_uri=http://127.0.0.1:49152/callback", nil)
 		_, _, err = routes.validateAuthorizeRedirectTarget(req)
-		Expect(err).To(MatchError("unknown oauth client"))
+		Expect(err).To(MatchError(ErrOAuthUnknownClient))
 
 		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id="+ClientID+"&redirect_uri=https://127.0.0.1:49152/callback", nil)
 		_, _, err = routes.validateAuthorizeRedirectTarget(req)
-		Expect(err).To(MatchError(ContainSubstring("must use http")))
+		Expect(err).To(MatchError(ErrOAuthRedirectURIMustUseHTTP))
 
 		service.clients["restricted-client"] = registeredClient{RedirectURIs: []string{"http://127.0.0.1:49152/callback"}}
 		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=restricted-client&redirect_uri=http://127.0.0.1:49153/callback", nil)
 		_, _, err = routes.validateAuthorizeRedirectTarget(req)
-		Expect(err).To(MatchError("redirect_uri is not registered for this client"))
+		Expect(err).To(MatchError(ErrOAuthRedirectURIUnregistered))
 
 		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=restricted-client&redirect_uri=http://127.0.0.1:49152/callback&state=ok", nil)
 		redirectURI, state, err := routes.validateAuthorizeRedirectTarget(req)
@@ -142,7 +142,7 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		Expect(redirectURI).To(Equal("http://127.0.0.1:49152/callback"))
 		Expect(state).To(Equal("ok"))
 
-		Expect(validateLoopbackRedirectURI("%")).To(MatchError(ContainSubstring("invalid redirect_uri")))
+		Expect(validateLoopbackRedirectURI("%")).To(MatchError(ErrOAuthRedirectURIInvalid))
 	})
 
 	It("validates parsed authorize requests without invoking the full handler", func() {
@@ -171,7 +171,7 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 			Scopes:        []string{ScopeMCP},
 			Public:        true,
 		}
-		Expect(routes.validateAuthorizeRequest(httpReq, ar, "")).To(MatchError("unknown oauth client"))
+		Expect(routes.validateAuthorizeRequest(httpReq, ar, "")).To(MatchError(ErrOAuthUnknownClient))
 
 		ar = newRequest()
 		ar.ResponseTypes = fosite.Arguments{"token"}
@@ -188,7 +188,7 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		ar = newRequest()
 		ar.RedirectURI, err = url.Parse("https://127.0.0.1:49152/callback")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(routes.validateAuthorizeRequest(httpReq, ar, "")).To(MatchError(ContainSubstring("must use http")))
+		Expect(routes.validateAuthorizeRequest(httpReq, ar, "")).To(MatchError(ErrOAuthRedirectURIMustUseHTTP))
 
 		service.clients["restricted-validate-client"] = registeredClient{
 			RedirectURIs:  []string{"http://127.0.0.1:49152/allowed"},
@@ -215,15 +215,19 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		routes := NewRoutes(service)
 
 		rec := performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(map[string]any{}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("redirect_uris is required"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(map[string]any{
 			"redirect_uris": []string{"http://127.0.0.1:49152/callback"},
 			"grant_types":   []string{"client_credentials"},
 		}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("unsupported grant_type"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(map[string]any{
 			"redirect_uris":  []string{"http://127.0.0.1:49152/callback"},
@@ -231,15 +235,19 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 			"grant_types":    []string{string(fosite.GrantTypeAuthorizationCode)},
 			"client_name":    "Unsupported Response",
 		}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("unsupported response_type"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		rec = performOAuthJSONRequest(routes.handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(map[string]any{
 			"redirect_uris": []string{"http://127.0.0.1:49152/callback"},
 			"scope":         ScopeMCP + " other",
 		}))
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring("unsupported scope"))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusBadRequest),
+			HaveHTTPBody(ContainSubstring(oauthErrorInvalidClientMetadata)),
+		))
 
 		brokenService, err := NewService(ServiceConfig{})
 		Expect(err).NotTo(HaveOccurred())
@@ -247,8 +255,10 @@ var _ = Describe("OAuth deterministic edge coverage", func() {
 		rec = performOAuthJSONRequest(NewRoutes(brokenService).handleRegister, http.MethodPost, "/oauth/register", oauthJSONBody(map[string]any{
 			"redirect_uris": []string{"http://127.0.0.1:49152/callback"},
 		}))
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(oauthErrorServerError))
+		Expect(rec).To(SatisfyAll(
+			HaveHTTPStatus(http.StatusInternalServerError),
+			HaveHTTPBody(ContainSubstring(oauthErrorServerError)),
+		))
 	})
 
 	It("covers approval cleanup and malformed form parsing", func() {

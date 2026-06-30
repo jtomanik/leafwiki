@@ -105,7 +105,7 @@ func (r *Routes) validateAuthorizeRequest(req *http.Request, ar fosite.Authorize
 	clientID := ar.GetClient().GetID()
 	client, ok := r.service.client(clientID)
 	if !ok {
-		return fmt.Errorf("unknown oauth client")
+		return ErrOAuthUnknownClient
 	}
 	if !ar.GetResponseTypes().ExactOne(responseTypeCode) || !stringSliceContains(client.ResponseTypes, responseTypeCode) {
 		return fosite.ErrUnsupportedResponseType
@@ -139,10 +139,10 @@ func validateAuthorizeResource(req *http.Request, basePath string) error {
 		return nil
 	}
 	if len(resources) != 1 {
-		return fmt.Errorf("resource must be supplied once")
+		return ErrOAuthResourceMustBeSingular
 	}
 	if resources[0] != MCPResourceURL(req, basePath) {
-		return fmt.Errorf("resource must match MCP resource URL")
+		return ErrOAuthResourceMismatch
 	}
 	return nil
 }
@@ -151,14 +151,14 @@ func (r *Routes) validateAuthorizeRedirectTarget(req *http.Request) (string, str
 	clientID := req.FormValue("client_id")
 	client, ok := r.service.client(clientID)
 	if !ok {
-		return "", "", fmt.Errorf("unknown oauth client")
+		return "", "", ErrOAuthUnknownClient
 	}
 	redirectURI := req.FormValue("redirect_uri")
 	if err := validateLoopbackRedirectURI(redirectURI); err != nil {
 		return "", "", err
 	}
 	if !clientRedirectURIAllowed(client, redirectURI) {
-		return "", "", fmt.Errorf("redirect_uri is not registered for this client")
+		return "", "", ErrOAuthRedirectURIUnregistered
 	}
 	return redirectURI, req.FormValue("state"), nil
 }
@@ -212,22 +212,22 @@ func requestedScopeAllowed(scope string) bool {
 func validateLoopbackRedirectURI(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u == nil {
-		return fmt.Errorf("invalid redirect_uri")
+		return fmt.Errorf("%w: %w", ErrOAuthRedirectURIInvalid, err)
 	}
 	if u.Scheme != "http" {
-		return fmt.Errorf("redirect_uri must use http")
+		return ErrOAuthRedirectURIMustUseHTTP
 	}
 	if u.Port() == "" {
-		return fmt.Errorf("redirect_uri must include an explicit port")
+		return ErrOAuthRedirectURIPortRequired
 	}
 	if u.Fragment != "" {
-		return fmt.Errorf("redirect_uri must not include a fragment")
+		return ErrOAuthRedirectURIHasFragment
 	}
 	host := strings.ToLower(u.Hostname())
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return nil
 	}
-	return fmt.Errorf("redirect_uri must be loopback")
+	return ErrOAuthRedirectURINotLoopback
 }
 
 func clientRedirectURIAllowed(client registeredClient, redirectURI string) bool {
