@@ -1,8 +1,9 @@
 package treemigration
 
 import (
+	"errors"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
-	"strings"
 )
 
 type testNode struct{}
@@ -47,15 +48,15 @@ func validDependencies() Dependencies {
 type missingDependencyCase struct {
 	name   string
 	mutate func(*Dependencies)
-	want   string
+	want   error
 }
 
 var missingDependencyCases = []missingDependencyCase{
-	{name: "nil root", mutate: func(d *Dependencies) { d.Root = nil }, want: "tree not loaded"},
-	{name: "nil store", mutate: func(d *Dependencies) { d.Store = nil }, want: "migration store is required"},
-	{name: "nil log", mutate: func(d *Dependencies) { d.Log = nil }, want: "migration logger is required"},
-	{name: "nil save tree", mutate: func(d *Dependencies) { d.SaveTree = nil }, want: "save tree callback is required"},
-	{name: "nil save schema", mutate: func(d *Dependencies) { d.SaveSchema = nil }, want: "save schema callback is required"},
+	{name: "nil root", mutate: func(d *Dependencies) { d.Root = nil }, want: ErrMigrationRootRequired},
+	{name: "nil store", mutate: func(d *Dependencies) { d.Store = nil }, want: ErrMigrationStoreRequired},
+	{name: "nil log", mutate: func(d *Dependencies) { d.Log = nil }, want: ErrMigrationLoggerRequired},
+	{name: "nil save tree", mutate: func(d *Dependencies) { d.SaveTree = nil }, want: ErrSaveTreeCallbackRequired},
+	{name: "nil save schema", mutate: func(d *Dependencies) { d.SaveSchema = nil }, want: ErrSaveSchemaCallbackRequired},
 }
 
 var _ = ginkgo.Describe("runner validation", func() {
@@ -67,7 +68,7 @@ var _ = ginkgo.Describe("runner validation", func() {
 		if err == nil {
 			t.Fatalf("expected error for negative schema version")
 		}
-		if !strings.Contains(err.Error(), "invalid schema version") {
+		if !errors.Is(err, ErrInvalidSchemaVersion) {
 			t.Fatalf("expected invalid schema version error, got: %v", err)
 		}
 	})
@@ -83,8 +84,8 @@ var _ = ginkgo.Describe("runner validation", func() {
 				if err == nil {
 					t.Fatalf("expected error")
 				}
-				if !strings.Contains(err.Error(), tt.want) {
-					t.Fatalf("expected error containing %q, got: %v", tt.want, err)
+				if !errors.Is(err, tt.want) {
+					t.Fatalf("expected error %v, got: %v", tt.want, err)
 				}
 			})
 		}
@@ -99,7 +100,7 @@ var _ = ginkgo.Describe("runner validation", func() {
 		if err == nil {
 			t.Fatalf("expected error for unsupported migration version")
 		}
-		if !strings.Contains(err.Error(), "unsupported schema migration version: 5") {
+		if !errors.Is(err, ErrUnsupportedSchemaMigrationVersion) {
 			t.Fatalf("expected unsupported migration version error, got: %v", err)
 		}
 	})

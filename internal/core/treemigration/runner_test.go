@@ -2,6 +2,7 @@ package treemigration_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/core/treemigration"
 )
 
 type treemigrationTestT interface {
@@ -506,7 +508,7 @@ Hello World
 		if err == nil {
 			t.Fatalf("expected migration error when order file cannot be written")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
+		if !errors.Is(err, treemigration.ErrPersistChildOrder) {
 			t.Fatalf("expected migration error to mention child order persistence, got: %v", err)
 		}
 	})
@@ -562,7 +564,7 @@ Hello World
 		if err == nil {
 			t.Fatalf("expected migration error when section index cannot be written")
 		}
-		if !strings.Contains(err.Error(), "materialize section index") {
+		if !errors.Is(err, treemigration.ErrMaterializeSectionIndex) {
 			t.Fatalf("expected migration error to mention section index materialization, got: %v", err)
 		}
 	})

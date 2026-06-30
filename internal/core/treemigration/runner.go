@@ -21,7 +21,16 @@ const (
 var (
 	statFile = os.Stat
 
-	ErrStoredSchemaVersionNewer = errors.New("stored schema version is newer than current schema version")
+	ErrStoredSchemaVersionNewer          = errors.New("stored schema version is newer than current schema version")
+	ErrInvalidSchemaVersion              = errors.New("invalid schema version")
+	ErrMigrationRootRequired             = errors.New("tree not loaded")
+	ErrMigrationStoreRequired            = errors.New("migration store is required")
+	ErrMigrationLoggerRequired           = errors.New("migration logger is required")
+	ErrSaveTreeCallbackRequired          = errors.New("save tree callback is required")
+	ErrSaveSchemaCallbackRequired        = errors.New("save schema callback is required")
+	ErrUnsupportedSchemaMigrationVersion = errors.New("unsupported schema migration version")
+	ErrPersistChildOrder                 = errors.New("persist child order")
+	ErrMaterializeSectionIndex           = errors.New("materialize section index")
 
 	writeMarkdownFile = func(mdFile *markdown.MarkdownFile) error {
 		return mdFile.WriteToFile()
@@ -107,22 +116,22 @@ func Run(fromVersion int, deps Dependencies) error {
 
 func validateDependencies(fromVersion int, deps Dependencies) error {
 	if fromVersion < 0 {
-		return fmt.Errorf("invalid schema version: %d", fromVersion)
+		return fmt.Errorf("invalid schema version: %d: %w", fromVersion, ErrInvalidSchemaVersion)
 	}
 	if deps.Root == nil {
-		return errors.New("tree not loaded")
+		return ErrMigrationRootRequired
 	}
 	if deps.Store == nil {
-		return errors.New("migration store is required")
+		return ErrMigrationStoreRequired
 	}
 	if deps.Log == nil {
-		return errors.New("migration logger is required")
+		return ErrMigrationLoggerRequired
 	}
 	if deps.SaveTree == nil {
-		return errors.New("save tree callback is required")
+		return ErrSaveTreeCallbackRequired
 	}
 	if deps.SaveSchema == nil {
-		return errors.New("save schema callback is required")
+		return ErrSaveSchemaCallbackRequired
 	}
 	if deps.CurrentSchemaVersion < fromVersion {
 		return fmt.Errorf("%w: current=%d stored=%d", ErrStoredSchemaVersionNewer, deps.CurrentSchemaVersion, fromVersion)
@@ -150,7 +159,7 @@ func migrationForVersion(version int) (func(Dependencies) error, error) {
 	case 4:
 		return migrateToV5, nil
 	default:
-		return nil, fmt.Errorf("unsupported schema migration version: %d", version)
+		return nil, fmt.Errorf("unsupported schema migration version: %d: %w", version, ErrUnsupportedSchemaMigrationVersion)
 	}
 }
 
@@ -227,7 +236,7 @@ func backfillChildOrder(deps Dependencies, node Node) error {
 			node.SetKind(NodeKindSection)
 		}
 		if err := deps.Store.SaveChildOrder(node); err != nil {
-			return fmt.Errorf("persist child order for node %s: %w", node.ID(), err)
+			return fmt.Errorf("persist child order for node %s: %w", node.ID(), errors.Join(ErrPersistChildOrder, err))
 		}
 	}
 
@@ -407,7 +416,7 @@ func materializeSectionIndexes(deps Dependencies, node Node) error {
 
 	if node.ID() != "root" && node.Kind() == NodeKindSection {
 		if _, err := deps.Store.EnsureSectionIndex(node); err != nil {
-			return fmt.Errorf("could not materialize section index for node %s: %w", node.ID(), err)
+			return fmt.Errorf("could not materialize section index for node %s: %w", node.ID(), errors.Join(ErrMaterializeSectionIndex, err))
 		}
 	}
 
