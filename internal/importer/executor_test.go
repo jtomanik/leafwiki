@@ -107,6 +107,9 @@ var _ = ginkgo.Describe("TestExecutor_StalePlan", func() {
 		if got != nil {
 			t.Fatalf("expected nil result on stale plan, got %#v", got)
 		}
+		if !errors.Is(err, ErrImportPlanStale) {
+			t.Fatalf("unexpected stale plan error: %v", err)
+		}
 
 	})
 })

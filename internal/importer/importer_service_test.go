@@ -194,7 +194,8 @@ var _ = ginkgo.Describe("TestImporterService_StartCurrentPlanExecution_RunsInBac
 			treeHash: "h1",
 			lookups:  map[string]*tree.PathLookup{},
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
-				<-allowEnsure
+				defer ginkgo.GinkgoRecover()
+				gomega.Eventually(allowEnsure).Should(gomega.BeClosed())
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
 		}
@@ -262,7 +263,8 @@ var _ = ginkgo.Describe("TestImporterService_ClearCurrentPlan_WhileRunning_Retur
 			treeHash: "h1",
 			lookups:  map[string]*tree.PathLookup{},
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
-				<-allowEnsure
+				defer ginkgo.GinkgoRecover()
+				gomega.Eventually(allowEnsure).Should(gomega.BeClosed())
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
 		}
@@ -301,7 +303,8 @@ var _ = ginkgo.Describe("TestImporterService_CancelCurrentPlan_StopsBeforeNextIt
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				if targetPath == "a" {
 					enterFirstEnsure <- struct{}{}
-					<-allowFirstEnsure
+					defer ginkgo.GinkgoRecover()
+					gomega.Eventually(allowFirstEnsure).Should(gomega.BeClosed())
 				}
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
@@ -315,7 +318,7 @@ var _ = ginkgo.Describe("TestImporterService_CancelCurrentPlan_StopsBeforeNextIt
 			t.Fatalf("StartCurrentPlanExecution err: %v", err)
 		}
 
-		<-enterFirstEnsure
+		gomega.Eventually(enterFirstEnsure).Should(gomega.Receive())
 
 		state, requested, err := is.CancelCurrentPlan()
 		if err != nil {
@@ -552,7 +555,7 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ExecutorStalePla
 		if err == nil {
 			t.Fatalf("expected stale plan error")
 		}
-		if !strings.Contains(err.Error(), "plan is stale") {
+		if !errors.Is(err, ErrImportPlanStale) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 

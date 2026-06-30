@@ -15,7 +15,7 @@ type ZipExtractor struct {
 }
 
 const (
-	zipExtractInvalidEntryFormat = "invalid zip entry %q: %w"
+	zipExtractInvalidEntryFormat = "%w %q: %w"
 	zipExtractMkdirFormat        = "mkdir: %w"
 )
 
@@ -68,7 +68,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 
 		destPath, err := safeJoin(ws.Root, name)
 		if err != nil {
-			return fail(fmt.Errorf(zipExtractInvalidEntryFormat, f.Name, err))
+			return fail(fmt.Errorf(zipExtractInvalidEntryFormat, ErrImportZipInvalidEntry, f.Name, err))
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
@@ -109,7 +109,7 @@ func (x *ZipExtractor) ExtractToDir(zipPath string, baseDir string) (*ZipWorkspa
 func safeJoin(baseDir, zipEntryName string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(zipEntryName))
 	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("absolute path not allowed")
+		return "", ErrImportZipAbsolutePath
 	}
 	dest := filepath.Join(baseDir, clean)
 
@@ -117,7 +117,7 @@ func safeJoin(baseDir, zipEntryName string) (string, error) {
 	destClean := filepath.Clean(dest)
 
 	if !strings.HasPrefix(destClean+string(filepath.Separator), baseClean) {
-		return "", fmt.Errorf("path traversal detected: %q", zipEntryName)
+		return "", fmt.Errorf("%w: %q", ErrImportZipPathTraversal, zipEntryName)
 	}
 	return destClean, nil
 }

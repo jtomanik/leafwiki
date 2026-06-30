@@ -14,7 +14,7 @@ import (
 
 type contentTransformCase struct {
 	name       string
-	sourcePath string
+	sourcePath tree.WorkspaceSourcePath
 	content    string
 	want       string
 }
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("TestContentTransformer_TransformContent_TableDriven", f
 			page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
 			wiki := &fakeExecWiki{}
 
-			got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath(tt.sourcePath), page, tt.content, wiki)
+			got, err := transformer.TransformContent(newFixtureUserID("editor"), tt.sourcePath, page, tt.content, wiki)
 			if err != nil {
 				t.Fatalf("TransformContent err: %v", err)
 			}
@@ -59,169 +59,170 @@ var _ = ginkgo.Describe("TestContentTransformer_TransformContent_TableDriven", f
 })
 
 func contentTransformCases() []contentTransformCase {
+	currentSourcePath := newFixtureWorkspaceSourcePath("docs/current.md")
 	return []contentTransformCase{
 		{
 			name:       "normal markdown link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Note](../Note.md)",
 			want:       "[Note](/note.md)",
 		},
 		{
 			name:       "markdown link with title",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Note](../Note.md \"Tooltip\")",
 			want:       "[Note](/note.md \"Tooltip\")",
 		},
 		{
 			name:       "wiki link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Note]]",
 			want:       "[Note](/note.md)",
 		},
 		{
 			name:       "wiki link alias",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Note|Alias]]",
 			want:       "[Alias](/note.md)",
 		},
 		{
 			name:       "wiki link anchor",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Note#Heading]]",
 			want:       "[Note](/note.md#Heading)",
 		},
 		{
 			name:       "wiki link anchor alias",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Note#Heading|Alias]]",
 			want:       "[Alias](/note.md#Heading)",
 		},
 		{
 			name:       "wiki link block reference",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Note#^block-id]]",
 			want:       "[Note](/note.md#^block-id)",
 		},
 		{
 			name:       "unresolved wiki link falls back to dead markdown link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[Missing Note]]",
 			want:       "[Missing Note](/missing-note)",
 		},
 		{
 			name:       "asset embed",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "![[../img.png]]",
 			want:       "![img.png](/assets/p1/img.png)",
 		},
 		{
 			name:       "non image wiki asset stays a link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[../Document.pdf]]",
 			want:       "[Document.pdf](/assets/p1/Document.pdf)",
 		},
 		{
 			name:       "image wiki asset renders as image",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[[../Image.png]]",
 			want:       "![Image.png](/assets/p1/Image.png)",
 		},
 		{
 			name:       "image wiki asset with underscore filename renders as image",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "![[../obsidian_repo.png]]",
 			want:       "![obsidian_repo.png](/assets/p1/obsidian_repo.png)",
 		},
 		{
 			name:       "relative markdown link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Bar](../foo/bar.md)",
 			want:       "[Bar](/foo/bar.md)",
 		},
 		{
 			name:       "percent encoded markdown link",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Three laws](../Three%20laws%20of%20motion.md)",
 			want:       "[Three laws](/three-laws-of-motion.md)",
 		},
 		{
 			// - Importer preserves query and fragment while canonicalizing
 			name:       "markdown link preserves query and fragment",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Note](../Note.md?mode=raw#part)",
 			want:       "[Note](/note.md?mode=raw#part)",
 		},
 		{
 			// - Importer does not coerce assets with .md extension under asset namespaces
 			name:       "asset markdown path remains unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Manual](../assets/manual.md)",
 			want:       "[Manual](../assets/manual.md)",
 		},
 		{
 			name:       "markdown link with escaped bracket label",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[No\\]te](../Note.md)",
 			want:       "[No\\]te](/note.md)",
 		},
 		{
 			name:       "markdown link with nested bracket label",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[See [Note]](../Note.md)",
 			want:       "[See [Note]](/note.md)",
 		},
 		{
 			name:       "markdown link with escaped closing paren in destination",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Note](../No\\)te.md)\n[Real](../Note.md)",
 			want:       "[Note](/no-te.md)\n[Real](/note.md)",
 		},
 		{
 			name:       "escaped literal markdown link stays unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "\\[Note](../Note.md)\n[Real](../Note.md)",
 			want:       "\\[Note](../Note.md)\n[Real](/note.md)",
 		},
 		{
 			name:       "pseudo markdown links with whitespace before destination stay unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Space] (../Note.md)\n[Newline]\n(../Note.md)\n[Real](../Note.md)",
 			want:       "[Space] (../Note.md)\n[Newline]\n(../Note.md)\n[Real](/note.md)",
 		},
 		{
 			name:       "link-like title text stays unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[Outer](../foo/bar.md \"[Inner](../Note.md)\")",
 			want:       "[Outer](/foo/bar.md \"[Inner](../Note.md)\")",
 		},
 		{
 			name:       "scheme relative url stays external",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "[CDN](//example.com/assets/note.md)",
 			want:       "[CDN](//example.com/assets/note.md)",
 		},
 		{
 			name:       "inline code stays unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "`[[Note]]`",
 			want:       "`[[Note]]`",
 		},
 		{
 			name:       "fenced code stays unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "```md\n[x](../Note.md)\n```",
 			want:       "```md\n[x](../Note.md)\n```",
 		},
 		{
 			// - Importer does not rewrite code examples
 			name:       "indented code stays unchanged",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "Example:\n\n    [x](../Note.md)\n\t[[Note]]\n\n[Note](../Note.md)\n[[Note]]",
 			want:       "Example:\n\n    [x](../Note.md)\n\t[[Note]]\n\n[Note](/note.md)\n[Note](/note.md)",
 		},
 		{
 			name:       "nested list links are rewritten",
-			sourcePath: "docs/current.md",
+			sourcePath: currentSourcePath,
 			content:    "- parent\n    - [Note](../Note.md)\n    - [[Note]]",
 			want:       "- parent\n    - [Note](/note.md)\n    - [Note](/note.md)",
 		},

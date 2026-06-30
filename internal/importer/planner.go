@@ -22,6 +22,61 @@ const (
 	PlanActionSkip   PlanAction = "skip"   // skips existing node
 )
 
+type ImportErrorCode string
+
+const (
+	ImportErrorCodeEnsurePathFailed          ImportErrorCode = "ensure_path_failed"
+	ImportErrorCodeCreatePageFailed          ImportErrorCode = "create_page_failed"
+	ImportErrorCodeLoadSourceFailed          ImportErrorCode = "load_source_failed"
+	ImportErrorCodeTransformContentFailed    ImportErrorCode = "transform_content_failed"
+	ImportErrorCodeRenderImportedContent     ImportErrorCode = "render_imported_content_failed"
+	ImportErrorCodeUpdatePageFailed          ImportErrorCode = "update_page_failed"
+	ImportErrorCodeUnknownAction             ImportErrorCode = "unknown_action"
+	ImportErrorCodeSourceStatFailed          ImportErrorCode = "source_stat_failed"
+	ImportErrorCodeSourceIsDirectory         ImportErrorCode = "source_is_directory"
+	ImportErrorCodeNormalizeSourcePathFailed ImportErrorCode = "normalize_source_path_failed"
+	ImportErrorCodeNormalizeFilenameFailed   ImportErrorCode = "normalize_filename_failed"
+	ImportErrorCodeLookupPathFailed          ImportErrorCode = "lookup_path_failed"
+	ImportErrorCodeInvalidLookupResult       ImportErrorCode = "invalid_lookup_result"
+)
+
+type PlanError struct {
+	SourcePath tree.WorkspaceSourcePath `json:"source_path,omitempty"`
+	Code       ImportErrorCode          `json:"code"`
+	Error      string                   `json:"error"`
+}
+
+type importPlanError struct {
+	code ImportErrorCode
+	err  error
+}
+
+func (err importPlanError) Error() string {
+	if err.err == nil {
+		return ""
+	}
+	return err.err.Error()
+}
+
+func (err importPlanError) Unwrap() error {
+	return err.err
+}
+
+func newImportPlanError(code ImportErrorCode, err error) error {
+	if err == nil {
+		return nil
+	}
+	return importPlanError{code: code, err: err}
+}
+
+func importPlanErrorCode(err error) ImportErrorCode {
+	var planErr importPlanError
+	if errors.As(err, &planErr) {
+		return planErr.code
+	}
+	return ""
+}
+
 // ImportMDFile represents a markdown file to be imported
 type ImportMDFile struct {
 	SourcePath tree.WorkspaceSourcePath // relative path to the markdown file in the zip directory
@@ -50,10 +105,11 @@ type PlanOptions struct {
 
 // PlanResult represents the result of the import plan
 type PlanResult struct {
-	ID       string     `json:"id"`
-	TreeHash string     `json:"tree_hash"` // hash of the state of the wiki tree before import
-	Items    []PlanItem `json:"items"`
-	Errors   []string   `json:"errors"`
+	ID           string      `json:"id"`
+	TreeHash     string      `json:"tree_hash"` // hash of the state of the wiki tree before import
+	Items        []PlanItem  `json:"items"`
+	Errors       []string    `json:"errors"`
+	ErrorDetails []PlanError `json:"error_details,omitempty"`
 }
 
 // Planner is responsible for creating an import plan
@@ -82,16 +138,23 @@ func (p *Planner) CreatePlan(entries []ImportMDFile, options PlanOptions) (*Plan
 		return nil, fmt.Errorf("could not generate unique ID: %w", err)
 	}
 	result := &PlanResult{
-		ID:       id,
-		Items:    []PlanItem{},
-		Errors:   []string{},
-		TreeHash: p.wiki.TreeHash(),
+		ID:           id,
+		Items:        []PlanItem{},
+		Errors:       []string{},
+		ErrorDetails: []PlanError{},
+		TreeHash:     p.wiki.TreeHash(),
 	}
 	for _, entry := range entries {
 		resEntry, err := p.analyzeEntry(entry, options)
 		if err != nil {
 			p.log.Warn("could not import resource", "source_path", entry.SourcePath, "error", err)
-			result.Errors = append(result.Errors, err.Error())
+			errMsg := err.Error()
+			result.Errors = append(result.Errors, errMsg)
+			result.ErrorDetails = append(result.ErrorDetails, PlanError{
+				SourcePath: entry.SourcePath,
+				Code:       importPlanErrorCode(err),
+				Error:      errMsg,
+			})
 			continue
 		}
 
@@ -108,10 +171,10 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	// Validate if sourcePath exists and is a file
 	info, err := os.Stat(sourcePath)
 	if err != nil {
-		return nil, err
+		return nil, newImportPlanError(ImportErrorCodeSourceStatFailed, err)
 	}
 	if info.IsDir() {
-		return nil, errors.New("source path is a directory, expected a file: " + mdFile.SourcePath.FilesystemPath())
+		return nil, newImportPlanError(ImportErrorCodeSourceIsDirectory, errors.New("source path is a directory, expected a file: "+mdFile.SourcePath.FilesystemPath()))
 	}
 
 	// normalize source path (zip-ish)
@@ -129,7 +192,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	// At planning time we intentionally do not try to enforce sibling uniqueness in the tree.
 	normalizedSourceDir, err := p.slugger.NormalizePathToValidSlugs(sourceDir)
 	if err != nil {
-		return nil, err
+		return nil, newImportPlanError(ImportErrorCodeNormalizeSourcePathFailed, err)
 	}
 	normalizedSourceDir = strings.Trim(normalizedSourceDir, "/")
 
@@ -147,7 +210,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 		// File names map to page slugs, so we normalize the basename but preserve the extension.
 		normalizedFilename, err := p.slugger.NormalizeFilenameToValidSlug(filenameLower) // e.g. "my-page.md"
 		if err != nil {
-			return nil, err
+			return nil, newImportPlanError(ImportErrorCodeNormalizeFilenameFailed, err)
 		}
 		baseSlug := strings.TrimSuffix(normalizedFilename, path.Ext(normalizedFilename))
 		if sourceFilename == "README.md" {
@@ -159,7 +222,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	// lookup existing
 	result, err := p.wiki.LookupPagePathForKind(wikiPath, kind)
 	if err != nil {
-		return nil, err
+		return nil, newImportPlanError(ImportErrorCodeLookupPathFailed, err)
 	}
 
 	var notes []string
@@ -199,7 +262,7 @@ func (p *Planner) analyzeEntry(mdFile ImportMDFile, options PlanOptions) (*PlanI
 	}
 
 	if len(result.Segments) == 0 {
-		return nil, errors.New("invalid lookup result with zero segments for existing path")
+		return nil, newImportPlanError(ImportErrorCodeInvalidLookupResult, errors.New("invalid lookup result with zero segments for existing path"))
 	}
 
 	last := result.Segments[len(result.Segments)-1]

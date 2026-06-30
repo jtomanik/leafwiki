@@ -21,7 +21,7 @@ type fakeWiki struct {
 
 	// planner part
 	lookups          map[string]*tree.PathLookup
-	lookupsForKind   map[string]*tree.PathLookup
+	lookupsForKind   map[fakeLookupForKindKey]*tree.PathLookup
 	lookupErr        error
 	lookupForKindErr error
 
@@ -35,6 +35,11 @@ type fakeWiki struct {
 	ensureErr     error
 	ensureNilPage bool
 	updateErr     error
+}
+
+type fakeLookupForKindKey struct {
+	path tree.RoutePath
+	kind tree.NodeKind
 }
 
 func (f *fakeWiki) TreeHash() string { return f.treeHash }
@@ -54,7 +59,7 @@ func (f *fakeWiki) LookupPagePathForKind(p tree.RoutePath, kind tree.NodeKind) (
 	if f.lookupForKindErr != nil {
 		return nil, f.lookupForKindErr
 	}
-	key := string(kind) + ":" + p.FilesystemPath()
+	key := fakeLookupForKindKey{path: p, kind: kind}
 	if v, ok := f.lookupsForKind[key]; ok {
 		return v, nil
 	}
@@ -253,7 +258,7 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_ReadmeMdFallbackSectionWhenNoInd
 })
 
 type nonExactReadmeCase struct {
-	sourcePath string
+	sourcePath tree.WorkspaceSourcePath
 	wantPath   string
 }
 
@@ -261,12 +266,12 @@ var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPa
 	func(tt nonExactReadmeCase) {
 		t := ginkgo.GinkgoT()
 		tmp := t.TempDir()
-		importerWriteFile(t, tmp, tt.sourcePath, "# Readme Page")
+		importerWriteFile(t, tmp, tt.sourcePath.FilesystemPath(), "# Readme Page")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath(tt.sourcePath)}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: tt.sourcePath}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -281,8 +286,8 @@ var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPa
 			t.Fatalf("TargetPath = %q, want %s", it.TargetPath, tt.wantPath)
 		}
 	},
-	ginkgo.Entry("Guides/readme.md", nonExactReadmeCase{sourcePath: "Guides/readme.md", wantPath: "docs/guides/readme"}),
-	ginkgo.Entry("Guides/Readme.md", nonExactReadmeCase{sourcePath: "Guides/Readme.md", wantPath: "docs/guides/readme"}),
+	ginkgo.Entry("Guides/readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/readme.md"), wantPath: "docs/guides/readme"}),
+	ginkgo.Entry("Guides/Readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/Readme.md"), wantPath: "docs/guides/readme"}),
 )
 
 var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreatesPageTwinWhenExistingSameRouteSectionExists", func() {
@@ -303,8 +308,8 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreatesPageTwinWhenExistingSameR
 					},
 				},
 			},
-			lookupsForKind: map[string]*tree.PathLookup{
-				string(tree.NodeKindPage) + ":docs/sync": {
+			lookupsForKind: map[fakeLookupForKindKey]*tree.PathLookup{
+				{path: newFixtureRoutePath("docs/sync"), kind: tree.NodeKindPage}: {
 					Path: "docs/sync",
 					Segments: []tree.PathSegment{
 						fakePathSegment("docs", tree.NodeKindSection, "docs-section", "Docs", true),

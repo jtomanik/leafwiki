@@ -47,6 +47,7 @@ type CurrentPlanState struct {
 	TreeHash        string           `json:"tree_hash"`
 	Items           []PlanItem       `json:"items"`
 	Errors          []string         `json:"errors"`
+	ErrorDetails    []PlanError      `json:"error_details,omitempty"`
 	ExecutionStatus ExecutionStatus  `json:"execution_status"`
 	CancelRequested bool             `json:"cancel_requested"`
 	ExecutionResult *ExecutionResult `json:"execution_result,omitempty"`
@@ -174,7 +175,7 @@ func (is *ImporterService) ExecuteCurrentPlan(userID tree.UserID) (*ExecutionRes
 			return nil, ErrImportExecutionRunning
 		case ExecutionStatusCompleted:
 			if sp.ExecutionResult == nil {
-				return nil, errors.New("import completed without result")
+				return nil, ErrImportCompletedResultMissing
 			}
 			return sp.ExecutionResult, nil
 		}
@@ -359,6 +360,7 @@ func currentPlanStateFromStored(sp *StoredPlan) *CurrentPlanState {
 		TreeHash:        sp.Plan.TreeHash,
 		Items:           sp.Plan.Items,
 		Errors:          sp.Plan.Errors,
+		ErrorDetails:    sp.Plan.ErrorDetails,
 		ExecutionStatus: sp.ExecutionStatus,
 		CancelRequested: sp.CancelRequested,
 		ExecutionResult: sp.ExecutionResult,

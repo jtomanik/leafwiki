@@ -43,6 +43,7 @@ type ExecutionItemResult struct {
 	TargetPath tree.RoutePath           `json:"target_path"`
 	Action     ExecutionAction          `json:"action"`
 	Error      *string                  `json:"error,omitempty"`
+	ErrorCode  ImportErrorCode          `json:"error_code,omitempty"`
 	Notes      []string                 `json:"notes,omitempty"`
 }
 
@@ -51,6 +52,16 @@ const (
 	importerLogFieldSourcePath = "source_path"
 	importerLogFieldPageID     = "page_id"
 )
+
+func (item *ExecutionItemResult) fail(code ImportErrorCode, message string) {
+	item.Action = ExecutionActionSkipped
+	item.Error = &message
+	item.ErrorCode = code
+}
+
+func (item *ExecutionItemResult) failWithError(code ImportErrorCode, err error) {
+	item.fail(code, err.Error())
+}
 
 type Executor struct {
 	plan                   *PlanResult
@@ -124,12 +135,12 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 	expectedTreeHash := e.plan.TreeHash
 	if e.startIndex > 0 {
 		if e.initialResult == nil || e.initialResult.TreeHash == "" {
-			return nil, fmt.Errorf("resume state missing tree hash")
+			return nil, ErrImportResumeTreeHashMissing
 		}
 		expectedTreeHash = e.initialResult.TreeHash
 	}
 	if expectedTreeHash != beforeExecution {
-		return nil, fmt.Errorf("plan is stale: expected tree_hash %s but got %s", expectedTreeHash, beforeExecution)
+		return nil, fmt.Errorf("plan is stale: %w: expected tree_hash %s but got %s", ErrImportPlanStale, expectedTreeHash, beforeExecution)
 	}
 
 	transformer := newContentTransformerWithOptions(e.plan, e.planOptions.SourceBasePath, e.assetMaxBytes, ContentTransformerOptions{
@@ -179,9 +190,7 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			// Creates the page or section and also all necessary parent sections
 			page, err := e.wiki.EnsurePath(userID, item.TargetPath, item.Title, &item.Kind)
 			if err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.failWithError(ImportErrorCodeEnsurePathFailed, err)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to ensure path", importerLogFieldTargetPath, item.TargetPath, "error", err)
@@ -191,8 +200,7 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			// And update the page content
 			if page == nil {
 				errMsg := "could not create page"
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.fail(ImportErrorCodeCreatePageFailed, errMsg)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Could not create page", importerLogFieldTargetPath, item.TargetPath, "error", errMsg)
@@ -201,9 +209,7 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			sourceAbs := filepath.Join(e.planOptions.SourceBasePath, filepath.FromSlash(item.SourcePath.FilesystemPath()))
 			mdFile, err := markdown.LoadMarkdownFile(sourceAbs)
 			if err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.failWithError(ImportErrorCodeLoadSourceFailed, err)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to load source file", importerLogFieldSourcePath, sourceAbs, "error", err)
@@ -211,9 +217,7 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			}
 			importedBody, err := transformer.TransformContent(userID, item.SourcePath, page, mdFile.GetContent(), e.wiki)
 			if err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.failWithError(ImportErrorCodeTransformContentFailed, err)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to transform imported content", importerLogFieldSourcePath, sourceAbs, "error", err)
@@ -221,18 +225,14 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			}
 			importedContent, err := buildImportedContent(mdFile, page, importedBody)
 			if err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.failWithError(ImportErrorCodeRenderImportedContent, err)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to prepare imported content", importerLogFieldSourcePath, sourceAbs, "error", err)
 				continue
 			}
 			if _, err := e.wiki.UpdatePage(userID, page.ID, page.Title, page.Slug, &importedContent, &page.Kind); err != nil {
-				errMsg := err.Error()
-				execItem.Action = ExecutionActionSkipped
-				execItem.Error = &errMsg
+				execItem.failWithError(ImportErrorCodeUpdatePageFailed, err)
 				result.SkippedCount++
 				result.Items = append(result.Items, execItem)
 				e.logger.Error("Failed to update page content", importerLogFieldPageID, page.ID, "error", err)
@@ -247,8 +247,7 @@ func (e *Executor) Execute(userID tree.UserID) (*ExecutionResult, error) {
 			result.SkippedCount++
 		default:
 			errMsg := "unknown action"
-			execItem.Action = ExecutionActionSkipped
-			execItem.Error = &errMsg
+			execItem.fail(ImportErrorCodeUnknownAction, errMsg)
 			e.logger.Info("Skipped page with unknown action", importerLogFieldSourcePath, item.SourcePath, importerLogFieldTargetPath, item.TargetPath)
 			result.SkippedCount++
 		}

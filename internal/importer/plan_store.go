@@ -10,10 +10,18 @@ import (
 	"time"
 )
 
-var ErrNoPlan = errors.New("no plan available")
-var ErrImportExecutionRunning = errors.New("import execution already running")
-var ErrImportCanceled = errors.New("import execution canceled")
-var ErrImportStateUnavailable = errors.New("import state unavailable")
+var (
+	ErrNoPlan                       = errors.New("no plan available")
+	ErrImportExecutionRunning       = errors.New("import execution already running")
+	ErrImportCanceled               = errors.New("import execution canceled")
+	ErrImportStateUnavailable       = errors.New("import state unavailable")
+	ErrImportResumeTreeHashMissing  = errors.New("resume state missing tree hash")
+	ErrImportCompletedResultMissing = errors.New("import completed without result")
+	ErrImportPlanStale              = errors.New("import plan stale")
+	ErrImportZipInvalidEntry        = errors.New("invalid zip entry")
+	ErrImportZipAbsolutePath        = errors.New("absolute path not allowed")
+	ErrImportZipPathTraversal       = errors.New("path traversal detected")
+)
 
 type ExecutionStatus string
 
