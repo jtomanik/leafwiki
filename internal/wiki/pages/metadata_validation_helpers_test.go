@@ -1,7 +1,6 @@
 package pages
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,12 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("metadata and validation helpers", func() {
@@ -60,8 +62,10 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 			return raw, nil
 		})
 
-		Expect(page.Tags).To(Equal([]string{"alpha", "beta"}))
-		Expect(page.Properties).To(Equal(map[string]string{"status": "draft"}))
+		Expect(page).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Tags":       Equal([]string{"alpha", "beta"}),
+			"Properties": Equal(map[string]string{"status": "draft"}),
+		})))
 	})
 
 	ginkgo.It("extracts normalized tags and string properties from metadata", func() {
@@ -93,8 +97,10 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		EnrichPageMetadata(page, func(tree.PageID) (string, error) {
 			return "", errors.New("read failed")
 		})
-		Expect(page.Tags).To(BeEmpty())
-		Expect(page.Properties).To(BeEmpty())
+		Expect(page).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Tags":       BeEmpty(),
+			"Properties": BeEmpty(),
+		})))
 
 		current, err := markdown.RenderPageDocument(markdown.PageDocument{
 			Body: "Body",
@@ -113,8 +119,10 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(err).NotTo(HaveOccurred())
 		doc, _, err := markdown.ParsePageDocument(rendered)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(doc.Metadata.Tags).To(Equal([]string{"keep"}))
-		Expect(doc.Metadata.Fields).To(Equal(map[string]interface{}{"status": "draft"}))
+		Expect(doc.Metadata).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Tags":   Equal([]string{"keep"}),
+			"Fields": Equal(map[string]interface{}{"status": "draft"}),
+		}))
 
 		meta := ApplyPublicMetadata(markdown.PageMetadata{Fields: map[string]interface{}{"status": "draft"}}, map[string]string{"status": "draft"}, nil, nil)
 		Expect(meta.Fields).To(BeNil())
@@ -145,13 +153,19 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 
 		doc, _, err := markdown.ParsePageDocument(rendered)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(doc.Body).To(Equal("New body"))
-		Expect(doc.Metadata.Page.ID).To(Equal("page-2"))
-		Expect(doc.Metadata.Page.Title).To(Equal("New Title"))
-		Expect(doc.Metadata.Tags).To(Equal([]string{"new", "done"}))
-		Expect(doc.Metadata.Fields).To(Equal(map[string]interface{}{
-			"private_flag": true,
-			"status":       "published",
+		Expect(doc).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Body": Equal("New body"),
+			"Metadata": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Page": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"ID":    Equal("page-2"),
+					"Title": Equal("New Title"),
+				}),
+				"Tags": Equal([]string{"new", "done"}),
+				"Fields": Equal(map[string]interface{}{
+					"private_flag": true,
+					"status":       "published",
+				}),
+			}),
 		}))
 	})
 
@@ -171,9 +185,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(properties).To(Equal(map[string]string{"status": "published"}))
 
 		_, _, err = ApplyMetadataPatch(nil, nil, MetadataPatch{RemoveProperties: []string{" leafwiki_hidden "}})
-		Expect(err).To(HaveOccurred())
-		var validationErr *sharederrors.ValidationErrors
-		Expect(errors.As(err, &validationErr)).To(BeTrue())
+		Expect(err).To(HavePageValidationFieldError("removeProperties. leafwiki_hidden ", FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace))
 	})
 
 	ginkgo.It("validates and normalizes route path and page kind inputs", func() {
@@ -183,19 +195,17 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(kind).To(Equal(tree.NodeKindSection))
 
 		_, _, err = NormalizePagePathInput("docs/page.md", "section")
-		Expect(err).To(HaveOccurred())
-		_, ok := sharederrors.AsLocalizedError(err)
-		Expect(ok).To(BeTrue())
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
 		kind, err = ValidatePageKind(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(kind).To(Equal(tree.NodeKindPage))
 
 		_, err = ValidatePageRoutePath(" ")
-		expectPageLocalizedCode(err, ErrCodePageMissingPath)
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageMissingPath))
 
 		_, err = ValidatePageRoutePath("../escape")
-		expectPageLocalizedCode(err, ErrCodePageInvalidPath)
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidPath))
 
 		Expect(MarkdownContentPathForRoute(tree.RoutePath("docs/page"), tree.NodeKindPage)).To(Equal(tree.MarkdownPath("docs/page.md")))
 
@@ -204,7 +214,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(validatedParent).To(Equal("root"))
 
 		_, err = ValidateMoveParentID(" parent ")
-		expectPageLocalizedCode(err, ErrCodePageInvalidParentID)
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
 
 		parent := "parent-1"
 		optionalParent, err := ValidateOptionalParentID(&parent)
@@ -219,13 +229,10 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(*optionalSemanticParent).To(Equal(typedParent))
 
 		_, err = ValidateSemanticRoutePath(" ")
-		var validationErr *sharederrors.ValidationErrors
-		Expect(errors.As(err, &validationErr)).To(BeTrue())
-		expectValidationField(validationErr, "path")
+		Expect(err).To(HavePageValidationFieldError("path", FieldCodePagePathRequired, MessageIDPagePathRequired))
 
 		_, err = ValidateRoutePathValue(tree.RoutePath(""))
-		Expect(errors.As(err, &validationErr)).To(BeTrue())
-		expectValidationField(validationErr, "path")
+		Expect(err).To(HavePageValidationFieldError("path", FieldCodePagePathRequired, MessageIDPagePathRequired))
 
 		id := tree.PageIDFromString("page-1")
 		Expect(optionalPageIDString(nil)).To(BeNil())
@@ -246,20 +253,24 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		input, ok, err := NormalizeReadmeMarkdownPathFallbackInput("README.md", "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
-		Expect(input.PageRoute).To(Equal("README"))
-		Expect(input.SectionRoute).To(BeEmpty())
-		Expect(input.TryPage).To(BeTrue())
-		Expect(input.TrySection).To(BeTrue())
+		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"PageRoute":    Equal("README"),
+			"SectionRoute": BeEmpty(),
+			"TryPage":      BeTrue(),
+			"TrySection":   BeTrue(),
+		}))
 
-		input, ok, err = NormalizeReadmeMarkdownPathFallbackInput("docs/README.md", string(tree.NodeKindSection))
+		input, ok, err = NormalizeReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
-		Expect(input.TryPage).To(BeFalse())
-		Expect(input.TrySection).To(BeTrue())
+		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"TryPage":    BeFalse(),
+			"TrySection": BeTrue(),
+		}))
 
-		_, ok, err = NormalizeReadmeMarkdownPathFallbackInput("docs/README.md", "bad-kind")
+		_, ok, err = NormalizeReadmeMarkdownPathFallbackRawInput("docs/README.md", "bad-kind")
 		Expect(ok).To(BeTrue())
-		expectPageLocalizedCode(err, ErrCodePageInvalidKind)
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
 		rootDir := ginkgo.GinkgoT().TempDir()
 		Expect(ReadmeFallbackSectionIsActive("", "docs")).To(BeFalse())
@@ -271,10 +282,12 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(ReadmeFallbackSectionIsActive(rootDir, "docs")).To(BeFalse())
 
 		pageOut := &FindByPathOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: tree.PageIDFromString("readme")}}}
-		out, handled, err := FindReadmeMarkdownPathFallback("docs/README.md", string(tree.NodeKindPage), ReadmeMarkdownPathFallbackLookup{
+		out, handled, err := FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
 			FindByPath: func(in FindByPathInput) (*FindByPathOutput, error) {
-				Expect(in.RoutePath).To(Equal(tree.RoutePath("docs/README")))
-				Expect(in.Kind).To(Equal(tree.NodeKindPage))
+				Expect(in).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"RoutePath": Equal(tree.RoutePath("docs/README")),
+					"Kind":      Equal(tree.NodeKindPage),
+				}))
 				return pageOut, nil
 			},
 		})
@@ -286,7 +299,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(handled).To(BeFalse())
 
-		_, handled, err = FindReadmeMarkdownPathFallback("docs/README.md", string(tree.NodeKindPage), ReadmeMarkdownPathFallbackLookup{
+		_, handled, err = FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
 			FindByPath: func(FindByPathInput) (*FindByPathOutput, error) {
 				return nil, tree.ErrPageNotFound
 			},
@@ -299,14 +312,18 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		detail, status, ok := PageErrorDetailForError(tree.ErrPageNotFound)
 		Expect(ok).To(BeTrue())
 		Expect(status).To(Equal(http.StatusNotFound))
-		Expect(detail.Code).To(Equal(ErrCodePageNotFound))
-		Expect(detail.MessageID).To(Equal(sharederrors.MessageID("errors.page.not_found")))
+		Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      Equal(ErrCodePageNotFound),
+			"MessageID": Equal(sharederrors.MessageIDForCode(ErrCodePageNotFound)),
+		}))
 
 		localized := sharederrors.NewLocalizedErrorFromCode(ErrCodePageVersionConflict, nil)
 		detail, status, ok = PageErrorDetailForError(localized)
 		Expect(ok).To(BeTrue())
 		Expect(status).To(Equal(http.StatusConflict))
-		Expect(detail.Code).To(Equal(ErrCodePageVersionConflict))
+		Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code": Equal(ErrCodePageVersionConflict),
+		}))
 
 		_, _, ok = PageErrorDetailForError(errors.New("outside pages"))
 		Expect(ok).To(BeFalse())
@@ -330,7 +347,9 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 			detail, status, ok = PageErrorDetailForError(tc.err)
 			Expect(ok).To(BeTrue())
 			Expect(status).To(Equal(tc.status))
-			Expect(detail.Code).To(Equal(tc.code))
+			Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Code": Equal(tc.code),
+			}))
 		}
 
 		Expect(pageErrorStatus(ErrCodePageVersionConflict)).To(Equal(http.StatusConflict))
@@ -339,34 +358,68 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 
 	ginkgo.It("writes structured page errors for localized, validation, sentinel, and fallback failures", func() {
 		rec := respondWithPageErrorRecorder(sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRequest, nil))
-		expectPageErrorResponse(rec, http.StatusBadRequest, ErrCodePageInvalidRequest)
+		Expect(rec).To(HavePageErrorResponse(http.StatusBadRequest, ErrCodePageInvalidRequest), rec.Body.String())
 
 		validationErr := sharederrors.NewValidationErrors()
 		validationErr.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 		rec = respondWithPageErrorRecorder(validationErr)
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		Expect(rec.Body.String()).To(ContainSubstring(pageValidationErrorCode))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), rec.Body.String())
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(pageValidationErrorCode)))
 
 		rec = respondWithPageErrorRecorder(tree.ErrPageNotFound)
-		expectPageErrorResponse(rec, http.StatusNotFound, ErrCodePageNotFound)
+		Expect(rec).To(HavePageErrorResponse(http.StatusNotFound, ErrCodePageNotFound), rec.Body.String())
 
 		rec = respondWithPageErrorRecorder(errors.New("boom"))
-		expectPageErrorResponse(rec, http.StatusInternalServerError, ErrCodePageInternalError)
+		Expect(rec).To(HavePageErrorResponse(http.StatusInternalServerError, ErrCodePageInternalError), rec.Body.String())
 	})
 })
 
-func expectPageLocalizedCode(err error, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
-
-	var localized *sharederrors.LocalizedError
-	Expect(errors.As(err, &localized)).To(BeTrue(), "error = %T %v", err, err)
-	Expect(localized.Code).To(Equal(code))
+func MatchPageLocalizedCode(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
 }
 
-func expectValidationField(err *sharederrors.ValidationErrors, field string) {
-	ginkgo.GinkgoHelper()
+func HavePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		if !errors.As(err, &validation) {
+			return nil
+		}
+		return validation
+	}, ContainPageValidationFieldError(field, code, messageID))
+}
 
-	Expect(err.Errors).To(ContainElement(HaveField("Field", field)))
+func HavePageValidationField(field testmatchers.ValidationField) types.GomegaMatcher {
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		if !errors.As(err, &validation) {
+			return nil
+		}
+		return validation
+	}, ContainPageValidationField(field))
+}
+
+func HavePageValidationFields(fields ...testmatchers.ValidationField) types.GomegaMatcher {
+	matchers := make([]types.GomegaMatcher, 0, len(fields))
+	for _, field := range fields {
+		matchers = append(matchers, HavePageValidationField(field))
+	}
+	return SatisfyAll(matchers...)
+}
+
+func ContainPageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	return testmatchers.ContainFieldError(field, code, messageID)
+}
+
+func ContainPageValidationField(field testmatchers.ValidationField) types.GomegaMatcher {
+	fieldName := field.String()
+	return WithTransform(func(validation *sharederrors.ValidationErrors) []*sharederrors.FieldError {
+		if validation == nil {
+			return nil
+		}
+		return validation.Errors
+	}, ContainElement(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Field": Equal(fieldName),
+	}))))
 }
 
 func respondWithPageErrorRecorder(err error) *httptest.ResponseRecorder {
@@ -380,11 +433,6 @@ func respondWithPageErrorRecorder(err error) *httptest.ResponseRecorder {
 	return rec
 }
 
-func expectPageErrorResponse(rec *httptest.ResponseRecorder, status int, code sharederrors.ErrorCode) {
-	ginkgo.GinkgoHelper()
-
-	Expect(rec.Code).To(Equal(status), rec.Body.String())
-	var body PageErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-	Expect(body.Error.Code).To(Equal(code))
+func HavePageErrorResponse(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
 }

@@ -8,12 +8,16 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/properties"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/tags"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 var _ = ginkgo.Describe("page save side-effect branch coverage", func() {
@@ -23,12 +27,13 @@ var _ = ginkgo.Describe("page save side-effect branch coverage", func() {
 
 	ginkgo.It("returns search bootstrap tree walk errors", func() {
 		_, _, index, _ := setupSearchSideEffect()
+		walkFailedErr := errors.New("walk failed")
 		effect := &SearchIndexSideEffect{
 			index: index,
-			tree:  failingSearchBootstrapTree{err: errors.New("walk failed")},
+			tree:  failingSearchBootstrapTree{err: walkFailedErr},
 		}
 
-		Expect(effect.IndexAllPages()).To(MatchError("walk failed"))
+		Expect(effect.IndexAllPages()).To(MatchError(walkFailedErr))
 	})
 
 	ginkgo.It("applies link index updates across update, move, restore, and delete event shapes", func() {
@@ -126,8 +131,10 @@ var _ = ginkgo.Describe("page save side-effect branch coverage", func() {
 
 		result, err := index.Search("needle", nil, 0, 10)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Count).To(Equal(1))
-		Expect(result.Items[0].PageID).To(Equal(page.ID))
+		Expect(result).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Count": Equal(1),
+			"Items": ContainElement(HaveField("PageID", Equal(page.ID))),
+		})))
 
 		effect.indexPage(nil)
 		unreadable := createMarkdownPage(treeService, "Unreadable", "unreadable", "unreadable content")
@@ -137,7 +144,7 @@ var _ = ginkgo.Describe("page save side-effect branch coverage", func() {
 		Expect(effect.IndexAllPages()).To(Succeed())
 
 		dropSQLiteTables(filepath.Join(dir, "search.db"), "pages")
-		Expect(effect.IndexAllPages()).To(MatchError(ContainSubstring("no such table")))
+		Expect(effect.IndexAllPages()).To(HaveSQLiteErrorCode(sqlite3.SQLITE_ERROR))
 		Expect(func() {
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 		}).NotTo(Panic())
@@ -302,4 +309,14 @@ func dropSQLiteTables(dbPath string, tableNames ...string) {
 		Expect(err).NotTo(HaveOccurred())
 	}
 	Expect(db.Close()).To(Succeed())
+}
+
+func HaveSQLiteErrorCode(code int) types.GomegaMatcher {
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return 0
+		}
+		return sqliteErr.Code()
+	}, Equal(code))
 }

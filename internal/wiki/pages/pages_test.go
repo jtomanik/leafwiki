@@ -3,7 +3,6 @@ package pages_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -14,6 +13,7 @@ import (
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/test_utils"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
@@ -187,7 +187,7 @@ var _ = ginkgo.It("TestCreatePageUseCase_EmptyTitle_ReturnsValidationError", fun
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
-	assertFieldErrorCode(t, ve, "title", "page_title_required", "validation.page.title_required")
+	assertFieldErrorCode(t, ve, "title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired)
 })
 
 var _ = ginkgo.It("TestCreatePageUseCase_ReservedSlug_ReturnsValidationError", func() {
@@ -208,7 +208,7 @@ var _ = ginkgo.It("TestCreatePageUseCase_ReservedSlug_ReturnsValidationError", f
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
-	assertFieldErrorCode(t, ve, "slug", "page_slug_invalid", "validation.page.slug_invalid")
+	assertFieldErrorCode(t, ve, "slug", pages.FieldCodePageSlugInvalid, pages.MessageIDPageSlugInvalid)
 })
 
 var _ = ginkgo.It("TestPageUseCaseInputsUseSemanticTypesAtBoundary", func() {
@@ -237,6 +237,7 @@ var _ = ginkgo.It("TestPageUseCaseInputsUseSemanticTypesAtBoundary", func() {
 
 var _ = ginkgo.It("TestValidatePageMetadataInputReportsStableCodes", func() {
 	t := ginkgo.GinkgoT()
+	const whitespacePropertyField = "properties. leafwiki_custom"
 
 	err := pages.ValidatePageMetadataInput(
 		[]string{" tag ", "unique", "UNIQUE"},
@@ -252,29 +253,30 @@ var _ = ginkgo.It("TestValidatePageMetadataInputReportsStableCodes", func() {
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
-	assertFieldErrorCode(t, ve, "tags[0]", "page_tag_whitespace", "validation.page.tag_whitespace")
-	assertFieldErrorCode(t, ve, "tags[2]", "page_tag_duplicate", "validation.page.tag_duplicate")
-	assertFieldErrorCode(t, ve, "properties. leafwiki_custom", "page_property_key_whitespace", "validation.page.property_key_whitespace")
-	assertFieldErrorCode(t, ve, "properties.leafwiki_custom", "page_property_key_reserved", "validation.page.property_key_reserved_prefix")
-	assertFieldErrorCode(t, ve, "properties.tags", "page_property_key_reserved", "validation.page.property_key_reserved")
-	assertFieldErrorCode(t, ve, "properties.", "page_property_key_required", "validation.page.property_key_required")
+	assertFieldErrorCode(t, ve, "tags[0]", pages.FieldCodePageTagWhitespace, pages.MessageIDPageTagWhitespace)
+	assertFieldErrorCode(t, ve, "tags[2]", pages.FieldCodePageTagDuplicate, pages.MessageIDPageTagDuplicate)
+	assertFieldErrorCode(t, ve, whitespacePropertyField, pages.FieldCodePagePropertyKeyWhitespace, pages.MessageIDPagePropertyKeyWhitespace)
+	assertFieldErrorCode(t, ve, "properties.leafwiki_custom", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReservedPrefix)
+	assertFieldErrorCode(t, ve, "properties.tags", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReserved)
+	assertFieldErrorCode(t, ve, "properties.", pages.FieldCodePagePropertyKeyRequired, pages.MessageIDPagePropertyKeyRequired)
 })
 
-func assertFieldErrorCode(t pagesTestT, ve *sharederrors.ValidationErrors, field string, code string, messageID string) {
+func assertFieldErrorCode(t pagesTestT, ve *sharederrors.ValidationErrors, field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 
+	fieldName := field.String()
 	for _, err := range ve.Errors {
-		if err.Field == field {
-			if fmt.Sprintf("%s", err.Code) != code {
-				t.Fatalf("%s code = %q, want %q", field, err.Code, code)
+		if err.Field == fieldName {
+			if err.Code != code {
+				t.Fatalf("%s code = %q, want %q", fieldName, err.Code, code)
 			}
-			if fmt.Sprintf("%s", err.MessageID) != messageID {
-				t.Fatalf("%s messageId = %q, want %q", field, err.MessageID, messageID)
+			if err.MessageID != messageID {
+				t.Fatalf("%s messageId = %q, want %q", fieldName, err.MessageID, messageID)
 			}
 			return
 		}
 	}
-	t.Fatalf("missing field error for %s in %#v", field, ve.Errors)
+	t.Fatalf("missing field error for %s in %#v", fieldName, ve.Errors)
 }
 
 var _ = ginkgo.It("TestCreatePageUseCase_NilKind_ReturnsValidationError", func() {
@@ -860,7 +862,7 @@ var _ = ginkgo.It("TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
-	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
+	assertFieldErrorCode(t, ve, "path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid)
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1056,7 +1058,7 @@ var _ = ginkgo.It("TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationE
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
 	}
-	assertFieldErrorCode(t, ve, "path", "page_path_invalid", "validation.page.path_invalid")
+	assertFieldErrorCode(t, ve, "path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid)
 })
 
 var _ = ginkgo.It("TestSortPagesUseCase_HappyPath", func() {

@@ -234,8 +234,8 @@ func (uc *PreviewPageRefactorUseCase) getAffectedPages(oldPath tree.RoutePath, r
 		if err != nil {
 			return nil, 0, err
 		}
-		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath, Kind: string(rootKind)}}
-		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculateRoutePath(), links.MarkdownSourceKind(sourcePage.Kind), rules)
+		rules := []links.RewriteRule{{OldPath: oldPath, NewPath: oldPath, Kind: links.TargetKindFromNodeKind(rootKind)}}
+		result := engine.RewriteWithSourceKind(sourcePage.Content, sourcePage.CalculateRoutePath(), links.MarkdownSourceKindFromNodeKind(sourcePage.Kind), rules)
 		for _, w := range result.Warnings {
 			warning := RefactorWarning{MessageID: w.MessageID, Message: w.Message}
 			if !containsRefactorWarning(item.WarningDetails, warning) {
@@ -424,7 +424,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteIncomingLinks(in RefactorApplyInput, 
 	if !in.RewriteLinks {
 		return nil
 	}
-	rules := []links.RewriteRule{{OldPath: plan.oldPath, NewPath: plan.newPath, Kind: string(plan.page.Kind)}}
+	rules := []links.RewriteRule{{OldPath: plan.oldPath, NewPath: plan.newPath, Kind: links.TargetKindFromNodeKind(plan.page.Kind)}}
 	return uc.rewriteAffectedPages(in.UserID, in.Source, plan.affectedPageIDs, rules, plan.legacyPageLinkSourceIDs)
 }
 
@@ -473,7 +473,7 @@ func (uc *ApplyPageRefactorUseCase) buildApplyPlan(in RefactorApplyInput) (*appl
 			seenPageIDs[match.FromPageID] = struct{}{}
 			plan.affectedPageIDs = append(plan.affectedPageIDs, match.FromPageID)
 		}
-		if page.Kind == tree.NodeKindPage && match.ToPath == oldPath && match.ToKind == "unknown" && !match.Broken {
+		if page.Kind == tree.NodeKindPage && match.ToPath == oldPath && match.ToKind == links.TargetKindUnknown && !match.Broken {
 			if plan.legacyPageLinkSourceIDs == nil {
 				plan.legacyPageLinkSourceIDs = make(map[tree.PageID]struct{})
 			}
@@ -552,17 +552,17 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID tree.UserID, sou
 		if _, hasLegacyPageLink := legacyPageLinkSourceIDs[pageID]; hasLegacyPageLink {
 			pageRules = append([]links.RewriteRule{}, rules...)
 			for _, rule := range rules {
-				if rule.Kind == string(tree.NodeKindPage) {
+				if rule.Kind == links.TargetKindPage {
 					pageRules = append(pageRules, links.RewriteRule{
 						OldPath:    rule.OldPath,
 						NewPath:    rule.NewPath,
-						Kind:       string(tree.NodeKindSection),
-						OutputKind: string(tree.NodeKindPage),
+						Kind:       links.TargetKindSection,
+						OutputKind: links.TargetKindPage,
 					})
 				}
 			}
 		}
-		result := engine.RewriteWithSourceKind(page.Content, page.CalculateRoutePath(), links.MarkdownSourceKind(page.Kind), pageRules)
+		result := engine.RewriteWithSourceKind(page.Content, page.CalculateRoutePath(), links.MarkdownSourceKindFromNodeKind(page.Kind), pageRules)
 		if result.Count() == 0 || result.Content == page.Content {
 			continue
 		}
@@ -594,7 +594,7 @@ func (uc *ApplyPageRefactorUseCase) rewriteAffectedPages(userID tree.UserID, sou
 
 func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID tree.UserID, source string, snapshots []pathChangeSnapshot, oldPath, newPath tree.RoutePath) error {
 	engine := links.NewMarkdownRefactorEngineWithOptions(links.MarkdownRefactorOptions{MarkdownLinkRootPrefix: uc.markdownLinkRootPrefix})
-	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath, Kind: string(planNodeKind(snapshots))}}
+	rules := []links.RewriteRule{{OldPath: oldPath, NewPath: newPath, Kind: links.TargetKindFromNodeKind(planNodeKind(snapshots))}}
 
 	type pending struct {
 		page    *tree.Page
@@ -614,7 +614,7 @@ func (uc *ApplyPageRefactorUseCase) rewritePathChangedSubtree(userID tree.UserID
 		if !ok {
 			continue
 		}
-		result := engine.RewriteRelativeLinksForPathChangeWithSourceKind(snap.Content, snap.OldPath, current.CalculateRoutePath(), links.MarkdownSourceKind(snap.Kind), rules)
+		result := engine.RewriteRelativeLinksForPathChangeWithSourceKind(snap.Content, snap.OldPath, current.CalculateRoutePath(), links.MarkdownSourceKindFromNodeKind(snap.Kind), rules)
 		if (result.Count() == 0 && snap.Content == current.Content) || result.Content == current.Content {
 			continue
 		}

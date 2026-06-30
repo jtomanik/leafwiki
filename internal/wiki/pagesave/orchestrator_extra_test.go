@@ -6,6 +6,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -54,10 +55,12 @@ var _ = ginkgo.Describe("page save side-effect orchestration", func() {
 			return workspacesync.Actor{Name: "Resolved"}
 		})
 
-		Expect(effect.ApplyRequired(PageSaveEvent{UserID: tree.NewUserIDUnchecked("alice")})).To(Succeed())
+		Expect(effect.ApplyRequired(PageSaveEvent{UserID: newFixtureUserID("alice")})).To(Succeed())
 
-		Expect(syncer.req.Actor.ID.String()).To(Equal("alice"))
-		Expect(syncer.req.Actor.Name).To(Equal("Resolved"))
+		Expect(syncer.req.Actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ID":   Equal(workspacesync.ActorIDFromUserID(newFixtureUserID("alice"))),
+			"Name": Equal("Resolved"),
+		}))
 	})
 
 	ginkgo.It("returns nil for nil workspace sync services and surfaces sync failures for required effects", func() {

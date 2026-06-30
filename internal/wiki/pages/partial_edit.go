@@ -26,23 +26,23 @@ type sectionHeading struct {
 func ReplaceMarkdownSection(content string, headingPath []string, occurrence int, replacement string) (string, error) {
 	targetPath := normalizeHeadingPath(headingPath)
 	if len(targetPath) == 0 {
-		return "", fmt.Errorf("headingPath is required")
+		return "", ErrSectionHeadingPathRequired
 	}
 	lines := strings.Split(content, "\n")
 	headings := markdownHeadings(lines)
 	matches := matchingHeadings(headings, targetPath)
 	if len(matches) == 0 {
-		return "", fmt.Errorf("heading_not_found: heading path not found")
+		return "", fmt.Errorf("%w: heading path not found", ErrSectionHeadingNotFound)
 	}
 	var target sectionHeading
 	switch {
 	case occurrence > 0:
 		if occurrence > len(matches) {
-			return "", fmt.Errorf("heading_not_found: occurrence not found")
+			return "", fmt.Errorf("%w: occurrence not found", ErrSectionHeadingNotFound)
 		}
 		target = matches[occurrence-1]
 	case len(matches) > 1:
-		return "", fmt.Errorf("ambiguous_heading: occurrence is required")
+		return "", fmt.Errorf("%w: occurrence is required", ErrSectionAmbiguousHeading)
 	default:
 		target = matches[0]
 	}

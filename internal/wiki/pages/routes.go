@@ -161,7 +161,7 @@ func (r *Routes) handleGetByPath(c *gin.Context) {
 		respondWithPageError(c, sharederrors.NewLocalizedErrorFromCode(ErrCodePageMissingPath, nil))
 		return
 	}
-	out, err := r.findByPathInput(c.Request.Context(), rawPath, c.Query("kind"))
+	out, err := r.findByPathRawInput(c.Request.Context(), rawPath, c.Query("kind"))
 	if err != nil {
 		respondWithPageError(c, err)
 		return
@@ -173,16 +173,20 @@ func (r *Routes) handleGetByPath(c *gin.Context) {
 	r.respondPageWithDepth(c, http.StatusOK, out.Page, depth)
 }
 
-func (r *Routes) findByPathInput(ctx context.Context, rawPath string, rawKind string) (*FindByPathOutput, error) {
-	if rawPath == "" {
-		kind := tree.NodeKind("")
-		if strings.TrimSpace(rawKind) != "" {
-			validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
-			if err != nil {
-				return nil, err
-			}
-			kind = validKind
+func (r *Routes) findByPathRawInput(ctx context.Context, rawPath string, rawKind string) (*FindByPathOutput, error) {
+	var kind tree.NodeKind
+	if strings.TrimSpace(rawKind) != "" {
+		validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
+		if err != nil {
+			return nil, err
 		}
+		kind = validKind
+	}
+	return r.findByPathInput(ctx, rawPath, kind)
+}
+
+func (r *Routes) findByPathInput(ctx context.Context, rawPath string, kind tree.NodeKind) (*FindByPathOutput, error) {
+	if rawPath == "" {
 		if kind != "" && kind != tree.NodeKindSection {
 			return nil, tree.ErrPageNotFound
 		}
@@ -192,7 +196,7 @@ func (r *Routes) findByPathInput(ctx context.Context, rawPath string, rawKind st
 		}
 		return &FindByPathOutput{Page: page}, nil
 	}
-	if out, handled, err := FindReadmeMarkdownPathFallback(rawPath, rawKind, ReadmeMarkdownPathFallbackLookup{
+	if out, handled, err := FindReadmeMarkdownPathFallback(rawPath, kind, ReadmeMarkdownPathFallbackLookup{
 		RootDir: r.treeService.RootDir(),
 		FindByPath: func(input FindByPathInput) (*FindByPathOutput, error) {
 			return r.findByPath.Execute(ctx, input)
@@ -203,16 +207,16 @@ func (r *Routes) findByPathInput(ctx context.Context, rawPath string, rawKind st
 	}); err != nil || handled {
 		return out, err
 	}
-	routePath, kind, err := NormalizePagePathInput(rawPath, rawKind)
+	routePath, normalizedKind, err := NormalizePagePathKindInput(rawPath, kind)
 	if err != nil {
 		return nil, err
 	}
-	return r.findByPath.Execute(ctx, FindByPathInput{RoutePath: routePath, Kind: kind})
+	return r.findByPath.Execute(ctx, FindByPathInput{RoutePath: routePath, Kind: normalizedKind})
 }
 
 func (r *Routes) handleLookupPath(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
-	kind := tree.NodeKind("")
+	var kind tree.NodeKind
 	rawKind := strings.TrimSpace(c.Query("kind"))
 	if rawKind != "" {
 		validKind, kindErr := ValidatePageKindString(rawKind)
@@ -527,10 +531,11 @@ func (r *Routes) handleConvert(c *gin.Context) {
 }
 
 func ValidateConvertTargetKind(kind string) (tree.NodeKind, error) {
-	if kind != string(tree.NodeKindPage) && kind != string(tree.NodeKindSection) {
+	targetKind, ok := tree.ParseNodeKind(kind)
+	if !ok {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidTargetKind, nil)
 	}
-	return tree.NodeKind(kind), nil
+	return targetKind, nil
 }
 
 func (r *Routes) handleCopy(c *gin.Context) {

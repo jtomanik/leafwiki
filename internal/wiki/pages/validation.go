@@ -26,12 +26,11 @@ func ValidatePageKind(kind *string) (tree.NodeKind, error) {
 	if kind == nil {
 		return tree.NodeKindPage, nil
 	}
-	switch *kind {
-	case string(tree.NodeKindPage), string(tree.NodeKindSection):
-		return tree.NodeKind(*kind), nil
-	default:
+	validKind, ok := tree.ParseNodeKind(*kind)
+	if !ok {
 		return "", sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidKind, nil)
 	}
+	return validKind, nil
 }
 
 func ValidatePageKindString(kind string) (tree.NodeKind, error) {
@@ -39,8 +38,7 @@ func ValidatePageKindString(kind string) (tree.NodeKind, error) {
 }
 
 func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
-	routePath := strings.Trim(strings.TrimSpace(rawPath), "/")
-	kind := tree.NodeKind("")
+	var kind tree.NodeKind
 	if strings.TrimSpace(rawKind) != "" {
 		validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
 		if err != nil {
@@ -48,6 +46,11 @@ func NormalizePagePathInput(rawPath string, rawKind string) (tree.RoutePath, tre
 		}
 		kind = validKind
 	}
+	return NormalizePagePathKindInput(rawPath, kind)
+}
+
+func NormalizePagePathKindInput(rawPath string, kind tree.NodeKind) (tree.RoutePath, tree.NodeKind, error) {
+	routePath := strings.Trim(strings.TrimSpace(rawPath), "/")
 	if derivedKind := MarkdownPathInputKind(tree.MarkdownPathFromString(routePath)); derivedKind != "" {
 		routePath = tree.MarkdownPathToRoutePath(routePath)
 		if kind != "" && kind != derivedKind {
@@ -103,36 +106,66 @@ type ReadmeMarkdownPathFallbackLookup struct {
 	RootPage   func() (*tree.Page, error)
 }
 
-func NormalizeReadmeMarkdownPathFallbackInput(rawPath string, rawKind string) (ReadmeMarkdownPathFallbackInput, bool, error) {
+func NormalizeReadmeMarkdownPathFallbackInput(rawPath string, kind tree.NodeKind) (ReadmeMarkdownPathFallbackInput, bool, error) {
 	pageRoute, sectionRoute, ok := ReadmeMarkdownPathFallbackRoutes(rawPath)
 	if !ok {
 		return ReadmeMarkdownPathFallbackInput{}, false, nil
 	}
+	return normalizeReadmeMarkdownPathFallbackRoutes(pageRoute, sectionRoute, kind)
+}
+
+func NormalizeReadmeMarkdownPathFallbackRawInput(rawPath string, rawKind string) (ReadmeMarkdownPathFallbackInput, bool, error) {
+	pageRoute, sectionRoute, ok := ReadmeMarkdownPathFallbackRoutes(rawPath)
+	if !ok {
+		return ReadmeMarkdownPathFallbackInput{}, false, nil
+	}
+	var kind tree.NodeKind
+	if strings.TrimSpace(rawKind) != "" {
+		validKind, err := ValidatePageKindString(strings.TrimSpace(rawKind))
+		if err != nil {
+			return ReadmeMarkdownPathFallbackInput{}, true, err
+		}
+		kind = validKind
+	}
+	return normalizeReadmeMarkdownPathFallbackRoutes(pageRoute, sectionRoute, kind)
+}
+
+func normalizeReadmeMarkdownPathFallbackRoutes(pageRoute string, sectionRoute string, kind tree.NodeKind) (ReadmeMarkdownPathFallbackInput, bool, error) {
 	input := ReadmeMarkdownPathFallbackInput{
 		PageRoute:    pageRoute,
 		SectionRoute: sectionRoute,
 	}
-	switch strings.TrimSpace(rawKind) {
+	switch kind {
 	case "":
 		input.TryPage = true
 		input.TrySection = true
-	case string(tree.NodeKindPage):
+	case tree.NodeKindPage:
 		input.TryPage = true
-	case string(tree.NodeKindSection):
+	case tree.NodeKindSection:
 		input.TrySection = true
 	default:
-		if _, err := ValidatePageKindString(strings.TrimSpace(rawKind)); err != nil {
-			return ReadmeMarkdownPathFallbackInput{}, true, err
-		}
+		return ReadmeMarkdownPathFallbackInput{}, true, sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidKind, nil)
 	}
 	return input, true, nil
 }
 
-func FindReadmeMarkdownPathFallback(rawPath string, rawKind string, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, bool, error) {
-	fallback, ok, err := NormalizeReadmeMarkdownPathFallbackInput(rawPath, rawKind)
+func FindReadmeMarkdownPathFallback(rawPath string, kind tree.NodeKind, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, bool, error) {
+	fallback, ok, err := NormalizeReadmeMarkdownPathFallbackInput(rawPath, kind)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
+	return findReadmeMarkdownPathFallback(fallback, lookup)
+}
+
+func FindReadmeMarkdownPathFallbackRawInput(rawPath string, rawKind string, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, bool, error) {
+	fallback, ok, err := NormalizeReadmeMarkdownPathFallbackRawInput(rawPath, rawKind)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return findReadmeMarkdownPathFallback(fallback, lookup)
+}
+
+func findReadmeMarkdownPathFallback(fallback ReadmeMarkdownPathFallbackInput, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, bool, error) {
 	var pageErr error
 	if fallback.TryPage {
 		pageRoute, err := ValidatePageRoutePath(fallback.PageRoute)

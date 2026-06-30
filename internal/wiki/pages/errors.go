@@ -36,6 +36,39 @@ const (
 	ErrCodePageInvalidRefactorKind sharederrors.ErrorCode = "page_invalid_refactor_kind"
 )
 
+type SectionEditErrorCode string
+
+func (code SectionEditErrorCode) String() string {
+	return string(code)
+}
+
+type sectionEditError struct {
+	code SectionEditErrorCode
+}
+
+func (err sectionEditError) Error() string {
+	return err.code.String()
+}
+
+func (err sectionEditError) Code() SectionEditErrorCode {
+	return err.code
+}
+
+func newSectionEditError(code SectionEditErrorCode) error {
+	return sectionEditError{code: code}
+}
+
+const (
+	ErrCodeSectionHeadingNotFound  SectionEditErrorCode = "heading_not_found"
+	ErrCodeSectionAmbiguousHeading SectionEditErrorCode = "ambiguous_heading"
+)
+
+var (
+	ErrSectionHeadingPathRequired = errors.New("headingPath is required")
+	ErrSectionHeadingNotFound     = newSectionEditError(ErrCodeSectionHeadingNotFound)
+	ErrSectionAmbiguousHeading    = newSectionEditError(ErrCodeSectionAmbiguousHeading)
+)
+
 const (
 	FieldCodePageTitleRequired         sharederrors.FieldErrorCode = "page_title_required"
 	FieldCodePageKindRequired          sharederrors.FieldErrorCode = "page_kind_required"

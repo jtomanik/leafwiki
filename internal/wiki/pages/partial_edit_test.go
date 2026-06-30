@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"errors"
 	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -94,7 +95,7 @@ var _ = ginkgo.It("TestReplaceMarkdownSection_RequiresOccurrenceForAmbiguousHead
 	content := "# Guide\n\n## Notes\n\nfirst\n\n## Notes\n\nsecond\n"
 
 	_, err := ReplaceMarkdownSection(content, []string{"Notes"}, 0, "new notes\n")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous_heading") {
+	if err == nil || !errors.Is(err, ErrSectionAmbiguousHeading) {
 		t.Fatalf("ReplaceMarkdownSection ambiguous error = %v, want ambiguous_heading", err)
 	}
 
@@ -115,7 +116,7 @@ var _ = ginkgo.It("TestReplaceMarkdownSection_MissingHeadingErrorsWithoutContent
 	content := "# Guide\n\n## API\n\nold api\n"
 
 	_, err := ReplaceMarkdownSection(content, []string{"Missing"}, 0, "new\n")
-	if err == nil || !strings.Contains(err.Error(), "heading_not_found") {
+	if err == nil || !errors.Is(err, ErrSectionHeadingNotFound) {
 		t.Fatalf("ReplaceMarkdownSection missing error = %v, want heading_not_found", err)
 	}
 })
