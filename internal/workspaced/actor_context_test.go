@@ -1,7 +1,6 @@
 package workspaced
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,16 +9,19 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/assets"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("authenticated workspaced router", func() {
 	ginkgo.DescribeTable("TestAuthenticatedRouterRequiresPrivateTokenAndActorContext",
-		func(token string, actor string, wantCode string, wantMessageID string) {
+		func(token string, actor string, wantCode sharederrors.ErrorCode) {
 			now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 			w := newTestWiki()
 			ginkgo.DeferCleanup(func() {
@@ -40,12 +42,11 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 
 			req := newPrivateRequest(http.MethodGet, "/api/tree", token, actor)
 			rec := requestWithRequest(router, req)
-			Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-			assertStructuredPrivateAuthError(rec, wantCode, wantMessageID)
+			Expect(rec).To(matchStructuredPrivateAuthError(wantCode))
 		},
-		ginkgo.Entry("missing token", "", "", "private_control_token_invalid", "errors.private.control_token_invalid"),
-		ginkgo.Entry("wrong token", "wrong", "", "private_control_token_invalid", "errors.private.control_token_invalid"),
-		ginkgo.Entry("missing actor", "private-token", "", "private_actor_context_invalid", "errors.private.actor_context_invalid"),
+		ginkgo.Entry("missing token", "", "", errCodePrivateControlTokenInvalid),
+		ginkgo.Entry("wrong token", "wrong", "", errCodePrivateControlTokenInvalid),
+		ginkgo.Entry("missing actor", "private-token", "", errCodePrivateActorContextInvalid),
 	)
 
 	ginkgo.It("TestAuthenticatedRouterRequiresPrivateTokenAndActorContext rejects wrong workspace and accepts a valid private request", func() {
@@ -81,8 +82,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(err).NotTo(HaveOccurred())
 		wrongWorkspaceReq := newPrivateRequest(http.MethodGet, "/api/tree", "private-token", wrongWorkspaceActor)
 		wrongWorkspaceRec := requestWithRequest(router, wrongWorkspaceReq)
-		Expect(wrongWorkspaceRec.Code).To(Equal(http.StatusUnauthorized), wrongWorkspaceRec.Body.String())
-		assertStructuredPrivateAuthError(wrongWorkspaceRec, "private_actor_context_invalid", "errors.private.actor_context_invalid")
+		Expect(wrongWorkspaceRec).To(matchStructuredPrivateAuthError(errCodePrivateActorContextInvalid))
 
 		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(err).NotTo(HaveOccurred())
 		req := newPrivateRequest(http.MethodGet, "/api/tree", "private-token", actor)
 		rec := requestWithRequest(router, req)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
 	ginkgo.It("rejects an empty daemon token even when the request token is empty", func() {
@@ -126,8 +126,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		})
 
 		rec := requestWithRequest(router, newPrivateRequest(http.MethodGet, "/api/tree", "", actor))
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-		assertStructuredPrivateAuthError(rec, "private_control_token_invalid", "errors.private.control_token_invalid")
+		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateControlTokenInvalid))
 	})
 
 	ginkgo.It("rejects an expired actor context", func() {
@@ -155,8 +154,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		})
 
 		rec := requestWithRequest(router, newPrivateRequest(http.MethodGet, "/api/tree", "private-token", actor))
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
-		assertStructuredPrivateAuthError(rec, "private_actor_context_invalid", "errors.private.actor_context_invalid")
+		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateActorContextInvalid))
 	})
 
 	ginkgo.It("TestPrivateAuthOptionsCarriesSemanticWorkspaceID", func() {
@@ -197,7 +195,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 
 		req := newPrivateRequest(http.MethodGet, "/api/tree", "private-token", actor)
 		rec := requestWithRequest(router, req)
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
 	ginkgo.It("TestAuthenticatedRouterAllowsPrivateMutationWithoutPublicCSRFCookie", func() {
@@ -233,8 +231,8 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		req.Body = io.NopCloser(strings.NewReader(`{"kind":"page","slug":"private-mutation","title":"Private Mutation"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := requestWithRequest(router, req)
-		Expect(rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "CSRF")).To(BeFalse(), "private actor-context mutation was blocked by public CSRF middleware: %s", rec.Body.String())
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
+		Expect(rec).NotTo(SatisfyAll(HaveHTTPStatus(http.StatusForbidden), HaveHTTPBody(ContainSubstring("CSRF"))), "private actor-context mutation was blocked by public CSRF middleware: %s", rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), rec.Body.String())
 	})
 })
 
@@ -257,17 +255,7 @@ func requestWithRequest(router http.Handler, req *http.Request) *httptest.Respon
 	return rec
 }
 
-func assertStructuredPrivateAuthError(rec *httptest.ResponseRecorder, code string, messageID string) {
+func matchStructuredPrivateAuthError(code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
-		} `json:"error"`
-	}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), "body=%s", rec.Body.String())
-	Expect(body.Error.Code).To(Equal(code))
-	Expect(body.Error.MessageID).To(Equal(messageID))
-	Expect(body.Error.Message).NotTo(BeEmpty())
+	return testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, code, sharederrors.MessageIDForCode(code))
 }

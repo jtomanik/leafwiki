@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 			})
 
 			rec := request(router, method, path)
-			Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), rec.Body.String())
 		},
 		ginkgo.Entry("config", http.MethodGet, "/api/config"),
 		ginkgo.Entry("auth me", http.MethodGet, "/api/auth/me"),
@@ -59,7 +59,7 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 		})
 
 		rec := request(router, http.MethodGet, "/api/tree")
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
 	ginkgo.DescribeTable("TestRoutersDoNotExposeEmbeddedFrontendRoutes",
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 			router := routerFactory(w)
 
 			rec := request(router, http.MethodGet, path)
-			Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), rec.Body.String())
 		},
 		ginkgo.Entry("workspaced custom stylesheet", workspacedRouterFactory, "/custom.css"),
 		ginkgo.Entry("workspaced favicon", workspacedRouterFactory, "/favicon.svg"),
