@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,6 +15,8 @@ import (
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/workspacesync"
 )
+
+var errValidationContentKindMismatch = errors.New("kind does not match markdown path")
 
 func (r *Routes) registerValidationTools(server *sdkmcp.Server) {
 	addTypedTool[validatePageInput, validationOutput](server, toolValidatePage, func(ctx context.Context, in validatePageInput) (validationOutput, error) {
@@ -45,7 +47,7 @@ func (r *Routes) validatePageTool(ctx context.Context, in validatePageInput) (va
 
 func (r *Routes) validateContentTool(ctx context.Context, in validateContentInput) (validationOutput, error) {
 	existingPageID := tree.PageIDFromString(strings.TrimSpace(in.ExistingPageID))
-	routePath, inputKind, err := r.normalizeValidationContentPathInput(in.Path, in.Kind)
+	routePath, inputKind, err := r.normalizeValidationContentPathToolInput(in.Path, in.Kind)
 	if err != nil {
 		return validationOutput{}, err
 	}
@@ -349,9 +351,24 @@ func (r *Routes) validationSourceKindForRoute(routePath tree.RoutePath) tree.Nod
 	return page.Kind
 }
 
-func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
+func (r *Routes) normalizeValidationContentPathToolInput(rawPath string, rawKind string) (tree.RoutePath, tree.NodeKind, error) {
+	kind, err := validationContentInputKindFromString(rawKind)
+	if err != nil {
+		return "", "", err
+	}
+	return r.normalizeValidationContentPathInput(rawPath, kind)
+}
+
+func validationContentInputKindFromString(rawKind string) (tree.NodeKind, error) {
+	trimmed := strings.TrimSpace(rawKind)
+	if trimmed == "" {
+		return "", nil
+	}
+	return wikipages.ValidatePageKindString(trimmed)
+}
+
+func (r *Routes) normalizeValidationContentPathInput(rawPath string, inputKind tree.NodeKind) (tree.RoutePath, tree.NodeKind, error) {
 	routePath := normalizeToolRoutePath(rawPath)
-	rawKind = strings.TrimSpace(rawKind)
 	parseRoutePath := func(raw string) (tree.RoutePath, error) {
 		trimmed := strings.Trim(strings.TrimSpace(raw), "/")
 		if trimmed == "" {
@@ -360,7 +377,7 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 		return tree.ParseRoutePath(trimmed)
 	}
 	if pageRoute, sectionRoute, ok := wikipages.ReadmeMarkdownPathFallbackRoutes(rawPath); ok {
-		if rawKind == "" {
+		if inputKind == "" {
 			semanticPageRoute, err := parseRoutePath(pageRoute)
 			if err != nil {
 				return "", "", err
@@ -374,16 +391,13 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 			}
 			return semanticPageRoute, tree.NodeKindPage, nil
 		}
-		kind, err := wikipages.ValidatePageKindString(rawKind)
-		if err != nil {
-			return "", "", err
-		}
+		kind := inputKind
 		if kind == tree.NodeKindSection {
 			if r != nil && r.treeService != nil && wikipages.ReadmeFallbackSectionIsActive(r.treeService.RootDir(), sectionRoute) {
 				semanticSectionRoute := tree.RoutePathFromString(sectionRoute).Clean()
 				return semanticSectionRoute, tree.NodeKindSection, nil
 			}
-			return "", "", fmt.Errorf("kind does not match markdown path")
+			return "", "", errValidationContentKindMismatch
 		}
 		semanticPageRoute, err := parseRoutePath(pageRoute)
 		if err != nil {
@@ -391,7 +405,7 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 		}
 		return semanticPageRoute, tree.NodeKindPage, nil
 	}
-	if rawKind == "" {
+	if inputKind == "" {
 		if derivedKind := wikipages.MarkdownPathInputKind(tree.MarkdownPathFromString(routePath)); derivedKind != "" {
 			semanticRoutePath, err := parseRoutePath(tree.MarkdownPathToRoutePath(routePath))
 			if err != nil {
@@ -405,13 +419,10 @@ func (r *Routes) normalizeValidationContentPathInput(rawPath string, rawKind str
 		}
 		return semanticRoutePath, "", nil
 	}
-	kind, err := wikipages.ValidatePageKindString(rawKind)
-	if err != nil {
-		return "", "", err
-	}
+	kind := inputKind
 	if derivedKind := wikipages.MarkdownPathInputKind(tree.MarkdownPathFromString(routePath)); derivedKind != "" {
 		if kind != derivedKind {
-			return "", "", fmt.Errorf("kind does not match markdown path")
+			return "", "", errValidationContentKindMismatch
 		}
 		semanticRoutePath, err := parseRoutePath(tree.MarkdownPathToRoutePath(routePath))
 		if err != nil {

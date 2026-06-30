@@ -18,8 +18,10 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/ory/fosite"
 	"github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/wiki"
@@ -32,25 +34,33 @@ const (
 	oauthScope    = "leafwiki:mcp"
 )
 
+type oauthMetadataCase struct {
+	basePath          string
+	authMetadataPaths []string
+	prMetadataPaths   []string
+	issuer            string
+	resource          string
+}
+
 var _ = DescribeTable("LocalMCPOAuthMetadata",
-	func(basePath string, authMetadataPaths, prMetadataPaths []string, issuer, resource string) {
+	func(tc oauthMetadataCase) {
 		t := GinkgoTB()
 		w := newLocalMCPAuthTestWiki(t)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 			AllowInsecure:           true,
-			BasePath:                basePath,
+			BasePath:                tc.basePath,
 			AccessTokenTimeout:      15 * time.Minute,
 			RefreshTokenTimeout:     7 * 24 * time.Hour,
 			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 			MCPEnabled:              true,
 		})
 
-		for _, path := range authMetadataPaths {
+		for _, path := range tc.authMetadataPaths {
 			authMeta := getJSONMap(t, router, "http://leafwiki.local"+path)
-			assertStringField(t, authMeta, "issuer", issuer)
-			assertStringField(t, authMeta, "authorization_endpoint", issuer+"/oauth/authorize")
-			assertStringField(t, authMeta, "token_endpoint", issuer+"/oauth/token")
-			assertStringField(t, authMeta, "registration_endpoint", issuer+"/oauth/register")
+			assertStringField(t, authMeta, "issuer", tc.issuer)
+			assertStringField(t, authMeta, "authorization_endpoint", tc.issuer+"/oauth/authorize")
+			assertStringField(t, authMeta, "token_endpoint", tc.issuer+"/oauth/token")
+			assertStringField(t, authMeta, "registration_endpoint", tc.issuer+"/oauth/register")
 			assertStringSliceField(t, authMeta, "response_types_supported", []string{"code"})
 			assertStringSliceField(t, authMeta, "grant_types_supported", []string{"authorization_code", "refresh_token"})
 			assertStringSliceField(t, authMeta, "code_challenge_methods_supported", []string{"S256"})
@@ -64,14 +74,14 @@ var _ = DescribeTable("LocalMCPOAuthMetadata",
 			}
 		}
 
-		for _, path := range prMetadataPaths {
+		for _, path := range tc.prMetadataPaths {
 			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local"+path, nil, nil)
 			if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
 				t.Fatalf("GET %s content-type = %q, want JSON; body=%s", path, contentType, rec.Body.String())
 			}
 			prMeta := decodeJSONResponse(t, rec, http.StatusOK)
-			assertStringField(t, prMeta, "resource", resource)
-			assertStringSliceField(t, prMeta, "authorization_servers", []string{issuer})
+			assertStringField(t, prMeta, "resource", tc.resource)
+			assertStringSliceField(t, prMeta, "authorization_servers", []string{tc.issuer})
 			assertStringSliceField(t, prMeta, "scopes_supported", []string{oauthScope})
 
 			optionsRec := performRequest(t, router, http.MethodOptions, "http://leafwiki.local"+path, nil, nil)
@@ -82,19 +92,23 @@ var _ = DescribeTable("LocalMCPOAuthMetadata",
 	},
 	Entry(
 		"root",
-		"",
-		[]string{"/.well-known/oauth-authorization-server"},
-		[]string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"},
-		"http://leafwiki.local",
-		"http://leafwiki.local/mcp",
+		oauthMetadataCase{
+			basePath:          "",
+			authMetadataPaths: []string{"/.well-known/oauth-authorization-server"},
+			prMetadataPaths:   []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"},
+			issuer:            "http://leafwiki.local",
+			resource:          "http://leafwiki.local/mcp",
+		},
 	),
 	Entry(
 		"base path",
-		"/wiki",
-		[]string{"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/wiki"},
-		[]string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource/wiki/mcp"},
-		"http://leafwiki.local/wiki",
-		"http://leafwiki.local/wiki/mcp",
+		oauthMetadataCase{
+			basePath:          "/wiki",
+			authMetadataPaths: []string{"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/wiki"},
+			prMetadataPaths:   []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource/wiki/mcp"},
+			issuer:            "http://leafwiki.local/wiki",
+			resource:          "http://leafwiki.local/wiki/mcp",
+		},
 	),
 )
 
@@ -352,7 +366,7 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requ
 )
 
 var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect errors",
-	func(override func(url.Values), wantError string, wantState string) {
+	func(override func(url.Values), wantError *fosite.RFC6749Error, wantState string) {
 		t := GinkgoTB()
 		w := newLocalMCPAuthTestWiki(t)
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -376,20 +390,20 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect
 		if got := redirected.Query().Get("state"); got != wantState {
 			t.Fatalf("authorize error redirect state = %q, want %q", got, wantState)
 		}
-		if got := redirected.Query().Get("error"); got != wantError {
-			t.Fatalf("authorize error = %q, want %q in %s", got, wantError, redirected.String())
+		if got := redirected.Query().Get("error"); got != wantError.ErrorField {
+			t.Fatalf("authorize error = %q, want %q in %s", got, wantError.ErrorField, redirected.String())
 		}
 		if code := redirected.Query().Get("code"); code != "" {
 			t.Fatalf("authorize error redirect included code %q", code)
 		}
 	},
-	Entry("missing state redirects to client", func(q url.Values) { q.Del("state") }, "invalid_state", ""),
-	Entry("short state redirects to client", func(q url.Values) { q.Set("state", "short") }, "invalid_state", "short"),
-	Entry("missing pkce redirects to client", func(q url.Values) { q.Del("code_challenge") }, "invalid_request", "redirect-error-state"),
-	Entry("plain pkce redirects to client", func(q url.Values) { q.Set("code_challenge_method", "plain") }, "invalid_request", "redirect-error-state"),
-	Entry("resource mismatch redirects to client", func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, "invalid_request", "redirect-error-state"),
-	Entry("mixed duplicate resource redirects to client", func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, "invalid_request", "redirect-error-state"),
-	Entry("unsupported scope redirects to client", func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, "invalid_scope", "redirect-error-state"),
+	Entry("missing state redirects to client", func(q url.Values) { q.Del("state") }, fosite.ErrInvalidState, ""),
+	Entry("short state redirects to client", func(q url.Values) { q.Set("state", "short") }, fosite.ErrInvalidState, "short"),
+	Entry("missing pkce redirects to client", func(q url.Values) { q.Del("code_challenge") }, fosite.ErrInvalidRequest, "redirect-error-state"),
+	Entry("plain pkce redirects to client", func(q url.Values) { q.Set("code_challenge_method", "plain") }, fosite.ErrInvalidRequest, "redirect-error-state"),
+	Entry("resource mismatch redirects to client", func(q url.Values) { q.Set("resource", "http://leafwiki.local/not-mcp") }, fosite.ErrInvalidRequest, "redirect-error-state"),
+	Entry("mixed duplicate resource redirects to client", func(q url.Values) { q.Add("resource", "http://leafwiki.local/not-mcp") }, fosite.ErrInvalidRequest, "redirect-error-state"),
+	Entry("unsupported scope redirects to client", func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, fosite.ErrInvalidScope, "redirect-error-state"),
 )
 
 var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenticated approval",
@@ -849,7 +863,7 @@ var _ = It("LocalMCPRegistration_AuthEnabledOAuthBearerProtection", func() {
 })
 
 var _ = DescribeTable("LocalMCPRegistration_AuthEnabledOAuthBearerProtection viewer denied",
-	func(toolName string, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
+	func(toolName wikimcp.ToolID, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
 		t := GinkgoTB()
 		w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
 		opts := oauthRouterOptions("")
@@ -891,66 +905,66 @@ var _ = DescribeTable("LocalMCPRegistration_AuthEnabledOAuthBearerProtection vie
 		latestRevision := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
 		latestRevisionID := stringField(t, latestRevision, "id")
 
-		errResult := callToolStructuredError(t, viewerSession, toolName, buildArgs(pageID, currentVersion, latestRevisionID))
-		assertMCPStructuredError(t, "viewer "+toolName+" denied", errResult, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
+		errResult := callTypedToolStructuredError(t, viewerSession, toolName, buildArgs(pageID, currentVersion, latestRevisionID))
+		assertMCPStructuredError(t, fmt.Sprintf("viewer_%s_denied", toolName), errResult, wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired))
 
 		afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
 		if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != updatedContent {
 			t.Fatalf("page after viewer-denied %s = %#v, want version %q and content %q", toolName, afterViewerDenied, currentVersion, updatedContent)
 		}
 	},
-	Entry("wiki_suggest_slug", "wiki_suggest_slug", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_suggest_slug", wikimcp.ToolSuggestSlug, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"title": "Viewer Slug"}
 	}),
-	Entry("wiki_refresh", "wiki_refresh", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_refresh", wikimcp.ToolRefresh, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"source": "filesystem"}
 	}),
-	Entry("wiki_create_page", "wiki_create_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_create_page", wikimcp.ToolCreatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"title": "Viewer Write", "slug": "viewer-write"}
 	}),
-	Entry("wiki_update_page", "wiki_update_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_update_page", wikimcp.ToolUpdatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}
 	}),
-	Entry("wiki_update_page_metadata", "wiki_update_page_metadata", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_update_page_metadata", wikimcp.ToolUpdatePageMetadata, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}
 	}),
-	Entry("wiki_replace_page_section", "wiki_replace_page_section", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_replace_page_section", wikimcp.ToolReplacePageSection, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}
 	}),
-	Entry("wiki_delete_page", "wiki_delete_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_delete_page", wikimcp.ToolDeletePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "recursive": false}
 	}),
-	Entry("wiki_move_page", "wiki_move_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_move_page", wikimcp.ToolMovePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion}
 	}),
-	Entry("wiki_sort_pages", "wiki_sort_pages", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_sort_pages", wikimcp.ToolSortPages, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"parentId": "", "orderedIds": []any{pageID}}
 	}),
-	Entry("wiki_ensure_page", "wiki_ensure_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_ensure_page", wikimcp.ToolEnsurePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}
 	}),
-	Entry("wiki_convert_page", "wiki_convert_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_convert_page", wikimcp.ToolConvertPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}
 	}),
-	Entry("wiki_copy_page", "wiki_copy_page", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_copy_page", wikimcp.ToolCopyPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}
 	}),
-	Entry("wiki_upload_asset", "wiki_upload_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_upload_asset", wikimcp.ToolUploadAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}
 	}),
-	Entry("wiki_rename_asset", "wiki_rename_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_rename_asset", wikimcp.ToolRenameAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}
 	}),
-	Entry("wiki_delete_asset", "wiki_delete_asset", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_delete_asset", wikimcp.ToolDeleteAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}
 	}),
-	Entry("wiki_restore_revision", "wiki_restore_revision", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_restore_revision", wikimcp.ToolRestoreRevision, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "revisionId": latestRevisionID}
 	}),
-	Entry("wiki_preview_page_refactor", "wiki_preview_page_refactor", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_preview_page_refactor", wikimcp.ToolPreviewRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}
 	}),
-	Entry("wiki_apply_page_refactor", "wiki_apply_page_refactor", func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("wiki_apply_page_refactor", wikimcp.ToolApplyRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}
 	}),
 )
@@ -1002,16 +1016,16 @@ var _ = It("LocalMCPRegistration_AuthEnabledAPIKeyBearerProtection", func() {
 	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerKey.Secret)
 	_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
 	for _, tt := range []struct {
-		name string
+		name wikimcp.ToolID
 		args map[string]any
 	}{
-		{name: "wiki_refresh", args: map[string]any{"source": "filesystem"}},
-		{name: "wiki_create_page", args: map[string]any{"title": "Viewer API Key Write", "slug": "viewer-api-key-write"}},
-		{name: "wiki_update_page_metadata", args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
-		{name: "wiki_replace_page_section", args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
+		{name: wikimcp.ToolRefresh, args: map[string]any{"source": "filesystem"}},
+		{name: wikimcp.ToolCreatePage, args: map[string]any{"title": "Viewer API Key Write", "slug": "viewer-api-key-write"}},
+		{name: wikimcp.ToolUpdatePageMetadata, args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
+		{name: wikimcp.ToolReplacePageSection, args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
 	} {
-		viewerErr := callToolStructuredError(t, viewerSession, tt.name, tt.args)
-		assertMCPStructuredError(t, "viewer api key "+tt.name+" denied", viewerErr, "mcp_editor_role_required", "errors.mcp.editor_role_required", "editor or admin role required")
+		viewerErr := callTypedToolStructuredError(t, viewerSession, tt.name, tt.args)
+		assertMCPStructuredError(t, fmt.Sprintf("viewer_api_key_%s_denied", tt.name), viewerErr, wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired))
 	}
 	afterViewerDenied := nestedMap(t, callToolStructured(t, editorSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
 	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != "updated through api key" {
@@ -1502,6 +1516,49 @@ func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token st
 	}
 	DeferCleanup(func() { _ = session.Close() })
 	return session
+}
+
+func callTypedToolStructuredError(t testing.TB, session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any) mcpToolErrorResult {
+	t.Helper()
+
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name:      name.String(),
+		Arguments: args,
+	})
+	if err != nil {
+		t.Fatalf("CallTool %s failed: %v", name, err)
+	}
+	if !result.IsError {
+		t.Fatalf("CallTool %s succeeded, want tool error: %#v", name, result.StructuredContent)
+	}
+	out := mcpToolErrorResult{}
+	for _, content := range result.Content {
+		if text, ok := content.(*sdkmcp.TextContent); ok {
+			out.Text = text.Text
+			break
+		}
+	}
+	if out.Text == "" {
+		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
+	}
+	if errorPayload, ok := result.Meta["error"].(map[string]any); ok {
+		raw, err := json.Marshal(errorPayload)
+		if err != nil {
+			t.Fatalf("CallTool %s structured error marshal failed: %v payload=%#v", name, err, errorPayload)
+		}
+		var typed mcpToolErrorPayloadWire
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			t.Fatalf("CallTool %s structured error decode failed: %v payload=%#v", name, err, errorPayload)
+		}
+		out.Code = typed.Code
+		out.MessageID = typed.MessageID
+		out.Message = typed.Message
+		out.Args = typed.Args
+	}
+	if out.Code == "" || out.MessageID == "" || out.Message == "" {
+		t.Fatalf("CallTool %s structured error = %#v, want code/messageId/message", name, out)
+	}
+	return out
 }
 
 func assertMCPBearerUnauthorized(t testing.TB, router http.Handler, path, token string) {

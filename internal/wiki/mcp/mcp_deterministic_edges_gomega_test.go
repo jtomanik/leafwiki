@@ -15,7 +15,9 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -31,10 +33,10 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			previous, history := store.record("session", contextCheckpoint{})
 
 			Expect(previous).To(BeNil())
-			Expect(history).To(HaveLen(1))
-			Expect(history[0].Token).To(Equal("ctx_1"))
-			Expect(history[0].CreatedAt).NotTo(BeZero())
-			Expect(history[0].CreatedAt).To(BeTemporally(">=", before))
+			Expect(history).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Token":     Equal("ctx_1"),
+				"CreatedAt": And(Not(BeZero()), BeTemporally(">=", before)),
+			})))
 			Expect(store.limit).To(Equal(10))
 		})
 
@@ -78,7 +80,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 			Expect(store.sessions).To(HaveKey("empty"))
 			Expect(store.sessions).NotTo(HaveKey("expired"))
-			Expect(store.sessions["mixed"]).To(Equal([]contextCheckpoint{
+			Expect(store.sessions).To(HaveKeyWithValue("mixed", []contextCheckpoint{
 				{Token: "fresh", CreatedAt: base.Add(-30 * time.Second)},
 			}))
 		})
@@ -103,7 +105,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			user, err := routes.actorForRequest(req)
 
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(GinkgoT(), err, errCodeMCPAuthenticatedUserServiceUnavailable, "errors.mcp.authenticated_user_service_unavailable")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserServiceUnavailable, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserServiceUnavailable)))
 		})
 
 		It("allows optional private actor context headers to be absent", func() {
@@ -128,7 +130,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 			Expect(ok).To(BeTrue())
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(GinkgoT(), err, errCodeMCPActorContextInvalid, "errors.mcp.actor_context_invalid")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPActorContextInvalid, sharederrors.MessageIDForCode(errCodeMCPActorContextInvalid)))
 		})
 
 		It("reports unavailable API-key service for missing-token STDIO auth", func() {
@@ -137,7 +139,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			user, err := routes.actorForMissingTokenInfo()
 
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(GinkgoT(), err, errCodeMCPAuthenticatedUserServiceUnavailable, "errors.mcp.authenticated_user_service_unavailable")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserServiceUnavailable, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserServiceUnavailable)))
 		})
 	})
 
@@ -171,7 +173,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 				handler.ServeHTTP(rec, req)
 
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+				Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 				Expect(called).To(BeFalse())
 			}
 
@@ -183,7 +185,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 			handler.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 			Expect(called).To(BeFalse())
 		})
 
@@ -244,11 +246,12 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			Expect(routes.recentChanges(context.Background(), status, 0)).To(BeEmpty())
 			changes := routes.recentChanges(context.Background(), status, 1)
 
-			Expect(changes).To(HaveLen(1))
-			Expect(changes[0].CommitID).To(Equal("latest"))
-			Expect(changes[0].ChangedCount).To(Equal(1))
-			Expect(changes[0].ChangedPaths).To(Equal([]string{"home.md"}))
-			Expect(changes[0].PageIDs).To(ConsistOf(home.ID))
+			Expect(changes).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"CommitID":     Equal("latest"),
+				"ChangedCount": Equal(1),
+				"ChangedPaths": Equal([]string{"home.md"}),
+				"PageIDs":      ConsistOf(home.ID),
+			})))
 		})
 
 		It("reports commit deltas across pagination outcomes", func() {
@@ -282,8 +285,9 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 			Expect(ok).To(BeTrue())
 			Expect(calls).To(Equal(2))
-			Expect(changes).To(HaveLen(1))
-			Expect(changes[0].CommitID).To(Equal("newer"))
+			Expect(changes).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"CommitID": Equal("newer"),
+			})))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{
@@ -381,14 +385,14 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(kind).To(Equal(tree.NodeKindPage))
 
-			_, _, err = routes.normalizeValidationContentPathInput("guide.md", string(tree.NodeKindSection))
-			Expect(err).To(MatchError(ContainSubstring("kind does not match markdown path")))
+			_, _, err = routes.normalizeValidationContentPathInput("guide.md", tree.NodeKindSection)
+			Expect(err).To(MatchError(errValidationContentKindMismatch))
 
 			guideDir := filepath.Join(routes.treeService.RootDir(), "guide")
 			Expect(os.MkdirAll(guideDir, 0o755)).To(Succeed())
 			Expect(os.Remove(filepath.Join(guideDir, "index.md"))).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(guideDir, "README.md"), []byte("# Guide\n"), 0o644)).To(Succeed())
-			routePath, kind, err = routes.normalizeValidationContentPathInput("guide/README.md", string(tree.NodeKindSection))
+			routePath, kind, err = routes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindSection)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(kind).To(Equal(tree.NodeKindSection))
@@ -425,7 +429,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			Expect(subtreeTruncated(&tree.PageNode{Children: []*tree.PageNode{{}}}, treeDisplayDepth(-1))).To(BeFalse())
 
 			_, err := boundedSubtreeDepth(&negative)
-			Expect(err).To(MatchError("depth must be zero or greater"))
+			Expect(err).To(MatchError(errSubtreeDepthInvalid))
 
 			depth, err := boundedSubtreeDepth(&zero)
 			Expect(err).NotTo(HaveOccurred())
@@ -473,10 +477,12 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			var input updatePageInput
 
 			Expect(json.Unmarshal([]byte(`{"id":"p1","tags":[],"properties":{}}`), &input)).To(Succeed())
-			Expect(input.TagsPresent).To(BeTrue())
-			Expect(input.PropertiesPresent).To(BeTrue())
-			Expect(input.Tags).To(BeEmpty())
-			Expect(input.Properties).To(BeEmpty())
+			Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"TagsPresent":       BeTrue(),
+				"PropertiesPresent": BeTrue(),
+				"Tags":              BeEmpty(),
+				"Properties":        BeEmpty(),
+			}))
 
 			Expect(json.Unmarshal([]byte(`{"tags":{}}`), &input)).To(HaveOccurred())
 			Expect(json.Unmarshal([]byte(`{"properties":[]}`), &input)).To(HaveOccurred())

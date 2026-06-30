@@ -15,9 +15,12 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	coreassets "github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -82,35 +85,36 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			user, err := routes.actorForRequest(mcpTokenInfoRequest(editor.ID))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(user.ID).To(Equal(editor.ID))
-			Expect(user.Role).To(Equal(coreauth.RoleEditor))
+			Expect(user).To(matchMCPUser(gstruct.Fields{
+				"ID":   Equal(editor.ID),
+				"Role": Equal(coreauth.RoleEditor),
+			}))
 
 			user, err = routes.actorForRequest(mcpTokenInfoRequest("missing-user"))
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(t, err, errCodeMCPAuthenticatedUserNotFound, "errors.mcp.authenticated_user_not_found")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 
 			blocker := beginExclusiveMCPTestSQLiteTransaction(t, filepath.Join(userDir, "users.db"))
 			DeferCleanup(blocker.rollback, t)
 
 			user, err = routes.actorForRequest(mcpTokenInfoRequest(editor.ID))
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(t, err, errCodeMCPAuthenticatedUserLookupFailed, "errors.mcp.authenticated_user_lookup_failed")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserLookupFailed, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserLookupFailed)))
 		})
 
 		It("requires private actor context headers when configured and propagates editor auth failures", func() {
-			t := GinkgoT()
 			routes := &Routes{actorContextAllowed: true, actorContextRequired: true}
 
 			user, ok, err := routes.actorFromPrivateContextHeader(http.Header{})
 
 			Expect(ok).To(BeTrue())
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(t, err, errCodeMCPActorContextMissing, "errors.mcp.actor_context_missing")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPActorContextMissing, sharederrors.MessageIDForCode(errCodeMCPActorContextMissing)))
 
 			user, err = (&Routes{}).editorActorForRequest(nil)
 
 			Expect(user).To(BeNil())
-			assertLocalizedErrorCode(t, err, errCodeMCPTokenInfoMissing, "errors.mcp.token_info_missing")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPTokenInfoMissing, sharederrors.MessageIDForCode(errCodeMCPTokenInfoMissing)))
 		})
 
 		It("covers private API-key success, verifier absence, and actor-context HTTP factory paths", func() {
@@ -127,12 +131,11 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			handler.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusNoContent))
+			Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 			Expect(called).To(BeTrue())
 
 			_, err := (&Routes{}).verifyBearerToken(context.Background(), created.Secret, nil)
-			Expect(errors.Is(err, sdkauth.ErrInvalidToken)).To(BeTrue())
-			Expect(err).To(MatchError(ContainSubstring("api key verifier unavailable")))
+			Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 
 			actorHandler := (&Routes{}).NewActorContextHTTPHandler(httpinternal.RouterOptions{})
 			actorHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/mcp", nil))
@@ -160,7 +163,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			failingHandler.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+			Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
 		})
 	})
 
@@ -174,7 +177,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 			routes := newContextToolTestRoutes(GinkgoT())
 			routes.webPresenceProvider = func(*coreauth.User) ([]wikipresence.Session, error) {
-				return []wikipresence.Session{{Type: wikipresence.SessionTypeWeb, SessionID: "web-session"}}, nil
+				return []wikipresence.Session{{Type: wikipresence.SessionTypeWeb, SessionID: wikipresence.WebSessionIDFromString("web-session")}}, nil
 			}
 			routes.agentPresenceProvider = func() ([]projectdaemon.AgentPresenceSession, error) {
 				return []projectdaemon.AgentPresenceSession{{SessionIDHash: "agent-session", Provider: "codex", FirstSeenAt: now, LastSeenAt: now}}, nil
@@ -182,11 +185,14 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			sessions, status := routes.activeSessionsForContext(&coreauth.User{ID: "editor", Role: coreauth.RoleEditor})
 
-			Expect(status.Web).To(Equal("enabled"))
-			Expect(status.AgentHooks).To(Equal("enabled"))
-			Expect(sessions).To(HaveLen(2))
-			Expect(sessions[0].Type).To(Equal(wikipresence.SessionTypeAgent))
-			Expect(sessions[1].Type).To(Equal(wikipresence.SessionTypeWeb))
+			Expect(status).To(matchPresenceStatusOutput(gstruct.Fields{
+				"Web":        Equal("enabled"),
+				"AgentHooks": Equal("enabled"),
+			}))
+			Expect(sessions).To(HaveExactElements(
+				matchPresenceSession(gstruct.Fields{"Type": Equal(wikipresence.SessionTypeAgent)}),
+				matchPresenceSession(gstruct.Fields{"Type": Equal(wikipresence.SessionTypeWeb)}),
+			))
 
 			huge := 99
 			Expect(shouldRefreshForContext(contextSyncModeForce, workspacesync.SyncStatus{})).To(BeTrue())
@@ -200,7 +206,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(func() { ensureNodeChildrenArray(nil) }).NotTo(Panic())
 
 			_, err := routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SyncMode: "invalid"})
-			Expect(err).To(MatchError("syncMode must be auto, force, or none"))
+			Expect(err).To(MatchError(errContextSyncModeInvalid))
 
 			refreshCalled := false
 			routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
@@ -309,7 +315,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 		It("covers subtree edge branches and partial-edit error mapping", func() {
 			unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
 			_, err := (&Routes{treeService: unloadedTree}).getSubtree(context.Background(), getSubtreeInput{})
-			Expect(err).To(MatchError("page not found"))
+			Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 			routes := newContextToolTestRoutes(GinkgoT())
 			Expect(routes.subtreeContentPreview(newFixturePageID("missing"))).To(BeEmpty())
@@ -325,8 +331,9 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(partialEditVersionPreflight("", home)).To(HaveOccurred())
 			Expect(partialEditVersionPreflight(tree.PageVersionFromString("stale"), home)).To(HaveOccurred())
-			Expect(partialEditWriteError(errors.New("other"), nil)).To(MatchError("other"))
-			Expect(partialEditWriteError(errors.New("other"), home)).To(MatchError("other"))
+			otherErr := errors.New("other")
+			Expect(partialEditWriteError(otherErr, nil)).To(MatchError(otherErr))
+			Expect(partialEditWriteError(otherErr, home)).To(MatchError(otherErr))
 
 			missingPage := &tree.Page{PageNode: &tree.PageNode{ID: "missing", Title: "Missing", Slug: "missing", Kind: tree.NodeKindPage}}
 			_, err = routes.partialEditOutput(context.Background(), missingPage, false, nil, false)
@@ -384,13 +391,13 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(err).To(HaveOccurred())
 			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", "")
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", string(tree.NodeKindPage))
+			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", tree.NodeKindPage)
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("bad//route", string(tree.NodeKindPage))
+			_, _, err = routes.normalizeValidationContentPathInput("bad//route", tree.NodeKindPage)
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("home", "invalid-kind")
+			_, _, err = routes.normalizeValidationContentPathToolInput("home", "invalid-kind")
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("guide/README.md", "invalid-kind")
+			_, _, err = routes.normalizeValidationContentPathToolInput("guide/README.md", "invalid-kind")
 			Expect(err).To(HaveOccurred())
 			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", "")
 			Expect(err).To(HaveOccurred())
@@ -413,27 +420,27 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(sourceKind).To(Equal(tree.NodeKindSection))
-			routePath, sourceKind, err = fallbackRoutes.normalizeValidationContentPathInput("guide/README.md", string(tree.NodeKindSection))
+			routePath, sourceKind, err = fallbackRoutes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindSection)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(sourceKind).To(Equal(tree.NodeKindSection))
-			_, _, err = routes.normalizeValidationContentPathInput("guide/README.md", string(tree.NodeKindSection))
+			_, _, err = routes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindSection)
 			Expect(err).To(HaveOccurred())
-			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", string(tree.NodeKindPage))
+			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide/README")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
-			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("home.md", string(tree.NodeKindPage))
+			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("home.md", tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("home")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
-			_, _, err = routes.normalizeValidationContentPathInput("home.md", string(tree.NodeKindSection))
+			_, _, err = routes.normalizeValidationContentPathInput("home.md", tree.NodeKindSection)
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("../bad", string(tree.NodeKindPage))
+			_, _, err = routes.normalizeValidationContentPathInput("../bad", tree.NodeKindPage)
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", string(tree.NodeKindPage))
+			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", tree.NodeKindPage)
 			Expect(err).To(HaveOccurred())
-			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", string(tree.NodeKindSection))
+			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", tree.NodeKindSection)
 			Expect(err).To(HaveOccurred())
 			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", "")
 			Expect(err).To(HaveOccurred())
@@ -484,10 +491,10 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 		It("covers workspace refresh disabled, source, error, and validation branches", func() {
 			_, err := (&Routes{}).refreshWorkspaceSync(context.Background(), toolActor{}, refreshInput{})
-			Expect(err).To(MatchError("workspace sync is not enabled"))
+			Expect(err).To(MatchError(errWorkspaceSyncDisabled))
 
 			_, err = refreshSource("invalid")
-			Expect(err).To(MatchError("source must be mcp or filesystem"))
+			Expect(err).To(MatchError(errWorkspaceSyncSourceInvalid))
 
 			source, err := refreshSource(" filesystem ")
 			Expect(err).NotTo(HaveOccurred())
@@ -505,7 +512,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			routes.workspaceSyncRefresh = func(_ context.Context, req workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
 				Expect(req.Source).To(Equal(workspacesync.SourceMCP))
-				Expect(req.Actor.ID.String()).To(Equal("editor"))
+				Expect(req.Actor.ID).To(Equal(workspacesync.ActorIDFromUserID(coreauth.UserIDFromString("editor"))))
 				return workspacesync.SyncStatus{
 					Enabled:                    true,
 					LastCommitHash:             "commit-1",
@@ -519,13 +526,36 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			out, err := routes.refreshWorkspaceSync(context.Background(), toolActor{ID: "editor", User: &coreauth.User{ID: "editor", Username: "editor"}}, refreshInput{Validate: &validate})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(out.LastCommitHash).To(Equal("commit-1"))
-			Expect(out.RecentChangedPaths).To(Equal([]string{"home.md"}))
-			Expect(out.Validation).NotTo(BeNil())
-			Expect(out.Validation.OK).To(BeFalse())
+			Expect(out).To(matchRefreshOutput(gstruct.Fields{
+				"LastCommitHash":     Equal("commit-1"),
+				"RecentChangedPaths": Equal([]string{"home.md"}),
+				"Validation": gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"OK": BeFalse(),
+				})),
+			}))
 		})
 	})
 })
+
+func matchMCPUser(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchPresenceStatusOutput(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchRefreshOutput(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
 
 func mcpTokenInfoRequest(userID string) *sdkmcp.CallToolRequest {
 	GinkgoHelper()

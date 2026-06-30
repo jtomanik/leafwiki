@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"path"
 	"path/filepath"
 	"sort"
@@ -22,6 +22,8 @@ import (
 )
 
 const errCodeMCPWorkspaceSyncFailed sharederrors.ErrorCode = "workspace_sync_failed"
+
+var errContextSyncModeInvalid = errors.New("syncMode must be auto, force, or none")
 
 const (
 	contextSyncModeAuto  = "auto"
@@ -70,7 +72,7 @@ func (r *Routes) getContext(ctx context.Context, req *sdkmcp.CallToolRequest, ac
 		syncMode = contextSyncModeAuto
 	}
 	if syncMode != contextSyncModeAuto && syncMode != contextSyncModeForce && syncMode != contextSyncModeNone {
-		return contextOutput{}, fmt.Errorf("syncMode must be auto, force, or none")
+		return contextOutput{}, errContextSyncModeInvalid
 	}
 
 	status := r.currentWorkspaceSyncStatus()
@@ -199,7 +201,7 @@ func (r *Routes) activeSessionsForContext(viewer *auth.User) ([]wikipresence.Ses
 		if sessions[i].Type != sessions[j].Type {
 			return sessions[i].Type < sessions[j].Type
 		}
-		return sessions[i].SessionID < sessions[j].SessionID
+		return sessions[i].SessionID.Less(sessions[j].SessionID)
 	})
 	return sessions, status
 }
@@ -489,7 +491,7 @@ func workspaceActorForToolActor(actor toolActor) workspacesync.Actor {
 		return workspacesync.PublicEditorActor()
 	}
 	return workspacesync.Actor{
-		ID:    workspacesync.NewActorIDUnchecked(actor.User.ID),
+		ID:    workspacesync.ActorIDFromUserID(auth.UserIDFromString(actor.User.ID)),
 		Name:  actor.User.Username,
 		Email: actor.User.Email,
 	}

@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -11,6 +11,10 @@ import (
 	"github.com/perber/wiki/internal/http/dto"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
 )
+
+var ErrSubtreeDepthInvalid = errors.New("depth must be zero or greater")
+
+var errSubtreeDepthInvalid = ErrSubtreeDepthInvalid
 
 func (r *Routes) registerNavigationTools(server *sdkmcp.Server) {
 	addTypedTool[getSubtreeInput, subtreeOutput](server, toolGetSubtree, func(ctx context.Context, in getSubtreeInput) (subtreeOutput, error) {
@@ -55,7 +59,7 @@ func (r *Routes) getSubtree(ctx context.Context, in getSubtreeInput) (subtreeOut
 		node = r.treeService.GetTree()
 	}
 	if node == nil {
-		return subtreeOutput{}, fmt.Errorf("page not found")
+		return subtreeOutput{}, tree.ErrPageNotFound
 	}
 
 	root := r.subtreeNode(ctx, node, parentPathForNode(node), depth, opts)
@@ -187,7 +191,7 @@ func boundedSubtreeDepth(raw *int) (treeDisplayDepth, error) {
 		return defaultContextTreeDepth, nil
 	}
 	if *raw < 0 {
-		return 0, fmt.Errorf("depth must be zero or greater")
+		return 0, errSubtreeDepthInvalid
 	}
 	if *raw > maxContextTreeDepth {
 		return maxContextTreeDepth, nil

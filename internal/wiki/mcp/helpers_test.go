@@ -12,9 +12,12 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	sqlite "modernc.org/sqlite"
 )
 
 var _ = Describe("actor/request helpers", func() {
@@ -30,7 +33,7 @@ var _ = Describe("actor/request helpers", func() {
 			if user, err := routes.actorForRequest(req); err == nil {
 				t.Fatalf("actorForRequest(%#v) returned user %#v, want missing-token error", req, user)
 			} else {
-				assertLocalizedErrorCode(t, err, "mcp_token_info_missing", "errors.mcp.token_info_missing")
+				Expect(err).To(matchLocalizedErrorCode(errCodeMCPTokenInfoMissing, sharederrors.MessageIDForCode(errCodeMCPTokenInfoMissing)))
 			}
 		}
 	})
@@ -101,7 +104,7 @@ var _ = Describe("actor/request helpers", func() {
 		if _, err := routes.actorForRequest(nil); err == nil {
 			t.Fatalf("actorForRequest after revoke succeeded, want authenticated user error")
 		} else {
-			assertLocalizedErrorCode(t, err, "mcp_authenticated_user_not_found", "errors.mcp.authenticated_user_not_found")
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 		}
 	})
 
@@ -135,7 +138,7 @@ var _ = Describe("actor/request helpers", func() {
 		if err == nil {
 			t.Fatalf("editorActorForRequest returned user %#v, want role error", user)
 		}
-		assertLocalizedErrorCode(t, err, "mcp_editor_role_required", "errors.mcp.editor_role_required")
+		Expect(err).To(matchLocalizedErrorCode(errCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(errCodeMCPEditorRoleRequired)))
 	})
 
 	It("preserves API key bearer verification storage errors", func() {
@@ -148,8 +151,8 @@ var _ = Describe("actor/request helpers", func() {
 		_, err := routes.verifyBearerToken(context.Background(), created.Secret, nil)
 
 		Expect(err).To(HaveOccurred())
-		Expect(errors.Is(err, sdkauth.ErrInvalidToken)).To(BeFalse(), "storage failure should not be classified as invalid-token")
-		Expect(err.Error()).To(Or(ContainSubstring("api key verifier"), ContainSubstring("database")))
+		Expect(err).NotTo(MatchError(sdkauth.ErrInvalidToken), "storage failure should not be classified as invalid-token")
+		Expect(err).To(MatchError(errMCPAPIKeyVerifierFailed))
 	})
 
 	It("preserves missing-token API key storage errors", func() {
@@ -165,8 +168,8 @@ var _ = Describe("actor/request helpers", func() {
 		_, err := routes.actorForRequest(nil)
 
 		Expect(err).To(HaveOccurred())
-		assertLocalizedErrorCode(t, err, "mcp_authenticated_user_lookup_failed", "errors.mcp.authenticated_user_lookup_failed")
-		Expect(err.Error()).To(ContainSubstring("database"))
+		Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserLookupFailed, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserLookupFailed)))
+		Expect(err).To(matchSQLiteErrorCause())
 	})
 })
 
@@ -176,18 +179,17 @@ type mcpHelperT interface {
 	TempDir() string
 }
 
-func assertLocalizedErrorCode(t mcpHelperT, err error, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
-	t.Helper()
-	localized, ok := sharederrors.AsLocalizedError(err)
-	if !ok {
-		t.Fatalf("error = %T %v, want LocalizedError", err, err)
-	}
-	if localized.Code != code {
-		t.Fatalf("code = %q, want %q", localized.Code, code)
-	}
-	if localized.MessageID != messageID {
-		t.Fatalf("messageId = %q, want %q", localized.MessageID, messageID)
-	}
+func matchLocalizedErrorCode(code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return testmatchers.MatchLocalizedError(code, messageID)
+}
+
+func matchSQLiteErrorCause() types.GomegaMatcher {
+	GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var sqliteErr *sqlite.Error
+		return errors.As(err, &sqliteErr)
+	})
 }
 
 func newMCPAuthServices(t mcpHelperT) (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User) {

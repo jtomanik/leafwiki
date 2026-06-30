@@ -9,13 +9,25 @@ func (id ToolID) String() string {
 }
 
 func (id ToolID) ProtocolName() ToolProtocolName {
-	return ToolProtocolName(id)
+	return ToolProtocolNameFromToolID(id)
 }
 
-type ToolProtocolName string
+type toolProtocolWireName string
 
-func (name ToolProtocolName) String() string {
-	return string(name)
+type ToolProtocolName struct {
+	wire toolProtocolWireName
+}
+
+func ToolProtocolNameFromWireName(raw string) ToolProtocolName {
+	return ToolProtocolName{wire: toolProtocolWireName(raw)}
+}
+
+func ToolProtocolNameFromToolID(id ToolID) ToolProtocolName {
+	return ToolProtocolName{wire: toolProtocolWireName(id)}
+}
+
+func (name ToolProtocolName) WireName() string {
+	return string(name.wire)
 }
 
 type ToolDescriptionID string
@@ -183,7 +195,7 @@ func allToolDescriptors() []ToolDescriptor {
 func toolNames(descriptors []ToolDescriptor) []string {
 	names := make([]string, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		names = append(names, descriptor.Name.ProtocolName().String())
+		names = append(names, descriptor.Name.ProtocolName().WireName())
 	}
 	return names
 }
@@ -198,5 +210,5 @@ func newToolDescriptor(name ToolID) ToolDescriptor {
 }
 
 func ToolDescriptionIDForTool(name ToolID) ToolDescriptionID {
-	return ToolDescriptionID("mcp.tools." + name.ProtocolName().String() + ".description")
+	return ToolDescriptionID("mcp.tools." + name.ProtocolName().WireName() + ".description")
 }

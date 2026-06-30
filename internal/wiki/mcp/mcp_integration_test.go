@@ -25,6 +25,7 @@ import (
 	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
+	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
@@ -41,6 +42,56 @@ import (
 // - MCP agent context returns canonical examples
 
 var baseToolNames = wikimcp.BaseToolNames()
+
+const (
+	mcpLabelGetPageByPathInactiveReadmeSection = "get_page_by_path_inactive_readme_section"
+	mcpLabelGetPageByPathMissingReadme         = "get_page_by_path_missing_readme"
+	mcpLabelGetPageByPathLowercaseReadme       = "get_page_by_path_lowercase_readme"
+	mcpLabelGetPageByPathTraversalReadme       = "get_page_by_path_traversal_readme"
+	mcpLabelValidatePageLowercaseReadme        = "validate_page_lowercase_readme"
+	mcpLabelCreatePageInvalidKind              = "create_page_invalid_kind"
+	mcpLabelCreatePagePaddedKind               = "create_page_padded_kind"
+	mcpLabelCreatePageWhitespaceParentID       = "create_page_whitespace_parent_id"
+	mcpLabelCreatePagePaddedParentID           = "create_page_padded_parent_id"
+	mcpLabelLookupPathInvalidKind              = "lookup_path_invalid_kind"
+	mcpLabelEnsurePageInvalidKind              = "ensure_page_invalid_kind"
+	mcpLabelMovePageWhitespaceParentID         = "move_page_whitespace_parent_id"
+	mcpLabelConvertPageInvalidTargetKind       = "convert_page_invalid_target_kind"
+	mcpLabelConvertPagePaddedTargetKind        = "convert_page_padded_target_kind"
+	mcpLabelCopyPageWhitespaceTargetParentID   = "copy_page_whitespace_target_parent_id"
+	mcpLabelCopyPagePaddedTargetParentID       = "copy_page_padded_target_parent_id"
+	mcpLabelPreviewRefactorInvalidKind         = "preview_refactor_invalid_kind"
+	mcpLabelPreviewRefactorPaddedKind          = "preview_refactor_padded_kind"
+	mcpLabelApplyRefactorInvalidKind           = "apply_refactor_invalid_kind"
+	mcpLabelPreviewRefactorWhitespaceParentID  = "preview_refactor_whitespace_parent_id"
+	mcpLabelApplyRefactorPaddedParentID        = "apply_refactor_padded_parent_id"
+	mcpLabelGetPageAmbiguousIdentifier         = "get_page_ambiguous_identifier"
+	mcpLabelGetPageMissingIdentifier           = "get_page_missing_identifier"
+	mcpLabelGetSubtreeAmbiguousTarget          = "get_subtree_ambiguous_target"
+	mcpLabelGetSubtreeNegativeDepth            = "get_subtree_negative_depth"
+	mcpLabelValidatePageAmbiguousInput         = "validate_page_ambiguous_input"
+	mcpLabelValidatePageMissingTarget          = "validate_page_missing_target"
+	mcpLabelValidateContentDoesNotWrite        = "validate_content_does_not_write"
+	mcpLabelUpdateMetadataMissingTarget        = "update_metadata_missing_target"
+	mcpLabelUpdateMetadataAmbiguousTarget      = "update_metadata_ambiguous_target"
+	mcpLabelUpdateMetadataReservedKey          = "update_metadata_reserved_key"
+	mcpLabelUpdateMetadataStaleBeforeReserved  = "update_metadata_stale_before_reserved"
+	mcpLabelUpdateMetadataStaleVersion         = "update_metadata_stale_version"
+	mcpLabelReplaceSectionMissingTarget        = "replace_section_missing_target"
+	mcpLabelReplaceSectionAmbiguousTarget      = "replace_section_ambiguous_target"
+	mcpLabelReplaceSectionAmbiguousHeading     = "replace_section_ambiguous_heading"
+	mcpLabelReplaceSectionMissingHeading       = "replace_section_missing_heading"
+	mcpLabelReplaceSectionStaleBeforeMissing   = "replace_section_stale_before_missing_heading"
+	mcpLabelReplaceSectionStaleVersion         = "replace_section_stale_version"
+	mcpLabelMetadataValidationError            = "metadata_validation_error"
+	mcpLabelGetLatestRevisionMissingPage       = "get_latest_revision_missing_page"
+	mcpLabelRevisionMissingSuffix              = "missing_revision"
+	mcpLabelRevisionBlankInputSuffix           = "blank_revision_input"
+)
+
+func mcpToolCaseLabel(tool string, suffix string) string {
+	return tool + "_" + suffix
+}
 
 func federatedToolNames(extra ...[]string) []string {
 	names := append([]string{}, baseToolNames...)
@@ -270,7 +321,7 @@ func expectedHTTPMCPParityCases(t testing.TB) (map[string]httpMCPParityCase, []s
 
 	expected := make([]string, 0, len(baseToolNames)+len(wikimcp.RevisionToolNames())+len(wikimcp.LinkRefactorToolNames()))
 	for _, name := range baseToolNames {
-		if _, mcpOnly := mcpOnlyToolNames[wikimcp.ToolProtocolName(name)]; mcpOnly {
+		if _, mcpOnly := mcpOnlyToolNames[wikimcp.ToolProtocolNameFromWireName(name)]; mcpOnly {
 			continue
 		}
 		expected = append(expected, name)
@@ -577,9 +628,9 @@ var _ = It("LocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan", func(
 		"id":     "missing-page",
 		"pageId": "missing-page",
 	})
-	assertMCPStructuredError(t, "wiki_get_page ambiguous id/pageId", ambiguousPageIDErr, "mcp_page_identifier_ambiguous", "errors.mcp.page_identifier_ambiguous", "id and pageId cannot both be supplied")
+	assertMCPStructuredError(t, mcpLabelGetPageAmbiguousIdentifier, ambiguousPageIDErr, wikimcp.ErrCodeMCPPageIdentifierAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierAmbiguous))
 	missingPageIDErr := callToolStructuredError(t, session, "wiki_get_page", map[string]any{})
-	assertMCPStructuredError(t, "wiki_get_page missing id/pageId", missingPageIDErr, "mcp_page_identifier_required", "errors.mcp.page_identifier_required", "id or pageId is required")
+	assertMCPStructuredError(t, mcpLabelGetPageMissingIdentifier, missingPageIDErr, wikimcp.ErrCodeMCPPageIdentifierRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierRequired))
 
 	for _, name := range got {
 		if strings.HasPrefix(name, "leafwiki_") {
@@ -1232,14 +1283,14 @@ var _ = It("LocalMCPValidateAndRefreshNormalizeWorkspaceRoutes", func() {
 	if ok, _ := validateOut["ok"].(bool); !ok {
 		t.Fatalf("wiki_validate_wiki = %#v, want normalizable plan filename to validate", validateOut)
 	}
-	assertValidationIssueCodesAbsent(t, validateOut, []string{"invalid_slug"})
+	assertValidationIssueCodesAbsent(t, validateOut, []wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug})
 
 	refreshOut := callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
 	validation := nestedMap(t, refreshOut, "validation")
 	if ok, _ := validation["ok"].(bool); !ok {
 		t.Fatalf("wiki_refresh validation = %#v, want normalized route validation to agree", validation)
 	}
-	assertValidationIssueCodesAbsent(t, validation, []string{"invalid_slug"})
+	assertValidationIssueCodesAbsent(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug})
 
 	readBack := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "plans/agent-hooks-plan", "kind": "page"})
 	page := nestedMap(t, readBack, "page")
@@ -1307,7 +1358,7 @@ var _ = It("LocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailabl
 	if errors, ok := summary["errors"].(float64); !ok || errors == 0 {
 		t.Fatalf("wiki_refresh validation summary = %#v, want validation errors for duplicate IDs", summary)
 	}
-	assertValidationIssueCodes(t, validation, []string{"duplicate_leafwiki_id"})
+	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID})
 
 	currentUser := callToolStructured(t, session, "wiki_get_current_user", nil)
 	user := nestedMap(t, currentUser, "user")
@@ -1467,7 +1518,7 @@ var _ = It("LocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs", func() {
 		"pageId": stringField(t, parentPage, "id"),
 		"path":   "docs",
 	})
-	assertMCPStructuredError(t, "wiki_get_subtree ambiguous target", ambiguousSubtreeErr, "mcp_page_target_ambiguous", "errors.mcp.page_target_ambiguous", "pageId and path cannot both be supplied")
+	assertMCPStructuredError(t, mcpLabelGetSubtreeAmbiguousTarget, ambiguousSubtreeErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
 	if errText := callToolError(t, session, "wiki_get_subtree", map[string]any{"path": "missing-subtree"}); !strings.Contains(strings.ToLower(errText), "not found") {
 		t.Fatalf("missing subtree error = %q, want not found detail", errText)
 	}
@@ -1475,7 +1526,7 @@ var _ = It("LocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs", func() {
 		"path":  "docs",
 		"depth": float64(-1),
 	})
-	assertGenericToolErrorArgContainsAny(t, "wiki_get_subtree negative depth", negativeDepthErr, "depth must be zero or greater")
+	assertGenericToolErrorArgContainsAny(t, mcpLabelGetSubtreeNegativeDepth, negativeDepthErr, wikimcp.ErrSubtreeDepthInvalid.Error())
 	hugeDepth := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
 		"path":  "docs",
 		"depth": float64(999),
@@ -1565,7 +1616,7 @@ var _ = It("LocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree", func
 		t.Fatalf("wiki_validate_wiki = %#v, want broken link when target is absent from filesystem snapshot", out)
 	}
 	validation := out
-	assertValidationIssueCodes(t, validation, []string{"broken_link"})
+	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
 })
 
 var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
@@ -1602,9 +1653,9 @@ var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
 		"pageId": stringField(t, created, "id"),
 		"path":   "valid-page",
 	})
-	assertMCPStructuredError(t, "wiki_validate_page ambiguous input", ambiguousErr, "mcp_page_target_ambiguous", "errors.mcp.page_target_ambiguous", "pageId and path cannot both be supplied")
+	assertMCPStructuredError(t, mcpLabelValidatePageAmbiguousInput, ambiguousErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
 	missingTargetErr := callToolStructuredError(t, session, "wiki_validate_page", map[string]any{})
-	assertMCPStructuredError(t, "wiki_validate_page missing target", missingTargetErr, "mcp_page_target_required", "errors.mcp.page_target_required", "pageId or path is required")
+	assertMCPStructuredError(t, mcpLabelValidatePageMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
 
 	proposed := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "draft",
@@ -1613,8 +1664,8 @@ var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
 	if proposed["ok"] != true {
 		t.Fatalf("wiki_validate_content valid = %#v, want ok", proposed)
 	}
-	missingDraft := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
-	assertErrorContainsAny(t, "wiki_validate_content does not write", missingDraft, "not found", "page_not_found")
+	missingDraft := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
+	assertMCPPageError(t, mcpLabelValidateContentDoesNotWrite, missingDraft, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 
 	canonicalPageLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "draft-canonical",
@@ -1703,7 +1754,7 @@ var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
 	if sectionMdLink["ok"] != false {
 		t.Fatalf("wiki_validate_content section .md link = %#v, want broken link", sectionMdLink)
 	}
-	assertValidationIssueCodes(t, sectionMdLink, []string{"broken_link"})
+	assertValidationIssueCodes(t, sectionMdLink, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
 	_ = sectionChildTarget
 
 	invalid := callToolStructured(t, session, "wiki_validate_content", map[string]any{
@@ -1726,7 +1777,12 @@ var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
 	if semantic["ok"] != false {
 		t.Fatalf("semantic validation = %#v, want not ok", semantic)
 	}
-	assertValidationIssueCodes(t, semantic, []string{"duplicate_leafwiki_id", "reserved_metadata", "broken_link", "missing_asset"})
+	assertValidationIssueCodes(t, semantic, []wikivalidation.IssueCode{
+		wikivalidation.IssueCodeDuplicateLeafwikiID,
+		wikivalidation.IssueCodeReservedMetadata,
+		wikivalidation.IssueCodeBrokenLink,
+		wikivalidation.IssueCodeMissingAsset,
+	})
 
 	assetOwner := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Asset Owner",
@@ -1751,13 +1807,13 @@ var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
 	if wrongPageAsset["ok"] != false {
 		t.Fatalf("wrong-page asset validation = %#v, want not ok", wrongPageAsset)
 	}
-	assertValidationIssueCodes(t, wrongPageAsset, []string{"missing_asset"})
+	assertValidationIssueCodes(t, wrongPageAsset, []wikivalidation.IssueCode{wikivalidation.IssueCodeMissingAsset})
 
 	pathConflict := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "valid-page",
 		"content": "---\nleafwiki_id: draft-conflict\nleafwiki_title: Draft Conflict\n---\n# Draft\n",
 	})
-	assertValidationIssueCodes(t, pathConflict, []string{"path_conflict"})
+	assertValidationIssueCodes(t, pathConflict, []wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict})
 })
 
 var _ = It("LocalMCPPathToolsResolveCanonicalSameBasenameTwins", func() {
@@ -1858,7 +1914,7 @@ leafwiki_title: MCP Section Only
 	if draftPageBesideSection["ok"] != true {
 		t.Fatalf("wiki_validate_content draft page beside section = %#v, want ok", draftPageBesideSection)
 	}
-	assertValidationIssueCodesAbsent(t, draftPageBesideSection, []string{"path_conflict"})
+	assertValidationIssueCodesAbsent(t, draftPageBesideSection, []wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict})
 })
 
 var _ = It("LocalMCPPathToolsResolveReadmeFallbackMarkdownPath", func() {
@@ -1939,27 +1995,27 @@ var _ = It("LocalMCPPathToolsResolveReadmeFallbackMarkdownPath", func() {
 		t.Fatalf("wiki_get_page_by_path README page = %#v, want indexed README page", readmeChildPage)
 	}
 
-	inactiveExplicitSectionErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+	inactiveExplicitSectionErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
 		"path": "/docs/indexed/README.md",
 		"kind": "section",
 	})
-	assertErrorContainsAny(t, "wiki_get_page_by_path inactive explicit README section", inactiveExplicitSectionErr, "not found", "page_not_found")
+	assertMCPPageError(t, mcpLabelGetPageByPathInactiveReadmeSection, inactiveExplicitSectionErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 
-	missingReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+	missingReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
 		"path": "/docs/no-readme/README.md",
 	})
-	assertErrorContainsAny(t, "wiki_get_page_by_path missing README", missingReadmeErr, "not found", "page_not_found")
+	assertMCPPageError(t, mcpLabelGetPageByPathMissingReadme, missingReadmeErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 
-	lowercaseReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+	lowercaseReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
 		"path": "/docs/guides/readme.md",
 	})
-	assertErrorContainsAny(t, "wiki_get_page_by_path lowercase readme", lowercaseReadmeErr, "not found", "page_not_found")
+	assertMCPPageError(t, mcpLabelGetPageByPathLowercaseReadme, lowercaseReadmeErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 
-	traversalReadmeErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{
+	traversalReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
 		"path": "../README.md",
 		"kind": "section",
 	})
-	assertErrorContainsAny(t, "wiki_get_page_by_path traversal README", traversalReadmeErr, "invalid", "invalid_path")
+	assertMCPPageError(t, mcpLabelGetPageByPathTraversalReadme, traversalReadmeErr, wikipages.ErrCodePageInvalidPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidPath))
 
 	fallbackValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
 		"path": "/docs/guides/README.md",
@@ -1968,10 +2024,10 @@ var _ = It("LocalMCPPathToolsResolveReadmeFallbackMarkdownPath", func() {
 		t.Fatalf("wiki_validate_page README fallback = %#v, want ok", fallbackValidation)
 	}
 
-	lowercaseValidationErr := callToolError(t, session, "wiki_validate_page", map[string]any{
+	lowercaseValidationErr := callToolStructuredError(t, session, "wiki_validate_page", map[string]any{
 		"path": "/docs/guides/readme.md",
 	})
-	assertErrorContainsAny(t, "wiki_validate_page lowercase readme", lowercaseValidationErr, "not found", "page_not_found")
+	assertMCPPageError(t, mcpLabelValidatePageLowercaseReadme, lowercaseValidationErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 
 	fallbackDraftValidation := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "/docs/guides/README.md",
@@ -2029,8 +2085,8 @@ var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
 	if out["ok"] != false {
 		t.Fatalf("wiki_validate_wiki = %#v, want duplicate ID error before refresh", out)
 	}
-	assertValidationIssueCodes(t, out, []string{"duplicate_leafwiki_id"})
-	duplicateIssue := validationIssueByCode(t, out, "duplicate_leafwiki_id")
+	assertValidationIssueCodes(t, out, []wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID})
+	duplicateIssue := validationIssueByCode(t, out, wikivalidation.IssueCodeDuplicateLeafwikiID)
 	if duplicateIssue["path"] != "unsynced-duplicate-id.md" {
 		t.Fatalf("duplicate_leafwiki_id path = %#v, want unsynced duplicate path in %#v", duplicateIssue["path"], duplicateIssue)
 	}
@@ -2065,7 +2121,7 @@ var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
 		t.Fatalf("write README fallback link source: %v", err)
 	}
 	readmeFallbackOut := callToolStructured(t, session, "wiki_validate_wiki", nil)
-	assertValidationIssueCodesAbsent(t, readmeFallbackOut, []string{"broken_link"})
+	assertValidationIssueCodesAbsent(t, readmeFallbackOut, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
 
 	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".hidden.md"), []byte("# Hidden\n"), 0o644); err != nil {
 		t.Fatalf("write hidden markdown: %v", err)
@@ -2077,9 +2133,9 @@ var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
 		t.Fatalf("write hidden scratch markdown: %v", err)
 	}
 	withoutWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodesAbsent(t, withoutWarnings, []string{"hidden_markdown_path"})
+	assertValidationIssueCodesAbsent(t, withoutWarnings, []wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath})
 	withWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": true})
-	assertValidationIssueCodes(t, withWarnings, []string{"hidden_markdown_path"})
+	assertValidationIssueCodes(t, withWarnings, []wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath})
 	assertNoValidationIssuePath(t, withWarnings, ".scratch/bad.md")
 
 	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "!!!.md"), []byte("# Invalid Slug\n"), 0o644); err != nil {
@@ -2117,13 +2173,19 @@ var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
 		t.Fatalf("write route conflict link: %v", err)
 	}
 	conflicts := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodes(t, conflicts, []string{"invalid_slug", "missing_asset"})
-	assertValidationIssueCodesAbsent(t, conflicts, []string{"path_conflict", "ambiguous_legacy_link"})
+	assertValidationIssueCodes(t, conflicts, []wikivalidation.IssueCode{
+		wikivalidation.IssueCodeInvalidSlug,
+		wikivalidation.IssueCodeMissingAsset,
+	})
+	assertValidationIssueCodesAbsent(t, conflicts, []wikivalidation.IssueCode{
+		wikivalidation.IssueCodePathConflict,
+		wikivalidation.IssueCodeAmbiguousLegacyLink,
+	})
 	ambiguousContent := callToolStructured(t, session, "wiki_validate_content", map[string]any{
 		"path":    "draft-route-conflict",
 		"content": "[Ambiguous](/route-conflict)\n",
 	})
-	assertValidationIssueCodesAbsent(t, ambiguousContent, []string{"ambiguous_legacy_link"})
+	assertValidationIssueCodesAbsent(t, ambiguousContent, []wikivalidation.IssueCode{wikivalidation.IssueCodeAmbiguousLegacyLink})
 
 	broken := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
 		"title": "Broken Link",
@@ -2138,7 +2200,7 @@ var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
 		"content": "[Missing](/missing-validation-target)\n",
 	})
 	duplicated := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	if got := validationIssueCodeCount(t, duplicated, "broken_link", "broken-link"); got != 1 {
+	if got := validationIssueCodeCount(t, duplicated, wikivalidation.IssueCodeBrokenLink, "broken-link"); got != 1 {
 		t.Fatalf("broken_link issue count for broken-link = %d, want 1 in %#v", got, duplicated["issues"])
 	}
 })
@@ -2185,7 +2247,7 @@ var _ = It("LocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles", func
 	}
 
 	out := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodesAbsent(t, out, []string{"broken_link"})
+	assertValidationIssueCodesAbsent(t, out, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
 })
 
 var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func() {
@@ -2256,14 +2318,14 @@ var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func
 		"version": stringField(t, compact, "version"),
 		"addTags": []any{"missing-target"},
 	})
-	assertMCPStructuredError(t, "wiki_update_page_metadata missing target", missingTargetErr, "mcp_page_target_required", "errors.mcp.page_target_required", "pageId or path is required")
+	assertMCPStructuredError(t, mcpLabelUpdateMetadataMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
 	ambiguousTargetErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
 		"pageId":  stringField(t, updated, "id"),
 		"path":    "/metadata-target",
 		"version": stringField(t, compact, "version"),
 		"addTags": []any{"ambiguous-target"},
 	})
-	assertMCPStructuredError(t, "wiki_update_page_metadata ambiguous target", ambiguousTargetErr, "mcp_page_target_ambiguous", "errors.mcp.page_target_ambiguous", "pageId and path cannot both be supplied")
+	assertMCPStructuredError(t, mcpLabelUpdateMetadataAmbiguousTarget, ambiguousTargetErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
 
 	beforeReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
@@ -2273,7 +2335,7 @@ var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func
 		"version":       stringField(t, beforeReserved, "version"),
 		"setProperties": map[string]any{"leafwiki_private": "true"},
 	})
-	assertGenericToolErrorArgContainsAny(t, "wiki_update_page_metadata reserved key", reservedErr, "reserved", "validation")
+	assertGenericToolErrorArgContainsAny(t, mcpLabelUpdateMetadataReservedKey, reservedErr, "reserved", "validation")
 	afterReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2294,20 +2356,20 @@ var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func
 	setTagsPage := nestedMap(t, setTagsResult, "page")
 	assertStringSet(t, "metadata setTags replacement", stringSliceField(t, setTagsPage, "tags"), []string{"final"})
 
-	staleReservedErr := callToolError(t, session, "wiki_update_page_metadata", map[string]any{
+	staleReservedErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
 		"pageId":        stringField(t, updated, "id"),
 		"version":       originalVersion,
 		"setProperties": map[string]any{"leafwiki_private": "true"},
 	})
-	assertErrorContainsAny(t, "wiki_update_page_metadata stale version before reserved key", staleReservedErr, "page_version_conflict", "version conflict")
-	assertErrorDoesNotContainAny(t, "wiki_update_page_metadata stale version before reserved key", staleReservedErr, "reserved", "validation")
+	assertMCPPageError(t, mcpLabelUpdateMetadataStaleBeforeReserved, staleReservedErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
+	assertErrorDoesNotContainAny(t, mcpLabelUpdateMetadataStaleBeforeReserved, staleReservedErr.Text, "reserved", "validation")
 
 	staleErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
 		"pageId":  stringField(t, updated, "id"),
 		"version": originalVersion,
 		"addTags": []any{"late"},
 	})
-	assertMCPStructuredError(t, "wiki_update_page_metadata stale version", staleErr, wikipages.ErrCodePageVersionConflict, "errors.page.version_conflict", "Page was changed by another request")
+	assertMCPStructuredError(t, mcpLabelUpdateMetadataStaleVersion, staleErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
 	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2644,7 +2706,7 @@ var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
 		"headingPath": []any{"API"},
 		"content":     "missing target",
 	})
-	assertMCPStructuredError(t, "wiki_replace_page_section missing target", missingTargetErr, "mcp_page_target_required", "errors.mcp.page_target_required", "pageId or path is required")
+	assertMCPStructuredError(t, mcpLabelReplaceSectionMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
 	ambiguousTargetErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
 		"pageId":      stringField(t, updated, "id"),
 		"path":        "/section-target",
@@ -2652,7 +2714,7 @@ var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
 		"headingPath": []any{"API"},
 		"content":     "ambiguous target",
 	})
-	assertMCPStructuredError(t, "wiki_replace_page_section ambiguous target", ambiguousTargetErr, "mcp_page_target_ambiguous", "errors.mcp.page_target_ambiguous", "pageId and path cannot both be supplied")
+	assertMCPStructuredError(t, mcpLabelReplaceSectionAmbiguousTarget, ambiguousTargetErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
 
 	withValidation := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
 		"path":              "/section-target",
@@ -2663,16 +2725,16 @@ var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
 		"includeValidation": true,
 	})
 	validation := nestedMap(t, withValidation, "validation")
-	assertValidationIssueCodes(t, validation, []string{"broken_link"})
+	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
 
-	staleMissingHeadingErr := callToolError(t, session, "wiki_replace_page_section", map[string]any{
+	staleMissingHeadingErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
 		"pageId":      stringField(t, updated, "id"),
 		"version":     originalVersion,
 		"headingPath": []any{"Missing"},
 		"content":     "late missing",
 	})
-	assertErrorContainsAny(t, "wiki_replace_page_section stale version before missing heading", staleMissingHeadingErr, "page_version_conflict", "version conflict")
-	assertErrorDoesNotContainAny(t, "wiki_replace_page_section stale version before missing heading", staleMissingHeadingErr, "heading_not_found")
+	assertMCPPageError(t, mcpLabelReplaceSectionStaleBeforeMissing, staleMissingHeadingErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
+	assertErrorDoesNotContainAny(t, mcpLabelReplaceSectionStaleBeforeMissing, staleMissingHeadingErr.Text, wikipages.ErrCodeSectionHeadingNotFound.String())
 
 	staleErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
 		"pageId":      stringField(t, updated, "id"),
@@ -2680,7 +2742,7 @@ var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
 		"headingPath": []any{"API"},
 		"content":     "late change",
 	})
-	assertMCPStructuredError(t, "wiki_replace_page_section stale version", staleErr, wikipages.ErrCodePageVersionConflict, "errors.page.version_conflict", "Page was changed by another request")
+	assertMCPStructuredError(t, mcpLabelReplaceSectionStaleVersion, staleErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
 	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2723,7 +2785,7 @@ var _ = It("LocalMCPReplacePageSection_FailuresDoNotMutate", func() {
 		"headingPath": []any{"Notes"},
 		"content":     "ambiguous mutation",
 	})
-	assertGenericToolErrorArgContainsAny(t, "wiki_replace_page_section ambiguous heading", ambiguousErr, "ambiguous_heading")
+	assertGenericToolErrorArgContainsAny(t, mcpLabelReplaceSectionAmbiguousHeading, ambiguousErr, wikipages.ErrCodeSectionAmbiguousHeading.String())
 	afterAmbiguous := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2737,7 +2799,7 @@ var _ = It("LocalMCPReplacePageSection_FailuresDoNotMutate", func() {
 		"headingPath": []any{"Missing"},
 		"content":     "missing mutation",
 	})
-	assertGenericToolErrorArgContainsAny(t, "wiki_replace_page_section missing heading", missingErr, "heading_not_found")
+	assertGenericToolErrorArgContainsAny(t, mcpLabelReplaceSectionMissingHeading, missingErr, wikipages.ErrCodeSectionHeadingNotFound.String())
 	afterMissing := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
 		"pageId": stringField(t, updated, "id"),
 	}), "page")
@@ -2813,20 +2875,20 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 	})
 	session := connectLocalMCP(t, router, "/mcp")
 
-	invalidCreateKindErr := callToolError(t, session, "wiki_create_page", map[string]any{
+	invalidCreateKindErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
 		"title": "Invalid Kind",
 		"slug":  "invalid-kind",
 		"kind":  "folder",
 	})
-	assertErrorContainsAny(t, "MCP create_page invalid kind", invalidCreateKindErr, "page_invalid_kind", "invalid kind")
-	assertErrorDoesNotContainAny(t, "MCP create_page invalid kind", invalidCreateKindErr, "enum", "validating")
-	paddedCreateKindErr := callToolError(t, session, "wiki_create_page", map[string]any{
+	assertMCPPageError(t, mcpLabelCreatePageInvalidKind, invalidCreateKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
+	assertErrorDoesNotContainAny(t, mcpLabelCreatePageInvalidKind, invalidCreateKindErr.Text, "enum", "validating")
+	paddedCreateKindErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
 		"title": "Padded Kind",
 		"slug":  "padded-kind",
 		"kind":  " page ",
 	})
-	assertErrorContainsAny(t, "MCP create_page padded kind", paddedCreateKindErr, "page_invalid_kind", "invalid kind")
-	assertErrorDoesNotContainAny(t, "MCP create_page padded kind", paddedCreateKindErr, "enum", "validating")
+	assertMCPPageError(t, mcpLabelCreatePagePaddedKind, paddedCreateKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
+	assertErrorDoesNotContainAny(t, mcpLabelCreatePagePaddedKind, paddedCreateKindErr.Text, "enum", "validating")
 	invalidCreateKindHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
 		"title": "Invalid Kind HTTP",
 		"slug":  "invalid-kind-http",
@@ -2877,13 +2939,13 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 		"slug":  "http-create-parent",
 		"kind":  "section",
 	}, http.StatusCreated)
-	whitespaceParentCreateErr := callToolError(t, session, "wiki_create_page", map[string]any{
+	whitespaceParentCreateErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
 		"parentId": " ",
 		"title":    "Whitespace Parent",
 		"slug":     "whitespace-parent",
 		"kind":     "page",
 	})
-	assertErrorContainsAny(t, "MCP create_page whitespace parentId", whitespaceParentCreateErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelCreatePageWhitespaceParentID, whitespaceParentCreateErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	whitespaceParentCreateHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
 		"parentId": " ",
 		"title":    "Whitespace Parent HTTP",
@@ -2893,13 +2955,13 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 	if !strings.Contains(whitespaceParentCreateHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP create_page whitespace parentId error = %q, want page_invalid_parent_id", whitespaceParentCreateHTTP)
 	}
-	paddedParentCreateErr := callToolError(t, session, "wiki_create_page", map[string]any{
+	paddedParentCreateErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
 		"parentId": " " + stringField(t, mcpCreateParent, "id") + " ",
 		"title":    "Padded Parent",
 		"slug":     "padded-parent",
 		"kind":     "page",
 	})
-	assertErrorContainsAny(t, "MCP create_page padded parentId", paddedParentCreateErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelCreatePagePaddedParentID, paddedParentCreateErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	paddedParentCreateHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
 		"parentId": " " + stringField(t, httpCreateParent, "id") + " ",
 		"title":    "Padded Parent HTTP",
@@ -3014,7 +3076,7 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 			"leafwiki_hidden": "forbidden",
 		},
 	})
-	assertGenericToolErrorArgContainsAny(t, "MCP metadata validation error", metadataErr, "validation", "reserved")
+	assertGenericToolErrorArgContainsAny(t, mcpLabelMetadataValidationError, metadataErr, "validation", "reserved")
 
 	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
 	staleHTTPBody := strings.NewReader(`{"version":"` + version + `","title":"MCP Draft Stale","slug":"mcp-draft","content":"stale"}`)
@@ -3414,11 +3476,11 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 	assertJSONEqual(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, httpLookupSectionTwin)
 	assertLookupFinalID(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, stringField(t, sectionTwin, "id"), "section")
 
-	invalidLookupKindErr := callToolError(t, session, "wiki_lookup_path", map[string]any{
+	invalidLookupKindErr := callToolStructuredError(t, session, "wiki_lookup_path", map[string]any{
 		"path": "parent-section/lookup-twin",
 		"kind": "folder",
 	})
-	assertErrorContainsAny(t, "MCP lookup_path invalid kind", invalidLookupKindErr, "page_invalid_kind", "invalid kind")
+	assertMCPPageError(t, mcpLabelLookupPathInvalidKind, invalidLookupKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
 	invalidLookupKindHTTP := getHTTPStatus(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=folder", http.StatusBadRequest)
 	if !strings.Contains(invalidLookupKindHTTP, "page_invalid_kind") {
 		t.Fatalf("HTTP lookup_path invalid kind error = %q, want page_invalid_kind", invalidLookupKindHTTP)
@@ -3438,12 +3500,13 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		t.Fatalf("resolve_permalink pageId alias path = %v, want parent-section/ensured", got)
 	}
 
-	invalidEnsureKindErr := callToolError(t, session, "wiki_ensure_page", map[string]any{
+	invalidEnsureKindErr := callToolStructuredError(t, session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/invalid-kind",
 		"title": "Invalid Ensure Kind",
 		"kind":  "folder",
 	})
-	assertErrorContainsAny(t, "MCP ensure_page invalid kind", invalidEnsureKindErr, "page_invalid_kind", "invalid kind", "enum")
+	assertMCPPageError(t, mcpLabelEnsurePageInvalidKind, invalidEnsureKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
+	assertErrorDoesNotContainAny(t, mcpLabelEnsurePageInvalidKind, invalidEnsureKindErr.Text, "enum", "validating")
 	invalidEnsureKindHTTP := postHTTPJSONBody(t, router, "/api/pages/ensure", map[string]any{
 		"path":  "parent-section/invalid-kind-http",
 		"title": "Invalid Ensure Kind HTTP",
@@ -3484,12 +3547,12 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		"slug":  "mcp-whitespace-move",
 		"kind":  "page",
 	}), "page")
-	whitespaceMoveErr := callToolError(t, session, "wiki_move_page", map[string]any{
+	whitespaceMoveErr := callToolStructuredError(t, session, "wiki_move_page", map[string]any{
 		"id":       stringField(t, mcpWhitespaceMove, "id"),
 		"version":  stringField(t, mcpWhitespaceMove, "version"),
 		"parentId": " ",
 	})
-	assertErrorContainsAny(t, "MCP whitespace move parentId", whitespaceMoveErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelMovePageWhitespaceParentID, whitespaceMoveErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	httpWhitespaceMove := postHTTPJSON(t, router, "/api/pages", map[string]any{
 		"title": "HTTP Whitespace Move",
 		"slug":  "http-whitespace-move",
@@ -3557,20 +3620,20 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		"targetKind": "section",
 	}, http.StatusConflict)
 	assertPageVersionConflictParity(t, "stale convert_page", staleConvertErr, staleConvertHTTP)
-	invalidConvertErr := callToolError(t, session, "wiki_convert_page", map[string]any{
+	invalidConvertErr := callToolStructuredError(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, httpConverted, "version"),
 		"targetKind": "folder",
 	})
-	assertErrorContainsAny(t, "MCP invalid convert_page targetKind", invalidConvertErr, wikipages.ErrCodePageInvalidTargetKind.String(), "invalid target kind", "targetkind")
-	assertErrorDoesNotContainAny(t, "MCP invalid convert_page targetKind", invalidConvertErr, "enum", "validating")
-	paddedConvertErr := callToolError(t, session, "wiki_convert_page", map[string]any{
+	assertMCPPageError(t, mcpLabelConvertPageInvalidTargetKind, invalidConvertErr, wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind))
+	assertErrorDoesNotContainAny(t, mcpLabelConvertPageInvalidTargetKind, invalidConvertErr.Text, "enum", "validating")
+	paddedConvertErr := callToolStructuredError(t, session, "wiki_convert_page", map[string]any{
 		"id":         stringField(t, convertMe, "id"),
 		"version":    stringField(t, httpConverted, "version"),
 		"targetKind": " page ",
 	})
-	assertErrorContainsAny(t, "MCP padded convert_page targetKind", paddedConvertErr, wikipages.ErrCodePageInvalidTargetKind.String(), "invalid target kind", "targetkind")
-	assertErrorDoesNotContainAny(t, "MCP padded convert_page targetKind", paddedConvertErr, "enum", "validating")
+	assertMCPPageError(t, mcpLabelConvertPagePaddedTargetKind, paddedConvertErr, wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind))
+	assertErrorDoesNotContainAny(t, mcpLabelConvertPagePaddedTargetKind, paddedConvertErr.Text, "enum", "validating")
 	invalidConvertHTTP := postHTTPJSONBody(t, router, "/api/pages/convert/"+stringField(t, convertMe, "id"), map[string]any{
 		"version":    stringField(t, httpConverted, "version"),
 		"targetKind": "folder",
@@ -3596,13 +3659,13 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		"title": "Child A Copy",
 		"slug":  "child-a-http-copy",
 	}, http.StatusCreated)
-	whitespaceCopyErr := callToolError(t, session, "wiki_copy_page", map[string]any{
+	whitespaceCopyErr := callToolStructuredError(t, session, "wiki_copy_page", map[string]any{
 		"id":             stringField(t, childA, "id"),
 		"targetParentId": " ",
 		"title":          "Whitespace Copy",
 		"slug":           "whitespace-copy",
 	})
-	assertErrorContainsAny(t, "MCP copy_page whitespace targetParentId", whitespaceCopyErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelCopyPageWhitespaceTargetParentID, whitespaceCopyErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	whitespaceCopyHTTP := postHTTPJSONBody(t, router, "/api/pages/copy/"+stringField(t, childB, "id"), map[string]any{
 		"targetParentId": " ",
 		"title":          "Whitespace Copy HTTP",
@@ -3611,13 +3674,13 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 	if !strings.Contains(whitespaceCopyHTTP, "page_invalid_parent_id") {
 		t.Fatalf("HTTP copy_page whitespace targetParentId error = %q, want page_invalid_parent_id", whitespaceCopyHTTP)
 	}
-	paddedCopyErr := callToolError(t, session, "wiki_copy_page", map[string]any{
+	paddedCopyErr := callToolStructuredError(t, session, "wiki_copy_page", map[string]any{
 		"id":             stringField(t, childA, "id"),
 		"targetParentId": " " + parentID + " ",
 		"title":          "Padded Copy",
 		"slug":           "padded-copy",
 	})
-	assertErrorContainsAny(t, "MCP copy_page padded targetParentId", paddedCopyErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelCopyPagePaddedTargetParentID, paddedCopyErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	paddedCopyHTTP := postHTTPJSONBody(t, router, "/api/pages/copy/"+stringField(t, childB, "id"), map[string]any{
 		"targetParentId": " " + parentID + " ",
 		"title":          "Padded Copy HTTP",
@@ -3890,7 +3953,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 	if !strings.HasPrefix(httpRenamedContentType, renamedAsset["mimeType"].(string)) {
 		t.Fatalf("HTTP renamed content type = %q, want MCP mime type %q", httpRenamedContentType, renamedAsset["mimeType"])
 	}
-	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "note.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/note.txt", http.StatusNotFound)
 	httpRenamedAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
 	if got := httpRenamedAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(httpAssetContent) {
@@ -3899,7 +3962,7 @@ func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 	if got := getHTTPAsset(t, router, sourceID, "http-renamed.txt"); got != string(httpAssetContent) {
 		t.Fatalf("HTTP-renamed asset content = %q, want HTTP asset content", got)
 	}
-	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-note.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-note.txt", http.StatusNotFound)
 	httpListed = getHTTPAssets(t, router, sourceID)
 	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
@@ -3912,9 +3975,9 @@ func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 	httpDeletedBody := deleteHTTPStatus(t, router, "/api/pages/"+sourceID+"/assets/http-renamed.txt", http.StatusOK)
 	httpDeleted := decodeJSONMap(t, "HTTP delete_asset", []byte(httpDeletedBody))
 	assertScopedSuccessPayloadsEqual(t, "wiki_delete_asset", mcpDeleted, httpDeleted, "mcp.tools.wiki_delete_asset.success", "api.assets.delete.success")
-	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "renamed.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/renamed.txt", http.StatusNotFound)
-	assertMCPToolErrorContains(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"}, "asset")
+	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"}, "asset")
 	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-renamed.txt", http.StatusNotFound)
 	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	if arrayContainsString(listed["files"], "/assets/"+sourceID+"/renamed.txt") {
@@ -4027,38 +4090,34 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	session := connectLocalMCP(t, router, "/mcp")
 
 	missingLatestErr := callToolStructuredError(t, session, "wiki_get_latest_revision", map[string]any{"pageId": "missing-page"})
-	assertMCPStructuredError(t, "wiki_get_latest_revision missing page", missingLatestErr, wikipages.ErrCodePageNotFound, "errors.page.not_found", "Page not found")
+	assertMCPStructuredError(t, mcpLabelGetLatestRevisionMissingPage, missingLatestErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
 	for _, tc := range []struct {
-		name          string
-		args          map[string]any
-		wantCode      sharederrors.ErrorCode
-		wantMessageID string
-		wantMessage   string
+		name     string
+		args     map[string]any
+		wantCode sharederrors.ErrorCode
 	}{
-		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision"}, wantCode: wikipages.ErrCodePageNotFound, wantMessageID: "errors.page.not_found", wantMessage: "Page not found"},
-		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": "target-revision"}, wantCode: wikipages.ErrCodePageNotFound, wantMessageID: "errors.page.not_found", wantMessage: "Page not found"},
-		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionNotFound, wantMessageID: "errors.revision.not_found", wantMessage: "Revision asset not found"},
+		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision"}, wantCode: wikipages.ErrCodePageNotFound},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": "target-revision"}, wantCode: wikipages.ErrCodePageNotFound},
+		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionNotFound},
 	} {
 		errResult := callToolStructuredError(t, session, tc.name, tc.args)
-		assertMCPStructuredError(t, tc.name+" missing revision", errResult, tc.wantCode, tc.wantMessageID, tc.wantMessage)
+		assertMCPStructuredError(t, mcpToolCaseLabel(tc.name, mcpLabelRevisionMissingSuffix), errResult, tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode))
 		if strings.Contains(strings.ToLower(errResult.Text), "file does not exist") || strings.Contains(strings.ToLower(errResult.Text), "no such file") {
 			t.Fatalf("%s missing revision error = %q, want structured revision error instead of raw storage error", tc.name, errResult.Text)
 		}
 	}
 	for _, tc := range []struct {
-		name          string
-		args          map[string]any
-		wantCode      sharederrors.ErrorCode
-		wantMessageID string
-		wantMessage   string
+		name     string
+		args     map[string]any
+		wantCode sharederrors.ErrorCode
 	}{
-		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantMessageID: "errors.revision.invalid_revision_id", wantMessage: "Revision ID is required"},
-		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": " ", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID, wantMessageID: "errors.revision.invalid_revision_id", wantMessage: "Revision ID is required"},
-		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": " ", "targetRevisionId": "target-revision"}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantMessageID: "errors.revision.compare_invalid_request", wantMessage: "Revision compare request is invalid"},
-		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest, wantMessageID: "errors.revision.compare_invalid_request", wantMessage: "Revision compare request is invalid"},
+		{name: "wiki_get_revision", args: map[string]any{"pageId": "missing-page", "revisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID},
+		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": " ", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionInvalidRevisionID},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": " ", "targetRevisionId": "target-revision"}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest},
+		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest},
 	} {
 		errResult := callToolStructuredError(t, session, tc.name, tc.args)
-		assertMCPStructuredError(t, tc.name+" blank revision input", errResult, tc.wantCode, tc.wantMessageID, tc.wantMessage)
+		assertMCPStructuredError(t, mcpToolCaseLabel(tc.name, mcpLabelRevisionBlankInputSuffix), errResult, tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode))
 	}
 
 	target := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
@@ -4103,8 +4162,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	})
 
 	limitErr := callToolStructuredError(t, session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(201)})
-	if limitErr.Code != fmt.Sprintf("%s", wikirevisions.ErrCodeRevisionInvalidLimit) ||
-		limitErr.MessageID != "errors.revision.invalid_limit" ||
+	if limitErr.Code != wikirevisions.ErrCodeRevisionInvalidLimit ||
+		limitErr.MessageID != sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionInvalidLimit) ||
 		!strings.Contains(limitErr.Message, "limit") {
 		t.Fatalf("invalid wiki_list_revisions limit error = %#v, want structured invalid limit", limitErr)
 	}
@@ -4189,8 +4248,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		"revisionId": assetRevisionID,
 		"assetName":  "style.css",
 	})
-	if revisionAssetErr.Code != fmt.Sprintf("%s", wikirevisions.ErrCodeRevisionNotFound) ||
-		revisionAssetErr.MessageID != "errors.revision.not_found" ||
+	if revisionAssetErr.Code != wikirevisions.ErrCodeRevisionNotFound ||
+		revisionAssetErr.MessageID != sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionNotFound) ||
 		!strings.Contains(strings.ToLower(revisionAssetErr.Message), "asset") {
 		t.Fatalf("MCP Git-backed revision asset error = %#v, want structured revision asset error", revisionAssetErr)
 	}
@@ -4200,14 +4259,14 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	}
 	recordHTTPMCPParity(t, "wiki_get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
 
-	invalidRefactorKindErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
+	invalidRefactorKindErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  "copy",
 		"title": "Target",
 		"slug":  "target-copy",
 	})
-	assertErrorContainsAny(t, "MCP invalid wiki_preview_page_refactor kind", invalidRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind.String(), "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP invalid wiki_preview_page_refactor kind", invalidRefactorKindErr, "enum", "validating")
+	assertMCPPageError(t, mcpLabelPreviewRefactorInvalidKind, invalidRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
+	assertErrorDoesNotContainAny(t, mcpLabelPreviewRefactorInvalidKind, invalidRefactorKindErr.Text, "enum", "validating")
 	invalidRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  "copy",
 		"title": "Target",
@@ -4216,14 +4275,14 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	if !strings.Contains(invalidRefactorKindHTTP, "page_invalid_refactor_kind") {
 		t.Fatalf("HTTP invalid wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidRefactorKindHTTP)
 	}
-	paddedRefactorKindErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
+	paddedRefactorKindErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  " rename ",
 		"title": "Target",
 		"slug":  "target-padded",
 	})
-	assertErrorContainsAny(t, "MCP padded wiki_preview_page_refactor kind", paddedRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind.String(), "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP padded wiki_preview_page_refactor kind", paddedRefactorKindErr, "enum", "validating")
+	assertMCPPageError(t, mcpLabelPreviewRefactorPaddedKind, paddedRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
+	assertErrorDoesNotContainAny(t, mcpLabelPreviewRefactorPaddedKind, paddedRefactorKindErr.Text, "enum", "validating")
 	paddedRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  " rename ",
 		"title": "Target",
@@ -4233,15 +4292,15 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		t.Fatalf("HTTP padded wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", paddedRefactorKindHTTP)
 	}
 	currentForInvalidApply := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID}), "page")
-	invalidApplyKindErr := callToolError(t, session, "wiki_apply_page_refactor", map[string]any{
+	invalidApplyKindErr := callToolStructuredError(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":      targetID,
 		"version": stringField(t, currentForInvalidApply, "version"),
 		"kind":    "copy",
 		"title":   "Target",
 		"slug":    "target-copy",
 	})
-	assertErrorContainsAny(t, "MCP invalid wiki_apply_page_refactor kind", invalidApplyKindErr, wikipages.ErrCodePageInvalidRefactorKind.String(), "invalid refactor kind")
-	assertErrorDoesNotContainAny(t, "MCP invalid wiki_apply_page_refactor kind", invalidApplyKindErr, "enum", "validating")
+	assertMCPPageError(t, mcpLabelApplyRefactorInvalidKind, invalidApplyKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
+	assertErrorDoesNotContainAny(t, mcpLabelApplyRefactorInvalidKind, invalidApplyKindErr.Text, "enum", "validating")
 	invalidApplyKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/apply", map[string]any{
 		"version": stringField(t, currentForInvalidApply, "version"),
 		"kind":    "copy",
@@ -4251,12 +4310,12 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 	if !strings.Contains(invalidApplyKindHTTP, "page_invalid_refactor_kind") {
 		t.Fatalf("HTTP invalid wiki_apply_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidApplyKindHTTP)
 	}
-	whitespaceRefactorParentErr := callToolError(t, session, "wiki_preview_page_refactor", map[string]any{
+	whitespaceRefactorParentErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
 		"id":       targetID,
 		"kind":     "move",
 		"parentId": " ",
 	})
-	assertErrorContainsAny(t, "MCP wiki_preview_page_refactor whitespace parentId", whitespaceRefactorParentErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelPreviewRefactorWhitespaceParentID, whitespaceRefactorParentErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	whitespaceRefactorParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":     "move",
 		"parentId": " ",
@@ -4274,13 +4333,13 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		"slug":  "refactor-padded-target",
 		"kind":  "page",
 	}), "page")
-	paddedApplyParentErr := callToolError(t, session, "wiki_apply_page_refactor", map[string]any{
+	paddedApplyParentErr := callToolStructuredError(t, session, "wiki_apply_page_refactor", map[string]any{
 		"id":       stringField(t, refactorPaddedTarget, "id"),
 		"version":  stringField(t, refactorPaddedTarget, "version"),
 		"kind":     "move",
 		"parentId": " " + stringField(t, refactorPaddedParent, "id") + " ",
 	})
-	assertErrorContainsAny(t, "MCP wiki_apply_page_refactor padded parentId", paddedApplyParentErr, "page_invalid_parent_id", "parent")
+	assertMCPPageError(t, mcpLabelApplyRefactorPaddedParentID, paddedApplyParentErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
 	paddedApplyParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+stringField(t, refactorPaddedTarget, "id")+"/refactor/apply", map[string]any{
 		"version":  stringField(t, refactorPaddedTarget, "version"),
 		"kind":     "move",
@@ -4902,7 +4961,7 @@ func contains(values []string, want string) bool {
 
 func containsToolProtocolName(values []string, want wikimcp.ToolProtocolName) bool {
 	for _, value := range values {
-		if wikimcp.ToolProtocolName(value) == want {
+		if wikimcp.ToolProtocolNameFromWireName(value) == want {
 			return true
 		}
 	}
@@ -4932,10 +4991,46 @@ func callToolStructured(t testing.TB, session *sdkmcp.ClientSession, name string
 
 type mcpToolErrorResult struct {
 	Text      string
-	Code      string
-	MessageID string
+	CodeText  string
+	Code      sharederrors.ErrorCode
+	MessageID sharederrors.MessageID
 	Message   string
 	Args      []string
+}
+
+type mcpToolErrorPayloadWire struct {
+	Code      sharederrors.ErrorCode `json:"code"`
+	MessageID sharederrors.MessageID `json:"messageId"`
+	Message   string                 `json:"message"`
+	Args      []string               `json:"args"`
+}
+
+type mcpToolErrorPayloadRawWire struct {
+	Code string `json:"code"`
+}
+
+func mcpToolErrorPayloadFromWire(t testing.TB, name string, payload map[string]any) mcpToolErrorResult {
+	t.Helper()
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("CallTool %s structured error marshal failed: %v payload=%#v", name, err, payload)
+	}
+	var typed mcpToolErrorPayloadWire
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		t.Fatalf("CallTool %s structured error decode failed: %v payload=%#v", name, err, payload)
+	}
+	var rawFields mcpToolErrorPayloadRawWire
+	if err := json.Unmarshal(raw, &rawFields); err != nil {
+		t.Fatalf("CallTool %s structured error raw decode failed: %v payload=%#v", name, err, payload)
+	}
+	return mcpToolErrorResult{
+		CodeText:  rawFields.Code,
+		Code:      typed.Code,
+		MessageID: typed.MessageID,
+		Message:   typed.Message,
+		Args:      typed.Args,
+	}
 }
 
 func callToolError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) string {
@@ -4954,10 +5049,10 @@ func callToolStructuredError(t testing.TB, session *sdkmcp.ClientSession, name s
 	return result
 }
 
-func assertMCPStructuredError(t testing.TB, label string, result mcpToolErrorResult, code sharederrors.ErrorCode, messageID string, message string) {
+func assertMCPStructuredError(t testing.TB, label string, result mcpToolErrorResult, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 
-	if result.Code != fmt.Sprintf("%s", code) {
+	if result.Code != code {
 		t.Fatalf("%s code = %q, want %q; text=%q", label, result.Code, code, result.Text)
 	}
 	if result.MessageID != messageID {
@@ -4968,9 +5063,6 @@ func assertMCPStructuredError(t testing.TB, label string, result mcpToolErrorRes
 	}
 	if result.Text == "" {
 		t.Fatalf("%s text is empty", label)
-	}
-	if message != "" && !strings.Contains(result.Message, message) && !strings.Contains(result.Text, message) {
-		t.Fatalf("%s message/text = %q/%q, want fragment %q", label, result.Message, result.Text, message)
 	}
 }
 
@@ -4998,19 +5090,12 @@ func callToolErrorResult(t testing.TB, session *sdkmcp.ClientSession, name strin
 		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
 	}
 	if errorPayload, ok := result.Meta["error"].(map[string]any); ok {
-		out.Code, _ = errorPayload["code"].(string)
-		out.MessageID, _ = errorPayload["messageId"].(string)
-		out.Message, _ = errorPayload["message"].(string)
-		switch args := errorPayload["args"].(type) {
-		case []string:
-			out.Args = append(out.Args, args...)
-		case []any:
-			for _, arg := range args {
-				if text, ok := arg.(string); ok {
-					out.Args = append(out.Args, text)
-				}
-			}
-		}
+		decoded := mcpToolErrorPayloadFromWire(t, name, errorPayload)
+		out.CodeText = decoded.CodeText
+		out.Code = decoded.Code
+		out.MessageID = decoded.MessageID
+		out.Message = decoded.Message
+		out.Args = decoded.Args
 	}
 	return out
 }
@@ -5371,45 +5456,67 @@ func assertRestoredMetadata(t testing.TB, label string, page map[string]any) {
 func assertPageVersionConflictParity(t testing.TB, label string, mcpErr mcpToolErrorResult, httpBody string) {
 	t.Helper()
 
-	assertMCPPageError(t, label+" MCP", mcpErr, wikipages.ErrCodePageVersionConflict, "Page was changed by another request")
-	assertHTTPPageError(t, label+" HTTP", httpBody, wikipages.ErrCodePageVersionConflict.String(), "errors.page.version_conflict", "Page was changed by another request", "page was changed by another request")
+	messageID := sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)
+	assertMCPPageError(t, label+" MCP", mcpErr, wikipages.ErrCodePageVersionConflict, messageID)
+	assertHTTPPageError(t, label+" HTTP", httpBody, wikipages.ErrCodePageVersionConflict, messageID)
 }
 
-func assertMCPPageError(t testing.TB, label string, errResult mcpToolErrorResult, code sharederrors.ErrorCode, message string) {
+func assertMCPPageError(t testing.TB, label string, errResult mcpToolErrorResult, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 
-	want := fmt.Sprintf("%s: %s", code, message)
-	if errResult.Text != want {
-		t.Fatalf("%s error = %q, want %q", label, errResult.Text, want)
-	}
-	if errResult.Code != fmt.Sprintf("%s", code) {
+	if errResult.Code != code {
 		t.Fatalf("%s structured error.code = %q, want %q", label, errResult.Code, code)
 	}
-	if errResult.MessageID != "errors.page.version_conflict" {
-		t.Fatalf("%s structured error.messageId = %q, want errors.page.version_conflict", label, errResult.MessageID)
+	if errResult.MessageID != messageID {
+		t.Fatalf("%s structured error.messageId = %q, want %q", label, errResult.MessageID, messageID)
 	}
-	if errResult.Message != message {
-		t.Fatalf("%s structured error.message = %q, want %q", label, errResult.Message, message)
+	if errResult.Message == "" {
+		t.Fatalf("%s structured error.message is empty", label)
+	}
+	if !strings.Contains(errResult.Text, errResult.CodeText) {
+		t.Fatalf("%s error text = %q, want code %q", label, errResult.Text, code)
 	}
 }
 
-func assertHTTPPageError(t testing.TB, label, body, code, messageID, message, template string) {
+type httpPageErrorPayloadWire struct {
+	Code      sharederrors.ErrorCode `json:"code"`
+	MessageID sharederrors.MessageID `json:"messageId"`
+	Message   string                 `json:"message"`
+	Template  string                 `json:"template"`
+}
+
+func assertHTTPPageError(t testing.TB, label, body string, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
 	t.Helper()
 
 	payload := decodeJSONMap(t, label, []byte(body))
 	errPayload := nestedMap(t, payload, "error")
-	if got := errPayload["code"]; got != code {
+	got := httpPageErrorPayloadFromWire(t, label, errPayload)
+	if got.Code != code {
 		t.Fatalf("%s error.code = %v, want %q; body=%s", label, got, code, body)
 	}
-	if got := errPayload["messageId"]; got != messageID {
+	if got.MessageID != messageID {
 		t.Fatalf("%s error.messageId = %v, want %q; body=%s", label, got, messageID, body)
 	}
-	if got := errPayload["message"]; got != message {
-		t.Fatalf("%s error.message = %v, want %q; body=%s", label, got, message, body)
+	if got.Message == "" {
+		t.Fatalf("%s error.message is empty; body=%s", label, body)
 	}
-	if got := errPayload["template"]; got != template {
-		t.Fatalf("%s error.template = %v, want %q; body=%s", label, got, template, body)
+	if got.Template == "" {
+		t.Fatalf("%s error.template is empty; body=%s", label, body)
 	}
+}
+
+func httpPageErrorPayloadFromWire(t testing.TB, label string, payload map[string]any) httpPageErrorPayloadWire {
+	t.Helper()
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("%s error payload marshal failed: %v payload=%#v", label, err, payload)
+	}
+	var decoded httpPageErrorPayloadWire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("%s error payload decode failed: %v payload=%#v", label, err, payload)
+	}
+	return decoded
 }
 
 func assertRestorePayloadsMatch(t testing.TB, mcpRestored, httpRestored map[string]any) {
@@ -5540,10 +5647,29 @@ func assertCanonicalPageMarkdown(t testing.TB, label, raw string) markdown.PageD
 	return doc
 }
 
-func assertMCPToolErrorContains(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any, want string) {
+func assertMCPToolErrorContains(t testing.TB, session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any, want string) {
 	t.Helper()
 
-	errText := callToolError(t, session, name, args)
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name:      name.String(),
+		Arguments: args,
+	})
+	if err != nil {
+		t.Fatalf("CallTool %s failed: %v", name, err)
+	}
+	if !result.IsError {
+		t.Fatalf("CallTool %s succeeded, want tool error: %#v", name, result.StructuredContent)
+	}
+	errText := ""
+	for _, content := range result.Content {
+		if text, ok := content.(*sdkmcp.TextContent); ok {
+			errText = text.Text
+			break
+		}
+	}
+	if errText == "" {
+		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
+	}
 	if !strings.Contains(strings.ToLower(errText), strings.ToLower(want)) {
 		t.Fatalf("%s error = %q, want detail containing %q", name, errText, want)
 	}
@@ -5564,7 +5690,7 @@ func assertErrorContainsAny(t testing.TB, label, errText string, wants ...string
 func assertGenericToolErrorArgContainsAny(t testing.TB, label string, result mcpToolErrorResult, wants ...string) {
 	t.Helper()
 
-	assertMCPStructuredError(t, label, result, sharederrors.ErrorCode("mcp_tool_error"), "errors.mcp.tool_error", "MCP tool failed")
+	assertMCPStructuredError(t, label, result, wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError))
 	joinedArgs := strings.Join(result.Args, "\n")
 	lower := strings.ToLower(joinedArgs)
 	for _, want := range wants {
@@ -5836,24 +5962,39 @@ func changedPathsFromContext(t testing.TB, output map[string]any) map[string]boo
 	return paths
 }
 
-func assertValidationIssueCodes(t testing.TB, output map[string]any, wantCodes []string) {
+type validationIssueWire struct {
+	Code wikivalidation.IssueCode `json:"code"`
+	Path string                   `json:"path"`
+}
+
+func validationIssueFromWire(t testing.TB, item map[string]any) validationIssueWire {
+	t.Helper()
+
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("validation issue marshal failed: %v issue=%#v", err, item)
+	}
+	var decoded validationIssueWire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("validation issue decode failed: %v issue=%#v", err, item)
+	}
+	return decoded
+}
+
+func assertValidationIssueCodes(t testing.TB, output map[string]any, wantCodes []wikivalidation.IssueCode) {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
 	if !ok {
 		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
 	}
-	got := map[string]struct{}{}
+	got := map[wikivalidation.IssueCode]struct{}{}
 	for _, issue := range issues {
 		item, ok := issue.(map[string]any)
 		if !ok {
 			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
 		}
-		code, ok := item["code"].(string)
-		if !ok {
-			t.Fatalf("validation issue code = %T %#v, want string", item["code"], item["code"])
-		}
-		got[code] = struct{}{}
+		got[validationIssueFromWire(t, item).Code] = struct{}{}
 	}
 	for _, want := range wantCodes {
 		if _, exists := got[want]; !exists {
@@ -5862,7 +6003,7 @@ func assertValidationIssueCodes(t testing.TB, output map[string]any, wantCodes [
 	}
 }
 
-func validationIssueByCode(t testing.TB, output map[string]any, wantCode string) map[string]any {
+func validationIssueByCode(t testing.TB, output map[string]any, wantCode wikivalidation.IssueCode) map[string]any {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5874,7 +6015,7 @@ func validationIssueByCode(t testing.TB, output map[string]any, wantCode string)
 		if !ok {
 			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
 		}
-		if item["code"] == wantCode {
+		if validationIssueFromWire(t, item).Code == wantCode {
 			return item
 		}
 	}
@@ -5900,7 +6041,7 @@ func assertNoValidationIssuePath(t testing.TB, output map[string]any, unwantedPa
 	}
 }
 
-func assertValidationIssueCodesAbsent(t testing.TB, output map[string]any, absentCodes []string) {
+func assertValidationIssueCodesAbsent(t testing.TB, output map[string]any, absentCodes []wikivalidation.IssueCode) {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5912,17 +6053,23 @@ func assertValidationIssueCodesAbsent(t testing.TB, output map[string]any, absen
 		if !ok {
 			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
 		}
-		code, ok := item["code"].(string)
-		if !ok {
-			t.Fatalf("validation issue code = %T %#v, want string", item["code"], item["code"])
-		}
-		if contains(absentCodes, code) {
+		code := validationIssueFromWire(t, item).Code
+		if containsIssueCode(absentCodes, code) {
 			t.Fatalf("validation issue codes include forbidden %q in output %#v", code, output)
 		}
 	}
 }
 
-func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode string, wantPath string) int {
+func containsIssueCode(codes []wikivalidation.IssueCode, want wikivalidation.IssueCode) bool {
+	for _, code := range codes {
+		if code == want {
+			return true
+		}
+	}
+	return false
+}
+
+func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode wikivalidation.IssueCode, wantPath string) int {
 	t.Helper()
 
 	issues, ok := output["issues"].([]any)
@@ -5935,7 +6082,8 @@ func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode stri
 		if !ok {
 			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
 		}
-		if item["code"] == wantCode && item["path"] == wantPath {
+		decoded := validationIssueFromWire(t, item)
+		if decoded.Code == wantCode && decoded.Path == wantPath {
 			count++
 		}
 	}

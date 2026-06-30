@@ -8,11 +8,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
 )
+
+const validationDuplicateLeafwikiIDMessage = "duplicate leafwiki_id"
 
 var _ = Describe("Validation tool helpers", func() {
 	It("caches one asset predicate per page", func() {
@@ -29,8 +31,8 @@ var _ = Describe("Validation tool helpers", func() {
 		Expect(assetExists(newFixturePageID("page-2"), "logo.png")).To(BeFalse())
 		assetExists(newFixturePageID("page-1"), "second.png")
 
-		Expect(calls[newFixturePageID("page-1")]).To(Equal(1))
-		Expect(calls[newFixturePageID("page-2")]).To(Equal(1))
+		Expect(calls).To(HaveKeyWithValue(newFixturePageID("page-1"), 1))
+		Expect(calls).To(HaveKeyWithValue(newFixturePageID("page-2"), 1))
 	})
 
 	It("uses the section source for same-basename markdown twins", func() {
@@ -120,16 +122,17 @@ leafwiki_title: Glossary
 			Code:      wikivalidation.IssueCodeDuplicateLeafwikiID,
 			Path:      "docs/a.md",
 			MessageID: wikivalidation.IssueCodeDuplicateLeafwikiID.MessageID(),
-			Message:   "duplicate leafwiki_id",
-			Severity:  "error",
+			Message:   validationDuplicateLeafwikiIDMessage,
+			Severity:  wikivalidation.IssueSeverityError,
 		}})
 
-		Expect(issues).To(HaveLen(1))
-		Expect(issues[0].Code).To(Equal(wikivalidation.IssueCodeDuplicateLeafwikiID))
-		Expect(issues[0].Path).To(Equal("docs/a.md"))
-		Expect(issues[0].MessageID).To(Equal(sharederrors.MessageID("validation.markdown.duplicate_leafwiki_id")))
-		Expect(issues[0].Message).To(Equal("duplicate leafwiki_id"))
-		Expect(issues[0].Severity).To(Equal(wikivalidation.IssueSeverity("error")))
+		Expect(issues).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      Equal(wikivalidation.IssueCodeDuplicateLeafwikiID),
+			"Path":      Equal("docs/a.md"),
+			"MessageID": Equal(wikivalidation.IssueCodeDuplicateLeafwikiID.MessageID()),
+			"Message":   Equal(validationDuplicateLeafwikiIDMessage),
+			"Severity":  Equal(wikivalidation.IssueSeverityError),
+		})))
 	})
 
 	It("resolves validation source markdown files and page IDs for sections", func() {

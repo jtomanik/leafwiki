@@ -347,7 +347,7 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 		verified, err := r.apiKeys.VerifyAPIKey(token)
 		if err != nil {
 			if !errors.Is(err, coreauth.ErrInvalidToken) {
-				return nil, fmt.Errorf("api key verifier failed: %w", err)
+				return nil, fmt.Errorf("%w: %w", errMCPAPIKeyVerifierFailed, err)
 			}
 			return nil, fmt.Errorf("%w: invalid api key", sdkauth.ErrInvalidToken)
 		}

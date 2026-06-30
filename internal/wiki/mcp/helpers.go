@@ -34,6 +34,17 @@ const (
 	errCodeMCPPageTargetRequired                  sharederrors.ErrorCode = "mcp_page_target_required"
 )
 
+const (
+	ErrCodeMCPEditorRoleRequired      = errCodeMCPEditorRoleRequired
+	ErrCodeMCPToolError               = errCodeMCPToolError
+	ErrCodeMCPPageIdentifierAmbiguous = errCodeMCPPageIdentifierAmbiguous
+	ErrCodeMCPPageIdentifierRequired  = errCodeMCPPageIdentifierRequired
+	ErrCodeMCPPageTargetAmbiguous     = errCodeMCPPageTargetAmbiguous
+	ErrCodeMCPPageTargetRequired      = errCodeMCPPageTargetRequired
+)
+
+var errMCPAPIKeyVerifierFailed = errors.New("api key verifier failed")
+
 func newMCPHelperError(code sharederrors.ErrorCode, message string, cause error) *sharederrors.LocalizedError {
 	return sharederrors.NewLocalizedErrorFromCode(code, cause)
 }

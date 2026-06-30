@@ -11,12 +11,15 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
 var _ = Describe("Revision tools", func() {
 	It("passes the workspace cursor and returns the next cursor", func() {
+		const revisionCursorFixture = "rev-3"
 		t := GinkgoT()
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
 			DataDir: t.TempDir(),
@@ -37,16 +40,16 @@ var _ = Describe("Revision tools", func() {
 				seenCursor = cursor
 				return workspacesync.PageRevisionList{
 					Revisions: []*corerevision.Revision{{
-						ID:       "rev-3",
+						ID:       corerevision.RevisionIDFromString(revisionCursorFixture),
 						PageID:   *pageID,
 						Type:     corerevision.RevisionTypeContentUpdate,
 						AuthorID: "alice",
 						Title:    "Page A",
 						Slug:     "page-a",
-						Kind:     string(tree.NodeKindPage),
+						Kind:     tree.NodeKindPage,
 						Path:     "page-a",
 					}},
-					NextCursor: "rev-3",
+					NextCursor: revisionCursorFixture,
 				}, nil
 			},
 		})
@@ -76,20 +79,17 @@ var _ = Describe("Revision tools", func() {
 		body, ok := result.StructuredContent.(map[string]any)
 		Expect(ok).To(BeTrue(), "structured content type = %T", result.StructuredContent)
 		Expect(seenCursor).To(Equal("rev-5"))
-		Expect(body["nextCursor"]).To(Equal("rev-3"))
+		Expect(body).To(HaveKeyWithValue("nextCursor", revisionCursorFixture))
 		revisions, ok := body["revisions"].([]any)
 		Expect(ok).To(BeTrue(), "revisions = %#v", body["revisions"])
 		Expect(revisions).To(HaveLen(1))
 		first, ok := revisions[0].(map[string]any)
 		Expect(ok).To(BeTrue(), "first revision = %#v", revisions[0])
-		Expect(first["id"]).To(Equal("rev-3"))
+		Expect(first).To(HaveKeyWithValue("id", revisionCursorFixture))
 	})
 
 	It("returns a stable unavailable-backend revision error", func() {
 		err := unavailableWorkspaceRevisionBackend()
-		localized, ok := sharederrors.AsLocalizedError(err)
-		Expect(ok).To(BeTrue())
-		Expect(localized.Code).To(Equal(sharederrors.ErrorCode("revision_not_found")))
-		Expect(localized.MessageID).To(Equal(sharederrors.MessageID("errors.revision.not_found")))
+		Expect(err).To(testmatchers.MatchLocalizedError(wikirevisions.ErrCodeRevisionNotFound, sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionNotFound)))
 	})
 })

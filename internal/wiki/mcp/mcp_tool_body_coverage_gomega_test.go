@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	corerevision "github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
@@ -44,7 +45,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
 		Expect((&Routes{treeService: unloadedTree}).getTreeTool(getTreeInput{}).Tree).To(BeNil())
 		Expect(os.WriteFile(filepath.Join(unloadedTree.RootDir(), "README.md"), []byte("# Root\n"), 0o644)).To(Succeed())
-		_, err = (&Routes{treeService: unloadedTree}).findToolPageByInputPath(context.Background(), "README.md", string(tree.NodeKindSection))
+		_, err = (&Routes{treeService: unloadedTree}).findToolPageByInputPath(context.Background(), "README.md", mcpInputNodeKindSection)
 		Expect(err).To(HaveOccurred())
 
 		routes := newContextToolTestRoutes(GinkgoT())
@@ -58,7 +59,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		routes.ensurePath = fakeMCPEnsurePathUseCase{err: backendErr}
-		pageKind := string(tree.NodeKindPage)
+		pageKind := mcpInputNodeKindPage
 		_, err = routes.ensurePageTool(context.Background(), toolActor{ID: "user-1"}, ensurePageInput{Path: "new-page", Title: "New", Kind: &pageKind})
 		Expect(err).To(MatchError(backendErr))
 		routes.ensurePath = fakeMCPEnsurePathUseCase{out: &wikipages.EnsurePathOutput{Page: page}}
@@ -210,8 +211,10 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		}}}
 		out, err := routes.searchPagesTool(context.Background(), searchPagesInput{Query: "needle"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Limit).To(Equal(20))
-		Expect(out.HasMore).To(BeTrue())
+		Expect(out).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Limit":   Equal(20),
+			"HasMore": BeTrue(),
+		}))
 	})
 
 	It("covers refactor tool body validation, backend, and success branches", func() {
@@ -240,7 +243,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(preview).NotTo(BeNil())
 		applied, err := routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{PageID: page.ID.String()})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(applied.Page.ID).To(Equal(page.ID.String()))
+		Expect(applied.Page.ID).To(Equal(mcpOutputPageID(page.ID)))
 	})
 
 	It("covers revision tool body validation, backend, and success branches", func() {
@@ -323,13 +326,13 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		routes.listWorkspaceRevisions = func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 			return workspacesync.PageRevisionList{Revisions: []*corerevision.Revision{rev}, NextCursor: "next"}, nil
 		}
-		snapshots := map[string]*corerevision.RevisionSnapshot{
-			"base":   {Revision: mcpTestRevision(page.ID, "base"), Content: "base"},
-			"target": {Revision: mcpTestRevision(page.ID, "target"), Content: "target"},
-			"rev-1":  {Revision: rev, Content: "content"},
+		snapshots := map[tree.RevisionID]*corerevision.RevisionSnapshot{
+			tree.RevisionIDFromString("base"):   {Revision: mcpTestRevision(page.ID, "base"), Content: "base"},
+			tree.RevisionIDFromString("target"): {Revision: mcpTestRevision(page.ID, "target"), Content: "target"},
+			tree.RevisionIDFromString("rev-1"):  {Revision: rev, Content: "content"},
 		}
 		routes.getWorkspaceRevision = func(_ context.Context, _ *tree.Page, id tree.RevisionID) (*corerevision.RevisionSnapshot, error) {
-			if snapshot := snapshots[id.String()]; snapshot != nil {
+			if snapshot := snapshots[id]; snapshot != nil {
 				return snapshot, nil
 			}
 			return nil, backendErr
@@ -340,8 +343,10 @@ var _ = Describe("MCP extracted tool bodies", func() {
 
 		listed, err := routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: page.ID.String(), Cursor: " cursor "})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(listed.Revisions).To(HaveLen(1))
-		Expect(listed.NextCursor).To(Equal("next"))
+		Expect(listed).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Revisions":  HaveLen(1),
+			"NextCursor": Equal("next"),
+		}))
 		latest, err := routes.latestRevisionTool(context.Background(), pageIDInput{PageID: page.ID.String()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(latest.Revision).NotTo(BeNil())
@@ -353,7 +358,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(compared).NotTo(BeNil())
 		restored, err := routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: page.ID.String(), RevisionID: "rev-1"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(restored.Page.ID).To(Equal(page.ID.String()))
+		Expect(restored.Page.ID).To(Equal(mcpOutputPageID(page.ID)))
 	})
 
 	It("covers link-status dependent helper branches", func() {
@@ -374,10 +379,17 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(routes.subtreeLinkCounts(context.Background(), page.PageNode)).To(Equal(corelinks.LinkStatusCounts{Outgoings: 1}))
 		withLinks, err := routes.partialEditOutput(context.Background(), page, true, &includeValidation, true)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(withLinks.Page).NotTo(BeNil())
-		Expect(withLinks.LinkStatus).NotTo(BeNil())
+		Expect(withLinks).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Page":       Not(BeNil()),
+			"LinkStatus": Not(BeNil()),
+		}))
 	})
 })
+
+const (
+	mcpInputNodeKindPage    = "page"
+	mcpInputNodeKindSection = "section"
+)
 
 func mcpTestRevision(pageID tree.PageID, id string) *corerevision.Revision {
 	GinkgoHelper()
@@ -387,9 +399,13 @@ func mcpTestRevision(pageID tree.PageID, id string) *corerevision.Revision {
 		Type:   corerevision.RevisionTypeContentUpdate,
 		Title:  "Home",
 		Slug:   "home",
-		Kind:   string(tree.NodeKindPage),
+		Kind:   tree.NodeKindPage,
 		Path:   "home",
 	}
+}
+
+func mcpOutputPageID(pageID tree.PageID) string {
+	return pageID.MetadataValue()
 }
 
 type fakeMCPGetTagsUseCase struct {

@@ -22,7 +22,7 @@ func addTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDescriptor,
 
 func addRequestTypedTool[In, Out any](server *sdkmcp.Server, descriptor ToolDescriptor, handler func(context.Context, *sdkmcp.CallToolRequest, In) (Out, error)) {
 	tool := &sdkmcp.Tool{
-		Name:         descriptor.Name.ProtocolName().String(),
+		Name:         descriptor.Name.ProtocolName().WireName(),
 		Description:  descriptor.Description,
 		OutputSchema: toolOutputSchema(descriptor.Name),
 	}

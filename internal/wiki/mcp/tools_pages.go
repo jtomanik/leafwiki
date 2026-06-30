@@ -188,7 +188,7 @@ func (r *Routes) getTreeTool(in getTreeInput) treeOutput {
 }
 
 func (r *Routes) lookupPathTool(ctx context.Context, in pathInput) (lookupPathOutput, error) {
-	kind := tree.NodeKind("")
+	var kind tree.NodeKind
 	if strings.TrimSpace(in.Kind) != "" {
 		validKind, err := wikipages.ValidatePageKindString(strings.TrimSpace(in.Kind))
 		if err != nil {
@@ -290,7 +290,7 @@ func (r *Routes) ensurePageTool(ctx context.Context, actor toolActor, in ensureP
 }
 
 func (r *Routes) findToolPageByInputPath(ctx context.Context, rawPath string, rawKind string) (*wikipages.FindByPathOutput, error) {
-	if out, handled, err := wikipages.FindReadmeMarkdownPathFallback(rawPath, rawKind, wikipages.ReadmeMarkdownPathFallbackLookup{
+	if out, handled, err := wikipages.FindReadmeMarkdownPathFallbackRawInput(rawPath, rawKind, wikipages.ReadmeMarkdownPathFallbackLookup{
 		RootDir: r.treeService.RootDir(),
 		FindByPath: func(input wikipages.FindByPathInput) (*wikipages.FindByPathOutput, error) {
 			return r.findByPath.Execute(ctx, input)

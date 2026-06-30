@@ -3,17 +3,21 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/localization"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = Describe("Tool descriptor contracts", func() {
 	It("uses typed IDs and description IDs", func() {
-		Expect(toolMovePage.Name).To(Equal(ToolMovePage))
-		Expect(toolMovePage.DescriptionID).To(Equal(ToolDescriptionMovePage))
+		Expect(toolMovePage).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Name":          Equal(ToolMovePage),
+			"DescriptionID": Equal(ToolDescriptionMovePage),
+		}))
 		Expect(toolNames([]ToolDescriptor{toolMovePage})).To(Equal([]string{"wiki_move_page"}))
 	})
 
@@ -25,18 +29,30 @@ var _ = Describe("Tool descriptor contracts", func() {
 	It("keeps every tool descriptor description catalog-backed", func() {
 		for _, descriptor := range allToolDescriptors() {
 			rendered := localization.English.Render(descriptor.DescriptionID, "fallback")
-			Expect(rendered.Missing).To(BeFalse(), "%s description ID %s should be catalog-backed", descriptor.Name, descriptor.DescriptionID)
-			Expect(rendered.Err).NotTo(HaveOccurred(), "%s description ID %s should render", descriptor.Name, descriptor.DescriptionID)
+			Expect(rendered).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Missing": BeFalse(),
+				"Err":     Not(HaveOccurred()),
+			}), "%s description ID %s should be catalog-backed", descriptor.Name, descriptor.DescriptionID)
 		}
 	})
 
 	It("serializes message outputs with stable message IDs", func() {
 		output := newMessageOutput(ToolMessageMovePageSuccess)
-		Expect(output.Message).To(Equal("Page moved"))
+		rendered := localization.English.Render(ToolMessageMovePageSuccess, "")
+		Expect(rendered).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
+		Expect(output.Message).To(Equal(rendered.Message))
 
 		encoded, err := json.Marshal(output)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(encoded)).To(Equal(`{"messageId":"mcp.tools.wiki_move_page.success","message":"Page moved"}`))
+		var decoded messageOutput
+		Expect(json.Unmarshal(encoded, &decoded)).To(Succeed())
+		Expect(decoded).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"MessageID": Equal(ToolMessageMovePageSuccess),
+			"Message":   Equal(rendered.Message),
+		}))
 	})
 
 	It("exposes message IDs in message-only output schemas", func() {
@@ -52,9 +68,7 @@ var _ = Describe("Tool descriptor contracts", func() {
 		result := mcpToolErrorResult(rawErr)
 		errorMeta, ok := result.Meta["error"].(map[string]any)
 		Expect(ok).To(BeTrue(), "Meta error = %#v, want map", result.Meta["error"])
-		Expect(errorMeta["code"]).To(Equal(errCodeMCPToolError))
-		Expect(fmt.Sprint(errorMeta["messageId"])).To(Equal("errors.mcp.tool_error"))
-		Expect(errorMeta["message"]).To(Equal("MCP tool failed"))
-		Expect(errorMeta["args"]).To(Equal([]string{rawErr.Error()}))
+		Expect(errorMeta).To(testmatchers.HaveMCPStructuredError(errCodeMCPToolError, sharederrors.MessageIDForCode(errCodeMCPToolError)))
+		Expect(errorMeta).To(HaveKeyWithValue("args", Equal([]string{rawErr.Error()})))
 	})
 })

@@ -2,11 +2,16 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/perber/wiki/internal/workspacesync"
+)
+
+var (
+	errWorkspaceSyncDisabled      = errors.New("workspace sync is not enabled")
+	errWorkspaceSyncSourceInvalid = errors.New("source must be mcp or filesystem")
 )
 
 func (r *Routes) registerWorkspaceSyncTools(server *sdkmcp.Server) {
@@ -17,7 +22,7 @@ func (r *Routes) registerWorkspaceSyncTools(server *sdkmcp.Server) {
 
 func (r *Routes) refreshWorkspaceSync(ctx context.Context, actor toolActor, in refreshInput) (refreshOutput, error) {
 	if r.workspaceSyncRefresh == nil {
-		return refreshOutput{}, fmt.Errorf("workspace sync is not enabled")
+		return refreshOutput{}, errWorkspaceSyncDisabled
 	}
 	source, err := refreshSource(in.Source)
 	if err != nil {
@@ -51,6 +56,6 @@ func refreshSource(raw string) (workspacesync.Source, error) {
 	case string(workspacesync.SourceFilesystem):
 		return workspacesync.SourceFilesystem, nil
 	default:
-		return "", fmt.Errorf("source must be mcp or filesystem")
+		return "", errWorkspaceSyncSourceInvalid
 	}
 }

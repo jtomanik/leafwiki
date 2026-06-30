@@ -172,7 +172,7 @@ func (r *Routes) restoreRevisionTool(ctx context.Context, actor toolActor, in re
 		return pageOutput{}, err
 	}
 	restored, err := r.restoreWorkspaceRevision(ctx, page, revisionID, workspacesync.Actor{
-		ID:    workspacesync.NewActorIDUnchecked(actor.ID),
+		ID:    workspacesync.ActorIDFromUserID(tree.UserIDFromString(actor.ID)),
 		Name:  actor.User.Username,
 		Email: actor.User.Email,
 	}, workspacesync.SourceMCP)
