@@ -17,6 +17,8 @@ var (
 	ErrDuplicateWorkspaceID                         = errors.New("duplicate workspace ID")
 	ErrWorkspaceDataDirRequired                     = errors.New("workspace data dir is required")
 	ErrWorkspaceRootDirRequired                     = errors.New("workspace root dir is required")
+	ErrWorkspaceDataDirAlreadyInUse                 = errors.New("workspace data dir is already in use")
+	ErrWorkspaceRootDirAlreadyInUse                 = errors.New("workspace root dir is already in use")
 	ErrWorkspaceMarkdownLinkRootPrefixNotNormalized = errors.New("workspace markdown link root prefix must be normalized")
 	wikidFilepathAbs                                = filepath.Abs
 	wikidEvalSymlinks                               = filepath.EvalSymlinks

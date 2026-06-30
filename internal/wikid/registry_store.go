@@ -91,10 +91,10 @@ func (s *RegistryStore) RegisterWorkspaceWithResultAndGrants(
 				return upsertWorkspaceGrantsForRegistration(ctx, conn, result, grants)
 			}
 			if cleanPath(existing.DataDir) == cleanPath(workspace.DataDir) {
-				return fmt.Errorf("data directory is already in use by workspace %q", existing.ID.String())
+				return fmt.Errorf("data directory is already in use by workspace %q: %w", existing.ID.String(), ErrWorkspaceDataDirAlreadyInUse)
 			}
 			if cleanPath(existing.RootDir) == cleanPath(workspace.RootDir) {
-				return fmt.Errorf("root directory is already in use by workspace %q", existing.ID.String())
+				return fmt.Errorf("root directory is already in use by workspace %q: %w", existing.ID.String(), ErrWorkspaceRootDirAlreadyInUse)
 			}
 		}
 		result = RegisterWorkspaceResult{Workspace: workspace, Created: true}

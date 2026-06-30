@@ -1,6 +1,7 @@
 package projectdaemon
 
 import (
+	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
@@ -253,7 +254,7 @@ var _ = ginkgo.It("TestReadTrustedDescriptorRejectsGroupReadableFile", func() {
 		t.Fatalf("write descriptor: %v", err)
 	}
 
-	if _, err := ReadTrustedDescriptor(path); err == nil || !strings.Contains(err.Error(), "want 0600") {
+	if _, err := ReadTrustedDescriptor(path); err == nil || !errors.Is(err, errDescriptorModeMismatch) {
 		t.Fatalf("ReadTrustedDescriptor error = %v, want 0600 rejection", err)
 	}
 

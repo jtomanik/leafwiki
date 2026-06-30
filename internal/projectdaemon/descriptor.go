@@ -18,6 +18,7 @@ type descriptorTempFile interface {
 var (
 	errDescriptorRequired       = errors.New("descriptor is required")
 	errDescriptorNotRegularFile = errors.New("project daemon descriptor is not a regular file")
+	errDescriptorModeMismatch   = errors.New("project daemon descriptor mode mismatch")
 	ErrDescriptorSchemaMismatch = errors.New("project daemon descriptor schema version mismatch")
 
 	chmodDescriptorFile        = os.Chmod
@@ -41,7 +42,7 @@ func ReadTrustedDescriptor(path string) (*Descriptor, error) {
 		return nil, errDescriptorNotRegularFile
 	}
 	if got := validateDescriptorFileMode(info).Perm(); got != 0o600 {
-		return nil, fmt.Errorf("project daemon descriptor mode = %04o, want 0600", got)
+		return nil, fmt.Errorf("project daemon descriptor mode = %04o, want 0600: %w", got, errDescriptorModeMismatch)
 	}
 	if err := validateDescriptorOwner(path, info); err != nil {
 		return nil, err

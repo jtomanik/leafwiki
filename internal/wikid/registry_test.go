@@ -3,6 +3,7 @@ package wikid
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -214,14 +215,14 @@ var _ = ginkgo.It("TestRegistryServiceRejectsConflictingWorkspaceLocations", fun
 		DisplayName: "Other Data",
 		DataDir:     filepath.Join(t.TempDir(), "Other Data"),
 		RootDir:     rootDir,
-	}); err == nil || !strings.Contains(err.Error(), "root directory is already in use") {
+	}); err == nil || !errors.Is(err, ErrWorkspaceRootDirAlreadyInUse) {
 		t.Fatalf("same root error = %v, want root directory conflict", err)
 	}
 	if _, err := service.RegisterWorkspace(RegisterWorkspaceRequest{
 		DisplayName: "Other Root",
 		DataDir:     dataDir,
 		RootDir:     filepath.Join(t.TempDir(), "Other Root"),
-	}); err == nil || !strings.Contains(err.Error(), "data directory is already in use") {
+	}); err == nil || !errors.Is(err, ErrWorkspaceDataDirAlreadyInUse) {
 		t.Fatalf("same data error = %v, want data directory conflict", err)
 	}
 })
@@ -241,7 +242,7 @@ var _ = ginkgo.It("TestRegistryStoreRejectsNonURLSafeWorkspaceIDs", func() {
 	})
 
 	err := NewRegistryStore(path).Save(doc)
-	if err == nil || !strings.Contains(err.Error(), "workspace ID") {
+	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDInvalid {
 		t.Fatalf("Save error = %v, want workspace ID validation", err)
 	}
 })
@@ -310,7 +311,7 @@ var _ = ginkgo.It("TestRegistryStoreRegisterWorkspaceAndGrantSeedingRollsBackTog
 			Role:        GrantRole("owner"),
 		}}, nil
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown grant role "owner"`) {
+	if err == nil || !errors.Is(err, ErrUnknownGrantRole) {
 		t.Fatalf("RegisterWorkspaceWithResultAndGrants error = %v, want grant validation", err)
 	}
 

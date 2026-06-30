@@ -1,10 +1,10 @@
 package wikid
 
 import (
+	"errors"
 	"fmt"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/perber/wiki/internal/workspaceid"
@@ -22,7 +22,7 @@ var _ = ginkgo.It("TestGrantStoreRejectsUnknownRole", func() {
 		WorkspaceID: HomeWorkspaceID,
 		Role:        GrantRole("owner"),
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown grant role "owner"`) {
+	if err == nil || !errors.Is(err, ErrUnknownGrantRole) {
 		t.Fatalf("Upsert error = %v, want unknown role validation", err)
 	}
 })
@@ -35,7 +35,7 @@ var _ = ginkgo.It("TestGrantStoreRejectsNonURLSafeWorkspaceID", func() {
 		WorkspaceID: "bad/id",
 		Role:        GrantRoleViewer,
 	})
-	if err == nil || !strings.Contains(err.Error(), "workspace ID") {
+	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDInvalid {
 		t.Fatalf("Upsert error = %v, want workspace ID validation", err)
 	}
 })

@@ -13,19 +13,19 @@ import (
 )
 
 var _ = DescribeTable("NewMCPProxy validates constructor inputs",
-	func(upstream string, token string, wantErr string) {
+	func(upstream string, token string, wantErr error) {
 		t := GinkgoT()
 
 		proxy, err := NewMCPProxy(upstream, token)
 		if err == nil {
 			t.Fatalf("NewMCPProxy(%q, %q) returned proxy %#v, want error", upstream, token, proxy)
 		}
-		if !strings.Contains(err.Error(), wantErr) {
-			t.Fatalf("NewMCPProxy error = %q, want substring %q", err.Error(), wantErr)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("NewMCPProxy error = %q, want %v", err.Error(), wantErr)
 		}
 	},
-	Entry("invalid upstream URL", "://bad-url", "daemon-token", "invalid workspaced upstream"),
-	Entry("missing daemon token", "http://127.0.0.1:1", "   ", "daemon token is required"),
+	Entry("invalid upstream URL", "://bad-url", "daemon-token", errInvalidWorkspacedUpstream),
+	Entry("missing daemon token", "http://127.0.0.1:1", "   ", errDaemonTokenRequired),
 )
 
 var _ = It("NewMCPProxy injects the daemon token and strips public actor context", func() {
