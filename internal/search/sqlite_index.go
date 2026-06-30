@@ -33,6 +33,20 @@ func searchIndexDatabasePath(storageDir string, filename tree.AssetName) string 
 
 var headingParser = goldmark.New()
 
+type searchSQLiteNodeKind string
+
+func searchSQLiteNodeKindFromNodeKind(kind tree.NodeKind) searchSQLiteNodeKind {
+	return searchSQLiteNodeKind(kind)
+}
+
+func parseSearchSQLiteNodeKind(raw string) (tree.NodeKind, error) {
+	kind, ok := tree.ParseNodeKind(raw)
+	if !ok {
+		return "", fmt.Errorf("unknown search index node kind: %q", raw)
+	}
+	return kind, nil
+}
+
 var (
 	openSQLiteSearchDB = func(dbPath string) (*sql.DB, error) {
 		return sql.Open("sqlite", dbPath)
@@ -229,7 +243,7 @@ func (s *SQLiteIndex) IndexPage(path string, filePath string, pageID tree.PageID
 		_, err = db.Exec(`
 		INSERT INTO pages (path, filepath, pageID, kind, title, headings, content)
 		VALUES (?, ?, ?, ?, ?, ?, ?);
-	`, path, filePath, pageID, string(kind), title, headings, sanitizedBody)
+	`, path, filePath, pageID, searchSQLiteNodeKindFromNodeKind(kind), title, headings, sanitizedBody)
 
 		return err
 	})
@@ -332,10 +346,16 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, startAt Result
 			var r SearchResultItem
 			var bm25Score float64
 			var content string
+			var storedKind string
 
-			if err := rows.Scan(&r.PageID, &r.Path, &r.Kind, &r.Title, &r.Excerpt, &content, &bm25Score); err != nil {
+			if err := rows.Scan(&r.PageID, &r.Path, &storedKind, &r.Title, &r.Excerpt, &content, &bm25Score); err != nil {
 				return err
 			}
+			kind, err := parseSearchSQLiteNodeKind(storedKind)
+			if err != nil {
+				return err
+			}
+			r.Kind = kind
 			if strings.TrimSpace(r.Excerpt) == "" {
 				r.Excerpt = excerpt.FromBody(content)
 			}

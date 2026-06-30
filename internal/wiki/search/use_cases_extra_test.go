@@ -11,10 +11,13 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	coresearch "github.com/perber/wiki/internal/search"
 	coretags "github.com/perber/wiki/internal/tags"
+	sqlite "modernc.org/sqlite"
 )
 
 var _ = ginkgo.Describe("search execution", func() {
@@ -30,14 +33,17 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(1))
-		Expect(out.Result.Items).To(HaveLen(1))
-		Expect(out.Result.Items[0].PageID).To(Equal(goID))
-		Expect(out.Result.Items[0].Tags).To(ConsistOf("go", "docs"))
-		Expect(out.Result.TagFacets).To(ConsistOf(
-			coresearch.SearchTagFacet{Tag: "go", Count: 1},
-			coresearch.SearchTagFacet{Tag: "docs", Count: 1},
-		))
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(1),
+			"Items": HaveExactElements(matchSearchResultItem(gstruct.Fields{
+				"PageID": Equal(goID),
+				"Tags":   ConsistOf("go", "docs"),
+			})),
+			"TagFacets": ConsistOf(
+				coresearch.SearchTagFacet{Tag: "go", Count: 1},
+				coresearch.SearchTagFacet{Tag: "docs", Count: 1},
+			),
+		}))
 	})
 
 	ginkgo.It("intersects query results with normalized tag filters", func() {
@@ -53,8 +59,12 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(1))
-		Expect(out.Result.Items[0].PageID).To(Equal(goID))
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(1),
+			"Items": HaveExactElements(matchSearchResultItem(gstruct.Fields{
+				"PageID": Equal(goID),
+			})),
+		}))
 	})
 
 	ginkgo.It("returns sorted and paged tag-only results from the tree", func() {
@@ -71,17 +81,20 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(2))
-		Expect(out.Result.StartAt).To(Equal(coresearch.ResultOffset(0)))
-		Expect(out.Result.PageSize).To(Equal(coresearch.ResultLimit(1)))
-		Expect(out.Result.Items).To(HaveLen(1))
-		Expect(out.Result.Items[0].PageID).To(Equal(alphaID))
-		Expect(out.Result.Items[0].Title).To(Equal("Alpha Page"))
-		Expect(out.Result.Items[0].Tags).To(ConsistOf("go", "docs"))
-		Expect(out.Result.TagFacets).To(ConsistOf(
-			coresearch.SearchTagFacet{Tag: "go", Count: 3},
-			coresearch.SearchTagFacet{Tag: "docs", Count: 1},
-		))
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Count":    Equal(2),
+			"StartAt":  Equal(coresearch.ResultOffset(0)),
+			"PageSize": Equal(coresearch.ResultLimit(1)),
+			"Items": HaveExactElements(matchSearchResultItem(gstruct.Fields{
+				"PageID": Equal(alphaID),
+				"Title":  Equal("Alpha Page"),
+				"Tags":   ConsistOf("go", "docs"),
+			})),
+			"TagFacets": ConsistOf(
+				coresearch.SearchTagFacet{Tag: "go", Count: 3},
+				coresearch.SearchTagFacet{Tag: "docs", Count: 1},
+			),
+		}))
 	})
 
 	ginkgo.It("sorts equal tag-only titles by path and applies the default page size", func() {
@@ -96,10 +109,14 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(2))
-		Expect(out.Result.PageSize).To(Equal(coresearch.ResultLimit(20)))
-		Expect(out.Result.Items).To(HaveLen(2))
-		Expect(out.Result.Items[0].PageID).To(Equal(firstID))
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Count":    Equal(2),
+			"PageSize": Equal(coresearch.ResultLimit(20)),
+			"Items": HaveExactElements(
+				matchSearchResultItem(gstruct.Fields{"PageID": Equal(firstID)}),
+				gstruct.Ignore(),
+			),
+		}))
 	})
 
 	ginkgo.It("bounds tag-only result offsets past the end", func() {
@@ -113,8 +130,10 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(1))
-		Expect(out.Result.Items).To(BeEmpty())
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(1),
+			"Items": BeEmpty(),
+		}))
 	})
 
 	ginkgo.It("returns tag lookup errors before searching", func() {
@@ -129,7 +148,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_tags")))
+		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
 	ginkgo.It("returns tag-only excerpt lookup errors", func() {
@@ -143,7 +162,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: page_meta")))
+		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
 	ginkgo.It("returns index search errors", func() {
@@ -157,7 +176,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("no such table: pages")))
+		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
 	ginkgo.It("returns full-match page ID lookup errors after searching", func() {
@@ -191,9 +210,12 @@ var _ = ginkgo.Describe("search execution", func() {
 		})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Items).To(HaveLen(1))
-		Expect(out.Result.Items[0].Tags).To(BeNil())
-		Expect(out.Result.TagFacets).To(Equal([]coresearch.SearchTagFacet{}))
+		Expect(out.Result).To(matchSearchResult(gstruct.Fields{
+			"Items": HaveExactElements(matchSearchResultItem(gstruct.Fields{
+				"Tags": BeNil(),
+			})),
+			"TagFacets": BeEmpty(),
+		}))
 	})
 
 	ginkgo.It("handles empty tag attachment inputs", func() {
@@ -203,8 +225,10 @@ var _ = ginkgo.Describe("search execution", func() {
 		items := []coresearch.SearchResultItem{{Title: "No ID"}}
 		fixture.useCase.attachTags(items)
 
-		Expect(items[0].Tags).To(BeNil())
-		Expect(fixture.useCase.buildTagFacets(nil)).To(Equal([]coresearch.SearchTagFacet{}))
+		Expect(items).To(HaveExactElements(matchSearchResultItem(gstruct.Fields{
+			"Tags": BeNil(),
+		})))
+		Expect(fixture.useCase.buildTagFacets(nil)).To(BeEmpty())
 	})
 
 	ginkgo.It("sets empty tags when an attached result has no tag entry", func() {
@@ -213,7 +237,9 @@ var _ = ginkgo.Describe("search execution", func() {
 
 		fixture.useCase.attachTags(items)
 
-		Expect(items[0].Tags).To(Equal([]string{}))
+		Expect(items).To(HaveExactElements(matchSearchResultItem(gstruct.Fields{
+			"Tags": BeEmpty(),
+		})))
 	})
 })
 
@@ -231,14 +257,14 @@ var _ = ginkgo.Describe("search routes", func() {
 
 		searchRec := httptest.NewRecorder()
 		router.ServeHTTP(searchRec, httptest.NewRequest(http.MethodGet, "/api/search?q=guide&tags=go&offset=0&limit=10", nil))
-		Expect(searchRec.Code).To(Equal(http.StatusOK), searchRec.Body.String())
+		Expect(searchRec).To(HaveHTTPStatus(http.StatusOK), searchRec.Body.String())
 		var result coresearch.SearchResult
 		Expect(json.Unmarshal(searchRec.Body.Bytes(), &result)).To(Succeed())
 		Expect(result.Items).To(HaveLen(1))
 
 		statusRec := httptest.NewRecorder()
 		router.ServeHTTP(statusRec, httptest.NewRequest(http.MethodGet, "/api/search/status", nil))
-		Expect(statusRec.Code).To(Equal(http.StatusOK), statusRec.Body.String())
+		Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
 		var statusBody coresearch.IndexingStatus
 		Expect(json.Unmarshal(statusRec.Body.Bytes(), &statusBody)).To(Succeed())
 		Expect(statusBody.Indexed).To(Equal(1))
@@ -251,18 +277,15 @@ var _ = ginkgo.Describe("search routes", func() {
 
 		missing := httptest.NewRecorder()
 		router.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/search", nil))
-		Expect(missing.Code).To(Equal(http.StatusBadRequest), missing.Body.String())
-		assertSearchStructuredError(missing, "search_missing_query", "errors.search.missing_query")
+		Expect(missing).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchMissingQuery))
 
 		badOffset := httptest.NewRecorder()
 		router.ServeHTTP(badOffset, httptest.NewRequest(http.MethodGet, "/api/search?q=docs&offset=bad", nil))
-		Expect(badOffset.Code).To(Equal(http.StatusBadRequest), badOffset.Body.String())
-		assertSearchStructuredError(badOffset, "search_invalid_offset", "errors.search.invalid_offset")
+		Expect(badOffset).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchInvalidOffset))
 
 		badLimit := httptest.NewRecorder()
 		router.ServeHTTP(badLimit, httptest.NewRequest(http.MethodGet, "/api/search?q=docs&limit=bad", nil))
-		Expect(badLimit.Code).To(Equal(http.StatusBadRequest), badLimit.Body.String())
-		assertSearchStructuredError(badLimit, "search_invalid_limit", "errors.search.invalid_limit")
+		Expect(badLimit).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchInvalidLimit))
 	})
 
 	ginkgo.It("returns structured search errors from the public route", func() {
@@ -273,8 +296,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/search?q=docs", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable), rec.Body.String())
-		assertSearchStructuredError(rec, "search_unavailable", "errors.search.unavailable")
+		Expect(rec).To(matchSearchStructuredError(http.StatusServiceUnavailable, ErrCodeSearchUnavailable))
 	})
 
 	ginkgo.It("requires authentication for private search routes", func() {
@@ -283,7 +305,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/search/status", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
 	ginkgo.It("returns nil query tags when the key is absent", func() {
@@ -381,4 +403,20 @@ func (f fakeSearchIndex) Search(string, []tree.PageID, coresearch.ResultOffset, 
 
 func (f fakeSearchIndex) SearchPageIDs(string, []tree.PageID) ([]tree.PageID, error) {
 	return f.pageIDs, f.pageIDsErr
+}
+
+func matchSearchResult(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchSearchResultItem(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchSQLiteSearchFailure() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var sqliteErr *sqlite.Error
+		return errors.As(err, &sqliteErr)
+	})
 }

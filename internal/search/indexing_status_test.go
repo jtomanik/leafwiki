@@ -3,6 +3,7 @@ package search
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 var _ = ginkgo.Describe("IndexingStatus", func() {
@@ -13,10 +14,12 @@ var _ = ginkgo.Describe("IndexingStatus", func() {
 		Expect(status.IsFailed()).To(BeFalse())
 		Expect(status.IsReady()).To(BeFalse())
 		snapshot := status.Snapshot()
-		Expect(snapshot.Active).To(BeFalse())
-		Expect(snapshot.Indexed).To(Equal(0))
-		Expect(snapshot.Failed).To(Equal(0))
-		Expect(snapshot.FinishedAt.IsZero()).To(BeTrue())
+		Expect(snapshot).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Active":     BeFalse(),
+			"Indexed":    BeZero(),
+			"Failed":     BeZero(),
+			"FinishedAt": BeZero(),
+		})))
 	})
 
 	ginkgo.It("tracks successful indexing runs and returns independent snapshots", func() {
@@ -32,9 +35,11 @@ var _ = ginkgo.Describe("IndexingStatus", func() {
 		Expect(status.IsReady()).To(BeTrue())
 		Expect(status.IsFailed()).To(BeFalse())
 		snapshot := status.Snapshot()
-		Expect(snapshot.Indexed).To(Equal(2))
-		Expect(snapshot.Failed).To(Equal(0))
-		Expect(snapshot.FinishedAt.IsZero()).To(BeFalse())
+		Expect(snapshot).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Indexed":    Equal(2),
+			"Failed":     BeZero(),
+			"FinishedAt": Not(BeZero()),
+		})))
 
 		snapshot.Indexed = 99
 		Expect(status.Snapshot().Indexed).To(Equal(2))
@@ -58,8 +63,10 @@ var _ = ginkgo.Describe("IndexingStatus", func() {
 		Expect(status.IsReady()).To(BeFalse())
 		Expect(status.IsFailed()).To(BeFalse())
 		snapshot := status.Snapshot()
-		Expect(snapshot.Indexed).To(Equal(0))
-		Expect(snapshot.Failed).To(Equal(0))
-		Expect(snapshot.FinishedAt.IsZero()).To(BeTrue())
+		Expect(snapshot).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Indexed":    BeZero(),
+			"Failed":     BeZero(),
+			"FinishedAt": BeZero(),
+		})))
 	})
 })

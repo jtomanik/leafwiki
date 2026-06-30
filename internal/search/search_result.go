@@ -14,13 +14,13 @@ type SearchResult struct {
 }
 
 type SearchResultItem struct {
-	PageID  tree.PageID `json:"page_id"`
-	Title   string      `json:"title"`
-	Path    string      `json:"path"`
-	Kind    string      `json:"kind"`
-	Rank    float64     `json:"rank"`
-	Excerpt string      `json:"excerpt"`
-	Tags    []string    `json:"tags,omitempty"`
+	PageID  tree.PageID   `json:"page_id"`
+	Title   string        `json:"title"`
+	Path    string        `json:"path"`
+	Kind    tree.NodeKind `json:"kind"`
+	Rank    float64       `json:"rank"`
+	Excerpt string        `json:"excerpt"`
+	Tags    []string      `json:"tags,omitempty"`
 }
 
 type SearchTagFacet struct {

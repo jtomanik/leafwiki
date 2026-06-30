@@ -137,7 +137,7 @@ func (uc *SearchUseCase) searchByTags(pageIDs []tree.PageID, startAt coresearch.
 			PageID:  node.ID,
 			Title:   node.Title,
 			Path:    dto.BuildPathFromNode(node),
-			Kind:    string(node.Kind),
+			Kind:    node.Kind,
 			Rank:    1,
 			Excerpt: excerpts[pageID],
 		})

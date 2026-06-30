@@ -9,39 +9,68 @@ import (
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
+)
+
+const (
+	missingCatalogFallbackTemplate     = "Default fallback {{.Arg0}}"
+	missingCatalogFallbackRendered     = "Default fallback value"
+	safeFallbackTemplate               = "safe fallback {{.Arg0}}"
+	safeFallbackRendered               = "safe fallback page.md"
+	genericFallbackTemplate            = "fallback {{.Arg0}}"
+	genericFallbackRendered            = "fallback value"
+	invalidFallbackTemplate            = "Default {{"
+	missingArgumentFallbackTemplate    = "Default {{.Arg1}}"
+	duplicateMessageDefaultUsage       = "Usage: leafwiki [command]"
+	duplicateMessageDefaultOther       = "Usage: other"
+	registryDefaultValue               = "Default"
+	testCatalogMissingID               = "test.missing.catalog"
+	testCatalogMissingDefault          = "Synthetic test message"
+	testCatalogMismatchDefault         = "Different usage"
+	testCatalogFixtureUsageDescription = "Usage."
+	testCatalogFixtureUsageDefault     = "Usage: leafwiki [command]"
 )
 
 var _ = Describe("English renderer", func() {
 	It("TestEnglishRendererUsesCatalogAndPositionalArgs", func() {
 		rendered := English.Render("errors.page.version_conflict", "fallback", "docs.md", "README.md")
 
-		Expect(rendered.Message).To(ContainSubstring("docs.md"))
-		Expect(rendered.Message).To(ContainSubstring("README.md"))
-		Expect(rendered.Missing).To(BeFalse())
-		Expect(rendered.Err).NotTo(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": SatisfyAll(
+				ContainSubstring("docs.md"),
+				ContainSubstring("README.md"),
+			),
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
 	})
 
 	It("TestEnglishRendererFallsBackWhenCatalogEntryIsMissing", func() {
-		rendered := English.Render("errors.test.missing", "Default fallback {{.Arg0}}", "value")
+		rendered := English.Render("errors.test.missing", missingCatalogFallbackTemplate, "value")
 
-		Expect(rendered.Message).To(Equal("Default fallback value"))
-		Expect(rendered.Missing).To(BeTrue())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(missingCatalogFallbackRendered),
+			"Missing": BeTrue(),
+		}))
 	})
 
 	It("TestEnglishRendererFallsBackWhenTemplateDataDoesNotMatch", func() {
-		rendered := English.Render("errors.page.version_conflict", "safe fallback {{.Arg0}}", "page.md")
+		rendered := English.Render("errors.page.version_conflict", safeFallbackTemplate, "page.md")
 
-		Expect(rendered.Message).To(Equal("safe fallback page.md"))
-		Expect(rendered.Err).To(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(safeFallbackRendered),
+			"Err":     HaveOccurred(),
+		}))
 	})
 
 	It("TestRegistryRejectsDuplicateMessageIDWithDifferentEnglish", func() {
 		err := validateDefinitions([]Definition{
-			{ID: "cli.help.usage", Default: "Usage: leafwiki [command]"},
-			{ID: "cli.help.usage", Default: "Usage: other"},
+			{ID: MessageIDCLIHelpUsage, Default: duplicateMessageDefaultUsage},
+			{ID: MessageIDCLIHelpUsage, Default: duplicateMessageDefaultOther},
 		})
 
-		Expect(err).To(MatchError(ContainSubstring("conflicting defaults")))
+		Expect(err).To(MatchError(ErrMessageDefinitionDefaultConflict))
 	})
 
 	It("TestCommittedCatalogCoversRegistry", func() {
@@ -78,67 +107,79 @@ var _ = Describe("localization edge coverage", func() {
 	It("nil renderer falls back using positional template data", func() {
 		var renderer *Renderer
 
-		rendered := renderer.Render("cli.help.usage", "fallback {{.Arg0}}", "value")
+		rendered := renderer.Render(MessageIDCLIHelpUsage, genericFallbackTemplate, "value")
 
-		Expect(rendered.Message).To(Equal("fallback value"))
-		Expect(rendered.Missing).To(BeFalse())
-		Expect(rendered.Err).NotTo(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(genericFallbackRendered),
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
 	})
 
 	It("nil renderer reports missing catalog IDs", func() {
 		var renderer *Renderer
 
-		Expect(renderer.hasCatalogID("cli.help.usage")).To(BeFalse())
+		Expect(renderer.hasCatalogID(MessageIDCLIHelpUsage)).To(BeFalse())
 	})
 
 	It("empty message IDs use the fallback message", func() {
-		rendered := English.Render("", "fallback {{.Arg0}}", "value")
+		rendered := English.Render("", genericFallbackTemplate, "value")
 
-		Expect(rendered.Message).To(Equal("fallback value"))
-		Expect(rendered.Missing).To(BeFalse())
-		Expect(rendered.Err).NotTo(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(genericFallbackRendered),
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
 	})
 
 	It("message IDs implementing String render through catalog lookup", func() {
-		rendered := English.Render(stringMessageID("cli.help.usage"), "fallback")
+		rendered := English.Render(stringMessageID(MessageIDCLIHelpUsage), "fallback")
 
-		Expect(rendered.Message).To(ContainSubstring("Usage: leafwiki"))
-		Expect(rendered.Missing).To(BeFalse())
-		Expect(rendered.Err).NotTo(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Not(Equal("fallback")),
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
 	})
 
 	It("non-string message IDs are stringified before fallback rendering", func() {
-		rendered := English.Render(123, "fallback {{.Arg0}}", "value")
+		rendered := English.Render(123, genericFallbackTemplate, "value")
 
-		Expect(rendered.Message).To(Equal("fallback value"))
-		Expect(rendered.Missing).To(BeTrue())
-		Expect(rendered.Err).To(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(genericFallbackRendered),
+			"Missing": BeTrue(),
+			"Err":     HaveOccurred(),
+		}))
 	})
 
 	It("fallback rendering returns literal default when template is invalid", func() {
-		rendered := English.Render("errors.test.missing", "Default {{")
+		rendered := English.Render("errors.test.missing", invalidFallbackTemplate)
 
-		Expect(rendered.Message).To(Equal("Default {{"))
-		Expect(rendered.Missing).To(BeTrue())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(invalidFallbackTemplate),
+			"Missing": BeTrue(),
+		}))
 	})
 
 	It("fallback rendering returns literal default when arguments are missing", func() {
-		rendered := English.Render("errors.test.missing", "Default {{.Arg1}}", "value")
+		rendered := English.Render("errors.test.missing", missingArgumentFallbackTemplate, "value")
 
-		Expect(rendered.Message).To(Equal("Default {{.Arg1}}"))
-		Expect(rendered.Missing).To(BeTrue())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Equal(missingArgumentFallbackTemplate),
+			"Missing": BeTrue(),
+		}))
 	})
 
 	It("validateDefinitions rejects empty IDs", func() {
-		err := validateDefinitions([]Definition{{ID: " ", Default: "Default"}})
+		err := validateDefinitions([]Definition{{ID: " ", Default: registryDefaultValue}})
 
-		Expect(err).To(MatchError(ContainSubstring("empty ID")))
+		Expect(err).To(MatchError(ErrMessageDefinitionIDRequired))
 	})
 
 	It("validateDefinitions rejects empty defaults", func() {
 		err := validateDefinitions([]Definition{{ID: "cli.test", Default: " "}})
 
-		Expect(err).To(MatchError(ContainSubstring("empty default")))
+		Expect(err).To(MatchError(ErrMessageDefinitionDefaultMissing))
 	})
 
 	It("validateDefinitions accepts duplicate IDs with identical defaults", func() {
@@ -154,11 +195,13 @@ var _ = Describe("localization edge coverage", func() {
 		renderer, err := NewEnglishRenderer()
 		Expect(err).NotTo(HaveOccurred())
 
-		rendered := renderer.Render("cli.help.usage", "fallback")
+		rendered := renderer.Render(MessageIDCLIHelpUsage, "fallback")
 
-		Expect(rendered.Message).To(ContainSubstring("Usage: leafwiki"))
-		Expect(rendered.Missing).To(BeFalse())
-		Expect(rendered.Err).NotTo(HaveOccurred())
+		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+			"Message": Not(Equal("fallback")),
+			"Missing": BeFalse(),
+			"Err":     Not(HaveOccurred()),
+		}))
 	})
 
 	It("Definitions include derived error and shell run messages", func() {
@@ -185,11 +228,11 @@ var _ = Describe("localization edge coverage", func() {
 	})
 
 	It("renderer construction and committed catalog validation reject invalid registry definitions", func() {
-		replaceRegistryMessages([]*i18n.Message{{ID: " ", Other: "Default"}})
+		replaceRegistryMessages([]*i18n.Message{{ID: " ", Other: registryDefaultValue}})
 
-		Expect(ValidateCommittedCatalog()).To(MatchError(ContainSubstring("empty ID")))
+		Expect(ValidateCommittedCatalog()).To(MatchError(ErrMessageDefinitionIDRequired))
 		renderer, err := NewEnglishRenderer()
-		Expect(err).To(MatchError(ContainSubstring("empty ID")))
+		Expect(err).To(MatchError(ErrMessageDefinitionIDRequired))
 		Expect(renderer).To(BeNil())
 		Expect(func() {
 			mustNewEnglishRenderer()
@@ -199,15 +242,18 @@ var _ = Describe("localization edge coverage", func() {
 	It("ValidateCommittedCatalog reports registry messages missing from the committed catalog", func() {
 		messages := append([]*i18n.Message(nil), registryMessages...)
 		messages = append(messages, &i18n.Message{
-			ID:          "test.missing.catalog",
+			ID:          testCatalogMissingID,
 			Description: "Synthetic test message.",
-			Other:       "Synthetic test message",
+			Other:       testCatalogMissingDefault,
 		})
 		replaceRegistryMessages(messages)
 
 		err := ValidateCommittedCatalog()
 
-		Expect(err).To(MatchError(ContainSubstring("catalog missing message IDs: test.missing.catalog")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrCommittedCatalogMissingMessage),
+			MatchError(ContainSubstring(testCatalogMissingID)),
+		))
 	})
 
 	It("ValidateCommittedCatalog reports committed catalog default mismatches", func() {
@@ -215,7 +261,7 @@ var _ = Describe("localization edge coverage", func() {
 		for i, message := range messages {
 			if message != nil && message.ID == MessageIDCLIHelpUsage {
 				clone := *message
-				clone.Other = "Different usage"
+				clone.Other = testCatalogMismatchDefault
 				messages[i] = &clone
 				break
 			}
@@ -224,23 +270,38 @@ var _ = Describe("localization edge coverage", func() {
 
 		err := ValidateCommittedCatalog()
 
-		Expect(err).To(MatchError(ContainSubstring("catalog cli.help.usage other")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrCommittedCatalogDefaultMismatch),
+			MatchError(ContainSubstring(string(MessageIDCLIHelpUsage))),
+		))
 	})
 
 	It("catalog readers return errors when the embedded catalog is unavailable", func() {
 		replaceLocaleFS(embed.FS{})
 
 		catalog, err := committedCatalog()
-		Expect(err).To(MatchError(ContainSubstring("read English catalog")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrEnglishCatalogRead),
+			MatchError(fs.ErrNotExist),
+		))
 		Expect(catalog).To(BeNil())
 
 		ids, err := catalogIDsFromCommittedCatalog()
-		Expect(err).To(MatchError(ContainSubstring("read English catalog")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrEnglishCatalogRead),
+			MatchError(fs.ErrNotExist),
+		))
 		Expect(ids).To(BeNil())
 
-		Expect(ValidateCommittedCatalog()).To(MatchError(ContainSubstring("read English catalog")))
+		Expect(ValidateCommittedCatalog()).To(SatisfyAll(
+			MatchError(ErrEnglishCatalogRead),
+			MatchError(fs.ErrNotExist),
+		))
 		renderer, err := NewEnglishRenderer()
-		Expect(err).To(MatchError(ContainSubstring("read English catalog")))
+		Expect(err).To(SatisfyAll(
+			MatchError(ErrEnglishCatalogRead),
+			MatchError(fs.ErrNotExist),
+		))
 		Expect(renderer).To(BeNil())
 	})
 
@@ -251,7 +312,7 @@ var _ = Describe("localization edge coverage", func() {
 
 		catalog, err := committedCatalog()
 
-		Expect(err).To(MatchError(ContainSubstring("parse English catalog")))
+		Expect(err).To(MatchError(ErrEnglishCatalogParse))
 		Expect(catalog).To(BeNil())
 	})
 
@@ -260,8 +321,8 @@ var _ = Describe("localization edge coverage", func() {
 			files: []fstest.MapFS{
 				{
 					"locales/active.en.toml": &fstest.MapFile{Data: []byte(`["cli.help.usage"]
-description = "Usage."
-other = "Usage: leafwiki [command]"
+description = "` + testCatalogFixtureUsageDescription + `"
+other = "` + testCatalogFixtureUsageDefault + `"
 `)},
 				},
 				{
@@ -272,7 +333,7 @@ other = "Usage: leafwiki [command]"
 
 		renderer, err := NewEnglishRenderer()
 
-		Expect(err).To(MatchError(ContainSubstring("load English catalog")))
+		Expect(err).To(MatchError(ErrEnglishCatalogLoad))
 		Expect(renderer).To(BeNil())
 	})
 })
@@ -307,4 +368,8 @@ func (fsys *sequentialCatalogFS) Open(name string) (fs.File, error) {
 	}
 	fsys.opens++
 	return fsys.files[index].Open(name)
+}
+
+func matchRenderResult(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }

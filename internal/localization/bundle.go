@@ -43,7 +43,7 @@ func NewEnglishRenderer() (*Renderer, error) {
 	bundle := i18n.NewBundle(language.English)
 	bundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 	if _, err := bundle.LoadMessageFileFS(localeFS, "locales/active.en.toml"); err != nil {
-		return nil, fmt.Errorf("load English catalog: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrEnglishCatalogLoad, err)
 	}
 	return &Renderer{
 		localizer:       i18n.NewLocalizer(bundle, "en"),

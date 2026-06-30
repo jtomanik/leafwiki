@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	coresearch "github.com/perber/wiki/internal/search"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("search error responses", func() {
@@ -20,8 +22,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 
 		respondWithSearchError(ctx, ErrSearchUnavailable)
 
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"search_unavailable","messageId":"errors.search.unavailable","message":"Search is currently unavailable","template":"search is currently unavailable"}}`))
+		Expect(rec).To(matchSearchStructuredError(http.StatusServiceUnavailable, ErrCodeSearchUnavailable))
 	})
 
 	ginkgo.It("TestRespondWithSearchError_InternalErrorIsSanitized", func() {
@@ -29,8 +30,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 
 		respondWithSearchError(ctx, errors.New("sqlite disk I/O error"))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"search_internal_error","messageId":"errors.search.internal_error","message":"Failed to perform search","template":"Failed to perform search"}}`))
+		Expect(rec).To(matchSearchStructuredError(http.StatusInternalServerError, ErrCodeSearchInternal))
 	})
 
 	ginkgo.It("maps search error codes to HTTP status codes", func() {
@@ -46,8 +46,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 
 		respondWithSearchStatusError(ctx, http.StatusBadRequest, ErrCodeSearchInvalidOffset, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertSearchStructuredError(rec, "search_invalid_offset", "errors.search.invalid_offset")
+		Expect(rec).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchInvalidOffset))
 	})
 
 	ginkgo.It("renders localized errors with their mapped status", func() {
@@ -55,22 +54,17 @@ var _ = ginkgo.Describe("search error responses", func() {
 
 		respondWithSearchError(ctx, sharederrors.NewLocalizedErrorFromCode(ErrCodeSearchMissingQuery, nil))
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertSearchStructuredError(rec, "search_missing_query", "errors.search.missing_query")
+		Expect(rec).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchMissingQuery))
 	})
 })
 
 var _ = ginkgo.Describe("search request helpers", func() {
 	ginkgo.It("requires either a query or non-empty normalized tags", func() {
 		err := ValidateSearchRequest("", nil)
-		loc, ok := sharederrors.AsLocalizedError(err)
-		Expect(ok).To(BeTrue())
-		Expect(loc.Code).To(Equal(ErrCodeSearchMissingQuery))
+		Expect(err).To(testmatchers.MatchLocalizedError(ErrCodeSearchMissingQuery, sharederrors.MessageIDForCode(ErrCodeSearchMissingQuery)))
 
 		err = ValidateSearchRequest("", []string{" ", ""})
-		loc, ok = sharederrors.AsLocalizedError(err)
-		Expect(ok).To(BeTrue())
-		Expect(loc.Code).To(Equal(ErrCodeSearchMissingQuery))
+		Expect(err).To(testmatchers.MatchLocalizedError(ErrCodeSearchMissingQuery, sharederrors.MessageIDForCode(ErrCodeSearchMissingQuery)))
 
 		Expect(ValidateSearchRequest("docs", nil)).To(Succeed())
 		Expect(ValidateSearchRequest("", []string{" go "})).To(Succeed())
@@ -107,11 +101,13 @@ var _ = ginkgo.Describe("search use cases", func() {
 		out, err := uc.searchByTags(nil, coresearch.ResultOffset(-3), coresearch.ResultLimit(0))
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result.Count).To(Equal(0))
-		Expect(out.Result.Items).To(Equal([]coresearch.SearchResultItem{}))
-		Expect(out.Result.StartAt).To(Equal(coresearch.ResultOffset(-3)))
-		Expect(out.Result.PageSize).To(Equal(coresearch.ResultLimit(0)))
-		Expect(out.Result.TagFacets).To(Equal([]coresearch.SearchTagFacet{}))
+		Expect(out.Result).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Count":     BeZero(),
+			"Items":     BeEmpty(),
+			"StartAt":   Equal(coresearch.ResultOffset(-3)),
+			"PageSize":  Equal(coresearch.ResultLimit(0)),
+			"TagFacets": BeEmpty(),
+		})))
 	})
 
 	ginkgo.It("returns nil indexing status when no tracker is configured", func() {
@@ -131,9 +127,11 @@ var _ = ginkgo.Describe("search use cases", func() {
 		out := uc.Execute(context.Background())
 		status.Fail()
 
-		Expect(out.Status.Active).To(BeTrue())
-		Expect(out.Status.Indexed).To(Equal(1))
-		Expect(out.Status.Failed).To(Equal(0))
+		Expect(out.Status).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Active":  BeTrue(),
+			"Indexed": Equal(1),
+			"Failed":  BeZero(),
+		})))
 	})
 })
 
@@ -152,10 +150,6 @@ func ginContextForTarget(target string) *gin.Context {
 	return ctx
 }
 
-func assertSearchStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
-	ginkgo.GinkgoHelper()
-	var body SearchErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code.String()).To(Equal(code))
-	Expect(body.Error.MessageID.String()).To(Equal(messageID))
+func matchSearchStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
 }
