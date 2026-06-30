@@ -12,8 +12,11 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -27,8 +30,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots")
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_disabled", "errors.workspace.sync_disabled", "workspace sync is not enabled")
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
 	ginkgo.It("TestSnapshotRouteFailureDoesNotRenderRawErrorAsMessage", func() {
@@ -44,9 +46,8 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots")
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_failed", "errors.workspace.sync_failed", "Workspace sync failed")
-		Expect(strings.Contains(rec.Body.String(), rawErr.Error())).To(BeFalse())
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
+		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring(rawErr.Error())))
 	})
 
 	ginkgo.It("maps SyncStatus fields into the public status response", func() {
@@ -79,8 +80,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(response).To(HaveKeyWithValue("validationErrorDetails", status.ValidationErrors))
 		detail, ok := response["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
 		Expect(ok).To(BeTrue())
-		Expect(detail.Code.String()).To(Equal("workspace_sync_failed"))
-		Expect(detail.MessageID.String()).To(Equal("errors.workspace.sync_failed"))
+		Expect(detail).To(testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)))
 	})
 
 	ginkgo.It("omits last-error detail for blank status errors", func() {
@@ -92,9 +92,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		detail := workspaceSyncLastErrorDetail("git failed")
 
 		Expect(detail).NotTo(BeNil())
-		Expect(detail.Code.String()).To(Equal("workspace_sync_failed"))
-		Expect(detail.MessageID.String()).To(Equal("errors.workspace.sync_failed"))
-		Expect(detail.Message).To(Equal("Workspace sync failed"))
+		Expect(detail).To(testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)))
 	})
 
 	ginkgo.DescribeTable("rejects invalid snapshot cursors",
@@ -110,8 +108,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 			rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots?cursor="+query)
 
-			Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-			assertWorkspaceSyncStructuredError(rec, "workspace_sync_invalid_cursor", "errors.workspace.sync_invalid_cursor", "invalid snapshot cursor")
+			Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusBadRequest, errCodeWorkspaceSyncInvalidCursor), rec.Body.String())
 		},
 		ginkgo.Entry("cursor with whitespace", "abc%20123"),
 		ginkgo.Entry("cursor longer than 256 characters", strings.Repeat("a", 257)),
@@ -130,8 +127,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 			rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots?limit="+limit)
 
-			Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-			assertWorkspaceSyncStructuredError(rec, "workspace_sync_invalid_limit", "errors.workspace.sync_invalid_limit", "invalid snapshot limit")
+			Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusBadRequest, errCodeWorkspaceSyncInvalidLimit), rec.Body.String())
 		},
 		ginkgo.Entry("non-number", "many"),
 		ginkgo.Entry("zero", "0"),
@@ -141,6 +137,10 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 	ginkgo.It("passes snapshot cursor and limit to the list callback and returns next cursor", func() {
 		var gotCursor workspacesync.CommitHash
 		var gotLimit workspacesync.SnapshotLimit
+		expectedSnapshot := workspacesync.Snapshot{
+			ID:      workspacesync.CommitHashFromString("snapshot-1"),
+			Message: "first snapshot",
+		}
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true}
@@ -149,10 +149,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 				gotCursor = cursor
 				gotLimit = limit
 				return workspacesync.SnapshotList{
-					Snapshots: []workspacesync.Snapshot{{
-						ID:      workspacesync.CommitHashFromString("snapshot-1"),
-						Message: "first snapshot",
-					}},
+					Snapshots:  []workspacesync.Snapshot{expectedSnapshot},
 					NextCursor: workspacesync.CommitHashFromString("next-snapshot"),
 				}, nil
 			},
@@ -160,21 +157,18 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots?cursor=after-commit&limit=12")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		Expect(gotCursor).To(Equal(workspacesync.CommitHashFromString("after-commit")))
 		Expect(gotLimit).To(Equal(workspacesync.SnapshotLimit(12)))
 		var body struct {
 			Snapshots []struct {
-				ID      string `json:"id"`
-				Message string `json:"message"`
+				ID      workspacesync.CommitHash `json:"id"`
+				Message string                   `json:"message"`
 			} `json:"snapshots"`
-			NextCursor string `json:"nextCursor"`
+			NextCursor workspacesync.CommitHash `json:"nextCursor"`
 		}
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body.Snapshots).To(HaveLen(1))
-		Expect(body.Snapshots[0].ID).To(Equal("snapshot-1"))
-		Expect(body.Snapshots[0].Message).To(Equal("first snapshot"))
-		Expect(body.NextCursor).To(Equal("next-snapshot"))
+		Expect(body).To(haveWorkspaceSyncSnapshotPageResponse(expectedSnapshot, workspacesync.CommitHashFromString("next-snapshot")))
 	})
 
 	ginkgo.It("uses the default snapshot page limit when the query omits limit", func() {
@@ -191,7 +185,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		Expect(gotLimit).To(Equal(workspacesync.SnapshotLimit(50)))
 	})
 
@@ -204,14 +198,13 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/status")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body struct {
 			Enabled           bool `json:"enabled"`
 			PendingEventCount int  `json:"pendingEventCount"`
 		}
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body.Enabled).To(BeTrue())
-		Expect(body.PendingEventCount).To(Equal(3))
+		Expect(body).To(haveWorkspaceSyncStatusResponse(true, 3))
 	})
 
 	ginkgo.It("serves status from the public route when public access is enabled", func() {
@@ -223,7 +216,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/status")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
 	ginkgo.It("returns disabled when refresh is not configured", func() {
@@ -235,8 +228,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/refresh")
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_disabled", "errors.workspace.sync_disabled", "workspace sync is not enabled")
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
 	ginkgo.It("passes explicit filesystem refresh requests to the refresh callback", func() {
@@ -253,10 +245,8 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/refresh")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-		Expect(gotRequest.Reason).To(Equal(workspacesync.ReasonExplicit))
-		Expect(gotRequest.Source).To(Equal(workspacesync.SourceFilesystem))
-		Expect(gotRequest.Actor).To(Equal(workspacesync.PublicEditorActor()))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+		Expect(gotRequest).To(haveWorkspaceSyncRequest(workspacesync.ReasonExplicit, workspacesync.SourceFilesystem, workspacesync.PublicEditorActor()))
 	})
 
 	ginkgo.It("returns a structured failure when refresh fails", func() {
@@ -271,8 +261,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/refresh")
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_failed", "errors.workspace.sync_failed", "Workspace sync failed")
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
 	})
 
 	ginkgo.It("returns disabled when restore is not configured", func() {
@@ -284,8 +273,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/snapshots/abc123/restore")
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_disabled", "errors.workspace.sync_disabled", "workspace sync is not enabled")
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
 	ginkgo.It("passes commit and public-editor actor details to the restore callback", func() {
@@ -306,10 +294,9 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/snapshots/abc123/restore")
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		Expect(gotCommit).To(Equal(workspacesync.CommitHashFromString("abc123")))
-		Expect(gotActor.ID.String()).To(Equal("public-editor"))
-		Expect(gotActor.Name).To(Equal("public-editor"))
+		Expect(gotActor).To(haveWorkspaceSyncRoutePublicEditorActor())
 		Expect(gotSource).To(Equal(workspacesync.SourceWeb))
 	})
 
@@ -325,8 +312,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncCSRFRequest(router, http.MethodPost, "/api/workspace-sync/snapshots/abc123/restore")
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertWorkspaceSyncStructuredError(rec, "workspace_sync_failed", "errors.workspace.sync_failed", "Workspace sync failed")
+		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
 	})
 
 	ginkgo.It("ignores nil route registrations and configs without a status callback", func() {
@@ -353,7 +339,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		rec := performWorkspaceSyncRequest(router, http.MethodPost, "/restore/abc123")
 
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
 		Expect(called).To(BeFalse())
 	})
 })
@@ -392,17 +378,43 @@ func performWorkspaceSyncCSRFRequest(router http.Handler, method string, path st
 	return rec
 }
 
-func assertWorkspaceSyncStructuredError(rec *httptest.ResponseRecorder, code string, messageID string, message string) {
+func matchWorkspaceSyncStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
-		} `json:"error"`
-	}
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code).To(Equal(code))
-	Expect(body.Error.MessageID).To(Equal(messageID))
-	Expect(body.Error.Message).To(Equal(message))
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func haveWorkspaceSyncSnapshotPageResponse(snapshot workspacesync.Snapshot, nextCursor workspacesync.CommitHash) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Snapshots": HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ID":      Equal(snapshot.ID),
+			"Message": Equal(snapshot.Message),
+		})),
+		"NextCursor": Equal(nextCursor),
+	})
+}
+
+func haveWorkspaceSyncStatusResponse(enabled bool, pendingEventCount int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Enabled":           Equal(enabled),
+		"PendingEventCount": Equal(pendingEventCount),
+	})
+}
+
+func haveWorkspaceSyncRequest(reason workspacesync.Reason, source workspacesync.Source, actor workspacesync.Actor) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Reason": Equal(reason),
+		"Source": Equal(source),
+		"Actor":  Equal(actor),
+	})
+}
+
+func haveWorkspaceSyncRoutePublicEditorActor() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":   Equal(workspacesync.PublicEditorActor().ID),
+		"Name": Equal("public-editor"),
+	})
 }

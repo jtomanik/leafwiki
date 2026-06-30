@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("link errors", func() {
@@ -25,8 +26,7 @@ var _ = ginkgo.Describe("link errors", func() {
 			nil,
 		))
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_page_not_found","messageId":"errors.link.page_not_found","message":"Page not found","template":"page not found"}}`))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusNotFound, ErrCodeLinkPageNotFound, sharederrors.MessageIDForCode(ErrCodeLinkPageNotFound)))
 	})
 
 	ginkgo.It("TestRespondWithLinkError_ServiceUnavailable", func() {
@@ -36,8 +36,7 @@ var _ = ginkgo.Describe("link errors", func() {
 
 		respondWithLinkError(c, ErrLinkServiceUnavailable)
 
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_service_unavailable","messageId":"errors.link.service_unavailable","message":"Link service is unavailable","template":"link service is unavailable"}}`))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusServiceUnavailable, ErrCodeLinkUnavailable, sharederrors.MessageIDForCode(ErrCodeLinkUnavailable)))
 	})
 
 	ginkgo.It("TestRespondWithLinkError_InternalErrorIsSanitized", func() {
@@ -47,8 +46,7 @@ var _ = ginkgo.Describe("link errors", func() {
 
 		respondWithLinkError(c, errors.New("sql: database is closed"))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		Expect(rec.Body.String()).To(Equal(`{"error":{"code":"link_internal_error","messageId":"errors.link.internal_error","message":"Failed to load link status","template":"Failed to load link status"}}`))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeLinkInternalError, sharederrors.MessageIDForCode(ErrCodeLinkInternalError)))
 	})
 
 	ginkgo.It("linkErrorStatus maps known link error codes", func() {
@@ -64,8 +62,6 @@ var _ = ginkgo.Describe("link errors", func() {
 
 		respondWithLinkStatusError(c, http.StatusServiceUnavailable, ErrCodeLinkUnavailable, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
-		Expect(rec.Body.String()).To(ContainSubstring(string(ErrCodeLinkUnavailable)))
-		Expect(rec.Body.String()).To(ContainSubstring("errors.link.service_unavailable"))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusServiceUnavailable, ErrCodeLinkUnavailable, sharederrors.MessageIDForCode(ErrCodeLinkUnavailable)))
 	})
 })

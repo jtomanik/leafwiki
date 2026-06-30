@@ -117,7 +117,7 @@ func (r *Routes) handleRestoreWorkspace(c *gin.Context) {
 	status, err := r.restoreWorkspace(
 		c.Request.Context(),
 		workspacesync.CommitHashFromString(strings.TrimSpace(c.Param("commit"))),
-		workspacesync.Actor{ID: workspacesync.NewActorIDUnchecked(user.ID), Name: user.Username, Email: user.Email},
+		workspacesync.Actor{ID: workspacesync.ActorIDFromUserID(coreauth.UserIDFromString(user.ID)), Name: user.Username, Email: user.Email},
 		workspacesync.SourceWeb,
 	)
 	if err != nil {
