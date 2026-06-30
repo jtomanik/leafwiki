@@ -11,6 +11,8 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	corebranding "github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -33,31 +35,31 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(status.Enabled).To(BeFalse())
 
 		status, err := w.WorkspaceSyncRefresh(ctx, workspacesync.SyncRequest{})
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(status.Enabled).To(BeFalse())
 
 		snapshotList, err := w.WorkspaceSyncSnapshots(ctx, 10)
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(snapshotList).To(BeNil())
 
 		snapshots, err := w.WorkspaceSyncSnapshotPage(ctx, "", 10)
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(snapshots).To(Equal(workspacesync.SnapshotList{}))
 
 		status, err = w.WorkspaceSyncRestoreWorkspace(ctx, "abc123", workspacesync.Actor{ID: "user-1"}, workspacesync.SourceWeb)
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(status.Enabled).To(BeFalse())
 
 		revisions, err := w.WorkspaceSyncPageRevisions(ctx, page, "", 5)
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(revisions).To(Equal(workspacesync.PageRevisionList{}))
 
-		revisionSnapshot, err := w.WorkspaceSyncPageRevision(ctx, page, revision.NewRevisionIDUnchecked("rev-1"))
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		revisionSnapshot, err := w.WorkspaceSyncPageRevision(ctx, page, revision.RevisionIDFromString("rev-1"))
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(revisionSnapshot).To(BeNil())
 
-		restored, err := w.WorkspaceSyncRestorePageRevision(ctx, page, revision.NewRevisionIDUnchecked("rev-1"), workspacesync.Actor{ID: "user-1"}, workspacesync.SourceWeb)
-		Expect(err).To(MatchError(ContainSubstring("workspace sync is not enabled")))
+		restored, err := w.WorkspaceSyncRestorePageRevision(ctx, page, revision.RevisionIDFromString("rev-1"), workspacesync.Actor{ID: "user-1"}, workspacesync.SourceWeb)
+		Expect(err).To(matchWorkspaceSyncDisabled())
 		Expect(restored).To(BeNil())
 	})
 
@@ -72,14 +74,14 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		snapshot := workspacesync.Snapshot{ID: "commit-1", Message: "snapshot"}
-		revisionSnapshot := &revision.RevisionSnapshot{Revision: &revision.Revision{ID: revision.NewRevisionIDUnchecked("rev-1")}}
+		revisionSnapshot := &revision.RevisionSnapshot{Revision: &revision.Revision{ID: revision.RevisionIDFromString("rev-1")}}
 		fake := &fakeWorkspaceSyncFacade{
 			status:           workspacesync.SyncStatus{Enabled: true, LastCommitHash: "commit-1"},
 			refreshStatus:    workspacesync.SyncStatus{Enabled: true, LastCommitHash: "commit-2"},
 			snapshots:        []workspacesync.Snapshot{snapshot},
 			snapshotPage:     workspacesync.SnapshotList{Snapshots: []workspacesync.Snapshot{snapshot}, NextCursor: "next"},
 			restoreStatus:    workspacesync.SyncStatus{Enabled: true, LastCommitHash: "restore-1"},
-			pageRevisions:    workspacesync.PageRevisionList{Revisions: []*revision.Revision{{ID: revision.NewRevisionIDUnchecked("rev-1")}}, NextCursor: "next-rev"},
+			pageRevisions:    workspacesync.PageRevisionList{Revisions: []*revision.Revision{{ID: revision.RevisionIDFromString("rev-1")}}, NextCursor: "next-rev"},
 			revisionSnapshot: revisionSnapshot,
 		}
 		w := &Wiki{tree: treeService, workspaceSync: fake}
@@ -91,12 +93,12 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(w.WorkspaceSyncSnapshotPage(ctx, "cursor", 6)).To(Equal(fake.snapshotPage))
 		Expect(w.WorkspaceSyncRestoreWorkspace(ctx, "restore-target", workspacesync.Actor{ID: "actor"}, workspacesync.SourceMCP)).To(Equal(fake.restoreStatus))
 		Expect(w.WorkspaceSyncPageRevisions(ctx, page, "rev-cursor", 7)).To(Equal(fake.pageRevisions))
-		Expect(w.WorkspaceSyncPageRevision(ctx, page, revision.NewRevisionIDUnchecked("rev-1"))).To(Equal(revisionSnapshot))
+		Expect(w.WorkspaceSyncPageRevision(ctx, page, revision.RevisionIDFromString("rev-1"))).To(Equal(revisionSnapshot))
 
-		restored, err := w.WorkspaceSyncRestorePageRevision(ctx, page, revision.NewRevisionIDUnchecked("rev-2"), workspacesync.Actor{ID: "actor"}, workspacesync.SourceWeb)
+		restored, err := w.WorkspaceSyncRestorePageRevision(ctx, page, revision.RevisionIDFromString("rev-2"), workspacesync.Actor{ID: "actor"}, workspacesync.SourceWeb)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(restored.ID).To(Equal(page.ID))
-		Expect(fake.restoredDocumentCommit).To(Equal(workspacesync.CommitHashFromRevisionID(revision.NewRevisionIDUnchecked("rev-2"))))
+		Expect(fake.restoredDocumentCommit).To(Equal(workspacesync.CommitHashFromRevisionID(revision.RevisionIDFromString("rev-2"))))
 	})
 
 	ginkgo.It("workspace sync restore page revision returns sync errors before reading the restored page", func() {
@@ -106,7 +108,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		restored, err := w.WorkspaceSyncRestorePageRevision(
 			context.Background(),
 			&tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page")}},
-			revision.NewRevisionIDUnchecked("rev-1"),
+			revision.RevisionIDFromString("rev-1"),
 			workspacesync.Actor{ID: "actor"},
 			workspacesync.SourceWeb,
 		)
@@ -125,14 +127,11 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		}
 
 		w.configureWorkspaceSyncRebuilder()
-		Expect(fake.afterSync).NotTo(BeNil())
-
 		w.startWorkspaceSyncWatcher()
-		Expect(fake.startCalled).To(BeTrue())
 		Expect(w.workspaceSyncCancel).NotTo(BeNil())
 
 		Expect(w.Close()).To(Succeed())
-		Expect(fake.stopCalled).To(BeTrue())
+		Expect(fake).To(haveWorkspaceSyncLifecycleObserved())
 	})
 
 	ginkgo.It("route registrar accessors expose the expected route groups", func() {
@@ -166,7 +165,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 
 		(&Wiki{}).SetRuntimeRoleHealth(nil, nil)
 		webSessions, err := (&Wiki{}).WebPresenceSessions(&coreauth.User{ID: "viewer"})
-		Expect(err).To(MatchError(ContainSubstring("web presence is unavailable")))
+		expectWebPresenceUnavailable(err)
 		Expect(webSessions).To(BeNil())
 
 		w.webPresence = wikipresence.NewWebPresenceRegistry(time.Minute, nil)
@@ -175,7 +174,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(webSessions).To(BeEmpty())
 
 		agentSessions, err := (&Wiki{}).AgentPresenceSessions()
-		Expect(err).To(MatchError(ContainSubstring("agent presence is unavailable")))
+		expectAgentPresenceUnavailable(err)
 		Expect(agentSessions).To(BeNil())
 
 		w.SetAgentPresenceRegistry(projectdaemon.NewAgentPresenceRegistry(time.Minute, nil))
@@ -230,28 +229,23 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		w := createWikiTestInstance(t)
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
-		actor := (&Wiki{}).workspaceSyncActorForUser(tree.UserIDFromString("external-user"))
-		Expect(actor.ID.String()).To(Equal("external-user"))
-		Expect(actor.Name).To(BeEmpty())
-		Expect(actor.Email).To(BeEmpty())
+		externalUserID := tree.UserIDFromString("external-user")
+		actor := (&Wiki{}).workspaceSyncActorForUser(externalUserID)
+		Expect(actor).To(haveWorkspaceSyncActor(workspacesync.ActorIDFromUserID(externalUserID), BeEmpty(), BeEmpty()))
 
 		actor = w.workspaceSyncActorForUser(tree.UserIDFromString(""))
-		Expect(actor.ID.String()).To(BeEmpty())
-		Expect(actor.Name).To(BeEmpty())
-		Expect(actor.Email).To(BeEmpty())
+		Expect(actor).To(haveWorkspaceSyncActor(workspacesync.ActorIDFromUserID(tree.UserIDFromString("")), BeEmpty(), BeEmpty()))
 
-		actor = w.workspaceSyncActorForUser(tree.UserIDFromString("missing-user"))
-		Expect(actor.ID.String()).To(Equal("missing-user"))
-		Expect(actor.Name).To(BeEmpty())
-		Expect(actor.Email).To(BeEmpty())
+		missingUserID := tree.UserIDFromString("missing-user")
+		actor = w.workspaceSyncActorForUser(missingUserID)
+		Expect(actor).To(haveWorkspaceSyncActor(workspacesync.ActorIDFromUserID(missingUserID), BeEmpty(), BeEmpty()))
 
 		user, err := w.user.CreateUser("syncactor", "syncactor@example.com", "password123", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
 
-		actor = w.workspaceSyncActorForUser(tree.UserIDFromString(user.ID))
-		Expect(actor.ID.String()).To(Equal(user.ID))
-		Expect(actor.Name).To(Equal("syncactor"))
-		Expect(actor.Email).To(Equal("syncactor@example.com"))
+		knownUserID := tree.UserIDFromString(user.ID)
+		actor = w.workspaceSyncActorForUser(knownUserID)
+		Expect(actor).To(haveWorkspaceSyncActor(workspacesync.ActorIDFromUserID(knownUserID), Equal("syncactor"), Equal("syncactor@example.com")))
 	})
 
 	ginkgo.It("import adapter delegates tree, page, and asset operations", func() {
@@ -264,8 +258,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 
 		rootLookup, err := adapter.LookupPagePath("")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(rootLookup.Path).To(BeEmpty())
-		Expect(rootLookup.Exists).To(BeFalse())
+		Expect(rootLookup).To(haveWikiPathLookup(tree.RoutePathFromString(""), BeFalse()))
 
 		sectionRootLookup, err := adapter.LookupPagePathForKind("", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
@@ -398,4 +391,63 @@ func (f *fakeWorkspaceSyncFacade) StartWatcher(context.Context) error {
 
 func (f *fakeWorkspaceSyncFacade) StopWatcher() {
 	f.stopCalled = true
+}
+
+var (
+	expectedWorkspaceSyncDisabledError = errors.New("workspace sync is not enabled")
+	expectedWebPresenceUnavailable     = errors.New("web presence is unavailable")
+	expectedAgentPresenceUnavailable   = errors.New("agent presence is unavailable")
+)
+
+type workspaceSyncLifecycleSnapshot struct {
+	AfterSyncConfigured bool
+	Started             bool
+	Stopped             bool
+}
+
+func haveWorkspaceSyncLifecycleObserved() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(fake *fakeWorkspaceSyncFacade) workspaceSyncLifecycleSnapshot {
+		return workspaceSyncLifecycleSnapshot{
+			AfterSyncConfigured: fake.afterSync != nil,
+			Started:             fake.startCalled,
+			Stopped:             fake.stopCalled,
+		}
+	}, gstruct.MatchAllFields(gstruct.Fields{
+		"AfterSyncConfigured": BeTrue(),
+		"Started":             BeTrue(),
+		"Stopped":             BeTrue(),
+	}))
+}
+
+func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, email types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":    Equal(id),
+		"Name":  name,
+		"Email": email,
+	})
+}
+
+func haveWikiPathLookup(path tree.RoutePath, exists types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path":   Equal(path),
+		"Exists": exists,
+	}))
+}
+
+func matchWorkspaceSyncDisabled() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return MatchError(expectedWorkspaceSyncDisabledError)
+}
+
+func expectWebPresenceUnavailable(err error) {
+	ginkgo.GinkgoHelper()
+	Expect(err).To(MatchError(expectedWebPresenceUnavailable))
+}
+
+func expectAgentPresenceUnavailable(err error) {
+	ginkgo.GinkgoHelper()
+	Expect(err).To(MatchError(expectedAgentPresenceUnavailable))
 }

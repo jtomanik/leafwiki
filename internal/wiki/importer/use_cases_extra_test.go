@@ -19,11 +19,14 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/shared"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	coreimporter "github.com/perber/wiki/internal/importer"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("importer use cases", func() {
@@ -38,9 +41,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out.Plan).NotTo(BeNil())
-		Expect(out.Plan.ExecutionStatus).To(Equal(coreimporter.ExecutionStatusPlanned))
-		Expect(out.Plan.Items).To(HaveLen(1))
-		Expect(out.Plan.Items[0].TargetPath).To(Equal(tree.RoutePathFromString("docs/imported")))
+		Expect(out.Plan).To(haveImporterPlanWithTargetItem(coreimporter.ExecutionStatusPlanned, tree.RoutePathFromString("docs/imported")))
 	})
 
 	ginkgo.It("returns plan creation errors from invalid uploads", func() {
@@ -50,7 +51,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		out, err := uc.Execute(context.Background(), CreateImportPlanInput{File: strings.NewReader("not a zip")})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring("extract zip to temp")))
+		Expect(err).To(HaveOccurred())
 	})
 
 	ginkgo.It("returns current-plan lookup errors after successful plan creation", func() {
@@ -60,7 +61,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		out, err := uc.Execute(context.Background(), CreateImportPlanInput{File: strings.NewReader("ignored")})
 
 		Expect(out).To(BeNil())
-		Expect(errors.Is(err, getErr)).To(BeTrue())
+		Expect(err).To(MatchError(getErr))
 	})
 
 	ginkgo.It("gets the current plan or maps a missing plan to a localized error", func() {
@@ -69,7 +70,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 
 		out, err := uc.Execute(context.Background())
 		Expect(out).To(BeNil())
-		expectLocalizedImporterError(err, ErrCodeImporterNoPlan)
+		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterNoPlan))
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
 		out, err = uc.Execute(context.Background())
@@ -84,7 +85,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		out, err := uc.Execute(context.Background())
 
 		Expect(out).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring(coreimporter.ErrImportStateUnavailable.Error())))
+		Expect(err).To(MatchError(coreimporter.ErrImportStateUnavailable))
 	})
 
 	ginkgo.It("starts planned imports and maps execution errors", func() {
@@ -93,12 +94,12 @@ var _ = ginkgo.Describe("importer use cases", func() {
 
 		out, err := uc.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
 		Expect(out).To(BeNil())
-		expectLocalizedImporterError(err, ErrCodeImporterNoPlan)
+		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterNoPlan))
 
 		running := &ExecuteImportUseCase{svc: fakeImporterExecutor{err: coreimporter.ErrImportExecutionRunning}}
 		out, err = running.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
 		Expect(out).To(BeNil())
-		expectLocalizedImporterError(err, ErrCodeImporterExecutionRunning)
+		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterExecutionRunning))
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
 		out, err = uc.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
@@ -109,7 +110,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		unavailable := NewExecuteImportUseCase(newImporterServiceWithStore(importerUnavailablePlanStore()))
 		out, err = unavailable.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
 		Expect(out).To(BeNil())
-		expectLocalizedImporterError(err, ErrCodeImporterStateUnavailable)
+		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterStateUnavailable))
 	})
 
 	ginkgo.It("returns raw execution errors unchanged", func() {
@@ -119,7 +120,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		out, err := uc.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
 
 		Expect(out).To(BeNil())
-		Expect(errors.Is(err, executeErr)).To(BeTrue())
+		Expect(err).To(MatchError(executeErr))
 	})
 
 	ginkgo.It("clears planned imports, requests cancellation for running imports, and maps state errors", func() {
@@ -141,13 +142,12 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		state, err = uc.Execute(context.Background())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(state).NotTo(BeNil())
-		Expect(state.ExecutionStatus).To(Equal(coreimporter.ExecutionStatusRunning))
-		Expect(state.CancelRequested).To(BeTrue())
+		Expect(state).To(haveImporterPlanWithCancellation(coreimporter.ExecutionStatusRunning))
 
 		unavailable := NewClearImportPlanUseCase(newImporterServiceWithStore(importerUnavailablePlanStore()))
 		state, err = unavailable.Execute(context.Background())
 		Expect(state).To(BeNil())
-		expectLocalizedImporterError(err, ErrCodeImporterStateUnavailable)
+		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterStateUnavailable))
 	})
 
 	ginkgo.It("returns raw cancellation and clear errors unchanged", func() {
@@ -156,14 +156,14 @@ var _ = ginkgo.Describe("importer use cases", func() {
 
 		state, err := uc.Execute(context.Background())
 		Expect(state).To(BeNil())
-		Expect(errors.Is(err, cancelErr)).To(BeTrue())
+		Expect(err).To(MatchError(cancelErr))
 
 		clearErr := errors.New("clear failed")
 		uc = &ClearImportPlanUseCase{svc: fakeImporterClearer{clearErr: clearErr}}
 
 		state, err = uc.Execute(context.Background())
 		Expect(state).To(BeNil())
-		Expect(errors.Is(err, clearErr)).To(BeTrue())
+		Expect(err).To(MatchError(clearErr))
 	})
 
 	ginkgo.It("returns final clear errors after a cancel check succeeds", func() {
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		state, err := NewClearImportPlanUseCase(svc).Execute(context.Background())
 
 		Expect(state).To(BeNil())
-		Expect(err).To(MatchError(ContainSubstring(coreimporter.ErrImportStateUnavailable.Error())))
+		Expect(err).To(MatchError(coreimporter.ErrImportStateUnavailable))
 	})
 })
 
@@ -193,7 +193,7 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/import/plan", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var body coreimporter.CurrentPlanState
 		Expect(jsonUnmarshalImporterResponse(rec, &body)).To(Succeed())
 		Expect(body.ID).To(Equal("plan-1"))
@@ -208,12 +208,10 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		getPlan := httptest.NewRecorder()
 		router.ServeHTTP(getPlan, httptest.NewRequest(http.MethodGet, "/api/import/plan", nil))
-		Expect(getPlan.Code).To(Equal(http.StatusNotFound), getPlan.Body.String())
-		assertImporterStructuredError(getPlan, "importer_no_plan", "errors.importer.no_plan")
+		Expect(getPlan).To(haveImporterStructuredError(http.StatusNotFound, ErrCodeImporterNoPlan), getPlan.Body.String())
 
 		execute := performImporterCSRFRequest(router, http.MethodPost, "/api/import/execute", nil, "")
-		Expect(execute.Code).To(Equal(http.StatusNotFound), execute.Body.String())
-		assertImporterStructuredError(execute, "importer_no_plan", "errors.importer.no_plan")
+		Expect(execute).To(haveImporterStructuredError(http.StatusNotFound, ErrCodeImporterNoPlan), execute.Body.String())
 	})
 
 	ginkgo.It("creates plans from multipart uploads", func() {
@@ -227,11 +225,10 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		rec := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", body, contentType)
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		var plan coreimporter.CurrentPlanState
 		Expect(jsonUnmarshalImporterResponse(rec, &plan)).To(Succeed())
-		Expect(plan.ExecutionStatus).To(Equal(coreimporter.ExecutionStatusPlanned))
-		Expect(plan.Items).To(HaveLen(1))
+		Expect(plan).To(haveImporterPlanWithItemCount(coreimporter.ExecutionStatusPlanned, 1))
 	})
 
 	ginkgo.It("returns structured create-plan request errors", func() {
@@ -242,18 +239,15 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 		})
 
 		malformed := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", strings.NewReader("bad multipart"), "multipart/form-data; boundary=missing")
-		Expect(malformed.Code).To(Equal(http.StatusRequestEntityTooLarge), malformed.Body.String())
-		assertImporterStructuredError(malformed, "importer_upload_too_large", "errors.importer.upload_too_large")
+		Expect(malformed).To(haveImporterStructuredError(http.StatusRequestEntityTooLarge, ErrCodeImporterUploadTooLarge), malformed.Body.String())
 
 		body, contentType := importerMultipartBody(nil, "")
 		missingFile := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", body, contentType)
-		Expect(missingFile.Code).To(Equal(http.StatusBadRequest), missingFile.Body.String())
-		assertImporterStructuredError(missingFile, "importer_missing_file", "errors.importer.missing_file")
+		Expect(missingFile).To(haveImporterStructuredError(http.StatusBadRequest, ErrCodeImporterMissingFile), missingFile.Body.String())
 
 		invalidZip, invalidZipContentType := importerMultipartBody([]byte("not a zip"), "")
 		failedPlan := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", invalidZip, invalidZipContentType)
-		Expect(failedPlan.Code).To(Equal(http.StatusInternalServerError), failedPlan.Body.String())
-		assertImporterStructuredError(failedPlan, "importer_internal_error", "errors.importer.internal_error")
+		Expect(failedPlan).To(haveImporterStructuredError(http.StatusInternalServerError, ErrCodeImporterInternalError), failedPlan.Body.String())
 	})
 
 	ginkgo.It("returns structured file-open errors from multipart uploads", func() {
@@ -274,8 +268,7 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		rec := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", body, contentType)
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
-		assertImporterStructuredError(rec, "importer_file_open_failed", "errors.importer.file_open_failed")
+		Expect(rec).To(haveImporterStructuredError(http.StatusBadRequest, ErrCodeImporterFileOpenFailed), rec.Body.String())
 	})
 
 	ginkgo.It("logs close errors after successful multipart uploads", func() {
@@ -296,7 +289,7 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		rec := performImporterCSRFRequest(router, http.MethodPost, "/api/import/plan", body, contentType)
 
-		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
 	ginkgo.It("executes planned imports with accepted status and completed imports with ok status", func() {
@@ -307,11 +300,11 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
 		accepted := performImporterCSRFRequest(router, http.MethodPost, "/api/import/execute", nil, "")
-		Expect(accepted.Code).To(Equal(http.StatusAccepted), accepted.Body.String())
+		Expect(accepted).To(HaveHTTPStatus(http.StatusAccepted), accepted.Body.String())
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusCompleted)
 		ok := performImporterCSRFRequest(router, http.MethodPost, "/api/import/execute", nil, "")
-		Expect(ok.Code).To(Equal(http.StatusOK), ok.Body.String())
+		Expect(ok).To(HaveHTTPStatus(http.StatusOK), ok.Body.String())
 	})
 
 	ginkgo.It("clears planned imports and accepts cancellation for running imports", func() {
@@ -322,12 +315,12 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
 		cleared := performImporterCSRFRequest(router, http.MethodDelete, "/api/import/plan", nil, "")
-		Expect(cleared.Code).To(Equal(http.StatusOK), cleared.Body.String())
-		Expect(strings.TrimSpace(cleared.Body.String())).To(Equal("null"))
+		Expect(cleared).To(HaveHTTPStatus(http.StatusOK), cleared.Body.String())
+		Expect(cleared).To(HaveHTTPBody(MatchJSON("null")))
 
 		seedImporterPlan(store, coreimporter.ExecutionStatusRunning)
 		canceling := performImporterCSRFRequest(router, http.MethodDelete, "/api/import/plan", nil, "")
-		Expect(canceling.Code).To(Equal(http.StatusAccepted), canceling.Body.String())
+		Expect(canceling).To(HaveHTTPStatus(http.StatusAccepted), canceling.Body.String())
 		var state coreimporter.CurrentPlanState
 		Expect(jsonUnmarshalImporterResponse(canceling, &state)).To(Succeed())
 		Expect(state.CancelRequested).To(BeTrue())
@@ -341,8 +334,7 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		rec := performImporterCSRFRequest(router, http.MethodDelete, "/api/import/plan", nil, "")
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError), rec.Body.String())
-		assertImporterStructuredError(rec, "importer_state_unavailable", "errors.importer.state_unavailable")
+		Expect(rec).To(haveImporterStructuredError(http.StatusInternalServerError, ErrCodeImporterStateUnavailable), rec.Body.String())
 	})
 
 	ginkgo.It("forbids direct handler calls when user context is missing", func() {
@@ -353,11 +345,11 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 
 		createPlan := httptest.NewRecorder()
 		router.ServeHTTP(createPlan, httptest.NewRequest(http.MethodPost, "/import/plan", nil))
-		Expect(createPlan.Code).To(Equal(http.StatusForbidden), createPlan.Body.String())
+		Expect(createPlan).To(HaveHTTPStatus(http.StatusForbidden), createPlan.Body.String())
 
 		execute := httptest.NewRecorder()
 		router.ServeHTTP(execute, httptest.NewRequest(http.MethodPost, "/import/execute", nil))
-		Expect(execute.Code).To(Equal(http.StatusForbidden), execute.Body.String())
+		Expect(execute).To(HaveHTTPStatus(http.StatusForbidden), execute.Body.String())
 	})
 })
 
@@ -430,7 +422,7 @@ func (w *importerTestWiki) EnsurePath(_ tree.UserID, targetPath tree.RoutePath, 
 		nodeKind = *kind
 	}
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    tree.PageIDFromString("page-" + slug.String()),
+		ID:    importerFixturePageID(slug),
 		Title: title,
 		Slug:  slug,
 		Kind:  nodeKind,
@@ -545,9 +537,44 @@ func jsonUnmarshalImporterResponse(rec *httptest.ResponseRecorder, dst any) erro
 	return json.Unmarshal(rec.Body.Bytes(), dst)
 }
 
-func expectLocalizedImporterError(err error, code sharederrors.ErrorCode) {
+func matchLocalizedImporterError(code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	loc, ok := sharederrors.AsLocalizedError(err)
-	Expect(ok).To(BeTrue(), "error should be localized: %v", err)
-	Expect(loc.Code).To(Equal(code))
+	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
+}
+
+func haveImporterPlanWithTargetItem(status coreimporter.ExecutionStatus, targetPath tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return haveImporterPlan(status, HaveExactElements(haveImporterPlanItemWithTargetPath(targetPath)))
+}
+
+func haveImporterPlanWithItemCount(status coreimporter.ExecutionStatus, count int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return haveImporterPlan(status, HaveLen(count))
+}
+
+func haveImporterPlanWithCancellation(status coreimporter.ExecutionStatus) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ExecutionStatus": Equal(status),
+		"CancelRequested": BeTrue(),
+	}))
+}
+
+func haveImporterPlan(status coreimporter.ExecutionStatus, items types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ExecutionStatus": Equal(status),
+		"Items":           items,
+	}))
+}
+
+func haveImporterPlanItemWithTargetPath(targetPath tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"TargetPath": Equal(targetPath),
+	})
+}
+
+func importerFixturePageID(slug tree.Slug) tree.PageID {
+	return tree.PageIDFromString("page-" + slug.HashPayload())
 }

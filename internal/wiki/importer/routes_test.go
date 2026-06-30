@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = ginkgo.Describe("importer routes", func() {
@@ -25,7 +26,7 @@ var _ = ginkgo.Describe("importer routes", func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/import/plan", nil))
 
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
 	ginkgo.It("TestRoutesRequireCSRFForImportPlanMutations", func() {
@@ -43,7 +44,7 @@ var _ = ginkgo.Describe("importer routes", func() {
 		req.Header.Set("Content-Type", "multipart/form-data; boundary=missing")
 		router.ServeHTTP(rec, req)
 
-		Expect(rec.Code).To(Equal(http.StatusForbidden), rec.Body.String())
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
 	})
 })
 
@@ -63,8 +64,7 @@ var _ = ginkgo.Describe("importer error responses", func() {
 
 		respondWithImporterStatusError(ctx, http.StatusBadRequest, ErrCodeImporterMissingFile, "ignored", "ignored")
 
-		Expect(rec.Code).To(Equal(http.StatusBadRequest))
-		assertImporterStructuredError(rec, "importer_missing_file", "errors.importer.missing_file")
+		Expect(rec).To(haveImporterStructuredError(http.StatusBadRequest, ErrCodeImporterMissingFile), rec.Body.String())
 	})
 
 	ginkgo.It("renders localized importer errors with their mapped status", func() {
@@ -72,8 +72,7 @@ var _ = ginkgo.Describe("importer error responses", func() {
 
 		respondWithImporterError(ctx, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterNoPlan, nil))
 
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
-		assertImporterStructuredError(rec, "importer_no_plan", "errors.importer.no_plan")
+		Expect(rec).To(haveImporterStructuredError(http.StatusNotFound, ErrCodeImporterNoPlan), rec.Body.String())
 	})
 
 	ginkgo.It("sanitizes unknown importer errors as internal failures", func() {
@@ -81,9 +80,8 @@ var _ = ginkgo.Describe("importer error responses", func() {
 
 		respondWithImporterError(ctx, errors.New("zip path /tmp/private failed"))
 
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-		assertImporterStructuredError(rec, "importer_internal_error", "errors.importer.internal_error")
-		Expect(rec.Body.String()).NotTo(ContainSubstring("/tmp/private"))
+		Expect(rec).To(haveImporterStructuredError(http.StatusInternalServerError, ErrCodeImporterInternalError), rec.Body.String())
+		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring("/tmp/private")))
 	})
 })
 
@@ -95,10 +93,7 @@ func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return ctx, rec
 }
 
-func assertImporterStructuredError(rec *httptest.ResponseRecorder, code string, messageID string) {
+func haveImporterStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	var body ImporterErrorResponse
-	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
-	Expect(body.Error.Code.String()).To(Equal(code))
-	Expect(body.Error.MessageID.String()).To(Equal(messageID))
+	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
 }
