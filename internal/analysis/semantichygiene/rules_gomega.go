@@ -27,7 +27,7 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesErrError(ctx, assertion) && isMatcherNamed(assertion.matcher, "Equal", "ContainSubstring") {
 		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaErrorStringMatcherDiagnostic())
 	}
-	if assertionUsesRawStringMatchError(assertion) {
+	if assertionUsesRawStringMatchError(ctx, assertion) {
 		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaRawStringMatchErrorDiagnostic())
 	}
 	if assertionUsesErrorNilMatcher(ctx, assertion) {
@@ -124,7 +124,7 @@ func checkGomegaAsyncAssertion(ctx *analysisContext, call *ast.CallExpr) {
 	if assertion.sourceName == "Eventually" && isNegativeAssertionMethod(assertion.method) && isMatcherNamed(assertion.matcher, "Receive") {
 		ctx.pass.Reportf(assertion.call.Pos(), "%s", gomegaAsyncNegativeReceiveDiagnostic())
 	}
-	if matcherTreeContainsRawStringMatchError(assertion.matcher) {
+	if matcherTreeContainsRawStringMatchError(ctx, assertion.matcher) {
 		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaRawStringMatchErrorDiagnostic())
 	}
 	if assertion.sourceName == "Eventually" && !eventuallyBareActualAllowed(ctx, assertion.actual) {
@@ -981,29 +981,29 @@ func isBooleanMatcher(matcher *ast.CallExpr) bool {
 	return isMatcherNamed(matcher, "BeTrue", "BeFalse", "BeTrueBecause", "BeFalseBecause")
 }
 
-func assertionUsesRawStringMatchError(assertion gomegaAssertion) bool {
-	return matcherTreeContainsRawStringMatchError(assertion.matcher)
+func assertionUsesRawStringMatchError(ctx *analysisContext, assertion gomegaAssertion) bool {
+	return matcherTreeContainsRawStringMatchError(ctx, assertion.matcher)
 }
 
-func matcherTreeContainsRawStringMatchError(expr ast.Expr) bool {
+func matcherTreeContainsRawStringMatchError(ctx *analysisContext, expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
 	if isMatcherNamed(call, "MatchError") && len(call.Args) > 0 {
-		if matchErrorArgumentUsesRawString(call.Args[0]) {
+		if matchErrorArgumentUsesRawString(ctx, call.Args[0]) {
 			return true
 		}
 	}
 	for _, arg := range call.Args {
-		if matcherTreeContainsRawStringMatchError(arg) {
+		if matcherTreeContainsRawStringMatchError(ctx, arg) {
 			return true
 		}
 	}
 	return false
 }
 
-func matchErrorArgumentUsesRawString(expr ast.Expr) bool {
+func matchErrorArgumentUsesRawString(ctx *analysisContext, expr ast.Expr) bool {
 	expr = unparenExpr(expr)
 	lit, ok := expr.(*ast.BasicLit)
 	if ok && lit.Kind == token.STRING {
@@ -1014,11 +1014,11 @@ func matchErrorArgumentUsesRawString(expr ast.Expr) bool {
 		return false
 	}
 	if isMatcherNamed(call, "Equal", "ContainSubstring", "HavePrefix", "HaveSuffix", "MatchRegexp") {
-		return callHasStringLiteralArg(call)
+		return callHasStringArg(ctx, call)
 	}
 	if isMatcherNamed(call, "And", "Or", "SatisfyAll", "SatisfyAny") {
 		for _, arg := range call.Args {
-			if matchErrorArgumentUsesRawString(arg) {
+			if matchErrorArgumentUsesRawString(ctx, arg) {
 				return true
 			}
 		}
@@ -1026,10 +1026,13 @@ func matchErrorArgumentUsesRawString(expr ast.Expr) bool {
 	return false
 }
 
-func callHasStringLiteralArg(call *ast.CallExpr) bool {
+func callHasStringArg(ctx *analysisContext, call *ast.CallExpr) bool {
 	for _, arg := range call.Args {
 		lit, ok := unparenExpr(arg).(*ast.BasicLit)
 		if ok && lit.Kind == token.STRING {
+			return true
+		}
+		if isStringType(ctx.pass, arg) {
 			return true
 		}
 	}
