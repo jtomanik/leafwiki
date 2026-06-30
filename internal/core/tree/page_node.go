@@ -24,6 +24,17 @@ const (
 	NodeKindSection NodeKind = "section"
 )
 
+func ParseNodeKind(raw string) (NodeKind, bool) {
+	switch raw {
+	case string(NodeKindPage):
+		return NodeKindPage, true
+	case string(NodeKindSection):
+		return NodeKindSection, true
+	default:
+		return "", false
+	}
+}
+
 // PageNode represents a single node in the tree
 // It has an ID, a parent, a path, and children
 // The ID is a unique identifier for the entry
