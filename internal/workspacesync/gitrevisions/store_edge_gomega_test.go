@@ -17,6 +17,7 @@ import (
 	gitstorage "github.com/go-git/go-git/v6/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/core/identity"
 )
@@ -38,7 +39,8 @@ var _ = Describe("git revision edge coverage", func() {
 		Expect(target).To(Equal(filepath.Clean("/tmp/repo/.git")))
 
 		Expect(mergeMarkdownPaths([]string{" a.md ", "", "nested/b.md"}, []string{"a.md"})).To(Equal([]string{"a.md", "nested/b.md"}))
-		Expect(commitMessage(CommitRequest{}, "batch-1", nil)).To(ContainSubstring("LeafWiki-Source: unknown"))
+		_, messageTrailers, _ := parseCommitMessage(commitMessage(CommitRequest{}, "batch-1", nil))
+		Expect(messageTrailers).To(HaveKeyWithValue("LeafWiki-Source", string(SourceUnknown)))
 		Expect(commitMessage(CommitRequest{Reason: ReasonStartup}, "batch-1", nil)).To(HavePrefix("LeafWiki initial workspace snapshot"))
 		Expect(commitMessage(CommitRequest{Reason: ReasonRestore}, "batch-1", nil)).To(HavePrefix("LeafWiki workspace restore"))
 		Expect(commitActorIDs(CommitRequest{AdditionalActors: []Actor{{}, {ID: "public-editor"}}})).To(Equal([]ActorID{"public-editor"}))
@@ -49,86 +51,94 @@ var _ = Describe("git revision edge coverage", func() {
 		Expect(newBatchID()).NotTo(BeEmpty())
 		restoreRand()
 
-		sig := signature(Actor{})
-		Expect(sig.Name).To(Equal("Public Editor"))
-		Expect(sig.Email).To(Equal("public-editor@leafwiki.local"))
+		Expect(signature(Actor{})).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Name":  Equal("Public Editor"),
+			"Email": Equal("public-editor@leafwiki.local"),
+		})))
 
-		sig = signature(Actor{ID: "agent-1"})
-		Expect(sig.Name).To(Equal("agent-1"))
-		Expect(sig.Email).To(Equal("agent-1@leafwiki.local"))
+		Expect(signature(Actor{ID: "agent-1"})).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Name":  Equal("agent-1"),
+			"Email": Equal("agent-1@leafwiki.local"),
+		})))
 
 		title, trailers, actors := parseCommitMessage("Title\nnot-a-trailer\nOther: value\nLeafWiki-Actor: alice\n")
 		Expect(title).To(Equal("Title"))
-		Expect(trailers["LeafWiki-Actor"]).To(Equal("alice"))
+		Expect(trailers).To(HaveKeyWithValue("LeafWiki-Actor", "alice"))
 		Expect(actors).To(Equal([]ActorID{"alice"}))
 	})
 
 	It("covers Open validation and dependency failures", func() {
 		_, err := Open(StoreOptions{})
-		Expect(err).To(MatchError("data dir is required"))
+		Expect(err).To(MatchError(ErrDataDirRequired))
 
 		_, err = Open(StoreOptions{DataDir: "data"})
-		Expect(err).To(MatchError("root dir is required"))
+		Expect(err).To(MatchError(ErrRootDirRequired))
 
+		errMkdirInternalFailed := errors.New("mkdir internal failed")
 		restoreMkdir := setGitRevisionSeam(&gitRevisionMkdirAll, func(string, os.FileMode) error {
-			return errors.New("mkdir internal failed")
+			return errMkdirInternalFailed
 		})
 		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		Expect(err).To(MatchError(ContainSubstring("create internal git dir")))
+		Expect(err).To(MatchError(errMkdirInternalFailed))
 		restoreMkdir()
 
+		errMkdirRootFailed := errors.New("mkdir root failed")
 		mkdirCalls := 0
 		restoreMkdir = setGitRevisionSeam(&gitRevisionMkdirAll, func(string, os.FileMode) error {
 			mkdirCalls++
 			if mkdirCalls == 2 {
-				return errors.New("mkdir root failed")
+				return errMkdirRootFailed
 			}
 			return nil
 		})
 		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		Expect(err).To(MatchError(ContainSubstring("create root dir")))
+		Expect(err).To(MatchError(errMkdirRootFailed))
 		restoreMkdir()
 
 		restoreOpen := setGitRevisionSeam(&gitRevisionGitOpen, func(gitstorage.Storer, billy.Filesystem) (*git.Repository, error) {
 			return nil, git.ErrRepositoryNotExists
 		})
+		errInitFailed := errors.New("init failed")
 		restoreInit := setGitRevisionSeam(&gitRevisionGitInit, func(gitstorage.Storer, ...git.InitOption) (*git.Repository, error) {
-			return nil, errors.New("init failed")
+			return nil, errInitFailed
 		})
 		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		Expect(err).To(MatchError(ContainSubstring("open internal git repository")))
+		Expect(err).To(MatchError(errInitFailed))
 		restoreInit()
 		restoreOpen()
 
+		errSecondOpenFailed := errors.New("second open failed")
 		openCalls := 0
 		restoreOpen = setGitRevisionSeam(&gitRevisionGitOpen, func(gitstorage.Storer, billy.Filesystem) (*git.Repository, error) {
 			openCalls++
 			if openCalls == 1 {
 				return nil, git.ErrRepositoryNotExists
 			}
-			return nil, errors.New("second open failed")
+			return nil, errSecondOpenFailed
 		})
 		restoreInit = setGitRevisionSeam(&gitRevisionGitInit, func(gitstorage.Storer, ...git.InitOption) (*git.Repository, error) {
 			return nil, nil
 		})
 		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		Expect(err).To(MatchError(ContainSubstring("open internal git repository")))
+		Expect(err).To(MatchError(errSecondOpenFailed))
 		restoreInit()
 		restoreOpen()
 
+		errRemoveRootGitFileFailed := errors.New("remove .git failed")
 		restoreCleanup := setGitRevisionSeam(&gitRevisionRemoveInternalRootGitFile, func(string, string) error {
-			return errors.New("remove root .git file: remove .git failed")
+			return errRemoveRootGitFileFailed
 		})
 		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		Expect(err).To(MatchError(ContainSubstring("remove root .git file")))
+		Expect(err).To(MatchError(errRemoveRootGitFileFailed))
 		restoreCleanup()
 	})
 
 	It("covers root .git cleanup branches", func() {
+		errStatFailed := errors.New("stat failed")
 		restoreLstat := setGitRevisionSeam(&gitRevisionLstat, func(string) (os.FileInfo, error) {
-			return nil, errors.New("stat failed")
+			return nil, errStatFailed
 		})
-		Expect(removeInternalRootGitFile(GinkgoT().TempDir(), "/internal/git")).To(MatchError(ContainSubstring("stat root .git")))
+		Expect(removeInternalRootGitFile(GinkgoT().TempDir(), "/internal/git")).To(MatchError(errStatFailed))
 		restoreLstat()
 
 		rootDir := GinkgoT().TempDir()
@@ -146,22 +156,24 @@ var _ = Describe("git revision edge coverage", func() {
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
 		Expect(removeInternalRootGitFile(rootDir, internal)).To(Succeed())
 		_, err := os.Stat(filepath.Join(rootDir, ".git"))
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		rootDir = GinkgoT().TempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
+		errReadFailed := errors.New("read failed")
 		restoreRead := setGitRevisionSeam(&gitRevisionReadFile, func(string) ([]byte, error) {
-			return nil, errors.New("read failed")
+			return nil, errReadFailed
 		})
-		Expect(removeInternalRootGitFile(rootDir, internal)).To(MatchError(ContainSubstring("read root .git file")))
+		Expect(removeInternalRootGitFile(rootDir, internal)).To(MatchError(errReadFailed))
 		restoreRead()
 
 		rootDir = GinkgoT().TempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
+		errRemoveFailed := errors.New("remove failed")
 		restoreRemove := setGitRevisionSeam(&gitRevisionRemove, func(string) error {
-			return errors.New("remove failed")
+			return errRemoveFailed
 		})
-		Expect(removeInternalRootGitFile(rootDir, internal)).To(MatchError(ContainSubstring("remove root .git file")))
+		Expect(removeInternalRootGitFile(rootDir, internal)).To(MatchError(errRemoveFailed))
 		restoreRemove()
 	})
 
@@ -172,32 +184,35 @@ var _ = Describe("git revision edge coverage", func() {
 		_, err := store.Capture(canceled, CommitRequest{})
 		Expect(err).To(Equal(context.Canceled))
 
+		errWorktreeFailed := errors.New("worktree failed")
 		restoreWorktree := setGitRevisionSeam(&gitRevisionRepoWorktree, func(*git.Repository) (*git.Worktree, error) {
-			return nil, errors.New("worktree failed")
+			return nil, errWorktreeFailed
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{})
-		Expect(err).To(MatchError("worktree failed"))
+		Expect(err).To(MatchError(errWorktreeFailed))
 		restoreWorktree()
 
 		restoreWorktree = setGitRevisionSeam(&gitRevisionRepoWorktree, func(*git.Repository) (*git.Worktree, error) {
 			return nil, nil
 		})
+		errStageFailed := errors.New("stage failed")
 		restoreStage := setGitRevisionSeam(&gitRevisionStoreStageMarkdownChanges, func(*Store, context.Context, *git.Worktree) ([]string, error) {
-			return nil, errors.New("stage failed")
+			return nil, errStageFailed
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{})
-		Expect(err).To(MatchError("stage failed"))
+		Expect(err).To(MatchError(errStageFailed))
 		restoreStage()
 		restoreStage = setGitRevisionSeam(&gitRevisionStoreStageMarkdownChanges, func(*Store, context.Context, *git.Worktree) ([]string, error) {
 			return nil, nil
 		})
 
 		hash := plumbing.NewHash("1111111111111111111111111111111111111111")
+		errCommitFailed := errors.New("commit failed")
 		restoreCommit := setGitRevisionSeam(&gitRevisionWorktreeCommit, func(*git.Worktree, string, *git.CommitOptions) (plumbing.Hash, error) {
-			return plumbing.ZeroHash, errors.New("commit failed")
+			return plumbing.ZeroHash, errCommitFailed
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("commit markdown snapshot")))
+		Expect(err).To(MatchError(errCommitFailed))
 		restoreCommit()
 
 		commitCalls := 0
@@ -213,40 +228,44 @@ var _ = Describe("git revision edge coverage", func() {
 		})
 		commit, err := store.Capture(context.Background(), CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit.Created).To(BeTrue())
-		Expect(commit.Hash).To(Equal(hash.String()))
+		Expect(commit).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Created": BeTrue(),
+			"Hash":    Equal(identity.CommitHashFromString(hash.String())),
+		})))
 		restoreHead()
 		restoreCommit()
 
 		commitCalls = 0
+		errEmptyRestoreFailed := errors.New("empty restore failed")
 		restoreCommit = setGitRevisionSeam(&gitRevisionWorktreeCommit, func(*git.Worktree, string, *git.CommitOptions) (plumbing.Hash, error) {
 			commitCalls++
 			if commitCalls == 1 {
 				return plumbing.ZeroHash, git.ErrEmptyCommit
 			}
-			return plumbing.ZeroHash, errors.New("empty restore failed")
+			return plumbing.ZeroHash, errEmptyRestoreFailed
 		})
 		restoreHead = setGitRevisionSeam(&gitRevisionRepoHead, func(*git.Repository) (*plumbing.Reference, error) {
 			return nil, nil
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{Reason: ReasonRestore})
-		Expect(err).To(MatchError(ContainSubstring("commit empty restore snapshot")))
+		Expect(err).To(MatchError(errEmptyRestoreFailed))
 		restoreHead()
 		restoreCommit()
 
 		commitCalls = 0
+		errEmptyInitialFailed := errors.New("empty initial failed")
 		restoreCommit = setGitRevisionSeam(&gitRevisionWorktreeCommit, func(*git.Worktree, string, *git.CommitOptions) (plumbing.Hash, error) {
 			commitCalls++
 			if commitCalls == 1 {
 				return plumbing.ZeroHash, git.ErrEmptyCommit
 			}
-			return plumbing.ZeroHash, errors.New("empty initial failed")
+			return plumbing.ZeroHash, errEmptyInitialFailed
 		})
 		restoreHead = setGitRevisionSeam(&gitRevisionRepoHead, func(*git.Repository) (*plumbing.Reference, error) {
 			return nil, plumbing.ErrReferenceNotFound
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("commit empty initial markdown snapshot")))
+		Expect(err).To(MatchError(errEmptyInitialFailed))
 		restoreHead()
 		restoreCommit()
 
@@ -258,8 +277,10 @@ var _ = Describe("git revision edge coverage", func() {
 		})
 		commit, err = store.Capture(context.Background(), CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit.Created).To(BeFalse())
-		Expect(commit.Hash).To(Equal(hash.String()))
+		Expect(commit).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Created": BeFalse(),
+			"Hash":    Equal(identity.CommitHashFromString(hash.String())),
+		})))
 		restoreHead()
 		restoreCommit()
 
@@ -279,58 +300,64 @@ var _ = Describe("git revision edge coverage", func() {
 
 	It("covers index and tracked-file store errors", func() {
 		store := &Store{}
+		indexErr := errors.New("index failed")
 		restoreIndex := setGitRevisionSeam(&gitRevisionRepositoryIndex, func(*git.Repository) (*index.Index, error) {
-			return nil, errors.New("index failed")
+			return nil, indexErr
 		})
-		Expect(store.removeFromIndexOnly("old.md")).To(MatchError("index failed"))
+		Expect(store.removeFromIndexOnly("old.md")).To(MatchError(indexErr))
 		restoreIndex()
 
 		restoreIndex = setGitRevisionSeam(&gitRevisionRepositoryIndex, func(*git.Repository) (*index.Index, error) {
 			return &index.Index{}, nil
 		})
+		indexRemoveErr := errors.New("index remove failed")
 		restoreIndexRemove := setGitRevisionSeam(&gitRevisionIndexRemove, func(*index.Index, string) (*index.Entry, error) {
-			return nil, errors.New("index remove failed")
+			return nil, indexRemoveErr
 		})
-		Expect(store.removeFromIndexOnly("old.md")).To(MatchError("index remove failed"))
+		Expect(store.removeFromIndexOnly("old.md")).To(MatchError(indexRemoveErr))
 		restoreIndexRemove()
 
 		restoreIndexRemove = setGitRevisionSeam(&gitRevisionIndexRemove, func(*index.Index, string) (*index.Entry, error) {
 			return &index.Entry{}, nil
 		})
+		setIndexErr := errors.New("set index failed")
 		restoreSetIndex := setGitRevisionSeam(&gitRevisionRepositorySetIndex, func(*git.Repository, *index.Index) error {
-			return errors.New("set index failed")
+			return setIndexErr
 		})
-		Expect(store.removeFromIndexOnly("old.md")).To(MatchError("set index failed"))
+		Expect(store.removeFromIndexOnly("old.md")).To(MatchError(setIndexErr))
 		restoreSetIndex()
 		restoreIndexRemove()
 		restoreIndex()
 
 		head := plumbing.NewHashReference(plumbing.HEAD, plumbing.NewHash("1111111111111111111111111111111111111111"))
+		errHeadFailed := errors.New("head failed")
 		restoreHead := setGitRevisionSeam(&gitRevisionRepoHead, func(*git.Repository) (*plumbing.Reference, error) {
-			return nil, errors.New("head failed")
+			return nil, errHeadFailed
 		})
 		_, err := store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("read internal git HEAD")))
+		Expect(err).To(MatchError(errHeadFailed))
 		restoreHead()
 
 		restoreHead = setGitRevisionSeam(&gitRevisionRepoHead, func(*git.Repository) (*plumbing.Reference, error) {
 			return head, nil
 		})
+		errCommitObjectFailed := errors.New("commit failed")
 		restoreCommitObject := setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
-			return nil, errors.New("commit failed")
+			return nil, errCommitObjectFailed
 		})
 		_, err = store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("load HEAD commit")))
+		Expect(err).To(MatchError(errCommitObjectFailed))
 		restoreCommitObject()
 
 		restoreCommitObject = setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
 			return &object.Commit{}, nil
 		})
+		errCommitTreeFailed := errors.New("tree failed")
 		restoreCommitTree := setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
-			return nil, errors.New("tree failed")
+			return nil, errCommitTreeFailed
 		})
 		_, err = store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("load HEAD tree")))
+		Expect(err).To(MatchError(errCommitTreeFailed))
 		restoreCommitTree()
 
 		restoreCommitTree = setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
@@ -339,31 +366,34 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreTreeFiles := setGitRevisionSeam(&gitRevisionTreeFiles, func(*object.Tree) *object.FileIter {
 			return &object.FileIter{}
 		})
+		errFileIterFailed := errors.New("iter failed")
 		restoreFileIter := setGitRevisionSeam(&gitRevisionFileIterForEach, func(*object.FileIter, func(*object.File) error) error {
-			return errors.New("iter failed")
+			return errFileIterFailed
 		})
 		_, err = store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("list tracked markdown")))
+		Expect(err).To(MatchError(errFileIterFailed))
 		restoreFileIter()
 
 		restoreFileIter = setGitRevisionSeam(&gitRevisionFileIterForEach, func(_ *object.FileIter, visit func(*object.File) error) error {
 			return visit(&object.File{Name: "page.md"})
 		})
+		errFileReaderFailed := errors.New("reader failed")
 		restoreFileReader := setGitRevisionSeam(&gitRevisionFileReader, func(*object.File) (io.ReadCloser, error) {
-			return nil, errors.New("reader failed")
+			return nil, errFileReaderFailed
 		})
 		_, err = store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("list tracked markdown")))
+		Expect(err).To(MatchError(errFileReaderFailed))
 		restoreFileReader()
 
 		restoreFileReader = setGitRevisionSeam(&gitRevisionFileReader, func(*object.File) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("# Page\n")), nil
 		})
+		errReadAllFailed := errors.New("read all failed")
 		restoreReadAll := setGitRevisionSeam(&gitRevisionReadAll, func(io.Reader) ([]byte, error) {
-			return nil, errors.New("read all failed")
+			return nil, errReadAllFailed
 		})
 		_, err = store.trackedMarkdownFiles()
-		Expect(err).To(MatchError(ContainSubstring("list tracked markdown")))
+		Expect(err).To(MatchError(errReadAllFailed))
 		restoreReadAll()
 		restoreFileReader()
 		restoreFileIter()
@@ -376,21 +406,23 @@ var _ = Describe("git revision edge coverage", func() {
 	It("covers stageMarkdownChanges error branches through seams", func() {
 		store := &Store{rootDir: "/workspace"}
 
+		errCollectFailed := errors.New("collect failed")
 		restoreCollect := setGitRevisionSeam(&gitRevisionCollectMarkdownPaths, func(string) ([]string, error) {
-			return nil, errors.New("collect failed")
+			return nil, errCollectFailed
 		})
 		_, err := store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError("collect failed"))
+		Expect(err).To(MatchError(errCollectFailed))
 		restoreCollect()
 
 		restoreCollect = setGitRevisionSeam(&gitRevisionCollectMarkdownPaths, func(string) ([]string, error) {
 			return []string{"page.md"}, nil
 		})
+		errTrackedFailed := errors.New("tracked failed")
 		restoreTracked := setGitRevisionSeam(&gitRevisionStoreTrackedMarkdownFiles, func(*Store) (map[string]string, error) {
-			return nil, errors.New("tracked failed")
+			return nil, errTrackedFailed
 		})
 		_, err = store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError("tracked failed"))
+		Expect(err).To(MatchError(errTrackedFailed))
 		restoreTracked()
 
 		restoreTracked = setGitRevisionSeam(&gitRevisionStoreTrackedMarkdownFiles, func(*Store) (map[string]string, error) {
@@ -401,21 +433,23 @@ var _ = Describe("git revision edge coverage", func() {
 		_, err = store.stageMarkdownChanges(canceled, nil)
 		Expect(err).To(Equal(context.Canceled))
 
+		errReadFailed := errors.New("read failed")
 		restoreRead := setGitRevisionSeam(&gitRevisionReadFile, func(string) ([]byte, error) {
-			return nil, errors.New("read failed")
+			return nil, errReadFailed
 		})
 		_, err = store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError(ContainSubstring("read markdown page.md")))
+		Expect(err).To(MatchError(errReadFailed))
 		restoreRead()
 
 		restoreRead = setGitRevisionSeam(&gitRevisionReadFile, func(string) ([]byte, error) {
 			return []byte("# Page\n"), nil
 		})
+		errAddFailed := errors.New("add failed")
 		restoreAdd := setGitRevisionSeam(&gitRevisionWorktreeAdd, func(*git.Worktree, string) (plumbing.Hash, error) {
-			return plumbing.ZeroHash, errors.New("add failed")
+			return plumbing.ZeroHash, errAddFailed
 		})
 		_, err = store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError(ContainSubstring("stage markdown page.md")))
+		Expect(err).To(MatchError(errAddFailed))
 		restoreAdd()
 
 		restoreCollect()
@@ -426,22 +460,24 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreTracked = setGitRevisionSeam(&gitRevisionStoreTrackedMarkdownFiles, func(*Store) (map[string]string, error) {
 			return map[string]string{"old.md": "# Old\n"}, nil
 		})
+		errRemoveFailed := errors.New("remove failed")
 		restoreRemove := setGitRevisionSeam(&gitRevisionWorktreeRemove, func(*git.Worktree, string) (plumbing.Hash, error) {
-			return plumbing.ZeroHash, errors.New("remove failed")
+			return plumbing.ZeroHash, errRemoveFailed
 		})
 		_, err = store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError(ContainSubstring("stage markdown delete old.md")))
+		Expect(err).To(MatchError(errRemoveFailed))
 		restoreRemove()
 
 		restoreTracked()
 		restoreTracked = setGitRevisionSeam(&gitRevisionStoreTrackedMarkdownFiles, func(*Store) (map[string]string, error) {
 			return map[string]string{".obsidian/local.md": "# Local\n"}, nil
 		})
+		errRemoveIndexFailed := errors.New("remove index failed")
 		restoreRemoveIndex := setGitRevisionSeam(&gitRevisionStoreRemoveFromIndexOnly, func(*Store, string) error {
-			return errors.New("remove index failed")
+			return errRemoveIndexFailed
 		})
 		_, err = store.stageMarkdownChanges(context.Background(), nil)
-		Expect(err).To(MatchError(ContainSubstring("stage unmanaged markdown delete .obsidian/local.md")))
+		Expect(err).To(MatchError(errRemoveIndexFailed))
 		restoreRemoveIndex()
 		restoreTracked()
 		restoreCollect()
@@ -454,18 +490,19 @@ var _ = Describe("git revision edge coverage", func() {
 			return fn(filepath.Join(root, "bad.md"), fakeDirEntry{name: "bad.md"}, walkErr)
 		})
 		_, err := collectMarkdownPaths("/workspace")
-		Expect(err).To(MatchError(ContainSubstring("collect markdown paths")))
+		Expect(err).To(MatchError(walkErr))
 		restoreWalk()
 
 		restoreWalk = setGitRevisionSeam(&gitRevisionWalkDir, func(root string, fn fs.WalkDirFunc) error {
 			Expect(fn(root, fakeDirEntry{name: filepath.Base(root), dir: true}, nil)).To(Succeed())
 			return fn(filepath.Join(root, "page.md"), fakeDirEntry{name: "page.md", typ: 0}, nil)
 		})
+		errRelFailed := errors.New("rel failed")
 		restoreRel := setGitRevisionSeam(&gitRevisionRel, func(string, string) (string, error) {
-			return "", errors.New("rel failed")
+			return "", errRelFailed
 		})
 		_, err = collectMarkdownPaths("/workspace")
-		Expect(err).To(MatchError(ContainSubstring("collect markdown paths")))
+		Expect(err).To(MatchError(errRelFailed))
 		restoreRel()
 		restoreWalk()
 	})
@@ -495,58 +532,63 @@ var _ = Describe("git revision edge coverage", func() {
 		_, err = store.RestoreDocumentToPath(canceled, "page.md", "page.md", identity.CommitHashFromString("hash"), CommitRequest{})
 		Expect(err).To(Equal(context.Canceled))
 		_, err = store.RestoreDocumentToPath(context.Background(), "../bad.md", "page.md", identity.CommitHashFromString("hash"), CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("document restore path is invalid")))
+		Expect(err).To(MatchError(ErrDocumentRestorePathInvalid))
 		_, err = store.RestoreDocumentToPath(context.Background(), "page.md", "../bad.md", identity.CommitHashFromString("hash"), CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("document restore source path is invalid")))
+		Expect(err).To(MatchError(ErrDocumentRestoreSourcePathInvalid))
 		_, err = store.RestoreDocumentContentToPath(canceled, "page.md", "# Page\n", CommitRequest{})
 		Expect(err).To(Equal(context.Canceled))
 		_, err = store.RestoreDocumentContentToPath(context.Background(), "../bad.md", "# Page\n", CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("document restore path is invalid")))
+		Expect(err).To(MatchError(ErrDocumentRestorePathInvalid))
 
+		errMissingCommit := errors.New("missing commit")
 		restoreFilesAt := setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
-			return nil, errors.New("missing commit")
+			return nil, errMissingCommit
 		})
 		_, err = store.FilesAt(context.Background(), identity.CommitHashFromString("0000000000000000000000000000000000000000"))
-		Expect(err).To(MatchError(ContainSubstring("load commit")))
+		Expect(err).To(MatchError(errMissingCommit))
 		_, err = store.GetCommit(context.Background(), identity.CommitHashFromString("0000000000000000000000000000000000000000"))
-		Expect(err).To(MatchError(ContainSubstring("load commit")))
+		Expect(err).To(MatchError(errMissingCommit))
 		_, err = store.fileContentAt(context.Background(), identity.CommitHashFromString("0000000000000000000000000000000000000000"), "page.md")
-		Expect(err).To(MatchError(ContainSubstring("load commit")))
+		Expect(err).To(MatchError(errMissingCommit))
 		restoreFilesAt()
 
+		errMkdirRestoreFailed := errors.New("mkdir restore failed")
 		restoreMkdir := setGitRevisionSeam(&gitRevisionMkdirAll, func(string, os.FileMode) error {
-			return errors.New("mkdir restore failed")
+			return errMkdirRestoreFailed
 		})
 		_, err = store.RestoreDocumentContentToPath(context.Background(), "page.md", "# Page\n", CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("create restore parent page.md")))
+		Expect(err).To(MatchError(errMkdirRestoreFailed))
 		restoreMkdir()
 
+		errWriteRestoreFailed := errors.New("write restore failed")
 		restoreWrite := setGitRevisionSeam(&gitRevisionWriteFile, func(string, []byte, os.FileMode) error {
-			return errors.New("write restore failed")
+			return errWriteRestoreFailed
 		})
 		_, err = store.RestoreDocumentContentToPath(context.Background(), "page.md", "# Page\n", CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("write restored markdown page.md")))
+		Expect(err).To(MatchError(errWriteRestoreFailed))
 		restoreWrite()
 	})
 
 	It("covers commit iteration, changed entries, restore, and file content seams", func() {
 		store := &Store{rootDir: GinkgoT().TempDir()}
 
+		errLogFailed := errors.New("log failed")
 		restoreLog := setGitRevisionSeam(&gitRevisionRepoLog, func(*git.Repository, *git.LogOptions) (object.CommitIter, error) {
-			return nil, errors.New("log failed")
+			return nil, errLogFailed
 		})
-		Expect(store.ForEachCommit(context.Background(), func(Commit) (bool, error) { return true, nil })).To(MatchError(ContainSubstring("list commits")))
+		Expect(store.ForEachCommit(context.Background(), func(Commit) (bool, error) { return true, nil })).To(MatchError(errLogFailed))
 		_, err := store.ListCommits(context.Background(), ListRequest{})
-		Expect(err).To(MatchError(ContainSubstring("list commits")))
+		Expect(err).To(MatchError(errLogFailed))
 		restoreLog()
 
 		restoreLog = setGitRevisionSeam(&gitRevisionRepoLog, func(*git.Repository, *git.LogOptions) (object.CommitIter, error) {
 			return fakeCommitIter{}, nil
 		})
+		errIterFailed := errors.New("iter failed")
 		restoreCommitIter := setGitRevisionSeam(&gitRevisionCommitIterForEach, func(object.CommitIter, func(*object.Commit) error) error {
-			return errors.New("iter failed")
+			return errIterFailed
 		})
-		Expect(store.ForEachCommit(context.Background(), func(Commit) (bool, error) { return true, nil })).To(MatchError(ContainSubstring("iterate commits")))
+		Expect(store.ForEachCommit(context.Background(), func(Commit) (bool, error) { return true, nil })).To(MatchError(errIterFailed))
 		restoreCommitIter()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -555,15 +597,16 @@ var _ = Describe("git revision edge coverage", func() {
 			return visit(&object.Commit{})
 		})
 		err = store.ForEachCommit(ctx, func(Commit) (bool, error) { return true, nil })
-		Expect(errors.Is(err, context.Canceled)).To(BeTrue())
+		Expect(err).To(MatchError(context.Canceled))
 		restoreCommitIter()
 
+		errVisitFailed := errors.New("visit failed")
 		restoreCommitIter = setGitRevisionSeam(&gitRevisionCommitIterForEach, func(_ object.CommitIter, visit func(*object.Commit) error) error {
 			return visit(&object.Commit{})
 		})
 		Expect(store.ForEachCommit(context.Background(), func(Commit) (bool, error) {
-			return false, errors.New("visit failed")
-		})).To(MatchError(ContainSubstring("visit failed")))
+			return false, errVisitFailed
+		})).To(MatchError(errVisitFailed))
 		restoreCommitIter()
 		restoreLog()
 
@@ -571,11 +614,12 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCommitObject := setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
 			return &object.Commit{}, nil
 		})
+		errTreeFailed := errors.New("tree failed")
 		restoreCommitTree := setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
-			return nil, errors.New("tree failed")
+			return nil, errTreeFailed
 		})
 		_, _, err = store.changedMarkdownEntries(context.Background(), hash)
-		Expect(err).To(MatchError(ContainSubstring("load commit tree")))
+		Expect(err).To(MatchError(errTreeFailed))
 		restoreCommitTree()
 
 		restoreCommitTree = setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
@@ -594,22 +638,24 @@ var _ = Describe("git revision edge coverage", func() {
 		paths, contents, err := store.changedMarkdownEntries(context.Background(), hash)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(paths).To(Equal([]string{"page.md"}))
-		Expect(contents["page.md"]).To(Equal("# page.md\n"))
+		Expect(contents).To(HaveKeyWithValue("page.md", "# page.md\n"))
 		restoreContents()
 
+		errContentsFailed := errors.New("contents failed")
 		restoreContents = setGitRevisionSeam(&gitRevisionFileContents, func(*object.File) (string, error) {
-			return "", errors.New("contents failed")
+			return "", errContentsFailed
 		})
 		_, _, err = store.changedMarkdownEntries(context.Background(), hash)
-		Expect(err).To(MatchError(ContainSubstring("list changed markdown for root commit")))
+		Expect(err).To(MatchError(errContentsFailed))
 		restoreContents()
 		restoreFileIter()
 
+		errRootIterFailed := errors.New("root iter failed")
 		restoreFileIter = setGitRevisionSeam(&gitRevisionFileIterForEach, func(*object.FileIter, func(*object.File) error) error {
-			return errors.New("root iter failed")
+			return errRootIterFailed
 		})
 		_, _, err = store.changedMarkdownEntries(context.Background(), hash)
-		Expect(err).To(MatchError(ContainSubstring("list changed markdown for root commit")))
+		Expect(err).To(MatchError(errRootIterFailed))
 		restoreFileIter()
 		restoreTreeFiles()
 		restoreCommitTree()
@@ -629,22 +675,24 @@ var _ = Describe("git revision edge coverage", func() {
 
 		originalCommitTree := gitRevisionCommitTree
 		treeCalls := 0
+		errParentTreeFailed := errors.New("parent tree failed")
 		restoreCommitTree = setGitRevisionSeam(&gitRevisionCommitTree, func(commit *object.Commit) (*object.Tree, error) {
 			treeCalls++
 			if treeCalls == 2 {
-				return nil, errors.New("parent tree failed")
+				return nil, errParentTreeFailed
 			}
 			return originalCommitTree(commit)
 		})
 		_, _, err = realStore.changedMarkdownEntries(context.Background(), secondHash)
-		Expect(err).To(MatchError(ContainSubstring("load parent tree")))
+		Expect(err).To(MatchError(errParentTreeFailed))
 		restoreCommitTree()
 
+		errDiffFailed := errors.New("diff failed")
 		restoreDiff := setGitRevisionSeam(&gitRevisionTreeDiffContext, func(*object.Tree, context.Context, *object.Tree) (object.Changes, error) {
-			return nil, errors.New("diff failed")
+			return nil, errDiffFailed
 		})
 		_, _, err = realStore.changedMarkdownEntries(context.Background(), secondHash)
-		Expect(err).To(MatchError(ContainSubstring("diff commit")))
+		Expect(err).To(MatchError(errDiffFailed))
 		restoreDiff()
 
 		ctx, cancel = context.WithCancel(context.Background())
@@ -659,11 +707,12 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreDiff = setGitRevisionSeam(&gitRevisionTreeDiffContext, func(*object.Tree, context.Context, *object.Tree) (object.Changes, error) {
 			return object.Changes{&object.Change{}}, nil
 		})
+		errChangeFilesFailed := errors.New("change files failed")
 		restoreChangeFiles := setGitRevisionSeam(&gitRevisionChangeFiles, func(*object.Change) (*object.File, *object.File, error) {
-			return nil, nil, errors.New("change files failed")
+			return nil, nil, errChangeFilesFailed
 		})
 		_, _, err = realStore.changedMarkdownEntries(context.Background(), secondHash)
-		Expect(err).To(MatchError("change files failed"))
+		Expect(err).To(MatchError(errChangeFilesFailed))
 		restoreChangeFiles()
 
 		restoreChangeFiles = setGitRevisionSeam(&gitRevisionChangeFiles, func(*object.Change) (*object.File, *object.File, error) {
@@ -678,20 +727,22 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreChangeFiles = setGitRevisionSeam(&gitRevisionChangeFiles, func(*object.Change) (*object.File, *object.File, error) {
 			return nil, &object.File{Name: "page.md"}, nil
 		})
+		errToContentsFailed := errors.New("to contents failed")
 		restoreContents = setGitRevisionSeam(&gitRevisionFileContents, func(*object.File) (string, error) {
-			return "", errors.New("to contents failed")
+			return "", errToContentsFailed
 		})
 		_, _, err = realStore.changedMarkdownEntries(context.Background(), secondHash)
-		Expect(err).To(MatchError("to contents failed"))
+		Expect(err).To(MatchError(errToContentsFailed))
 		restoreContents()
 		restoreChangeFiles()
 		restoreDiff()
 
+		errFilesAtFailed := errors.New("files at failed")
 		restoreFilesAt := setGitRevisionSeam(&gitRevisionStoreFilesAt, func(*Store, context.Context, identity.CommitHash) (map[string]string, error) {
-			return nil, errors.New("files at failed")
+			return nil, errFilesAtFailed
 		})
 		_, err = store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
-		Expect(err).To(MatchError("files at failed"))
+		Expect(err).To(MatchError(errFilesAtFailed))
 		restoreFilesAt()
 
 		restoreFilesAt = setGitRevisionSeam(&gitRevisionStoreFilesAt, func(*Store, context.Context, identity.CommitHash) (map[string]string, error) {
@@ -702,25 +753,28 @@ var _ = Describe("git revision edge coverage", func() {
 		_, err = store.RestoreWorkspace(ctx, hash, CommitRequest{})
 		Expect(err).To(Equal(context.Canceled))
 
+		errWorkspaceMkdirFailed := errors.New("workspace mkdir failed")
 		restoreMkdir := setGitRevisionSeam(&gitRevisionMkdirAll, func(string, os.FileMode) error {
-			return errors.New("workspace mkdir failed")
+			return errWorkspaceMkdirFailed
 		})
 		_, err = store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("create restore parent page.md")))
+		Expect(err).To(MatchError(errWorkspaceMkdirFailed))
 		restoreMkdir()
 
+		errWorkspaceWriteFailed := errors.New("workspace write failed")
 		restoreWrite := setGitRevisionSeam(&gitRevisionWriteFile, func(string, []byte, os.FileMode) error {
-			return errors.New("workspace write failed")
+			return errWorkspaceWriteFailed
 		})
 		_, err = store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("write restored markdown page.md")))
+		Expect(err).To(MatchError(errWorkspaceWriteFailed))
 		restoreWrite()
 
+		errCollectRestoreFailed := errors.New("collect restore failed")
 		restoreCollect := setGitRevisionSeam(&gitRevisionCollectMarkdownPaths, func(string) ([]string, error) {
-			return nil, errors.New("collect restore failed")
+			return nil, errCollectRestoreFailed
 		})
 		_, err = store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
-		Expect(err).To(MatchError("collect restore failed"))
+		Expect(err).To(MatchError(errCollectRestoreFailed))
 		restoreCollect()
 
 		restoreFilesAt()
@@ -730,11 +784,12 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCollect = setGitRevisionSeam(&gitRevisionCollectMarkdownPaths, func(string) ([]string, error) {
 			return []string{"gone.md"}, nil
 		})
+		errRemoveRestoreFailed := errors.New("remove restore failed")
 		restoreRemove := setGitRevisionSeam(&gitRevisionRemove, func(string) error {
-			return errors.New("remove restore failed")
+			return errRemoveRestoreFailed
 		})
 		_, err = store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
-		Expect(err).To(MatchError(ContainSubstring("remove markdown absent from restore gone.md")))
+		Expect(err).To(MatchError(errRemoveRestoreFailed))
 		restoreRemove()
 
 		restoreCollect()
@@ -742,8 +797,10 @@ var _ = Describe("git revision edge coverage", func() {
 			return nil, nil
 		})
 		restoreCapture := setGitRevisionSeam(&gitRevisionStoreCapture, func(_ *Store, _ context.Context, req CommitRequest) (*Commit, error) {
-			Expect(req.Reason).To(Equal(ReasonRestore))
-			Expect(req.Source).To(Equal(SourceSystem))
+			Expect(req).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Reason": Equal(ReasonRestore),
+				"Source": Equal(SourceSystem),
+			}))
 			return &Commit{Created: true}, nil
 		})
 		commit, err := store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
@@ -753,19 +810,22 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCollect()
 		restoreFilesAt()
 
+		errContentFailed := errors.New("content failed")
 		restoreFileContent := setGitRevisionSeam(&gitRevisionStoreFileContentAt, func(*Store, context.Context, identity.CommitHash, string) (string, error) {
-			return "", errors.New("content failed")
+			return "", errContentFailed
 		})
 		_, err = store.RestoreDocumentToPath(context.Background(), "page.md", "page.md", hash, CommitRequest{})
-		Expect(err).To(MatchError("content failed"))
+		Expect(err).To(MatchError(errContentFailed))
 		restoreFileContent()
 
 		restoreWrite = setGitRevisionSeam(&gitRevisionWriteFile, func(string, []byte, os.FileMode) error {
 			return nil
 		})
 		restoreCapture = setGitRevisionSeam(&gitRevisionStoreCapture, func(_ *Store, _ context.Context, req CommitRequest) (*Commit, error) {
-			Expect(req.Reason).To(Equal(ReasonRestore))
-			Expect(req.Source).To(Equal(SourceSystem))
+			Expect(req).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Reason": Equal(ReasonRestore),
+				"Source": Equal(SourceSystem),
+			}))
 			return &Commit{Created: true}, nil
 		})
 		commit, err = store.RestoreDocumentContentToPath(context.Background(), "page.md", "# Page\n", CommitRequest{})
@@ -777,33 +837,36 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCommitObject = setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
 			return &object.Commit{}, nil
 		})
+		errFileTreeFailed := errors.New("file tree failed")
 		restoreCommitTree = setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
-			return nil, errors.New("file tree failed")
+			return nil, errFileTreeFailed
 		})
 		_, err = store.fileContentAt(context.Background(), hash, "page.md")
-		Expect(err).To(MatchError(ContainSubstring("load commit tree")))
+		Expect(err).To(MatchError(errFileTreeFailed))
 		_, err = store.filesAtCommit(context.Background(), &object.Commit{})
-		Expect(err).To(MatchError(ContainSubstring("load commit tree")))
+		Expect(err).To(MatchError(errFileTreeFailed))
 		restoreCommitTree()
 
 		restoreCommitTree = setGitRevisionSeam(&gitRevisionCommitTree, func(*object.Commit) (*object.Tree, error) {
 			return &object.Tree{}, nil
 		})
+		errFileMissing := errors.New("file missing")
 		restoreTreeFile := setGitRevisionSeam(&gitRevisionTreeFile, func(*object.Tree, string) (*object.File, error) {
-			return nil, errors.New("file missing")
+			return nil, errFileMissing
 		})
 		_, err = store.fileContentAt(context.Background(), hash, "page.md")
-		Expect(err).To(MatchError(ContainSubstring("document page.md is not present")))
+		Expect(err).To(MatchError(errFileMissing))
 		restoreTreeFile()
 
 		restoreTreeFile = setGitRevisionSeam(&gitRevisionTreeFile, func(*object.Tree, string) (*object.File, error) {
 			return &object.File{Name: "page.md"}, nil
 		})
+		errFileContentsFailed := errors.New("file contents failed")
 		restoreContents = setGitRevisionSeam(&gitRevisionFileContents, func(*object.File) (string, error) {
-			return "", errors.New("file contents failed")
+			return "", errFileContentsFailed
 		})
 		_, err = store.fileContentAt(context.Background(), hash, "page.md")
-		Expect(err).To(MatchError(ContainSubstring("read document page.md")))
+		Expect(err).To(MatchError(errFileContentsFailed))
 		restoreContents()
 		restoreTreeFile()
 
@@ -814,21 +877,23 @@ var _ = Describe("git revision edge coverage", func() {
 			Expect(visit(&object.File{Name: "image.png"})).To(Succeed())
 			return visit(&object.File{Name: "page.md"})
 		})
+		errFileReaderFailed := errors.New("file reader failed")
 		restoreFileReader := setGitRevisionSeam(&gitRevisionFileReader, func(*object.File) (io.ReadCloser, error) {
-			return nil, errors.New("file reader failed")
+			return nil, errFileReaderFailed
 		})
 		_, err = store.filesAtCommit(context.Background(), &object.Commit{})
-		Expect(err).To(MatchError(ContainSubstring("read commit files")))
+		Expect(err).To(MatchError(errFileReaderFailed))
 		restoreFileReader()
 
 		restoreFileReader = setGitRevisionSeam(&gitRevisionFileReader, func(*object.File) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("# Page\n")), nil
 		})
+		errFileReadAllFailed := errors.New("file read all failed")
 		restoreReadAll := setGitRevisionSeam(&gitRevisionReadAll, func(io.Reader) ([]byte, error) {
-			return nil, errors.New("file read all failed")
+			return nil, errFileReadAllFailed
 		})
 		_, err = store.filesAtCommit(context.Background(), &object.Commit{})
-		Expect(err).To(MatchError(ContainSubstring("read commit files")))
+		Expect(err).To(MatchError(errFileReadAllFailed))
 		restoreReadAll()
 		restoreFileReader()
 
@@ -839,14 +904,15 @@ var _ = Describe("git revision edge coverage", func() {
 			return visit(&object.File{Name: "page.md"})
 		})
 		_, err = store.filesAtCommit(ctx, &object.Commit{})
-		Expect(err).To(MatchError(ContainSubstring("read commit files")))
+		Expect(err).To(MatchError(context.Canceled))
 		restoreFileIter()
 
+		errFilesIterFailed := errors.New("files iter failed")
 		restoreFileIter = setGitRevisionSeam(&gitRevisionFileIterForEach, func(*object.FileIter, func(*object.File) error) error {
-			return errors.New("files iter failed")
+			return errFilesIterFailed
 		})
 		_, err = store.filesAtCommit(context.Background(), &object.Commit{})
-		Expect(err).To(MatchError(ContainSubstring("read commit files")))
+		Expect(err).To(MatchError(errFilesIterFailed))
 		restoreFileIter()
 		restoreTreeFiles()
 		restoreCommitTree()
@@ -857,11 +923,12 @@ var _ = Describe("git revision edge coverage", func() {
 		store := &Store{}
 		hash := identity.CommitHashFromString("1111111111111111111111111111111111111111")
 
+		errLoadChangedCommitFailed := errors.New("load changed commit failed")
 		restoreCommitObject := setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
-			return nil, errors.New("load changed commit failed")
+			return nil, errLoadChangedCommitFailed
 		})
 		_, _, err := store.changedMarkdownEntries(context.Background(), hash)
-		Expect(err).To(MatchError(ContainSubstring("load commit")))
+		Expect(err).To(MatchError(errLoadChangedCommitFailed))
 		restoreCommitObject()
 
 		restoreCommitObject = setGitRevisionSeam(&gitRevisionRepoCommitObject, func(*git.Repository, plumbing.Hash) (*object.Commit, error) {
@@ -882,16 +949,17 @@ var _ = Describe("git revision edge coverage", func() {
 			return visit(&object.File{Name: "page.md"})
 		})
 		_, _, err = store.changedMarkdownEntries(ctx, hash)
-		Expect(errors.Is(err, context.Canceled)).To(BeTrue())
+		Expect(err).To(MatchError(context.Canceled))
 		restoreFileIter()
 		restoreTreeFiles()
 		restoreCommitIterNext()
 
+		errParentFailed := errors.New("parent failed")
 		restoreCommitIterNext = setGitRevisionSeam(&gitRevisionCommitIterNext, func(object.CommitIter) (*object.Commit, error) {
-			return nil, errors.New("parent failed")
+			return nil, errParentFailed
 		})
 		_, _, err = store.changedMarkdownEntries(context.Background(), hash)
-		Expect(err).To(MatchError(ContainSubstring("load parent for commit")))
+		Expect(err).To(MatchError(errParentFailed))
 		restoreCommitIterNext()
 		restoreCommitTree()
 		restoreCommitObject()
@@ -952,13 +1020,6 @@ func setGitRevisionSeam[T any](target *T, replacement T) func() {
 	}
 	DeferCleanup(restore)
 	return restore
-}
-
-func expectErrorContaining(err error, text string) {
-	GinkgoHelper()
-
-	Expect(err).To(HaveOccurred())
-	Expect(err.Error()).To(ContainSubstring(text))
 }
 
 func containsAll(haystack string, needles ...string) bool {

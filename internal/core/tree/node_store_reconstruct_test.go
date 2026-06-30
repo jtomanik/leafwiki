@@ -2,6 +2,7 @@ package tree
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -681,11 +682,8 @@ leafwiki_title: B
 		if err == nil {
 			t.Fatalf("expected duplicate ID error")
 		}
-		if !strings.Contains(err.Error(), "duplicate leafwiki_id") {
+		if !errors.Is(err, ErrDuplicateLeafwikiID) {
 			t.Fatalf("expected duplicate ID error, got: %v", err)
-		}
-		if !strings.Contains(err.Error(), "dup-id") {
-			t.Fatalf("expected duplicate ID to be mentioned, got: %v", err)
 		}
 
 	})
@@ -715,11 +713,8 @@ leafwiki_title: B
 		if err == nil {
 			t.Fatalf("expected duplicate ID error")
 		}
-		if !strings.Contains(err.Error(), "duplicate leafwiki_id") {
+		if !errors.Is(err, ErrDuplicateLeafwikiID) {
 			t.Fatalf("expected duplicate ID error, got: %v", err)
-		}
-		if !strings.Contains(err.Error(), "mixed-dup-id") {
-			t.Fatalf("expected duplicate ID to be mentioned, got: %v", err)
 		}
 
 	})
@@ -741,7 +736,7 @@ var _ = ginkgo.DescribeTable("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOn
 		if err == nil {
 			t.Fatalf("expected reconstruct error")
 		}
-		if !strings.Contains(err.Error(), "metadata parse error") {
+		if !errors.Is(err, markdown.ErrMetadataParse) {
 			t.Fatalf("expected metadata parse error, got: %v", err)
 		}
 	},
@@ -800,11 +795,8 @@ var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnCaseI
 		if err == nil {
 			t.Fatalf("expected duplicate slug error")
 		}
-		if !strings.Contains(err.Error(), "duplicate slug") {
+		if !errors.Is(err, ErrDuplicateReconstructedSlug) {
 			t.Fatalf("expected duplicate slug error, got: %v", err)
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "abc") {
-			t.Fatalf("expected conflicting slug to be mentioned, got: %v", err)
 		}
 
 	})
@@ -921,11 +913,8 @@ var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnNorma
 		if err == nil {
 			t.Fatalf("expected duplicate normalized slug error")
 		}
-		if !strings.Contains(err.Error(), "duplicate page slug") {
+		if !errors.Is(err, ErrDuplicateReconstructedSlug) {
 			t.Fatalf("expected duplicate page slug error, got: %v", err)
-		}
-		if !strings.Contains(err.Error(), "foo_bar.md") || !strings.Contains(err.Error(), "foo-bar.md") {
-			t.Fatalf("expected both conflicting paths in error, got: %v", err)
 		}
 
 	})

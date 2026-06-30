@@ -98,6 +98,7 @@ func handleStringBinaryEscape(ctx *analysisContext, expr ast.Expr, typeName stri
 func handleStringCallEscape(ctx *analysisContext, expr ast.Expr, typeName string, call *ast.CallExpr) bool {
 	if isAllowedSemanticStringConstructorCall(ctx, call, typeName) ||
 		isAllowedSemanticConstructorTransform(ctx, call, typeName) ||
+		isAllowedExternalSemanticStringBoundary(ctx, call, typeName) ||
 		isAllowedTestStringCall(ctx, call) {
 		return true
 	}
@@ -231,6 +232,16 @@ func isAllowedTerminalStringCall(ctx *analysisContext, call *ast.CallExpr) bool 
 	default:
 		return false
 	}
+}
+
+func isAllowedExternalSemanticStringBoundary(ctx *analysisContext, call *ast.CallExpr, typeName string) bool {
+	if typeName != "CommitHash" {
+		return false
+	}
+	pkgPath, name := calleePackageAndName(ctx, call)
+	return pkgPath == "github.com/go-git/go-git/v6/plumbing" &&
+		name == "NewHash" &&
+		isAllowedTerminalCallBoundary(ctx, call)
 }
 
 func isAllowedTestStringCall(ctx *analysisContext, call *ast.CallExpr) bool {

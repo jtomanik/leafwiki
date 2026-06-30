@@ -10,10 +10,18 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
 	"github.com/sgtdi/fswatcher"
+)
+
+var (
+	errAdditionalFSWatcherFailed       = errors.New("fswatcher failed")
+	errAdditionalCaptureFailed         = errors.New("capture failed")
+	errAdditionalChangedContentsFailed = errors.New("changed contents failed")
+	errAdditionalWatchStopped          = errors.New("watch stopped")
 )
 
 var _ = Describe("workspace sync additional edge coverage", func() {
@@ -32,13 +40,13 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			previous := workspacesyncNewFSWatcher
 			DeferCleanup(func() { workspacesyncNewFSWatcher = previous })
 			workspacesyncNewFSWatcher = func(...fswatcher.WatcherOpt) (fswatcher.Watcher, error) {
-				return nil, errors.New("fswatcher failed")
+				return nil, errAdditionalFSWatcherFailed
 			}
 
 			watcher, err := newFileWatcher("/workspace")
 
 			Expect(watcher).To(BeNil())
-			Expect(err).To(MatchError("fswatcher failed"))
+			Expect(err).To(MatchError(errAdditionalFSWatcherFailed))
 		})
 
 		It("pumps events and dropped events until the wrapped watcher returns", func() {
@@ -56,7 +64,7 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 				close(wrapped.dropped)
 				select {
 				case <-release:
-					return errors.New("watch stopped")
+					return errAdditionalWatchStopped
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -70,7 +78,7 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			Eventually(adapter.Events()).Should(Receive(Equal(watcherEvent{Path: "/workspace/a.md"})))
 			Eventually(adapter.Dropped()).Should(Receive(Equal(watcherEvent{Path: "/workspace/dropped.md", Dropped: true})))
 			close(release)
-			Eventually(done).Should(Receive(MatchError("watch stopped")))
+			Eventually(done).Should(Receive(MatchError(errAdditionalWatchStopped)))
 			adapter.Close()
 			Expect(wrapped.closeCount).To(Equal(1))
 		})
@@ -135,23 +143,27 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			service := &Service{
 				enabled: true,
 				tree:    &fakeTreeReconstructor{},
-				store:   &fakeRevisionStore{captureErr: errors.New("capture failed")},
+				store:   &fakeRevisionStore{captureErr: errAdditionalCaptureFailed},
 				status:  SyncStatus{Enabled: true, PendingEventCount: 1},
 			}
 
 			service.handleWatcherBatch(context.Background(), 3, true, "")
-			Expect(service.status.PendingEventCount).To(Equal(0))
-			Expect(service.status.LastError).To(Equal("watcher dropped events"))
+			Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"PendingEventCount": BeZero(),
+				"LastError":         Equal(watcherDroppedEventsStatus("")),
+			}))
 
 			service.status.LastError = ""
 			service.status.PendingEventCount = 2
 			service.handleWatcherBatch(context.Background(), 1, true, "docs/a.md")
-			Expect(service.status.PendingEventCount).To(Equal(1))
-			Expect(service.status.LastError).To(Equal("watcher dropped events for docs/a.md"))
+			Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"PendingEventCount": Equal(1),
+				"LastError":         Equal(watcherDroppedEventsStatus("docs/a.md")),
+			}))
 
 			service.status.LastError = ""
 			service.handleWatcherBatch(context.Background(), 1, false, "")
-			Expect(service.status.LastError).To(Equal("capture failed"))
+			Expect(service.status.LastError).To(Equal(errAdditionalCaptureFailed.Error()))
 		})
 
 		It("records changed markdown paths with trimming, dedupe, and history bounds", func() {
@@ -169,17 +181,17 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 		})
 
 		It("merges validation errors without aliasing or duplicates", func() {
-			existing := []ValidationError{{Code: "broken_link", Path: "a", Message: "same"}}
+			existing := []ValidationError{{Code: wikivalidation.IssueCodeBrokenLink, Path: "a", Message: "same"}}
 			next := []ValidationError{
-				{Code: "broken_link", Path: "a", Message: "same"},
-				{Code: "invalid_slug", Path: "b", Message: "other"},
+				{Code: wikivalidation.IssueCodeBrokenLink, Path: "a", Message: "same"},
+				{Code: wikivalidation.IssueCodeInvalidSlug, Path: "b", Message: "other"},
 			}
 
 			Expect(mergeValidationErrors(nil, next)).To(Equal(next))
 			Expect(mergeValidationErrors(existing, nil)).To(Equal(existing))
 			Expect(mergeValidationErrors(existing, next)).To(Equal([]ValidationError{
-				{Code: "broken_link", Path: "a", Message: "same"},
-				{Code: "invalid_slug", Path: "b", Message: "other"},
+				{Code: wikivalidation.IssueCodeBrokenLink, Path: "a", Message: "same"},
+				{Code: wikivalidation.IssueCodeInvalidSlug, Path: "b", Message: "other"},
 			}))
 		})
 
@@ -206,8 +218,8 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(requires).To(BeTrue())
 
-			_, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), &fakeRevisionStore{changedContentsErr: errors.New("changed contents failed")}, "metadata")
-			Expect(err).To(MatchError("changed contents failed"))
+			_, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), &fakeRevisionStore{changedContentsErr: errAdditionalChangedContentsFailed}, "metadata")
+			Expect(err).To(MatchError(errAdditionalChangedContentsFailed))
 
 			_, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), store, "parse-error")
 			Expect(err).To(HaveOccurred())
@@ -247,11 +259,13 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			_, ok = leafWikiIDFromContent("---\nleafwiki_id: [broken\n---\n# Broken\n")
 			Expect(ok).To(BeFalse())
 
-			commit := gitrevisions.Commit{Hash: "hash-1", Message: "", AuthorID: gitrevisions.NewActorIDUnchecked(""), CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)}
+			commit := gitrevisions.Commit{Hash: CommitHashFromString("hash-1"), Message: "", AuthorID: gitrevisions.ParseActorID(""), CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)}
 			rev := revisionForPageContent(rootDir, page, commit, "docs/Page.MD", files["docs/Page.MD"])
-			Expect(rev.AuthorID).To(Equal(PublicEditorActor().ID.String()))
-			Expect(rev.Summary).To(Equal("workspace sync"))
-			Expect(rev.Title).To(Equal("Historical Title"))
+			Expect(rev).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"AuthorID": Equal(PublicEditorActor().ID.MetadataValue()),
+				"Summary":  Equal("workspace sync"),
+				"Title":    Equal("Historical Title"),
+			})))
 		})
 
 		It("extracts markdown paths from quoted error tokens without duplicates", func() {

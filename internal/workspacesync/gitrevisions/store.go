@@ -46,20 +46,6 @@ const (
 	SourceUnknown    Source = "unknown"
 )
 
-type ActorID string
-
-func NewActorIDUnchecked(raw string) ActorID {
-	return ActorID(raw)
-}
-
-func (id ActorID) String() string {
-	return string(id)
-}
-
-func (id ActorID) Trimmed() ActorID {
-	return ActorID(strings.TrimSpace(id.String()))
-}
-
 type Actor struct {
 	ID    ActorID
 	Name  string
@@ -81,7 +67,7 @@ type CommitRequest struct {
 }
 
 type Commit struct {
-	Hash                 string
+	Hash                 identity.CommitHash
 	Message              string
 	AuthorID             ActorID
 	AuthorName           string
@@ -107,6 +93,11 @@ type Store struct {
 	repo    *git.Repository
 }
 
+var ErrDataDirRequired = errors.New("data dir is required")
+var ErrRootDirRequired = errors.New("root dir is required")
+var ErrDocumentRestorePathInvalid = errors.New("document restore path is invalid")
+var ErrDocumentRestoreSourcePathInvalid = errors.New("document restore source path is invalid")
+
 func PublicEditorActor() Actor {
 	return Actor{
 		ID:    "public-editor",
@@ -119,10 +110,10 @@ func Open(options StoreOptions) (*Store, error) {
 	dataDir := strings.TrimSpace(options.DataDir)
 	rootDir := strings.TrimSpace(options.RootDir)
 	if dataDir == "" {
-		return nil, fmt.Errorf("data dir is required")
+		return nil, ErrDataDirRequired
 	}
 	if rootDir == "" {
-		return nil, fmt.Errorf("root dir is required")
+		return nil, ErrRootDirRequired
 	}
 	dataDir = filepath.Clean(dataDir)
 	rootDir = filepath.Clean(rootDir)
@@ -270,7 +261,7 @@ func (s *Store) commit(ctx context.Context, req CommitRequest, amend bool) (*Com
 			if err != nil {
 				return nil, fmt.Errorf("commit empty restore snapshot: %w", err)
 			}
-			return newCommitResult(hash.String(), batchID, messageChangedMarkdownPaths, true), nil
+			return newCommitResult(CommitHashFromPlumbingHash(hash), batchID, messageChangedMarkdownPaths, true), nil
 		}
 		if errors.Is(headErr, plumbing.ErrReferenceNotFound) && !amend {
 			hash, err = gitRevisionWorktreeCommit(wt, commitMessage(req, batchID, messageChangedMarkdownPaths), &git.CommitOptions{
@@ -281,20 +272,20 @@ func (s *Store) commit(ctx context.Context, req CommitRequest, amend bool) (*Com
 			if err != nil {
 				return nil, fmt.Errorf("commit empty initial markdown snapshot: %w", err)
 			}
-			return newCommitResult(hash.String(), batchID, messageChangedMarkdownPaths, true), nil
+			return newCommitResult(CommitHashFromPlumbingHash(hash), batchID, messageChangedMarkdownPaths, true), nil
 		}
 		if headErr != nil {
 			return nil, err
 		}
-		return newCommitResult(head.Hash().String(), batchID, nil, false), nil
+		return newCommitResult(CommitHashFromPlumbingHash(head.Hash()), batchID, nil, false), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("commit markdown snapshot: %w", err)
 	}
-	return newCommitResult(hash.String(), batchID, messageChangedMarkdownPaths, true), nil
+	return newCommitResult(CommitHashFromPlumbingHash(hash), batchID, messageChangedMarkdownPaths, true), nil
 }
 
-func newCommitResult(hash string, batchID string, changedMarkdownPaths []string, created bool) *Commit {
+func newCommitResult(hash identity.CommitHash, batchID string, changedMarkdownPaths []string, created bool) *Commit {
 	paths := append([]string(nil), changedMarkdownPaths...)
 	sort.Strings(paths)
 	return &Commit{
@@ -518,14 +509,14 @@ func commitMessage(req CommitRequest, batchID string, changedMarkdownPaths []str
 }
 
 func commitActorIDs(req CommitRequest) []ActorID {
-	primaryID := req.Actor.ID.Trimmed()
+	primaryID := TrimActorID(req.Actor.ID)
 	if primaryID == "" {
 		primaryID = PublicEditorActor().ID
 	}
 	actorIDs := []ActorID{primaryID}
 	seen := map[ActorID]struct{}{primaryID: {}}
 	for _, actor := range req.AdditionalActors {
-		actorID := actor.ID.Trimmed()
+		actorID := TrimActorID(actor.ID)
 		if actorID == "" {
 			continue
 		}
@@ -547,16 +538,16 @@ func newBatchID() string {
 }
 
 func signature(actor Actor) *object.Signature {
-	if actor.ID.Trimmed() == "" {
+	if TrimActorID(actor.ID) == "" {
 		actor = PublicEditorActor()
 	}
 	name := strings.TrimSpace(actor.Name)
 	if name == "" {
-		name = actor.ID.String()
+		name = ActorIDGitSignatureName(actor.ID)
 	}
 	email := strings.TrimSpace(actor.Email)
 	if email == "" {
-		email = actor.ID.String() + "@leafwiki.local"
+		email = ActorIDGitSignatureEmail(actor.ID)
 	}
 	return &object.Signature{Name: name, Email: email, When: time.Now().UTC()}
 }
@@ -573,7 +564,7 @@ func (s *Store) ListCommits(ctx context.Context, req ListRequest) ([]Commit, err
 		limit = 50
 	}
 	commits := make([]Commit, 0, limit)
-	cursor := strings.TrimSpace(fmt.Sprint(req.Cursor))
+	cursor := req.Cursor
 	foundCursor := cursor == ""
 	err := s.ForEachCommit(ctx, func(commit Commit) (bool, error) {
 		if !foundCursor {
@@ -633,7 +624,7 @@ func (s *Store) GetCommit(ctx context.Context, commitHash identity.CommitHash) (
 	if err := ctx.Err(); err != nil {
 		return Commit{}, err
 	}
-	commit, err := gitRevisionRepoCommitObject(s.repo, plumbing.NewHash(fmt.Sprint(commitHash)))
+	commit, err := gitRevisionRepoCommitObject(s.repo, PlumbingHashFromCommitHash(commitHash))
 	if err != nil {
 		return Commit{}, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
@@ -654,7 +645,7 @@ func (s *Store) changedMarkdownEntries(ctx context.Context, commitHash identity.
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	commit, err := gitRevisionRepoCommitObject(s.repo, plumbing.NewHash(fmt.Sprint(commitHash)))
+	commit, err := gitRevisionRepoCommitObject(s.repo, PlumbingHashFromCommitHash(commitHash))
 	if err != nil {
 		return nil, nil, fmt.Errorf("load commit %s: %w", commitHash, err)
 	}
@@ -737,12 +728,12 @@ func sortedKeys(values map[string]struct{}) []string {
 func commitFromObject(commit *object.Commit) Commit {
 	title, trailers, actorIDs := parseCommitMessage(commit.Message)
 	changed, _ := strconv.Atoi(trailers["LeafWiki-Changed-Markdown"])
-	authorID := ActorID("")
+	var authorID ActorID
 	if len(actorIDs) > 0 {
 		authorID = actorIDs[0]
 	}
 	return Commit{
-		Hash:                 commit.Hash.String(),
+		Hash:                 CommitHashFromPlumbingHash(commit.Hash),
 		Message:              title,
 		AuthorID:             authorID,
 		AuthorName:           commit.Author.Name,
@@ -775,7 +766,7 @@ func parseCommitMessage(message string) (string, map[string]string, []ActorID) {
 		}
 		value = strings.TrimSpace(value)
 		if key == "LeafWiki-Actor" {
-			actorIDs = append(actorIDs, ActorID(value))
+			actorIDs = append(actorIDs, ParseActorID(value))
 			if _, exists := trailers[key]; !exists {
 				trailers[key] = value
 			}
@@ -839,11 +830,11 @@ func (s *Store) RestoreDocumentToPath(ctx context.Context, targetRelPath string,
 	}
 	targetRelPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRelPath)))
 	if targetRelPath == "." || strings.HasPrefix(targetRelPath, "../") || !isManagedMarkdownRelPath(targetRelPath) {
-		return nil, fmt.Errorf("document restore path is invalid: %s", targetRelPath)
+		return nil, fmt.Errorf("%w: %s", ErrDocumentRestorePathInvalid, targetRelPath)
 	}
 	sourceRelPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(sourceRelPath)))
 	if sourceRelPath == "." || strings.HasPrefix(sourceRelPath, "../") || !isManagedMarkdownRelPath(sourceRelPath) {
-		return nil, fmt.Errorf("document restore source path is invalid: %s", sourceRelPath)
+		return nil, fmt.Errorf("%w: %s", ErrDocumentRestoreSourcePathInvalid, sourceRelPath)
 	}
 	content, err := gitRevisionStoreFileContentAt(s, ctx, commitHash, sourceRelPath)
 	if err != nil {
@@ -858,7 +849,7 @@ func (s *Store) RestoreDocumentContentToPath(ctx context.Context, targetRelPath 
 	}
 	targetRelPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRelPath)))
 	if targetRelPath == "." || strings.HasPrefix(targetRelPath, "../") || !isManagedMarkdownRelPath(targetRelPath) {
-		return nil, fmt.Errorf("document restore path is invalid: %s", targetRelPath)
+		return nil, fmt.Errorf("%w: %s", ErrDocumentRestorePathInvalid, targetRelPath)
 	}
 	fullPath := filepath.Join(s.rootDir, filepath.FromSlash(targetRelPath))
 	if err := gitRevisionMkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -880,7 +871,7 @@ func (s *Store) fileContentAt(ctx context.Context, commitHash identity.CommitHas
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	hash := plumbing.NewHash(fmt.Sprint(commitHash))
+	hash := PlumbingHashFromCommitHash(commitHash)
 	commit, err := gitRevisionRepoCommitObject(s.repo, hash)
 	if err != nil {
 		return "", fmt.Errorf("load commit %s: %w", commitHash, err)
@@ -904,7 +895,7 @@ func (s *Store) FilesAt(ctx context.Context, commitHash identity.CommitHash) (ma
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	hash := plumbing.NewHash(fmt.Sprint(commitHash))
+	hash := PlumbingHashFromCommitHash(commitHash)
 	commit, err := gitRevisionRepoCommitObject(s.repo, hash)
 	if err != nil {
 		return nil, fmt.Errorf("load commit %s: %w", commitHash, err)

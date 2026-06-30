@@ -18,6 +18,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -1322,14 +1323,23 @@ leafwiki_title: Sync Section
 		}
 		t.Fatalf("ValidationErrors = %#v, want message containing %q", status.ValidationErrors, needle)
 	}
-	assertValidationErrorContains("ambiguous_legacy_link")
+	assertValidationErrorCode := func(code wikivalidation.IssueCode) {
+		t.Helper()
+		for _, validationError := range status.ValidationErrors {
+			if validationError.Code == code {
+				return
+			}
+		}
+		t.Fatalf("ValidationErrors = %#v, want code %q", status.ValidationErrors, code)
+	}
+	assertValidationErrorCode(wikivalidation.IssueCodeAmbiguousLegacyLink)
 	assertValidationErrorContains("/docs/missing")
 })
 
 var _ = It("CanonicalMigrationValidationErrorsUseNormalizedRoutePath", func() {
 	t := GinkgoT()
 	validationErrors := canonicalMigrationValidationErrors(t.TempDir(), "plans/agent_hooks.PLAN.md", []markdownlinks.Issue{{
-		Code:        "ambiguous_legacy_link",
+		Code:        markdownlinks.IssueCodeAmbiguousLegacyLink,
 		Destination: "/plans/sync",
 	}})
 
@@ -1538,6 +1548,7 @@ var _ = It("ServiceSyncNowLogsStartupPhases", func() {
 
 var _ = It("ServiceListSnapshotPagePropagatesChangedMarkdownPathErrors", func() {
 	t := GinkgoT()
+	errChangedPathTrailerReadFailed := errors.New("path trailer read failed")
 	service, err := NewService(ServiceOptions{
 		Enabled: true,
 		Tree:    &fakeTreeReconstructor{},
@@ -1545,7 +1556,7 @@ var _ = It("ServiceListSnapshotPagePropagatesChangedMarkdownPathErrors", func() 
 			commits: []gitrevisions.Commit{
 				{Hash: "abc123", ChangedMarkdownCount: 1},
 			},
-			changedPathsErr: errors.New("path trailer read failed"),
+			changedPathsErr: errChangedPathTrailerReadFailed,
 		},
 	})
 	if err != nil {
@@ -1553,9 +1564,7 @@ var _ = It("ServiceListSnapshotPagePropagatesChangedMarkdownPathErrors", func() 
 	}
 
 	_, err = service.ListSnapshotPage(context.Background(), CommitHash(""), 10)
-	if err == nil || !strings.Contains(err.Error(), "path trailer read failed") {
-		t.Fatalf("ListSnapshotPage error = %v, want changed path error", err)
-	}
+	Expect(err).To(MatchError(errChangedPathTrailerReadFailed))
 })
 
 var _ = It("ServiceListSnapshotPageDoesNotReadChangedPathsForSentinelCommit", func() {
@@ -1614,12 +1623,13 @@ var _ = It("ServiceListSnapshotPageDoesNotBlockStatusThroughSyncNowWhileReadingC
 		t.Fatalf("NewService: %v", err)
 	}
 
+	changedPathsStarted := store.changedPathsStarted
 	listDone := make(chan error, 1)
 	go func() {
 		_, err := service.ListSnapshotPage(context.Background(), CommitHash(""), 1)
 		listDone <- err
 	}()
-	<-store.changedPathsStarted
+	Eventually(changedPathsStarted).Within(time.Second).Should(BeClosed())
 	unblockChangedPaths := closeOnce(store.unblockChangedPaths)
 	DeferCleanup(unblockChangedPaths)
 
@@ -2214,7 +2224,7 @@ var _ = It("ServiceListPageRevisionsUsesHistoricalMarkdownMetadata", func() {
 	if revisions[0].Slug != "old-page" {
 		t.Fatalf("revision slug = %q, want old-page", revisions[0].Slug)
 	}
-	if revisions[0].Kind != string(tree.NodeKindPage) {
+	if revisions[0].Kind != tree.NodeKindPage {
 		t.Fatalf("revision kind = %q, want page", revisions[0].Kind)
 	}
 	if revisions[0].Path != "old-page" {
@@ -2265,7 +2275,7 @@ var _ = It("ServiceListPageRevisionsNormalizesSectionIndexPath", func() {
 	if revisions[0].Slug != "docs" {
 		t.Fatalf("revision slug = %q, want docs", revisions[0].Slug)
 	}
-	if revisions[0].Kind != string(tree.NodeKindSection) {
+	if revisions[0].Kind != tree.NodeKindSection {
 		t.Fatalf("revision kind = %q, want section", revisions[0].Kind)
 	}
 	if revisions[0].Path != "docs" {
@@ -2316,7 +2326,7 @@ var _ = It("ServiceListPageRevisionsNormalizesReadmeFallbackSectionPath", func()
 	if revisions[0].Slug != "guides" {
 		t.Fatalf("revision slug = %q, want guides", revisions[0].Slug)
 	}
-	if revisions[0].Kind != string(tree.NodeKindSection) {
+	if revisions[0].Kind != tree.NodeKindSection {
 		t.Fatalf("revision kind = %q, want section", revisions[0].Kind)
 	}
 	if revisions[0].Path != "guides" {
@@ -2375,7 +2385,7 @@ var _ = It("ServiceListPageRevisionsMapsReadmeAsPageWhenWorkspaceDirHasIndex", f
 	if len(revisions) != 1 {
 		t.Fatalf("revision count = %d, want 1", len(revisions))
 	}
-	if revisions[0].Kind != string(tree.NodeKindPage) {
+	if revisions[0].Kind != tree.NodeKindPage {
 		t.Fatalf("revision kind = %q, want page", revisions[0].Kind)
 	}
 	if revisions[0].Path != "user-guides/README" {
@@ -2423,7 +2433,7 @@ var _ = It("ServiceListPageRevisionsKeepsHistoricalPageKindAfterSectionConversio
 	if len(revisions) != 1 {
 		t.Fatalf("revision count = %d, want 1", len(revisions))
 	}
-	if revisions[0].Kind != string(tree.NodeKindPage) {
+	if revisions[0].Kind != tree.NodeKindPage {
 		t.Fatalf("revision kind = %q, want historical page kind", revisions[0].Kind)
 	}
 	if revisions[0].Path != "docs" {
@@ -2545,7 +2555,7 @@ var _ = It("ServiceListPageRevisionsScansAllCommitsPastLargeUnrelatedHead", func
 	}
 	for i := 0; i < 1005; i++ {
 		hash := "page-b-change-" + strconv.Itoa(i)
-		store.commits = append(store.commits, gitrevisions.Commit{Hash: hash, AuthorID: "bob"})
+		store.commits = append(store.commits, gitrevisions.Commit{Hash: CommitHashFromString(hash), AuthorID: "bob"})
 		store.filesAt[CommitHashFromString(hash)] = map[string]string{
 			"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 			"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
@@ -2608,7 +2618,7 @@ var _ = It("ServiceListPageRevisionsStopsScanningAfterConfirmedNextCursor", func
 	}
 	for i := 0; i < 1005; i++ {
 		hash := "page-b-change-" + strconv.Itoa(i)
-		store.commits = append(store.commits, gitrevisions.Commit{Hash: hash, AuthorID: "bob"})
+		store.commits = append(store.commits, gitrevisions.Commit{Hash: CommitHashFromString(hash), AuthorID: "bob"})
 		store.filesAt[CommitHashFromString(hash)] = map[string]string{
 			"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
 			"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
@@ -2726,7 +2736,7 @@ var _ = It("ServiceListPageRevisionsDoesNotBlockStatusWhileScanningStore", func(
 		_, err := service.ListPageRevisions(context.Background(), page, "", 1)
 		done <- err
 	}()
-	<-store.changedContentsStarted
+	Eventually(store.changedContentsStarted).Within(time.Second).Should(BeClosed())
 	unblockChangedContents := closeOnce(store.unblockChangedContents)
 	DeferCleanup(unblockChangedContents)
 
@@ -2811,7 +2821,7 @@ var _ = It("ServiceGetPageRevisionSnapshotDoesNotBlockStatusWhileReadingStore", 
 		_, err := service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("page-a-change"))
 		done <- err
 	}()
-	<-store.changedContentsStarted
+	Eventually(store.changedContentsStarted).Within(time.Second).Should(BeClosed())
 	unblockChangedContents := closeOnce(store.unblockChangedContents)
 	DeferCleanup(unblockChangedContents)
 
@@ -3687,13 +3697,13 @@ var _ = It("normalizes validation paths and rejects workspace escapes", func() {
 	rootDir := filepath.Join(t.TempDir(), "workspace")
 	Expect(normalizeValidationPath(rootDir, filepath.Join(rootDir, "docs", "page.md"))).To(Equal("docs/page.md"))
 	Expect(normalizeValidationPath(rootDir, "./docs/page.md")).To(Equal("docs/page.md"))
-	Expect(normalizeValidationPath(rootDir, "../outside.md")).To(Equal(""))
+	Expect(normalizeValidationPath(rootDir, "../outside.md")).To(BeEmpty())
 	Expect(normalizeValidationPath(rootDir, filepath.Join(filepath.Dir(rootDir), "outside.md"))).To(Equal(filepath.ToSlash(filepath.Join(filepath.Dir(rootDir), "outside.md"))))
 })
 
 var _ = It("firstNonEmpty trims values and returns the first non-blank value", func() {
 	Expect(firstNonEmpty("", " \t ", " value ", "later")).To(Equal("value"))
-	Expect(firstNonEmpty("", " ")).To(Equal(""))
+	Expect(firstNonEmpty("", " ")).To(BeEmpty())
 })
 
 type testHelper interface {

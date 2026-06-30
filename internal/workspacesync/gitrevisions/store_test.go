@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -556,7 +557,7 @@ var _ = It("StoreCapturePrunesPreviouslyTrackedDotDirectoryMarkdown", func() {
 		t.Fatalf("prune commit not created: %#v", prune)
 	}
 
-	prunedCommit, err := store.repo.CommitObject(plumbing.NewHash(prune.Hash))
+	prunedCommit, err := store.repo.CommitObject(PlumbingHashFromCommitHash(prune.Hash))
 	if err != nil {
 		t.Fatalf("pruned CommitObject: %v", err)
 	}
@@ -790,7 +791,7 @@ var _ = It("StoreGetCommit returns captured commit metadata and reports missing 
 		Reason: ReasonExplicit,
 		Source: SourceMCP,
 		Actor: Actor{
-			ID:    NewActorIDUnchecked("agent-1"),
+			ID:    ParseActorID("agent-1"),
 			Name:  "Agent One",
 			Email: "agent-1@example.test",
 		},
@@ -799,13 +800,15 @@ var _ = It("StoreGetCommit returns captured commit metadata and reports missing 
 
 	commit, err := store.GetCommit(context.Background(), identity.CommitHashFromString(captured.Hash))
 	Expect(err).NotTo(HaveOccurred())
-	Expect(commit.Hash).To(Equal(captured.Hash))
-	Expect(commit.AuthorID).To(Equal(NewActorIDUnchecked("agent-1")))
-	Expect(commit.Source).To(Equal(SourceMCP))
-	Expect(commit.Reason).To(Equal(ReasonExplicit))
+	Expect(commit).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Hash":     Equal(captured.Hash),
+		"AuthorID": Equal(ParseActorID("agent-1")),
+		"Source":   Equal(SourceMCP),
+		"Reason":   Equal(ReasonExplicit),
+	}))
 
 	_, err = store.GetCommit(context.Background(), identity.CommitHashFromString("0000000000000000000000000000000000000000"))
-	Expect(err).To(MatchError(ContainSubstring("load commit 0000000000000000000000000000000000000000")))
+	Expect(err).To(MatchError(plumbing.ErrObjectNotFound))
 })
 
 type testHelper interface {

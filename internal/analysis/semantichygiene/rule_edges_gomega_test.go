@@ -691,6 +691,22 @@ func use(id PageID) {
 				Expect(isAllowedTerminalCallBoundary(h.ctx, h.findCall(name))).To(BeTrue())
 			}
 
+			gitHashBoundary := newRuleHarness("/repo/internal/workspacesync/gitrevisions/semantic_types.go", "github.com/perber/wiki/internal/workspacesync/gitrevisions", `package gitrevisions
+type CommitHash string
+type Hash struct{}
+type plumbingPackage struct{}
+func (plumbingPackage) NewHash(string) Hash { return Hash{} }
+var plumbing plumbingPackage
+func (hash CommitHash) String() string { return string(hash) }
+func PlumbingHashFromCommitHash(hash CommitHash) Hash {
+	return plumbing.NewHash(hash.String())
+}
+`)
+			newHash := gitHashBoundary.findCall("NewHash").Fun.(*ast.SelectorExpr).Sel
+			gitHashBoundary.ctx.pass.TypesInfo.Uses[newHash] = types.NewFunc(token.NoPos, types.NewPackage("github.com/go-git/go-git/v6/plumbing", "plumbing"), "NewHash", nil)
+			checkStringLeak(gitHashBoundary.ctx, gitHashBoundary.findCall("String"))
+			Expect(gitHashBoundary.diagnostics).To(BeEmpty())
+
 			nested := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 import "fmt"
 type PageID string

@@ -23,18 +23,149 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
+	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaceid"
 )
+
+const (
+	leafwikiNativeStdioParseErrorFrame = `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}`
+	leafwikiFixtureDaemonStopped       = "daemon stopped"
+	leafwikiFixtureFrontdExited        = "frontd exited"
+)
+
+func MatchProjectDaemonConfigMismatch(mismatches ...projectdaemon.Mismatch) types.GomegaMatcher {
+	expected := append([]projectdaemon.Mismatch(nil), mismatches...)
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var mismatchErr *projectdaemon.ConfigMismatchError
+		if !errors.As(err, &mismatchErr) {
+			return false, nil
+		}
+		for _, want := range expected {
+			if !containsProjectDaemonMismatch(mismatchErr.Mismatches, want) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon config mismatch\n{{format .Data 1}}", expected)
+}
+
+func containsProjectDaemonMismatch(mismatches []projectdaemon.Mismatch, want projectdaemon.Mismatch) bool {
+	for _, got := range mismatches {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func MatchPathError() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var pathErr *os.PathError
+		return errors.As(err, &pathErr), nil
+	}).WithMessage("match path error")
+}
+
+func MatchJSONSyntaxError() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var syntaxErr *json.SyntaxError
+		return errors.As(err, &syntaxErr), nil
+	}).WithMessage("match JSON syntax error")
+}
+
+func MatchProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaemon.RoleState, fields gstruct.Fields) types.GomegaMatcher {
+	expected := gstruct.Fields{
+		"Name":  Equal(name),
+		"State": Equal(state),
+	}
+	for field, matcher := range fields {
+		expected[field] = matcher
+	}
+	return gstruct.MatchFields(gstruct.IgnoreExtras, expected)
+}
+
+func MatchFederatedEnsureUnexpectedResult(workspaceID workspaceid.WorkspaceID, resultType string) types.GomegaMatcher {
+	expected := struct {
+		WorkspaceID workspaceid.WorkspaceID
+		ResultType  string
+	}{WorkspaceID: workspaceID, ResultType: resultType}
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var unexpectedErr *federatedEnsureUnexpectedResultError
+		if !errors.As(err, &unexpectedErr) {
+			return false, nil
+		}
+		return unexpectedErr.WorkspaceID == workspaceID && unexpectedErr.ResultType == resultType, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match federated ensure unexpected result\n{{format .Data 1}}", expected)
+}
+
+func MatchProjectDaemonControlStatus(status int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		return projectdaemon.IsControlStatus(err, status), nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon control status\n{{format .Data 1}}", status)
+}
+
+func MatchNetOpError() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var opErr *net.OpError
+		return errors.As(err, &opErr), nil
+	}).WithMessage("match net operation error")
+}
+
+func MatchURLError() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var urlErr *url.Error
+		return errors.As(err, &urlErr), nil
+	}).WithMessage("match URL error")
+}
+
+func MatchWikidPrivateEndpoint(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	expected := struct {
+		Status int
+		Code   sharederrors.ErrorCode
+	}{Status: status, Code: code}
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		var endpointErr *wikidPrivateEndpointError
+		if !errors.As(err, &endpointErr) {
+			return false, nil
+		}
+		return endpointErr.StatusCode == status && endpointErr.Code == code, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match wikid private endpoint\n{{format .Data 1}}", expected)
+}
+
+func waitForLeafwikiContextCancellation(ctx context.Context) error {
+	ginkgo.GinkgoHelper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for ctx.Err() == nil {
+		if time.Now().After(deadline) {
+			return context.DeadlineExceeded
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return ctx.Err()
+}
 
 var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	ginkgo.It("panics on usage write failures instead of silently truncating help", func() {
@@ -53,41 +184,41 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		_, flags := leafwikiEdgeFlagSet()
 		*flags.internalProjectDaemon = filepath.Join(t.TempDir(), "missing-daemon-startup.json")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = runInternalStartupCommand(flags)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		_, flags = leafwikiEdgeFlagSet()
 		*flags.internalRuntimeRole = filepath.Join(t.TempDir(), "missing-runtime-role.json")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = runInternalStartupCommand(flags)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		_, flags = leafwikiEdgeFlagSet()
 		*flags.mcp = "invalid-transport"
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = resolveStartupMCPTransports(flags, map[string]bool{"mcp": true}, false)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			validateStartupCommandTransport(true, mcpTransports{Stdio: true}, nil)
-		})
-		expectLeafwikiExit(1, func() {
+		}).To(PanicWithLeafwikiExit(1))
+		Expect(func() {
 			validateStartupCommandTransport(false, mcpTransports{Stdio: true}, []string{"serve"})
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			validateProxyAuthSettings("not-a-cidr", false)
-		})
-		expectLeafwikiExit(1, func() {
+		}).To(PanicWithLeafwikiExit(1))
+		Expect(func() {
 			validateProxyAuthSettings("", true)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		_, flags = leafwikiEdgeFlagSet()
 		*flags.markdownLinkRootPrefix = "https://example.test/wiki"
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = buildRuntimeConfigForStartup(flags, map[string]bool{"markdown-link-root-prefix": true}, false, mcpTransports{}, t.TempDir())
-		})
+		}).To(PanicWithLeafwikiExit(1))
 	})
 
 	ginkgo.It("resolves startup data directories for service mode without ignoring explicit inputs", func() {
@@ -105,9 +236,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(resolveStartupDataDir(flags, map[string]bool{"data-dir": true}, true)).To(Equal(*flags.dataDir))
 
 		t.Setenv("HOME", "")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = resolveStartupDataDir(flags, map[string]bool{}, true)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 	})
 
 	ginkgo.It("parses agent-hook commands without treating flag values as providers", func() {
@@ -117,11 +248,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		provider, ok = agentHookProviderFromArgs([]string{"--config", "leafwiki.yml", "agent-hook", "cursor"})
 		Expect(ok).To(BeTrue())
-		Expect(provider).To(Equal("cursor"))
+		Expect(provider).To(Equal(agenthooks.ProviderCursor))
 
 		provider, ok = agentHookProviderFromArgs([]string{"agent-hook"})
 		Expect(ok).To(BeTrue())
-		Expect(provider).To(Equal("unknown"))
+		Expect(provider).To(Equal(agenthooks.ProviderUnknown))
 
 		provider, ok = agentHookProviderFromRawArgs([]string{"--config", "agent-hook"})
 		Expect(ok).To(BeFalse())
@@ -129,7 +260,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		provider, ok = agentHookProviderFromRawArgs([]string{"--config=leafwiki.yml", "agent-hook"})
 		Expect(ok).To(BeTrue())
-		Expect(provider).To(Equal("unknown"))
+		Expect(provider).To(Equal(agenthooks.ProviderUnknown))
 	})
 
 	ginkgo.It("recognizes help commands before full startup dispatch", func() {
@@ -202,37 +333,37 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		t := ginkgo.GinkgoT()
 
 		t.Setenv("LEAFWIKI_EDGE_BOOL", "bogus")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = resolveBool("edge-bool", false, map[string]bool{}, "LEAFWIKI_EDGE_BOOL")
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		t.Setenv("LEAFWIKI_EDGE_INT", "bogus")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = resolveInt("edge-int", 0, map[string]bool{}, "LEAFWIKI_EDGE_INT", 1)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		t.Setenv("LEAFWIKI_EDGE_DURATION", "bogus")
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = resolveDuration("edge-duration", 0, map[string]bool{}, "LEAFWIKI_EDGE_DURATION")
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			_ = parseByteSize("bogus", "edge size")
-		})
-		expectLeafwikiExit(1, func() {
+		}).To(PanicWithLeafwikiExit(1))
+		Expect(func() {
 			_ = parseByteSize("0B", "edge size")
-		})
-		expectLeafwikiExit(1, func() {
+		}).To(PanicWithLeafwikiExit(1))
+		Expect(func() {
 			_ = parseByteSize("16EiB", "edge size")
-		})
-		expectLeafwikiExit(1, func() {
+		}).To(PanicWithLeafwikiExit(1))
+		Expect(func() {
 			_ = parseByteSize("8EiB", "edge size")
-		})
+		}).To(PanicWithLeafwikiExit(1))
 	})
 
 	ginkgo.It("returns logger setup errors without replacing the default logger", func() {
 		closer, err := setupLogger(leaflogging.Config{Target: leaflogging.Target("bogus")}, io.Discard, io.Discard)
-		Expect(err).To(MatchError(ContainSubstring("invalid log target")))
+		Expect(err).To(MatchError(leaflogging.ErrInvalidLogTarget))
 		Expect(closer).To(BeNil())
 	})
 
@@ -244,26 +375,36 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			DataDir: "/requested/data",
 			RootDir: "/requested/root",
 		})
-		Expect(err).To(MatchError(And(
-			ContainSubstring("data-dir owner=/owner/data requested=/requested/data"),
-			ContainSubstring("root-dir owner=/owner/root requested=/requested/root"),
-		)))
+		Expect(err).To(MatchProjectDaemonConfigMismatch(
+			projectdaemon.Mismatch{Field: "data-dir", Want: "/owner/data", Got: "/requested/data"},
+			projectdaemon.Mismatch{Field: "root-dir", Want: "/owner/root", Got: "/requested/root"},
+		))
 
 		Expect(projectDaemonDescriptorRole(projectdaemon.RuntimeStackWikidFrontd)).To(Equal(projectdaemon.RoleWikid))
 		Expect(projectDaemonDescriptorRole("single-process")).To(BeEmpty())
 		Expect(projectDaemonDescriptorRoles("single-process", 123, "127.0.0.1:8080", nil)).To(BeNil())
 
-		snapshot := projectDaemonDescriptorRoles(projectdaemon.RuntimeStackWikidFrontd, 123, "127.0.0.1:8080", nil)
-		Expect(snapshot).To(HaveLen(3))
-		Expect(snapshot[0].Name).To(Equal(projectdaemon.RoleWikid))
-		Expect(snapshot[1].URL).To(Equal("http://127.0.0.1:8080"))
-		Expect(snapshot[2].Private).To(BeTrue())
+		Expect(projectDaemonDescriptorRoles(projectdaemon.RuntimeStackWikidFrontd, 123, "127.0.0.1:8080", nil)).To(HaveExactElements(
+			MatchProjectDaemonRoleHealth(projectdaemon.RoleWikid, projectdaemon.RoleStateReady, gstruct.Fields{
+				"PID": Equal(123),
+			}),
+			MatchProjectDaemonRoleHealth(projectdaemon.RoleFrontd, projectdaemon.RoleStateReady, gstruct.Fields{
+				"PID": Equal(123),
+				"URL": Equal("http://127.0.0.1:8080"),
+			}),
+			MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
+				"PID":     Equal(123),
+				"Private": BeTrue(),
+			}),
+		))
 
 		roles := []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, Error: "boom"}}
 		copied := projectDaemonDescriptorRoles(projectdaemon.RuntimeStackWikidFrontd, 123, "127.0.0.1:8080", &wikidFrontdRuntime{roles: roles})
 		Expect(copied).To(Equal(roles))
 		copied[0].Error = "mutated"
-		Expect(roles[0].Error).To(Equal("boom"))
+		Expect(roles).To(HaveExactElements(MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateCrashed, gstruct.Fields{
+			"Error": Equal("boom"),
+		})))
 	})
 
 	ginkgo.It("derives workspace display names and original request paths", func() {
@@ -307,13 +448,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		blankPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "blank.json")
 		writeProjectDaemonStartupError(" ", os.ErrPermission)
 		writeProjectDaemonStartupError(blankPath, nil)
-		_, err = os.Stat(blankPath)
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(os.Stat(blankPath)).Error().To(MatchError(os.ErrNotExist))
 
-		Expect(runInternalProjectDaemon(context.Background(), filepath.Join(ginkgo.GinkgoT().TempDir(), "missing.json"))).To(MatchError(ContainSubstring("read daemon startup config")))
+		Expect(runInternalProjectDaemon(context.Background(), filepath.Join(ginkgo.GinkgoT().TempDir(), "missing.json"))).To(MatchError(os.ErrNotExist))
 		badDaemonStartup := filepath.Join(ginkgo.GinkgoT().TempDir(), "bad-daemon.json")
 		Expect(os.WriteFile(badDaemonStartup, []byte("{bad"), 0o600)).To(Succeed())
-		Expect(runInternalProjectDaemon(context.Background(), badDaemonStartup)).To(MatchError(ContainSubstring("decode daemon startup config")))
+		Expect(runInternalProjectDaemon(context.Background(), badDaemonStartup)).To(MatchJSONSyntaxError())
 
 		ownerErrPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "owner-startup.err")
 		ownerFailureStartup := filepath.Join(ginkgo.GinkgoT().TempDir(), "owner-failure.json")
@@ -336,7 +476,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(forwarded).To(BeEmpty())
-		Expect(stdout.String()).To(Equal(`{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}` + "\n"))
+		Expect(stdout.String()).To(Equal(leafwikiNativeStdioParseErrorFrame + "\n"))
 	})
 
 	ginkgo.It("normalizes valid native STDIO frames and preserves IO failures", func() {
@@ -348,7 +488,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		forwarded, err := io.ReadAll(pr)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(<-done).To(Succeed())
+		Eventually(done).Should(Receive(Succeed()))
 		Expect(string(forwarded)).To(Equal(`{"jsonrpc":"2.0"}` + "\n"))
 
 		closedReader, closedForward := io.Pipe()
@@ -365,7 +505,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(frame)).To(Equal(`{"jsonrpc":"2.0"}`))
 		Expect(partialReader.CloseWithError(errors.New("newline rejected"))).To(Succeed())
-		Expect(<-done).To(HaveOccurred())
+		Eventually(done).Should(Receive(HaveOccurred()))
 
 		stdoutErr := errors.New("stdout closed")
 		_, failingStdoutForward := io.Pipe()
@@ -384,14 +524,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	})
 
 	ginkgo.It("parses startup diagnostics and trusts only local daemon control URLs", func() {
-		structured := parseProjectDaemonStartupError([]byte(`{"message":" daemon stopped "}`))
+		structured := parseProjectDaemonStartupError([]byte(`{"message":" ` + leafwikiFixtureDaemonStopped + ` "}`))
 		Expect(structured.Kind).To(Equal(projectDaemonStartupErrorKindStartup))
-		Expect(structured.RenderedMessage).To(Equal("daemon stopped"))
-		Expect(formatProjectDaemonStartupError(structured)).To(MatchError(ContainSubstring("project daemon failed to start")))
+		Expect(structured.RenderedMessage).To(Equal(leafwikiFixtureDaemonStopped))
+		Expect(formatProjectDaemonStartupError(structured)).To(MatchError(errProjectDaemonStartupFailed))
 
 		lockStartup := parseProjectDaemonStartupError([]byte("acquire data directory lock: /tmp/wiki"))
 		Expect(lockStartup.IsLock()).To(BeTrue())
-		Expect(formatProjectDaemonStartupError(lockStartup)).To(MatchError(ContainSubstring("project is locked")))
+		Expect(formatProjectDaemonStartupError(lockStartup)).To(MatchError(errProjectLockedNoAttachableDaemon))
 
 		Expect(isTrustedDaemonControlURL(" http://localhost:8080/control ")).To(BeTrue())
 		Expect(isTrustedDaemonControlURL("http://127.0.0.1:8080/control")).To(BeTrue())
@@ -539,23 +679,29 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		expectedDataDir, expectedRootDir, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(daemonCfg.WorkspaceID).To(Equal(workspaceid.WorkspaceID("home")))
-		Expect(daemonCfg.DataDir).To(Equal(expectedDataDir))
-		Expect(daemonCfg.RootDir).To(Equal(expectedRootDir))
-		Expect(daemonCfg.LogFile).To(Equal(filepath.Join(expectedDataDir, ".leafwiki", "logs", "leafwiki.log")))
-		Expect(daemonCfg.InjectCodeInHeaderHash).NotTo(BeEmpty())
-		Expect(daemonCfg.EnableWorkspaceSync).To(BeTrue())
-		Expect(daemonCfg.MarkdownLinkRootPrefix).To(Equal("/docs"))
+		Expect(daemonCfg).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WorkspaceID":            Equal(workspaceid.WorkspaceID("home")),
+			"DataDir":                Equal(expectedDataDir),
+			"RootDir":                Equal(expectedRootDir),
+			"LogFile":                Equal(filepath.Join(expectedDataDir, ".leafwiki", "logs", "leafwiki.log")),
+			"InjectCodeInHeaderHash": Not(BeEmpty()),
+			"EnableWorkspaceSync":    BeTrue(),
+			"MarkdownLinkRootPrefix": Equal("/docs"),
+		}))
 
 		cfg.APIKey = "sk-test"
 		cfg.Logging = leaflogging.Config{Target: leaflogging.TargetStderr}
 		cfg.MCPTransports = mcpTransports{Stdio: true}
 		workspaceCfg, err := daemonWorkspaceRuntimeConfig(cfg)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(workspaceCfg.APIKey).To(BeEmpty())
-		Expect(workspaceCfg.RuntimeStack).To(Equal(projectdaemon.RuntimeStackWikidFrontd))
-		Expect(workspaceCfg.Logging.Target).To(Equal(leaflogging.TargetFile))
-		Expect(workspaceCfg.Logging.FilePath).To(Equal(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")))
+		Expect(workspaceCfg).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"APIKey":       BeEmpty(),
+			"RuntimeStack": Equal(projectdaemon.RuntimeStackWikidFrontd),
+			"Logging": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Target":   Equal(leaflogging.TargetFile),
+				"FilePath": Equal(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")),
+			}),
+		}))
 
 		rel, ok := localRelativePath(dataDir, filepath.Join(dataDir, "nested", "leafwiki.log"))
 		Expect(ok).To(BeTrue())
@@ -601,8 +747,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		rec := httptest.NewRecorder()
 		writeRuntimeJSON(rec, map[string]string{"ok": "true"})
-		Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
-		Expect(rec.Body.String()).To(ContainSubstring(`"ok":"true"`))
+		Expect(rec).To(HaveHTTPHeaderWithValue("Content-Type", "application/json"))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"ok":"true"`)))
 
 		writeRuntimeJSON(httptest.NewRecorder(), func() {})
 		failingWriter := &leafwikiFailingResponseWriter{err: errors.New("write failed")}
@@ -612,7 +758,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 	ginkgo.It("maps actor contexts, runtime grants, and home workspace status edges", func() {
 		_, err := actorContextForUser(nil, "api_key", leafwikiRuntimeConfig{})
-		Expect(err).To(MatchError("actor user is required"))
+		Expect(err).To(MatchError(errRuntimeActorUserRequired))
 
 		actor, err := actorContextForUser(&coreauth.User{
 			ID:       "u1",
@@ -621,16 +767,18 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Role:     coreauth.RoleEditor,
 		}, "api_key", leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "workspace-a"}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor.Subject).To(Equal("user:u1"))
-		Expect(actor.WorkspaceID).To(Equal(workspaceid.WorkspaceID("workspace-a")))
-		Expect(actor.Scopes).To(ContainElement("leafwiki:mcp"))
+		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Subject":     Equal("user:u1"),
+			"WorkspaceID": Equal(workspaceid.WorkspaceID("workspace-a")),
+			"Scopes":      ContainElement("leafwiki:mcp"),
+		}))
 
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleViewer)).To(Equal(wikid.GrantRoleViewer))
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleEditor)).To(Equal(wikid.GrantRoleEditor))
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleAdmin)).To(Equal(wikid.GrantRoleAdmin))
 		Expect(wikidGrantRoleForCoreRole("owner")).To(BeEmpty())
 		Expect(scopesForGrantRole("owner")).To(BeNil())
-		Expect(ensureRuntimeHomeGrant(nil, nil)).To(MatchError("user is required"))
+		Expect(ensureRuntimeHomeGrant(nil, nil)).To(MatchError(errRuntimeHomeGrantUserRequired))
 		Expect(ensureRuntimeHomeGrant(nil, &coreauth.User{Role: "owner"})).To(Succeed())
 
 		now := time.Now().UTC()
@@ -647,8 +795,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			UpdatedAt: now,
 		}})
 		status := supervisor.Status(wikid.HomeWorkspaceID)
-		Expect(status.State).To(Equal(wikid.WorkspaceStateStarting))
-		Expect(status.URL).To(Equal("http://127.0.0.1:8001"))
+		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"State": Equal(wikid.WorkspaceStateStarting),
+			"URL":   Equal("http://127.0.0.1:8001"),
+		}))
 
 		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
 			Name:      projectdaemon.RoleWorkspaced,
@@ -657,8 +807,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			UpdatedAt: now.Add(time.Second),
 		}})
 		status = supervisor.Status(wikid.HomeWorkspaceID)
-		Expect(status.State).To(Equal(wikid.WorkspaceStateCrashed))
-		Expect(status.Error).To(Equal("stopped"))
+		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"State": Equal(wikid.WorkspaceStateCrashed),
+			"Error": Equal("stopped"),
+		}))
 
 		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
 			Name:      projectdaemon.RoleWorkspaced,
@@ -680,13 +832,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 		actor, err := frontdActorResolver(w, cfg)(req)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor.Subject).To(Equal("user:public-editor"))
-		Expect(actor.AuthMethod).To(Equal("disabled"))
+		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Subject":    Equal("user:public-editor"),
+			"AuthMethod": Equal("disabled"),
+		}))
 
 		_, err = frontdMCPTokenVerifier(&wiki.Wiki{})(context.Background(), "not-an-api-key", req)
-		Expect(err).To(MatchError(ContainSubstring("oauth verifier unavailable")))
+		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 		_, err = frontdMCPTokenVerifier(&wiki.Wiki{})(context.Background(), "lwk_key_secret", req)
-		Expect(err).To(MatchError(ContainSubstring("api key verifier unavailable")))
+		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 
 		editor, err := w.UserService().CreateUser("token-editor", "token-editor@example.com", "password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
@@ -699,29 +853,31 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		rec := httptest.NewRecorder()
 		handleWikidTokenVerify(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/token/verify", nil), w)
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 
 		rec = httptest.NewRecorder()
 		invalidReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/token/verify", nil)
 		invalidReq.Header.Set("Authorization", "Bearer invalid")
 		handleWikidTokenVerify(rec, invalidReq, w)
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 
 		rec = httptest.NewRecorder()
 		validReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/token/verify", nil)
 		validReq.Header.Set("Authorization", "Bearer "+created.Secret)
 		handleWikidTokenVerify(rec, validReq, w)
-		Expect(rec.Code).To(Equal(http.StatusOK))
-		Expect(rec.Body.String()).To(ContainSubstring(string(editor.ID)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec).To(HaveHTTPBody(ContainSubstring(string(editor.ID))))
 
 		authenticatedResolver := frontdMCPActorResolver(&wiki.Wiki{}, leafwikiRuntimeConfig{})
 		_, err = authenticatedResolver(req)
-		Expect(err).To(MatchError(ContainSubstring("token info missing")))
+		Expect(err).To(MatchError(errFrontdMCPTokenInfoMissing))
 
 		disabledResolver := frontdMCPActorResolver(w, cfg)
 		actor, err = disabledResolver(req)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor.AuthMethod).To(Equal("disabled"))
+		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"AuthMethod": Equal("disabled"),
+		}))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -818,13 +974,21 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		info, err := wikidMCPTokenVerifier(privateServer.URL+"/", "daemon-token")(context.Background(), " edge-token ", nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(info.UserID).To(Equal(editor.ID))
-		Expect(info.Scopes).To(ContainElement("leafwiki:mcp"))
-		Expect(seenPaths).To(ContainElement("/__leafwiki/token/verify"))
-		Expect(seenAuthorization).To(ContainElement("Bearer edge-token"))
-		Expect(seenControlTokens).To(ContainElement("daemon-token"))
+		Expect(info).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"UserID": Equal(editor.ID),
+			"Scopes": ContainElement("leafwiki:mcp"),
+		})))
+		Expect(struct {
+			Paths          []string
+			Authorizations []string
+			ControlTokens  []string
+		}{seenPaths, seenAuthorization, seenControlTokens}).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Paths":          ContainElement("/__leafwiki/token/verify"),
+			"Authorizations": ContainElement("Bearer edge-token"),
+			"ControlTokens":  ContainElement("daemon-token"),
+		}))
 		_, err = wikidMCPTokenVerifier("http://[::1", "daemon-token")(context.Background(), "edge-token", nil)
-		Expect(err).To(MatchError(ContainSubstring("invalid token")))
+		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 
 		req := httptest.NewRequest(http.MethodPatch, "/source", nil)
 		req.RemoteAddr = "127.0.0.1:9191"
@@ -852,10 +1016,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(isWikidPrivateAuthFailure(err)).To(BeTrue())
 		var endpointErr *wikidPrivateEndpointError
-		Expect(errors.As(err, &endpointErr)).To(BeTrue())
-		Expect(endpointErr.Error()).To(ContainSubstring(string(errCodeStdioAuthAPIKeyInvalid)))
+		Expect(err).To(Satisfy(func(err error) bool {
+			return errors.As(err, &endpointErr)
+		}))
+		Expect(endpointErr).To(testmatchers.HaveStructuredError(errCodeStdioAuthAPIKeyInvalid, sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyInvalid)))
 		Expect((*wikidPrivateEndpointError)(nil).Error()).To(BeEmpty())
-		Expect((&wikidPrivateEndpointError{Path: "/empty", StatusCode: 499}).Error()).To(ContainSubstring("status 499"))
+		Expect((&wikidPrivateEndpointError{Path: "/empty", StatusCode: 499}).StatusCode).To(Equal(499))
 		Expect(isWikidPrivateAuthFailure(errors.New("plain"))).To(BeFalse())
 		Expect(isWikidPrivateAuthFailure(&wikidPrivateEndpointError{StatusCode: http.StatusInternalServerError})).To(BeFalse())
 
@@ -868,23 +1034,27 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		resolver := frontdMCPActorResolver(w, cfg)
 		resolved, resolveErr := resolveWithSDKToken(resolver, apiKey.Secret, editor.ID)
 		Expect(resolveErr).NotTo(HaveOccurred())
-		Expect(resolved.Subject).To(Equal("user:" + editor.ID))
-		Expect(resolved.AuthMethod).To(Equal("api_key"))
+		Expect(resolved).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Subject":    Equal("user:" + editor.ID),
+			"AuthMethod": Equal("api_key"),
+		}))
 
 		resolved, resolveErr = resolveWithSDKToken(resolver, "oauth-token", editor.ID)
 		Expect(resolveErr).NotTo(HaveOccurred())
-		Expect(resolved.AuthMethod).To(Equal("oauth"))
+		Expect(resolved).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"AuthMethod": Equal("oauth"),
+		}))
 
 		_, resolveErr = resolveWithSDKToken(frontdMCPActorResolver(&wiki.Wiki{}, cfg), "oauth-token", editor.ID)
-		Expect(resolveErr).To(MatchError(ContainSubstring("user service is unavailable")))
+		Expect(resolveErr).To(MatchError(errFrontdMCPUserServiceUnavailable))
 
 		_, resolveErr = resolveWithSDKToken(resolver, "oauth-token", "missing-user")
 		Expect(resolveErr).To(HaveOccurred())
 
 		_, _, err = frontdActorUser(httptest.NewRequest(http.MethodGet, "/mcp", nil), &wiki.Wiki{}, leafwikiRuntimeConfig{})
-		Expect(err).To(MatchError(ContainSubstring("missing credentials")))
+		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing))
 		_, err = frontdActorResolver(w, leafwikiRuntimeConfig{})(httptest.NewRequest(http.MethodGet, "/mcp", nil))
-		Expect(err).To(MatchError(ContainSubstring("missing credentials")))
+		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing))
 
 		mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		mcpReq.Header.Set("Authorization", "Bearer lwk_key_invalid")
@@ -894,7 +1064,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		oauthReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		oauthReq.Header.Set("Authorization", "Bearer oauth-token")
 		_, _, err = frontdActorUser(oauthReq, &wiki.Wiki{}, leafwikiRuntimeConfig{})
-		Expect(err).To(MatchError(ContainSubstring("oauth actor services are unavailable")))
+		Expect(err).To(MatchError(errFrontdOAuthActorServicesUnavailable))
 		_, _, err = frontdActorUser(oauthReq, w, leafwikiRuntimeConfig{})
 		Expect(err).To(HaveOccurred())
 
@@ -934,13 +1104,20 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			releaseLeafwikiRuntimeRoleProcesses(doneChans, context.Canceled)
 		})
 
-		Expect(calls).To(HaveLen(2))
-		Expect(calls[0].Role).To(Equal(projectdaemon.RoleWorkspaced))
-		Expect(calls[0].Runtime.Host).To(Equal("127.0.0.1"))
-		Expect(calls[0].Runtime.Port).To(Equal("0"))
-		Expect(calls[1].Role).To(Equal(projectdaemon.RoleFrontd))
-		Expect(calls[1].WorkspacedURL).To(Equal("http://workspaced.local"))
-		Expect(calls[1].WikidURL).To(Equal("http://wikid.local"))
+		Expect(calls).To(HaveExactElements(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Role": Equal(projectdaemon.RoleWorkspaced),
+				"Runtime": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"Host": Equal("127.0.0.1"),
+					"Port": Equal("0"),
+				}),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Role":          Equal(projectdaemon.RoleFrontd),
+				"WorkspacedURL": Equal("http://workspaced.local"),
+				"WikidURL":      Equal("http://wikid.local"),
+			}),
+		))
 		Expect(runtime.workspacedURL).To(Equal("http://workspaced.local"))
 		Expect(runtime.roleHealthSnapshot()).To(ContainElement(Satisfy(func(role projectdaemon.RoleHealth) bool {
 			return role.Name == projectdaemon.RoleFrontd && role.URL == "http://frontd.local"
@@ -948,17 +1125,19 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	})
 
 	ginkgo.It("covers wikid-frontd runtime startup and restart failures", func() {
+		workspacedErr := errors.New("workspaced failed")
 		swapInternalRuntimeRoleStarter(func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
-			return nil, internalRuntimeRoleReady{}, errors.New(string(startup.Role) + " failed")
+			return nil, internalRuntimeRoleReady{}, workspacedErr
 		})
 		runtime, err := startWikidFrontdRuntime(context.Background(), leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local")
 		Expect(runtime).To(BeNil())
-		Expect(err).To(MatchError("workspaced failed"))
+		Expect(err).To(MatchError(workspacedErr))
 
 		var doneChans []chan error
+		frontdErr := errors.New("frontd failed")
 		swapInternalRuntimeRoleStarter(func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
 			if startup.Role == projectdaemon.RoleFrontd {
-				return nil, internalRuntimeRoleReady{}, errors.New("frontd failed")
+				return nil, internalRuntimeRoleReady{}, frontdErr
 			}
 			proc, done := newLeafwikiRuntimeRoleProcess(startup.Role, 201)
 			doneChans = append(doneChans, done)
@@ -966,7 +1145,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})
 		runtime, err = startWikidFrontdRuntime(context.Background(), leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local")
 		Expect(runtime).To(BeNil())
-		Expect(err).To(MatchError("frontd failed"))
+		Expect(err).To(MatchError(frontdErr))
 		releaseLeafwikiRuntimeRoleProcesses(doneChans, context.Canceled)
 
 		runtime = &wikidFrontdRuntime{
@@ -974,7 +1153,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			supervisor: wikid.NewSupervisor(wikid.SupervisorOptions{}),
 			processes:  map[projectdaemon.RoleName]*internalRuntimeRoleProcess{},
 		}
-		Expect(runtime.startFrontdLocked()).To(MatchError("workspaced URL is unavailable"))
+		Expect(runtime.startFrontdLocked()).To(MatchError(errRuntimeWorkspacedURLUnavailable))
 	})
 
 	ginkgo.It("covers runtime role restart and crash publishing paths", func() {
@@ -1028,10 +1207,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			published = append(published, roles)
 		}
 		go crashRuntime.monitorRoleProcess(crashingProc)
-		crashDone <- errors.New("frontd exited")
+		frontdExitedErr := errors.New(leafwikiFixtureFrontdExited)
+		crashDone <- frontdExitedErr
 		waitForLeafwikiRoleState(crashRuntime, projectdaemon.RoleFrontd, projectdaemon.RoleStateCrashed)
 		Expect(published).NotTo(BeEmpty())
-		Expect(crashRuntime.supervisor.State(projectdaemon.RoleFrontd).Error).To(Equal("frontd exited"))
+		Expect(crashRuntime.supervisor.State(projectdaemon.RoleFrontd).Error).To(Equal(frontdExitedErr.Error()))
 		releaseLeafwikiRuntimeRoleProcesses(crashDoneChans, context.Canceled)
 
 		scheduledProc, scheduledDone := newLeafwikiRuntimeRoleProcess(projectdaemon.RoleFrontd, 402)
@@ -1057,8 +1237,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
 
 		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{DisableAuth: true})).To(Succeed())
-		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{})).To(MatchError(ContainSubstring("JWT secret is required")))
-		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{JWTSecret: "jwt"})).To(MatchError(ContainSubstring("admin password is required")))
+		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{})).To(MatchError(errAuthJWTSecretRequired))
+		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{JWTSecret: "jwt"})).To(MatchError(errAuthAdminPasswordRequired))
 		Expect(validateAuthStartupConfig(leafwikiRuntimeConfig{JWTSecret: "jwt", AdminPassword: "admin"})).To(Succeed())
 
 		logPath := filepath.Join(dataDir, "startup.log")
@@ -1076,15 +1256,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(output).To(ContainSubstring("admin"))
 		cleanupFailureDir := filepath.Join(t.TempDir(), "cleanup-failure")
 		Expect(os.MkdirAll(filepath.Join(cleanupFailureDir, "users.db", "child"), 0o755)).To(Succeed())
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			resetAdminPasswordCommand(cleanupFailureDir)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 		resetFailureDir := filepath.Join(t.TempDir(), "reset-failure")
 		Expect(os.MkdirAll(resetFailureDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(resetFailureDir, ".leafwiki"), []byte("not a directory"), 0o600)).To(Succeed())
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			resetAdminPasswordCommand(resetFailureDir)
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
 		now := time.Now().UTC()
 		var privateControlTokens []string
@@ -1135,18 +1315,28 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(privateWorkspaceIDs).To(ContainElement(workspaceid.WorkspaceID("workspace-a").HTTPHeaderValue()))
 
 		_, err = daemonStdioActorContext(context.Background(), desc, leafwikiRuntimeConfig{APIKey: "rejected"})
-		Expect(err).To(MatchError(ContainSubstring("unauthorized native STDIO API key")))
+		Expect(err).To(HaveOccurred())
+		var endpointErr *wikidPrivateEndpointError
+		Expect(err).To(Satisfy(func(err error) bool {
+			return errors.As(err, &endpointErr)
+		}))
+		Expect(endpointErr).To(testmatchers.HaveStructuredError(errCodeStdioAuthAPIKeyInvalid, sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyInvalid)))
 		_, err = daemonStdioActorContext(context.Background(), desc, leafwikiRuntimeConfig{APIKey: "server-error"})
-		Expect(err).To(MatchError(ContainSubstring("resolve native STDIO actor context")))
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(Satisfy(func(err error) bool {
+			return errors.As(err, &endpointErr)
+		}))
+		Expect(endpointErr.StatusCode).To(Equal(http.StatusInternalServerError))
 		previousEncodeActorContext := encodeActorContextForRuntime
 		ginkgo.DeferCleanup(func() {
 			encodeActorContextForRuntime = previousEncodeActorContext
 		})
+		encodeActorContextErr := errors.New("encode failed")
 		encodeActorContextForRuntime = func(projectdaemon.ActorContext) (string, error) {
-			return "", errors.New("encode failed")
+			return "", encodeActorContextErr
 		}
 		_, err = daemonStdioActorContext(context.Background(), desc, leafwikiRuntimeConfig{APIKey: "stdio-key"})
-		Expect(err).To(MatchError(ContainSubstring("encode native STDIO actor context")))
+		Expect(err).To(MatchError(encodeActorContextErr))
 		encodeActorContextForRuntime = previousEncodeActorContext
 
 		layout := wikid.GlobalLayout(dataDir)
@@ -1166,7 +1356,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(grantOK).To(BeFalse())
 		Expect(grant).To(Equal(wikid.Grant{}))
 		_, _, err = federatedStdioAPIKeyWorkspaceGrant(layout, leafwikiRuntimeConfig{APIKey: "lwk_key_missing"}, "workspace-a")
-		Expect(err).To(MatchError(ContainSubstring("resolve native STDIO API-key grant user")))
+		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 		unsupportedRoleAuthDir := authStorageDirForRuntime(layout.HomeDir)
 		Expect(os.MkdirAll(unsupportedRoleAuthDir, 0o755)).To(Succeed())
 		userStore, err := coreauth.NewUserStore(unsupportedRoleAuthDir)
@@ -1181,7 +1371,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		unsupportedRoleKey, err := apiKeyService.CreateAPIKey(coreauth.UserIDFromString(unsupportedRoleUser.ID), "unsupported role", coreauth.UserIDFromString(unsupportedRoleUser.ID))
 		Expect(err).NotTo(HaveOccurred())
 		_, _, err = federatedStdioAPIKeyWorkspaceGrant(layout, leafwikiRuntimeConfig{APIKey: unsupportedRoleKey.Secret}, "workspace-a")
-		Expect(err).To(MatchError(ContainSubstring("cannot access workspaces")))
+		Expect(err).To(MatchError(errNativeStdioWorkspaceAccessDenied))
 
 		workspaceData := filepath.Join(t.TempDir(), "workspace-data")
 		workspaceRoot := filepath.Join(t.TempDir(), "workspace-root")
@@ -1209,7 +1399,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(desc).To(BeNil())
 		Expect(healthy).To(BeFalse())
 		_, err = os.Stat(descriptorPath)
-		Expect(os.IsNotExist(err)).To(BeTrue())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		staleDesc := &projectdaemon.Descriptor{
 			SchemaVersion: 0,
@@ -1235,7 +1425,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(projectDaemonDescriptorHealthy(context.Background(), healthyDesc)).To(BeFalse())
 		healthyDesc.PrivateMCPURL = "https://example.com/mcp"
 		_, err = projectDaemonDescriptorHealthy(context.Background(), healthyDesc)
-		Expect(err).To(MatchError(ContainSubstring("private MCP URL is not trusted")))
+		Expect(err).To(MatchError(errPrivateMCPURLUntrusted))
 	})
 
 	ginkgo.It("covers wikid actor-context and remote-user branches", func() {
@@ -1248,13 +1438,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		cfg := leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "home"}}
 		rec := httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), &wiki.Wiki{}, cfg, nil, nil)
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 
 		rec = httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
 		req.Header.Set(projectdaemon.WorkspaceIDHeader, "not valid")
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, nil, nil)
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
 		layout := wikid.GlobalLayout(t.TempDir())
 		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
@@ -1262,7 +1452,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		req = httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
 		req.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceid.WorkspaceID("missing-workspace").HTTPHeaderValue())
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, registry, nil)
-		Expect(rec.Code).To(Equal(http.StatusNotFound))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
 		grantLayout := wikid.GlobalLayout(t.TempDir())
 		grantRegistry := wikid.NewRegistryService(wikid.NewRegistryStore(grantLayout.DBPath), grantLayout)
@@ -1279,22 +1469,28 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		req = httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
 		req.Header.Set(projectdaemon.WorkspaceIDHeader, grantedWorkspace.ID.HTTPHeaderValue())
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, nil, grants)
-		Expect(rec.Code).To(Equal(http.StatusForbidden))
-		Expect(rec.Body.String()).To(ContainSubstring(string(runtimeErrorCodeWorkspaceGrantDenied)))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied, sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied)))
 
 		Expect(grants.Upsert(wikid.Grant{Subject: "user:public-editor", WorkspaceID: grantedWorkspace.ID, Role: wikid.GrantRoleViewer})).To(Succeed())
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, nil, grants)
-		Expect(rec.Code).To(Equal(http.StatusOK))
-		Expect(rec.Body.String()).To(ContainSubstring(grantedWorkspace.ID.String()))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		var actorContextBody struct {
+			Actor projectdaemon.ActorContext `json:"actor"`
+		}
+		Expect(json.Unmarshal(rec.Body.Bytes(), &actorContextBody)).To(Succeed())
+		Expect(actorContextBody.Actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WorkspaceID": Equal(grantedWorkspace.ID),
+		}))
 
 		previousGrantsForSubject := grantsForSubjectForRuntime
+		errGrantLookupFailed := errors.New("grant lookup failed")
 		grantsForSubjectForRuntime = func(*wikid.GrantStore, string) ([]wikid.Grant, error) {
-			return nil, errors.New("grant lookup failed")
+			return nil, errGrantLookupFailed
 		}
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, nil, grants)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		grantsForSubjectForRuntime = previousGrantsForSubject
 
 		admin, err := w.UserService().CreateUser("remote-admin", "remote-admin@example.com", "password", coreauth.RoleAdmin)
@@ -1306,16 +1502,17 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		adminReq.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceid.WorkspaceID("admin-workspace").HTTPHeaderValue())
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, adminReq, w, cfg, nil, grants)
-		Expect(rec.Code).To(Equal(http.StatusOK))
-		Expect(rec.Body.String()).To(ContainSubstring("leafwiki:workspace:admin"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(json.Unmarshal(rec.Body.Bytes(), &actorContextBody)).To(Succeed())
+		Expect(actorContextBody.Actor.Scopes).To(ContainElement("leafwiki:workspace:admin"))
 
 		_, err = actorContextForWorkspaceGrant(nil, "api_key", cfg, "workspace-a", wikid.GrantRoleViewer)
-		Expect(err).To(MatchError("actor user is required"))
+		Expect(err).To(MatchError(errRuntimeActorUserRequired))
 		Expect(seedRuntimeHomeGrants(grants, leafwikiRuntimeConfig{DisableAuth: true, PublicAccess: true})).To(Succeed())
 
 		remoteReq := httptest.NewRequest(http.MethodGet, "/", nil)
 		_, _, _, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "bad-cidr"})
-		Expect(err).To(MatchError(ContainSubstring("bad-cidr")))
+		Expect(err).To(MatchError(authmw.ErrInvalidTrustedProxy))
 		remoteReq.RemoteAddr = "192.0.2.10:1111"
 		user, method, ok, err := frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).NotTo(HaveOccurred())
@@ -1333,7 +1530,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		remoteReq.Header.Set("Remote-User", editor.Username)
 		_, _, ok, err = frontdRemoteUser(remoteReq, &wiki.Wiki{}, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(ok).To(BeTrue())
-		Expect(err).To(MatchError("remote user service is unavailable"))
+		Expect(err).To(MatchError(errFrontdRemoteUserServiceUnavailable))
 
 		user, method, ok, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).NotTo(HaveOccurred())
@@ -1389,18 +1586,20 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			})
 		}()
 
-		desc := waitForLeafwikiDescriptor(projectdaemon.DescriptorPath(dataDir))
-		Expect(desc.ControlURL).To(HavePrefix("http://127.0.0.1:"))
-		Expect(desc.PrivateMCPURL).To(Equal("http://workspaced.local/mcp"))
-		Expect(desc.PublicURL).To(Equal("http://frontd.local"))
-		Expect(desc.Roles).To(ContainElements(
-			Satisfy(func(role projectdaemon.RoleHealth) bool {
-				return role.Name == projectdaemon.RoleWorkspaced && role.Private && role.URL == "http://workspaced.local"
-			}),
-			Satisfy(func(role projectdaemon.RoleHealth) bool {
-				return role.Name == projectdaemon.RoleFrontd && role.URL == "http://frontd.local"
-			}),
-		))
+		Expect(waitForLeafwikiDescriptor(projectdaemon.DescriptorPath(dataDir))).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ControlURL":    HavePrefix("http://127.0.0.1:"),
+			"PrivateMCPURL": Equal("http://workspaced.local/mcp"),
+			"PublicURL":     Equal("http://frontd.local"),
+			"Roles": ContainElements(
+				MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
+					"Private": BeTrue(),
+					"URL":     Equal("http://workspaced.local"),
+				}),
+				MatchProjectDaemonRoleHealth(projectdaemon.RoleFrontd, projectdaemon.RoleStateReady, gstruct.Fields{
+					"URL": Equal("http://frontd.local"),
+				}),
+			),
+		})))
 
 		cancel()
 		releaseLeafwikiRuntimeRoleProcesses(doneChans, context.Canceled)
@@ -1427,10 +1626,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		held, err = projectDaemonLocksHeld(dataDir, rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(held).To(BeFalse())
 		free, err := projectDaemonLocksFree(dataDir, rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(free).To(BeFalse())
+		Expect(struct {
+			Held bool
+			Free bool
+		}{held, free}).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Held": BeFalse(),
+			"Free": BeFalse(),
+		}))
 		Expect(dataLock.Release()).To(Succeed())
 
 		rootLock, err := locking.AcquireRootDirLock(rootDir)
@@ -1448,7 +1652,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		descriptorPath := filepath.Join(t.TempDir(), "descriptor.json")
 		Expect(os.WriteFile(descriptorPath, []byte("{bad"), 0o600)).To(Succeed())
 		_, _, err = readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
-		Expect(err).To(MatchError(ContainSubstring("read project daemon descriptor")))
+		var syntaxErr *json.SyntaxError
+		Expect(err).To(Satisfy(func(err error) bool {
+			return errors.As(err, &syntaxErr)
+		}))
 
 		stalePath := filepath.Join(t.TempDir(), "stale-descriptor.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(stalePath, &projectdaemon.Descriptor{
@@ -1457,7 +1664,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			RootDir:       rootDir,
 		})).To(Succeed())
 		_, _, err = readHealthyProjectDaemon(context.Background(), stalePath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
-		Expect(err).To(MatchError(ContainSubstring("schema version")))
+		Expect(err).To(MatchError(projectdaemon.ErrDescriptorSchemaMismatch))
 
 		Expect(dataLock.Release()).To(Succeed())
 		Expect(rootLock.Release()).To(Succeed())
@@ -1481,8 +1688,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(waitForForegroundSession(context.Background(), heartbeatErr)).To(Succeed())
 		heartbeatErr <- context.Canceled
 		Expect(waitForForegroundSession(context.Background(), heartbeatErr)).To(Succeed())
-		heartbeatErr <- errors.New("heartbeat failed")
-		Expect(waitForForegroundSession(context.Background(), heartbeatErr)).To(MatchError(ContainSubstring("project daemon heartbeat failed")))
+		heartbeatFailure := errors.New("heartbeat failed")
+		heartbeatErr <- heartbeatFailure
+		Expect(waitForForegroundSession(context.Background(), heartbeatErr)).To(MatchError(heartbeatFailure))
 
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -1544,7 +1752,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		lockStartupPath := filepath.Join(t.TempDir(), "lock-startup.txt")
 		Expect(os.WriteFile(lockStartupPath, []byte("acquire data directory lock: held"), 0o600)).To(Succeed())
 		_, err = waitForProjectDaemon(context.Background(), filepath.Join(t.TempDir(), "missing-descriptor.json"), lockStartupPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir}, mcpTransports{})
-		Expect(err).To(MatchError(ContainSubstring("project is locked")))
+		Expect(err).To(MatchError(errProjectLockedNoAttachableDaemon))
 		Expect(lockedRoot.Release()).To(Succeed())
 
 		privateMCPServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -1564,7 +1772,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Config:          descriptorCfg,
 		})).To(Succeed())
 		_, err = waitForProjectDaemon(context.Background(), mismatchDescriptorPath, "", projectdaemon.Config{DataDir: dataDir, RootDir: rootDir, Host: "requested"}, mcpTransports{})
-		Expect(err).To(MatchError(ContainSubstring("project daemon config mismatch")))
+		Expect(err).To(MatchProjectDaemonConfigMismatch())
 	})
 
 	ginkgo.It("covers direct runtime role process and startup helper branches", func() {
@@ -1648,10 +1856,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		unsupportedPath := filepath.Join(t.TempDir(), "unsupported.json")
 		Expect(os.WriteFile(unsupportedPath, []byte(`{"role":"unknown"}`), 0o600)).To(Succeed())
-		Expect(runInternalRuntimeRole(context.Background(), unsupportedPath)).To(MatchError(ContainSubstring("unsupported runtime role")))
+		Expect(runInternalRuntimeRole(context.Background(), unsupportedPath)).To(MatchError(errUnsupportedRuntimeRole))
 		badRuntimeStartup := filepath.Join(t.TempDir(), "bad-runtime.json")
 		Expect(os.WriteFile(badRuntimeStartup, []byte("{bad"), 0o600)).To(Succeed())
-		Expect(runInternalRuntimeRole(context.Background(), badRuntimeStartup)).To(MatchError(ContainSubstring("decode runtime role startup config")))
+		Expect(runInternalRuntimeRole(context.Background(), badRuntimeStartup)).To(MatchJSONSyntaxError())
 		wikidRuntimeStartup := filepath.Join(t.TempDir(), "wikid-runtime.json")
 		Expect(os.WriteFile(wikidRuntimeStartup, []byte(`{"role":"wikid"}`), 0o600)).To(Succeed())
 		wikidCanceled, cancelWikid := context.WithCancel(context.Background())
@@ -1660,7 +1868,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
-		Expect(runInternalRuntimeRole(canceled, string(projectdaemon.RoleWikid))).To(Succeed())
+		Expect(runInternalRuntimeRoleName(canceled, projectdaemon.RoleWikid)).To(Succeed())
 	})
 
 	ginkgo.It("covers runtime role startup process failures through existing seams", func() {
@@ -1672,20 +1880,21 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		t.Setenv("TMPDIR", blockingFile)
 		_, _, err := startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError(ContainSubstring("create frontd ready file")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 		_, err = writeInternalRuntimeRoleStartupConfig(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError(ContainSubstring("create frontd startup config")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 
 		t.Setenv("TMPDIR", validTempDir)
 		previousExecutable := projectDaemonExecutable
+		executableUnavailableErr := errors.New("executable unavailable")
 		projectDaemonExecutable = func() (string, error) {
-			return "", errors.New("executable unavailable")
+			return "", executableUnavailableErr
 		}
 		ginkgo.DeferCleanup(func() {
 			projectDaemonExecutable = previousExecutable
 		})
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError("executable unavailable"))
+		Expect(err).To(MatchError(executableUnavailableErr))
 
 		projectDaemonExecutable = previousExecutable
 		previousReadinessTimeout := internalRuntimeRoleReadinessTimeoutForProcess
@@ -1695,13 +1904,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})
 		t.Setenv("GO_WANT_LEAFWIKI_HELPER_PROCESS", "1")
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWikid})
-		Expect(err).To(MatchError("runtime role did not become ready before timeout"))
+		Expect(err).To(MatchError(errRuntimeRoleReadinessTimeout))
 
 		projectDaemonExecutable = func() (string, error) {
 			return missingExecutable, nil
 		}
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError(ContainSubstring("start frontd role process")))
+		Expect(err).To(MatchError(os.ErrNotExist))
 	})
 
 	ginkgo.It("covers temp-file chmod, write, and close failure branches", func() {
@@ -1715,23 +1924,34 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		for _, tc := range []struct {
 			name string
+			err  error
 			file *leafwikiFakeTempFile
 		}{
-			{name: "chmod", file: &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "chmod.json"), chmodErr: errors.New("chmod failed")}},
-			{name: "write", file: &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "write.json"), writeErr: errors.New("write failed")}},
-			{name: "close", file: &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "close.json"), closeErr: errors.New("close failed")}},
+			{name: "chmod", err: errors.New("chmod failed")},
+			{name: "write", err: errors.New("write failed")},
+			{name: "close", err: errors.New("close failed")},
 		} {
+			tc.file = &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), tc.name+".json")}
+			switch tc.name {
+			case "chmod":
+				tc.file.chmodErr = tc.err
+			case "write":
+				tc.file.writeErr = tc.err
+			case "close":
+				tc.file.closeErr = tc.err
+			}
 			tempFile := tc.file
 			createTempFileForRuntime = func(string, string) (leafwikiTempFile, error) {
 				return tempFile, nil
 			}
 			_, err := writeInternalRuntimeRoleStartupConfig(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-			Expect(err).To(MatchError(ContainSubstring(tc.name + " failed")))
+			Expect(err).To(MatchError(tc.err))
 		}
 
 		validCfg := leafwikiRuntimeConfig{Logging: leaflogging.Config{Target: leaflogging.TargetStderr}, DisableAuth: true}
 		errTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "daemon.err")}
-		startupTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "daemon.json"), writeErr: errors.New("daemon startup write failed")}
+		daemonStartupWriteErr := errors.New("daemon startup write failed")
+		startupTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "daemon.json"), writeErr: daemonStartupWriteErr}
 		createTempFileForRuntime = func(_ string, pattern string) (leafwikiTempFile, error) {
 			if strings.Contains(pattern, "*.err") {
 				return errTemp, nil
@@ -1739,14 +1959,22 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return startupTemp, nil
 		}
 		_, err := spawnProjectDaemonOwner(validCfg)
-		Expect(err).To(MatchError("daemon startup write failed"))
+		Expect(err).To(MatchError(daemonStartupWriteErr))
 		for _, tc := range []struct {
 			name string
+			err  error
 			file *leafwikiFakeTempFile
 		}{
-			{name: "daemon startup chmod", file: &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "daemon-chmod.json"), chmodErr: errors.New("daemon startup chmod failed")}},
-			{name: "daemon startup close", file: &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "daemon-close.json"), closeErr: errors.New("daemon startup close failed")}},
+			{name: "daemon startup chmod", err: errors.New("daemon startup chmod failed")},
+			{name: "daemon startup close", err: errors.New("daemon startup close failed")},
 		} {
+			tc.file = &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), strings.ReplaceAll(tc.name, " ", "-")+".json")}
+			switch tc.name {
+			case "daemon startup chmod":
+				tc.file.chmodErr = tc.err
+			case "daemon startup close":
+				tc.file.closeErr = tc.err
+			}
 			startupTemp := tc.file
 			createTempFileForRuntime = func(_ string, pattern string) (leafwikiTempFile, error) {
 				if strings.Contains(pattern, "*.err") {
@@ -1755,14 +1983,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				return startupTemp, nil
 			}
 			_, err = spawnProjectDaemonOwner(validCfg)
-			Expect(err).To(MatchError(ContainSubstring(tc.name + " failed")))
+			Expect(err).To(MatchError(tc.err))
 		}
 
 		projectDaemonExecutable = func() (string, error) {
 			return "", errors.New("executable should not be reached")
 		}
 		readyTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "ready.json")}
-		roleTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "role.json"), closeErr: errors.New("role startup close failed")}
+		roleStartupCloseErr := errors.New("role startup close failed")
+		roleTemp := &leafwikiFakeTempFile{name: filepath.Join(t.TempDir(), "role.json"), closeErr: roleStartupCloseErr}
 		createTempFileForRuntime = func(_ string, pattern string) (leafwikiTempFile, error) {
 			if strings.Contains(pattern, "runtime-ready") {
 				return readyTemp, nil
@@ -1770,7 +1999,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return roleTemp, nil
 		}
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError("role startup close failed"))
+		Expect(err).To(MatchError(roleStartupCloseErr))
 	})
 
 	ginkgo.It("covers runtime role readiness failure branches", func() {
@@ -1779,11 +2008,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		exitedProc, exitedDone := newLeafwikiRuntimeRoleProcess(projectdaemon.RoleFrontd, os.Getpid())
 		exitedDone <- nil
 		_, err := waitForInternalRuntimeRoleReady(filepath.Join(t.TempDir(), "missing-ready.json"), exitedProc, time.Second)
-		Expect(err).To(MatchError("process exited before readiness"))
+		Expect(err).To(MatchError(errRuntimeRoleExitedBeforeReadiness))
 
 		timeoutProc, timeoutDone := newLeafwikiRuntimeRoleProcess(projectdaemon.RoleFrontd, os.Getpid())
 		_, err = waitForInternalRuntimeRoleReady(filepath.Join(t.TempDir(), "missing-ready.json"), timeoutProc, time.Millisecond)
-		Expect(err).To(MatchError("runtime role did not become ready before timeout"))
+		Expect(err).To(MatchError(errRuntimeRoleReadinessTimeout))
 		releaseLeafwikiRuntimeRoleProcesses([]chan error{timeoutDone}, context.Canceled)
 
 		blockingFile := filepath.Join(t.TempDir(), "not-a-dir")
@@ -1802,7 +2031,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Expect(os.WriteFile(blankPath, []byte(`{"role":"frontd","pid":0}`), 0o600)).To(Succeed())
 		}()
 		_, err = waitForInternalRuntimeRoleReady(blankPath, blankProc, time.Second)
-		Expect(err).To(MatchError("runtime role reported invalid PID"))
+		Expect(err).To(MatchError(errRuntimeRoleInvalidPID))
 		releaseLeafwikiRuntimeRoleProcesses([]chan error{blankDone}, context.Canceled)
 	})
 
@@ -1825,30 +2054,33 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		parentCanceled, parentCancel := context.WithCancel(context.Background())
 		parentCancel()
 		cancelWhenParentExits(parentCanceled, func() { ginkgo.Fail("canceled context should stop parent polling") }, os.Getpid(), 0)
+		acceptErr := errors.New("accept failed")
 		Expect(serveInternalRuntimeHTTP(context.Background(), projectdaemon.RoleFrontd, leafwikiErrorListener{
 			addr: leafwikiStringAddr("127.0.0.1:0"),
-			err:  errors.New("accept failed"),
-		}, http.NotFoundHandler(), 0)).To(MatchError(ContainSubstring("frontd server failed")))
+			err:  acceptErr,
+		}, http.NotFoundHandler(), 0)).To(MatchError(acceptErr))
 
 		_, err := newRuntimeWiki(leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "home"}}, projectdaemon.Config{DataDir: "bad\x00data", RootDir: validRuntime.Workspace.RootDir}, runtimeWikiFull)
-		Expect(err).To(MatchError(ContainSubstring("initialize Wiki")))
+		Expect(err).To(MatchPathError())
 
 		badPathRuntime := validRuntime
 		badPathRuntime.Workspace.DataDir = "bad\x00data"
-		Expect(runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badPathRuntime})).To(MatchError(ContainSubstring("resolve data dir")))
-		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badPathRuntime})).To(MatchError(ContainSubstring("resolve data dir")))
+		err = runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badPathRuntime})
+		Expect(err).To(MatchPathError())
+		err = runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badPathRuntime})
+		Expect(err).To(MatchPathError())
 
 		badLogRuntime := validRuntime
 		badLogRuntime.Logging = leaflogging.Config{Target: leaflogging.Target("not-a-target")}
-		Expect(runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badLogRuntime})).To(MatchError(ContainSubstring("invalid logging configuration")))
-		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badLogRuntime})).To(MatchError(ContainSubstring("invalid logging configuration")))
+		Expect(runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badLogRuntime})).To(MatchError(leaflogging.ErrInvalidLogTarget))
+		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badLogRuntime})).To(MatchError(leaflogging.ErrInvalidLogTarget))
 
 		badProxyRuntime := validRuntime
 		badProxyRuntime.TrustedProxyIPsRaw = "bad-cidr"
 		_, err = routerOptionsForRuntimeWithUserService(badProxyRuntime, nil, "", false, "127.0.0.1")
-		Expect(err).To(MatchError(ContainSubstring("invalid trusted proxies")))
-		Expect(runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badProxyRuntime})).To(MatchError(ContainSubstring("invalid trusted proxies")))
-		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badProxyRuntime})).To(MatchError(ContainSubstring("invalid trusted proxies")))
+		Expect(err).To(MatchError(authmw.ErrInvalidTrustedProxy))
+		Expect(runFrontdRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: badProxyRuntime})).To(MatchError(authmw.ErrInvalidTrustedProxy))
+		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: badProxyRuntime})).To(MatchError(authmw.ErrInvalidTrustedProxy))
 
 		startup := internalRuntimeRoleStartupConfig{
 			Role:          projectdaemon.RoleFrontd,
@@ -1861,15 +2093,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		badWikid := startup
 		badWikid.WikidURL = "http://[::1"
-		Expect(runFrontdRole(context.Background(), badWikid)).To(MatchError(ContainSubstring("invalid wikid upstream")))
+		Expect(runFrontdRole(context.Background(), badWikid)).To(Satisfy(frontd.IsInvalidWikidUpstream))
 
 		badWorkspaced := startup
 		badWorkspaced.WorkspacedURL = "http://[::1"
-		Expect(runFrontdRole(context.Background(), badWorkspaced)).To(MatchError(ContainSubstring("invalid workspaced upstream")))
+		Expect(runFrontdRole(context.Background(), badWorkspaced)).To(Satisfy(frontd.IsInvalidWorkspacedUpstream))
 
 		badHost := startup
 		badHost.Runtime.Host = "bad host"
-		Expect(runFrontdRole(context.Background(), badHost)).To(MatchError(ContainSubstring("start frontd listener")))
+		Expect(runFrontdRole(context.Background(), badHost)).To(MatchNetOpError())
 
 		badReady := startup
 		badReady.ReadyPath = filepath.Join(blockingPathForLeafwikiTest(t), "ready.json")
@@ -1884,7 +2116,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		badWorkspacedHost := workspacedStartup
 		badWorkspacedHost.Runtime.Port = "not-a-port"
-		Expect(runWorkspacedRole(context.Background(), badWorkspacedHost)).To(MatchError(ContainSubstring("start workspaced listener")))
+		Expect(runWorkspacedRole(context.Background(), badWorkspacedHost)).To(MatchNetOpError())
 
 		badWorkspacedReady := workspacedStartup
 		badWorkspacedReady.ReadyPath = filepath.Join(blockingPathForLeafwikiTest(t), "ready.json")
@@ -1906,7 +2138,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ready := waitForLeafwikiRuntimeReady(successStartup.ReadyPath)
 		resp, err := http.Get(strings.TrimRight(ready.URL, "/") + "/mcp")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(resp).To(HaveHTTPStatus(http.StatusUnauthorized))
 		Expect(resp.Body.Close()).To(Succeed())
 		successCancel()
 		Eventually(done).WithTimeout(3 * time.Second).Should(Receive(Succeed()))
@@ -1935,31 +2167,33 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		runDaemonServiceForDispatch = func(context.Context, leafwikiRuntimeConfig) error {
 			return errors.New("service failed")
 		}
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			dispatchRuntimeCommand(nil, true, false, leafwikiRuntimeConfig{})
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
-		var hookProvider string
+		var hookProvider agenthooks.ProviderID
 		runAgentHookCommandForDispatch = func(_ context.Context, _ leafwikiRuntimeConfig, provider agenthooks.ProviderID, _ io.Reader, _ io.Writer) error {
-			hookProvider = string(provider)
+			hookProvider = provider
 			return errors.New("hook failed open")
 		}
 		dispatchRuntimeCommand([]string{"agent-hook", "cursor"}, false, true, leafwikiRuntimeConfig{})
-		Expect(hookProvider).To(Equal("cursor"))
-		Expect(runAgentHookCommand(context.Background(), leafwikiRuntimeConfig{}, agenthooks.ProviderCodex, strings.NewReader(`{}`), leafwikiFailWriter{err: errors.New("stdout failed")})).To(MatchError(ContainSubstring("write hook allow response")))
+		Expect(hookProvider).To(Equal(agenthooks.ProviderCursor))
+		hookStdoutErr := errors.New("stdout failed")
+		Expect(runAgentHookCommand(context.Background(), leafwikiRuntimeConfig{}, agenthooks.ProviderCodex, strings.NewReader(`{}`), leafwikiFailWriter{err: hookStdoutErr})).To(MatchError(hookStdoutErr))
 		attachOrStartRuntimeDaemonForAgentHook = func(context.Context, leafwikiRuntimeConfig) (*projectdaemon.Descriptor, error) {
 			return &projectdaemon.Descriptor{ControlURL: "http://127.0.0.1:1", ControlToken: "daemon-token"}, nil
 		}
-		Expect(runAgentHookCommand(context.Background(), leafwikiRuntimeConfig{}, agenthooks.ProviderCodex, strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"session-a"}`), io.Discard)).To(MatchError(ContainSubstring("record agent presence")))
+		Expect(runAgentHookCommand(context.Background(), leafwikiRuntimeConfig{}, agenthooks.ProviderCodex, strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"session-a"}`), io.Discard)).To(MatchURLError())
 		attachOrStartRuntimeDaemonForAgentHook = previousAgentHookAttach
 
 		runProjectDaemonLauncherForDispatch = func(context.Context, leafwikiRuntimeConfig) error {
 			return errors.New("launcher failed")
 		}
-		expectLeafwikiExit(1, func() {
+		Expect(func() {
 			dispatchRuntimeCommand(nil, false, false, leafwikiRuntimeConfig{})
-		})
+		}).To(PanicWithLeafwikiExit(1))
 
+		verifierDownErr := errors.New("verifier down")
 		sessions := projectdaemon.NewSessionRegistry(time.Minute, nil)
 		controlServer := httptest.NewServer(projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
 			Token:    "daemon-token",
@@ -1969,7 +2203,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				case "invalid":
 					return projectdaemon.ErrInvalidAPIKey
 				case "broken":
-					return errors.New("verifier down")
+					return verifierDownErr
 				default:
 					return nil
 				}
@@ -1998,20 +2232,22 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		attachOrStartRuntimeDaemonForLaunch = func(ctx context.Context, _ leafwikiRuntimeConfig) (*projectdaemon.Descriptor, error) {
 			return &badTokenDescriptor, nil
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchError(ContainSubstring("register project daemon session")))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchProjectDaemonControlStatus(http.StatusUnauthorized))
 		attachOrStartRuntimeDaemonForLaunch = func(ctx context.Context, _ leafwikiRuntimeConfig) (*projectdaemon.Descriptor, error) {
 			return descriptor, nil
 		}
 
+		launcherHeartbeatErr := errors.New("heartbeat failed")
 		runDaemonHeartbeatForLaunch = func(context.Context, *projectdaemon.Client, projectdaemon.SessionID, time.Duration) error {
-			return errors.New("heartbeat failed")
+			return launcherHeartbeatErr
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchError(ContainSubstring("project daemon heartbeat failed")))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchError(launcherHeartbeatErr))
 
+		attachErr := errors.New("attach failed")
 		attachOrStartRuntimeDaemonForLaunch = func(ctx context.Context, _ leafwikiRuntimeConfig) (*projectdaemon.Descriptor, error) {
-			return nil, errors.New("attach failed")
+			return nil, attachErr
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchError("attach failed"))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{})).To(MatchError(attachErr))
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
 		Expect(runProjectDaemonLauncher(canceled, leafwikiRuntimeConfig{})).To(Succeed())
@@ -2020,29 +2256,30 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return descriptor, nil
 		}
 		runDaemonHeartbeatForLaunch = func(ctx context.Context, _ *projectdaemon.Client, _ projectdaemon.SessionID, _ time.Duration) error {
-			<-ctx.Done()
-			return ctx.Err()
+			return waitForLeafwikiContextCancellation(ctx)
 		}
+		bridgeErr := errors.New("bridge failed")
 		runDaemonStdioBridgeForLaunch = func(context.Context, daemonStdioBridge) error {
-			return errors.New("bridge failed")
+			return bridgeErr
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError("bridge failed"))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError(bridgeErr))
 
+		stdioHeartbeatErr := errors.New("stdio heartbeat failed")
 		runDaemonHeartbeatForLaunch = func(context.Context, *projectdaemon.Client, projectdaemon.SessionID, time.Duration) error {
-			return errors.New("stdio heartbeat failed")
+			return stdioHeartbeatErr
 		}
 		runDaemonStdioBridgeForLaunch = func(ctx context.Context, _ daemonStdioBridge) error {
-			<-ctx.Done()
-			return ctx.Err()
+			return waitForLeafwikiContextCancellation(ctx)
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError(ContainSubstring("project daemon heartbeat failed")))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError(stdioHeartbeatErr))
 
 		descriptor.PrivateMCPURL = "http://private.local/mcp"
 		descriptor.PrivateMCPToken = "private-token"
+		actorContextErr := errors.New("actor context failed")
 		daemonStdioActorContextForLaunch = func(context.Context, *projectdaemon.Descriptor, leafwikiRuntimeConfig) (string, error) {
-			return "", errors.New("actor context failed")
+			return "", actorContextErr
 		}
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError("actor context failed"))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(MatchError(actorContextErr))
 		daemonStdioActorContextForLaunch = func(context.Context, *projectdaemon.Descriptor, leafwikiRuntimeConfig) (string, error) {
 			return "", context.Canceled
 		}
@@ -2051,15 +2288,20 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		descriptor.PrivateMCPToken = ""
 		daemonStdioActorContextForLaunch = previousActorContext
 
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}, APIKey: "invalid"})).To(MatchError("invalid native STDIO API key"))
-		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}, APIKey: "broken"})).To(MatchError(ContainSubstring("verify native STDIO API key")))
+		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}, APIKey: "invalid"})).To(MatchError(projectdaemon.ErrInvalidAPIKey))
+		err := runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}, APIKey: "broken"})
+		Expect(err).To(HaveOccurred())
+		var controlErr *projectdaemon.ControlHTTPError
+		Expect(err).To(Satisfy(func(err error) bool {
+			return errors.As(err, &controlErr)
+		}))
+		Expect(controlErr.StatusCode).To(Equal(http.StatusServiceUnavailable))
 
 		runDaemonHeartbeatForLaunch = func(context.Context, *projectdaemon.Client, projectdaemon.SessionID, time.Duration) error {
 			return nil
 		}
 		runDaemonStdioBridgeForLaunch = func(ctx context.Context, _ daemonStdioBridge) error {
-			<-ctx.Done()
-			return ctx.Err()
+			return waitForLeafwikiContextCancellation(ctx)
 		}
 		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(Succeed())
 	})
@@ -2100,7 +2342,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		now := time.Now().UTC()
 		authServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-			Expect(req.Header.Get(projectdaemon.ControlTokenHeader)).To(Equal("daemon-token"))
+			Expect(req.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey(projectdaemon.ControlTokenHeader), ContainElement("daemon-token")))
 			writeRuntimeJSON(rw, map[string]any{"actor": projectdaemon.ActorContext{
 				Version:     1,
 				Issuer:      projectdaemon.ActorContextIssuerWikid,
@@ -2128,18 +2370,19 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		resp, err := rt.RoundTrip(httptest.NewRequest(http.MethodGet, upstream.URL, nil))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(resp.StatusCode).To(Equal(http.StatusNoContent))
+		Expect(resp).To(HaveHTTPStatus(http.StatusNoContent))
 		Expect(resp.Body.Close()).To(Succeed())
 
 		previousEncodeActorContext := encodeActorContextForRuntime
 		ginkgo.DeferCleanup(func() {
 			encodeActorContextForRuntime = previousEncodeActorContext
 		})
+		encodeActorContextErr := errors.New("round trip encode failed")
 		encodeActorContextForRuntime = func(projectdaemon.ActorContext) (string, error) {
-			return "", errors.New("round trip encode failed")
+			return "", encodeActorContextErr
 		}
 		_, err = rt.actorContext(httptest.NewRequest(http.MethodGet, upstream.URL, nil))
-		Expect(err).To(MatchError(ContainSubstring("encode native STDIO actor context")))
+		Expect(err).To(MatchError(encodeActorContextErr))
 		encodeActorContextForRuntime = previousEncodeActorContext
 	})
 
@@ -2163,28 +2406,28 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		badPathCfg := validCfg
 		badPathCfg.Workspace.DataDir = "bad\x00data"
-		Expect(runProjectDaemonOwner(context.Background(), badPathCfg)).To(MatchError(ContainSubstring("resolve data dir")))
+		Expect(runProjectDaemonOwner(context.Background(), badPathCfg)).To(MatchPathError())
 
 		Expect(os.MkdirAll(validCfg.Workspace.DataDir, 0o755)).To(Succeed())
 		Expect(os.MkdirAll(validCfg.Workspace.RootDir, 0o755)).To(Succeed())
 		dataLock, err := locking.AcquireDataDirLock(validCfg.Workspace.DataDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchError(ContainSubstring("acquire data directory lock")))
+		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(Satisfy(locking.IsDataDirLockHeld))
 		Expect(dataLock.Release()).To(Succeed())
 
 		rootLock, err := locking.AcquireRootDirLock(validCfg.Workspace.RootDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchError(ContainSubstring("acquire root directory lock")))
+		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(Satisfy(locking.IsRootDirLockHeld))
 		Expect(rootLock.Release()).To(Succeed())
 
 		badLogCfg := validCfg
 		badLogCfg.Logging = leaflogging.Config{Target: leaflogging.Target("bad-target")}
-		Expect(runProjectDaemonOwner(context.Background(), badLogCfg)).To(MatchError(ContainSubstring("invalid logging configuration")))
+		Expect(runProjectDaemonOwner(context.Background(), badLogCfg)).To(MatchError(leaflogging.ErrInvalidLogTarget))
 
 		legacyDBDir := filepath.Join(validCfg.Workspace.DataDir, "users.db")
 		Expect(os.MkdirAll(legacyDBDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(legacyDBDir, "child"), []byte("x"), 0o600)).To(Succeed())
-		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchError(ContainSubstring("cleanup legacy auth DBs")))
+		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchPathError())
 		Expect(os.Remove(filepath.Join(legacyDBDir, "child"))).To(Succeed())
 		Expect(os.Remove(legacyDBDir)).To(Succeed())
 
@@ -2195,7 +2438,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(os.MkdirAll(authDirFailureCfg.Workspace.RootDir, 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(authDirFailureCfg.Workspace.DataDir, ".leafwiki"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(authDirFailureCfg.Workspace.DataDir, ".leafwiki", "wikid"), []byte("not a directory"), 0o600)).To(Succeed())
-		Expect(runProjectDaemonOwner(context.Background(), authDirFailureCfg)).To(MatchError(ContainSubstring("create wikid auth dir")))
+		Expect(runProjectDaemonOwner(context.Background(), authDirFailureCfg)).To(MatchPathError())
 
 		oauthDirFailureCfg := validCfg
 		oauthDirFailureCfg.Workspace.DataDir = filepath.Join(t.TempDir(), "oauth-dir-data")
@@ -2205,12 +2448,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		oauthPaths := wikid.AuthStoragePaths(oauthDirFailureCfg.Workspace.DataDir)
 		Expect(os.MkdirAll(oauthPaths.AuthDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(oauthPaths.OAuthDir, []byte("not a directory"), 0o600)).To(Succeed())
-		Expect(runProjectDaemonOwner(context.Background(), oauthDirFailureCfg)).To(MatchError(ContainSubstring("create wikid oauth dir")))
+		Expect(runProjectDaemonOwner(context.Background(), oauthDirFailureCfg)).To(MatchPathError())
 
+		wikidFrontdErr := errors.New("wikid-frontd failed")
 		runWikidFrontdOwnerForProjectDaemon = func(context.Context, leafwikiRuntimeConfig, projectdaemon.Config) error {
-			return errors.New("wikid-frontd failed")
+			return wikidFrontdErr
 		}
-		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchError("wikid-frontd failed"))
+		Expect(runProjectDaemonOwner(context.Background(), validCfg)).To(MatchError(wikidFrontdErr))
 
 		runWikidFrontdOwnerForProjectDaemon = func(context.Context, leafwikiRuntimeConfig, projectdaemon.Config) error {
 			return nil
@@ -2226,20 +2470,21 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		blockingFile := blockingPathForLeafwikiTest(t)
 		t.Setenv("TMPDIR", blockingFile)
 		_, err = spawnProjectDaemonOwner(validCfg)
-		Expect(err).To(MatchError(ContainSubstring("create daemon startup error file")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 
 		t.Setenv("TMPDIR", validTempDir)
+		executableUnavailableErr := errors.New("executable unavailable")
 		projectDaemonExecutable = func() (string, error) {
-			return "", errors.New("executable unavailable")
+			return "", executableUnavailableErr
 		}
 		_, err = spawnProjectDaemonOwner(validCfg)
-		Expect(err).To(MatchError("executable unavailable"))
+		Expect(err).To(MatchError(executableUnavailableErr))
 
 		projectDaemonExecutable = func() (string, error) {
 			return missingExecutable, nil
 		}
 		_, err = spawnProjectDaemonOwner(validCfg)
-		Expect(err).To(MatchError(ContainSubstring("start project daemon")))
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		scheduleProjectDaemonStartupConfigCleanup("")
 	})
@@ -2287,68 +2532,77 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			writeDescriptorAtomicForRuntime = previousWriteDescriptor
 		})
 
+		listenErr := errors.New("listen failed")
 		netListenForRuntime = func(string, string) (net.Listener, error) {
-			return nil, errors.New("listen failed")
+			return nil, listenErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(ContainSubstring("start control listener")))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(listenErr))
 		netListenForRuntime = previousNetListen
 
+		tokenErr := errors.New("token failed")
 		randomTokenForRuntime = func() (string, error) {
-			return "", errors.New("token failed")
+			return "", tokenErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("token failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(tokenErr))
 		randomTokenForRuntime = previousRandomToken
 
+		hashErr := errors.New("hash failed")
 		configHashForRuntime = func(projectdaemon.Config) (string, error) {
-			return "", errors.New("hash failed")
+			return "", hashErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("hash failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(hashErr))
 		configHashForRuntime = previousConfigHash
 
+		wikiErr := errors.New("wiki failed")
 		newRuntimeWikiForRuntime = func(leafwikiRuntimeConfig, projectdaemon.Config, runtimeWikiMode) (*wiki.Wiki, error) {
-			return nil, errors.New("wiki failed")
+			return nil, wikiErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("wiki failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(wikiErr))
 		newRuntimeWikiForRuntime = func(leafwikiRuntimeConfig, projectdaemon.Config, runtimeWikiMode) (*wiki.Wiki, error) {
 			w := newFrontdActorTestWiki(t)
 			ginkgo.DeferCleanup(w.Close)
 			return w, nil
 		}
 
+		routerOptionsErr := errors.New("router options failed")
 		controlPlaneRouterOptionsForOwner = func(leafwikiRuntimeConfig, *wiki.Wiki) (httpinternal.RouterOptions, error) {
-			return httpinternal.RouterOptions{}, errors.New("router options failed")
+			return httpinternal.RouterOptions{}, routerOptionsErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("router options failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(routerOptionsErr))
 		controlPlaneRouterOptionsForOwner = previousControlPlaneOptions
 
+		runtimeErr := errors.New("runtime failed")
 		startWikidFrontdRuntimeForOwner = func(context.Context, leafwikiRuntimeConfig, string, string) (*wikidFrontdRuntime, error) {
-			return nil, errors.New("runtime failed")
+			return nil, runtimeErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("runtime failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(runtimeErr))
 
 		startWikidFrontdRuntimeForOwner = func(ctx context.Context, _ leafwikiRuntimeConfig, _ string, _ string) (*wikidFrontdRuntime, error) {
 			return newLeafwikiReadyOwnerRuntime(ctx), nil
 		}
+		privateMCPErr := errors.New("private mcp failed")
 		newMCPProxyWithActorForRuntime = func(frontd.WorkspaceProxyOptions) (http.Handler, error) {
-			return nil, errors.New("private mcp failed")
+			return nil, privateMCPErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("private mcp failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(privateMCPErr))
 		newMCPProxyWithActorForRuntime = previousMCPProxy
 
+		writeDescriptorErr := errors.New("write descriptor failed")
 		writeDescriptorAtomicForRuntime = func(string, *projectdaemon.Descriptor) error {
-			return errors.New("write descriptor failed")
+			return writeDescriptorErr
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("write descriptor failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(writeDescriptorErr))
 
 		writeCalls := 0
+		writeGlobalDescriptorErr := errors.New("write global descriptor failed")
 		writeDescriptorAtomicForRuntime = func(path string, desc *projectdaemon.Descriptor) error {
 			writeCalls++
 			if writeCalls == 2 {
-				return errors.New("write global descriptor failed")
+				return writeGlobalDescriptorErr
 			}
 			return previousWriteDescriptor(path, desc)
 		}
-		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError("write global descriptor failed"))
+		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(writeGlobalDescriptorErr))
 	})
 
 	ginkgo.It("covers direct actor, token, and private endpoint error branches", func() {
@@ -2361,7 +2615,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(actor.Subject).To(Equal("user:public-editor"))
 
 		_, err = wikidControlMCPActorResolver(t.TempDir(), leafwikiRuntimeConfig{})(httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(err).To(MatchError("native STDIO requires an API key"))
+		Expect(err).To(MatchError(errNativeStdioAPIKeyRequired))
 		missingKeyReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		missingKeyReq.Header.Set("Authorization", "Bearer lwk_key_missing")
 		_, err = wikidControlMCPActorResolver(t.TempDir(), leafwikiRuntimeConfig{})(missingKeyReq)
@@ -2379,11 +2633,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(HaveOccurred())
 
 		_, err = frontdMCPTokenVerifier(&wiki.Wiki{})(context.Background(), "lwk_key_missing", httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(err).To(MatchError(ContainSubstring("api key verifier unavailable")))
+		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 
 		noCodeErr := newWikidPrivateEndpointError("/plain", http.StatusBadGateway, nil)
 		Expect(noCodeErr.Code).To(BeEmpty())
-		Expect(noCodeErr.Error()).To(ContainSubstring("status 502"))
+		Expect(noCodeErr.StatusCode).To(Equal(http.StatusBadGateway))
 
 		err = callWikidPrivateEndpoint(context.Background(), "http://[::1", "token", "/private", nil, nil)
 		Expect(err).To(HaveOccurred())
@@ -2395,12 +2649,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		badRegistry := wikid.NewRegistryService(wikid.NewRegistryStore(filepath.Join(blockingFile, "registry.db")), badRegistryLayout)
 		rec := httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, badRegistry, nil)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 
 		badGrantStore := wikid.NewGrantStore(filepath.Join(blockingFile, "grants.db"))
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, badGrantStore)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		previousGrantsForSubject := grantsForSubjectForRuntime
 		previousActorContextForGrant := actorContextForWorkspaceGrantForRuntime
 		ginkgo.DeferCleanup(func() {
@@ -2413,7 +2667,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		validGrantStore := wikid.NewGrantStore(filepath.Join(t.TempDir(), "grants.db"))
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, validGrantStore)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		grantsForSubjectForRuntime = previousGrantsForSubject
 
 		actorContextForWorkspaceGrantForRuntime = func(*coreauth.User, string, leafwikiRuntimeConfig, workspaceid.WorkspaceID, wikid.GrantRole) (projectdaemon.ActorContext, error) {
@@ -2421,11 +2675,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, nil)
-		Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		actorContextForWorkspaceGrantForRuntime = previousActorContextForGrant
 
-		Expect(seedRuntimeHomeGrants(badGrantStore, leafwikiRuntimeConfig{DisableAuth: true})).To(MatchError(ContainSubstring("seed disabled-auth home grant")))
-		Expect(seedRuntimeHomeGrants(badGrantStore, leafwikiRuntimeConfig{PublicAccess: true})).To(MatchError(ContainSubstring("seed public home grant")))
+		Expect(seedRuntimeHomeGrants(badGrantStore, leafwikiRuntimeConfig{DisableAuth: true})).To(MatchPathError())
+		Expect(seedRuntimeHomeGrants(badGrantStore, leafwikiRuntimeConfig{PublicAccess: true})).To(MatchPathError())
 	})
 
 	ginkgo.It("covers direct manager, storage, and environment helper branches", func() {
@@ -2434,11 +2688,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		var manager *federatedWorkspaceManager
 		manager.MarkReady("workspace-a", 1, "http://workspace.local")
 		_, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: "workspace-a"})
-		Expect(err).To(MatchError("workspace manager is unavailable"))
+		Expect(err).To(MatchError(errWorkspaceManagerUnavailable))
 
 		manager = newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(t.TempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		_, err = manager.Ensure(context.Background(), wikid.WorkspaceRecord{})
-		Expect(err).To(MatchError("workspace ID is required"))
+		Expect(err).To(MatchError(errWorkspaceIDRequired))
 
 		workspace := wikid.WorkspaceRecord{ID: "workspace-a", DataDir: t.TempDir(), RootDir: t.TempDir()}
 		manager.supervisor.MarkReady(workspace.ID, os.Getpid(), "http://workspace.local")
@@ -2454,30 +2708,36 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		manager.stopped = true
 		manager.restartWorkspaceAfter(wikid.WorkspaceRecord{ID: "workspace-a"}, time.Now().Add(-time.Second))
 
+		processStopErr := errors.New("process stop failed")
 		stoppedProcDone := make(chan error, 1)
-		stoppedProcDone <- errors.New("process stop failed")
+		stoppedProcDone <- processStopErr
 		stoppedProc := &internalRuntimeRoleProcess{
 			role:     projectdaemon.RoleWorkspaced,
 			done:     stoppedProcDone,
 			waitDone: make(chan struct{}),
 		}
-		Expect(stoppedProc.wait()).To(MatchError("process stop failed"))
+		Expect(stoppedProc.wait()).To(MatchError(processStopErr))
 		process, err := os.FindProcess(os.Getpid())
 		Expect(err).NotTo(HaveOccurred())
 		stoppedProc.process = process
 		manager = newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(t.TempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		manager.processes["workspace-stop"] = stoppedProc
-		Expect(manager.stop(context.Background())).To(MatchError("process stop failed"))
+		Expect(manager.stop(context.Background())).To(MatchError(processStopErr))
 
 		blockingFile := blockingPathForLeafwikiTest(t)
-		Expect(removeNonRegularDescriptor(filepath.Join(blockingFile, "descriptor.json"))).To(MatchError(ContainSubstring("inspect descriptor target")))
+		Expect(removeNonRegularDescriptor(filepath.Join(blockingFile, "descriptor.json"))).To(MatchPathError())
 		_, err = stdioAPIKeyUserFromStorage(filepath.Join(blockingFile, "auth"), "lwk_key_missing")
 		Expect(err).To(HaveOccurred())
 		_, err = daemonConfigForRuntime(leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: "bad\x00data", RootDir: t.TempDir()}})
-		Expect(err).To(MatchError(ContainSubstring("resolve data dir")))
+		Expect(err).To(MatchPathError())
 		_, err = daemonWorkspaceRequestConfigForRuntime(leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: "bad\x00data", RootDir: t.TempDir()}})
-		Expect(err).To(MatchError(ContainSubstring("resolve data dir")))
+		Expect(err).To(MatchPathError())
 		oldHome, hadHome := os.LookupEnv("HOME")
+		if hadHome {
+			ginkgo.DeferCleanup(os.Setenv, "HOME", oldHome)
+		} else {
+			ginkgo.DeferCleanup(os.Unsetenv, "HOME")
+		}
 		Expect(os.Setenv("HOME", "")).To(Succeed())
 		_, err = globalRuntimeHomeDir()
 		Expect(err).To(HaveOccurred())
@@ -2487,11 +2747,6 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(HaveOccurred())
 		_, err = daemonRequestConfigForRuntime(leafwikiRuntimeConfig{})
 		Expect(err).To(HaveOccurred())
-		if hadHome {
-			Expect(os.Setenv("HOME", oldHome)).To(Succeed())
-		} else {
-			Expect(os.Unsetenv("HOME")).To(Succeed())
-		}
 
 		opts := frontendConfigForRuntimeStorage(filepath.Join(t.TempDir(), "missing"))
 		Expect(opts.GetSiteName()).To(Equal("LeafWiki"))
@@ -2510,10 +2765,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		w := newFrontdActorTestWiki(t)
 		ginkgo.DeferCleanup(w.Close)
 		_, err = frontdMCPTokenVerifier(w)(context.Background(), "lwk_key_invalid", httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(err).To(MatchError(ContainSubstring("invalid api key")))
+		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
 
 		_, _, err = frontdActorUser(httptest.NewRequest(http.MethodPost, "/mcp", nil), w, leafwikiRuntimeConfig{})
-		Expect(err).To(MatchError(ContainSubstring("missing credentials")))
+		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing))
 	})
 
 	ginkgo.It("covers portable system-error seams for runtime helpers", func() {
@@ -2553,53 +2808,57 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return "", nil
 		}
 		_, err := globalRuntimeHomeDir()
-		Expect(err).To(MatchError("user home is empty"))
+		Expect(err).To(MatchError(errUserHomeEmpty))
+		homeErr := errors.New("home failed")
 		userHomeDirForRuntime = func() (string, error) {
-			return "", errors.New("home failed")
+			return "", homeErr
 		}
 		_, err = globalRuntimeHomeDir()
-		Expect(err).To(MatchError(ContainSubstring("resolve user home")))
+		Expect(err).To(MatchError(homeErr))
 		userHomeDirForRuntime = previousHome
 
+		openNullErr := errors.New("open null failed")
 		openDaemonNullDeviceForRuntime = func() (*os.File, error) {
-			return nil, errors.New("open null failed")
+			return nil, openNullErr
 		}
 		_, _, err = openDaemonNullDevice()
-		Expect(err).To(MatchError(ContainSubstring("open daemon null device")))
+		Expect(err).To(MatchError(openNullErr))
 		_, err = configureDaemonOwnerIO(&exec.Cmd{}, leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}})
-		Expect(err).To(MatchError(ContainSubstring("open daemon null device")))
+		Expect(err).To(MatchError(openNullErr))
 		_, err = configureInternalRuntimeRoleIO(&exec.Cmd{}, leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}})
-		Expect(err).To(MatchError(ContainSubstring("open daemon null device")))
+		Expect(err).To(MatchError(openNullErr))
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd, Runtime: leafwikiRuntimeConfig{MCPTransports: mcpTransports{Stdio: true}}})
-		Expect(err).To(MatchError(ContainSubstring("open daemon null device")))
+		Expect(err).To(MatchError(openNullErr))
 		_, err = spawnProjectDaemonOwner(leafwikiRuntimeConfig{
 			Workspace:     wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()},
 			DisableAuth:   true,
 			MCPTransports: mcpTransports{Stdio: true},
 			Logging:       leaflogging.Config{Target: leaflogging.TargetStderr},
 		})
-		Expect(err).To(MatchError(ContainSubstring("open daemon null device")))
+		Expect(err).To(MatchError(openNullErr))
 		openDaemonNullDeviceForRuntime = previousOpenNull
 
+		marshalErr := errors.New("marshal failed")
 		jsonMarshalForRuntime = func(any) ([]byte, error) {
-			return nil, errors.New("marshal failed")
+			return nil, marshalErr
 		}
 		startupErrPath := filepath.Join(t.TempDir(), "startup.err")
 		writeProjectDaemonStartupError(startupErrPath, errors.New("plain startup error"))
 		Expect(os.ReadFile(startupErrPath)).To(Equal([]byte("plain startup error")))
 		_, err = spawnProjectDaemonOwner(leafwikiRuntimeConfig{DisableAuth: true, Logging: leaflogging.Config{Target: leaflogging.TargetStderr}})
-		Expect(err).To(MatchError("marshal failed"))
+		Expect(err).To(MatchError(marshalErr))
 		_, err = writeInternalRuntimeRoleStartupConfig(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError("marshal failed"))
+		Expect(err).To(MatchError(marshalErr))
 		err = writeInternalRuntimeRoleReady(filepath.Join(t.TempDir(), "ready.json"), internalRuntimeRoleReady{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError("marshal failed"))
+		Expect(err).To(MatchError(marshalErr))
 		jsonMarshalForRuntime = previousMarshal
 
 		projectDaemonStartupConfigPostStartCleanupDelay = 0
 		scheduleProjectDaemonStartupConfigCleanup(filepath.Join(t.TempDir(), "startup.json"))
 
+		loggingResolveErr := errors.New("logging resolve failed")
 		resolveLoggingForRuntime = func(leaflogging.ConfigInput) (leaflogging.Config, error) {
-			return leaflogging.Config{}, errors.New("logging resolve failed")
+			return leaflogging.Config{}, loggingResolveErr
 		}
 		badWorkspaceCfg := leafwikiRuntimeConfig{
 			Workspace:     wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()},
@@ -2607,13 +2866,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Logging:       leaflogging.Config{Target: leaflogging.TargetStderr},
 		}
 		_, err = daemonWorkspaceRuntimeConfig(badWorkspaceCfg)
-		Expect(err).To(MatchError("logging resolve failed"))
+		Expect(err).To(MatchError(loggingResolveErr))
 		_, err = daemonWorkspaceRequestConfigForRuntime(badWorkspaceCfg)
-		Expect(err).To(MatchError("logging resolve failed"))
+		Expect(err).To(MatchError(loggingResolveErr))
 		_, err = daemonOwnerRuntimeConfig(badWorkspaceCfg)
-		Expect(err).To(MatchError("logging resolve failed"))
+		Expect(err).To(MatchError(loggingResolveErr))
 		_, err = spawnProjectDaemonOwner(badWorkspaceCfg)
-		Expect(err).To(MatchError("logging resolve failed"))
+		Expect(err).To(MatchError(loggingResolveErr))
 		resolveLoggingForRuntime = previousResolveLogging
 	})
 
@@ -2684,30 +2943,33 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return nil, errors.New("data lock probe failed")
 		}
 		_, err := waitForProjectDaemon(context.Background(), filepath.Join(t.TempDir(), "missing.json"), waitErrPath, projectdaemon.Config{DataDir: t.TempDir(), RootDir: t.TempDir()}, mcpTransports{})
-		Expect(err).To(MatchError(ContainSubstring("project is locked but no attachable daemon was found")))
+		Expect(err).To(MatchError(errProjectLockedNoAttachableDaemon))
 		acquireDataDirLockForRuntime = previousAcquireDataLock
 
 		waitLockPath := filepath.Join(t.TempDir(), "startup-lock.err")
 		Expect(os.WriteFile(waitLockPath, []byte("acquire data directory lock: held"), 0o600)).To(Succeed())
 		_, err = waitForProjectDaemon(context.Background(), filepath.Join(t.TempDir(), "missing.json"), waitLockPath, projectdaemon.Config{DataDir: t.TempDir(), RootDir: t.TempDir()}, mcpTransports{})
-		Expect(err).To(MatchError(ContainSubstring("project is locked")))
+		Expect(err).To(MatchError(errProjectLockedNoAttachableDaemon))
 
+		descriptorLockProbeErr := errors.New("descriptor lock probe failed")
 		acquireDataDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
-			return nil, errors.New("descriptor lock probe failed")
+			return nil, descriptorLockProbeErr
 		}
 		badDescriptorPath := filepath.Join(t.TempDir(), "bad-descriptor.json")
 		Expect(os.WriteFile(badDescriptorPath, []byte("{bad"), 0o600)).To(Succeed())
 		_, err = waitForProjectDaemon(context.Background(), badDescriptorPath, "", projectdaemon.Config{DataDir: t.TempDir(), RootDir: t.TempDir()}, mcpTransports{})
-		Expect(err).To(MatchError(ContainSubstring("descriptor lock probe failed")))
+		Expect(err).To(MatchError(errProjectLockedNoAttachableDaemon))
+		Expect(err).To(MatchError(descriptorLockProbeErr))
 		acquireDataDirLockForRuntime = previousAcquireDataLock
 
 		startCommandForRuntime = func(*exec.Cmd) error {
 			return nil
 		}
 		_, _, err = startInternalRuntimeRoleProcess(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})
-		Expect(err).To(MatchError(ContainSubstring("missing process handle")))
+		Expect(err).To(MatchError(errRuntimeRoleMissingProcessHandle))
 
 		createCalls := 0
+		startupConfigTempErr := errors.New("startup config temp failed")
 		createTempFileForRuntime = func(dir string, pattern string) (leafwikiTempFile, error) {
 			createCalls++
 			if createCalls == 1 {
@@ -2717,49 +2979,53 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				}
 				return file, nil
 			}
-			return nil, errors.New("startup config temp failed")
+			return nil, startupConfigTempErr
 		}
 		_, err = spawnProjectDaemonOwner(leafwikiRuntimeConfig{DisableAuth: true, Logging: leaflogging.Config{Target: leaflogging.TargetStderr}})
-		Expect(err).To(MatchError(ContainSubstring("create daemon startup config")))
+		Expect(err).To(MatchError(startupConfigTempErr))
 		createTempFileForRuntime = previousCreateTempFile
 
+		releaseErr := errors.New("release failed")
 		releaseProcessForRuntime = func(*os.Process) error {
-			return errors.New("release failed")
+			return releaseErr
 		}
 		startCommandForRuntime = func(cmd *exec.Cmd) error {
 			cmd.Process = &os.Process{Pid: os.Getpid()}
 			return nil
 		}
 		_, err = spawnProjectDaemonOwner(leafwikiRuntimeConfig{DisableAuth: true, Logging: leaflogging.Config{Target: leaflogging.TargetStderr}})
-		Expect(err).To(MatchError(ContainSubstring("release project daemon process")))
+		Expect(err).To(MatchError(releaseErr))
 		startCommandForRuntime = previousStartCommand
 		releaseProcessForRuntime = previousReleaseProcess
 
+		roleStopErr := errors.New("role stop failed")
 		stopDone := make(chan error, 1)
-		stopDone <- errors.New("role stop failed")
+		stopDone <- roleStopErr
 		stopProc := &internalRuntimeRoleProcess{done: stopDone, waitDone: make(chan struct{})}
-		Expect(stopProc.wait()).To(MatchError("role stop failed"))
+		Expect(stopProc.wait()).To(MatchError(roleStopErr))
 		process, err := os.FindProcess(os.Getpid())
 		Expect(err).NotTo(HaveOccurred())
 		stopProc.process = process
 		runtime := &wikidFrontdRuntime{processes: map[projectdaemon.RoleName]*internalRuntimeRoleProcess{projectdaemon.RoleFrontd: stopProc}}
-		Expect(runtime.stop(context.Background())).To(MatchError("role stop failed"))
+		Expect(runtime.stop(context.Background())).To(MatchError(roleStopErr))
 
 		defaultInput := &leafwikiErrReadCloser{err: io.EOF}
 		defaultDaemonStdinForRuntime = func() io.ReadCloser { return defaultInput }
 		defaultDaemonStdoutForRuntime = func() io.Writer { return io.Discard }
+		bridgeErr := errors.New("bridge failed")
 		bridgeTransportsForRuntime = func(context.Context, sdkmcp.Transport, sdkmcp.Transport) error {
-			return errors.New("bridge failed")
+			return bridgeErr
 		}
-		Expect(runDaemonStdioBridge(context.Background(), daemonStdioBridge{EndpointURL: "http://127.0.0.1:1/mcp"})).To(MatchError(ContainSubstring("MCP STDIO failed")))
+		Expect(runDaemonStdioBridge(context.Background(), daemonStdioBridge{EndpointURL: "http://127.0.0.1:1/mcp"})).To(MatchError(bridgeErr))
 		Eventually(defaultInput.Closed).WithTimeout(200 * time.Millisecond).Should(BeTrue())
 
-		filterInput := &leafwikiErrReadCloser{err: errors.New("stdin failed")}
+		stdinErr := errors.New("stdin failed")
+		filterInput := &leafwikiErrReadCloser{err: stdinErr}
 		bridgeTransportsForRuntime = func(context.Context, sdkmcp.Transport, sdkmcp.Transport) error {
 			time.Sleep(20 * time.Millisecond)
 			return nil
 		}
-		Expect(runDaemonStdioBridge(context.Background(), daemonStdioBridge{EndpointURL: "http://127.0.0.1:1/mcp", Stdin: filterInput, Stdout: io.Discard})).To(MatchError(ContainSubstring("MCP STDIO input failed")))
+		Expect(runDaemonStdioBridge(context.Background(), daemonStdioBridge{EndpointURL: "http://127.0.0.1:1/mcp", Stdin: filterInput, Stdout: io.Discard})).To(MatchError(stdinErr))
 		bridgeTransportsForRuntime = previousBridgeTransports
 		defaultDaemonStdinForRuntime = previousDefaultStdin
 		defaultDaemonStdoutForRuntime = previousDefaultStdout
@@ -2772,10 +3038,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		notifyRuntimeSignalsForRuntime = previousNotifySignals
 		stopRuntimeSignalsForRuntime = previousStopSignals
 
+		shutdownErr := errors.New("shutdown failed")
 		shutdownInternalRuntimeHTTPServerForRuntime = func(*http.Server, context.Context) error {
-			return errors.New("shutdown failed")
+			return shutdownErr
 		}
-		Expect(serveInternalRuntimeHTTP(context.Background(), projectdaemon.RoleFrontd, leafwikiFakeListener{addr: leafwikiStringAddr("127.0.0.1:0")}, http.NotFoundHandler(), 0)).To(MatchError("shutdown failed"))
+		Expect(serveInternalRuntimeHTTP(context.Background(), projectdaemon.RoleFrontd, leafwikiFakeListener{addr: leafwikiStringAddr("127.0.0.1:0")}, http.NotFoundHandler(), 0)).To(MatchError(shutdownErr))
 		shutdownInternalRuntimeHTTPServerForRuntime = previousShutdownInternalHTTP
 
 		validRuntime := leafwikiRuntimeConfig{
@@ -2792,36 +3059,41 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			WorkspacedURL: "http://127.0.0.1:2",
 			ReadyPath:     filepath.Join(t.TempDir(), "ready.json"),
 		}
+		workspacesAPIErr := errors.New("workspaces api failed")
 		newWorkspacesAPIForRuntime = func(string, string) (http.Handler, error) {
-			return nil, errors.New("workspaces api failed")
+			return nil, workspacesAPIErr
 		}
-		Expect(runFrontdRole(context.Background(), startup)).To(MatchError("workspaces api failed"))
+		Expect(runFrontdRole(context.Background(), startup)).To(MatchError(workspacesAPIErr))
 		newWorkspacesAPIForRuntime = previousWorkspacesAPI
 
+		workspaceResolverErr := errors.New("workspace resolver failed")
 		newWikidWorkspaceResolverForRuntime = func(string, string) (func(*http.Request, workspaceid.WorkspaceID) (frontd.WorkspaceRoute, error), error) {
-			return nil, errors.New("workspace resolver failed")
+			return nil, workspaceResolverErr
 		}
-		Expect(runFrontdRole(context.Background(), startup)).To(MatchError("workspace resolver failed"))
+		Expect(runFrontdRole(context.Background(), startup)).To(MatchError(workspaceResolverErr))
 		newWikidWorkspaceResolverForRuntime = previousWorkspaceResolver
 
 		httpStartup := startup
 		httpStartup.Runtime.MCPTransports = mcpTransports{HTTP: true}
+		publicMCPErr := errors.New("public mcp failed")
 		frontdPublicMCPHandlerForRuntime = func(leafwikiRuntimeConfig, string, string, string) (http.Handler, error) {
-			return nil, errors.New("public mcp failed")
+			return nil, publicMCPErr
 		}
-		Expect(runFrontdRole(context.Background(), httpStartup)).To(MatchError("public mcp failed"))
+		Expect(runFrontdRole(context.Background(), httpStartup)).To(MatchError(publicMCPErr))
 		frontdPublicMCPHandlerForRuntime = previousPublicMCP
 
+		singleResolverErr := errors.New("single resolver failed")
 		newWikidSingleWorkspaceResolverForRuntime = func(string, string) (func(*http.Request) (workspaceid.WorkspaceID, error), error) {
-			return nil, errors.New("single resolver failed")
+			return nil, singleResolverErr
 		}
-		Expect(runFrontdRole(context.Background(), httpStartup)).To(MatchError("single resolver failed"))
+		Expect(runFrontdRole(context.Background(), httpStartup)).To(MatchError(singleResolverErr))
 		newWikidSingleWorkspaceResolverForRuntime = previousSingleResolver
 
+		runtimeWikiErr := errors.New("runtime wiki failed")
 		newRuntimeWikiForRuntime = func(leafwikiRuntimeConfig, projectdaemon.Config, runtimeWikiMode) (*wiki.Wiki, error) {
-			return nil, errors.New("runtime wiki failed")
+			return nil, runtimeWikiErr
 		}
-		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: validRuntime})).To(MatchError("runtime wiki failed"))
+		Expect(runWorkspacedRole(context.Background(), internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleWorkspaced, Runtime: validRuntime})).To(MatchError(runtimeWikiErr))
 		newRuntimeWikiForRuntime = previousNewRuntimeWiki
 
 		ownerCfg := validRuntime
@@ -2837,8 +3109,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}
 			return nil, nil
 		}
-		mkdirAllForRuntime = func(string, os.FileMode) error { return errors.New("mkdir data failed") }
-		Expect(runProjectDaemonOwner(context.Background(), ownerCfg)).To(MatchError(ContainSubstring("create data directory")))
+		mkdirDataErr := errors.New("mkdir data failed")
+		mkdirAllForRuntime = func(string, os.FileMode) error { return mkdirDataErr }
+		Expect(runProjectDaemonOwner(context.Background(), ownerCfg)).To(MatchError(mkdirDataErr))
 
 		statPathForRuntime = func(path string) (os.FileInfo, error) {
 			if path == ownerDaemonCfg.RootDir {
@@ -2846,8 +3119,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}
 			return nil, nil
 		}
-		mkdirAllForRuntime = func(string, os.FileMode) error { return errors.New("mkdir root failed") }
-		Expect(runProjectDaemonOwner(context.Background(), ownerCfg)).To(MatchError(ContainSubstring("create root directory")))
+		mkdirRootErr := errors.New("mkdir root failed")
+		mkdirAllForRuntime = func(string, os.FileMode) error { return mkdirRootErr }
+		Expect(runProjectDaemonOwner(context.Background(), ownerCfg)).To(MatchError(mkdirRootErr))
 	})
 
 	ginkgo.It("covers extracted runtime callback and auth helper branches", func() {
@@ -2857,7 +3131,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(status.State).To(Equal(wikid.WorkspaceStateRunning))
 		_, err = federatedEnsureResultStatus("workspace-a", "unexpected", nil)
-		Expect(err).To(MatchError(ContainSubstring(`ensure workspace "workspace-a" returned unexpected result string`)))
+		Expect(err).To(MatchFederatedEnsureUnexpectedResult("workspace-a", "string"))
 		resultErr := errors.New("ensure failed")
 		_, err = federatedEnsureResultStatus("workspace-a", "unexpected", resultErr)
 		Expect(err).To(MatchError(resultErr))
@@ -2912,7 +3186,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}, func(*http.Request) (projectdaemon.ActorContext, error) {
 			return projectdaemon.ActorContext{}, nil
 		}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusServiceUnavailable))
+		Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
 
 		newMCPProxyWithActorForRuntime = func(opts frontd.WorkspaceProxyOptions) (http.Handler, error) {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -2932,38 +3206,41 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Expect(parseErr).NotTo(HaveOccurred())
 			return projectdaemon.ActorContext{WorkspaceID: workspaceID}, nil
 		}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(rec.Code).To(Equal(http.StatusNoContent))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
 		newMCPProxyWithActorForRuntime = previousMCPProxy
 
 		w := newFrontdActorTestWiki(t)
 		ginkgo.DeferCleanup(w.Close)
+		apiKeyBackendErr := errors.New("api key backend failed")
 		verifyFrontdAPIKeyForRuntime = func(*wiki.Wiki, string) (*coreauth.APIKeyVerification, error) {
-			return nil, errors.New("api key backend failed")
+			return nil, apiKeyBackendErr
 		}
 		_, err = frontdMCPTokenVerifier(w)(context.Background(), "lwk_key_backend", httptest.NewRequest(http.MethodPost, "/mcp", nil))
-		Expect(err).To(MatchError(ContainSubstring("api key verifier failed")))
+		Expect(err).To(MatchError(apiKeyBackendErr))
 		verifyFrontdAPIKeyForRuntime = previousVerifyAPIKey
 
 		verifyFrontdOAuthBearerTokenForRuntime = func(*wiki.Wiki, context.Context, string, *http.Request) (*sdkauth.TokenInfo, error) {
 			return &sdkauth.TokenInfo{UserID: "missing-user"}, nil
 		}
+		oauthUserLookupErr := errors.New("oauth user lookup failed")
 		getFrontdUserByIDForRuntime = func(*wiki.Wiki, coreauth.UserID) (*coreauth.User, error) {
-			return nil, errors.New("oauth user lookup failed")
+			return nil, oauthUserLookupErr
 		}
 		oauthReq := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		oauthReq.Header.Set("Authorization", "Bearer oauth-token")
 		_, _, err = frontdActorUser(oauthReq, w, leafwikiRuntimeConfig{})
-		Expect(err).To(MatchError("oauth user lookup failed"))
+		Expect(err).To(MatchError(oauthUserLookupErr))
 		getFrontdUserByIDForRuntime = previousGetUser
 		verifyFrontdOAuthBearerTokenForRuntime = previousVerifyOAuth
 
 		_, err = runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/workspace-a/ensure", nil), w, leafwikiRuntimeConfig{}, nil)
-		Expect(err).To(MatchError(ContainSubstring("missing credentials")))
+		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing))
+		homeGrantErr := errors.New("home grant failed")
 		ensureRuntimeHomeGrantForOwner = func(*wikid.GrantStore, *coreauth.User) error {
-			return errors.New("home grant failed")
+			return homeGrantErr
 		}
 		_, err = runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/home/ensure", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil)
-		Expect(err).To(MatchError("home grant failed"))
+		Expect(err).To(MatchError(homeGrantErr))
 		ensureRuntimeHomeGrantForOwner = previousEnsureHomeGrant
 		ensureRuntimeHomeGrantForOwner = func(*wikid.GrantStore, *coreauth.User) error {
 			return nil
@@ -2975,9 +3252,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		rec = httptest.NewRecorder()
 		runtimeTokenVerifyHandler(w).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/token/verify", nil))
-		Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
 		err = verifyOwnerControlAPIKey(projectdaemon.Config{DataDir: t.TempDir()}, "lwk_key_missing")
-		Expect(errors.Is(err, projectdaemon.ErrInvalidAPIKey)).To(BeTrue())
+		Expect(err).To(MatchError(projectdaemon.ErrInvalidAPIKey))
 
 		writeDescriptorAtomicForRuntime = func(string, *projectdaemon.Descriptor) error {
 			return errors.New("descriptor write failed")
@@ -2992,8 +3269,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(desc.PublicURL).To(Equal("http://127.0.0.1:4321"))
 		writeDescriptorAtomicForRuntime = previousWriteDescriptor
 
+		registeredWorkspaceErr := errors.New("registered workspace failed")
 		registeredFederatedWorkspaceForAttach = func(wikid.Layout, projectdaemon.Config) (wikid.WorkspaceRecord, bool, error) {
-			return wikid.WorkspaceRecord{}, false, errors.New("registered workspace failed")
+			return wikid.WorkspaceRecord{}, false, registeredWorkspaceErr
 		}
 		cfg := leafwikiRuntimeConfig{
 			Workspace:     wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()},
@@ -3002,7 +3280,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		requestCfg, err := daemonWorkspaceRequestConfigForRuntime(cfg)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "descriptor.json"))
-		Expect(err).To(MatchError("registered workspace failed"))
+		Expect(err).To(MatchError(registeredWorkspaceErr))
 	})
 
 	ginkgo.It("covers wikid owner server and shutdown seam branches", func() {
@@ -3073,22 +3351,24 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}
 		}
 
+		runtimeStopErr := errors.New("runtime stop failed")
 		startWikidFrontdRuntimeForOwner = func(context.Context, leafwikiRuntimeConfig, string, string) (*wikidFrontdRuntime, error) {
-			return fakeRuntime(errors.New("runtime stop failed")), nil
+			return fakeRuntime(runtimeStopErr), nil
 		}
 		newFederatedWorkspaceManagerForOwner = func(base leafwikiRuntimeConfig, daemonToken string, wikidURL string, layout wikid.Layout, supervisor *wikid.WorkspaceSupervisor) *federatedWorkspaceManager {
 			manager := newFederatedWorkspaceManager(base, daemonToken, wikidURL, layout, supervisor)
 			process, findErr := os.FindProcess(os.Getpid())
 			Expect(findErr).NotTo(HaveOccurred())
+			workspaceStopErr := errors.New("workspace stop failed")
 			done := make(chan error, 1)
-			done <- errors.New("workspace stop failed")
+			done <- workspaceStopErr
 			proc := &internalRuntimeRoleProcess{
 				role:     projectdaemon.RoleWorkspaced,
 				process:  process,
 				done:     done,
 				waitDone: make(chan struct{}),
 			}
-			Expect(proc.wait()).To(MatchError("workspace stop failed"))
+			Expect(proc.wait()).To(MatchError(workspaceStopErr))
 			manager.processes["workspace-stop"] = proc
 			return manager
 		}
@@ -3100,23 +3380,25 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}
 			return nil
 		}
+		controlServerErr := errors.New("control server failed")
 		serveWikidControlServerForOwner = func(*http.Server, net.Listener) <-chan error {
 			done := make(chan error, 1)
-			done <- errors.New("control server failed")
+			done <- controlServerErr
 			return done
 		}
 		err = runWikidFrontdOwner(context.Background(), baseCfg, ownerCfg)
-		Expect(err).To(MatchError("control server failed"))
+		Expect(err).To(MatchError(controlServerErr))
 		Expect(writeCount).To(BeNumerically(">=", 4))
 		newFederatedWorkspaceManagerForOwner = previousWorkspaceManager
 
 		bootstrapOwnerCfg := ownerCfg
 		bootstrapOwnerCfg.DataDir = filepath.Join(blockingPathForLeafwikiTest(t), "data")
 		err = runWikidFrontdOwner(context.Background(), baseCfg, bootstrapOwnerCfg)
-		Expect(err).To(MatchError(ContainSubstring("bootstrap home workspace")))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 
+		seedErr := errors.New("seed failed")
 		seedRuntimeHomeGrantsForOwner = func(*wikid.GrantStore, leafwikiRuntimeConfig) error {
-			return errors.New("seed failed")
+			return seedErr
 		}
 		writeDescriptorAtomicForRuntime = previousWriteDescriptor
 		serveWikidControlServerForOwner = previousServeControl
@@ -3124,7 +3406,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return fakeRuntime(nil), nil
 		}
 		err = runWikidFrontdOwner(context.Background(), baseCfg, ownerCfg)
-		Expect(err).To(MatchError("seed failed"))
+		Expect(err).To(MatchError(seedErr))
 		seedRuntimeHomeGrantsForOwner = previousSeedHomeGrants
 
 		canceledCtx, cancel := context.WithCancel(context.Background())
@@ -3132,15 +3414,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		serveWikidControlServerForOwner = func(*http.Server, net.Listener) <-chan error {
 			return make(chan error)
 		}
+		controlShutdownErr := errors.New("control shutdown failed")
 		shutdownWikidControlServerForRuntime = func(*http.Server, context.Context) error {
-			return errors.New("control shutdown failed")
+			return controlShutdownErr
 		}
 		err = runWikidFrontdOwner(canceledCtx, baseCfg, ownerCfg)
-		Expect(err).To(MatchError("control shutdown failed"))
+		Expect(err).To(MatchError(controlShutdownErr))
 		shutdownWikidControlServerForRuntime = previousShutdownControl
 
-		err = <-serveWikidControlServer(&http.Server{Handler: http.NotFoundHandler()}, leafwikiFakeListener{addr: leafwikiStringAddr("127.0.0.1:0")})
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(serveWikidControlServer(&http.Server{Handler: http.NotFoundHandler()}, leafwikiFakeListener{addr: leafwikiStringAddr("127.0.0.1:0")})).Should(Receive(Succeed()))
 		Expect(shutdownHTTPServer(&http.Server{}, context.Background())).To(Succeed())
 	})
 
@@ -3168,7 +3450,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			PrivateMCPToken: "private-token",
 		})).To(Succeed())
 		_, _, err = readHealthyProjectDaemon(context.Background(), untrustedWorkspacedDescriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
-		Expect(err).To(MatchError(ContainSubstring("private MCP URL is not trusted")))
+		Expect(err).To(MatchError(errPrivateMCPURLUntrusted))
 
 		mismatchedDescriptorPath := filepath.Join(t.TempDir(), "mismatched.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(mismatchedDescriptorPath, &projectdaemon.Descriptor{
@@ -3203,7 +3485,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			{status: http.StatusNoContent, want: true},
 		} {
 			privateMCPServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-				Expect(req.Header.Get(projectdaemon.ControlTokenHeader)).To(Equal("private-token"))
+				Expect(req.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey(projectdaemon.ControlTokenHeader), ContainElement("private-token")))
 				rw.WriteHeader(tc.status)
 			}))
 			desc := &projectdaemon.Descriptor{
@@ -3237,7 +3519,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			RootDir:       rootDir,
 			ControlURL:    "https://example.com",
 		})
-		Expect(err).To(MatchError(ContainSubstring("control URL is not trusted")))
+		Expect(err).To(MatchError(errControlURLUntrusted))
 
 		unreachableDesc := &projectdaemon.Descriptor{
 			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
@@ -3248,7 +3530,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			ControlToken:  "control-token",
 		}
 		_, err = projectDaemonDescriptorHealthy(context.Background(), unreachableDesc)
-		Expect(err).To(MatchError(ContainSubstring("control health is unreachable")))
+		Expect(err).To(MatchError(errControlHealthUnreachable))
 
 		mismatchServer := httptest.NewServer(projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
 			Token:        "control-token",
@@ -3265,7 +3547,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		mismatchDesc := *unreachableDesc
 		mismatchDesc.ControlURL = mismatchServer.URL
 		_, err = projectDaemonDescriptorHealthy(context.Background(), &mismatchDesc)
-		Expect(err).To(MatchError(ContainSubstring("control health does not match descriptor")))
+		Expect(err).To(MatchError(errControlHealthMismatch))
 
 		healthyServer := httptest.NewServer(projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
 			Token:        "control-token",
@@ -3286,18 +3568,19 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		mismatchPath := filepath.Join(t.TempDir(), "healthy-mismatch.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(mismatchPath, &healthyDesc)).To(Succeed())
 		_, _, err = readHealthyProjectDaemon(context.Background(), mismatchPath, projectdaemon.Config{DataDir: filepath.Join(t.TempDir(), "other-data"), RootDir: rootDir})
-		Expect(err).To(MatchError(ContainSubstring("project daemon config mismatch")))
+		Expect(err).To(MatchProjectDaemonConfigMismatch())
 
 		manager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(t.TempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		manager.descriptors["workspace-a"] = []string{"descriptor-a.json"}
+		removeDescriptorErr := errors.New("remove failed")
 		manager.removeDescriptor = func(string) error {
-			return errors.New("remove failed")
+			return removeDescriptorErr
 		}
-		Expect(manager.stop(context.Background())).To(MatchError(ContainSubstring("remove failed")))
+		Expect(manager.stop(context.Background())).To(MatchError(removeDescriptorErr))
 
 		descriptorDir := filepath.Join(t.TempDir(), "descriptor-dir")
 		Expect(os.MkdirAll(filepath.Join(descriptorDir, "child"), 0o755)).To(Succeed())
-		Expect(removeNonRegularDescriptor(descriptorDir)).To(MatchError(ContainSubstring("remove non-regular descriptor")))
+		Expect(removeNonRegularDescriptor(descriptorDir)).To(MatchPathError())
 
 		badDescriptorManager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(t.TempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		err = badDescriptorManager.writeWorkspaceDescriptor(
@@ -3315,16 +3598,18 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			})
 			return proc, internalRuntimeRoleReady{Role: startup.Role, PID: os.Getpid(), URL: "http://workspace.local"}, nil
 		}
+		writeDescriptorErr := errors.New("write descriptor failed")
 		writeFailManager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
-			return errors.New("write descriptor failed")
+			return writeDescriptorErr
 		}
 		_, err = writeFailManager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: "workspace-b", DataDir: t.TempDir(), RootDir: t.TempDir()})
-		Expect(err).To(MatchError("write descriptor failed"))
+		Expect(err).To(MatchError(writeDescriptorErr))
 
 		previousHash := configHashForRuntime
 		previousWriteDescriptor := writeDescriptorAtomicForRuntime
+		hashErr := errors.New("hash failed")
 		configHashForRuntime = func(projectdaemon.Config) (string, error) {
-			return "", errors.New("hash failed")
+			return "", hashErr
 		}
 		ginkgo.DeferCleanup(func() {
 			configHashForRuntime = previousHash
@@ -3336,18 +3621,19 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
-		Expect(err).To(MatchError("hash failed"))
+		Expect(err).To(MatchError(hashErr))
 
 		configHashForRuntime = previousHash
+		descriptorWriteErr := errors.New("descriptor write failed")
 		writeDescriptorAtomicForRuntime = func(string, *projectdaemon.Descriptor) error {
-			return errors.New("descriptor write failed")
+			return descriptorWriteErr
 		}
 		err = descriptorManager.writeWorkspaceDescriptor(
 			wikid.WorkspaceRecord{ID: "workspace-d", DataDir: t.TempDir(), RootDir: t.TempDir()},
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
-		Expect(err).To(MatchError("descriptor write failed"))
+		Expect(err).To(MatchError(descriptorWriteErr))
 
 		writeDescriptorAtomicForRuntime = previousWriteDescriptor
 		removeTargetManager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.Layout{RuntimeDir: blockingFile}, wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
@@ -3356,7 +3642,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: t.TempDir(), RootDir: t.TempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
-		Expect(err).To(MatchError(ContainSubstring("inspect descriptor target")))
+		Expect(err).To(MatchPathError())
 	})
 
 	ginkgo.It("covers federated attach orchestration seam branches", func() {
@@ -3397,15 +3683,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			JWTSecret:     "jwt",
 			AdminPassword: "admin",
 		})
-		Expect(err).To(MatchError(ContainSubstring("resolve native STDIO API-key grant user")))
+		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 
-		Expect(ensureFederatedWorkspace(context.Background(), nil, "workspace-a", leafwikiRuntimeConfig{})).To(MatchError("global wikid descriptor is unavailable"))
+		Expect(ensureFederatedWorkspace(context.Background(), nil, "workspace-a", leafwikiRuntimeConfig{})).To(MatchError(errGlobalWikidDescriptorUnavailable))
 		invalidEnsureDesc := *globalDesc
 		invalidEnsureDesc.ControlURL = "http://[::1"
 		Expect(ensureFederatedWorkspace(context.Background(), &invalidEnsureDesc, "workspace-a", leafwikiRuntimeConfig{})).To(HaveOccurred())
 		ensureServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-			Expect(req.Header.Get(projectdaemon.ControlTokenHeader)).To(Equal("daemon-token"))
-			Expect(req.Header.Get("Authorization")).To(Equal("Bearer stdio-key"))
+			Expect(req.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey(projectdaemon.ControlTokenHeader), ContainElement("daemon-token")))
+			Expect(req.Header).To(HaveKeyWithValue("Authorization", ContainElement("Bearer stdio-key")))
 			if strings.Contains(req.URL.Path, "denied") {
 				writeRuntimeError(rw, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
 				return
@@ -3415,7 +3701,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(ensureServer.Close)
 		ensureDesc := *globalDesc
 		ensureDesc.ControlURL = ensureServer.URL
-		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, "workspace-denied", leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(MatchError(ContainSubstring("ensure workspace")))
+		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, "workspace-denied", leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(MatchWikidPrivateEndpoint(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied))
 		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, "workspace-ok", leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(Succeed())
 
 		previousReadHealthy := readHealthyProjectDaemonForAttach
@@ -3435,11 +3721,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		stdioHomeCfg := cfg
 		stdioHomeCfg.MCPTransports = mcpTransports{Stdio: true}
+		directDescriptorReadErr := errors.New("direct descriptor read failed")
 		readHealthyProjectDaemonForAttach = func(context.Context, string, projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
-			return nil, false, errors.New("direct descriptor read failed")
+			return nil, false, directDescriptorReadErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), stdioHomeCfg, globalCfg, filepath.Join(t.TempDir(), "home-descriptor.json"))
-		Expect(err).To(MatchError("direct descriptor read failed"))
+		Expect(err).To(MatchError(directDescriptorReadErr))
 
 		directReadCalls := 0
 		readHealthyProjectDaemonForAttach = func(context.Context, string, projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
@@ -3469,20 +3756,22 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(desc).To(Equal(globalDesc))
 
+		spawnErr := errors.New("spawn failed")
 		spawnProjectDaemonOwnerForAttach = func(leafwikiRuntimeConfig) (string, error) {
-			return "", errors.New("spawn failed")
+			return "", spawnErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("spawn failed"))
+		Expect(err).To(MatchError(spawnErr))
 
 		spawnProjectDaemonOwnerForAttach = func(leafwikiRuntimeConfig) (string, error) {
 			return "startup.err", nil
 		}
+		waitErr := errors.New("wait failed")
 		waitForProjectDaemonForAttach = func(context.Context, string, string, projectdaemon.Config, mcpTransports) (*projectdaemon.Descriptor, error) {
-			return nil, errors.New("wait failed")
+			return nil, waitErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("wait failed"))
+		Expect(err).To(MatchError(waitErr))
 
 		mismatchedDesc := *globalDesc
 		mismatchedConfig := globalCfg
@@ -3493,25 +3782,27 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return &mismatchedDesc, true, nil
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError(ContainSubstring("project daemon config mismatch")))
+		Expect(err).To(MatchProjectDaemonConfigMismatch())
 
 		readHealthyProjectDaemonForAttach = func(context.Context, string, projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
 			return globalDesc, true, nil
 		}
+		registerErr := errors.New("register failed")
 		registerFederatedFirstContactForAttach = func(wikid.Layout, projectdaemon.Config, leafwikiRuntimeConfig) (wikid.WorkspaceRecord, bool, error) {
-			return wikid.WorkspaceRecord{}, false, errors.New("register failed")
+			return wikid.WorkspaceRecord{}, false, registerErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("register failed"))
+		Expect(err).To(MatchError(registerErr))
 
 		registerFederatedFirstContactForAttach = func(wikid.Layout, projectdaemon.Config, leafwikiRuntimeConfig) (wikid.WorkspaceRecord, bool, error) {
 			return wikid.WorkspaceRecord{ID: "workspace-a"}, false, nil
 		}
+		ensureErr := errors.New("ensure failed")
 		ensureFederatedWorkspaceForAttach = func(context.Context, *projectdaemon.Descriptor, workspaceid.WorkspaceID, leafwikiRuntimeConfig) error {
-			return errors.New("ensure failed")
+			return ensureErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("ensure failed"))
+		Expect(err).To(MatchError(ensureErr))
 
 		stdioCfg := cfg
 		stdioCfg.DisableAuth = false
@@ -3526,28 +3817,19 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return coreauth.ErrInvalidToken
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), stdioCfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("invalid native STDIO API key"))
+		Expect(err).To(MatchError(projectdaemon.ErrInvalidAPIKey))
 
 		badRuntimeCfg := cfg
 		badRuntimeCfg.Workspace.DataDir = "bad\x00data"
 		_, err = attachOrStartRuntimeDaemon(context.Background(), badRuntimeCfg)
 		Expect(err).To(HaveOccurred())
 
-		oldHome, hadHome := os.LookupEnv("HOME")
-		Expect(os.Setenv("HOME", "")).To(Succeed())
-		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(HaveOccurred())
-		if hadHome {
-			Expect(os.Setenv("HOME", oldHome)).To(Succeed())
-		} else {
-			Expect(os.Unsetenv("HOME")).To(Succeed())
-		}
-
+		readHealthyErr := errors.New("read healthy failed")
 		readHealthyProjectDaemonForAttach = func(context.Context, string, projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
-			return nil, false, errors.New("read healthy failed")
+			return nil, false, readHealthyErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError("read healthy failed"))
+		Expect(err).To(MatchError(readHealthyErr))
 
 		readHealthyProjectDaemonForAttach = func(context.Context, string, projectdaemon.Config) (*projectdaemon.Descriptor, bool, error) {
 			return nil, false, nil
@@ -3555,13 +3837,24 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		authRequiredCfg := cfg
 		authRequiredCfg.DisableAuth = false
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), authRequiredCfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError(ContainSubstring("JWT secret is required")))
+		Expect(err).To(MatchError(errAuthJWTSecretRequired))
 
+		authStoreUnavailableErr := errors.New("auth store unavailable")
 		verifyStdioAPIKeyFromStorageForAttach = func(string, string) error {
-			return errors.New("auth store unavailable")
+			return authStoreUnavailableErr
 		}
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), stdioCfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
-		Expect(err).To(MatchError(ContainSubstring("verify native STDIO API key")))
+		Expect(err).To(MatchError(authStoreUnavailableErr))
+
+		oldHome, hadHome := os.LookupEnv("HOME")
+		if hadHome {
+			ginkgo.DeferCleanup(os.Setenv, "HOME", oldHome)
+		} else {
+			ginkgo.DeferCleanup(os.Unsetenv, "HOME")
+		}
+		Expect(os.Setenv("HOME", "")).To(Succeed())
+		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, filepath.Join(t.TempDir(), "workspace-descriptor.json"))
+		Expect(err).To(HaveOccurred())
 	})
 })
 
@@ -3966,16 +4259,18 @@ func blockingPathForLeafwikiTest(t ginkgo.FullGinkgoTInterface) string {
 
 type leafwikiExitPanic int
 
-func expectLeafwikiExit(code int, fn func()) {
+func PanicWithLeafwikiExit(code int) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	previous := leafwikiExit
-	leafwikiExit = func(got int) {
-		panic(leafwikiExitPanic(got))
-	}
-	defer func() {
-		leafwikiExit = previous
-	}()
+	return gcustom.MakeMatcher(func(fn func()) (bool, error) {
+		previous := leafwikiExit
+		leafwikiExit = func(got int) {
+			panic(leafwikiExitPanic(got))
+		}
+		defer func() {
+			leafwikiExit = previous
+		}()
 
-	Expect(fn).To(PanicWith(leafwikiExitPanic(code)))
+		return PanicWith(leafwikiExitPanic(code)).Match(fn)
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} panic with leafwiki exit code\n{{format .Data 1}}", code)
 }

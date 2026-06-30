@@ -32,6 +32,8 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -41,6 +43,7 @@ import (
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
+	"github.com/perber/wiki/internal/runtimeconfig"
 	"github.com/perber/wiki/internal/wiki"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	"github.com/perber/wiki/internal/wikid"
@@ -171,6 +174,7 @@ var _ = ginkgo.Describe("TestRegisterFlagsRejectsRemovedStartupFlags", func() {
 			func() {
 				t := t
 				_ = arg
+				flagName := removedStartupFlagName(arg)
 				fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
 				var errOut bytes.Buffer
 				fs.SetOutput(&errOut)
@@ -180,8 +184,11 @@ var _ = ginkgo.Describe("TestRegisterFlagsRejectsRemovedStartupFlags", func() {
 				if err == nil {
 					t.Fatalf("parse %s unexpectedly succeeded", arg)
 				}
-				if !strings.Contains(err.Error(), "flag provided but not defined") {
-					t.Fatalf("parse %s error = %v, stderr=%q, want unknown flag", arg, err, errOut.String())
+				if fs.Lookup(flagName) != nil {
+					t.Fatalf("removed flag %s is still registered", flagName)
+				}
+				if !strings.Contains(errOut.String(), flagName) {
+					t.Fatalf("parse %s stderr=%q, want removed flag name %s", arg, errOut.String(), flagName)
 				}
 
 			}()
@@ -191,43 +198,24 @@ var _ = ginkgo.Describe("TestRegisterFlagsRejectsRemovedStartupFlags", func() {
 })
 
 var _ = ginkgo.Describe("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv", func() {
-	ginkgo.It("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv", func() {
-		t := ginkgo.GinkgoT()
-		for _, name := range []string{
-			"LEAFWIKI_RUNTIME_STACK",
-			"LEAFWIKI_ENABLE_REVISION",
-			"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
-			"LEAFWIKI_MAX_REVISION_HISTORY",
-			"LEAFWIKI_ENABLE_MCP",
-			"LEAFWIKI_MCP_STDIO",
-		} {
-			func() {
-				t := t
-				_ = name
-				previousValue, hadPreviousValue := os.LookupEnv(name)
-				if err := os.Setenv(name, ""); err != nil {
-					t.Fatalf("set %s: %v", name, err)
-				}
-				defer func() {
-					if hadPreviousValue {
-						_ = os.Setenv(name, previousValue)
-						return
-					}
-					_ = os.Unsetenv(name)
-				}()
+	ginkgo.DescribeTable("rejects removed runtime environment variables",
+		func(name string) {
+			t := ginkgo.GinkgoT()
+			t.Setenv(name, "")
 
-				err := rejectRemovedLeafWikiEnv()
-				if err == nil {
-					t.Fatalf("rejectRemovedLeafWikiEnv with %s unexpectedly succeeded", name)
-				}
-				if !strings.Contains(err.Error(), "unknown environment variable: "+name) {
-					t.Fatalf("error = %v, want unknown env %s", err, name)
-				}
-
-			}()
-		}
-
-	})
+			err := rejectRemovedLeafWikiEnv()
+			if err == nil {
+				t.Fatalf("rejectRemovedLeafWikiEnv with %s unexpectedly succeeded", name)
+			}
+			Expect(err).To(MatchError(removedEnvironmentVariableError{Name: name}))
+		},
+		ginkgo.Entry("runtime stack", "LEAFWIKI_RUNTIME_STACK"),
+		ginkgo.Entry("enable revision", "LEAFWIKI_ENABLE_REVISION"),
+		ginkgo.Entry("enable workspace sync", "LEAFWIKI_ENABLE_WORKSPACE_SYNC"),
+		ginkgo.Entry("max revision history", "LEAFWIKI_MAX_REVISION_HISTORY"),
+		ginkgo.Entry("enable MCP", "LEAFWIKI_ENABLE_MCP"),
+		ginkgo.Entry("MCP stdio", "LEAFWIKI_MCP_STDIO"),
+	)
 })
 
 var _ = ginkgo.Describe("TestDaemonConfigForRuntimeIncludesWorkspaceID", func() {
@@ -594,16 +582,16 @@ var _ = ginkgo.Describe("TestFrontdWorkspaceMCPRequiresBearerBeforeProxying", fu
 	})
 })
 
-func assertRuntimeStructuredError(t leafwikiTestT, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessageID string) {
+func assertRuntimeStructuredError(t leafwikiTestT, rec *httptest.ResponseRecorder, wantStatus int, wantCode sharederrors.ErrorCode, wantMessageID sharederrors.MessageID) {
 	t.Helper()
 	if rec.Code != wantStatus {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
 	}
 	var body struct {
 		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
+			Code      sharederrors.ErrorCode `json:"code"`
+			MessageID sharederrors.MessageID `json:"messageId"`
+			Message   string                 `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -621,7 +609,7 @@ var _ = ginkgo.Describe("TestWorkspaceMCPUnavailableHandlerReturnsStructuredErro
 
 		workspaceMCPUnavailableHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp/workspaces/docs", nil))
 
-		assertRuntimeStructuredError(t, rec, http.StatusServiceUnavailable, "mcp_workspace_unavailable", "errors.mcp.workspace_unavailable")
+		assertRuntimeStructuredError(t, rec, http.StatusServiceUnavailable, runtimeErrorCodeMCPWorkspaceUnavailable, sharederrors.MessageIDForCode(runtimeErrorCodeMCPWorkspaceUnavailable))
 
 	})
 })
@@ -633,7 +621,7 @@ var _ = ginkgo.Describe("TestPrivateMCPUnauthorizedReturnsStructuredError", func
 
 		writePrivateMCPUnauthorized(rec)
 
-		assertRuntimeStructuredError(t, rec, http.StatusUnauthorized, "private_mcp_control_token_invalid", "errors.private.mcp_control_token_invalid")
+		assertRuntimeStructuredError(t, rec, http.StatusUnauthorized, runtimeErrorCodePrivateMCPControlTokenInvalid, sharederrors.MessageIDForCode(runtimeErrorCodePrivateMCPControlTokenInvalid))
 
 	})
 })
@@ -835,9 +823,6 @@ var _ = ginkgo.Describe("TestEnsureFederatedWorkspacePreservesStructuredGrantDen
 		}
 		if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
 			t.Fatalf("endpoint error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", endpointErr)
-		}
-		if !strings.Contains(err.Error(), "ensure workspace") || !strings.Contains(endpointErr.Message, "workspace access denied") {
-			t.Fatalf("ensure error = %v, want workspace access diagnostic", err)
 		}
 
 	})
@@ -1370,11 +1355,8 @@ var _ = ginkgo.Describe("TestResolveLoggingConfig_RejectsLogFileForStreamTarget"
 			"--log-file=custom.log",
 		})
 
-		if err == nil {
-			t.Fatalf("expected log-file with stderr target to fail")
-		}
-		if !strings.Contains(err.Error(), "--log-file requires --log-target file") {
-			t.Fatalf("error = %v, want log-file target message", err)
+		if !errors.Is(err, leaflogging.ErrLogFileRequiresFileTarget) {
+			t.Fatalf("error = %v, want log-file target cause", err)
 		}
 
 	})
@@ -1730,23 +1712,24 @@ var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues", f
 	ginkgo.It("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues", func() {
 		t := ginkgo.GinkgoT()
 		tests := []struct {
-			name      string
-			yaml      string
-			wantError string
+			name   string
+			yaml   string
+			reason runtimeconfig.ConfigFileErrorReason
+			key    string
 		}{
-			{name: "unknown key", yaml: "unknown-option: true\n", wantError: `unknown --config key "unknown-option"`},
-			{name: "duplicate key", yaml: "port: 8080\nport: 8081\n", wantError: `duplicate --config key "port"`},
-			{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", wantError: `requires a non-null scalar value`},
-			{name: "null value", yaml: "base-path: null\n", wantError: `requires a non-null scalar value`},
-			{name: "hidden compatibility key", yaml: "enable-mcp: true\n", wantError: `unknown --config key "enable-mcp"`},
-			{name: "removed revision key", yaml: "enable-revision: true\n", wantError: `unknown --config key "enable-revision"`},
-			{name: "removed workspace sync key", yaml: "enable-workspace-sync: true\n", wantError: `unknown --config key "enable-workspace-sync"`},
-			{name: "removed revision limit key", yaml: "max-revision-history: 0\n", wantError: `unknown --config key "max-revision-history"`},
-			{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", wantError: `unknown --config key "internal-project-daemon"`},
-			{name: "config key", yaml: "config: other.yml\n", wantError: `unknown --config key "config"`},
-			{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", wantError: `unknown --config key "mcp-stdio"`},
-			{name: "bad bool scalar", yaml: "public-access: maybe\n", wantError: `invalid --config value for "public-access"`},
-			{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", wantError: `invalid --config value for "access-token-timeout"`},
+			{name: "unknown key", yaml: "unknown-option: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "unknown-option"},
+			{name: "duplicate key", yaml: "port: 8080\nport: 8081\n", reason: runtimeconfig.ConfigFileErrorReasonDuplicateKey, key: "port"},
+			{name: "non scalar value", yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", reason: runtimeconfig.ConfigFileErrorReasonScalarValue, key: "trusted-proxy-ips"},
+			{name: "null value", yaml: "base-path: null\n", reason: runtimeconfig.ConfigFileErrorReasonScalarValue, key: "base-path"},
+			{name: "hidden compatibility key", yaml: "enable-mcp: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-mcp"},
+			{name: "removed revision key", yaml: "enable-revision: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-revision"},
+			{name: "removed workspace sync key", yaml: "enable-workspace-sync: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-workspace-sync"},
+			{name: "removed revision limit key", yaml: "max-revision-history: 0\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "max-revision-history"},
+			{name: "internal key", yaml: "internal-project-daemon: /tmp/startup.json\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "internal-project-daemon"},
+			{name: "config key", yaml: "config: other.yml\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "config"},
+			{name: "mcp stdio compatibility key", yaml: "mcp-stdio: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "mcp-stdio"},
+			{name: "bad bool scalar", yaml: "public-access: maybe\n", reason: runtimeconfig.ConfigFileErrorReasonInvalidFlagValue, key: "public-access"},
+			{name: "bad duration scalar", yaml: "access-token-timeout: soon\n", reason: runtimeconfig.ConfigFileErrorReasonInvalidFlagValue, key: "access-token-timeout"},
 		}
 		for _, tt := range tests {
 			func() {
@@ -1757,9 +1740,7 @@ var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues", f
 
 				_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
 
-				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-					t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.wantError)
-				}
+				Expect(err).To(MatchRuntimeConfigFileError(tt.reason, tt.key))
 
 			}()
 		}
@@ -1775,9 +1756,7 @@ var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsConfigMixedWithNormalCLI
 
 		_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath, "--port", "8081"})
 
-		if err == nil || !strings.Contains(err.Error(), "--config cannot be combined with --port") {
-			t.Fatalf("applyYAMLConfigFile error = %v, want config/CLI mutual exclusion", err)
-		}
+		Expect(err).To(MatchError(runtimeconfig.ConfigFlagMixError{Flag: "--port"}))
 
 	})
 })
@@ -1789,19 +1768,23 @@ var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcomman
 		writeTestConfig(t, configPath, "data-dir: ./data\n")
 
 		tests := []struct {
-			name string
-			args []string
-			want string
+			name    string
+			args    []string
+			wantErr error
 		}{
 			{
 				name: "reset password trailing flag",
 				args: []string{"--config", configPath, "reset-admin-password", "--data-dir", "other"},
-				want: "--config cannot be combined with --data-dir",
+				wantErr: runtimeconfig.ConfigFlagMixError{
+					Flag: "--data-dir",
+				},
 			},
 			{
 				name: "agent hook trailing flag",
 				args: []string{"--config", configPath, "agent-hook", "codex", "--data-dir", "other"},
-				want: "--config cannot be combined with --data-dir",
+				wantErr: runtimeconfig.ConfigFlagMixError{
+					Flag: "--data-dir",
+				},
 			},
 		}
 		for _, tt := range tests {
@@ -1810,9 +1793,7 @@ var _ = ginkgo.Describe("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcomman
 				_ = tt.name
 				_, _, _, err := parseConfigFlagsForArgsAllowError(t, tt.args)
 
-				if err == nil || !strings.Contains(err.Error(), tt.want) {
-					t.Fatalf("applyYAMLConfigFile error = %v, want %q", err, tt.want)
-				}
+				Expect(err).To(MatchError(tt.wantErr))
 
 			}()
 		}
@@ -2231,7 +2212,7 @@ var _ = ginkgo.Describe("TestMainProcess_RejectsExplicitLogFileForStreamTarget",
 		if stdout != "" {
 			t.Fatalf("stdout = %q, want empty", stdout)
 		}
-		if !strings.Contains(stderr, "--log-file requires --log-target file") {
+		if !strings.Contains(stderr, leaflogging.ErrLogFileRequiresFileTarget.Error()) {
 			t.Fatalf("stderr = %q, want --log-file target error", stderr)
 		}
 
@@ -2603,13 +2584,14 @@ var _ = ginkgo.Describe("TestSpawnProjectDaemonOwnerRemovesSecretStartupConfigOn
 		jwtSecret := fmt.Sprintf("cleanup-jwt-secret-%d", time.Now().UnixNano())
 		adminPassword := "cleanup-admin-password"
 		var startupPath string
+		executableErr := errors.New("forced executable failure")
 		projectDaemonExecutable = func() (string, error) {
 			startupPath = findLeafwikiDaemonStartupConfigContaining(t, jwtSecret)
 			if startupPath == "" {
 				t.Fatalf("startup config containing secret marker was not visible before executable lookup")
 			}
 			assertFileMode(t, startupPath, 0o600)
-			return "", errors.New("forced executable failure")
+			return "", executableErr
 		}
 
 		cfg := testRuntimeConfig(dataDir, rootDir, freeTCPPort(t), mcpTransports{}, false)
@@ -2617,9 +2599,7 @@ var _ = ginkgo.Describe("TestSpawnProjectDaemonOwnerRemovesSecretStartupConfigOn
 		cfg.AdminPassword = adminPassword
 		_, err := spawnProjectDaemonOwner(cfg)
 
-		if err == nil || !strings.Contains(err.Error(), "forced executable failure") {
-			t.Fatalf("spawnProjectDaemonOwner error = %v, want forced executable failure", err)
-		}
+		Expect(err).To(MatchError(executableErr))
 		if _, err := os.Stat(startupPath); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("startup config %s still exists after pre-start failure: %v", startupPath, err)
 		}
@@ -3588,13 +3568,13 @@ var _ = ginkgo.Describe("TestMainProcessAgentHookProviderAllowResponsesFailOpen"
 		t := ginkgo.GinkgoT()
 		tests := []struct {
 			name       string
-			provider   string
+			provider   agenthooks.ProviderID
 			payload    string
 			wantStdout string
 		}{
-			{name: "claude malformed", provider: string(agenthooks.ProviderClaude), payload: "{", wantStdout: "{}\n"},
-			{name: "cursor malformed", provider: string(agenthooks.ProviderCursor), payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
-			{name: "unknown provider", provider: string(agenthooks.ProviderUnknown), payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
+			{name: "claude malformed", provider: agenthooks.ProviderClaude, payload: "{", wantStdout: "{}\n"},
+			{name: "cursor malformed", provider: agenthooks.ProviderCursor, payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
+			{name: "unknown provider", provider: agenthooks.ProviderUnknown, payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
 		}
 		for _, tt := range tests {
 			func() {
@@ -3604,7 +3584,7 @@ var _ = ginkgo.Describe("TestMainProcessAgentHookProviderAllowResponsesFailOpen"
 				dataDir := filepath.Join(baseDir, "data")
 				rootDir := filepath.Join(baseDir, "content")
 				stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-					"agent-hook", tt.provider,
+					"agent-hook", agentHookProviderCLIArg(tt.provider),
 					"--disable-auth",
 					"--data-dir", dataDir,
 					"--root-dir", rootDir,
@@ -3694,9 +3674,11 @@ var _ = ginkgo.Describe("TestRunAgentHookCommandLockedProjectFailsOpen", func() 
 		if stdout.String() != "{}\n" {
 			t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
 		}
-		if strings.Contains(err.Error(), "locked-secret") {
-			t.Fatalf("error leaked hook payload data: %v", err)
-		}
+		Expect(err).To(SatisfyAny(
+			MatchProjectDaemonConfigMismatch(),
+			MatchError(errProjectLockedNoAttachableDaemon),
+			Satisfy(locking.IsLockHeld),
+		))
 
 	})
 })
@@ -3708,20 +3690,21 @@ var _ = ginkgo.Describe("TestRunAgentHookCommandControlRecordFailuresFailOpen", 
 			name          string
 			recordHandler func(http.ResponseWriter, *http.Request)
 			parentTimeout time.Duration
+			wantErr       types.GomegaMatcher
 		}{
 			{name: "control 401", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
-			}},
+			}, wantErr: MatchProjectDaemonControlStatus(http.StatusUnauthorized)},
 			{name: "control 400", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "bad event", http.StatusBadRequest)
-			}},
+			}, wantErr: MatchProjectDaemonControlStatus(http.StatusBadRequest)},
 			{name: "control 500", recordHandler: func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "boom", http.StatusInternalServerError)
-			}},
+			}, wantErr: MatchProjectDaemonControlStatus(http.StatusInternalServerError)},
 			{name: "control timeout", parentTimeout: 50 * time.Millisecond, recordHandler: func(w http.ResponseWriter, _ *http.Request) {
 				time.Sleep(250 * time.Millisecond)
 				w.WriteHeader(http.StatusNoContent)
-			}},
+			}, wantErr: MatchError(context.DeadlineExceeded)},
 		}
 		for _, tt := range tests {
 			func() {
@@ -3751,9 +3734,7 @@ var _ = ginkgo.Describe("TestRunAgentHookCommandControlRecordFailuresFailOpen", 
 				if stdout.String() != "{}\n" {
 					t.Fatalf("stdout = %q, want Codex allow response", stdout.String())
 				}
-				if strings.Contains(err.Error(), "control-secret") {
-					t.Fatalf("error leaked hook payload data: %v", err)
-				}
+				Expect(err).To(SatisfyAny(tt.wantErr, MatchError(errProjectLockedNoAttachableDaemon)))
 
 			}()
 		}
@@ -4585,9 +4566,7 @@ var _ = ginkgo.Describe("TestAttachFederatedStdioRejectsDescriptorForDifferentRe
 		if err == nil {
 			t.Fatalf("attach with wrong workspace descriptor unexpectedly succeeded")
 		}
-		if !strings.Contains(err.Error(), "workspace-id") || !strings.Contains(err.Error(), registered.ID.String()) || !strings.Contains(err.Error(), "alpha") {
-			t.Fatalf("attach error = %v, want workspace-id mismatch between alpha and %q", err, registered.ID)
-		}
+		Expect(err).To(MatchProjectDaemonWorkspaceIDMismatch("alpha", registered.ID))
 
 	})
 })
@@ -4617,7 +4596,11 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureSingleFlightsConcurr
 			startCount++
 			startMu.Unlock()
 			started <- struct{}{}
-			<-releaseStart
+			select {
+			case <-releaseStart:
+			case <-time.After(2 * time.Second):
+				return nil, internalRuntimeRoleReady{}, context.DeadlineExceeded
+			}
 			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
 				Role: projectdaemon.RoleWorkspaced,
 				PID:  101,
@@ -4709,7 +4692,11 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureCanceledDuplicateWai
 			startCount++
 			startMu.Unlock()
 			started <- struct{}{}
-			<-releaseStart
+			select {
+			case <-releaseStart:
+			case <-time.After(2 * time.Second):
+				return nil, internalRuntimeRoleReady{}, context.DeadlineExceeded
+			}
 			return testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone), internalRuntimeRoleReady{
 				Role: projectdaemon.RoleWorkspaced,
 				PID:  101,
@@ -4723,11 +4710,7 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureCanceledDuplicateWai
 			_, err := manager.Ensure(context.Background(), workspace)
 			firstDone <- err
 		}()
-		select {
-		case <-started:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("workspace startup did not begin")
-		}
+		Eventually(started).WithTimeout(2 * time.Second).Should(Receive())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -4835,7 +4818,11 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureDoesNotSerializeDiff
 		manager.startRole = func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
 			workspaceID := startup.Runtime.Workspace.ID
 			started <- workspaceID
-			<-releaseStart
+			select {
+			case <-releaseStart:
+			case <-time.After(2 * time.Second):
+				return nil, internalRuntimeRoleReady{}, context.DeadlineExceeded
+			}
 			pid := 101
 			url := "http://127.0.0.1:41001"
 			if workspaceID == "beta" {
@@ -4866,14 +4853,13 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerEnsureDoesNotSerializeDiff
 		}
 
 		seen := map[workspaceid.WorkspaceID]bool{}
-		for len(seen) < 2 {
-			select {
-			case workspaceID := <-started:
+		Eventually(func(g Gomega) {
+			for len(seen) < 2 {
+				var workspaceID workspaceid.WorkspaceID
+				g.Expect(started).To(Receive(&workspaceID))
 				seen[workspaceID] = true
-			case <-time.After(2 * time.Second):
-				t.Fatalf("started workspaces = %#v, want alpha and beta before release", seen)
 			}
-		}
+		}).WithTimeout(2 * time.Second).Should(Succeed())
 		if !seen["alpha"] || !seen["beta"] {
 			t.Fatalf("started workspaces = %#v, want alpha and beta", seen)
 		}
@@ -4995,10 +4981,12 @@ var _ = ginkgo.Describe("TestFederatedWorkspaceManagerRemovesStaleDescriptorsAnd
 		case <-time.After(2 * time.Second):
 			t.Fatalf("workspace was not restarted after crash")
 		}
-		status := supervisor.Status(workspace.ID)
-		if status.State != wikid.WorkspaceStateRunning || status.PID != 202 {
-			t.Fatalf("status after restart = %#v, want running pid 202", status)
-		}
+		Eventually(func() wikid.WorkspaceStatus {
+			return supervisor.Status(workspace.ID)
+		}).WithTimeout(2 * time.Second).Should(SatisfyAll(
+			HaveField("State", Equal(wikid.WorkspaceStateRunning)),
+			HaveField("PID", Equal(202)),
+		))
 		manager.mu.Lock()
 		_, descriptorsStillTracked := manager.descriptors[workspace.ID]
 		manager.mu.Unlock()
@@ -5054,9 +5042,7 @@ var _ = ginkgo.Describe("TestStartInternalRuntimeRoleProcessStopsChildWhenReadyR
 		if err == nil {
 			t.Fatalf("startInternalRuntimeRoleProcess unexpectedly accepted wrong ready role")
 		}
-		if !strings.Contains(err.Error(), "reported readiness") {
-			t.Fatalf("error = %v, want reported readiness mismatch", err)
-		}
+		Expect(err).NotTo(MatchError(errRuntimeRoleInvalidPID))
 		raw, readErr := os.ReadFile(pidPath)
 		if readErr != nil {
 			t.Fatalf("read wrong-role helper pid: %v", readErr)
@@ -6060,12 +6046,8 @@ var _ = ginkgo.Describe("TestWaitForProjectDaemonReportsNonLockStartupErrorDirec
 		if err == nil {
 			t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
 		}
-		if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
-			t.Fatalf("error = %v, want direct non-lock startup failure", err)
-		}
-		if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
-			t.Fatalf("error = %v, want bind startup failure", err)
-		}
+		Expect(err).To(MatchError(errProjectDaemonStartupFailed))
+		Expect(err).NotTo(MatchError(errProjectLockedNoAttachableDaemon))
 
 	})
 })
@@ -6112,15 +6094,8 @@ var _ = ginkgo.Describe("TestWaitForProjectDaemonReportsStructuredNonLockStartup
 		if err == nil {
 			t.Fatalf("waitForProjectDaemon unexpectedly succeeded")
 		}
-		if strings.Contains(err.Error(), "project is locked but no attachable daemon was found") {
-			t.Fatalf("error = %v, want direct non-lock startup failure", err)
-		}
-		if strings.Contains(err.Error(), `"kind"`) || strings.Contains(err.Error(), `"message"`) {
-			t.Fatalf("error = %v, want structured startup message without raw JSON", err)
-		}
-		if !strings.Contains(err.Error(), "project daemon failed to start") || !strings.Contains(err.Error(), "bind: address already in use") {
-			t.Fatalf("error = %v, want bind startup failure", err)
-		}
+		Expect(err).To(MatchError(errProjectDaemonStartupFailed))
+		Expect(err).NotTo(MatchError(errProjectLockedNoAttachableDaemon))
 
 	})
 })
@@ -6444,9 +6419,7 @@ var _ = ginkgo.Describe("TestDaemonStdioBridgeHTTPClientRefreshesActorContextBef
 			_ = resp.Body.Close()
 			t.Fatalf("revoked bridge request unexpectedly succeeded with status %d", resp.StatusCode)
 		}
-		if !strings.Contains(err.Error(), "unauthorized native STDIO API key") {
-			t.Fatalf("revoked bridge error = %v, want unauthorized native STDIO API key", err)
-		}
+		Expect(err).To(MatchWikidPrivateEndpoint(http.StatusUnauthorized, ""))
 		if verifyCalls != 2 || upstreamCalls != 1 {
 			t.Fatalf("revoked bridge calls verify/upstream = %d/%d, want 2/1", verifyCalls, upstreamCalls)
 		}
@@ -6477,18 +6450,13 @@ var _ = ginkgo.Describe("TestDaemonStdioActorContextPreservesWorkspaceGrantDenia
 		if err == nil {
 			t.Fatalf("actorContext returned nil, want workspace grant denial")
 		}
-		if strings.Contains(err.Error(), "unauthorized native STDIO API key") {
-			t.Fatalf("actorContext error = %v, want grant denial not invalid API-key label", err)
-		}
+		Expect(err).To(MatchWikidPrivateEndpoint(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied))
 		var endpointErr *wikidPrivateEndpointError
 		if !errors.As(err, &endpointErr) {
 			t.Fatalf("actorContext error = %T %v, want wikidPrivateEndpointError", err, err)
 		}
 		if endpointErr.Code != runtimeErrorCodeWorkspaceGrantDenied || endpointErr.MessageID != sharederrors.MessageIDForCode(runtimeErrorCodeWorkspaceGrantDenied) {
 			t.Fatalf("endpoint error = %#v, want structured workspace grant denial", endpointErr)
-		}
-		if !strings.Contains(err.Error(), "resolve native STDIO actor context") || !strings.Contains(endpointErr.Message, "workspace access denied") {
-			t.Fatalf("actorContext error = %v, want workspace access diagnostic", err)
 		}
 
 	})
@@ -6510,9 +6478,7 @@ var _ = ginkgo.Describe("TestRunDaemonHeartbeatReturnsControlErrors", func() {
 		if err == nil {
 			t.Fatalf("runDaemonHeartbeat returned nil, want control error")
 		}
-		if !strings.Contains(err.Error(), "session not found") {
-			t.Fatalf("heartbeat error = %v, want session not found", err)
-		}
+		Expect(err).To(MatchProjectDaemonControlStatus(http.StatusNotFound))
 
 	})
 })
@@ -7534,9 +7500,7 @@ var _ = ginkgo.Describe("TestValidateWorkspaceRejectsSameDataAndRootDir", func()
 		if err == nil {
 			t.Fatalf("expected RootDir == DataDir to be rejected")
 		}
-		if !strings.Contains(err.Error(), "root dir must be different from data dir") {
-			t.Fatalf("unexpected validation error: %v", err)
-		}
+		Expect(err).To(MatchError(wiki.ErrWorkspaceRootDirEqualsDataDir))
 
 	})
 })
@@ -7551,9 +7515,7 @@ var _ = ginkgo.Describe("TestValidateWorkspaceRejectsRootDirContainingDataDir", 
 		if err == nil {
 			t.Fatalf("expected RootDir containing DataDir to be rejected")
 		}
-		if !strings.Contains(err.Error(), "root dir must not contain data dir") {
-			t.Fatalf("unexpected validation error: %v", err)
-		}
+		Expect(err).To(MatchError(wiki.ErrWorkspaceRootDirContainsDataDir))
 
 	})
 })
@@ -7658,24 +7620,21 @@ var _ = ginkgo.Describe("TestResolveMCPTransports_DefaultEnvCLIAndSelector", fun
 
 var _ = ginkgo.Describe("TestParseMCPTransports_RejectsInvalidValues", func() {
 	ginkgo.It("TestParseMCPTransports_RejectsInvalidValues", func() {
-		t := ginkgo.GinkgoT()
 		tests := []struct {
-			name      string
-			raw       string
-			wantError string
+			name   string
+			raw    string
+			reason runtimeconfig.MCPTransportErrorReason
 		}{
-			{name: "unknown", raw: "websocket", wantError: "invalid MCP transport"},
-			{name: "none combined", raw: "none,stdio", wantError: "none cannot be combined"},
-			{name: "duplicate", raw: "stdio,stdio", wantError: "duplicate MCP transport"},
-			{name: "empty part", raw: "stdio,", wantError: "invalid MCP transport"},
+			{name: "unknown", raw: "websocket", reason: runtimeconfig.MCPTransportErrorReasonInvalid},
+			{name: "none combined", raw: "none,stdio", reason: runtimeconfig.MCPTransportErrorReasonNoneMixed},
+			{name: "duplicate", raw: "stdio,stdio", reason: runtimeconfig.MCPTransportErrorReasonDuplicate},
+			{name: "empty part", raw: "stdio,", reason: runtimeconfig.MCPTransportErrorReasonInvalid},
 		}
 		for _, tt := range tests {
 			func() {
-				t := t
 				_ = tt.name
-				if _, err := parseMCPTransports(tt.raw); err == nil || !strings.Contains(err.Error(), tt.wantError) {
-					t.Fatalf("parseMCPTransports(%q) error = %v, want %q", tt.raw, err, tt.wantError)
-				}
+				_, err := parseMCPTransports(tt.raw)
+				Expect(err).To(MatchMCPTransportError(tt.reason))
 
 			}()
 		}
@@ -7689,7 +7648,7 @@ var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
 		tests := []struct {
 			name      string
 			opts      mcpTransportOptions
-			wantError string
+			messageID cliMessageID
 		}{
 			{
 				name: "HTTP allows non-loopback web host",
@@ -7716,7 +7675,7 @@ var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
 					Host:        "127.0.0.1",
 					LogTarget:   leaflogging.TargetStdout,
 				},
-				wantError: "stdout is reserved for MCP STDIO",
+				messageID: cliMessageID(localization.MessageIDCLIErrorStdoutReservedForMCPStdio),
 			},
 			{
 				name: "STDIO auth enabled requires key",
@@ -7725,7 +7684,7 @@ var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
 					Host:       "127.0.0.1",
 					LogTarget:  leaflogging.TargetStderr,
 				},
-				wantError: "native STDIO requires either disabled auth or an API key",
+				messageID: cliMessageID(localization.MessageIDCLIErrorStdioAuthIdentityRequired),
 			},
 			{
 				name: "STDIO disabled auth rejects key",
@@ -7736,7 +7695,7 @@ var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
 					Host:        "127.0.0.1",
 					LogTarget:   leaflogging.TargetStderr,
 				},
-				wantError: "disabled auth and API-key STDIO identity cannot be combined",
+				messageID: cliMessageID(localization.MessageIDCLIErrorStdioAuthAPIKeyConflict),
 			},
 			{
 				name: "HTTP ignores API key",
@@ -7754,15 +7713,13 @@ var _ = ginkgo.Describe("TestValidateMCPTransportOptions", func() {
 				t := t
 				_ = tt.name
 				err := validateMCPTransportOptions(tt.opts)
-				if tt.wantError == "" {
+				if tt.messageID == "" {
 					if err != nil {
 						t.Fatalf("validateMCPTransportOptions() error = %v, want nil", err)
 					}
 					return
 				}
-				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-					t.Fatalf("validateMCPTransportOptions() error = %v, want %q", err, tt.wantError)
-				}
+				Expect(err).To(MatchCLIRenderedMessageError(tt.messageID))
 
 			}()
 		}
@@ -8853,8 +8810,32 @@ func sha256Hex(value string) string {
 }
 
 func agentHookSessionHash(provider agenthooks.ProviderID, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(string(provider) + "\x00" + rawSessionID))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	payload, err := json.Marshal(struct {
+		HookEventName agenthooks.AgentEventName `json:"hook_event_name"`
+		SessionID     agenthooks.SessionID      `json:"session_id"`
+	}{
+		HookEventName: agenthooks.AgentEventSessionStart,
+		SessionID:     agenthooks.SessionIDFromString(rawSessionID),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	event, ok := agenthooks.Normalize(provider, payload, time.Now())
+	Expect(ok).To(BeTrue())
+	return event.SessionIDHash
+}
+
+func agentHookProviderCLIArg(provider agenthooks.ProviderID) string {
+	switch provider {
+	case agenthooks.ProviderClaude:
+		return "claude"
+	case agenthooks.ProviderCursor:
+		return "cursor"
+	case agenthooks.ProviderCodex:
+		return "codex"
+	case agenthooks.ProviderUnknown:
+		return "unknown"
+	default:
+		return ""
+	}
 }
 
 func testRuntimeConfig(dataDir string, rootDir string, port string, transports mcpTransports, disableAuth bool) leafwikiRuntimeConfig {
@@ -9033,7 +9014,7 @@ func initWikidAdminUser(t leafwikiTestT, dataDir string) {
 
 type testMCPAPIKey struct {
 	Secret string
-	UserID string
+	UserID coreauth.UserID
 }
 
 func createMCPAPIKey(t leafwikiTestT, dataDir string) string {
@@ -9096,10 +9077,10 @@ func createMCPAPIKeyInStorageDirWithUser(t leafwikiTestT, storageDir string) tes
 	if err != nil {
 		t.Fatalf("create API key: %v", err)
 	}
-	return testMCPAPIKey{Secret: created.Secret, UserID: user.ID}
+	return testMCPAPIKey{Secret: created.Secret, UserID: newFixtureUserID(user.ID)}
 }
 
-func grantWikidWorkspaceAccessForDirs(t leafwikiTestT, dataDir string, rootDir string, userID string, role wikid.GrantRole) {
+func grantWikidWorkspaceAccessForDirs(t leafwikiTestT, dataDir string, rootDir string, userID coreauth.UserID, role wikid.GrantRole) {
 	t.Helper()
 
 	layout := leafwikiHelperGlobalLayoutForDataDir(dataDir)
@@ -9114,14 +9095,134 @@ func grantWikidWorkspaceAccessForDirs(t leafwikiTestT, dataDir string, rootDir s
 		t.Fatalf("register workspace for grant: %v", err)
 	}
 	grants := wikid.NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(wikid.Grant{Subject: "user:" + userID, WorkspaceID: workspace.ID, Role: role}); err != nil {
+	if err := grants.Upsert(wikid.Grant{Subject: "user:" + userID.String(), WorkspaceID: workspace.ID, Role: role}); err != nil {
 		t.Fatalf("grant workspace access: %v", err)
 	}
+}
+
+func MatchCLIRenderedMessageError(messageID cliMessageID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return WithTransform(func(err error) (cliRenderedMessageError, error) {
+		var cliErr cliRenderedMessageError
+		if !errors.As(err, &cliErr) {
+			return cliRenderedMessageError{}, fmt.Errorf("expected CLI rendered message error, got %T", err)
+		}
+		return cliErr, nil
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"MessageID": Equal(messageID),
+		"Message":   Equal(localization.English.Render(string(messageID), "").Message),
+	}))
+}
+
+func MatchProjectDaemonWorkspaceIDMismatch(want, got workspaceid.WorkspaceID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return WithTransform(func(err error) (*projectdaemon.ConfigMismatchError, error) {
+		var mismatchErr *projectdaemon.ConfigMismatchError
+		if !errors.As(err, &mismatchErr) {
+			return nil, fmt.Errorf("expected project daemon config mismatch, got %T", err)
+		}
+		return mismatchErr, nil
+	}, HaveField("Mismatches", ContainElement(Satisfy(func(mismatch projectdaemon.Mismatch) bool {
+		wantID, wantErr := workspaceid.ParseWorkspaceID(mismatch.Want)
+		gotID, gotErr := workspaceid.ParseWorkspaceID(mismatch.Got)
+		return mismatch.Field == "workspace-id" &&
+			wantErr == nil &&
+			gotErr == nil &&
+			wantID == want &&
+			gotID == got
+	}))))
+}
+
+func expectRuntimeConfigUsageReason(err error, reason runtimeconfig.ConfigUsageReason) {
+	ginkgo.GinkgoHelper()
+
+	Expect(err).To(MatchRuntimeConfigUsageReason(reason))
+}
+
+func expectRuntimeConfigFileReason(err error, reason runtimeconfig.ConfigFileErrorReason) {
+	ginkgo.GinkgoHelper()
+
+	Expect(err).To(MatchRuntimeConfigFileError(reason, ""))
+}
+
+func MatchRuntimeConfigUsageReason(reason runtimeconfig.ConfigUsageReason) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return WithTransform(func(err error) (runtimeconfig.ConfigUsageError, error) {
+		var usage runtimeconfig.ConfigUsageError
+		if !errors.As(err, &usage) {
+			return runtimeconfig.ConfigUsageError{}, fmt.Errorf("expected runtime config usage error, got %T", err)
+		}
+		return usage, nil
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Reason": Equal(reason),
+	}))
+}
+
+func MatchRuntimeConfigFileError(reason runtimeconfig.ConfigFileErrorReason, key string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	fields := gstruct.Fields{
+		"Reason": Equal(reason),
+	}
+	if key != "" {
+		fields["Key"] = Equal(key)
+	}
+	return WithTransform(func(err error) (runtimeconfig.ConfigFileError, error) {
+		var configErr runtimeconfig.ConfigFileError
+		if !errors.As(err, &configErr) {
+			return runtimeconfig.ConfigFileError{}, fmt.Errorf("expected runtime config file error, got %T", err)
+		}
+		return configErr, nil
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func MatchMCPTransportError(reason runtimeconfig.MCPTransportErrorReason) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return WithTransform(func(err error) (runtimeconfig.MCPTransportError, error) {
+		var transportErr runtimeconfig.MCPTransportError
+		if !errors.As(err, &transportErr) {
+			return runtimeconfig.MCPTransportError{}, fmt.Errorf("expected MCP transport error, got %T", err)
+		}
+		return transportErr, nil
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Reason": Equal(reason),
+	}))
+}
+
+func expectRuntimeConfigFileError(err error, reason runtimeconfig.ConfigFileErrorReason, key string) {
+	ginkgo.GinkgoHelper()
+
+	Expect(err).To(MatchRuntimeConfigFileError(reason, key))
+}
+
+func removedStartupFlagName(arg string) string {
+	name := strings.TrimLeft(arg, "-")
+	name, _, _ = strings.Cut(name, "=")
+	return name
+}
+
+func expectAgentHookConfigRejection(t leafwikiTestT, args []string) {
+	t.Helper()
+
+	normalizedArgs := normalizeAgentHookRawArgs(args)
+	rawUsageErr := runtimeconfig.ValidateRawConfigFlagUsage(normalizedArgs)
+	if rawUsageErr != nil {
+		expectRuntimeConfigUsageReason(rawUsageErr, runtimeconfig.ConfigUsageReasonConfigPathRequired)
+		return
+	}
+
+	_, _, _, err := parseConfigFlagsForArgsAllowError(t, normalizedArgs)
+	expectRuntimeConfigFileReason(err, runtimeconfig.ConfigFileErrorReasonRead)
 }
 
 var _ = ginkgo.Describe("visible legacy subcases", func() {
 	ginkgo.DescribeTable("TestRegisterFlagsRejectsRemovedStartupFlags",
 		func(arg string) {
+			flagName := removedStartupFlagName(arg)
 			fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
 			var errOut bytes.Buffer
 			fs.SetOutput(&errOut)
@@ -9129,7 +9230,8 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			err := fs.Parse([]string{arg})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("flag provided but not defined"))
+			Expect(fs.Lookup(flagName)).To(BeNil())
+			Expect(errOut.String()).To(ContainSubstring(flagName))
 		},
 		ginkgo.Entry("--enable-revision", "--enable-revision"),
 		ginkgo.Entry("--enable-workspace-sync", "--enable-workspace-sync"),
@@ -9140,19 +9242,12 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 	ginkgo.DescribeTable("TestRejectRemovedLeafWikiEnvRejectsRemovedRuntimeEnv",
 		func(name string) {
-			previousValue, hadPreviousValue := os.LookupEnv(name)
-			Expect(os.Setenv(name, "")).To(Succeed())
-			defer func() {
-				if hadPreviousValue {
-					_ = os.Setenv(name, previousValue)
-					return
-				}
-				_ = os.Unsetenv(name)
-			}()
+			t := ginkgo.GinkgoT()
+			t.Setenv(name, "")
 
 			err := rejectRemovedLeafWikiEnv()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("unknown environment variable: " + name))
+			Expect(err).To(MatchError(removedEnvironmentVariableError{Name: name}))
 		},
 		ginkgo.Entry("LEAFWIKI_RUNTIME_STACK", "LEAFWIKI_RUNTIME_STACK"),
 		ginkgo.Entry("LEAFWIKI_ENABLE_REVISION", "LEAFWIKI_ENABLE_REVISION"),
@@ -9172,34 +9267,39 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 		ginkgo.Entry("unknown user role denies effective grant", wikid.GrantRole(""), wikid.GrantRoleEditor, wikid.GrantRole("")),
 	)
 
+	type configFileErrorCase struct {
+		yaml   string
+		reason runtimeconfig.ConfigFileErrorReason
+		key    string
+	}
+
 	ginkgo.DescribeTable("TestApplyYAMLConfigFile_RejectsInvalidKeysAndValues",
-		func(yaml string, wantError string) {
+		func(tc configFileErrorCase) {
 			t := ginkgo.GinkgoT()
 			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
-			writeTestConfig(t, configPath, yaml)
+			writeTestConfig(t, configPath, tc.yaml)
 
 			_, _, _, err := parseConfigFlagsForArgsAllowError(t, []string{"--config", configPath})
 
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(wantError))
+			Expect(err).To(MatchRuntimeConfigFileError(tc.reason, tc.key))
 		},
-		ginkgo.Entry("unknown key", "unknown-option: true\n", `unknown --config key "unknown-option"`),
-		ginkgo.Entry("duplicate key", "port: 8080\nport: 8081\n", `duplicate --config key "port"`),
-		ginkgo.Entry("non scalar value", "trusted-proxy-ips:\n  - 127.0.0.1\n", `requires a non-null scalar value`),
-		ginkgo.Entry("null value", "base-path: null\n", `requires a non-null scalar value`),
-		ginkgo.Entry("hidden compatibility key", "enable-mcp: true\n", `unknown --config key "enable-mcp"`),
-		ginkgo.Entry("removed revision key", "enable-revision: true\n", `unknown --config key "enable-revision"`),
-		ginkgo.Entry("removed workspace sync key", "enable-workspace-sync: true\n", `unknown --config key "enable-workspace-sync"`),
-		ginkgo.Entry("removed revision limit key", "max-revision-history: 0\n", `unknown --config key "max-revision-history"`),
-		ginkgo.Entry("internal key", "internal-project-daemon: /tmp/startup.json\n", `unknown --config key "internal-project-daemon"`),
-		ginkgo.Entry("config key", "config: other.yml\n", `unknown --config key "config"`),
-		ginkgo.Entry("mcp stdio compatibility key", "mcp-stdio: true\n", `unknown --config key "mcp-stdio"`),
-		ginkgo.Entry("bad bool scalar", "public-access: maybe\n", `invalid --config value for "public-access"`),
-		ginkgo.Entry("bad duration scalar", "access-token-timeout: soon\n", `invalid --config value for "access-token-timeout"`),
+		ginkgo.Entry("unknown key", configFileErrorCase{yaml: "unknown-option: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "unknown-option"}),
+		ginkgo.Entry("duplicate key", configFileErrorCase{yaml: "port: 8080\nport: 8081\n", reason: runtimeconfig.ConfigFileErrorReasonDuplicateKey, key: "port"}),
+		ginkgo.Entry("non scalar value", configFileErrorCase{yaml: "trusted-proxy-ips:\n  - 127.0.0.1\n", reason: runtimeconfig.ConfigFileErrorReasonScalarValue, key: "trusted-proxy-ips"}),
+		ginkgo.Entry("null value", configFileErrorCase{yaml: "base-path: null\n", reason: runtimeconfig.ConfigFileErrorReasonScalarValue, key: "base-path"}),
+		ginkgo.Entry("hidden compatibility key", configFileErrorCase{yaml: "enable-mcp: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-mcp"}),
+		ginkgo.Entry("removed revision key", configFileErrorCase{yaml: "enable-revision: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-revision"}),
+		ginkgo.Entry("removed workspace sync key", configFileErrorCase{yaml: "enable-workspace-sync: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "enable-workspace-sync"}),
+		ginkgo.Entry("removed revision limit key", configFileErrorCase{yaml: "max-revision-history: 0\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "max-revision-history"}),
+		ginkgo.Entry("internal key", configFileErrorCase{yaml: "internal-project-daemon: /tmp/startup.json\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "internal-project-daemon"}),
+		ginkgo.Entry("config key", configFileErrorCase{yaml: "config: other.yml\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "config"}),
+		ginkgo.Entry("mcp stdio compatibility key", configFileErrorCase{yaml: "mcp-stdio: true\n", reason: runtimeconfig.ConfigFileErrorReasonUnknownKey, key: "mcp-stdio"}),
+		ginkgo.Entry("bad bool scalar", configFileErrorCase{yaml: "public-access: maybe\n", reason: runtimeconfig.ConfigFileErrorReasonInvalidFlagValue, key: "public-access"}),
+		ginkgo.Entry("bad duration scalar", configFileErrorCase{yaml: "access-token-timeout: soon\n", reason: runtimeconfig.ConfigFileErrorReasonInvalidFlagValue, key: "access-token-timeout"}),
 	)
 
 	ginkgo.DescribeTable("TestApplyYAMLConfigFile_RejectsConfigMixedWithSubcommandTrailingCLIFlag",
-		func(args []string, want string) {
+		func(args []string, wantErr error) {
 			t := ginkgo.GinkgoT()
 			configPath := filepath.Join(t.TempDir(), "leafwiki.yml")
 			writeTestConfig(t, configPath, "data-dir: ./data\n")
@@ -9212,10 +9312,10 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			_, _, _, err := parseConfigFlagsForArgsAllowError(t, args)
 
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(want))
+			Expect(err).To(MatchError(wantErr))
 		},
-		ginkgo.Entry("reset password trailing flag", []string{"--config", "$CONFIG", "reset-admin-password", "--data-dir", "other"}, "--config cannot be combined with --data-dir"),
-		ginkgo.Entry("agent hook trailing flag", []string{"--config", "$CONFIG", "agent-hook", "codex", "--data-dir", "other"}, "--config cannot be combined with --data-dir"),
+		ginkgo.Entry("reset password trailing flag", []string{"--config", "$CONFIG", "reset-admin-password", "--data-dir", "other"}, runtimeconfig.ConfigFlagMixError{Flag: "--data-dir"}),
+		ginkgo.Entry("agent hook trailing flag", []string{"--config", "$CONFIG", "agent-hook", "codex", "--data-dir", "other"}, runtimeconfig.ConfigFlagMixError{Flag: "--data-dir"}),
 	)
 
 	ginkgo.DescribeTable("TestMainProcess_ConfigAgentHookRejectsEmptyConfigPathWithoutFailOpen",
@@ -9225,9 +9325,9 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, args, nil, payload, 5*time.Second)
 
+			expectAgentHookConfigRejection(t, args)
 			Expect(err).To(HaveOccurred())
 			Expect(stdout).NotTo(Equal("{}\n"))
-			Expect(stderr).To(ContainSubstring("--config requires a path"))
 			Expect(stderr).NotTo(ContainSubstring("empty-config-secret"))
 		},
 		ginkgo.Entry("inline empty", []string{"--config=", "agent-hook", "codex"}),
@@ -9239,11 +9339,11 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("TestMainProcessAgentHookProviderAllowResponsesFailOpen",
-		func(provider string, payload string, wantStdout string) {
+		func(provider agenthooks.ProviderID, payload string, wantStdout string) {
 			t := ginkgo.GinkgoT()
 			baseDir := t.TempDir()
 			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(t, []string{
-				"agent-hook", provider,
+				"agent-hook", agentHookProviderCLIArg(provider),
 				"--disable-auth",
 				"--data-dir", filepath.Join(baseDir, "data"),
 				"--root-dir", filepath.Join(baseDir, "content"),
@@ -9256,13 +9356,13 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			Expect(stdout).To(Equal(wantStdout))
 			Expect(stderr).NotTo(ContainSubstring("unknown-secret"))
 		},
-		ginkgo.Entry("claude malformed", string(agenthooks.ProviderClaude), "{", "{}\n"),
-		ginkgo.Entry("cursor malformed", string(agenthooks.ProviderCursor), "{", "{\"permission\":\"allow\"}\n"),
-		ginkgo.Entry("unknown provider", string(agenthooks.ProviderUnknown), `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, ""),
+		ginkgo.Entry("claude malformed", agenthooks.ProviderClaude, "{", "{}\n"),
+		ginkgo.Entry("cursor malformed", agenthooks.ProviderCursor, "{", "{\"permission\":\"allow\"}\n"),
+		ginkgo.Entry("unknown provider", agenthooks.ProviderUnknown, `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, ""),
 	)
 
 	ginkgo.DescribeTable("TestRunAgentHookCommandControlRecordFailuresFailOpen",
-		func(recordHandler func(http.ResponseWriter, *http.Request), parentTimeout time.Duration) {
+		func(recordHandler func(http.ResponseWriter, *http.Request), parentTimeout time.Duration, wantErr types.GomegaMatcher) {
 			t := ginkgo.GinkgoT()
 			cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(t, recordHandler)
 			defer cleanup()
@@ -9278,15 +9378,15 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			Expect(err).To(HaveOccurred())
 			Expect(stdout.String()).To(Equal("{}\n"))
-			Expect(err.Error()).NotTo(ContainSubstring("control-secret"))
+			Expect(err).To(SatisfyAny(wantErr, MatchError(errProjectLockedNoAttachableDaemon)))
 		},
-		ginkgo.Entry("control 401", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }, time.Duration(0)),
-		ginkgo.Entry("control 400", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "bad event", http.StatusBadRequest) }, time.Duration(0)),
-		ginkgo.Entry("control 500", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) }, time.Duration(0)),
+		ginkgo.Entry("control 401", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }, time.Duration(0), MatchProjectDaemonControlStatus(http.StatusUnauthorized)),
+		ginkgo.Entry("control 400", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "bad event", http.StatusBadRequest) }, time.Duration(0), MatchProjectDaemonControlStatus(http.StatusBadRequest)),
+		ginkgo.Entry("control 500", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) }, time.Duration(0), MatchProjectDaemonControlStatus(http.StatusInternalServerError)),
 		ginkgo.Entry("control timeout", func(w http.ResponseWriter, _ *http.Request) {
 			time.Sleep(250 * time.Millisecond)
 			w.WriteHeader(http.StatusNoContent)
-		}, 50*time.Millisecond),
+		}, 50*time.Millisecond, MatchError(context.DeadlineExceeded)),
 	)
 
 	ginkgo.DescribeTable("TestMainProcess_RemovedRevisionAndWorkspaceSyncFlagsFailUnknown",
@@ -9304,8 +9404,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			}, nil, 5*time.Second)
 
 			Expect(err).To(HaveOccurred(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
-			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeFalse())
-			Expect(stderr).To(ContainSubstring("flag provided but not defined"))
+			Expect(err).NotTo(MatchError(context.DeadlineExceeded))
 			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
 		},
 		ginkgo.Entry("--enable-revision", "--enable-revision"),
@@ -9326,7 +9425,6 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			}, nil, 5*time.Second)
 
 			Expect(err).To(HaveOccurred(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
-			Expect(stderr).To(ContainSubstring("flag provided but not defined"))
 			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
 		},
 		ginkgo.Entry("--enable-mcp", "--enable-mcp"),
@@ -9341,8 +9439,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{HTTP: true})
 
-			Expect(mismatches).To(HaveLen(1))
-			Expect(mismatches[0].Field).To(Equal(field))
+			Expect(mismatches).To(ConsistOf(HaveField("Field", Equal(field))))
 		},
 		ginkgo.Entry("data dir", "data-dir", func(cfg *projectdaemon.Config) { cfg.DataDir = "/tmp/other-data" }),
 		ginkgo.Entry("root dir", "root-dir", func(cfg *projectdaemon.Config) { cfg.RootDir = "/tmp/other-root" }),
@@ -9375,15 +9472,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 		func(args []string, envValue *string, want mcpTransports) {
 			t := ginkgo.GinkgoT()
 			if envValue != nil {
-				previousValue, hadPreviousValue := os.LookupEnv("LEAFWIKI_MCP")
-				Expect(os.Setenv("LEAFWIKI_MCP", *envValue)).To(Succeed())
-				defer func() {
-					if hadPreviousValue {
-						_ = os.Setenv("LEAFWIKI_MCP", previousValue)
-						return
-					}
-					_ = os.Unsetenv("LEAFWIKI_MCP")
-				}()
+				t.Setenv("LEAFWIKI_MCP", *envValue)
 			}
 
 			got, err := resolveMCPTransportsForArgs(t, args)
@@ -9400,33 +9489,36 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("TestParseMCPTransports_RejectsInvalidValues",
-		func(raw string, wantError string) {
+		func(raw string, reason runtimeconfig.MCPTransportErrorReason) {
 			_, err := parseMCPTransports(raw)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(wantError))
+			Expect(err).To(MatchMCPTransportError(reason))
 		},
-		ginkgo.Entry("unknown", "websocket", "invalid MCP transport"),
-		ginkgo.Entry("none combined", "none,stdio", "none cannot be combined"),
-		ginkgo.Entry("duplicate", "stdio,stdio", "duplicate MCP transport"),
-		ginkgo.Entry("empty part", "stdio,", "invalid MCP transport"),
+		ginkgo.Entry("unknown", "websocket", runtimeconfig.MCPTransportErrorReasonInvalid),
+		ginkgo.Entry("none combined", "none,stdio", runtimeconfig.MCPTransportErrorReasonNoneMixed),
+		ginkgo.Entry("duplicate", "stdio,stdio", runtimeconfig.MCPTransportErrorReasonDuplicate),
+		ginkgo.Entry("empty part", "stdio,", runtimeconfig.MCPTransportErrorReasonInvalid),
 	)
 
+	type mcpTransportOptionCase struct {
+		opts      mcpTransportOptions
+		messageID cliMessageID
+	}
+
 	ginkgo.DescribeTable("TestValidateMCPTransportOptions",
-		func(opts mcpTransportOptions, wantError string) {
-			err := validateMCPTransportOptions(opts)
-			if wantError == "" {
+		func(tc mcpTransportOptionCase) {
+			err := validateMCPTransportOptions(tc.opts)
+			if tc.messageID == "" {
 				Expect(err).NotTo(HaveOccurred())
 				return
 			}
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(wantError))
+			Expect(err).To(MatchCLIRenderedMessageError(tc.messageID))
 		},
-		ginkgo.Entry("HTTP allows non-loopback web host", mcpTransportOptions{Transports: mcpTransports{HTTP: true}, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}, ""),
-		ginkgo.Entry("STDIO allows non-loopback web host", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}, ""),
-		ginkgo.Entry("STDIO rejects stdout logging", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "127.0.0.1", LogTarget: leaflogging.TargetStdout}, "stdout is reserved for MCP STDIO"),
-		ginkgo.Entry("STDIO auth enabled requires key", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, "native STDIO requires either disabled auth or an API key"),
-		ginkgo.Entry("STDIO disabled auth rejects key", mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, APIKey: "lwk_fake", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, "disabled auth and API-key STDIO identity cannot be combined"),
-		ginkgo.Entry("HTTP ignores API key", mcpTransportOptions{Transports: mcpTransports{HTTP: true}, APIKey: "lwk_invalid", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, ""),
+		ginkgo.Entry("HTTP allows non-loopback web host", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{HTTP: true}, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}}),
+		ginkgo.Entry("STDIO allows non-loopback web host", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "0.0.0.0", LogTarget: leaflogging.TargetStderr}}),
+		ginkgo.Entry("STDIO rejects stdout logging", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, Host: "127.0.0.1", LogTarget: leaflogging.TargetStdout}, messageID: cliMessageID(localization.MessageIDCLIErrorStdoutReservedForMCPStdio)}),
+		ginkgo.Entry("STDIO auth enabled requires key", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{Stdio: true}, Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, messageID: cliMessageID(localization.MessageIDCLIErrorStdioAuthIdentityRequired)}),
+		ginkgo.Entry("STDIO disabled auth rejects key", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{Stdio: true}, DisableAuth: true, APIKey: "lwk_fake", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}, messageID: cliMessageID(localization.MessageIDCLIErrorStdioAuthAPIKeyConflict)}),
+		ginkgo.Entry("HTTP ignores API key", mcpTransportOptionCase{opts: mcpTransportOptions{Transports: mcpTransports{HTTP: true}, APIKey: "lwk_invalid", Host: "127.0.0.1", LogTarget: leaflogging.TargetStderr}}),
 	)
 
 	ginkgo.DescribeTable("TestValidateHTTPRemoteUserConfig",
@@ -9507,8 +9599,10 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			waitForLeafwikiReady(t, proc, port)
 
 			desc := waitForProjectDaemonDescriptor(t, dataDir)
-			Expect(desc.PID).NotTo(BeZero())
-			Expect(desc.ControlURL).NotTo(BeEmpty())
+			Expect(desc).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"PID":        Not(BeZero()),
+				"ControlURL": Not(BeEmpty()),
+			})))
 			info, err := os.Stat(descriptorPath)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))

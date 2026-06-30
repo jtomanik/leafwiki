@@ -39,6 +39,13 @@ var (
 	resolveWorkspaceEvalSymlinks = filepath.EvalSymlinks
 )
 
+var (
+	ErrWorkspaceDataDirRequired              = errors.New("workspace data dir is required")
+	ErrWorkspaceRootDirEqualsDataDir         = errors.New("workspace root dir must differ from data dir")
+	ErrWorkspaceRootDirContainsDataDir       = errors.New("workspace root dir must not contain data dir")
+	ErrWorkspaceRootDirInsideDataDirAppState = errors.New("workspace root dir must not be inside data dir app state")
+)
+
 func DefaultWorkspace(dataDir string) Workspace {
 	return NormalizeWorkspace(Workspace{ID: "default", DataDir: dataDir})
 }
@@ -74,7 +81,7 @@ func ValidateWorkspace(workspace Workspace) error {
 		return fmt.Errorf("workspace id: %w", err)
 	}
 	if strings.TrimSpace(workspace.DataDir) == "" {
-		return fmt.Errorf("data dir must not be empty")
+		return fmt.Errorf("data dir must not be empty: %w", ErrWorkspaceDataDirRequired)
 	}
 	cleanData, err := resolveWorkspacePath(workspace.DataDir)
 	if err != nil {
@@ -85,15 +92,15 @@ func ValidateWorkspace(workspace Workspace) error {
 		return fmt.Errorf("resolve root dir: %w", err)
 	}
 	if cleanData == cleanRoot {
-		return fmt.Errorf("root dir must be different from data dir")
+		return fmt.Errorf("root dir must be different from data dir: %w", ErrWorkspaceRootDirEqualsDataDir)
 	}
 	if pathContains(cleanRoot, cleanData) {
-		return fmt.Errorf("root dir must not contain data dir")
+		return fmt.Errorf("root dir must not contain data dir: %w", ErrWorkspaceRootDirContainsDataDir)
 	}
 	for _, entry := range reservedDataDirEntries {
 		statePath := filepath.Join(cleanData, entry)
 		if cleanRoot == statePath || pathContains(statePath, cleanRoot) {
-			return fmt.Errorf("root dir must not be inside data dir app state: %s", statePath)
+			return fmt.Errorf("root dir must not be inside data dir app state: %s: %w", statePath, ErrWorkspaceRootDirInsideDataDirAppState)
 		}
 	}
 	return nil

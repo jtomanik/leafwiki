@@ -1,8 +1,8 @@
 package tree
 
 import (
+	"errors"
 	"path/filepath"
-	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 )
@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRouteRejectsEmptyNormalizedSegm
 		if err == nil {
 			t.Fatalf("expected error")
 		}
-		if !strings.Contains(err.Error(), "segment") || !strings.Contains(err.Error(), "not a valid slug") {
+		if !errors.Is(err, ErrSlugEmpty) {
 			t.Fatalf("expected invalid slug segment error, got %v", err)
 		}
 

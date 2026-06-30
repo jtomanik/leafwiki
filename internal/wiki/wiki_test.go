@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -929,7 +928,7 @@ var _ = ginkgo.It("TestWiki_RejectsWorkspaceWithSameDataAndRootDir", func() {
 	if err == nil {
 		t.Fatalf("expected same data/root dir to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must be different from data dir") {
+	if !errors.Is(err, ErrWorkspaceRootDirEqualsDataDir) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 })
@@ -949,7 +948,7 @@ var _ = ginkgo.It("TestWiki_RejectsWorkspaceWhenRootDirContainsDataDir", func() 
 	if err == nil {
 		t.Fatalf("expected root dir containing data dir to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
+	if !errors.Is(err, ErrWorkspaceRootDirContainsDataDir) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, statErr := os.Stat(rootDir); !os.IsNotExist(statErr) {

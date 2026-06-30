@@ -14,8 +14,8 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 		t := ginkgo.GinkgoT()
 		sameDir := filepath.Join(t.TempDir(), "same")
 
-		Expect(ValidateWorkspace(Workspace{ID: "default"})).To(MatchError(ContainSubstring("data dir must not be empty")))
-		Expect(ValidateWorkspace(Workspace{ID: "default", DataDir: sameDir, RootDir: sameDir})).To(MatchError(ContainSubstring("root dir must be different from data dir")))
+		Expect(ValidateWorkspace(Workspace{ID: "default"})).To(MatchError(ErrWorkspaceDataDirRequired))
+		Expect(ValidateWorkspace(Workspace{ID: "default", DataDir: sameDir, RootDir: sameDir})).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
 	})
 
 	ginkgo.It("surfaces absolute path failures from the resolver", func() {
@@ -31,21 +31,39 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 
 	ginkgo.It("surfaces data and root path resolution errors", func() {
 		t := ginkgo.GinkgoT()
-		loopA, loopB := createWorkspaceSymlinkLoop(t.TempDir())
+		dataDir := filepath.Join(t.TempDir(), "data")
+		rootDir := filepath.Join(t.TempDir(), "root")
+		dataErr := errors.New("data resolution failed")
+		rootErr := errors.New("root resolution failed")
+		restoreWorkspacePathSeams()
+
+		resolveWorkspaceEvalSymlinks = func(path string) (string, error) {
+			if path == dataDir {
+				return "", dataErr
+			}
+			return path, nil
+		}
 
 		err := ValidateWorkspace(Workspace{
 			ID:      "default",
-			DataDir: loopA,
-			RootDir: filepath.Join(t.TempDir(), "root"),
+			DataDir: dataDir,
+			RootDir: rootDir,
 		})
-		Expect(err).To(MatchError(ContainSubstring("resolve data dir:")))
+		Expect(err).To(MatchError(dataErr))
+
+		resolveWorkspaceEvalSymlinks = func(path string) (string, error) {
+			if path == rootDir {
+				return "", rootErr
+			}
+			return path, nil
+		}
 
 		err = ValidateWorkspace(Workspace{
 			ID:      "default",
-			DataDir: filepath.Join(t.TempDir(), "data"),
-			RootDir: loopB,
+			DataDir: dataDir,
+			RootDir: rootDir,
 		})
-		Expect(err).To(MatchError(ContainSubstring("resolve root dir:")))
+		Expect(err).To(MatchError(rootErr))
 	})
 
 	ginkgo.It("keeps unresolved paths when no existing parent can be resolved", func() {
@@ -87,16 +105,6 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 		Expect(pathContains(filepath.Join(t.TempDir(), "parent"), "relative-child")).To(BeFalse())
 	})
 })
-
-func createWorkspaceSymlinkLoop(baseDir string) (string, string) {
-	ginkgo.GinkgoHelper()
-
-	loopA := filepath.Join(baseDir, "loop-a")
-	loopB := filepath.Join(baseDir, "loop-b")
-	Expect(os.Symlink(loopB, loopA)).To(Succeed())
-	Expect(os.Symlink(loopA, loopB)).To(Succeed())
-	return loopA, loopB
-}
 
 func restoreWorkspacePathSeams() {
 	ginkgo.GinkgoHelper()

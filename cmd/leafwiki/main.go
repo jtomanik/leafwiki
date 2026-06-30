@@ -95,7 +95,7 @@ func setupLogger(cfg leaflogging.Config, stdout io.Writer, stderr io.Writer) (io
 }
 
 var (
-	failOpenAgentHookProvider string
+	failOpenAgentHookProvider agenthooks.ProviderID
 	leafwikiExit              = os.Exit
 )
 
@@ -107,7 +107,7 @@ func fail(msg string, args ...any) {
 	if failOpenAgentHookProvider != "" {
 		provider := failOpenAgentHookProvider
 		slog.Default().Warn("Agent hook failed open", "provider", provider, "reason", msg)
-		if allowResponse := agenthooks.AllowResponse(provider); len(allowResponse) > 0 {
+		if allowResponse := agenthooks.AllowProviderResponse(provider); len(allowResponse) > 0 {
 			_, _ = os.Stdout.Write(allowResponse)
 		}
 		leafwikiExit(0)
@@ -249,6 +249,36 @@ var (
 )
 
 const agentHookMaxPayloadBytes = 1024 * 1024
+
+var (
+	errRuntimeActorUserRequired            = errors.New("actor user is required")
+	errRuntimeHomeGrantUserRequired        = errors.New("user is required")
+	errFrontdMCPTokenInfoMissing           = errors.New("authenticated MCP token info missing")
+	errFrontdMCPUserServiceUnavailable     = errors.New("authenticated MCP user service is unavailable")
+	errFrontdOAuthActorServicesUnavailable = errors.New("oauth actor services are unavailable")
+	errFrontdWorkspaceCredentialsMissing   = errors.New("authenticated workspace request is missing credentials")
+	errFrontdRemoteUserServiceUnavailable  = errors.New("remote user service is unavailable")
+	errRuntimeWorkspacedURLUnavailable     = errors.New("workspaced URL is unavailable")
+	errRuntimeRoleExitedBeforeReadiness    = errors.New("process exited before readiness")
+	errRuntimeRoleReadinessTimeout         = errors.New("runtime role did not become ready before timeout")
+	errRuntimeRoleInvalidPID               = errors.New("runtime role reported invalid PID")
+	errUnsupportedRuntimeRole              = errors.New("unsupported runtime role")
+	errNativeStdioAPIKeyRequired           = errors.New("native STDIO requires an API key")
+	errNativeStdioWorkspaceAccessDenied    = errors.New("native STDIO API key cannot access workspaces")
+	errWorkspaceManagerUnavailable         = errors.New("workspace manager is unavailable")
+	errWorkspaceIDRequired                 = errors.New("workspace ID is required")
+	errUserHomeEmpty                       = errors.New("user home is empty")
+	errAuthJWTSecretRequired               = errors.New("JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
+	errAuthAdminPasswordRequired           = errors.New("admin password is required. Set it using --admin-password or LEAFWIKI_ADMIN_PASSWORD environment variable.")
+	errPrivateMCPURLUntrusted              = errors.New("private MCP URL is not trusted")
+	errControlURLUntrusted                 = errors.New("control URL is not trusted")
+	errControlHealthUnreachable            = errors.New("control health is unreachable")
+	errControlHealthMismatch               = errors.New("control health does not match descriptor")
+	errProjectLockedNoAttachableDaemon     = errors.New("project is locked but no attachable daemon was found")
+	errRuntimeRoleMissingProcessHandle     = errors.New("runtime role process handle is missing")
+	errProjectDaemonStartupFailed          = errors.New("project daemon failed to start")
+	errGlobalWikidDescriptorUnavailable    = errors.New("global wikid descriptor is unavailable")
+)
 
 type cliFlags struct {
 	config                  *string
@@ -621,7 +651,7 @@ func dispatchRuntimeCommand(args []string, serviceModeRequested bool, agentHookR
 	if agentHookRequested {
 		provider := agenthooks.ProviderUnknown
 		if len(args) >= 2 {
-			provider = agenthooks.ProviderID(args[1])
+			provider = agenthooks.ProviderIDFromString(args[1])
 		}
 		if err := runAgentHookCommandForDispatch(context.Background(), cfg, provider, os.Stdin, os.Stdout); err != nil {
 			slog.Default().Warn("Agent hook failed open", "provider", provider, "error", err)
@@ -643,6 +673,32 @@ func normalizeAgentHookRawArgs(args []string) []string {
 	return args
 }
 
+type removedEnvironmentVariableError struct {
+	Name string
+}
+
+func (err removedEnvironmentVariableError) Error() string {
+	return fmt.Sprintf("unknown environment variable: %s", err.Name)
+}
+
+type cliMessageID string
+
+type cliRenderedMessageError struct {
+	MessageID cliMessageID
+	Message   string
+}
+
+func (err cliRenderedMessageError) Error() string {
+	return err.Message
+}
+
+func newCLIRenderedMessageError(messageID cliMessageID) cliRenderedMessageError {
+	return cliRenderedMessageError{
+		MessageID: messageID,
+		Message:   localization.English.Render(string(messageID), "").Message,
+	}
+}
+
 func rejectRemovedLeafWikiEnv() error {
 	for _, name := range []string{
 		"LEAFWIKI_RUNTIME_STACK",
@@ -653,26 +709,26 @@ func rejectRemovedLeafWikiEnv() error {
 		"LEAFWIKI_MCP_STDIO",
 	} {
 		if _, ok := os.LookupEnv(name); ok {
-			return fmt.Errorf("unknown environment variable: %s", name)
+			return removedEnvironmentVariableError{Name: name}
 		}
 	}
 	return nil
 }
 
-func agentHookProviderFromArgs(args []string) (string, bool) {
+func agentHookProviderFromArgs(args []string) (agenthooks.ProviderID, bool) {
 	for i, arg := range args {
 		if arg != "agent-hook" {
 			continue
 		}
 		if len(args) > i+1 {
-			return args[i+1], true
+			return agenthooks.ProviderIDFromString(args[i+1]), true
 		}
-		return string(agenthooks.ProviderUnknown), true
+		return agenthooks.ProviderUnknown, true
 	}
 	return "", false
 }
 
-func agentHookProviderFromRawArgs(args []string) (string, bool) {
+func agentHookProviderFromRawArgs(args []string) (agenthooks.ProviderID, bool) {
 	skipNext := false
 	for i, arg := range args {
 		if skipNext {
@@ -689,9 +745,9 @@ func agentHookProviderFromRawArgs(args []string) (string, bool) {
 			continue
 		}
 		if len(args) > i+1 {
-			return args[i+1], true
+			return agenthooks.ProviderIDFromString(args[i+1]), true
 		}
-		return string(agenthooks.ProviderUnknown), true
+		return agenthooks.ProviderUnknown, true
 	}
 	return "", false
 }
@@ -861,7 +917,7 @@ func runProjectDaemonLauncher(parent context.Context, cfg leafwikiRuntimeConfig)
 			if !projectdaemon.IsControlStatus(err, http.StatusUnauthorized) {
 				return fmt.Errorf("verify native STDIO API key: %w", err)
 			}
-			return fmt.Errorf("invalid native STDIO API key")
+			return fmt.Errorf("invalid native STDIO API key: %w", projectdaemon.ErrInvalidAPIKey)
 		}
 	}
 	handle, err := client.RegisterSession(ctx)
@@ -940,7 +996,7 @@ func runDaemonService(parent context.Context, cfg leafwikiRuntimeConfig) error {
 }
 
 func runAgentHookCommand(parent context.Context, cfg leafwikiRuntimeConfig, provider agenthooks.ProviderID, stdin io.Reader, stdout io.Writer) (err error) {
-	allowResponse := agenthooks.AllowResponse(string(provider))
+	allowResponse := agenthooks.AllowProviderResponse(provider)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("agent hook panic: %v", recovered)
@@ -1031,10 +1087,10 @@ func validateAuthStartupConfig(cfg leafwikiRuntimeConfig) error {
 		return nil
 	}
 	if cfg.JWTSecret == "" {
-		return fmt.Errorf("JWT secret is required. Set it using --jwt-secret or LEAFWIKI_JWT_SECRET environment variable.")
+		return errAuthJWTSecretRequired
 	}
 	if cfg.AdminPassword == "" {
-		return fmt.Errorf("admin password is required. Set it using --admin-password or LEAFWIKI_ADMIN_PASSWORD environment variable.")
+		return errAuthAdminPasswordRequired
 	}
 	return nil
 }
@@ -1078,7 +1134,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 			}
 			if healthy {
 				if mismatches := compareProjectDaemonDescriptorForRequest(desc, directRequestCfg, cfg.MCPTransports); len(mismatches) > 0 {
-					return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+					return nil, projectdaemon.NewConfigMismatchError(mismatches)
 				}
 				return desc, nil
 			}
@@ -1104,7 +1160,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 		if cfg.MCPTransports.Stdio && !cfg.DisableAuth {
 			if err := verifyStdioAPIKeyFromStorageForAttach(authStorageDirForRuntime(globalCfg.DataDir), cfg.APIKey); err != nil {
 				if errors.Is(err, coreauth.ErrInvalidToken) {
-					return nil, fmt.Errorf("invalid native STDIO API key")
+					return nil, fmt.Errorf("invalid native STDIO API key: %w", projectdaemon.ErrInvalidAPIKey)
 				}
 				return nil, fmt.Errorf("verify native STDIO API key: %w", err)
 			}
@@ -1118,7 +1174,7 @@ func attachOrStartFederatedProjectDaemon(ctx context.Context, cfg leafwikiRuntim
 			return nil, err
 		}
 	} else if mismatches := compareProjectDaemonDescriptorForRequest(globalDesc, globalCfg, cfg.MCPTransports); len(mismatches) > 0 {
-		return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+		return nil, projectdaemon.NewConfigMismatchError(mismatches)
 	}
 
 	workspace, isHome, err := registerFederatedFirstContactForAttach(layout, requestCfg, cfg)
@@ -1209,7 +1265,7 @@ func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntime
 	userRole := wikidGrantRoleForCoreRole(user.Role)
 	role := userRole
 	if role == "" {
-		return wikid.Grant{}, false, fmt.Errorf("native STDIO API-key user role %q cannot access workspaces", user.Role)
+		return wikid.Grant{}, false, fmt.Errorf("native STDIO API-key user role %q cannot access workspaces: %w", user.Role, errNativeStdioWorkspaceAccessDenied)
 	}
 	return wikid.Grant{Subject: "user:" + user.ID, WorkspaceID: workspaceID, Role: role}, true, nil
 }
@@ -1226,7 +1282,7 @@ func federatedWorkspaceDisplayName(cfg projectdaemon.Config) string {
 
 func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descriptor, workspaceID workspaceid.WorkspaceID, cfg leafwikiRuntimeConfig) error {
 	if desc == nil {
-		return fmt.Errorf("global wikid descriptor is unavailable")
+		return errGlobalWikidDescriptorUnavailable
 	}
 	path := "/__leafwiki/workspaces/" + workspaceID.URLPathSegment() + "/ensure"
 	endpoint := strings.TrimRight(desc.ControlURL, "/") + path
@@ -1275,7 +1331,7 @@ func readHealthyProjectDaemon(ctx context.Context, descriptorPath string, ownerC
 			return nil, false, lockErr
 		}
 		if !locksFree {
-			return nil, false, fmt.Errorf("project daemon descriptor schema version = %d, want %d while project locks are held", desc.SchemaVersion, projectdaemon.DescriptorSchemaVersion)
+			return nil, false, fmt.Errorf("%w: schema version = %d, want %d while project locks are held", projectdaemon.ErrDescriptorSchemaMismatch, desc.SchemaVersion, projectdaemon.DescriptorSchemaVersion)
 		}
 		return desc, false, nil
 	}
@@ -1302,7 +1358,7 @@ func projectDaemonDescriptorHealthy(ctx context.Context, desc *projectdaemon.Des
 	}
 	if desc.Role == projectdaemon.RoleWorkspaced && strings.TrimSpace(desc.PrivateMCPURL) != "" && strings.TrimSpace(desc.PrivateMCPToken) != "" {
 		if !isTrustedDaemonControlURL(desc.PrivateMCPURL) {
-			return false, fmt.Errorf("workspaced descriptor private MCP URL is not trusted")
+			return false, errPrivateMCPURLUntrusted
 		}
 		if !processPIDAlive(desc.PID) {
 			return false, nil
@@ -1317,16 +1373,16 @@ func projectDaemonDescriptorHealthy(ctx context.Context, desc *projectdaemon.Des
 		return false, nil
 	}
 	if !isTrustedDaemonControlURL(desc.ControlURL) {
-		return false, fmt.Errorf("project daemon locks are held but descriptor control URL is not trusted")
+		return false, errControlURLUntrusted
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	health, err := projectdaemon.NewClient(desc.ControlURL, desc.ControlToken).Health(pingCtx)
 	if err != nil {
-		return false, fmt.Errorf("project daemon locks are held but control health is unreachable: %w", err)
+		return false, fmt.Errorf("%w: %w", errControlHealthUnreachable, err)
 	}
 	if !daemonHealthMatchesDescriptor(desc, health) {
-		return false, fmt.Errorf("project daemon locks are held but control health does not match descriptor")
+		return false, errControlHealthMismatch
 	}
 	return true, nil
 }
@@ -1379,7 +1435,7 @@ func projectDaemonIdentityMismatch(desc *projectdaemon.Descriptor, ownerCfg proj
 			Got:   ownerCfg.RootDir,
 		})
 	}
-	return errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+	return projectdaemon.NewConfigMismatchError(mismatches)
 }
 
 var projectDaemonWaitTimeout = 30 * time.Second
@@ -1398,7 +1454,7 @@ func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath 
 			lastErr = err
 		} else if healthy {
 			if mismatches := compareProjectDaemonDescriptorForRequest(desc, ownerCfg, requestTransports); len(mismatches) > 0 {
-				return nil, errors.New(projectdaemon.FormatConfigMismatch(mismatches))
+				return nil, projectdaemon.NewConfigMismatchError(mismatches)
 			}
 			return desc, nil
 		}
@@ -1427,9 +1483,9 @@ func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath 
 				return nil, formatProjectDaemonStartupError(startupErr)
 			}
 			if lastErr != nil {
-				return nil, fmt.Errorf("project is locked but no attachable daemon was found: %w", lastErr)
+				return nil, fmt.Errorf("%w: %w", errProjectLockedNoAttachableDaemon, lastErr)
 			}
-			return nil, fmt.Errorf("project is locked but no attachable daemon was found")
+			return nil, errProjectLockedNoAttachableDaemon
 		case <-ticker.C:
 		}
 	}
@@ -1476,9 +1532,9 @@ func parseProjectDaemonStartupError(raw []byte) projectDaemonStartupError {
 
 func formatProjectDaemonStartupError(startupErr projectDaemonStartupError) error {
 	if startupErr.IsLock() {
-		return fmt.Errorf("project is locked but no attachable daemon was found: %s", startupErr.RenderedMessage)
+		return fmt.Errorf("%w: %s", errProjectLockedNoAttachableDaemon, startupErr.RenderedMessage)
 	}
-	return fmt.Errorf("project daemon failed to start: %s", startupErr.RenderedMessage)
+	return fmt.Errorf("%w: %s", errProjectDaemonStartupFailed, startupErr.RenderedMessage)
 }
 
 func writeProjectDaemonStartupError(path string, err error) {
@@ -1707,7 +1763,7 @@ func wikidControlMCPActorResolver(authDir string, cfg leafwikiRuntimeConfig) fun
 		}
 		token := httpBearerToken(req)
 		if token == "" || !coreauth.IsAPIKeyBearer(token) {
-			return projectdaemon.ActorContext{}, fmt.Errorf("native STDIO requires an API key")
+			return projectdaemon.ActorContext{}, errNativeStdioAPIKeyRequired
 		}
 		user, err := stdioAPIKeyUserFromStorage(authDir, token)
 		if err != nil {
@@ -1940,7 +1996,7 @@ func globalRuntimeHomeDir() (string, error) {
 	}
 	home = strings.TrimSpace(home)
 	if home == "" {
-		return "", fmt.Errorf("user home is empty")
+		return "", errUserHomeEmpty
 	}
 	return filepath.Clean(filepath.Join(home, ".leafwiki")), nil
 }
@@ -2372,11 +2428,11 @@ func (m *federatedWorkspaceManager) MarkReady(workspaceID workspaceid.WorkspaceI
 
 func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
 	if m == nil || m.supervisor == nil {
-		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace manager is unavailable")
+		return wikid.WorkspaceStatus{}, errWorkspaceManagerUnavailable
 	}
 	workspaceID := workspace.ID
 	if workspaceID == "" {
-		return wikid.WorkspaceStatus{}, fmt.Errorf("workspace ID is required")
+		return wikid.WorkspaceStatus{}, errWorkspaceIDRequired
 	}
 	m.mu.Lock()
 	if current := m.supervisor.Status(workspaceID); current.State == wikid.WorkspaceStateRunning {
@@ -2401,9 +2457,21 @@ func (m *federatedWorkspaceManager) Ensure(ctx context.Context, workspace wikid.
 func federatedEnsureResultStatus(workspaceID workspaceid.WorkspaceID, value any, resultErr error) (wikid.WorkspaceStatus, error) {
 	status, ok := value.(wikid.WorkspaceStatus)
 	if !ok && resultErr == nil {
-		return wikid.WorkspaceStatus{}, fmt.Errorf("ensure workspace %q returned unexpected result %T", workspaceID.String(), value)
+		return wikid.WorkspaceStatus{}, &federatedEnsureUnexpectedResultError{WorkspaceID: workspaceID, ResultType: fmt.Sprintf("%T", value)}
 	}
 	return status, resultErr
+}
+
+type federatedEnsureUnexpectedResultError struct {
+	WorkspaceID workspaceid.WorkspaceID
+	ResultType  string
+}
+
+func (err *federatedEnsureUnexpectedResultError) Error() string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("ensure workspace %q returned unexpected result %s", err.WorkspaceID, err.ResultType)
 }
 
 func (m *federatedWorkspaceManager) ensureWorkspace(workspaceID workspaceid.WorkspaceID, workspace wikid.WorkspaceRecord) (wikid.WorkspaceStatus, error) {
@@ -2664,7 +2732,7 @@ func (s *wikidFrontdRuntime) startWorkspacedLocked() error {
 
 func (s *wikidFrontdRuntime) startFrontdLocked() error {
 	if strings.TrimSpace(s.workspacedURL) == "" {
-		return fmt.Errorf("workspaced URL is unavailable")
+		return errRuntimeWorkspacedURLUnavailable
 	}
 	proc, ready, err := startInternalRuntimeRoleProcessForRuntime(internalRuntimeRoleStartupConfig{
 		Role:          projectdaemon.RoleFrontd,
@@ -2809,7 +2877,7 @@ func startInternalRuntimeRoleProcess(startup internalRuntimeRoleStartupConfig) (
 	}
 	cleanupIO()
 	if cmd.Process == nil {
-		return nil, internalRuntimeRoleReady{}, fmt.Errorf("start %s role process: missing process handle", startup.Role)
+		return nil, internalRuntimeRoleReady{}, fmt.Errorf("start %s role process: %w", startup.Role, errRuntimeRoleMissingProcessHandle)
 	}
 	removeStartupConfig = false
 	scheduleProjectDaemonStartupConfigCleanup(startupPath)
@@ -2882,11 +2950,11 @@ func waitForInternalRuntimeRoleReady(path string, proc *internalRuntimeRoleProce
 		select {
 		case err := <-done:
 			if err == nil {
-				err = fmt.Errorf("process exited before readiness")
+				err = errRuntimeRoleExitedBeforeReadiness
 			}
 			return internalRuntimeRoleReady{}, err
 		case <-deadline.C:
-			return internalRuntimeRoleReady{}, fmt.Errorf("runtime role did not become ready before timeout")
+			return internalRuntimeRoleReady{}, errRuntimeRoleReadinessTimeout
 		case <-ticker.C:
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -2903,7 +2971,7 @@ func waitForInternalRuntimeRoleReady(path string, proc *internalRuntimeRoleProce
 				return internalRuntimeRoleReady{}, err
 			}
 			if ready.PID <= 0 {
-				return internalRuntimeRoleReady{}, fmt.Errorf("runtime role reported invalid PID")
+				return internalRuntimeRoleReady{}, errRuntimeRoleInvalidPID
 			}
 			return ready, nil
 		}
@@ -3022,13 +3090,10 @@ func (p *internalRuntimeRoleProcess) stop(ctx context.Context) error {
 func runInternalRuntimeRole(parent context.Context, startupPath string) error {
 	raw, err := os.ReadFile(startupPath)
 	if err != nil {
-		role := projectdaemon.RoleName(strings.TrimSpace(startupPath))
-		switch role {
-		case projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced:
-			return waitForInternalRuntimeRoleSignal(parent)
-		default:
-			return fmt.Errorf("read runtime role startup config: %w", err)
+		if role, ok := parseInternalRuntimeRoleName(startupPath); ok {
+			return runInternalRuntimeRoleName(parent, role)
 		}
+		return fmt.Errorf("read runtime role startup config: %w", err)
 	}
 	_ = os.Remove(startupPath)
 	var startup internalRuntimeRoleStartupConfig
@@ -3038,7 +3103,7 @@ func runInternalRuntimeRole(parent context.Context, startupPath string) error {
 	switch startup.Role {
 	case projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced:
 	default:
-		return fmt.Errorf("unsupported runtime role %q", startup.Role)
+		return fmt.Errorf("%w: %s", errUnsupportedRuntimeRole, startup.Role)
 	}
 	switch startup.Role {
 	case projectdaemon.RoleFrontd:
@@ -3047,6 +3112,28 @@ func runInternalRuntimeRole(parent context.Context, startupPath string) error {
 		return runWorkspacedRole(parent, startup)
 	default:
 		return waitForInternalRuntimeRoleSignal(parent)
+	}
+}
+
+func runInternalRuntimeRoleName(parent context.Context, role projectdaemon.RoleName) error {
+	switch role {
+	case projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced:
+		return waitForInternalRuntimeRoleSignal(parent)
+	default:
+		return errUnsupportedRuntimeRole
+	}
+}
+
+func parseInternalRuntimeRoleName(raw string) (projectdaemon.RoleName, bool) {
+	switch strings.TrimSpace(raw) {
+	case "wikid":
+		return projectdaemon.RoleWikid, true
+	case "frontd":
+		return projectdaemon.RoleFrontd, true
+	case "workspaced":
+		return projectdaemon.RoleWorkspaced, true
+	default:
+		return "", false
 	}
 }
 
@@ -3634,10 +3721,10 @@ func frontdMCPActorResolver(w *wiki.Wiki, cfg leafwikiRuntimeConfig) func(*http.
 	return func(req *http.Request) (projectdaemon.ActorContext, error) {
 		tokenInfo := sdkauth.TokenInfoFromContext(req.Context())
 		if tokenInfo == nil || strings.TrimSpace(tokenInfo.UserID) == "" {
-			return projectdaemon.ActorContext{}, fmt.Errorf("authenticated MCP token info missing")
+			return projectdaemon.ActorContext{}, errFrontdMCPTokenInfoMissing
 		}
 		if w.UserService() == nil {
-			return projectdaemon.ActorContext{}, fmt.Errorf("authenticated MCP user service is unavailable")
+			return projectdaemon.ActorContext{}, errFrontdMCPUserServiceUnavailable
 		}
 		user, err := getFrontdUserByIDForRuntime(w, coreauth.UserIDFromString(tokenInfo.UserID))
 		if err != nil {
@@ -3667,7 +3754,7 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 	}
 	if token := httpBearerToken(req); token != "" && isMCPActorPath(req.URL.Path) {
 		if w.OAuthService() == nil || w.UserService() == nil {
-			return nil, "", fmt.Errorf("oauth actor services are unavailable")
+			return nil, "", errFrontdOAuthActorServicesUnavailable
 		}
 		info, err := verifyFrontdOAuthBearerTokenForRuntime(w, req.Context(), token, req)
 		if err != nil {
@@ -3689,12 +3776,12 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 	if cfg.PublicAccess && req != nil && req.Method == http.MethodGet {
 		return &coreauth.User{ID: "public-viewer", Username: "public-viewer", Role: coreauth.RoleViewer}, "public_access", nil
 	}
-	return nil, "", fmt.Errorf("authenticated workspace request is missing credentials")
+	return nil, "", errFrontdWorkspaceCredentialsMissing
 }
 
 func actorContextForUser(user *coreauth.User, method string, cfg leafwikiRuntimeConfig) (projectdaemon.ActorContext, error) {
 	if user == nil {
-		return projectdaemon.ActorContext{}, fmt.Errorf("actor user is required")
+		return projectdaemon.ActorContext{}, errRuntimeActorUserRequired
 	}
 	now := time.Now().UTC()
 	return projectdaemon.ActorContext{
@@ -3718,9 +3805,22 @@ func actorContextForWorkspaceGrant(user *coreauth.User, method string, cfg leafw
 		return projectdaemon.ActorContext{}, err
 	}
 	actor.WorkspaceID = workspaceID
-	actor.Role = string(role)
+	actor.Role = actorContextRoleForWorkspaceGrant(role)
 	actor.Scopes = scopesForGrantRole(role)
 	return actor, nil
+}
+
+func actorContextRoleForWorkspaceGrant(role wikid.GrantRole) string {
+	switch role {
+	case wikid.GrantRoleViewer:
+		return "viewer"
+	case wikid.GrantRoleEditor:
+		return "editor"
+	case wikid.GrantRoleAdmin:
+		return "admin"
+	default:
+		return ""
+	}
 }
 
 func scopesForGrantRole(role wikid.GrantRole) []string {
@@ -3761,7 +3861,7 @@ func frontdRemoteUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig
 		return nil, "", false, nil
 	}
 	if w.UserService() == nil {
-		return nil, "", true, fmt.Errorf("remote user service is unavailable")
+		return nil, "", true, errFrontdRemoteUserServiceUnavailable
 	}
 	user, err := w.UserService().GetUserByUsername(username)
 	if err != nil {
@@ -4278,7 +4378,7 @@ func seedRuntimeHomeGrants(store *wikid.GrantStore, cfg leafwikiRuntimeConfig) e
 
 func ensureRuntimeHomeGrant(store *wikid.GrantStore, user *coreauth.User) error {
 	if user == nil {
-		return fmt.Errorf("user is required")
+		return errRuntimeHomeGrantUserRequired
 	}
 	role := wikidGrantRoleForCoreRole(user.Role)
 	if role == "" {
@@ -4735,14 +4835,14 @@ func validateMCPTransportOptions(opts mcpTransportOptions) error {
 		return nil
 	}
 	if opts.LogTarget == leaflogging.TargetStdout {
-		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdoutReservedForMCPStdio, "").Message)
+		return newCLIRenderedMessageError(cliMessageID(localization.MessageIDCLIErrorStdoutReservedForMCPStdio))
 	}
 	hasAPIKey := strings.TrimSpace(opts.APIKey) != ""
 	if opts.DisableAuth && hasAPIKey {
-		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdioAuthAPIKeyConflict, "").Message)
+		return newCLIRenderedMessageError(cliMessageID(localization.MessageIDCLIErrorStdioAuthAPIKeyConflict))
 	}
 	if !opts.DisableAuth && !hasAPIKey {
-		return fmt.Errorf("%s", localization.English.Render(localization.MessageIDCLIErrorStdioAuthIdentityRequired, "").Message)
+		return newCLIRenderedMessageError(cliMessageID(localization.MessageIDCLIErrorStdioAuthIdentityRequired))
 	}
 	return nil
 }

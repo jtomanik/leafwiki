@@ -181,10 +181,18 @@ func rejectRemovedRuntimeStackEnv() error {
 		"LEAFWIKI_RUN_MCP_RUNTIME_STACK",
 	} {
 		if _, ok := os.LookupEnv(name); ok {
-			return fmt.Errorf("unknown environment variable: %s", name)
+			return removedEnvironmentVariableError{Name: name}
 		}
 	}
 	return nil
+}
+
+type removedEnvironmentVariableError struct {
+	Name string
+}
+
+func (err removedEnvironmentVariableError) Error() string {
+	return fmt.Sprintf("unknown environment variable: %s", err.Name)
 }
 
 func createUser(users seedUserService, username, email, role string) (*coreauth.User, error) {

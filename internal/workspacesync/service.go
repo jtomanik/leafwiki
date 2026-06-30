@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -44,9 +45,15 @@ const (
 	SourceUnknown    = gitrevisions.SourceUnknown
 )
 
-const watcherBatchDebounce = 250 * time.Millisecond
+const (
+	watcherBatchDebounce            = 250 * time.Millisecond
+	watcherDroppedEventsStatusLabel = "watcher dropped events"
+)
 
 var (
+	ErrTreeServiceRequired            = errors.New("tree service is required")
+	ErrWorkspaceSyncDisabled          = errors.New("workspace sync is not enabled")
+	ErrWorkspaceSyncDocumentUnchanged = errors.New("workspace sync document did not change")
 	canonicalMarkdownRewriteWriter    = writeCanonicalMarkdownRewritesAtomically
 	workspacesyncOSStat               = os.Stat
 	workspacesyncNewMarkdownLinkIndex = markdownlinks.NewIndexFromRootWithOptions
@@ -70,10 +77,6 @@ type workspacesyncTempFile interface {
 
 type Actor = gitrevisions.Actor
 type ActorID = gitrevisions.ActorID
-
-func NewActorIDUnchecked(raw string) ActorID {
-	return gitrevisions.NewActorIDUnchecked(raw)
-}
 
 type treeReconstructor interface {
 	ReconstructTreeFromFS() error
@@ -153,7 +156,7 @@ type SyncStatus struct {
 type Snapshot struct {
 	ID                   CommitHash `json:"id"`
 	Message              string     `json:"message,omitempty"`
-	AuthorID             string     `json:"authorId,omitempty"`
+	AuthorID             ActorID    `json:"authorId,omitempty"`
 	AuthorName           string     `json:"author,omitempty"`
 	AuthorEmail          string     `json:"authorEmail,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt,omitempty"`
@@ -215,7 +218,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		return service, nil
 	}
 	if options.Tree == nil {
-		return nil, fmt.Errorf("tree service is required")
+		return nil, ErrTreeServiceRequired
 	}
 	if options.Store != nil {
 		service.store = options.Store
@@ -428,15 +431,18 @@ func (s *Service) handleWatcherBatch(ctx context.Context, eventCount int, droppe
 		s.status.PendingEventCount = 0
 	}
 	if dropped {
-		if droppedPath == "" {
-			s.status.LastError = "watcher dropped events"
-		} else {
-			s.status.LastError = "watcher dropped events for " + droppedPath
-		}
+		s.status.LastError = watcherDroppedEventsStatus(droppedPath)
 	} else if err != nil {
 		s.status.LastError = err.Error()
 	}
 	s.mu.Unlock()
+}
+
+func watcherDroppedEventsStatus(droppedPath string) string {
+	if droppedPath == "" {
+		return watcherDroppedEventsStatusLabel
+	}
+	return watcherDroppedEventsStatusLabel + " for " + droppedPath
 }
 
 func (s *Service) shouldLogStartupSync(req SyncRequest) bool {
@@ -549,7 +555,7 @@ func (s *Service) SyncNow(ctx context.Context, req SyncRequest) (SyncStatus, err
 		s.logStartupSyncFailed(logStartup, startupStarted, err)
 		return s.status, err
 	}
-	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
+	s.status.LastCommitHash = commit.Hash
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -786,7 +792,7 @@ func writeCanonicalMarkdownRewritesAtomically(rewrites []canonicalMarkdownRewrit
 			cleanupPreparedCanonicalMarkdownRewrites(prepared[len(committed):])
 			rollbackErr := rollbackCanonicalMarkdownRewrites(committed)
 			if rollbackErr != nil {
-				return fmt.Errorf("write canonical markdown migration: %w; rollback failed: %v", err, rollbackErr)
+				return fmt.Errorf("write canonical markdown migration: %w; rollback failed: %w", err, rollbackErr)
 			}
 			return err
 		}
@@ -951,21 +957,21 @@ func (s *Service) ListSnapshotPage(ctx context.Context, cursor CommitHash, pageS
 	}
 	nextCursor := CommitHashFromString("")
 	if len(commits) > requestedLimit {
-		nextCursor = CommitHashFromString(commits[requestedLimit-1].Hash)
+		nextCursor = commits[requestedLimit-1].Hash
 		commits = commits[:requestedLimit]
 	}
 	snapshots := make([]Snapshot, 0, len(commits))
 	for _, commit := range commits {
 		s.storeMu.Lock()
-		changedPaths, err := store.ChangedMarkdownPaths(ctx, CommitHashFromString(commit.Hash))
+		changedPaths, err := store.ChangedMarkdownPaths(ctx, commit.Hash)
 		s.storeMu.Unlock()
 		if err != nil {
 			return SnapshotList{}, err
 		}
 		snapshots = append(snapshots, Snapshot{
-			ID:                   CommitHashFromString(commit.Hash),
+			ID:                   commit.Hash,
 			Message:              commit.Message,
-			AuthorID:             commit.AuthorID.String(),
+			AuthorID:             commit.AuthorID,
 			AuthorName:           commit.AuthorName,
 			AuthorEmail:          commit.AuthorEmail,
 			CreatedAt:            commit.CreatedAt,
@@ -986,7 +992,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID Commi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.enabled {
-		return s.status, fmt.Errorf("workspace sync is not enabled")
+		return s.status, ErrWorkspaceSyncDisabled
 	}
 	if source == "" {
 		source = SourceSystem
@@ -1003,7 +1009,7 @@ func (s *Service) RestoreWorkspaceWithSource(ctx context.Context, commitID Commi
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
+	s.status.LastCommitHash = commit.Hash
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -1032,7 +1038,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	s.mu.Lock()
 	if !s.enabled || page == nil || page.PageNode == nil {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("workspace sync is not enabled")
+		return nil, ErrWorkspaceSyncDisabled
 	}
 	store := s.store
 	relPath := pageMarkdownPath(page)
@@ -1048,7 +1054,7 @@ func (s *Service) GetPageRevisionSnapshot(ctx context.Context, page *tree.Page, 
 	content, revisionPath, ok := changedContentForPageAtCommit(rootDir, page, relPath, changedFiles)
 	if !ok {
 		s.storeMu.Unlock()
-		return nil, fmt.Errorf("document %s did not change in commit %s", relPath, commitID)
+		return nil, fmt.Errorf("document %s did not change in commit %s: %w", relPath, commitID, ErrWorkspaceSyncDocumentUnchanged)
 	}
 	commit, err := store.GetCommit(ctx, commitID)
 	s.storeMu.Unlock()
@@ -1070,7 +1076,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.enabled || page == nil || page.PageNode == nil {
-		return s.status, fmt.Errorf("workspace sync is not enabled")
+		return s.status, ErrWorkspaceSyncDisabled
 	}
 	if source == "" {
 		source = SourceSystem
@@ -1086,7 +1092,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 	targetRelPath := s.currentPageMarkdownPath(page)
 	content, _, ok := changedContentForPageAtCommit(s.rootDir, page, targetRelPath, changedFiles)
 	if !ok {
-		err := fmt.Errorf("document %s did not change in commit %s", targetRelPath, commitID)
+		err := fmt.Errorf("document %s did not change in commit %s: %w", targetRelPath, commitID, ErrWorkspaceSyncDocumentUnchanged)
 		s.status.LastError = err.Error()
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
@@ -1103,7 +1109,7 @@ func (s *Service) RestoreDocumentWithSource(ctx context.Context, page *tree.Page
 		s.status.LastSyncTime = time.Now().UTC()
 		return s.status, err
 	}
-	s.status.LastCommitHash = CommitHashFromString(commit.Hash)
+	s.status.LastCommitHash = commit.Hash
 	s.status.LastSyncTime = time.Now().UTC()
 	s.status.LastError = ""
 	s.status.ValidationErrors = nil
@@ -1141,7 +1147,7 @@ func (s *Service) captureWritebacksLocked(ctx context.Context, req gitrevisions.
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	if commit.Created && amendCreatedCommit {
-		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, CommitHashFromString(commit.Hash))
+		requiresMigrationWriteback, err := capturedMarkdownRequiresMetadataWriteback(ctx, s.store, commit.Hash)
 		if err != nil {
 			return err
 		}
@@ -1261,17 +1267,17 @@ func (s *Service) ListPageRevisions(ctx context.Context, page *tree.Page, cursor
 	relPath := pageMarkdownPath(page)
 	scanLimit := requestedLimit + 1
 	revisions := make([]*revision.Revision, 0, scanLimit)
-	cursor = strings.TrimSpace(cursor)
-	foundCursor := cursor == ""
+	cursorHash := CommitHashFromString(strings.TrimSpace(cursor))
+	foundCursor := cursorHash == ""
 	s.storeMu.Lock()
 	err := store.ForEachCommit(ctx, func(commit gitrevisions.Commit) (bool, error) {
 		if !foundCursor {
-			if commit.Hash == cursor {
+			if commit.Hash == cursorHash {
 				foundCursor = true
 			}
 			return true, nil
 		}
-		changedFiles, err := store.ChangedMarkdownContents(ctx, CommitHashFromString(commit.Hash))
+		changedFiles, err := store.ChangedMarkdownContents(ctx, commit.Hash)
 		if err != nil {
 			return false, err
 		}
@@ -1544,9 +1550,9 @@ func leafWikiIDFromContent(content string) (tree.PageID, bool) {
 
 func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions.Commit, relPath string, content string) *revision.Revision {
 	sum := sha256.Sum256([]byte(content))
-	authorID := tree.UserIDFromString(strings.TrimSpace(commit.AuthorID.String()))
+	authorID := tree.UserIDFromString(commit.AuthorID.ActorID())
 	if authorID == "" {
-		authorID = tree.UserIDFromString(PublicEditorActor().ID.String())
+		authorID = tree.UserIDFromString(PublicEditorActor().ID)
 	}
 	summary := strings.TrimSpace(commit.Message)
 	if summary == "" {
@@ -1560,14 +1566,14 @@ func revisionForPageContent(rootDir string, page *tree.Page, commit gitrevisions
 	}
 	routePath, slug, kind := revisionRoutePathSlugAndKind(rootDir, relPath, page)
 	return &revision.Revision{
-		ID:            tree.RevisionIDFromString(CommitHashFromString(commit.Hash)),
+		ID:            tree.RevisionIDFromString(commit.Hash),
 		PageID:        page.ID,
 		Type:          revision.RevisionTypeContentUpdate,
 		AuthorID:      authorID.MetadataValue(),
 		CreatedAt:     commit.CreatedAt,
 		Title:         title,
 		Slug:          slug,
-		Kind:          string(kind),
+		Kind:          kind,
 		Path:          routePath.FilesystemPath(),
 		ContentHash:   hex.EncodeToString(sum[:]),
 		PageCreatedAt: page.Metadata.CreatedAt,

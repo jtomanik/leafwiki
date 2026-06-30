@@ -26,12 +26,12 @@ func (w *Wiki) newPageOrchestrator() *pagesave.PageSaveOrchestrator {
 }
 
 func (w *Wiki) workspaceSyncActorForUser(userID tree.UserID) workspacesync.Actor {
-	actorID := workspacesync.NewActorIDUnchecked(userID.ActorID())
+	actorID := workspacesync.ActorIDFromUserID(userID)
 	actor := workspacesync.Actor{ID: actorID}
-	if w.user == nil || actorID.Trimmed() == "" {
+	if w.user == nil || workspacesync.ActorIDIsEmpty(actorID) {
 		return actor
 	}
-	user, err := w.user.GetUserByID(coreauth.UserIDFromString(actorID.String()))
+	user, err := w.user.GetUserByID(coreauth.UserIDFromString(userID))
 	if err != nil || user == nil {
 		return actor
 	}

@@ -36,6 +36,14 @@ var (
 	encodeActorContext              = projectdaemon.EncodeActorContext
 )
 
+func IsInvalidWikidUpstream(err error) bool {
+	return errors.Is(err, errInvalidWikidUpstream)
+}
+
+func IsInvalidWorkspacedUpstream(err error) bool {
+	return errors.Is(err, errInvalidWorkspacedUpstream)
+}
+
 func NewIngressHandler(public http.Handler, opts IngressOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if opts.ControlPlane != nil && isWellKnownPath(req.URL.Path) {

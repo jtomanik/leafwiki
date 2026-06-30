@@ -26,3 +26,7 @@ func CommitHashFromRevisionID(id revision.RevisionID) CommitHash {
 func ActorIDFromUserID(userID identity.UserID) ActorID {
 	return gitrevisions.NewActorIDUnchecked(userID.ActorID())
 }
+
+func ActorIDIsEmpty(actorID ActorID) bool {
+	return gitrevisions.TrimActorID(actorID) == ""
+}

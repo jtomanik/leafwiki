@@ -47,7 +47,7 @@ func (e *WorkspaceSyncSideEffect) ApplyRequired(event PageSaveEvent) error {
 	actor := workspacesync.Actor{ID: actorID}
 	if e.actorForUser != nil {
 		resolved := e.actorForUser(event.UserID)
-		if resolved.ID.Trimmed() == "" {
+		if workspacesync.ActorIDIsEmpty(resolved.ID) {
 			resolved.ID = actorID
 		}
 		actor = resolved

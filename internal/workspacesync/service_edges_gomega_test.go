@@ -8,16 +8,25 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
+const (
+	syncPrimaryError   = "primary"
+	syncSecondaryError = "secondary"
+)
+
+var errWatcherFactoryFailed = errors.New("watcher factory failed")
+
 var _ = Describe("workspace sync service edges", func() {
 	It("passes through actor IDs and validates enabled service dependencies", func() {
-		actorID := NewActorIDUnchecked(" actor-1 ")
-		Expect(actorID.String()).To(Equal(" actor-1 "))
-		Expect(actorID.Trimmed().String()).To(Equal("actor-1"))
+		actorID := ActorIDFromUserID(tree.UserIDFromString(" actor-1 "))
+		expectedActorID := ActorIDFromUserID(tree.UserIDFromString("actor-1"))
+		Expect(actorID).To(Equal(expectedActorID))
+		Expect(ActorIDFromUserID(actorID)).To(Equal(expectedActorID))
 
 		service, err := NewService(ServiceOptions{Enabled: false})
 		Expect(err).NotTo(HaveOccurred())
@@ -30,7 +39,7 @@ var _ = Describe("workspace sync service edges", func() {
 		Expect(called).To(BeTrue())
 
 		_, err = NewService(ServiceOptions{Enabled: true})
-		Expect(err).To(MatchError(ContainSubstring("tree service is required")))
+		Expect(err).To(MatchError(ErrTreeServiceRequired))
 	})
 
 	It("records watcher factory failures in status", func() {
@@ -40,23 +49,25 @@ var _ = Describe("workspace sync service edges", func() {
 			Tree:    &fakeTreeReconstructor{},
 			Store:   &fakeRevisionStore{},
 			WatcherFactory: func(string) (fileWatcher, error) {
-				return nil, errors.New("watcher factory failed")
+				return nil, errWatcherFactoryFailed
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
 		err = service.StartWatcher(context.Background())
-		Expect(err).To(MatchError("watcher factory failed"))
+		Expect(err).To(MatchError(errWatcherFactoryFailed))
 		status := service.Status()
-		Expect(status.WatcherEnabled).To(BeTrue())
-		Expect(status.WatcherRunning).To(BeFalse())
-		Expect(status.LastError).To(Equal("watcher factory failed"))
+		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WatcherEnabled": BeTrue(),
+			"WatcherRunning": BeFalse(),
+			"LastError":      Equal(errWatcherFactoryFailed.Error()),
+		}))
 	})
 
 	It("aggregates sync errors without adding blank fragments", func() {
-		Expect(appendSyncError("", "secondary")).To(Equal("secondary"))
-		Expect(appendSyncError("primary", "")).To(Equal("primary"))
-		Expect(appendSyncError("primary", "secondary")).To(Equal("primary; secondary"))
+		Expect(appendSyncError("", syncSecondaryError)).To(Equal(syncSecondaryError))
+		Expect(appendSyncError(syncPrimaryError, "")).To(Equal(syncPrimaryError))
+		Expect(appendSyncError(syncPrimaryError, syncSecondaryError)).To(Equal(syncPrimaryError + "; " + syncSecondaryError))
 	})
 
 	DescribeTable("filters managed markdown watcher paths",
@@ -138,13 +149,16 @@ var _ = Describe("workspace sync service edges", func() {
 		service := &Service{rootDir: rootDir}
 
 		errs := service.validationErrorsFromError(errors.New("open " + filepath.Join(rootDir, "docs", "page.md") + ": permission denied"))
-		Expect(validationErrorPaths(errs)).To(Equal([]string{"docs/page.md"}))
-		Expect(errs[0].Code).To(Equal(wikivalidation.IssueCodeWorkspaceSyncError))
-		Expect(errs[0].Severity).To(Equal(wikivalidation.IssueSeverityError))
+		Expect(errs).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":     Equal(wikivalidation.IssueCodeWorkspaceSyncError),
+			"Path":     Equal("docs/page.md"),
+			"Severity": Equal(wikivalidation.IssueSeverityError),
+		})))
 
 		errs = service.validationErrorsFromError(errors.New("sync failed without markdown path"))
-		Expect(errs).To(HaveLen(1))
-		Expect(errs[0].Path).To(Equal("workspace"))
+		Expect(errs).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Path": Equal("workspace"),
+		})))
 
 		Expect(validationErrorsIncludeActionableMarkdownCode([]ValidationError{
 			{Code: ""},

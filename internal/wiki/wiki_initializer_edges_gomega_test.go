@@ -10,6 +10,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -24,6 +25,13 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+var (
+	errFixtureWikiStartupFailed = errors.New("startup failed")
+	errFixtureWikiAuthFailed    = errors.New("auth failed")
+	errFixtureWikiEdgeFailed    = errors.New("edge failed")
+	errFixtureWikiCloseFailed   = errors.New("close failed")
+)
+
 var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 	ginkgo.It("returns each NewWiki startup orchestration error", func() {
 		_, err := NewWiki(&WikiOptions{
@@ -31,53 +39,53 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 			WorkspaceOnly:    true,
 			ControlPlaneOnly: true,
 		})
-		Expect(err).To(MatchError("workspace-only and control-plane-only modes cannot be combined"))
+		Expect(err).To(MatchError(ErrWikiModeConflict))
 
-		expectNewWikiStartupError(func(expected error) {
+		Expect(runNewWikiStartupError(func(expected error) {
 			newWikiEnsureWorkspaceDirs = func(Workspace) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitAuth = func(*Wiki, *WikiOptions) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitOAuth = func(*Wiki, *WikiOptions) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitBranding = func(*Wiki) error { return expected }
 		}, func(options *WikiOptions) {
 			options.ControlPlaneOnly = true
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitCoreServices = func(*Wiki, *WikiOptions) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitLinkService = func(*Wiki) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitTagsService = func(*Wiki) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitProperties = func(*Wiki) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitSearch = func(*Wiki) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiInitBranding = func(*Wiki) error { return expected }
-		})
-		expectNewWikiStartupError(func(expected error) {
+		})).To(MatchError(errFixtureWikiStartupFailed))
+		Expect(runNewWikiStartupError(func(expected error) {
 			installFastNewWikiStartup()
 			newWikiEnsureWelcomePage = func(*Wiki) error { return expected }
-		})
+		})).To(MatchError(errFixtureWikiStartupFailed))
 	})
 
 	ginkgo.It("surfaces workspace directory creation failures", func() {
@@ -87,7 +95,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 		wikiMkdirAll = func(string, os.FileMode) error {
 			return expected
 		}
-		Expect(ensureWorkspaceDirs(Workspace{DataDir: "data", RootDir: "root"})).To(MatchError(ContainSubstring("create data dir")))
+		Expect(ensureWorkspaceDirs(Workspace{DataDir: "data", RootDir: "root"})).To(MatchError(expected))
 
 		restore()
 		restore = restoreWikiTestSeams()
@@ -100,25 +108,25 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 			}
 			return nil
 		}
-		Expect(ensureWorkspaceDirs(Workspace{DataDir: "data", RootDir: "root"})).To(MatchError(ContainSubstring("create root dir")))
+		Expect(ensureWorkspaceDirs(Workspace{DataDir: "data", RootDir: "root"})).To(MatchError(expected))
 	})
 
 	ginkgo.It("surfaces auth and oauth initializer dependency failures", func() {
-		expectInitAuthError(func(expected error) {
+		Expect(runInitAuthError(func(expected error) {
 			newWikiUserStore = func(string) (*coreauth.UserStore, error) { return nil, expected }
-		})
-		expectInitAuthError(func(expected error) {
+		})).To(MatchError(errFixtureWikiAuthFailed))
+		Expect(runInitAuthError(func(expected error) {
 			newWikiAPIKeyStore = func(string) (*coreauth.APIKeyStore, error) { return nil, expected }
-		})
-		expectInitAuthError(func(expected error) {
+		})).To(MatchError(errFixtureWikiAuthFailed))
+		Expect(runInitAuthError(func(expected error) {
 			wikiInitDefaultAdmin = func(*coreauth.UserService, string) error { return expected }
-		})
-		expectInitAuthError(func(expected error) {
+		})).To(MatchError(errFixtureWikiAuthFailed))
+		Expect(runInitAuthError(func(expected error) {
 			newWikiUserResolver = func(*coreauth.UserService) (*coreauth.UserResolver, error) { return nil, expected }
-		})
-		expectInitAuthError(func(expected error) {
+		})).To(MatchError(errFixtureWikiAuthFailed))
+		Expect(runInitAuthError(func(expected error) {
 			newWikiSessionStore = func(string) (*coreauth.SessionStore, error) { return nil, expected }
-		})
+		})).To(MatchError(errFixtureWikiAuthFailed))
 
 		expected := errors.New("oauth failed")
 		restore := restoreWikiTestSeams()
@@ -147,26 +155,26 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 		}
 		Expect(newInitializerWiki().initCoreServices(&WikiOptions{})).To(MatchError(expected))
 
-		expectInitializerError(func(expected error) error {
+		Expect(runInitializerError(func(expected error) error {
 			newWikiLinksStore = func(string) (*links.LinksStore, error) { return nil, expected }
 			return newInitializerWiki().initLinkService()
-		}, "failed to init links store")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			newWikiTagsStore = func(string) (*tags.TagsStore, error) { return nil, expected }
 			return newInitializerWiki().initTagsService()
-		}, "failed to init tags store")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			newWikiPropertiesStore = func(string) (*properties.PropertiesStore, error) { return nil, expected }
 			return newInitializerWiki().initPropertiesService()
-		}, "failed to init properties store")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			newWikiSQLiteIndex = func(string) (*search.SQLiteIndex, error) { return nil, expected }
 			return newInitializerWiki().initSearch()
-		}, "failed to init search index")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			newWikiBrandingService = func(string) (*branding.BrandingService, error) { return nil, expected }
 			return newInitializerWiki().initBranding()
-		}, "failed to init branding service")
+		})).To(MatchError(errFixtureWikiEdgeFailed))
 	})
 
 	ginkgo.It("logs non-fatal bootstrap and indexing failures", func() {
@@ -188,39 +196,43 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 		wikiSearchIndexAllPages = func(*pagesave.SearchIndexSideEffect) error { return expected }
 		w := newInitializerWiki()
 		Expect(w.initSearch()).To(Succeed())
-		Eventually(func() bool {
-			return w.status.IsFailed()
-		}).WithTimeout(time.Second).Should(BeTrue())
+		Eventually(func(g Gomega) {
+			g.Expect(w.status.Snapshot()).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Active":     BeFalse(),
+				"Failed":     BeNumerically(">", 0),
+				"FinishedAt": Not(BeZero()),
+			})))
+		}).WithTimeout(time.Second).Should(Succeed())
 	})
 
 	ginkgo.It("surfaces rebuild and welcome-page failure paths", func() {
-		expectInitializerError(func(expected error) error {
+		Expect(runInitializerError(func(expected error) error {
 			wikiLinksIndexAllPages = func(*links.LinkService) error { return expected }
 			return newInitializerWiki().rebuildDerivedIndexes()
-		}, "rebuild links")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiRebuildTagsProperties = func(*Wiki) error { return expected }
 			return newInitializerWiki().rebuildDerivedIndexes()
-		}, "rebuild tags/properties")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiSearchIndexAllPages = func(*pagesave.SearchIndexSideEffect) error { return expected }
 			return newInitializerWiki().rebuildDerivedIndexes()
-		}, "rebuild search")
+		})).To(MatchError(errFixtureWikiEdgeFailed))
 
-		expectInitializerError(func(expected error) error {
+		Expect(runInitializerError(func(expected error) error {
 			wikiCreateWelcomePage = func(*Wiki, tree.UserID, *tree.NodeKind) (*wikipages.CreatePageOutput, error) {
 				return nil, expected
 			}
 			return newInitializerWiki().EnsureWelcomePage()
-		}, "edge failed")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiCreateWelcomePage = func(*Wiki, tree.UserID, *tree.NodeKind) (*wikipages.CreatePageOutput, error) {
 				return &wikipages.CreatePageOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("welcome")}}}, nil
 			}
 			wikiGetWelcomePage = func(*tree.TreeService, tree.PageID) (*tree.Page, error) { return nil, expected }
 			return newInitializerWiki().EnsureWelcomePage()
-		}, "edge failed")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiCreateWelcomePage = func(*Wiki, tree.UserID, *tree.NodeKind) (*wikipages.CreatePageOutput, error) {
 				return &wikipages.CreatePageOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("welcome")}}}, nil
 			}
@@ -231,7 +243,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 				return nil, expected
 			}
 			return newInitializerWiki().EnsureWelcomePage()
-		}, "edge failed")
+		})).To(MatchError(errFixtureWikiEdgeFailed))
 	})
 
 	ginkgo.It("covers rebuild tag/property warning branches and close error paths", func() {
@@ -253,31 +265,31 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 		wikiPropsIndexPageContent = func(*properties.PropertiesService, tree.PageID, string) error { return expected }
 		Expect(newInitializerWiki().rebuildTagsAndProperties()).To(Succeed())
 
-		expectInitializerError(func(expected error) error {
+		Expect(runInitializerError(func(expected error) error {
 			wikiTagsClearIndex = func(*tags.TagsService) error { return expected }
 			return newInitializerWiki().rebuildTagsAndProperties()
-		}, "edge failed")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiPropertiesClearIndex = func(*properties.PropertiesService) error { return expected }
 			return newInitializerWiki().rebuildTagsAndProperties()
-		}, "edge failed")
-		expectInitializerError(func(expected error) error {
+		})).To(MatchError(errFixtureWikiEdgeFailed))
+		Expect(runInitializerError(func(expected error) error {
 			wikiTreeWalkNodes = func(*tree.TreeService, func(tree.PageID) error) error { return expected }
 			return newInitializerWiki().rebuildTagsAndProperties()
-		}, "edge failed")
+		})).To(MatchError(errFixtureWikiEdgeFailed))
 
-		expectCloseError(func(expected error) *Wiki {
+		Expect(runCloseError(func(expected error) *Wiki {
 			wikiCloseUserService = func(*coreauth.UserService) error { return expected }
 			return &Wiki{user: &coreauth.UserService{}}
-		})
-		expectCloseError(func(expected error) *Wiki {
+		})).To(MatchError(errFixtureWikiCloseFailed))
+		Expect(runCloseError(func(expected error) *Wiki {
 			wikiCloseAPIKeyService = func(*coreauth.APIKeyService) error { return expected }
 			return &Wiki{apiKeys: &coreauth.APIKeyService{}}
-		})
-		expectCloseError(func(expected error) *Wiki {
+		})).To(MatchError(errFixtureWikiCloseFailed))
+		Expect(runCloseError(func(expected error) *Wiki {
 			wikiCloseSearchIndex = func(*search.SQLiteIndex) error { return expected }
 			return &Wiki{searchIndex: &search.SQLiteIndex{}}
-		})
+		})).To(MatchError(errFixtureWikiCloseFailed))
 
 		restore()
 		restore = restoreWikiTestSeams()
@@ -380,13 +392,12 @@ func restoreWikiTestSeams() func() {
 	}
 }
 
-func expectNewWikiStartupError(configure func(error), mutateOptions ...func(*WikiOptions)) {
+func runNewWikiStartupError(configure func(error), mutateOptions ...func(*WikiOptions)) error {
 	ginkgo.GinkgoHelper()
 
 	restore := restoreWikiTestSeams()
 	defer restore()
-	expected := errors.New("startup failed")
-	configure(expected)
+	configure(errFixtureWikiStartupFailed)
 
 	options := &WikiOptions{
 		StorageDir:          ginkgo.GinkgoT().TempDir(),
@@ -400,7 +411,7 @@ func expectNewWikiStartupError(configure func(error), mutateOptions ...func(*Wik
 	}
 
 	_, err := NewWiki(options)
-	Expect(err).To(MatchError(expected))
+	return err
 }
 
 func installFastNewWikiStartup() {
@@ -422,39 +433,34 @@ func installFastNewWikiStartup() {
 	newWikiEnsureWelcomePage = func(*Wiki) error { return nil }
 }
 
-func expectInitAuthError(configure func(error)) {
+func runInitAuthError(configure func(error)) error {
 	ginkgo.GinkgoHelper()
 
 	restore := restoreWikiTestSeams()
 	defer restore()
-	expected := errors.New("auth failed")
-	configure(expected)
-	err := newInitializerWiki().initAuth(&WikiOptions{
+	configure(errFixtureWikiAuthFailed)
+	return newInitializerWiki().initAuth(&WikiOptions{
 		AdminPassword:       "admin",
 		JWTSecret:           "secret",
 		AccessTokenTimeout:  time.Minute,
 		RefreshTokenTimeout: time.Hour,
 	})
-	Expect(err).To(MatchError(expected))
 }
 
-func expectInitializerError(run func(error) error, message string) {
+func runInitializerError(run func(error) error) error {
 	ginkgo.GinkgoHelper()
 
 	restore := restoreWikiTestSeams()
 	defer restore()
-	expected := errors.New("edge failed")
-	err := run(expected)
-	Expect(err).To(MatchError(ContainSubstring(message)))
+	return run(errFixtureWikiEdgeFailed)
 }
 
-func expectCloseError(build func(error) *Wiki) {
+func runCloseError(build func(error) *Wiki) error {
 	ginkgo.GinkgoHelper()
 
 	restore := restoreWikiTestSeams()
 	defer restore()
-	expected := errors.New("close failed")
-	Expect(build(expected).Close()).To(MatchError(expected))
+	return build(errFixtureWikiCloseFailed).Close()
 }
 
 func newInitializerWiki() *Wiki {

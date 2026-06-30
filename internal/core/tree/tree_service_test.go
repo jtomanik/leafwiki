@@ -319,8 +319,8 @@ leafwiki_title: Current
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when current-schema content remains in default root")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, "schema.json"))
 		mustStat(t, filepath.Join(dataDir, "root", "current.md"))
@@ -358,8 +358,8 @@ leafwiki_title: Legacy
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when legacy content remains in the default root")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -391,8 +391,8 @@ leafwiki_title: Legacy
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when corrupt legacy tree has default-root content")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -431,8 +431,8 @@ leafwiki_title: Legacy
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when configured root lacks legacy markdown")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -481,8 +481,8 @@ leafwiki_title: Orphan
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when legacy default root has extra content")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -527,8 +527,8 @@ leafwiki_title: Other
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when configured root has mismatched legacy markdown")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -575,8 +575,8 @@ old content`, 0o644)
 		if err == nil {
 			t.Fatalf("expected LoadTree to fail safely when configured root has stale legacy markdown")
 		}
-		if !strings.Contains(err.Error(), "legacy content remains in the default root dir") {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.Is(err, ErrLegacyContentRemains) {
+			t.Fatalf("expected legacy content remains error, got: %v", err)
 		}
 		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
 		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
@@ -836,8 +836,8 @@ var _ = ginkgo.Describe("TestTreeService_CreateChild_RollsBackParentAutoConvertW
 		if err == nil {
 			t.Fatalf("expected CreateNode child to fail when child order save fails")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
-			t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
+		if !errors.Is(err, ErrPersistChildOrder) {
+			t.Fatalf("expected child order persistence error, got: %v", err)
 		}
 		if childID != nil {
 			t.Fatalf("expected returned child id to be nil on failure, got %q", childID.String())
@@ -873,8 +873,8 @@ var _ = ginkgo.Describe("TestTreeService_CreateNode_RollsBackWhenTreeSaveFails",
 		if err == nil {
 			t.Fatalf("expected CreateNode to fail when order file write fails")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
-			t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
+		if !errors.Is(err, ErrPersistChildOrder) {
+			t.Fatalf("expected child order persistence error, got: %v", err)
 		}
 		if id != nil {
 			t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
@@ -910,8 +910,8 @@ var _ = ginkgo.Describe("TestTreeService_CreateNode_RollsBackWhenOrderWriteFails
 		if err == nil {
 			t.Fatalf("expected CreateNode to fail when order file write fails")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
-			t.Fatalf("expected CreateNode error to mention child order persistence, got: %v", err)
+		if !errors.Is(err, ErrPersistChildOrder) {
+			t.Fatalf("expected child order persistence error, got: %v", err)
 		}
 		if id != nil {
 			t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
@@ -1813,8 +1813,8 @@ var _ = ginkgo.Describe("TestTreeService_MoveNode_ReturnsErrorAndRollsBackWhenOr
 		if err == nil {
 			t.Fatal("expected MoveNode to fail when child order persistence fails")
 		}
-		if !strings.Contains(err.Error(), "could not persist source child order") {
-			t.Fatalf("unexpected MoveNode error: %v", err)
+		if !errors.Is(err, ErrPersistSourceChildOrder) {
+			t.Fatalf("expected source child order persistence error, got: %v", err)
 		}
 
 		mustStat(t, filepath.Join(tmpDir, "root", "move.md"))
@@ -2005,8 +2005,8 @@ var _ = ginkgo.Describe("TestTreeService_SortPages_RollsBackWhenOrderPersistence
 		if err == nil {
 			t.Fatalf("expected SortPages to fail when order persistence fails")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
-			t.Fatalf("expected SortPages error to mention child order persistence, got: %v", err)
+		if !errors.Is(err, ErrPersistChildOrder) {
+			t.Fatalf("expected child order persistence error, got: %v", err)
 		}
 
 		root := svc.GetTree()
@@ -3899,8 +3899,8 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV5_ReturnsErrorWhenO
 		if err == nil {
 			t.Fatalf("expected migration error when order file cannot be written")
 		}
-		if !strings.Contains(err.Error(), "persist child order") {
-			t.Fatalf("expected migration error to mention child order persistence, got: %v", err)
+		if !errors.Is(err, treemigration.ErrPersistChildOrder) {
+			t.Fatalf("expected migration child order persistence error, got: %v", err)
 		}
 
 	})
@@ -3964,8 +3964,8 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_ReturnsErrorWhenS
 		if err == nil {
 			t.Fatalf("expected migration error when section index cannot be written")
 		}
-		if !strings.Contains(err.Error(), "materialize section index") {
-			t.Fatalf("expected migration error to mention section index materialization, got: %v", err)
+		if !errors.Is(err, treemigration.ErrMaterializeSectionIndex) {
+			t.Fatalf("expected migration section index materialization error, got: %v", err)
 		}
 
 	})

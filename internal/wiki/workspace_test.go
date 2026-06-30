@@ -1,9 +1,9 @@
 package wiki
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 )
@@ -26,7 +26,7 @@ var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirContainingDataDir", func(
 	if err == nil {
 		t.Fatalf("expected root dir containing data dir to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
+	if !errors.Is(err, ErrWorkspaceRootDirContainsDataDir) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 })
@@ -40,7 +40,7 @@ var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirInsideReservedDataDirStat
 	if err == nil {
 		t.Fatalf("expected root dir inside reserved app state to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
+	if !errors.Is(err, ErrWorkspaceRootDirInsideDataDirAppState) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 })
@@ -55,7 +55,7 @@ var _ = ginkgo.DescribeTable("TestValidateWorkspace_RejectsRootDirInsideFederate
 		if err == nil {
 			t.Fatalf("expected root dir inside %s control state to be rejected", reserved)
 		}
-		if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
+		if !errors.Is(err, ErrWorkspaceRootDirInsideDataDirAppState) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	},
@@ -80,7 +80,7 @@ var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirSymlinkContainingDataDir"
 	if err == nil {
 		t.Fatalf("expected symlinked root containing data dir to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must not contain data dir") {
+	if !errors.Is(err, ErrWorkspaceRootDirContainsDataDir) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 })
@@ -102,7 +102,7 @@ var _ = ginkgo.It("TestValidateWorkspace_RejectsRootDirSymlinkInsideReservedData
 	if err == nil {
 		t.Fatalf("expected symlinked root inside app state to be rejected")
 	}
-	if !strings.Contains(err.Error(), "root dir must not be inside data dir app state") {
+	if !errors.Is(err, ErrWorkspaceRootDirInsideDataDirAppState) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 })

@@ -2,6 +2,7 @@ package wiki
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -83,6 +84,8 @@ const SYSTEM_USER_ID = "system"
 
 const workspaceSyncStartupPhaseOpenService = "open_service"
 
+var ErrWikiModeConflict = errors.New("workspace-only and control-plane-only modes cannot be combined")
+
 var (
 	newWikiEnsureWorkspaceDirs = ensureWorkspaceDirs
 	newWikiInitAuth            = func(w *Wiki, options *WikiOptions) error { return w.initAuth(options) }
@@ -163,7 +166,7 @@ type WikiOptions struct {
 
 func NewWiki(options *WikiOptions) (*Wiki, error) {
 	if options.WorkspaceOnly && options.ControlPlaneOnly {
-		return nil, fmt.Errorf("workspace-only and control-plane-only modes cannot be combined")
+		return nil, ErrWikiModeConflict
 	}
 	workspace := resolveWorkspaceOptions(options)
 	if err := ValidateWorkspace(workspace); err != nil {
