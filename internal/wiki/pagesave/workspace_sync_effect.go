@@ -40,7 +40,7 @@ func (e *WorkspaceSyncSideEffect) ApplyRequired(event PageSaveEvent) error {
 	if e.svc == nil {
 		return nil
 	}
-	actorID := workspacesync.NewActorIDUnchecked(event.UserID.ActorID())
+	actorID := workspacesync.ActorIDFromUserID(event.UserID)
 	if actorID == "" {
 		actorID = workspacesync.PublicEditorActor().ID
 	}
