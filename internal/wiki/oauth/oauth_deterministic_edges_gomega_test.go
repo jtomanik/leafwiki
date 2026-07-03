@@ -20,17 +20,19 @@ var _ = Describe("OAuth deterministic service behavior", func() {
 		Expect(store.setClient(fixedOAuthClient())).To(Succeed())
 
 		redirectURI := "http://127.0.0.1:49152/callback"
-		_, ok := fixedClientRedirectFromContext(ctx, ClientID)
-		Expect(ok).To(BeFalse())
-		_, ok = fixedClientRedirectFromContext(context.WithValue(ctx, fixedClientRedirectContextKey{}, redirectURI), "other-client")
-		Expect(ok).To(BeFalse())
+		client, err := store.GetClient(ctx, ClientID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(client.GetRedirectURIs()).To(BeEmpty())
+
+		otherClient := fixedOAuthClient()
+		otherClient.id = "other-client"
+		Expect(store.setClient(otherClient)).To(Succeed())
+		client, err = store.GetClient(context.WithValue(ctx, fixedClientRedirectContextKey{}, redirectURI), "other-client")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(client.GetRedirectURIs()).To(BeEmpty())
 
 		fixedCtx := context.WithValue(ctx, fixedClientRedirectContextKey{}, redirectURI)
-		redirect, ok := fixedClientRedirectFromContext(fixedCtx, ClientID)
-		Expect(ok).To(BeTrue())
-		Expect(redirect).To(Equal(redirectURI))
-
-		client, err := store.GetClient(fixedCtx, ClientID)
+		client, err = store.GetClient(fixedCtx, ClientID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(client.GetRedirectURIs()).To(Equal([]string{redirectURI}))
 

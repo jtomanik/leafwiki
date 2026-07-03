@@ -174,9 +174,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 			ClientID string `json:"client_id"`
 		}
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		registered, ok := service.client(body.ClientID)
-		Expect(ok).To(BeTrue())
-		Expect(registered.ClientName).To(Equal("Native Client"))
+		Expect(service.clients).To(HaveKeyWithValue(body.ClientID, HaveField("ClientName", Equal("Native Client"))))
 		Expect(body.ClientID).To(HavePrefix("leafwiki-dcr-"))
 	})
 
@@ -192,24 +190,20 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 			Resource:    "http://leafwiki.test/mcp",
 		}
 
-		Expect(service.consumeApproval("", userID, "request")).To(BeFalse())
-		_, ok := service.approvalDetails("", userID)
-		Expect(ok).To(BeFalse())
+		Expect(consumeOAuthApproval(service, "", userID, "request")).To(MatchError(errOAuthApprovalRejected))
+		Expect(lookupApprovalDetails(service, "", userID)).To(haveNoApprovalDetails())
 
 		token, err := service.issueApproval(userID, "request", details)
 		Expect(err).NotTo(HaveOccurred())
-		gotDetails, ok := service.approvalDetails(" "+token+" ", userID)
-		Expect(ok).To(BeTrue())
-		Expect(gotDetails).To(Equal(details))
-		_, ok = service.approvalDetails(token, coreauth.UserIDFromString("other-user"))
-		Expect(ok).To(BeFalse())
-		Expect(service.consumeApproval(token, coreauth.UserIDFromString("other-user"), "request")).To(BeFalse())
-		Expect(service.consumeApproval(token, userID, "request")).To(BeFalse())
+		Expect(lookupApprovalDetails(service, " "+token+" ", userID)).To(haveApprovalDetails(details))
+		Expect(lookupApprovalDetails(service, token, coreauth.UserIDFromString("other-user"))).To(haveNoApprovalDetails())
+		Expect(consumeOAuthApproval(service, token, coreauth.UserIDFromString("other-user"), "request")).To(MatchError(errOAuthApprovalRejected))
+		Expect(consumeOAuthApproval(service, token, userID, "request")).To(MatchError(errOAuthApprovalRejected))
 
 		token, err = service.issueApproval(userID, "request", details)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(service.consumeApproval(token, userID, "request")).To(BeTrue())
-		Expect(service.consumeApproval(token, userID, "request")).To(BeFalse())
+		Expect(consumeOAuthApproval(service, token, userID, "request")).To(Succeed())
+		Expect(consumeOAuthApproval(service, token, userID, "request")).To(MatchError(errOAuthApprovalRejected))
 
 		service.approvals["expired"] = oauthApproval{
 			UserID:     userID,
@@ -217,8 +211,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 			Details:    details,
 			ExpiresAt:  time.Now().Add(-time.Minute),
 		}
-		_, ok = service.approvalDetails("expired", userID)
-		Expect(ok).To(BeFalse())
+		Expect(lookupApprovalDetails(service, "expired", userID)).To(haveNoApprovalDetails())
 
 		values := validAuthorizeRequestValues("http://127.0.0.1:49152/callback")
 		values.Set("resource", "http://leafwiki.test/mcp")
@@ -270,8 +263,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		_, err = service.VerifyBearerToken(context.Background(), "not-a-token", httptest.NewRequest(http.MethodGet, "/mcp", nil))
 		Expect(err).To(HaveOccurred())
 
-		_, ok := routes.service.client("missing-client")
-		Expect(ok).To(BeFalse())
+		Expect(routes.service.clients).NotTo(HaveKey("missing-client"))
 	})
 
 	ginkgo.It("validates token subjects and rejects malformed token requests", func() {
@@ -394,6 +386,44 @@ func performOAuthJSONRequest(handler gin.HandlerFunc, method, target string, bod
 func haveOAuthApprovalPageData(fields gstruct.Fields) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+var (
+	errOAuthApprovalDetailsUnavailable = errors.New("oauth approval details unavailable")
+	errOAuthApprovalRejected           = errors.New("oauth approval rejected")
+)
+
+type oauthApprovalLookupResult struct {
+	Details approvalPageData
+	Err     error
+}
+
+func lookupApprovalDetails(service *Service, token string, userID coreauth.UserID) oauthApprovalLookupResult {
+	details, available := service.approvalDetails(token, userID)
+	if !available {
+		return oauthApprovalLookupResult{Err: errOAuthApprovalDetailsUnavailable}
+	}
+	return oauthApprovalLookupResult{Details: details}
+}
+
+func haveApprovalDetails(details approvalPageData) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Details": Equal(details),
+		"Err":     Succeed(),
+	})
+}
+
+func haveNoApprovalDetails() types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Err": MatchError(errOAuthApprovalDetailsUnavailable),
+	})
+}
+
+func consumeOAuthApproval(service *Service, token string, userID coreauth.UserID, requestKey string) error {
+	if service.consumeApproval(token, userID, requestKey) {
+		return nil
+	}
+	return errOAuthApprovalRejected
 }
 
 func oauthJSONBody(v interface{}) []byte {
