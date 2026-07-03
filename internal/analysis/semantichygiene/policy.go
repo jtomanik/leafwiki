@@ -44,6 +44,7 @@ const (
 	ruleGinkgoTestName                     ruleID = "ginkgo.test-name"
 	ruleGinkgoCoverageName                 ruleID = "ginkgo.coverage-name"
 	ruleGinkgoTestingTInSpec               ruleID = "ginkgo.testing-t-in-spec"
+	ruleGinkgoFailInSpec                   ruleID = "ginkgo.fail-in-spec"
 	ruleGinkgoLinterRawIgnore              ruleID = "ginkgo-linter.raw-ignore"
 	ruleGomegaErrorString                  ruleID = "gomega.err-error-string"
 	ruleGomegaRawStringMatchError          ruleID = "gomega.raw-string-match-error"
@@ -136,6 +137,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoTestName:                     hardRule(ruleGinkgoTestName),
 	ruleGinkgoCoverageName:                 hardRule(ruleGinkgoCoverageName),
 	ruleGinkgoTestingTInSpec:               hardRule(ruleGinkgoTestingTInSpec),
+	ruleGinkgoFailInSpec:                   hardRule(ruleGinkgoFailInSpec),
 	ruleGinkgoLinterRawIgnore:              hardRule(ruleGinkgoLinterRawIgnore),
 	ruleGomegaErrorString:                  hardRule(ruleGomegaErrorString),
 	ruleGomegaRawStringMatchError:          hardRule(ruleGomegaRawStringMatchError),

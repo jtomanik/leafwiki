@@ -16,6 +16,7 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	checkGinkgoTestName(ctx, call, name)
 	checkGinkgoCoverageName(ctx, call, name)
 	checkGinkgoTestingTInSpec(ctx, call, name)
+	checkGinkgoFailInSpec(ctx, call, name)
 	switch {
 	case isFocusedGinkgoNodeName(name):
 		ctx.report(ruleGinkgoFocus, call, ginkgoFocusDiagnostic())
@@ -166,6 +167,35 @@ func checkGinkgoTestingTInSpec(ctx *analysisContext, call *ast.CallExpr, name st
 		ctx.report(ruleGinkgoTestingTInSpec, candidate, ginkgoTestingTInSpecDiagnostic(name))
 		return true
 	})
+}
+
+func checkGinkgoFailInSpec(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoSubjectBodyNodeName(name) || !isGinkgoDSLCall(ctx, call) {
+		return
+	}
+	body, ok := firstFuncLitArg(call)
+	if !ok {
+		return
+	}
+	ast.Inspect(body.Body, func(node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+		if nested, ok := node.(*ast.FuncLit); ok && nested != body {
+			return false
+		}
+		candidate, ok := node.(*ast.CallExpr)
+		if !ok || !isGinkgoFailCall(ctx, candidate) {
+			return true
+		}
+		ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoFailInSpecDiagnostic())
+		return true
+	})
+}
+
+func isGinkgoFailCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	packagePath, name := calleePackageAndName(ctx, call)
+	return packagePath == "github.com/onsi/ginkgo/v2" && name == "Fail"
 }
 
 func ginkgoTestingTAssertion(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
