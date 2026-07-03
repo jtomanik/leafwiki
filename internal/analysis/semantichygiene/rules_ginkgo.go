@@ -117,7 +117,8 @@ func ginkgoDescriptionUsesCoverageBucket(description string) bool {
 
 func isCoverageBucketVerb(field string) bool {
 	switch field {
-	case "cover", "covers", "covered", "covering":
+	case "cover", "covers", "covered", "covering",
+		"exercise", "exercises", "exercised", "exercising":
 		return true
 	default:
 		return false
