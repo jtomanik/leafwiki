@@ -920,14 +920,22 @@ func isBooleanProducingBinaryOp(op token.Token) bool {
 }
 
 func assertionUsesMapIndexEqual(ctx *analysisContext, assertion gomegaAssertion) bool {
-	if !isMatcherNamed(assertion.matcher, "Equal") {
-		return false
-	}
-	index, ok := unparenExpr(assertion.actual).(*ast.IndexExpr)
+	index, ok := mapIndexAssertionActual(assertion.actual)
 	if !ok {
 		return false
 	}
 	return typeIsMap(ctx.pass.TypesInfo.TypeOf(index.X))
+}
+
+func mapIndexAssertionActual(expr ast.Expr) (*ast.IndexExpr, bool) {
+	switch actual := unparenExpr(expr).(type) {
+	case *ast.IndexExpr:
+		return actual, true
+	case *ast.TypeAssertExpr:
+		return mapIndexAssertionActual(actual.X)
+	default:
+		return nil, false
+	}
 }
 
 func typeIsMap(typ types.Type) bool {
