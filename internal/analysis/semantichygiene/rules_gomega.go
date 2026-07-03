@@ -136,6 +136,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesNonEmptyCollection(ctx, assertion) {
 		ctx.report(ruleGomegaNonEmptyCollection, assertion.matcher, gomegaNonEmptyCollectionDiagnostic())
 	}
+	if assertionUsesSemanticScalarNotEmpty(ctx, assertion) {
+		ctx.report(ruleGomegaSemanticScalarNotEmpty, assertion.matcher, gomegaSemanticScalarNotEmptyDiagnostic())
+	}
 	if assertionUsesRepeatedFieldAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaRepeatedFieldAssertions, assertion.actual, gomegaRepeatedFieldAssertionDiagnostic())
 	}
@@ -783,6 +786,74 @@ func assertionUsesNonEmptyCollection(ctx *analysisContext, assertion gomegaAsser
 		return isEmptyMatcher(assertion.matcher)
 	}
 	return isNegatedEmptyMatcher(assertion.matcher)
+}
+
+func assertionUsesSemanticScalarNotEmpty(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if assertionActualIsCollection(ctx, assertion.actual) {
+		return false
+	}
+	if !assertionActualIsSemanticScalar(assertion.actual) {
+		return false
+	}
+	if isNegativeAssertionMethod(assertion.method) {
+		return isEmptyMatcher(assertion.matcher)
+	}
+	return isNegatedEmptyMatcher(assertion.matcher)
+}
+
+func assertionActualIsSemanticScalar(expr ast.Expr) bool {
+	names := semanticScalarExprNames(expr)
+	if len(names) == 0 {
+		return false
+	}
+	hasSelectorContext := len(names) > 1
+	for i, name := range names {
+		context := semanticScalarContext(names, i)
+		if typ, ok := semanticTypeForFieldName(name, context); ok && typ != "" {
+			return true
+		}
+		if canonicalName(name) == "id" {
+			if typ, ok := semanticTypeForBareIDContext(context); ok && typ != "" {
+				return true
+			}
+		}
+		if canonicalName(name) == "hash" {
+			if typ, ok := semanticTypeForBareHashContext(context); ok && typ != "" {
+				return true
+			}
+		}
+		if hasSelectorContext && semanticScalarTokenName(name) {
+			return true
+		}
+		if semanticName(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func semanticScalarExprNames(expr ast.Expr) []string {
+	switch e := unparenExpr(expr).(type) {
+	case *ast.Ident:
+		return []string{e.Name}
+	case *ast.SelectorExpr:
+		names := semanticScalarExprNames(e.X)
+		return append(names, e.Sel.Name)
+	default:
+		return nil
+	}
+}
+
+func semanticScalarContext(names []string, index int) string {
+	if index <= 0 || index > len(names) {
+		return ""
+	}
+	return strings.Join(names[:index], "")
+}
+
+func semanticScalarTokenName(name string) bool {
+	canonical := canonicalName(name)
+	return canonical != "token" && strings.HasSuffix(canonical, "token")
 }
 
 func assertionActualIsCollection(ctx *analysisContext, expr ast.Expr) bool {

@@ -401,3 +401,7 @@ func gomegaCollectionIndexAssertionDiagnostic() string {
 func gomegaNonEmptyCollectionDiagnostic() string {
 	return "assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())"
 }
+
+func gomegaSemanticScalarNotEmptyDiagnostic() string {
+	return "assert semantic scalar value meaning instead of only checking for non-empty text"
+}

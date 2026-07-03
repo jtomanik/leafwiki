@@ -87,6 +87,7 @@ const (
 	ruleGomegaRepeatedFieldAssertions      ruleID = "gomega.repeated-field-assertions"
 	ruleGomegaCollectionIndexAssertion     ruleID = "gomega.collection-index-assertion"
 	ruleGomegaNonEmptyCollection           ruleID = "gomega.non-empty-collection"
+	ruleGomegaSemanticScalarNotEmpty       ruleID = "gomega.semantic-scalar-not-empty"
 	ruleGomegaEqualEmpty                   ruleID = "gomega.equal-empty"
 	ruleGomegaEqualZero                    ruleID = "gomega.equal-zero"
 	ruleGomegaNumericEquivalent            ruleID = "gomega.numeric-equivalent"
@@ -191,6 +192,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaRepeatedFieldAssertions:      waivableRule(ruleGomegaRepeatedFieldAssertions, waiverScopeCall),
 	ruleGomegaCollectionIndexAssertion:     waivableRule(ruleGomegaCollectionIndexAssertion, waiverScopeCall),
 	ruleGomegaNonEmptyCollection:           waivableRule(ruleGomegaNonEmptyCollection, waiverScopeCall),
+	ruleGomegaSemanticScalarNotEmpty:       waivableRule(ruleGomegaSemanticScalarNotEmpty, waiverScopeCall),
 	ruleGomegaEqualEmpty:                   waivableRule(ruleGomegaEqualEmpty, waiverScopeCall),
 	ruleGomegaEqualZero:                    waivableRule(ruleGomegaEqualZero, waiverScopeCall),
 	ruleGomegaNumericEquivalent:            waivableRule(ruleGomegaNumericEquivalent, waiverScopeCall),
@@ -216,6 +218,7 @@ var waiverBudgetsByRule = map[ruleID]int{
 	ruleGomegaRepeatedFieldAssertions:  3,
 	ruleGomegaCollectionIndexAssertion: 3,
 	ruleGomegaNonEmptyCollection:       3,
+	ruleGomegaSemanticScalarNotEmpty:   3,
 	ruleGomegaEqualEmpty:               3,
 	ruleGomegaEqualZero:                3,
 	ruleGomegaNumericEquivalent:        3,

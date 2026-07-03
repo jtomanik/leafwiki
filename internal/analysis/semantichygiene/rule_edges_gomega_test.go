@@ -1416,7 +1416,7 @@ func TestRouterResponse() {
 			))
 		})
 
-		ginkgo.It("reports weak non-empty assertions on collections without flagging scalar values", func() {
+		ginkgo.It("reports weak non-empty assertions on collections and semantic scalar fields", func() {
 			h := newRuleHarness("/repo/internal/links/link_refactor_test.go", "github.com/perber/wiki/internal/links", `package links
 
 type assertion struct{}
@@ -1431,8 +1431,12 @@ func TestLinkWarnings() {
 	Expect(warnings).NotTo(BeEmpty())
 	byPath := map[string]int{"/docs": 1}
 	Expect(byPath).To(Not(BeEmpty()))
-	token := "generated-token"
-	Expect(token).NotTo(BeEmpty())
+	contextOutput := struct{ ContextToken string }{}
+	userRecord := struct{ User struct{ ID string } }{}
+	ordinary := struct{ Title string }{}
+	Expect(contextOutput.ContextToken).NotTo(BeEmpty())
+	Expect(userRecord.User.ID).To(Not(BeEmpty()))
+	Expect(ordinary.Title).NotTo(BeEmpty())
 }
 `)
 			for _, call := range append(h.findCalls("To"), h.findCalls("NotTo")...) {
@@ -1442,6 +1446,8 @@ func TestLinkWarnings() {
 			Expect(h.diagnosticMessages()).To(ConsistOf(
 				"semh:gomega.non-empty-collection: assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())",
 				"semh:gomega.non-empty-collection: assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())",
+				"semh:gomega.semantic-scalar-not-empty: assert semantic scalar value meaning instead of only checking for non-empty text",
+				"semh:gomega.semantic-scalar-not-empty: assert semantic scalar value meaning instead of only checking for non-empty text",
 			))
 		})
 
