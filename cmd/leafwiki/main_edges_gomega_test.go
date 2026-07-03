@@ -240,24 +240,24 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	})
 
 	ginkgo.It("parses agent-hook commands without treating flag values as providers", func() {
-		provider, ok := agentHookProviderFromArgs([]string{"--config", "leafwiki.yml"})
-		Expect(ok).To(BeFalse())
+		provider, err := agentHookProviderFromArgsResult([]string{"--config", "leafwiki.yml"})
+		Expect(err).To(MatchError(errAgentHookProviderAbsent))
 		Expect(provider).To(BeEmpty())
 
-		provider, ok = agentHookProviderFromArgs([]string{"--config", "leafwiki.yml", "agent-hook", "cursor"})
-		Expect(ok).To(BeTrue())
+		provider, err = agentHookProviderFromArgsResult([]string{"--config", "leafwiki.yml", "agent-hook", "cursor"})
+		Expect(err).To(Succeed())
 		Expect(provider).To(Equal(agenthooks.ProviderCursor))
 
-		provider, ok = agentHookProviderFromArgs([]string{"agent-hook"})
-		Expect(ok).To(BeTrue())
+		provider, err = agentHookProviderFromArgsResult([]string{"agent-hook"})
+		Expect(err).To(Succeed())
 		Expect(provider).To(Equal(agenthooks.ProviderUnknown))
 
-		provider, ok = agentHookProviderFromRawArgs([]string{"--config", "agent-hook"})
-		Expect(ok).To(BeFalse())
+		provider, err = agentHookProviderFromRawArgsResult([]string{"--config", "agent-hook"})
+		Expect(err).To(MatchError(errAgentHookProviderAbsent))
 		Expect(provider).To(BeEmpty())
 
-		provider, ok = agentHookProviderFromRawArgs([]string{"--config=leafwiki.yml", "agent-hook"})
-		Expect(ok).To(BeTrue())
+		provider, err = agentHookProviderFromRawArgsResult([]string{"--config=leafwiki.yml", "agent-hook"})
+		Expect(err).To(Succeed())
 		Expect(provider).To(Equal(agenthooks.ProviderUnknown))
 	})
 
@@ -299,7 +299,6 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	})
 
 	ginkgo.It("parses scalar config helpers without invoking failure exits", func() {
-
 		Expect(resolveInt("workers", 7, map[string]bool{"workers": true}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(7))
 		leafwikiSetenv("LEAFWIKI_TEST_WORKERS", "42")
 		Expect(resolveInt("workers", 7, map[string]bool{}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(42))
@@ -307,22 +306,22 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(resolveInt("workers", 7, map[string]bool{}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(3))
 
 		Expect(parseByteSize("1MiB", "upload")).To(Equal(int64(1024 * 1024)))
-		parsed, ok := parseBool(" ON ")
+		parsed, err := parseBoolResult(" ON ")
+		Expect(err).To(Succeed())
 		Expect(parsed).To(BeTrue())
-		Expect(ok).To(BeTrue())
-		parsed, ok = parseBool(" off ")
+		parsed, err = parseBoolResult(" off ")
+		Expect(err).To(Succeed())
 		Expect(parsed).To(BeFalse())
-		Expect(ok).To(BeTrue())
-		parsed, ok = parseBool("maybe")
+		parsed, err = parseBoolResult("maybe")
+		Expect(err).To(MatchError(errBoolValueRejected))
 		Expect(parsed).To(BeFalse())
-		Expect(ok).To(BeFalse())
 
-		duration, ok := parseDuration("1500ms")
-		Expect(ok).To(BeTrue())
+		duration, err := parseDurationResult("1500ms")
+		Expect(err).To(Succeed())
 		Expect(duration).To(Equal(1500 * time.Millisecond))
-		duration, ok = parseDuration("not-a-duration")
+		duration, err = parseDurationResult("not-a-duration")
+		Expect(err).To(MatchError(errDurationValueRejected))
 		Expect(duration).To(BeZero())
-		Expect(ok).To(BeFalse())
 	})
 
 	ginkgo.It("fails fast for invalid scalar environment and byte-size values", func() {
@@ -696,13 +695,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}),
 		}))
 
-		rel, ok := localRelativePath(dataDir, filepath.Join(dataDir, "nested", "leafwiki.log"))
-		Expect(ok).To(BeTrue())
+		rel, err := localRelativePathResult(dataDir, filepath.Join(dataDir, "nested", "leafwiki.log"))
+		Expect(err).To(Succeed())
 		Expect(rel).To(Equal(filepath.Join("nested", "leafwiki.log")))
-		_, ok = localRelativePath(dataDir, dataDir)
-		Expect(ok).To(BeFalse())
-		_, ok = localRelativePath(dataDir, filepath.Dir(dataDir))
-		Expect(ok).To(BeFalse())
+		_, err = localRelativePathResult(dataDir, dataDir)
+		Expect(err).To(MatchError(errRelativePathOutsideBase))
+		_, err = localRelativePathResult(dataDir, filepath.Dir(dataDir))
+		Expect(err).To(MatchError(errRelativePathOutsideBase))
 
 		canonicalDataDir := filepath.Join(leafwikiTempDir(), "canonical")
 		Expect(daemonLogFileForConfig(leafwikiRuntimeConfig{}, canonicalDataDir)).To(BeEmpty())
@@ -719,11 +718,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		Expect(roleURL(roles, projectdaemon.RoleFrontd)).To(Equal("http://127.0.0.1:8080"))
 		Expect(roleURL(roles, projectdaemon.RoleWorkspaced)).To(BeEmpty())
-		role, ok := findRuntimeRoleHealth(roles, projectdaemon.RoleFrontd)
-		Expect(ok).To(BeTrue())
+		role, err := runtimeRoleHealthResult(roles, projectdaemon.RoleFrontd)
+		Expect(err).To(Succeed())
 		Expect(role.Name).To(Equal(projectdaemon.RoleFrontd))
-		_, ok = findRuntimeRoleHealth(roles, projectdaemon.RoleWorkspaced)
-		Expect(ok).To(BeFalse())
+		_, err = runtimeRoleHealthResult(roles, projectdaemon.RoleWorkspaced)
+		Expect(err).To(MatchError(errRuntimeRoleAbsent))
 
 		Expect(httpBearerToken(nil)).To(BeEmpty())
 		req := httptest.NewRequest(http.MethodGet, "http://leafwiki.local/mcp", nil)
@@ -890,28 +889,32 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(waitForFirstProjectDaemonActivity(cancelCtx, projectdaemon.NewSessionRegistry(time.Millisecond, nil), projectdaemon.NewAgentPresenceRegistry(time.Millisecond, nil), time.Millisecond)).To(MatchError(context.Canceled))
 
 		idleCtx, idleCancelContext := context.WithCancel(context.Background())
-		idleCanceled := false
 		idleCancel := func() {
-			idleCanceled = true
 			idleCancelContext()
 		}
 		idleCallback := idleShutdownCallback(idleCtx, idleCancel, time.Hour, nil)
 		idleCallback(1)
 		idleCallback(1)
-		Expect(idleCanceled).To(BeFalse())
+		Consistently(idleCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
 
 		seenSessions := projectdaemon.NewSessionRegistry(time.Millisecond, nil)
 		_, err = seenSessions.Register()
 		Expect(err).NotTo(HaveOccurred())
-		cancelInvoked := false
-		cancelIfNoSessionAfterStartupGrace(context.Background(), func() { cancelInvoked = true }, seenSessions, 0)
-		Expect(cancelInvoked).To(BeFalse())
-		cancelIfNoActivityAfterStartupGrace(context.Background(), func() { cancelInvoked = true }, seenSessions, projectdaemon.NewAgentPresenceRegistry(time.Millisecond, nil), 0)
-		Expect(cancelInvoked).To(BeFalse())
-		cancelIfNoSessionAfterStartupGrace(cancelCtx, func() { cancelInvoked = true }, projectdaemon.NewSessionRegistry(time.Millisecond, nil), time.Hour)
-		Expect(cancelInvoked).To(BeFalse())
-		cancelIfNoActivityAfterStartupGrace(cancelCtx, func() { cancelInvoked = true }, projectdaemon.NewSessionRegistry(time.Millisecond, nil), projectdaemon.NewAgentPresenceRegistry(time.Millisecond, nil), time.Hour)
-		Expect(cancelInvoked).To(BeFalse())
+		noSessionCtx, noSessionCancel := context.WithCancel(context.Background())
+		cancelIfNoSessionAfterStartupGrace(context.Background(), noSessionCancel, seenSessions, 0)
+		Consistently(noSessionCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
+
+		noActivityCtx, noActivityCancel := context.WithCancel(context.Background())
+		cancelIfNoActivityAfterStartupGrace(context.Background(), noActivityCancel, seenSessions, projectdaemon.NewAgentPresenceRegistry(time.Millisecond, nil), 0)
+		Consistently(noActivityCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
+
+		parentSessionCtx, parentSessionCancel := context.WithCancel(context.Background())
+		cancelIfNoSessionAfterStartupGrace(cancelCtx, parentSessionCancel, projectdaemon.NewSessionRegistry(time.Millisecond, nil), time.Hour)
+		Consistently(parentSessionCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
+
+		parentActivityCtx, parentActivityCancel := context.WithCancel(context.Background())
+		cancelIfNoActivityAfterStartupGrace(cancelCtx, parentActivityCancel, projectdaemon.NewSessionRegistry(time.Millisecond, nil), projectdaemon.NewAgentPresenceRegistry(time.Millisecond, nil), time.Hour)
+		Consistently(parentActivityCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
 
 		runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 		runtimeCancel()
@@ -1336,9 +1339,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		layout := wikid.GlobalLayout(dataDir)
 		homeCfg := projectdaemon.Config{DataDir: layout.HomeDir, RootDir: layout.HomeRootDir}
-		workspace, ok, err := registeredFederatedWorkspaceForRequest(layout, homeCfg)
+		workspace, err := registeredFederatedWorkspaceForRequestResult(layout, homeCfg)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(workspace.ID).To(Equal(wikid.HomeWorkspaceID))
 
 		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
@@ -1346,11 +1348,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(isHome).To(BeTrue())
 		Expect(registered.ID).To(Equal(wikid.HomeWorkspaceID))
-		grant, grantOK, err := federatedStdioAPIKeyWorkspaceGrant(layout, leafwikiRuntimeConfig{}, "workspace-a")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(grantOK).To(BeFalse())
+		grant, err := federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{}, "workspace-a")
+		Expect(err).To(MatchError(errWorkspaceGrantAbsent))
 		Expect(grant).To(Equal(wikid.Grant{}))
-		_, _, err = federatedStdioAPIKeyWorkspaceGrant(layout, leafwikiRuntimeConfig{APIKey: "lwk_key_missing"}, "workspace-a")
+		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: "lwk_key_missing"}, "workspace-a")
 		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 		unsupportedRoleAuthDir := authStorageDirForRuntime(layout.HomeDir)
 		Expect(os.MkdirAll(unsupportedRoleAuthDir, 0o755)).To(Succeed())
@@ -1365,7 +1366,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(apiKeyService.Close)
 		unsupportedRoleKey, err := apiKeyService.CreateAPIKey(coreauth.UserIDFromString(unsupportedRoleUser.ID), "unsupported role", coreauth.UserIDFromString(unsupportedRoleUser.ID))
 		Expect(err).NotTo(HaveOccurred())
-		_, _, err = federatedStdioAPIKeyWorkspaceGrant(layout, leafwikiRuntimeConfig{APIKey: unsupportedRoleKey.Secret}, "workspace-a")
+		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: unsupportedRoleKey.Secret}, "workspace-a")
 		Expect(err).To(MatchError(errNativeStdioWorkspaceAccessDenied))
 
 		workspaceData := filepath.Join(leafwikiTempDir(), "workspace-data")
@@ -1376,9 +1377,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			RootDir:     workspaceRoot,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		workspace, ok, err = registeredFederatedWorkspaceForRequest(layout, projectdaemon.Config{DataDir: registered.DataDir, RootDir: registered.RootDir})
+		workspace, err = registeredFederatedWorkspaceForRequestResult(layout, projectdaemon.Config{DataDir: registered.DataDir, RootDir: registered.RootDir})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(workspace.ID).To(Equal(registered.ID))
 
 		descriptorPath := filepath.Join(leafwikiTempDir(), "descriptor.json")
@@ -1419,8 +1419,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		Expect(projectDaemonDescriptorHealthy(context.Background(), healthyDesc)).To(BeFalse())
 		healthyDesc.PrivateMCPURL = "https://example.com/mcp"
-		_, err = projectDaemonDescriptorHealthy(context.Background(), healthyDesc)
+		healthy, err = projectDaemonDescriptorHealthy(context.Background(), healthyDesc)
 		Expect(err).To(MatchError(errPrivateMCPURLUntrusted))
+		Expect(healthy).To(BeFalse())
 	})
 
 	ginkgo.It("derives wikid actor context from remote-user requests", func() {
@@ -1505,36 +1506,31 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(seedRuntimeHomeGrants(grants, leafwikiRuntimeConfig{DisableAuth: true, PublicAccess: true})).To(Succeed())
 
 		remoteReq := httptest.NewRequest(http.MethodGet, "/", nil)
-		_, _, _, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "bad-cidr"})
+		_, _, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "bad-cidr"})
 		Expect(err).To(MatchError(authmw.ErrInvalidTrustedProxy))
 		remoteReq.RemoteAddr = "192.0.2.10:1111"
-		user, method, ok, err := frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
+		user, method, err := frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
+		Expect(err).To(MatchError(errFrontdRemoteUserAbsent))
 		Expect(user).To(BeNil())
 		Expect(method).To(BeEmpty())
 
 		remoteReq.RemoteAddr = "127.0.0.1:1111"
-		user, method, ok, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
+		user, method, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
+		Expect(err).To(MatchError(errFrontdRemoteUserAbsent))
 		Expect(user).To(BeNil())
 		Expect(method).To(BeEmpty())
 
 		remoteReq.Header.Set("Remote-User", editor.Username)
-		_, _, ok, err = frontdRemoteUser(remoteReq, &wiki.Wiki{}, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
-		Expect(ok).To(BeTrue())
+		_, _, err = frontdRemoteUserResult(remoteReq, &wiki.Wiki{}, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).To(MatchError(errFrontdRemoteUserServiceUnavailable))
 
-		user, method, ok, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
+		user, method, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(user.ID).To(Equal(editor.ID))
 		Expect(method).To(Equal("remote_user"))
 
 		remoteReq.Header.Set("Remote-User", "missing-user")
-		_, _, ok, err = frontdRemoteUser(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
-		Expect(ok).To(BeTrue())
+		_, _, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -1638,11 +1634,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		descriptorPath := filepath.Join(leafwikiTempDir(), "descriptor.json")
 		Expect(os.WriteFile(descriptorPath, []byte("{bad"), 0o600)).To(Succeed())
-		_, _, err = readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
+		desc, err := readHealthyProjectDaemonResult(context.Background(), descriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
 		var syntaxErr *json.SyntaxError
 		Expect(err).To(Satisfy(func(err error) bool {
 			return errors.As(err, &syntaxErr)
 		}))
+		Expect(desc).To(BeNil())
 
 		stalePath := filepath.Join(leafwikiTempDir(), "stale-descriptor.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(stalePath, &projectdaemon.Descriptor{
@@ -1650,8 +1647,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			DataDir:       dataDir,
 			RootDir:       rootDir,
 		})).To(Succeed())
-		_, _, err = readHealthyProjectDaemon(context.Background(), stalePath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
+		desc, err = readHealthyProjectDaemonResult(context.Background(), stalePath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
 		Expect(err).To(MatchError(projectdaemon.ErrDescriptorSchemaMismatch))
+		Expect(desc).To(BeNil())
 
 		Expect(dataLock.Release()).To(Succeed())
 		Expect(rootLock.Release()).To(Succeed())
@@ -1695,8 +1693,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		acquireRootDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return nil, errors.New("root acquire failed")
 		}
-		_, err = projectDaemonLocksHeld(dataDir, rootDir)
+		held, err = projectDaemonLocksHeld(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(held).To(BeFalse())
 		Expect(dataLock.Release()).To(Succeed())
 
 		acquireDataDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
@@ -1705,32 +1704,37 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		acquireRootDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return nil, errors.New("root acquire failed")
 		}
-		_, err = projectDaemonLocksFree(dataDir, rootDir)
+		free, err = projectDaemonLocksFree(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(free).To(BeFalse())
 		acquireRootDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return leafwikiFakeRuntimeLock{releaseErr: errors.New("root release failed")}, nil
 		}
-		_, err = projectDaemonLocksFree(dataDir, rootDir)
+		free, err = projectDaemonLocksFree(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(free).To(BeFalse())
 
 		acquireDataDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return nil, errors.New("data acquire failed")
 		}
-		_, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
+		disjoint, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(disjoint).To(BeFalse())
 		acquireDataDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return leafwikiFakeRuntimeLock{releaseErr: errors.New("data release failed")}, nil
 		}
-		_, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
+		disjoint, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(disjoint).To(BeFalse())
 		acquireDataDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return leafwikiFakeRuntimeLock{}, nil
 		}
 		acquireRootDirLockForRuntime = func(string) (leafwikiRuntimeLock, error) {
 			return nil, errors.New("root acquire failed")
 		}
-		_, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
+		disjoint, err = projectDaemonDataLockFreeRootLockHeld(dataDir, rootDir)
 		Expect(err).To(HaveOccurred())
+		Expect(disjoint).To(BeFalse())
 		acquireDataDirLockForRuntime = previousAcquireDataLock
 		acquireRootDirLockForRuntime = previousAcquireRootLock
 
@@ -2032,13 +2036,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(os.MkdirAll(validRuntime.Workspace.DataDir, 0o755)).To(Succeed())
 		Expect(os.MkdirAll(validRuntime.Workspace.RootDir, 0o755)).To(Succeed())
 
-		parentCancelInvoked := false
-		cancelWhenParentExits(context.Background(), func() { parentCancelInvoked = true }, 0, 0)
-		Expect(parentCancelInvoked).To(BeFalse())
+		parentExitCtx, parentExitCancel := context.WithCancel(context.Background())
+		cancelWhenParentExits(context.Background(), parentExitCancel, 0, 0)
+		Consistently(parentExitCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
 		parentCanceled, parentCancel := context.WithCancel(context.Background())
 		parentCancel()
-		cancelWhenParentExits(parentCanceled, func() { parentCancelInvoked = true }, os.Getpid(), 0)
-		Expect(parentCancelInvoked).To(BeFalse())
+		parentCanceledExitCtx, parentCanceledExitCancel := context.WithCancel(context.Background())
+		cancelWhenParentExits(parentCanceled, parentCanceledExitCancel, os.Getpid(), 0)
+		Consistently(parentCanceledExitCtx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())
 		acceptErr := errors.New("accept failed")
 		Expect(serveInternalRuntimeHTTP(context.Background(), projectdaemon.RoleFrontd, leafwikiErrorListener{
 			addr: leafwikiStringAddr("127.0.0.1:0"),
@@ -2780,14 +2785,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		filepathRelForRuntime = func(string, string) (string, error) {
 			return "", errors.New("rel failed")
 		}
-		_, ok := localRelativePath(leafwikiTempDir(), filepath.Join(leafwikiTempDir(), "leafwiki.log"))
-		Expect(ok).To(BeFalse())
+		_, err := localRelativePathResult(leafwikiTempDir(), filepath.Join(leafwikiTempDir(), "leafwiki.log"))
+		Expect(err).To(MatchError(errRelativePathOutsideBase))
 		filepathRelForRuntime = previousRel
 
 		userHomeDirForRuntime = func() (string, error) {
 			return "", nil
 		}
-		_, err := globalRuntimeHomeDir()
+		_, err = globalRuntimeHomeDir()
 		Expect(err).To(MatchError(errUserHomeEmpty))
 		homeErr := errors.New("home failed")
 		userHomeDirForRuntime = func() (string, error) {
@@ -3412,8 +3417,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		descriptorPath := filepath.Join(leafwikiTempDir(), "descriptor.json")
 		Expect(os.WriteFile(descriptorPath, []byte("{bad"), 0o600)).To(Succeed())
-		_, _, err := readHealthyProjectDaemon(context.Background(), descriptorPath, projectdaemon.Config{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
+		desc, err := readHealthyProjectDaemonResult(context.Background(), descriptorPath, projectdaemon.Config{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
 		Expect(err).To(HaveOccurred())
+		Expect(desc).To(BeNil())
 
 		untrustedWorkspacedDescriptorPath := filepath.Join(leafwikiTempDir(), "untrusted-workspaced.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(untrustedWorkspacedDescriptorPath, &projectdaemon.Descriptor{
@@ -3425,8 +3431,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			PrivateMCPURL:   "https://example.com/mcp",
 			PrivateMCPToken: "private-token",
 		})).To(Succeed())
-		_, _, err = readHealthyProjectDaemon(context.Background(), untrustedWorkspacedDescriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
+		desc, err = readHealthyProjectDaemonResult(context.Background(), untrustedWorkspacedDescriptorPath, projectdaemon.Config{DataDir: dataDir, RootDir: rootDir})
 		Expect(err).To(MatchError(errPrivateMCPURLUntrusted))
+		Expect(desc).To(BeNil())
 
 		mismatchedDescriptorPath := filepath.Join(leafwikiTempDir(), "mismatched.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(mismatchedDescriptorPath, &projectdaemon.Descriptor{
@@ -3447,10 +3454,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			DataDir:       dataDir,
 			RootDir:       rootDir,
 		})).To(Succeed())
-		_, _, err = readHealthyProjectDaemon(context.Background(), staleDescriptorPath, projectdaemon.Config{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
+		desc, err = readHealthyProjectDaemonResult(context.Background(), staleDescriptorPath, projectdaemon.Config{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
 		Expect(err).To(HaveOccurred())
+		Expect(desc).To(BeNil())
 
-		_, err = projectDaemonDescriptorHealthy(context.Background(), &projectdaemon.Descriptor{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
+		err = projectDaemonDescriptorHealthyResult(context.Background(), &projectdaemon.Descriptor{DataDir: filepath.Join(blockingFile, "data"), RootDir: rootDir})
 		Expect(err).To(HaveOccurred())
 
 		for _, tc := range []struct {
@@ -3488,7 +3496,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Expect(rootLock.Release()).To(Succeed())
 		})
 
-		_, err = projectDaemonDescriptorHealthy(context.Background(), &projectdaemon.Descriptor{
+		err = projectDaemonDescriptorHealthyResult(context.Background(), &projectdaemon.Descriptor{
 			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
 			PID:           os.Getpid(),
 			DataDir:       dataDir,
@@ -3505,7 +3513,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			ControlURL:    "http://127.0.0.1:1",
 			ControlToken:  "control-token",
 		}
-		_, err = projectDaemonDescriptorHealthy(context.Background(), unreachableDesc)
+		err = projectDaemonDescriptorHealthyResult(context.Background(), unreachableDesc)
 		Expect(err).To(MatchError(errControlHealthUnreachable))
 
 		mismatchServer := httptest.NewServer(projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
@@ -3522,7 +3530,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(mismatchServer.Close)
 		mismatchDesc := *unreachableDesc
 		mismatchDesc.ControlURL = mismatchServer.URL
-		_, err = projectDaemonDescriptorHealthy(context.Background(), &mismatchDesc)
+		err = projectDaemonDescriptorHealthyResult(context.Background(), &mismatchDesc)
 		Expect(err).To(MatchError(errControlHealthMismatch))
 
 		healthyServer := httptest.NewServer(projectdaemon.NewControlServer(projectdaemon.ControlServerOptions{
@@ -3543,8 +3551,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		mismatchPath := filepath.Join(leafwikiTempDir(), "healthy-mismatch.json")
 		Expect(projectdaemon.WriteDescriptorAtomic(mismatchPath, &healthyDesc)).To(Succeed())
-		_, _, err = readHealthyProjectDaemon(context.Background(), mismatchPath, projectdaemon.Config{DataDir: filepath.Join(leafwikiTempDir(), "other-data"), RootDir: rootDir})
+		desc, err = readHealthyProjectDaemonResult(context.Background(), mismatchPath, projectdaemon.Config{DataDir: filepath.Join(leafwikiTempDir(), "other-data"), RootDir: rootDir})
 		Expect(err).To(MatchProjectDaemonConfigMismatch())
+		Expect(desc).To(BeNil())
 
 		manager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(leafwikiTempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		manager.descriptors["workspace-a"] = []string{"descriptor-a.json"}
@@ -3648,16 +3657,18 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		badRegistryLayout := wikid.GlobalLayout(leafwikiTempDir())
 		badRegistryPath := blockingPathForLeafwikiTest()
 		badRegistryLayout.DBPath = filepath.Join(badRegistryPath, "registry.db")
-		_, _, err = registeredFederatedWorkspaceForRequest(badRegistryLayout, projectdaemon.Config{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()})
+		_, err = registeredFederatedWorkspaceForRequestResult(badRegistryLayout, projectdaemon.Config{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()})
 		Expect(err).To(HaveOccurred())
 
 		firstContactLayout := wikid.GlobalLayout(leafwikiTempDir())
-		_, _, err = registerFederatedFirstContact(firstContactLayout, projectdaemon.Config{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}, leafwikiRuntimeConfig{
+		firstContactWorkspace, firstContactIsHome, err := registerFederatedFirstContact(firstContactLayout, projectdaemon.Config{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}, leafwikiRuntimeConfig{
 			APIKey:        "lwk_key_missing",
 			MCPTransports: mcpTransports{Stdio: true},
 			JWTSecret:     "jwt",
 			AdminPassword: "admin",
 		})
+		Expect(firstContactWorkspace).To(Equal(wikid.WorkspaceRecord{}))
+		Expect(firstContactIsHome).To(BeFalse())
 		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 
 		Expect(ensureFederatedWorkspace(context.Background(), nil, "workspace-a", leafwikiRuntimeConfig{})).To(MatchError(errGlobalWikidDescriptorUnavailable))
