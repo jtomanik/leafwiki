@@ -142,21 +142,19 @@ var _ = Describe("shared utility contracts", func() {
 		DeferCleanup(restoreSharedUtilitySeams())
 		runtimeGOOS = "windows"
 		removed := ""
-		renamed := false
+		renameProbe := &renameProbe{}
 		removeFile = func(path string) error {
 			removed = path
 			return nil
 		}
-		renameFile = func(src string, dst string) error {
-			renamed = true
-			Expect(src).To(Equal("src"))
-			Expect(dst).To(Equal("dst"))
-			return nil
-		}
+		renameFile = renameProbe.Rename
 
 		Expect(atomicReplace("src", "dst")).To(Succeed())
 		Expect(removed).To(Equal("dst"))
-		Expect(renamed).To(BeTrue())
+		Expect(renameProbe.requests).To(ConsistOf(SatisfyAll(
+			HaveField("Source", Equal("src")),
+			HaveField("Target", Equal("dst")),
+		)))
 
 		removeErr := errors.New("remove failed")
 		removeFile = func(string) error {
@@ -338,14 +336,11 @@ var _ = Describe("shared utility contracts", func() {
 	})
 
 	It("LogClose invokes the closer and suppresses successful closes", func() {
-		called := false
+		probe := &closeProbe{}
 
-		LogClose(func() error {
-			called = true
-			return nil
-		}, "close resource")
+		LogClose(probe.Close, "close resource")
 
-		Expect(called).To(BeTrue())
+		Expect(probe.closeCalls).To(Equal(1))
 	})
 
 	It("LogClose logs close errors without returning them", func() {
@@ -354,14 +349,11 @@ var _ = Describe("shared utility contracts", func() {
 		DeferCleanup(func() {
 			slog.SetDefault(previousLogger)
 		})
-		called := false
+		probe := &closeProbe{err: errors.New("close failed")}
 
-		LogClose(func() error {
-			called = true
-			return errors.New("close failed")
-		}, "close resource")
+		LogClose(probe.Close, "close resource")
 
-		Expect(called).To(BeTrue())
+		Expect(probe.closeCalls).To(Equal(1))
 	})
 })
 
@@ -371,6 +363,33 @@ type errorReader struct {
 
 func (r errorReader) Read([]byte) (int, error) {
 	return 0, r.err
+}
+
+type renameRequest struct {
+	Source string
+	Target string
+}
+
+type renameProbe struct {
+	requests []renameRequest
+}
+
+func (p *renameProbe) Rename(src string, dst string) error {
+	p.requests = append(p.requests, renameRequest{
+		Source: src,
+		Target: dst,
+	})
+	return nil
+}
+
+type closeProbe struct {
+	closeCalls int
+	err        error
+}
+
+func (p *closeProbe) Close() error {
+	p.closeCalls++
+	return p.err
 }
 
 type fakeAtomicTempFile struct {
