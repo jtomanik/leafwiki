@@ -778,7 +778,7 @@ func newAuthRouteFixture() authRouteFixture {
 	resolver, err := coreauth.NewUserResolver(userService)
 	Expect(err).NotTo(HaveOccurred())
 
-	sessionStore, err := coreauth.NewSessionStore(ginkgo.GinkgoT().TempDir())
+	sessionStore, err := coreauth.NewSessionStore(tempAuthStorageDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
 		Expect(sessionStore.Close()).To(Succeed())
