@@ -29,7 +29,7 @@ func validFrontdActor(workspaceID workspaceid.WorkspaceID) projectdaemon.ActorCo
 	}
 }
 
-var _ = ginkgo.Describe("frontd edge coverage", func() {
+var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 	ginkgo.It("validates proxy constructors and small path helpers", func() {
 		_, err := NewControlPlaneProxy("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
@@ -176,7 +176,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(ok).To(BeTrue())
 	})
 
-	ginkgo.It("covers workspace MCP handler routing and binding edge cases", func() {
+	ginkgo.It("routes workspace MCP requests and preserves session binding contracts", func() {
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/not-mcp", nil))
@@ -243,7 +243,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(workspace).To(Equal(workspaceid.WorkspaceID("other")))
 	})
 
-	ginkgo.It("covers wikid single-workspace resolver response mapping", func() {
+	ginkgo.It("maps wikid single-workspace resolver responses into routing errors", func() {
 		_, err := NewWikidSingleWorkspaceResolver("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", " ")
@@ -298,7 +298,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("covers wikid workspace resolver response mapping", func() {
+	ginkgo.It("maps wikid workspace resolver responses into workspace routes and errors", func() {
 		_, err := NewWikidWorkspaceResolver("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidWorkspaceResolver("http://127.0.0.1:1", " ")
@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("frontd edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("covers original request header helpers with nil and blank inputs", func() {
+	ginkgo.It("preserves original request headers while ignoring nil and blank inputs", func() {
 		preserveOriginalRequestHeaders(nil, httptest.NewRequest(http.MethodGet, "/x", nil))
 		target := httptest.NewRequest(http.MethodPost, "/target", nil)
 		preserveOriginalRequestHeaders(target, nil)

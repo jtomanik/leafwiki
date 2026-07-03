@@ -1,154 +1,175 @@
 package frontd
 
 import (
+	"context"
 	"errors"
-	. "github.com/onsi/ginkgo/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = It("TestWikidWorkspaceResolverEnsuresWorkspaceAndReturnsRoute", func() {
-	t := GinkgoT()
-	var seen struct {
-		path         string
-		token        string
-		auth         string
-		originalPath string
-	}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		seen.path = req.URL.Path
-		seen.token = req.Header.Get(projectdaemon.ControlTokenHeader)
-		seen.auth = req.Header.Get("Authorization")
-		seen.originalPath = req.Header.Get("X-LeafWiki-Original-Path")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"workspace":{"id":"docs"},
-			"status":{"workspaceId":"docs","state":"running","url":"http://127.0.0.1:49152"}
-		}`))
-	}))
-	DeferCleanup(upstream.Close)
+type observedWikidResolverRequest struct {
+	Path         string
+	Token        string
+	Auth         string
+	OriginalPath string
+}
 
-	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
-	if err != nil {
-		t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil)
-	req.Header.Set("Authorization", "Bearer public-token")
-
-	route, err := resolve(req, workspaceid.WorkspaceID("docs"))
-	if err != nil {
-		t.Fatalf("resolve failed: %v", err)
-	}
-
-	if seen.path != "/__leafwiki/workspaces/docs/ensure" {
-		t.Fatalf("ensure path = %q", seen.path)
-	}
-	if seen.token != "daemon-token" || seen.auth != "Bearer public-token" || seen.originalPath != "/api/workspaces/docs/tree" {
-		t.Fatalf("forwarded headers = token %q auth %q originalPath %q", seen.token, seen.auth, seen.originalPath)
-	}
-	if route.WorkspaceID != workspaceid.WorkspaceID("docs") || route.Upstream != "http://127.0.0.1:49152" || route.PrivateMCPURL != "http://127.0.0.1:49152/mcp" {
-		t.Fatalf("route = %#v", route)
-	}
-
-})
-
-var _ = It("TestWikidWorkspaceResolverRejectsInvalidWorkspaceIDBeforeEnsure", func() {
-	t := GinkgoT()
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		t.Fatalf("invalid workspace ID unexpectedly reached wikid: %s", req.URL.Path)
-	}))
-	DeferCleanup(upstream.Close)
-
-	resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
-	if err != nil {
-		t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
-	}
-
-	_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), workspaceid.WorkspaceID(" docs"))
-	if !errors.Is(err, ErrWorkspaceNotFound) {
-		t.Fatalf("resolve error = %v, want ErrWorkspaceNotFound", err)
-	}
-
-})
-
-var _ = It("TestWikidSingleWorkspaceResolverPreservesOriginalMCPPath", func() {
-	t := GinkgoT()
-	var seen struct {
-		path         string
-		originalPath string
-	}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		seen.path = req.URL.Path
-		seen.originalPath = req.Header.Get("X-LeafWiki-Original-Path")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"}]}`))
-	}))
-	DeferCleanup(upstream.Close)
-
-	resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
-	if err != nil {
-		t.Fatalf("NewWikidSingleWorkspaceResolver failed: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-
-	workspaceID, err := resolve(req)
-	if err != nil {
-		t.Fatalf("resolve failed: %v", err)
-	}
-
-	if workspaceID != workspaceid.WorkspaceID("home") {
-		t.Fatalf("workspaceID = %q, want home", workspaceID)
-	}
-	if seen.path != "/__leafwiki/workspaces" || seen.originalPath != "/mcp" {
-		t.Fatalf("resolver request path/original = %q/%q", seen.path, seen.originalPath)
-	}
-
-})
-
-var _ = It("TestWikidSingleWorkspaceResolverRejectsAmbiguousWorkspaceList", func() {
-	t := GinkgoT()
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"},{"id":"docs"}]}`))
-	}))
-	DeferCleanup(upstream.Close)
-
-	resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
-	if err != nil {
-		t.Fatalf("NewWikidSingleWorkspaceResolver failed: %v", err)
-	}
-
-	_, err = resolve(httptest.NewRequest(http.MethodPost, "/mcp", nil))
-	if err != ErrWorkspaceAmbiguous {
-		t.Fatalf("err = %v, want %v", err, ErrWorkspaceAmbiguous)
-	}
-
-})
+type observedSingleWorkspaceResolverRequest struct {
+	Path         string
+	OriginalPath string
+}
 
 type workspaceResolverAccessErrorCase struct {
 	code int
 	want error
 }
 
-var _ = DescribeTable("TestWikidWorkspaceResolverMapsAccessErrors",
-	func(tt workspaceResolverAccessErrorCase) {
-		t := GinkgoT()
+var _ = Describe("wikid workspace resolver", func() {
+	It("ensures the requested workspace and returns its workspaced route", func() {
+		var seen observedWikidResolverRequest
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.WriteHeader(tt.code)
+			seen.Path = req.URL.Path
+			seen.Token = req.Header.Get(projectdaemon.ControlTokenHeader)
+			seen.Auth = req.Header.Get("Authorization")
+			seen.OriginalPath = req.Header.Get("X-LeafWiki-Original-Path")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+			"workspace":{"id":"docs"},
+			"status":{"workspaceId":"docs","state":"running","url":"http://127.0.0.1:49152"}
+		}`))
 		}))
 		DeferCleanup(upstream.Close)
+
 		resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
-		if err != nil {
-			t.Fatalf("NewWikidWorkspaceResolver failed: %v", err)
+		Expect(err).To(Succeed())
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil)
+		req.Header.Set("Authorization", "Bearer public-token")
+
+		route, err := resolve(req, workspaceid.WorkspaceID("docs"))
+		Expect(err).To(Succeed())
+
+		Expect(seen).To(SatisfyAll(
+			HaveField("Path", Equal("/__leafwiki/workspaces/docs/ensure")),
+			HaveField("Token", Equal("daemon-token")),
+			HaveField("Auth", Equal("Bearer public-token")),
+			HaveField("OriginalPath", Equal("/api/workspaces/docs/tree")),
+		))
+		Expect(route).To(SatisfyAll(
+			HaveField("WorkspaceID", Equal(workspaceid.WorkspaceID("docs"))),
+			HaveField("Upstream", Equal("http://127.0.0.1:49152")),
+			HaveField("PrivateMCPURL", Equal("http://127.0.0.1:49152/mcp")),
+		))
+	})
+
+	It("rejects invalid workspace IDs before ensuring them in wikid", func() {
+		upstreamCalled := false
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			upstreamCalled = true
+		}))
+		DeferCleanup(upstream.Close)
+
+		resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
+		Expect(err).To(Succeed())
+
+		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), workspaceid.WorkspaceID(" docs"))
+		Expect(err).To(MatchError(ErrWorkspaceNotFound))
+		Expect(upstreamCalled).To(BeFalse())
+	})
+
+	It("preserves the original root MCP path when resolving a single workspace", func() {
+		var seen observedSingleWorkspaceResolverRequest
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			seen.Path = req.URL.Path
+			seen.OriginalPath = req.Header.Get("X-LeafWiki-Original-Path")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"}]}`))
+		}))
+		DeferCleanup(upstream.Close)
+
+		resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
+		Expect(err).To(Succeed())
+
+		workspaceID, err := resolve(httptest.NewRequest(http.MethodPost, "/mcp", nil))
+		Expect(err).To(Succeed())
+
+		Expect(workspaceID).To(Equal(workspaceid.WorkspaceID("home")))
+		Expect(seen).To(SatisfyAll(
+			HaveField("Path", Equal("/__leafwiki/workspaces")),
+			HaveField("OriginalPath", Equal("/mcp")),
+		))
+	})
+
+	It("rejects ambiguous workspace lists for root MCP", func() {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"workspaces":[{"id":"home"},{"id":"docs"}]}`))
+		}))
+		DeferCleanup(upstream.Close)
+
+		resolve, err := NewWikidSingleWorkspaceResolver(upstream.URL, "daemon-token")
+		Expect(err).To(Succeed())
+
+		_, err = resolve(httptest.NewRequest(http.MethodPost, "/mcp", nil))
+		Expect(err).To(MatchError(ErrWorkspaceAmbiguous))
+	})
+
+	DescribeTable("access error mapping",
+		func(tt workspaceResolverAccessErrorCase) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.WriteHeader(tt.code)
+			}))
+			DeferCleanup(upstream.Close)
+			resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
+			Expect(err).To(Succeed())
+
+			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
+			Expect(err).To(MatchError(tt.want))
+		},
+		Entry("maps not-found responses", workspaceResolverAccessErrorCase{code: http.StatusNotFound, want: ErrWorkspaceNotFound}),
+		Entry("maps forbidden responses", workspaceResolverAccessErrorCase{code: http.StatusForbidden, want: ErrWorkspaceForbidden}),
+	)
+})
+
+var _ = Describe("wikid workspace resolver constructors", func() {
+	It("reject invalid upstreams and missing daemon tokens", func() {
+		_, err := NewWikidWorkspaceResolver("://bad", "token")
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
+		_, err = NewWikidWorkspaceResolver("http://127.0.0.1:1", " ")
+		Expect(err).To(MatchError(errDaemonTokenRequired))
+
+		_, err = NewWikidSingleWorkspaceResolver("://bad", "token")
+		Expect(err).To(MatchError(errInvalidWikidUpstream))
+		_, err = NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", " ")
+		Expect(err).To(MatchError(errDaemonTokenRequired))
+	})
+})
+
+var _ = Describe("wikid workspace resolver request construction", func() {
+	It("returns request construction errors before contacting wikid", func() {
+		originalNewRequest := newFrontdRequestWithContext
+		requestErr := errors.New("frontd request failed")
+		newFrontdRequestWithContext = func(_ context.Context, _ string, _ string, _ io.Reader) (*http.Request, error) {
+			return nil, requestErr
 		}
-		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
-		if err != tt.want {
-			t.Fatalf("err = %v, want %v", err, tt.want)
-		}
-	},
-	Entry("not found", workspaceResolverAccessErrorCase{code: http.StatusNotFound, want: ErrWorkspaceNotFound}),
-	Entry("forbidden", workspaceResolverAccessErrorCase{code: http.StatusForbidden, want: ErrWorkspaceForbidden}),
-)
+		DeferCleanup(func() {
+			newFrontdRequestWithContext = originalNewRequest
+		})
+
+		resolver, err := NewWikidWorkspaceResolver("http://127.0.0.1:1", "token")
+		Expect(err).To(Succeed())
+		_, err = resolver(nil, "home")
+		Expect(err).To(MatchError(requestErr))
+
+		singleResolver, err := NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", "token")
+		Expect(err).To(Succeed())
+		_, err = singleResolver(nil)
+		Expect(err).To(MatchError(requestErr))
+	})
+})

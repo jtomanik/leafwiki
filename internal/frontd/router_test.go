@@ -1,11 +1,14 @@
 package frontd
 
 import (
-	. "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/assets"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -18,45 +21,47 @@ type publicRuntimeRouteCase struct {
 	wantStatus int
 }
 
-var _ = DescribeTable("TestRouterServesPublicRuntimeRoutes",
-	func(tc publicRuntimeRouteCase) {
-		t := GinkgoT()
-		w := newTestWiki(t)
-		DeferCleanup(w.Close)
-		router := NewRouter(w, httpinternal.RouterOptions{
-			PublicAccess:            true,
-			AllowInsecure:           true,
-			AuthDisabled:            true,
-			AccessTokenTimeout:      15 * time.Minute,
-			RefreshTokenTimeout:     7 * 24 * time.Hour,
-			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		})
+var _ = Describe("public runtime router", func() {
+	DescribeTable("serves public runtime routes",
+		func(tc publicRuntimeRouteCase) {
+			w := newTestWiki()
+			DeferCleanup(w.Close)
+			router := NewRouter(w, httpinternal.RouterOptions{
+				PublicAccess:            true,
+				AllowInsecure:           true,
+				AuthDisabled:            true,
+				AccessTokenTimeout:      15 * time.Minute,
+				RefreshTokenTimeout:     7 * 24 * time.Hour,
+				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			})
 
-		req := httptest.NewRequest(tc.method, tc.path, nil)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != tc.wantStatus {
-			t.Fatalf("%s %s status = %d, want %d: %s", tc.method, tc.path, rec.Code, tc.wantStatus, rec.Body.String())
-		}
-	},
-	Entry("config", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/config", wantStatus: http.StatusOK}),
-	Entry("me", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/auth/me", wantStatus: http.StatusOK}),
-	Entry("branding", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/branding", wantStatus: http.StatusOK}),
-)
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
 
-func newTestWiki(t frontdTestTB) *wiki.Wiki {
-	t.Helper()
+			Expect(rec).To(HaveHTTPStatus(tc.wantStatus))
+		},
+		Entry("serves public config", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/config", wantStatus: http.StatusOK}),
+		Entry("serves the current-user endpoint", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/auth/me", wantStatus: http.StatusOK}),
+		Entry("serves branding", publicRuntimeRouteCase{method: http.MethodGet, path: "/api/branding", wantStatus: http.StatusOK}),
+	)
+})
+
+func newTestWiki() *wiki.Wiki {
+	GinkgoHelper()
+	storageDir, err := os.MkdirTemp("", "leafwiki-frontd-*")
+	Expect(err).To(Succeed())
+	DeferCleanup(os.RemoveAll, storageDir)
+
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		StorageDir:          t.TempDir(),
+		StorageDir:          storageDir,
 		AdminPassword:       "admin",
 		JWTSecret:           "secret",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 		AuthDisabled:        true,
 	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return w
 }
 
