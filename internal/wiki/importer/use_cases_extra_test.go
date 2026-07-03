@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 	})
 
 	ginkgo.It("returns final clear errors after a cancel check succeeds", func() {
-		stateFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "current-plan.json")
+		stateFile := filepath.Join(tempImporterDir(), "current-plan.json")
 		store := coreimporter.NewPlanStore(stateFile)
 		svc := newImporterServiceWithStore(store)
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
@@ -450,12 +450,12 @@ func newImporterServiceFixture() (*coreimporter.ImporterService, *coreimporter.P
 func newImporterServiceWithStore(store *coreimporter.PlanStore) *coreimporter.ImporterService {
 	ginkgo.GinkgoHelper()
 	planner := coreimporter.NewPlanner(&importerTestWiki{treeHash: "hash-1"}, tree.NewSlugService())
-	return coreimporter.NewImporterService(planner, store, filepath.Join(ginkgo.GinkgoT().TempDir(), "workspaces"), 0)
+	return coreimporter.NewImporterService(planner, store, filepath.Join(tempImporterDir(), "workspaces"), 0)
 }
 
 func importerUnavailablePlanStore() *coreimporter.PlanStore {
 	ginkgo.GinkgoHelper()
-	path := filepath.Join(ginkgo.GinkgoT().TempDir(), "current-plan.json")
+	path := filepath.Join(tempImporterDir(), "current-plan.json")
 	Expect(os.WriteFile(path, []byte("{"), 0o644)).To(Succeed())
 	return coreimporter.NewPlanStore(path)
 }
@@ -469,11 +469,20 @@ func seedImporterPlan(store *coreimporter.PlanStore, status coreimporter.Executi
 			Items:    []coreimporter.PlanItem{},
 			Errors:   []string{},
 		},
-		PlanOptions:     coreimporter.PlanOptions{SourceBasePath: ginkgo.GinkgoT().TempDir()},
-		WorkspaceRoot:   ginkgo.GinkgoT().TempDir(),
+		PlanOptions:     coreimporter.PlanOptions{SourceBasePath: tempImporterDir()},
+		WorkspaceRoot:   tempImporterDir(),
 		CreatedAt:       time.Now(),
 		ExecutionStatus: status,
 	})).To(Succeed())
+}
+
+func tempImporterDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-importer-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func importerZipBytes(name string, content string) []byte {

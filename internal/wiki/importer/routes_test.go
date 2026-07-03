@@ -16,7 +16,7 @@ import (
 )
 
 var _ = ginkgo.Describe("importer routes", func() {
-	ginkgo.It("TestRoutesRequireAuthForImportPlanReads", func() {
+	ginkgo.It("requires authentication before reading import plans", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("importer routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
-	ginkgo.It("TestRoutesRequireCSRFForImportPlanMutations", func() {
+	ginkgo.It("requires CSRF protection before mutating import plans", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
