@@ -133,7 +133,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		Expect(normalizePagePath("docs")).To(Equal("/docs"))
 	})
 
-	ginkgo.It("covers registry defaults, JSON mode errors, removal misses, and sorted output", func() {
+	ginkgo.It("preserves registry defaults, rejects invalid JSON modes, ignores missing removals, and lists sessions in tab order", func() {
 		var mode SessionMode
 		Expect(json.Unmarshal([]byte(`{"mode":"view"}`), &mode)).To(HaveOccurred())
 		registry := NewWebPresenceRegistry(0, nil)
