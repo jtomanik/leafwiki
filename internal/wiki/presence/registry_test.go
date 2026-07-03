@@ -26,7 +26,7 @@ import (
 )
 
 var _ = ginkgo.Describe("web presence registry", func() {
-	ginkgo.It("TestWebPresenceRegistryListGatesEmailAndExpires", func() {
+	ginkgo.It("returns role-appropriate active-session views and expires stale sessions", func() {
 		now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 		registry := NewWebPresenceRegistry(time.Minute, func() time.Time { return now })
 
@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		Expect(registry.List(&coreauth.User{Role: coreauth.RoleAdmin})).To(BeEmpty())
 	})
 
-	ginkgo.It("TestWebPresenceRegistryRejectsInvalidHeartbeatWithoutDroppingExistingSession", func() {
+	ginkgo.It("rejects invalid heartbeats without dropping existing sessions", func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, user, nil)).To(Succeed())
@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		})))
 	})
 
-	ginkgo.DescribeTable("TestWebPresenceRegistryInvalidHeartbeatReturnsStableCodes",
+	ginkgo.DescribeTable("returns stable localized errors for invalid heartbeats",
 		func(heartbeat Heartbeat, code sharederrors.ErrorCode) {
 			registry := NewWebPresenceRegistry(time.Minute, nil)
 			user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
@@ -96,7 +96,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		ginkgo.Entry("invalid mode", Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeFromString("invalid")}, ErrCodePresenceModeInvalid),
 	)
 
-	ginkgo.It("TestWebPresenceRegistryBindsSessionIDToUser", func() {
+	ginkgo.It("keeps a web session bound to its original user", func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		editor := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
 		other := &coreauth.User{ID: "editor-2", Username: "Editor Two", Role: coreauth.RoleEditor}
@@ -190,7 +190,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		Expect(registered).To(HaveKey("DELETE /api/presence/session/:id"))
 	})
 
-	ginkgo.It("TestPresenceHeartbeatRouteReturnsStableErrorDetails", func() {
+	ginkgo.It("returns stable heartbeat validation error details", func() {
 		gin.SetMode(gin.TestMode)
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		routes := NewRoutes(RoutesConfig{Registry: registry})
@@ -208,7 +208,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodePresenceSessionIDRequired, sharederrors.MessageIDForCode(ErrCodePresenceSessionIDRequired)))
 	})
 
-	ginkgo.It("TestPresenceHeartbeatRouteReturnsStructuredInvalidRequestError", func() {
+	ginkgo.It("returns structured invalid-request errors for malformed heartbeats", func() {
 		gin.SetMode(gin.TestMode)
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		routes := NewRoutes(RoutesConfig{Registry: registry})
@@ -287,8 +287,8 @@ var _ = ginkgo.Describe("presence routes", func() {
 		Expect(routes.resolvePage("", "/")).To(BeNil())
 		Expect(routes.resolvePage("", `bad\path`)).To(BeNil())
 		Expect(NewRoutes(RoutesConfig{TreeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{
-			DataDir: ginkgo.GinkgoT().TempDir(),
-			RootDir: ginkgo.GinkgoT().TempDir(),
+			DataDir: newPresenceTempDir(),
+			RootDir: newPresenceTempDir(),
 		})}).resolvePage("", "/docs")).To(BeNil())
 		Expect((&Routes{}).resolvePage(*pageID, "/docs")).To(BeNil())
 
@@ -375,14 +375,22 @@ func setupPresenceTree() (*tree.TreeService, *tree.PageID) {
 func setupPresenceTreeWithRoot() (*tree.TreeService, *tree.PageID, string) {
 	ginkgo.GinkgoHelper()
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: ginkgo.GinkgoT().TempDir(),
-		RootDir: ginkgo.GinkgoT().TempDir(),
+		DataDir: newPresenceTempDir(),
+		RootDir: newPresenceTempDir(),
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
 	pageID, err := treeService.CreateNode("editor-1", nil, "Docs", "docs", &kind)
 	Expect(err).NotTo(HaveOccurred())
 	return treeService, pageID, treeService.RootDir()
+}
+
+func newPresenceTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-presence-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func exerciseDeleteSession(routes *Routes, sessionID string, user *coreauth.User) *httptest.ResponseRecorder {
