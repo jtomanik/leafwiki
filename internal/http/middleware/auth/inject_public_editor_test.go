@@ -143,14 +143,11 @@ var _ = Describe("public editor injection", func() {
 	It("continues the middleware chain after injecting the public editor", func() {
 		gin.SetMode(gin.TestMode)
 
-		nextCalled := false
+		next := &middlewareFlowProbe{}
 
 		router := gin.New()
 		router.Use(InjectPublicEditor(true))
-		router.Use(func(c *gin.Context) {
-			nextCalled = true
-			c.Next()
-		})
+		router.Use(next.Record)
 
 		router.GET("/test", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -161,6 +158,15 @@ var _ = Describe("public editor injection", func() {
 
 		router.ServeHTTP(w, req)
 
-		Expect(nextCalled).To(BeTrue())
+		Expect(next.reachedPaths).To(ConsistOf("/test"))
 	})
 })
+
+type middlewareFlowProbe struct {
+	reachedPaths []string
+}
+
+func (p *middlewareFlowProbe) Record(c *gin.Context) {
+	p.reachedPaths = append(p.reachedPaths, c.Request.URL.Path)
+	c.Next()
+}

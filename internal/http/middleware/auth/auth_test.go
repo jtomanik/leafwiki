@@ -344,13 +344,10 @@ var _ = Describe("required authentication middleware", func() {
 		// Apply RequireAuth with authDisabled=false
 		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
 
-		userSetInContext := false
+		var downstreamUser *coreauth.User
 
 		router.GET("/test", func(c *gin.Context) {
-			_, exists := c.Get("user")
-			if exists {
-				userSetInContext = true
-			}
+			downstreamUser = c.MustGet("user").(*coreauth.User)
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 
@@ -364,7 +361,10 @@ var _ = Describe("required authentication middleware", func() {
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(userSetInContext).To(BeTrue())
+		Expect(downstreamUser).To(SatisfyAll(
+			HaveField("Username", Equal("admin")),
+			HaveField("Role", Equal(coreauth.RoleAdmin)),
+		))
 	})
 
 	It("stops the handler chain when authentication fails", func() {
@@ -380,12 +380,9 @@ var _ = Describe("required authentication middleware", func() {
 		// Apply RequireAuth with authDisabled=false
 		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
 
-		nextCalled := false
+		next := &middlewareFlowProbe{}
 
-		router.Use(func(c *gin.Context) {
-			nextCalled = true
-			c.Next()
-		})
+		router.Use(next.Record)
 
 		router.GET("/test", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -397,7 +394,7 @@ var _ = Describe("required authentication middleware", func() {
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
-		Expect(nextCalled).To(BeFalse())
+		Expect(next.reachedPaths).To(BeEmpty())
 	})
 
 	DescribeTable("required authentication scenario matrix",
@@ -623,3 +620,12 @@ var _ = Describe("optional authentication middleware", func() {
 		Expect(w.Body.String()).To(MatchJSON(`{"username":"proxy"}`))
 	})
 })
+
+type middlewareFlowProbe struct {
+	reachedPaths []string
+}
+
+func (p *middlewareFlowProbe) Record(c *gin.Context) {
+	p.reachedPaths = append(p.reachedPaths, c.Request.URL.Path)
+	c.Next()
+}
