@@ -105,6 +105,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega binary boolean", ruleID("gomega.binary-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega boolean literal", ruleID("gomega.boolean-literal"), false, waiverScopeNone),
 			ginkgo.Entry("gomega comma-ok assertion", ruleID("gomega.comma-ok-assertion"), false, waiverScopeNone),
+			ginkgo.Entry("gomega ignored semantic boolean", ruleID("gomega.ignored-semantic-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega proxy boolean", ruleID("gomega.proxy-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega control status matcher", ruleID("gomega.control-status-matcher"), false, waiverScopeNone),
 			ginkgo.Entry("gomega map index", ruleID("gomega.map-index"), false, waiverScopeNone),

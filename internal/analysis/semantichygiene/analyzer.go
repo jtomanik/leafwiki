@@ -34,6 +34,7 @@ func run(pass *analysis.Pass) (any, error) {
 		switch n := node.(type) {
 		case *ast.AssignStmt:
 			checkGinkgoGlobalStateAssignment(ctx, n)
+			checkGomegaIgnoredSemanticBoolean(ctx, n)
 		case *ast.CallExpr:
 			checkGinkgoSpecQualityCall(ctx, n)
 			checkGinkgoGlobalStateCleanup(ctx, n)

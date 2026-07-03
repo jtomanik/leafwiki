@@ -140,6 +140,62 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	}
 }
 
+func checkGomegaIgnoredSemanticBoolean(ctx *analysisContext, assign *ast.AssignStmt) {
+	if !isTestFile(ctx.filename(assign.Pos())) || len(assign.Lhs) < 2 || len(assign.Rhs) != 1 {
+		return
+	}
+	call, ok := unparenExpr(assign.Rhs[0]).(*ast.CallExpr)
+	if !ok || !callTargetsLeafWikiProduction(ctx, call) {
+		return
+	}
+	results, ok := ctx.pass.TypesInfo.TypeOf(call).(*types.Tuple)
+	if !ok {
+		return
+	}
+	for i, lhs := range assign.Lhs {
+		if i >= results.Len() || !isBoolType(results.At(i).Type()) {
+			continue
+		}
+		ident, ok := unparenExpr(lhs).(*ast.Ident)
+		if !ok || ident.Name != "_" {
+			continue
+		}
+		ctx.report(ruleGomegaIgnoredSemanticBoolean, ident, gomegaIgnoredSemanticBooleanDiagnostic())
+	}
+}
+
+func callTargetsLeafWikiProduction(ctx *analysisContext, call *ast.CallExpr) bool {
+	fn := calledFunctionObject(ctx, call)
+	if fn == nil || fn.Pkg() == nil {
+		return false
+	}
+	if fn.Pos().IsValid() {
+		filename := ctx.filename(fn.Pos())
+		if isTestFile(filename) || isTestSupportFile(filename) {
+			return false
+		}
+	}
+	path := fn.Pkg().Path()
+	return path == ctx.pass.Pkg.Path() || strings.HasPrefix(path, "github.com/perber/wiki/")
+}
+
+func calledFunctionObject(ctx *analysisContext, call *ast.CallExpr) *types.Func {
+	switch fun := unparenExpr(call.Fun).(type) {
+	case *ast.Ident:
+		fn, _ := ctx.pass.TypesInfo.ObjectOf(fun).(*types.Func)
+		return fn
+	case *ast.SelectorExpr:
+		if selection := ctx.pass.TypesInfo.Selections[fun]; selection != nil {
+			fn, _ := selection.Obj().(*types.Func)
+			return fn
+		}
+		fn, _ := ctx.pass.TypesInfo.ObjectOf(fun.Sel).(*types.Func)
+		return fn
+	default:
+		return nil
+	}
+}
+
 func checkGomegaAsyncAssertion(ctx *analysisContext, call *ast.CallExpr) {
 	if !isTestFile(ctx.filename(call.Pos())) {
 		return

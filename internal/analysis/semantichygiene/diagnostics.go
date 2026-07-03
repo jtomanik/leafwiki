@@ -158,6 +158,10 @@ func gomegaCommaOKAssertionDiagnostic() string {
 	return "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 }
 
+func gomegaIgnoredSemanticBooleanDiagnostic() string {
+	return "assert the semantic presence/status result instead of discarding a production boolean return with _"
+}
+
 func gomegaProxyBooleanDiagnostic() string {
 	return "assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers"
 }

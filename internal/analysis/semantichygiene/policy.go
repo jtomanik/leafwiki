@@ -61,6 +61,7 @@ const (
 	ruleGomegaBinaryBoolean                ruleID = "gomega.binary-boolean"
 	ruleGomegaBooleanLiteral               ruleID = "gomega.boolean-literal"
 	ruleGomegaCommaOKAssertion             ruleID = "gomega.comma-ok-assertion"
+	ruleGomegaIgnoredSemanticBoolean       ruleID = "gomega.ignored-semantic-boolean"
 	ruleGomegaProxyBoolean                 ruleID = "gomega.proxy-boolean"
 	ruleGomegaControlStatusMatcher         ruleID = "gomega.control-status-matcher"
 	ruleGomegaMapIndex                     ruleID = "gomega.map-index"
@@ -160,6 +161,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaBinaryBoolean:                hardRule(ruleGomegaBinaryBoolean),
 	ruleGomegaBooleanLiteral:               hardRule(ruleGomegaBooleanLiteral),
 	ruleGomegaCommaOKAssertion:             hardRule(ruleGomegaCommaOKAssertion),
+	ruleGomegaIgnoredSemanticBoolean:       hardRule(ruleGomegaIgnoredSemanticBoolean),
 	ruleGomegaProxyBoolean:                 hardRule(ruleGomegaProxyBoolean),
 	ruleGomegaControlStatusMatcher:         hardRule(ruleGomegaControlStatusMatcher),
 	ruleGomegaMapIndex:                     hardRule(ruleGomegaMapIndex),

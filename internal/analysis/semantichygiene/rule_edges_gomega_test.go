@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -24,9 +25,30 @@ type ruleHarness struct {
 func newRuleHarness(filename string, packagePath string, src string) *ruleHarness {
 	ginkgo.GinkgoHelper()
 
+	return newRuleHarnessWithFiles(filename, packagePath, map[string]string{filename: src})
+}
+
+func newRuleHarnessWithFiles(targetFilename string, packagePath string, sources map[string]string) *ruleHarness {
+	ginkgo.GinkgoHelper()
+
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, filename, src, parser.ParseComments)
-	Expect(err).NotTo(HaveOccurred())
+	filenames := make([]string, 0, len(sources))
+	for filename := range sources {
+		filenames = append(filenames, filename)
+	}
+	sort.Strings(filenames)
+
+	files := make([]*ast.File, 0, len(filenames))
+	var targetFile *ast.File
+	for _, filename := range filenames {
+		file, err := parser.ParseFile(fset, filename, sources[filename], parser.ParseComments)
+		Expect(err).NotTo(HaveOccurred())
+		files = append(files, file)
+		if filename == targetFilename {
+			targetFile = file
+		}
+	}
+	Expect(targetFile).NotTo(BeNil(), "target file %q should exist in harness sources", targetFilename)
 
 	info := &types.Info{
 		Types:      map[ast.Expr]types.TypeAndValue{},
@@ -41,13 +63,13 @@ func newRuleHarness(filename string, packagePath string, src string) *ruleHarnes
 			typeErrors = append(typeErrors, err.Error())
 		},
 	}
-	pkg, err := config.Check(packagePath, fset, []*ast.File{file}, info)
+	pkg, err := config.Check(packagePath, fset, files, info)
 	Expect(err).NotTo(HaveOccurred(), strings.Join(typeErrors, "\n"))
 
-	harness := &ruleHarness{file: file}
+	harness := &ruleHarness{file: targetFile}
 	pass := &analysis.Pass{
 		Fset:      fset,
-		Files:     []*ast.File{file},
+		Files:     files,
 		Pkg:       pkg,
 		TypesInfo: info,
 		Report: func(diagnostic analysis.Diagnostic) {
@@ -1305,6 +1327,39 @@ func TestAgentPresence() {
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
+			))
+		})
+
+		ginkgo.It("reports discarded production boolean returns in specs", func() {
+			h := newRuleHarnessWithFiles("/repo/internal/agenthooks/agenthooks_test.go", "github.com/perber/wiki/internal/agenthooks", map[string]string{
+				"/repo/internal/agenthooks/agenthooks.go": `package agenthooks
+
+type ProviderID string
+type Event struct{}
+
+const ProviderCodex ProviderID = "codex"
+
+func Normalize(provider ProviderID, raw []byte) (Event, bool) {
+	return Event{}, true
+}
+`,
+				"/repo/internal/agenthooks/agenthooks_test.go": `package agenthooks
+
+func TestAgentHookNormalization() {
+	_, _ = Normalize(ProviderCodex, []byte("{}"))
+}
+`,
+			})
+			ast.Inspect(h.file, func(node ast.Node) bool {
+				assign, ok := node.(*ast.AssignStmt)
+				if ok {
+					checkGomegaIgnoredSemanticBoolean(h.ctx, assign)
+				}
+				return true
+			})
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.ignored-semantic-boolean: assert the semantic presence/status result instead of discarding a production boolean return with _",
 			))
 		})
 
