@@ -17,9 +17,9 @@ import (
 )
 
 var _ = ginkgo.Describe("health routes", func() {
-	ginkgo.It("TestRoutesDegradesWhenRequiredRuntimeRoleCrashed", func() {
+	ginkgo.It("reports degraded health when a required runtime role has crashed", func() {
 		routes := NewRoutes(RoutesConfig{
-			StorageDir: ginkgo.GinkgoT().TempDir(),
+			StorageDir: healthTempDir(),
 			RequiredRoles: []projectdaemon.RoleName{
 				projectdaemon.RoleWikid,
 				projectdaemon.RoleFrontd,
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("health routes", func() {
 	})
 
 	ginkgo.It("returns ok when storage exists and no failing dependencies are configured", func() {
-		routes := NewRoutes(RoutesConfig{StorageDir: ginkgo.GinkgoT().TempDir()})
+		routes := NewRoutes(RoutesConfig{StorageDir: healthTempDir()})
 		router := httpinternal.NewRouter([]httpinternal.RouteRegistrar{routes}, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{})
 
 		rec := performHealthRequest(router)
@@ -65,14 +65,14 @@ var _ = ginkgo.Describe("health routes", func() {
 	})
 })
 
-var _ = ginkgo.Describe("HealthUseCase", func() {
+var _ = ginkgo.Describe("health evaluation", func() {
 	ginkgo.It("marks missing or non-directory storage as failed", func() {
-		missing := filepath.Join(ginkgo.GinkgoT().TempDir(), "missing")
+		missing := filepath.Join(healthTempDir(), "missing")
 		healthy, checks := NewHealthUseCase(nil, nil, missing).Execute()
 		Expect(healthy).To(BeFalse())
 		Expect(checks).To(HaveKeyWithValue(healthCheckDataDir, healthStatusFailed))
 
-		filePath := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-dir")
+		filePath := filepath.Join(healthTempDir(), "not-a-dir")
 		Expect(os.WriteFile(filePath, []byte("x"), 0o600)).To(Succeed())
 		healthy, checks = NewHealthUseCase(nil, nil, filePath).Execute()
 		Expect(healthy).To(BeFalse())
@@ -85,14 +85,14 @@ var _ = ginkgo.Describe("HealthUseCase", func() {
 		status.Fail()
 		status.Finish()
 
-		healthy, checks := NewHealthUseCase(nil, status, ginkgo.GinkgoT().TempDir()).Execute()
+		healthy, checks := NewHealthUseCase(nil, status, healthTempDir()).Execute()
 
 		Expect(healthy).To(BeFalse())
 		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusFailed))
 	})
 
 	ginkgo.It("updates required role checks through SetRoleHealth", func() {
-		uc := NewHealthUseCase(nil, nil, ginkgo.GinkgoT().TempDir())
+		uc := NewHealthUseCase(nil, nil, healthTempDir())
 		healthy, checks := uc.Execute()
 		Expect(healthy).To(BeTrue())
 		Expect(checks).NotTo(HaveKey(healthCheckRoleWikid))
@@ -112,24 +112,24 @@ var _ = ginkgo.Describe("HealthUseCase", func() {
 		status.Success()
 		status.Finish()
 
-		healthy, checks := NewHealthUseCase(nil, status, ginkgo.GinkgoT().TempDir()).Execute()
+		healthy, checks := NewHealthUseCase(nil, status, healthTempDir()).Execute()
 		Expect(healthy).To(BeTrue())
 		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusOK))
 
 		status.Start()
-		healthy, checks = NewHealthUseCase(nil, status, ginkgo.GinkgoT().TempDir()).Execute()
+		healthy, checks = NewHealthUseCase(nil, status, healthTempDir()).Execute()
 		Expect(healthy).To(BeTrue())
 		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusIndexing))
 	})
 
 	ginkgo.It("reports sqlite health for configured indexes and legacy constructor", func() {
-		index, err := search.NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
+		index, err := search.NewSQLiteIndex(healthTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
 			Expect(index.Close()).To(Succeed())
 		})
 
-		healthy, checks := NewLegacyHealthUseCase(index, nil, ginkgo.GinkgoT().TempDir()).Execute()
+		healthy, checks := NewLegacyHealthUseCase(index, nil, healthTempDir()).Execute()
 
 		Expect(healthy).To(BeTrue())
 		Expect(checks).To(HaveKeyWithValue(healthCheckSQLite, healthStatusOK))
@@ -137,20 +137,20 @@ var _ = ginkgo.Describe("HealthUseCase", func() {
 	})
 
 	ginkgo.It("reports sqlite failure when a configured index cannot reopen its database", func() {
-		indexStorage := ginkgo.GinkgoT().TempDir()
+		indexStorage := healthTempDir()
 		index, err := search.NewSQLiteIndex(indexStorage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(index.Close()).To(Succeed())
 		Expect(os.RemoveAll(indexStorage)).To(Succeed())
 
-		healthy, checks := NewHealthUseCase(index, nil, ginkgo.GinkgoT().TempDir()).Execute()
+		healthy, checks := NewHealthUseCase(index, nil, healthTempDir()).Execute()
 
 		Expect(healthy).To(BeFalse())
 		Expect(checks).To(HaveKeyWithValue(healthCheckSQLite, healthStatusFailed))
 	})
 
 	ginkgo.It("routes SetRoleHealth updates the health endpoint checks", func() {
-		routes := NewRoutes(RoutesConfig{StorageDir: ginkgo.GinkgoT().TempDir()})
+		routes := NewRoutes(RoutesConfig{StorageDir: healthTempDir()})
 		routes.SetRoleHealth([]projectdaemon.RoleName{projectdaemon.RoleWikid}, func() []projectdaemon.RoleHealth {
 			return []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateCrashed}}
 		})
@@ -219,4 +219,12 @@ func decodeHealthResponse(rec *httptest.ResponseRecorder) struct {
 	}
 	Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), rec.Body.String())
 	return body
+}
+
+func healthTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-health-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
