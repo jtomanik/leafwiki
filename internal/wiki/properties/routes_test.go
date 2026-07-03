@@ -51,8 +51,17 @@ func matchPropertyPagePointer(wantID tree.PageID, title string, path string, pro
 	return gstruct.PointTo(matchPropertyPage(wantID, title, path, properties))
 }
 
+func tempPropertiesDataDir() string {
+	ginkgo.GinkgoHelper()
+
+	dataDir, err := os.MkdirTemp("", "leafwiki-properties-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dataDir)
+	return dataDir
+}
+
 var _ = ginkgo.Describe("properties routes", func() {
-	ginkgo.It("TestRoutesPublicAccessExposesPropertyKeysWithoutAuth", func() {
+	ginkgo.It("exposes property keys without authentication when public access is enabled", func() {
 		svc := newPropertiesTestService()
 		Expect(svc.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
@@ -75,7 +84,7 @@ var _ = ginkgo.Describe("properties routes", func() {
 		Expect(body).To(Equal([]coreprop.PropertyKeyCount{{Key: "status", Count: 1}}))
 	})
 
-	ginkgo.It("TestRoutesPrivatePropertiesRequireAuth", func() {
+	ginkgo.It("requires authentication for private property routes", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -308,7 +317,7 @@ func newPropertiesTestService() *coreprop.PropertiesService {
 
 func newPropertiesTestServiceWithDataDir() (*coreprop.PropertiesService, string) {
 	ginkgo.GinkgoHelper()
-	dataDir := ginkgo.GinkgoT().TempDir()
+	dataDir := tempPropertiesDataDir()
 	store, err := coreprop.NewPropertiesStore(dataDir)
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
@@ -325,7 +334,7 @@ type propertiesPageFixture struct {
 
 func newPropertiesPageFixture() propertiesPageFixture {
 	ginkgo.GinkgoHelper()
-	dataDir := ginkgo.GinkgoT().TempDir()
+	dataDir := tempPropertiesDataDir()
 	Expect(os.WriteFile(
 		dataDir+"/schema.json",
 		[]byte(fmt.Sprintf(`{"version":%d}`, tree.CurrentSchemaVersion)),
