@@ -1,8 +1,11 @@
 package markdown
 
 import (
+	"errors"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 )
 
 type splitFrontmatterCase struct {
@@ -11,6 +14,32 @@ type splitFrontmatterCase struct {
 	wantFM   string
 	wantBody string
 	wantHas  bool
+}
+
+var errParsedFrontmatterMissing = errors.New("parsed frontmatter missing")
+
+type frontmatterParseResult struct {
+	Frontmatter Frontmatter
+	Body        string
+	Err         error
+}
+
+func parsedFrontmatterResult(fm Frontmatter, body string, has bool, err error) frontmatterParseResult {
+	if err != nil {
+		return frontmatterParseResult{Frontmatter: fm, Body: body, Err: err}
+	}
+	if !has {
+		return frontmatterParseResult{Frontmatter: fm, Body: body, Err: errParsedFrontmatterMissing}
+	}
+	return frontmatterParseResult{Frontmatter: fm, Body: body}
+}
+
+func haveParsedFrontmatter(frontmatter, body types.GomegaMatcher) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Frontmatter", frontmatter),
+		HaveField("Body", body),
+		HaveField("Err", Succeed()),
+	)
 }
 
 var splitFrontmatterCases = []splitFrontmatterCase{
@@ -289,22 +318,21 @@ var _ = ginkgo.Describe("frontmatter", func() {
 	})
 
 	ginkgo.It("preserves scalar LeafWiki values as frontmatter strings", func() {
-		fm, body, has, err := ParseFrontmatter(`---
+		Expect(parsedFrontmatterResult(ParseFrontmatter(`---
 leafwiki_id: 123
 leafwiki_title: true
 ---
-Body`)
-		Expect(err).To(Succeed())
-		Expect(has).To(BeTrue())
-		Expect(fm).To(Equal(Frontmatter{
-			LeafWikiID:    "123",
-			LeafWikiTitle: "true",
-		}))
-		Expect(body).To(Equal("Body"))
+Body`))).To(haveParsedFrontmatter(
+			Equal(Frontmatter{
+				LeafWikiID:    "123",
+				LeafWikiTitle: "true",
+			}),
+			Equal("Body"),
+		))
 	})
 
 	ginkgo.It("adapts canonical metadata comments to legacy frontmatter callers", func() {
-		fm, body, has, err := ParseFrontmatter(`<!-- leafwiki
+		Expect(parsedFrontmatterResult(ParseFrontmatter(`<!-- leafwiki
 version: 1
 page:
   id: abc123
@@ -314,17 +342,16 @@ tags:
 fields:
   status: open
 -->
-Body`)
-		Expect(err).To(Succeed())
-		Expect(has).To(BeTrue())
-		Expect(fm).To(Equal(Frontmatter{
-			LeafWikiID:    "abc123",
-			LeafWikiTitle: "Canonical Title",
-			ExtraFields: map[string]interface{}{
-				"tags":   []string{"demo"},
-				"status": "open",
-			},
-		}))
-		Expect(body).To(Equal("Body"))
+Body`))).To(haveParsedFrontmatter(
+			Equal(Frontmatter{
+				LeafWikiID:    "abc123",
+				LeafWikiTitle: "Canonical Title",
+				ExtraFields: map[string]interface{}{
+					"tags":   []string{"demo"},
+					"status": "open",
+				},
+			}),
+			Equal("Body"),
+		))
 	})
 })
