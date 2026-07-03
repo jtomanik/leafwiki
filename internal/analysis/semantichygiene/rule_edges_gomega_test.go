@@ -567,6 +567,7 @@ var _ = ginkgo.It("TestExistingMigratedSpec", func() {
 			Expect(h.diagnosticMessages()).To(ConsistOf(
 				"semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason",
 				`semh:ginkgo.test-name: Ginkgo node name "TestExistingMigratedSpec" preserves a migrated testing.T name; describe observable behavior instead`,
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T-like.Helper adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
 			))
 		})
 
@@ -938,6 +939,43 @@ var _ = ginkgo.Describe("tree behavior", func() {
 				"semh:ginkgo.testing-t-in-spec: avoid testing.T-like.Fatalf assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
 				"semh:ginkgo.testing-t-in-spec: avoid testing.T-like.TempDir adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
 			))
+		})
+
+		ginkgo.It("does not treat logger Error and Log methods as testing.T-style adapters", func() {
+			h := newRuleHarness("/repo/internal/logging/logging_test.go", "github.com/perber/wiki/internal/logging", `package logging
+
+type bddDSL struct{}
+type logger interface {
+	Error(message string)
+	Log(message string)
+}
+type testLogger struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+func (testLogger) Error(message string) {}
+func (testLogger) Log(message string) {}
+func newLogger() logger { return testLogger{} }
+
+var _ = ginkgo.Describe("logging behavior", func() {
+	ginkgo.It("writes an error-level log entry", func() {
+		logger := newLogger()
+		logger.Error("failed")
+		logger.Log("debug")
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(BeEmpty())
 		})
 
 		ginkgo.It("reports direct Ginkgo Fail calls inside Ginkgo spec bodies", func() {

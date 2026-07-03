@@ -298,11 +298,31 @@ func isTestingTLikeAdapterType(typ types.Type) bool {
 	}
 	methods := map[string]struct{}{}
 	collectTestingTLikeMethods(types.Unalias(typ), methods)
-	if len(methods) >= 2 {
+	if testingTLikeMethodsHaveStrongSignal(methods) {
 		return true
 	}
 	named := namedType(typ)
 	return named != nil && strings.Contains(strings.ToLower(named.Obj().Name()), "testt") && len(methods) >= 1
+}
+
+func testingTLikeMethodsHaveStrongSignal(methods map[string]struct{}) bool {
+	for _, name := range []string{
+		"Fatalf",
+		"Fatal",
+		"Errorf",
+		"Helper",
+		"Cleanup",
+		"Setenv",
+		"Skip",
+		"Skipf",
+		"SkipNow",
+		"TempDir",
+	} {
+		if _, ok := methods[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func collectTestingTLikeMethods(typ types.Type, methods map[string]struct{}) {
