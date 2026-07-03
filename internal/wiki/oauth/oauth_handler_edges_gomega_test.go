@@ -20,7 +20,7 @@ import (
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
-var _ = Describe("OAuth handler edge coverage", func() {
+var _ = Describe("OAuth authorization handler behavior", func() {
 	const redirectURI = "http://127.0.0.1:49152/callback"
 
 	var (
@@ -254,7 +254,7 @@ var _ = Describe("OAuth handler edge coverage", func() {
 	})
 })
 
-var _ = Describe("OAuth token and bearer edge coverage", func() {
+var _ = Describe("OAuth token and bearer behavior", func() {
 	It("handles token subject failures, access response failures, and successful token responses", func() {
 		userService, user := newOAuthUserServiceForSpec("token-user")
 		service := newOAuthServiceForSpec(ServiceConfig{UserService: userService})
@@ -461,7 +461,7 @@ func newOAuthServiceForSpec(cfg ServiceConfig) *Service {
 func newOAuthUserServiceForSpec(username string) (*coreauth.UserService, *coreauth.User) {
 	GinkgoHelper()
 
-	store, err := coreauth.NewUserStore(GinkgoT().TempDir())
+	store, err := coreauth.NewUserStore(oauthTempDir())
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
 		Expect(store.Close()).To(Succeed())

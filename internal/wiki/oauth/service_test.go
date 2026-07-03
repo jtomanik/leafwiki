@@ -3,6 +3,9 @@ package oauth
 import (
 	"context"
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/types"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,73 +14,46 @@ import (
 	"github.com/ory/fosite"
 )
 
-var _ = ginkgo.It("TestNewServiceConstructsFositeBackedService", func() {
-	t := ginkgo.GinkgoT()
-	service, err := NewService(ServiceConfig{
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+var _ = ginkgo.Describe("OAuth service construction", func() {
+	ginkgo.It("installs Fosite configuration, provider, store, and fixed client", func() {
+		service, err := NewService(ServiceConfig{
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(service).To(haveInstalledFositeServiceComponents())
+		client, err := service.store.GetClient(context.Background(), ClientID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(client.GetID()).To(Equal(ClientID))
 	})
-	if err != nil {
-		t.Fatalf("NewService failed: %v", err)
-	}
 
-	if service.fositeConfig == nil {
-		t.Fatalf("service fositeConfig is nil")
-	}
-	if service.fositeProvider == nil {
-		t.Fatalf("service fositeProvider is nil")
-	}
-	if service.store == nil {
-		t.Fatalf("service store is nil")
-	}
-	client, err := service.store.GetClient(context.Background(), ClientID)
-	if err != nil {
-		t.Fatalf("fixed client missing from Fosite store: %v", err)
-	}
-	if got := client.GetID(); got != ClientID {
-		t.Fatalf("fixed client ID = %q, want %q", got, ClientID)
-	}
+	ginkgo.It("uses Fosite validation with the fixed redirect adapter for authorize requests", func() {
+		service, err := NewService(ServiceConfig{
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).NotTo(HaveOccurred())
 
-})
+		redirectURI := "http://localhost:49152/callback"
+		values := validAuthorizeRequestValues(redirectURI)
+		values.Set("response_type", "code token")
+		req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
 
-var _ = ginkgo.It("TestNewAuthorizeRequestUsesFositeValidationWithFixedRedirectAdapter", func() {
-	t := ginkgo.GinkgoT()
-	service, err := NewService(ServiceConfig{
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		_, err = service.newAuthorizeRequest(req, redirectURI, values.Get("state"))
+		// Plantrace evidence: Fosite preserves the RFC error field unsupported_response_type.
+		Expect(fosite.ErrorToRFC6749Error(err).ErrorField).To(Equal(fosite.ErrUnsupportedResponseType.ErrorField))
+
+		values.Set("response_type", responseTypeCode)
+		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
+		parsed, err := service.newAuthorizeRequest(req, redirectURI, values.Get("state"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parsed.GetRedirectURI().String()).To(Equal(redirectURI))
+
+		client, err := service.store.GetClient(context.Background(), ClientID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(client.GetRedirectURIs()).To(BeEmpty())
 	})
-	if err != nil {
-		t.Fatalf("NewService failed: %v", err)
-	}
-
-	redirectURI := "http://localhost:49152/callback"
-	values := validAuthorizeRequestValues(redirectURI)
-	values.Set("response_type", "code token")
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
-
-	if _, err := service.newAuthorizeRequest(req, redirectURI, values.Get("state")); err == nil {
-		t.Fatalf("newAuthorizeRequest accepted unsupported response_type")
-	} else if got := fosite.ErrorToRFC6749Error(err).ErrorField; got != "unsupported_response_type" {
-		t.Fatalf("newAuthorizeRequest error = %q, want unsupported_response_type", got)
-	}
-
-	values.Set("response_type", responseTypeCode)
-	req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
-	parsed, err := service.newAuthorizeRequest(req, redirectURI, values.Get("state"))
-	if err != nil {
-		t.Fatalf("newAuthorizeRequest fixed redirect adapter failed: %v", err)
-	}
-	if got := parsed.GetRedirectURI().String(); got != redirectURI {
-		t.Fatalf("parsed redirect URI = %q, want %q", got, redirectURI)
-	}
-	client, err := service.store.GetClient(context.Background(), ClientID)
-	if err != nil {
-		t.Fatalf("fixed client missing after authorize parse: %v", err)
-	}
-	if got := client.GetRedirectURIs(); len(got) != 0 {
-		t.Fatalf("fixed client persisted redirect URIs = %#v, want empty fixed-client adapter state", got)
-	}
-
 })
 
 func validAuthorizeRequestValues(redirectURI string) url.Values {
@@ -90,4 +66,13 @@ func validAuthorizeRequestValues(redirectURI string) url.Values {
 		"code_challenge":        {"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUV"},
 		"code_challenge_method": {"S256"},
 	}
+}
+
+func haveInstalledFositeServiceComponents() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(service *Service) (bool, error) {
+		if service == nil {
+			return false, nil
+		}
+		return service.fositeConfig != nil && service.fositeProvider != nil && service.store != nil, nil
+	}).WithMessage("have installed Fosite configuration, provider, and store")
 }

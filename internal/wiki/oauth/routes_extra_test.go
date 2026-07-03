@@ -275,7 +275,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 	})
 
 	ginkgo.It("validates token subjects and rejects malformed token requests", func() {
-		userStore, err := coreauth.NewUserStore(ginkgo.GinkgoT().TempDir())
+		userStore, err := coreauth.NewUserStore(oauthTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
 			Expect(userStore.Close()).To(Succeed())

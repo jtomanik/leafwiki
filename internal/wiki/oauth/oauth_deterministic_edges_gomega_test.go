@@ -13,7 +13,7 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 )
 
-var _ = Describe("OAuth deterministic edge coverage", func() {
+var _ = Describe("OAuth deterministic service behavior", func() {
 	It("covers fixed-client redirect adapters and client assertion replay guards", func() {
 		ctx := context.Background()
 		store := newFositeStore()

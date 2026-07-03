@@ -7,12 +7,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-type oauthTestT interface {
-	Helper()
-	Fatal(args ...any)
-	Fatalf(format string, args ...any)
-}
-
 func TestOAuthSuite(t *testing.T) {
 	RegisterFailHandler(ginkgo.Fail)
 	ginkgo.RunSpecs(t, "OAuth Suite")
