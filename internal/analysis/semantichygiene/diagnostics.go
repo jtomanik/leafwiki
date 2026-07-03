@@ -166,6 +166,10 @@ func gomegaBooleanStateStringDiagnostic() string {
 	return "do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly"
 }
 
+func gomegaControlStatusMatcherDiagnostic() string {
+	return "assert project daemon control errors with MatchError or a domain matcher instead of IsControlStatus with boolean matchers"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }

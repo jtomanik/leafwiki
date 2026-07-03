@@ -69,6 +69,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesErrorsAs(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaErrorsAsMatcher, assertion.actual, gomegaErrorsAsMatcherDiagnostic())
 	}
+	if assertionUsesControlStatus(assertion) && isBooleanMatcher(assertion.matcher) {
+		ctx.report(ruleGomegaControlStatusMatcher, assertion.actual, gomegaControlStatusMatcherDiagnostic())
+	}
 	if assertionUsesOSIsNotExist(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaOSIsNotExistMatcher, assertion.actual, gomegaOSIsNotExistMatcherDiagnostic())
 	}
@@ -557,6 +560,11 @@ func assertionUsesOSIsNotExist(ctx *analysisContext, assertion gomegaAssertion) 
 	}
 	packagePath, name := calleePackageAndName(ctx, call)
 	return packagePath == "os" && name == "IsNotExist"
+}
+
+func assertionUsesControlStatus(assertion gomegaAssertion) bool {
+	call, ok := assertion.actual.(*ast.CallExpr)
+	return ok && callName(call) == "IsControlStatus"
 }
 
 func assertionUsesLenEqual(assertion gomegaAssertion) bool {

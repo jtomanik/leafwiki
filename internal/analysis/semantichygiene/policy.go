@@ -62,6 +62,7 @@ const (
 	ruleGomegaBooleanLiteral               ruleID = "gomega.boolean-literal"
 	ruleGomegaCommaOKAssertion             ruleID = "gomega.comma-ok-assertion"
 	ruleGomegaProxyBoolean                 ruleID = "gomega.proxy-boolean"
+	ruleGomegaControlStatusMatcher         ruleID = "gomega.control-status-matcher"
 	ruleGomegaMapIndex                     ruleID = "gomega.map-index"
 	ruleGomegaHTTPStatus                   ruleID = "gomega.http-status"
 	ruleGomegaHTTPBody                     ruleID = "gomega.http-body"
@@ -160,6 +161,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaBooleanLiteral:               hardRule(ruleGomegaBooleanLiteral),
 	ruleGomegaCommaOKAssertion:             hardRule(ruleGomegaCommaOKAssertion),
 	ruleGomegaProxyBoolean:                 hardRule(ruleGomegaProxyBoolean),
+	ruleGomegaControlStatusMatcher:         hardRule(ruleGomegaControlStatusMatcher),
 	ruleGomegaMapIndex:                     hardRule(ruleGomegaMapIndex),
 	ruleGomegaHTTPStatus:                   hardRule(ruleGomegaHTTPStatus),
 	ruleGomegaHTTPBody:                     hardRule(ruleGomegaHTTPBody),
