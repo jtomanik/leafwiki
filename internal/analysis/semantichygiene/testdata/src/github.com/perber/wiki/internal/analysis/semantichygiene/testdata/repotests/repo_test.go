@@ -472,6 +472,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(payload).To(MatchFields(nil, Fields{
 		"Message": Equal("LeafWiki workspace sync"), // want "raw localized prose \"LeafWiki workspace sync\" used in test assertion code; assert a semantic code/message ID instead"
 	}))
+	Expect(text).To(Equal(HavePrefix("abc"))) // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
 
 	type matcherBackedRecord struct {
 		Content any
