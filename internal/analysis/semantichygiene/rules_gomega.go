@@ -574,7 +574,7 @@ func assertionUsesLenEqual(assertion gomegaAssertion) bool {
 
 func assertionUsesBinaryBoolean(assertion gomegaAssertion) bool {
 	binary, ok := assertion.actual.(*ast.BinaryExpr)
-	return ok && isComparisonOp(binary.Op) && isBooleanMatcher(assertion.matcher)
+	return ok && isBooleanProducingBinaryOp(binary.Op) && isBooleanMatcher(assertion.matcher)
 }
 
 func assertionUsesBooleanLiteral(assertion gomegaAssertion) bool {
@@ -612,7 +612,7 @@ func isProxyBooleanName(name string) bool {
 	case "ok", "found", "exists", "present", "matched", "valid", "success", "done", "called":
 		return true
 	}
-	for _, suffix := range []string{"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called"} {
+	for _, suffix := range []string{"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called", "Invoked"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
@@ -728,6 +728,10 @@ func isComparisonOp(op token.Token) bool {
 	default:
 		return false
 	}
+}
+
+func isBooleanProducingBinaryOp(op token.Token) bool {
+	return isComparisonOp(op) || op == token.LAND || op == token.LOR
 }
 
 func assertionUsesMapIndexEqual(ctx *analysisContext, assertion gomegaAssertion) bool {

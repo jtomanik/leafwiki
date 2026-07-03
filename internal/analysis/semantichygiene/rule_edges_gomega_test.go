@@ -1225,6 +1225,9 @@ func BeFalse() any { return nil }
 func TestCLIBehavior() {
 	Expect(false).To(BeTrue())
 	Expect(true).To(BeFalse())
+	privateURLMissing := true
+	privateTokenMissing := false
+	Expect(privateURLMissing || privateTokenMissing).To(BeFalse())
 }
 `)
 			for _, call := range h.findCalls("To") {
@@ -1234,6 +1237,7 @@ func TestCLIBehavior() {
 			Expect(h.diagnosticMessages()).To(ConsistOf(
 				"semh:gomega.boolean-literal: use semantic Gomega assertions instead of forcing pass/fail with boolean literals",
 				"semh:gomega.boolean-literal: use semantic Gomega assertions instead of forcing pass/fail with boolean literals",
+				"semh:gomega.binary-boolean: use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse",
 			))
 		})
 
@@ -1267,6 +1271,8 @@ func TestAgentPresence() {
 	Expect(ok).To(BeTrue())
 	mcpCalled := false
 	Expect(mcpCalled).To(BeFalse())
+	cancelInvoked := false
+	Expect(cancelInvoked).To(BeFalse())
 	Expect(struct {
 		Event string
 		Found bool
@@ -1292,6 +1298,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
