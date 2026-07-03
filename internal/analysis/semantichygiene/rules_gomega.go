@@ -25,91 +25,91 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	if assertionUsesErrError(ctx, assertion) && isMatcherNamed(assertion.matcher, "Equal", "ContainSubstring") {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaErrorStringMatcherDiagnostic())
+		ctx.report(ruleGomegaErrorString, assertion.actual, gomegaErrorStringMatcherDiagnostic())
 	}
 	if assertionUsesRawStringMatchError(ctx, assertion) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaRawStringMatchErrorDiagnostic())
+		ctx.report(ruleGomegaRawStringMatchError, assertion.matcher, gomegaRawStringMatchErrorDiagnostic())
 	}
 	if assertionUsesErrorNilMatcher(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaErrorNilMatcherDiagnostic())
+		ctx.report(ruleGomegaErrorNilMatcher, assertion.actual, gomegaErrorNilMatcherDiagnostic())
 	}
 	if assertionUsesInlineErrorReturnHaveOccurred(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaInlineErrorSucceedDiagnostic())
+		ctx.report(ruleGomegaInlineErrorSucceed, assertion.actual, gomegaInlineErrorSucceedDiagnostic())
 	}
 	if assertionUsesMultiReturnErrorMatcher(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaMultiReturnErrorMatcherDiagnostic())
+		ctx.report(ruleGomegaMultiReturnErrorMatcher, assertion.actual, gomegaMultiReturnErrorMatcherDiagnostic())
 	}
 	if assertionUsesStringsContains(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaStringsContainsMatcherDiagnostic())
+		ctx.report(ruleGomegaStringsContains, assertion.actual, gomegaStringsContainsMatcherDiagnostic())
 	}
 	if assertionUsesStringsPredicate(ctx, assertion, "HasPrefix") && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaStringPredicateMatcherDiagnostic("strings.HasPrefix", "HavePrefix"))
+		ctx.report(ruleGomegaStringPredicate, assertion.actual, gomegaStringPredicateMatcherDiagnostic("strings.HasPrefix", "HavePrefix"))
 	}
 	if assertionUsesStringsPredicate(ctx, assertion, "HasSuffix") && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaStringPredicateMatcherDiagnostic("strings.HasSuffix", "HaveSuffix"))
+		ctx.report(ruleGomegaStringPredicate, assertion.actual, gomegaStringPredicateMatcherDiagnostic("strings.HasSuffix", "HaveSuffix"))
 	}
 	if assertionUsesRegexpMatchString(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaRegexpMatchStringDiagnostic())
+		ctx.report(ruleGomegaRegexpMatchString, assertion.actual, gomegaRegexpMatchStringDiagnostic())
 	}
 	if assertionUsesErrorsIs(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaErrorsIsMatcherDiagnostic())
+		ctx.report(ruleGomegaErrorsIsMatcher, assertion.actual, gomegaErrorsIsMatcherDiagnostic())
 	}
 	if assertionUsesErrorsAs(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaErrorsAsMatcherDiagnostic())
+		ctx.report(ruleGomegaErrorsAsMatcher, assertion.actual, gomegaErrorsAsMatcherDiagnostic())
 	}
 	if assertionUsesOSIsNotExist(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaOSIsNotExistMatcherDiagnostic())
+		ctx.report(ruleGomegaOSIsNotExistMatcher, assertion.actual, gomegaOSIsNotExistMatcherDiagnostic())
 	}
 	if assertionUsesLenEqual(assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaLenMatcherDiagnostic())
+		ctx.report(ruleGomegaLenEqual, assertion.actual, gomegaLenMatcherDiagnostic())
 	}
 	if assertionUsesBinaryBoolean(assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaBinaryBooleanMatcherDiagnostic())
+		ctx.report(ruleGomegaBinaryBoolean, assertion.actual, gomegaBinaryBooleanMatcherDiagnostic())
 	}
 	if assertionUsesMapIndexEqual(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaMapIndexMatcherDiagnostic())
+		ctx.report(ruleGomegaMapIndex, assertion.actual, gomegaMapIndexMatcherDiagnostic())
 	}
 	if assertionUsesHTTPStatusEqual(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaHTTPStatusMatcherDiagnostic())
+		ctx.report(ruleGomegaHTTPStatus, assertion.actual, gomegaHTTPStatusMatcherDiagnostic())
 	}
 	if assertionUsesHTTPBodyString(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaHTTPBodyMatcherDiagnostic())
+		ctx.report(ruleGomegaHTTPBody, assertion.actual, gomegaHTTPBodyMatcherDiagnostic())
 	}
 	if assertionUsesRepeatedHTTPBodyMatcher(ctx, assertion) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaRepeatedHTTPBodyMatcherDiagnostic())
+		ctx.report(ruleGomegaRepeatedHTTPBody, assertion.matcher, gomegaRepeatedHTTPBodyMatcherDiagnostic())
 	}
 	if assertionUsesHTTPHeaderGet(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaHTTPHeaderMatcherDiagnostic())
+		ctx.report(ruleGomegaHTTPHeader, assertion.actual, gomegaHTTPHeaderMatcherDiagnostic())
 	}
 	if assertionUsesNumericBeEquivalentTo(ctx, assertion) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaNumericEquivalentDiagnostic())
+		ctx.report(ruleGomegaNumericEquivalent, assertion.matcher, gomegaNumericEquivalentDiagnostic())
 	}
 	if assertionUsesTimeEqual(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaTimeEqualDiagnostic())
+		ctx.report(ruleGomegaTimeEqual, assertion.actual, gomegaTimeEqualDiagnostic())
 	}
 	if assertionUsesEqualEmpty(assertion) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaEqualEmptyDiagnostic())
+		ctx.report(ruleGomegaEqualEmpty, assertion.matcher, gomegaEqualEmptyDiagnostic())
 	}
 	if assertionUsesEqualZero(assertion) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaEqualZeroDiagnostic())
+		ctx.report(ruleGomegaEqualZero, assertion.matcher, gomegaEqualZeroDiagnostic())
 	}
 	if assertionUsesRepeatedFieldAssertion(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaRepeatedFieldAssertionDiagnostic())
+		ctx.report(ruleGomegaRepeatedFieldAssertions, assertion.actual, gomegaRepeatedFieldAssertionDiagnostic())
 	}
 	if assertionUsesCollectionIndexAssertion(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaCollectionIndexAssertionDiagnostic())
+		ctx.report(ruleGomegaCollectionIndexAssertion, assertion.actual, gomegaCollectionIndexAssertionDiagnostic())
 	}
 	if fieldName, ok := assertionMatchesStructuredErrorField(ctx, assertion); ok {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaStructuredErrorMatcherDiagnostic(fieldName))
+		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.actual, gomegaStructuredErrorMatcherDiagnostic(fieldName))
 	}
 	if fieldName, ok := assertionUsesStructuredFieldMatcher(ctx, assertion); ok {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaStructuredErrorMatcherDiagnostic(fieldName))
+		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.matcher, gomegaStructuredErrorMatcherDiagnostic(fieldName))
 	}
 	if keyName, ok := assertionUsesStructuredProtocolKeyMatcher(ctx, assertion); ok {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaStructuredProtocolKeyMatcherDiagnostic(keyName))
+		ctx.report(ruleGomegaStructuredProtocolKey, assertion.matcher, gomegaStructuredProtocolKeyMatcherDiagnostic(keyName))
 	}
 	if matcherName, ok := assertionUsesStructuredProtocolPayloadMatcher(ctx, assertion); ok {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaStructuredProtocolPayloadMatcherDiagnostic(matcherName))
+		ctx.report(ruleGomegaStructuredProtocolPayload, assertion.matcher, gomegaStructuredProtocolPayloadMatcherDiagnostic(matcherName))
 	}
 }
 
@@ -122,19 +122,19 @@ func checkGomegaAsyncAssertion(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	if assertion.sourceName == "Eventually" && isNegativeAssertionMethod(assertion.method) && isMatcherNamed(assertion.matcher, "Receive") {
-		ctx.pass.Reportf(assertion.call.Pos(), "%s", gomegaAsyncNegativeReceiveDiagnostic())
+		ctx.report(ruleGomegaAsyncNegativeReceive, assertion.call, gomegaAsyncNegativeReceiveDiagnostic())
 	}
 	if matcherTreeContainsRawStringMatchError(ctx, assertion.matcher) {
-		ctx.pass.Reportf(assertion.matcher.Pos(), "%s", gomegaRawStringMatchErrorDiagnostic())
+		ctx.report(ruleGomegaRawStringMatchError, assertion.matcher, gomegaRawStringMatchErrorDiagnostic())
 	}
 	if assertion.sourceName == "Eventually" && !eventuallyBareActualAllowed(ctx, assertion.actual) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaAsyncBareValueDiagnostic())
+		ctx.report(ruleGomegaAsyncBareValue, assertion.actual, gomegaAsyncBareValueDiagnostic())
 	}
 	if asyncAssertionRequiresSpecContext(ctx, assertion) {
-		ctx.pass.Reportf(assertion.source.Pos(), "%s", ginkgoAsyncContextDiagnostic())
+		ctx.report(ruleGomegaAsyncContext, assertion.source, ginkgoAsyncContextDiagnostic())
 	}
 	if assertionUsesAsyncBooleanMatcher(ctx, assertion) {
-		ctx.pass.Reportf(assertion.actual.Pos(), "%s", gomegaAsyncBooleanMatcherDiagnostic())
+		ctx.report(ruleGomegaAsyncBoolean, assertion.actual, gomegaAsyncBooleanMatcherDiagnostic())
 	}
 }
 
@@ -159,7 +159,7 @@ func checkGomegaAssertionHelperOffset(ctx *analysisContext, fn *ast.FuncDecl) {
 		funcHasGomegaHelperReporting(ctx, fn) {
 		return
 	}
-	ctx.pass.Reportf(fn.Name.Pos(), "%s", gomegaHelperOffsetDiagnostic(fn.Name.Name))
+	ctx.report(ruleGomegaHelperOffset, fn.Name, gomegaHelperOffsetDiagnostic(fn.Name.Name))
 }
 
 func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -182,15 +182,15 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 				continue
 			}
 			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
-				ctx.pass.Reportf(name.Pos(), "%s", customMatcherSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				ctx.report(ruleSemanticRawSignature, name, customMatcherSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
 				continue
 			}
 			if testHelperMessageParamName(name.Name, fn.Name.Name) {
-				ctx.pass.Reportf(name.Pos(), "%s", customMatcherMessageParameterDiagnostic(fn.Name.Name, name.Name))
+				ctx.report(ruleI18nMessageParameter, name, customMatcherMessageParameterDiagnostic(fn.Name.Name, name.Name))
 				continue
 			}
 			if testHelperFieldParamName(name.Name, fn.Name.Name) {
-				ctx.pass.Reportf(name.Pos(), "%s", customMatcherFieldParameterDiagnostic(fn.Name.Name, name.Name))
+				ctx.report(ruleSemanticRawField, name, customMatcherFieldParameterDiagnostic(fn.Name.Name, name.Name))
 			}
 		}
 	}
@@ -370,7 +370,7 @@ func checkErrorStringPredicate(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	if exprIsErrorStringCall(ctx, call.Args[0]) {
-		ctx.pass.Reportf(call.Args[0].Pos(), "%s", gomegaErrorStringMatcherDiagnostic())
+		ctx.report(ruleGomegaErrorString, call.Args[0], gomegaErrorStringMatcherDiagnostic())
 	}
 }
 
@@ -873,7 +873,7 @@ func enclosingSpecContextNames(ctx *analysisContext, node ast.Node) map[string]b
 			continue
 		}
 		call, ok := ctx.parent(fn).(*ast.CallExpr)
-		if !ok || !isGinkgoSpecNodeName(callName(call)) {
+		if !ok || !isGinkgoSubjectBodyNodeName(callName(call)) {
 			continue
 		}
 		return funcLitContextParamNames(ctx, fn)
@@ -1281,7 +1281,7 @@ func reportGlobalExpectCallsInAsyncCallback(ctx *analysisContext, fn *ast.FuncLi
 		if !ok || !isGlobalGomegaExpectCall(call) {
 			return true
 		}
-		ctx.pass.Reportf(call.Pos(), "%s", gomegaAsyncCallbackExpectDiagnostic())
+		ctx.report(ruleGomegaAsyncCallbackExpect, call, gomegaAsyncCallbackExpectDiagnostic())
 		return true
 	})
 }

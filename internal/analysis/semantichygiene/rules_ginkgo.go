@@ -3,6 +3,7 @@ package semantichygiene
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 	"strings"
 )
 
@@ -11,11 +12,14 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	name := callName(call)
+	checkGinkgoTopLevelIt(ctx, call, name)
+	checkGinkgoTestName(ctx, call, name)
+	checkGinkgoTestingTInSpec(ctx, call, name)
 	switch {
 	case isFocusedGinkgoNodeName(name):
-		ctx.pass.Reportf(call.Pos(), "%s", ginkgoFocusDiagnostic())
+		ctx.report(ruleGinkgoFocus, call, ginkgoFocusDiagnostic())
 	case isPendingGinkgoNodeName(name):
-		ctx.pass.Reportf(call.Pos(), "%s", ginkgoPendingDiagnostic())
+		ctx.report(ruleGinkgoPending, call, ginkgoPendingDiagnostic())
 	}
 	if isGinkgoContainerNodeName(name) {
 		checkGinkgoContainerBody(ctx, call)
@@ -28,6 +32,140 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	}
 }
 
+func checkGinkgoTopLevelIt(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isTopLevelItCandidateName(name) || !isGinkgoDSLCall(ctx, call) {
+		return
+	}
+	if enclosingGinkgoContainerBlock(ctx, call) != nil {
+		return
+	}
+	ctx.report(ruleGinkgoTopLevelIt, call, ginkgoTopLevelItDiagnostic())
+}
+
+func checkGinkgoTestName(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoNameCarrier(name) || !isGinkgoDSLCall(ctx, call) || len(call.Args) == 0 {
+		return
+	}
+	reportGinkgoTestName(ctx, call.Args[0])
+	if isDescribeTableCall(name) {
+		for _, arg := range call.Args[1:] {
+			reportGinkgoTableEntryDescriptionName(ctx, arg)
+		}
+	}
+}
+
+func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoStaticDescription(expr)
+	if !ok || !strings.HasPrefix(description, "Test") {
+		return
+	}
+	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
+}
+
+func reportGinkgoTableEntryDescriptionName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoEntryDescriptionValue(expr)
+	if !ok || !strings.HasPrefix(description, "Test") {
+		return
+	}
+	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
+}
+
+func isGinkgoNameCarrier(name string) bool {
+	return isGinkgoSpecNodeName(name) ||
+		isGinkgoContainerNodeName(name) ||
+		isDescribeTableCall(name) ||
+		isBDDEntryCall(name)
+}
+
+func ginkgoStaticDescription(expr ast.Expr) (string, bool) {
+	if value, ok := stringLiteralValue(expr); ok {
+		return value, true
+	}
+	return ginkgoEntryDescriptionValue(expr)
+}
+
+func ginkgoEntryDescriptionValue(expr ast.Expr) (string, bool) {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	if !ok || callName(call) != "EntryDescription" || len(call.Args) == 0 {
+		return "", false
+	}
+	return stringLiteralValue(call.Args[0])
+}
+
+func checkGinkgoTestingTInSpec(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoSubjectBodyNodeName(name) || !isGinkgoDSLCall(ctx, call) {
+		return
+	}
+	body, ok := firstFuncLitArg(call)
+	if !ok {
+		return
+	}
+	ast.Inspect(body.Body, func(node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+		if nested, ok := node.(*ast.FuncLit); ok && nested != body {
+			return false
+		}
+		candidate, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if name, ok := ginkgoTestingTAssertion(ctx, candidate); ok {
+			ctx.report(ruleGinkgoTestingTInSpec, candidate, ginkgoTestingTAssertionDiagnostic(name))
+			return true
+		}
+		name, ok := ginkgoTestingTAdapter(ctx, candidate)
+		if !ok {
+			return true
+		}
+		ctx.report(ruleGinkgoTestingTInSpec, candidate, ginkgoTestingTInSpecDiagnostic(name))
+		return true
+	})
+}
+
+func ginkgoTestingTAssertion(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
+	selector, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
+	if !ok || !isTestingTFailureMethod(selector.Sel.Name) || !isTestingTType(ctx.pass.TypesInfo.TypeOf(selector.X)) {
+		return "", false
+	}
+	return "testing.T." + selector.Sel.Name, true
+}
+
+func isTestingTFailureMethod(name string) bool {
+	switch name {
+	case "Fatalf", "Fatal", "Errorf", "Error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTestingTType(typ types.Type) bool {
+	typ = types.Unalias(typ)
+	if ptr, ok := typ.(*types.Pointer); ok {
+		typ = ptr.Elem()
+	}
+	named, ok := typ.(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return false
+	}
+	return named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "T"
+}
+
+func ginkgoTestingTAdapter(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
+	packagePath, name := calleePackageAndName(ctx, call)
+	if packagePath != "github.com/onsi/ginkgo/v2" {
+		return "", false
+	}
+	switch name {
+	case "GinkgoT", "GinkgoTB":
+		return name, true
+	default:
+		return "", false
+	}
+}
+
 func checkGinkgoContainerBody(ctx *analysisContext, call *ast.CallExpr) {
 	body, ok := firstFuncLitArg(call)
 	if !ok {
@@ -37,11 +175,11 @@ func checkGinkgoContainerBody(ctx *analysisContext, call *ast.CallExpr) {
 		switch s := stmt.(type) {
 		case *ast.AssignStmt:
 			if s.Tok == token.DEFINE {
-				ctx.pass.Reportf(s.Pos(), "%s", ginkgoContainerStateInitializationDiagnostic())
+				ctx.report(ruleGinkgoContainerStateInitialization, s, ginkgoContainerStateInitializationDiagnostic())
 			}
 		case *ast.DeclStmt:
 			if ginkgoDeclInitializesState(s) {
-				ctx.pass.Reportf(s.Pos(), "%s", ginkgoContainerStateInitializationDiagnostic())
+				ctx.report(ruleGinkgoContainerStateInitialization, s, ginkgoContainerStateInitializationDiagnostic())
 			}
 		case *ast.ExprStmt:
 			checkGinkgoContainerExpr(ctx, s.X)
@@ -91,7 +229,7 @@ func reportDisallowedContainerCall(ctx *analysisContext, root *ast.CallExpr) {
 		if !isDisallowedGinkgoContainerCall(name) {
 			return true
 		}
-		ctx.pass.Reportf(call.Pos(), "%s", ginkgoContainerCallDiagnostic(name))
+		ctx.report(ruleGinkgoContainerCall, call, ginkgoContainerCallDiagnostic(name))
 		reported = true
 		return false
 	})
@@ -105,13 +243,13 @@ func checkGinkgoDecoratorArgs(ctx *analysisContext, call *ast.CallExpr) {
 		}
 		switch name {
 		case "Focus":
-			ctx.pass.Reportf(arg.Pos(), "%s", ginkgoFocusDiagnostic())
+			ctx.report(ruleGinkgoFocus, arg, ginkgoFocusDiagnostic())
 		case "Pending":
-			ctx.pass.Reportf(arg.Pos(), "%s", ginkgoPendingDiagnostic())
+			ctx.report(ruleGinkgoPending, arg, ginkgoPendingDiagnostic())
 		case "FlakeAttempts":
-			ctx.pass.Reportf(arg.Pos(), "%s", ginkgoFlakeAttemptsDiagnostic())
+			ctx.report(ruleGinkgoFlakeAttempts, arg, ginkgoFlakeAttemptsDiagnostic())
 		case "Serial", "Ordered", "SpecPriority":
-			ctx.pass.Reportf(arg.Pos(), "%s", ginkgoRestrictedDecoratorDiagnostic(name))
+			ctx.report(ruleGinkgoRestrictedDecorator, arg, ginkgoRestrictedDecoratorDiagnostic(name))
 		}
 	}
 }
@@ -132,7 +270,7 @@ func ginkgoDecoratorName(expr ast.Expr) (string, bool) {
 
 func checkGinkgoEntryPolicy(ctx *analysisContext, call *ast.CallExpr) {
 	if len(call.Args) > 5 {
-		ctx.pass.Reportf(call.Pos(), "%s", ginkgoWideEntryDiagnostic())
+		ctx.report(ruleGinkgoWideEntry, call, ginkgoWideEntryDiagnostic())
 	}
 	setupNames := enclosingGinkgoSetupAssignedNames(ctx, call)
 	if len(setupNames) == 0 {
@@ -141,7 +279,7 @@ func checkGinkgoEntryPolicy(ctx *analysisContext, call *ast.CallExpr) {
 	for _, arg := range call.Args[1:] {
 		for name := range identifiersInExpr(arg) {
 			if setupNames[name] {
-				ctx.pass.Reportf(arg.Pos(), "%s", ginkgoEntrySetupValueDiagnostic())
+				ctx.report(ruleGinkgoEntrySetupValue, arg, ginkgoEntrySetupValueDiagnostic())
 				return
 			}
 		}
@@ -246,7 +384,7 @@ func checkGinkgoGoroutineAssertionRecovery(ctx *analysisContext, stmt *ast.GoStm
 	if !funcLitContainsFailureAssertion(ctx, fn) || funcLitDefersGinkgoRecover(fn) {
 		return
 	}
-	ctx.pass.Reportf(stmt.Go, "%s", ginkgoGoroutineRecoverDiagnostic())
+	ctx.report(ruleGinkgoGoroutineRecover, stmt, ginkgoGoroutineRecoverDiagnostic())
 }
 
 func checkGinkgoBlockingReceive(ctx *analysisContext, expr *ast.UnaryExpr) {
@@ -257,7 +395,7 @@ func checkGinkgoBlockingReceive(ctx *analysisContext, expr *ast.UnaryExpr) {
 		insideGoroutineFuncLit(ctx, expr) {
 		return
 	}
-	ctx.pass.Reportf(expr.Pos(), "%s", ginkgoBlockingReceiveDiagnostic())
+	ctx.report(ruleGinkgoBlockingReceive, expr, ginkgoBlockingReceiveDiagnostic())
 }
 
 func checkGinkgoHelperFirst(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -269,7 +407,7 @@ func checkGinkgoHelperFirst(ctx *analysisContext, fn *ast.FuncDecl) {
 		firstStatementIsGinkgoHelper(fn.Body) {
 		return
 	}
-	ctx.pass.Reportf(fn.Name.Pos(), "%s", ginkgoHelperFirstDiagnostic(fn.Name.Name))
+	ctx.report(ruleGinkgoHelperFirst, fn.Name, ginkgoHelperFirstDiagnostic(fn.Name.Name))
 }
 
 func checkReusableAssertionHelper(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -285,7 +423,7 @@ func checkReusableAssertionHelper(ctx *analysisContext, fn *ast.FuncDecl) {
 	if !isTestFile(filename) && !isTestSupportFile(filename) {
 		return
 	}
-	ctx.pass.Reportf(fn.Name.Pos(), "%s", ginkgoReusableHelperMatcherDiagnostic(fn.Name.Name))
+	ctx.report(ruleGomegaHelperShouldBeMatcher, fn.Name, ginkgoReusableHelperMatcherDiagnostic(fn.Name.Name))
 }
 
 func checkGinkgoGlobalStateCleanup(ctx *analysisContext, call *ast.CallExpr) {
@@ -296,7 +434,7 @@ func checkGinkgoGlobalStateCleanup(ctx *analysisContext, call *ast.CallExpr) {
 	if !ok || nodeIsInsideCallNamed(ctx, call, "DeferCleanup") || enclosingBlockHasDeferCleanup(ctx, call) {
 		return
 	}
-	ctx.pass.Reportf(call.Pos(), "%s", ginkgoGlobalStateCleanupDiagnostic(name))
+	ctx.report(ruleGinkgoGlobalStateCleanup, call, ginkgoGlobalStateCleanupDiagnostic(name))
 }
 
 func checkGinkgoGlobalStateAssignment(ctx *analysisContext, stmt *ast.AssignStmt) {
@@ -308,7 +446,7 @@ func checkGinkgoGlobalStateAssignment(ctx *analysisContext, stmt *ast.AssignStmt
 		if !ok {
 			continue
 		}
-		ctx.pass.Reportf(lhs.Pos(), "%s", ginkgoGlobalStateCleanupDiagnostic(name))
+		ctx.report(ruleGinkgoGlobalStateCleanup, lhs, ginkgoGlobalStateCleanupDiagnostic(name))
 	}
 }
 
@@ -454,7 +592,7 @@ func insideGinkgoSpecOrGoTest(ctx *analysisContext, node ast.Node) bool {
 			return strings.HasPrefix(n.Name.Name, "Test")
 		case *ast.FuncLit:
 			call, ok := ctx.parent(n).(*ast.CallExpr)
-			if ok && isGinkgoSpecNodeName(callName(call)) {
+			if ok && isGinkgoSubjectBodyNodeName(callName(call)) {
 				return true
 			}
 		}
@@ -469,6 +607,19 @@ func isGinkgoSpecNodeName(name string) bool {
 	default:
 		return false
 	}
+}
+
+func isGinkgoSubjectBodyNodeName(name string) bool {
+	return isGinkgoSpecNodeName(name) || isDescribeTableCall(name)
+}
+
+func isTopLevelItCandidateName(name string) bool {
+	return name == "It" || name == "Specify"
+}
+
+func isGinkgoDSLCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	packagePath, _ := calleePackageAndName(ctx, call)
+	return packagePath == "github.com/onsi/ginkgo/v2"
 }
 
 func insideSelectStmt(ctx *analysisContext, node ast.Node) bool {

@@ -68,5 +68,6 @@ func run(pass *analysis.Pass) (any, error) {
 			checkLocalizedProseLiteral(ctx, n)
 		}
 	})
+	ctx.finalizeDiagnostics()
 	return nil, nil
 }

@@ -19,7 +19,7 @@ func checkDirectCast(ctx *analysisContext, call *ast.CallExpr) {
 	if isAllowedDirectCastContext(ctx, call, typeName) {
 		return
 	}
-	ctx.pass.Reportf(call.Pos(), "%s", directCastDiagnostic(typeName))
+	ctx.report(ruleDirectCast, call, directCastDiagnostic(typeName))
 }
 
 func checkUncheckedConstructorCall(ctx *analysisContext, call *ast.CallExpr) {
@@ -33,7 +33,7 @@ func checkUncheckedConstructorCall(ctx *analysisContext, call *ast.CallExpr) {
 	if !ok || !callHasPrimitiveArg(ctx, call) || isAllowedUncheckedConstructorCall(ctx, call, typeName) {
 		return
 	}
-	ctx.pass.Reportf(call.Pos(), "%s", uncheckedConstructorDiagnostic(funcName, typeName))
+	ctx.report(ruleSemanticUncheckedConstructor, call, uncheckedConstructorDiagnostic(funcName, typeName))
 }
 
 func callHasPrimitiveArg(ctx *analysisContext, call *ast.CallExpr) bool {

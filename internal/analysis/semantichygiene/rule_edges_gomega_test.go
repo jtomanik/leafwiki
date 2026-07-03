@@ -60,14 +60,18 @@ func newRuleHarness(filename string, packagePath string, src string) *ruleHarnes
 
 func (h *ruleHarness) resetDiagnostics() {
 	h.diagnostics = nil
+	h.ctx.diagnostics = nil
 }
 
 func (h *ruleHarness) diagnosticMessages() []string {
 	ginkgo.GinkgoHelper()
 
-	messages := make([]string, len(h.diagnostics))
-	for i, diagnostic := range h.diagnostics {
-		messages[i] = diagnostic.Message
+	messages := make([]string, 0, len(h.diagnostics)+len(h.ctx.diagnostics))
+	for _, diagnostic := range h.diagnostics {
+		messages = append(messages, diagnostic.Message)
+	}
+	for _, diagnostic := range h.ctx.diagnostics {
+		messages = append(messages, formatDiagnosticMessage(diagnostic))
 	}
 	return messages
 }
@@ -129,6 +133,44 @@ func (h *ruleHarness) findTypeSpec(name string) *ast.TypeSpec {
 		return true
 	})
 	Expect(found).NotTo(BeNil(), "type %q should exist", name)
+	return found
+}
+
+func (h *ruleHarness) findGoStmt() *ast.GoStmt {
+	ginkgo.GinkgoHelper()
+
+	var found *ast.GoStmt
+	ast.Inspect(h.file, func(node ast.Node) bool {
+		if found != nil {
+			return false
+		}
+		stmt, ok := node.(*ast.GoStmt)
+		if ok {
+			found = stmt
+			return false
+		}
+		return true
+	})
+	Expect(found).NotTo(BeNil(), "go statement should exist")
+	return found
+}
+
+func (h *ruleHarness) findBlockingReceive() *ast.UnaryExpr {
+	ginkgo.GinkgoHelper()
+
+	var found *ast.UnaryExpr
+	ast.Inspect(h.file, func(node ast.Node) bool {
+		if found != nil {
+			return false
+		}
+		expr, ok := node.(*ast.UnaryExpr)
+		if ok && expr.Op == token.ARROW {
+			found = expr
+			return false
+		}
+		return true
+	})
+	Expect(found).NotTo(BeNil(), "blocking receive should exist")
 	return found
 }
 
@@ -199,6 +241,943 @@ func namedStringType(name string) *types.Named {
 }
 
 var _ = ginkgo.Describe("semantichygiene edge coverage", func() {
+	ginkgo.Describe("structured diagnostics", func() {
+		ginkgo.It("delays rule diagnostics until finalization and prefixes the stable rule ID", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+func TestPage() {}
+`)
+
+			h.ctx.report(ruleDirectCast, h.file.Name, directCastDiagnostic("WorkspaceID"))
+			Expect(h.diagnostics).To(BeEmpty())
+
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:semantic.direct-cast: direct cast to semantic type WorkspaceID outside parser or boundary; use a parser or typed input",
+			))
+		})
+
+		ginkgo.It("formats every registered rule with its stable rule ID prefix", func() {
+			for id := range allRuleMetadata() {
+				message := formatDiagnosticMessage(semanticDiagnostic{
+					rule:    id,
+					message: "diagnostic text",
+				})
+
+				Expect(message).To(HavePrefix("semh:" + string(id) + ": "))
+			}
+		})
+
+		ginkgo.It("suppresses one matching call-scoped waivable diagnostic", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func It(text string, body func()) bool { return true }
+
+// semh:allow ginkgo.top-level-it -- package-level invariant reads clearer here
+var _ = It("documents package invariant", func() {})
+`)
+
+			h.ctx.report(ruleGinkgoTopLevelIt, h.findCall("It"), "top-level It reads like a migrated unit test; place it under a behavior container")
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnostics).To(BeEmpty())
+		})
+
+		ginkgo.It("suppresses a matcher diagnostic when the waiver is before the outer assertion call", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func Expect(actual any) assertion { return assertion{} }
+type assertion struct{}
+func (assertion) To(matcher any) {}
+func Equal(expected any) any { return nil }
+
+func TestPage() {
+	// semh:allow gomega.equal-zero -- zero literal reads clearer in this compatibility assertion
+	Expect(0).To(
+		Equal(0),
+	)
+}
+`)
+			equal := h.findCall("Equal")
+
+			h.ctx.report(ruleGomegaEqualZero, equal, gomegaEqualZeroDiagnostic())
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnostics).To(BeEmpty())
+		})
+
+		ginkgo.It("does not let a call-scoped waiver before a spec suppress diagnostics inside the spec body", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func It(text string, body func()) bool { return true }
+func Expect(actual any) assertion { return assertion{} }
+type assertion struct{}
+func (assertion) To(matcher any) {}
+func Equal(expected any) any { return nil }
+
+// semh:allow gomega.equal-zero -- the spec node must not waive assertions in its body
+var _ = It("documents behavior", func() {
+	Expect(0).To(Equal(0))
+})
+`)
+
+			h.ctx.report(ruleGomegaEqualZero, h.findCall("Equal"), gomegaEqualZeroDiagnostic())
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.stale: semh waiver for gomega.equal-zero did not match any diagnostic",
+				"semh:gomega.equal-zero: use BeZero matcher instead of Equal(0) for zero-value assertions",
+			))
+		})
+
+		ginkgo.It("suppresses one matching declaration-scoped waivable diagnostic", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow gomega.helper-should-be-matcher -- compact helper reads clearer than a matcher here
+func assertResponse() {}
+`)
+
+			h.ctx.report(ruleGomegaHelperShouldBeMatcher, h.findFunc("assertResponse").Name, "prefer a custom Gomega matcher for reusable assertion helper assertResponse")
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnostics).To(BeEmpty())
+		})
+
+		ginkgo.It("matches next-node waivers only against the immediately following node", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow ginkgo.top-level-it -- exercises next-node scope
+func TestPage() {}
+func TestLater() {}
+`)
+			waivers, diagnostics := h.ctx.collectWaivers()
+			Expect(diagnostics).To(BeEmpty())
+			Expect(waivers).To(HaveLen(1))
+
+			immediate := h.findFunc("TestPage")
+			later := h.findFunc("TestLater")
+			Expect(h.ctx.waiverMatchesDiagnostic(waivers[0], semanticDiagnostic{
+				rule: ruleGinkgoTopLevelIt,
+				pos:  immediate.Pos(),
+				node: immediate,
+			}, waiverScopeNextNode)).To(BeTrue())
+			Expect(h.ctx.waiverMatchesDiagnostic(waivers[0], semanticDiagnostic{
+				rule: ruleGinkgoTopLevelIt,
+				pos:  later.Pos(),
+				node: later,
+			}, waiverScopeNextNode)).To(BeFalse())
+		})
+
+		ginkgo.It("reports a valid waiver that matches no diagnostic as stale", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow ginkgo.top-level-it -- package-level invariant reads clearer here
+func TestPage() {}
+`)
+
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.stale: semh waiver for ginkgo.top-level-it did not match any diagnostic",
+			))
+		})
+
+		ginkgo.It("reports adjacent same-rule waivers for one diagnostic as duplicate", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func It(text string, body func()) bool { return true }
+
+// semh:allow ginkgo.top-level-it -- first explanation
+// semh:allow ginkgo.top-level-it -- duplicate explanation
+var _ = It("documents package invariant", func() {})
+`)
+
+			h.ctx.report(ruleGinkgoTopLevelIt, h.findCall("It"), "top-level It reads like a migrated unit test; place it under a behavior container")
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.duplicate: duplicate semh waiver for ginkgo.top-level-it; one waiver can suppress one diagnostic",
+			))
+		})
+
+		ginkgo.It("reports non-waivable rule waivers and leaves the hard diagnostic active", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow semantic.direct-cast -- this must stay hard
+func TestPage() {}
+`)
+
+			h.ctx.report(ruleDirectCast, h.file.Name, directCastDiagnostic("WorkspaceID"))
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.non-waivable-rule: semh waiver for semantic.direct-cast cannot suppress hard diagnostics",
+				"semh:semantic.direct-cast: direct cast to semantic type WorkspaceID outside parser or boundary; use a parser or typed input",
+			))
+		})
+
+		ginkgo.It("reports active waivers that exceed a per-rule budget", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func It(text string, body func()) bool { return true }
+
+// semh:allow ginkgo.top-level-it -- first package-level invariant
+var _ = It("documents first package invariant", func() {})
+// semh:allow ginkgo.top-level-it -- second package-level invariant
+var _ = It("documents second package invariant", func() {})
+// semh:allow ginkgo.top-level-it -- third package-level invariant
+var _ = It("documents third package invariant", func() {})
+// semh:allow ginkgo.top-level-it -- fourth package-level invariant
+var _ = It("documents fourth package invariant", func() {})
+`)
+			for _, call := range h.findCalls("It") {
+				h.ctx.report(ruleGinkgoTopLevelIt, call, "top-level It reads like a migrated unit test; place it under a behavior container")
+			}
+
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.budget-exceeded: waiver budget exceeded for ginkgo.top-level-it: used 4, budget 3",
+			))
+		})
+
+		ginkgo.It("reports active waivers that exceed the total budget", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+func Node(text string, body func()) bool { return true }
+
+// semh:allow ginkgo.top-level-it -- first package-level invariant
+var _ = Node("node 1", func() {})
+// semh:allow ginkgo.top-level-it -- second package-level invariant
+var _ = Node("node 2", func() {})
+// semh:allow ginkgo.top-level-it -- third package-level invariant
+var _ = Node("node 3", func() {})
+// semh:allow ginkgo.wide-entry -- first wide entry exception
+var _ = Node("node 4", func() {})
+// semh:allow ginkgo.wide-entry -- second wide entry exception
+var _ = Node("node 5", func() {})
+// semh:allow ginkgo.wide-entry -- third wide entry exception
+var _ = Node("node 6", func() {})
+// semh:allow gomega.equal-empty -- first empty matcher exception
+var _ = Node("node 7", func() {})
+// semh:allow gomega.equal-empty -- second empty matcher exception
+var _ = Node("node 8", func() {})
+// semh:allow gomega.equal-empty -- third empty matcher exception
+var _ = Node("node 9", func() {})
+// semh:allow gomega.equal-zero -- first zero matcher exception
+var _ = Node("node 10", func() {})
+// semh:allow gomega.equal-zero -- second zero matcher exception
+var _ = Node("node 11", func() {})
+`)
+			rules := []ruleID{
+				ruleGinkgoTopLevelIt,
+				ruleGinkgoTopLevelIt,
+				ruleGinkgoTopLevelIt,
+				ruleGinkgoWideEntry,
+				ruleGinkgoWideEntry,
+				ruleGinkgoWideEntry,
+				ruleGomegaEqualEmpty,
+				ruleGomegaEqualEmpty,
+				ruleGomegaEqualEmpty,
+				ruleGomegaEqualZero,
+				ruleGomegaEqualZero,
+			}
+			for i, call := range h.findCalls("Node") {
+				h.ctx.report(rules[i], call, "waivable readability diagnostic")
+			}
+
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:waiver.budget-exceeded: total waiver budget exceeded: used 11, budget 10",
+			))
+		})
+
+		ginkgo.It("reports package-qualified top-level It calls without a file-wide container prerequisite", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.It("documents package invariant", func() {})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason",
+			))
+		})
+
+		ginkgo.It("reports dot-imported top-level It calls", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
+
+func It(text string, body func()) bool { return true }
+
+var _ = It("documents package invariant", func() {})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.Ident)] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason",
+			))
+		})
+
+		ginkgo.It("reports migrated GinkgoT wrappers", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
+
+type bddDSL struct{}
+type fakeT struct{}
+var ginkgo bddDSL
+func (bddDSL) It(text string, body func()) bool { return true }
+func (bddDSL) GinkgoT() fakeT { return fakeT{} }
+func (fakeT) Helper() {}
+
+var _ = ginkgo.It("TestExistingMigratedSpec", func() {
+	t := ginkgo.GinkgoT()
+	t.Helper()
+})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason",
+				`semh:ginkgo.test-name: Ginkgo node name "TestExistingMigratedSpec" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports top-level It in ordinary repo packages", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.It("documents existing migrated behavior", func() {})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason",
+			))
+		})
+
+		ginkgo.It("ignores local selector calls on an identifier named ginkgo", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("page behavior", func() {})
+var _ = ginkgo.It("documents local DSL behavior", func() {})
+`)
+
+			checkGinkgoSpecQualityCall(h.ctx, h.findCall("It"))
+
+			Expect(h.diagnosticMessages()).To(BeEmpty())
+		})
+
+		ginkgo.It("reports Ginkgo spec names that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("brand behavior", func() {
+	ginkgo.It("TestFormatsBrand", func() {})
+})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestFormatsBrand" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports Ginkgo container names that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("TestBrandRendering", func() {})
+`)
+			call := h.findCall("Describe")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Describe",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestBrandRendering" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports Ginkgo table names that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+
+var _ = ginkgo.DescribeTable("TestBrandRows", func() {})
+`)
+			call := h.findCall("DescribeTable")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"DescribeTable",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestBrandRows" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports Ginkgo entry names that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+
+var _ = ginkgo.Entry("TestAcceptedBrand", 1)
+`)
+			call := h.findCall("Entry")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Entry",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestAcceptedBrand" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports Ginkgo entry description names that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Entry(text any, args ...any) bool { return true }
+func (bddDSL) EntryDescription(text string) string { return text }
+
+var _ = ginkgo.Entry(ginkgo.EntryDescription("TestAcceptedBrand"), 1)
+`)
+			call := h.findCall("Entry")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Entry",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestAcceptedBrand" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports Ginkgo table entry description decorators that preserve migrated Test function names", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+func (bddDSL) Entry(text any, args ...any) bool { return true }
+func (bddDSL) EntryDescription(text string) string { return text }
+
+var _ = ginkgo.DescribeTable("brand rows", func() {},
+	ginkgo.EntryDescription("TestAcceptedBrand"),
+	ginkgo.Entry(nil, 1),
+)
+`)
+			call := h.findCall("DescribeTable")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"DescribeTable",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "TestAcceptedBrand" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports GinkgoT adapters inside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+type fakeT struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+func (bddDSL) GinkgoT() fakeT { return fakeT{} }
+
+var _ = ginkgo.Describe("brand behavior", func() {
+	ginkgo.It("formats the brand", func() {
+		_ = ginkgo.GinkgoT()
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+			adapter := h.findCall("GinkgoT")
+			h.ctx.pass.TypesInfo.Uses[adapter.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"GinkgoT",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.testing-t-in-spec: avoid GinkgoT adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+			))
+		})
+
+		ginkgo.It("reports GinkgoT adapters inside Ginkgo table bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+type fakeT struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+func (bddDSL) GinkgoT() fakeT { return fakeT{} }
+
+var _ = ginkgo.DescribeTable("brand rows", func() {
+	_ = ginkgo.GinkgoT()
+}, ginkgo.Entry("accepted"))
+`)
+			table := h.findCall("DescribeTable")
+			h.ctx.pass.TypesInfo.Uses[table.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"DescribeTable",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+			adapter := h.findCall("GinkgoT")
+			h.ctx.pass.TypesInfo.Uses[adapter.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"GinkgoT",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, table)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.testing-t-in-spec: avoid GinkgoT adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+			))
+		})
+
+		ginkgo.It("reports testing.T Fatalf assertions inside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+import "testing"
+
+type bddDSL struct{}
+var ginkgo bddDSL
+var t *testing.T
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("brand behavior", func() {
+	ginkgo.It("formats the brand", func() {
+		t.Fatalf("brand did not format")
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T.Fatalf assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+			))
+		})
+
+		ginkgo.It("reports testing.T Fatalf assertions inside Ginkgo table bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+import "testing"
+
+type bddDSL struct{}
+var ginkgo bddDSL
+var t *testing.T
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+
+var _ = ginkgo.DescribeTable("brand rows", func() {
+	t.Fatalf("brand did not format")
+}, ginkgo.Entry("accepted"))
+`)
+			table := h.findCall("DescribeTable")
+			h.ctx.pass.TypesInfo.Uses[table.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"DescribeTable",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, table)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T.Fatalf assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+			))
+		})
+
+		ginkgo.It("reports goroutine assertions without recovery inside Ginkgo table bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+type assertion struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+func Expect(actual any) assertion { return assertion{} }
+func BeTrue() any { return nil }
+func (assertion) To(matcher any) {}
+
+var _ = ginkgo.DescribeTable("brand rows", func() {
+	go func() {
+		Expect(true).To(BeTrue())
+	}()
+}, ginkgo.Entry("accepted"))
+`)
+			checkGinkgoGoroutineAssertionRecovery(h.ctx, h.findGoStmt())
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.goroutine-recover: goroutine with assertions must defer GinkgoRecover() or use GinkgoHelperGo",
+			))
+		})
+
+		ginkgo.It("reports blocking receives inside Ginkgo table bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(), entries ...any) bool { return true }
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+
+var _ = ginkgo.DescribeTable("brand rows", func() {
+	ch := make(chan string)
+	<-ch
+}, ginkgo.Entry("accepted"))
+`)
+			checkGinkgoBlockingReceive(h.ctx, h.findBlockingReceive())
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.blocking-receive: avoid blocking channel receives in specs; use Eventually(...).Should(Receive(...)) so failures surface",
+			))
+		})
+
+		ginkgo.It("reports async assertions without context inside Ginkgo table bodies with SpecContext", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+type bddDSL struct{}
+type SpecContext struct{}
+type asyncAssertion struct{}
+var ginkgo bddDSL
+func (bddDSL) DescribeTable(text string, body func(SpecContext), entries ...any) bool { return true }
+func (bddDSL) Entry(text string, args ...any) bool { return true }
+func Eventually(actual any, args ...any) asyncAssertion { return asyncAssertion{} }
+func Equal(want any) any { return nil }
+func (asyncAssertion) Should(matcher any) {}
+
+var _ = ginkgo.DescribeTable("brand rows", func(ctx SpecContext) {
+	Eventually(func() int { return 1 }).Should(Equal(1))
+}, ginkgo.Entry("accepted"))
+`)
+			checkGomegaAsyncAssertion(h.ctx, h.findCall("Should"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.async-context: propagate the spec context into Eventually/Consistently with WithContext or positional context",
+			))
+		})
+
+		ginkgo.It("reports testing.T fatal and error assertions inside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+import "testing"
+
+type bddDSL struct{}
+var ginkgo bddDSL
+var t *testing.T
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("brand behavior", func() {
+	ginkgo.It("formats the brand", func() {
+		t.Fatal("brand did not format")
+		t.Errorf("brand did not format")
+		t.Error("brand did not format")
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T.Fatal assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T.Errorf assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+				"semh:ginkgo.testing-t-in-spec: avoid testing.T.Error assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers",
+			))
+		})
+
+		ginkgo.It("does not report testing.T usage outside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+import "testing"
+
+type bddDSL struct{}
+type fakeT struct{}
+var ginkgo bddDSL
+var t *testing.T
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) BeforeEach(body func()) bool { return true }
+func (bddDSL) GinkgoT() fakeT { return fakeT{} }
+
+func helper(t *testing.T) {
+	t.Fatalf("helper failure")
+}
+
+var _ = ginkgo.Describe("brand behavior", func() {
+	ginkgo.BeforeEach(func() {
+		_ = ginkgo.GinkgoT()
+		t.Fatalf("setup failure")
+	})
+})
+`)
+			setup := h.findCall("BeforeEach")
+			h.ctx.pass.TypesInfo.Uses[setup.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"BeforeEach",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+			adapter := h.findCall("GinkgoT")
+			h.ctx.pass.TypesInfo.Uses[adapter.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"GinkgoT",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, setup)
+			checkGinkgoSpecQualityCall(h.ctx, adapter)
+			for _, call := range h.findCalls("Fatalf") {
+				checkGinkgoSpecQualityCall(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(BeEmpty())
+		})
+
+		ginkgo.It("reports raw ginkgolinter ignore comments as hard semantic-hygiene violations", func() {
+			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
+
+// ginkgo-linter:ignore-len-assertion
+func helper() {}
+`)
+			h.ctx.finalizeDiagnostics()
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo-linter.raw-ignore: raw ginkgolinter ignore comments are not allowed; fix the generic lint or use semh waivers only for waivable semantic-hygiene rules",
+			))
+		})
+	})
+
+	ginkgo.Describe("waiver comments", func() {
+		ginkgo.It("parses a valid rule-specific waiver with an explanation", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow ginkgo.top-level-it -- documents the package-level invariant
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(diagnostics).To(BeEmpty())
+			Expect(waivers).To(ConsistOf(SatisfyAll(
+				WithTransform(func(waiver parsedWaiver) ruleID { return waiver.rule }, Equal(ruleGinkgoTopLevelIt)),
+				WithTransform(func(waiver parsedWaiver) string { return waiver.explanation }, Not(BeEmpty())),
+				WithTransform(func(waiver parsedWaiver) int {
+					return h.ctx.pass.Fset.Position(waiver.pos).Line
+				}, Equal(3)),
+			)))
+		})
+
+		ginkgo.It("reports a waiver that omits the required explanation delimiter", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow ginkgo.top-level-it
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverMissingExplanation)),
+			))
+		})
+
+		ginkgo.It("reports a waiver for an unknown rule ID", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow ginkgo.made-up -- documents the package-level invariant
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverUnknownRule)),
+			))
+		})
+
+		ginkgo.It("reports a malformed waiver without a rule ID", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow -- documents the package-level invariant
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverMalformed)),
+			))
+		})
+
+		ginkgo.It("reports a bare semh allow directive as malformed", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allow
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverMalformed)),
+			))
+		})
+
+		ginkgo.It("reports a glued semh allow directive as malformed", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// semh:allowginkgo.top-level-it -- documents the package-level invariant
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverMalformed)),
+			))
+		})
+
+		ginkgo.It("reports semh directives that are not standalone comments as malformed", func() {
+			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
+
+// TODO: revisit this exceptional shape semh:allow ginkgo.top-level-it -- package invariant
+func TestPage() {}
+`)
+
+			waivers, diagnostics := h.ctx.collectWaivers()
+
+			Expect(waivers).To(BeEmpty())
+			Expect(diagnostics).To(ConsistOf(
+				WithTransform(func(diagnostic semanticDiagnostic) ruleID { return diagnostic.rule }, Equal(ruleWaiverMalformed)),
+			))
+		})
+	})
+
 	ginkgo.Describe("policy helper branches", func() {
 		ginkgo.It("covers semantic and primitive type fallbacks", func() {
 			name, ok := semanticTypeNameOf(nil)

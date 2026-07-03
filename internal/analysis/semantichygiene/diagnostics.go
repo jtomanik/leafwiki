@@ -278,6 +278,26 @@ func ginkgoReusableHelperMatcherDiagnostic(funcName string) string {
 	return fmt.Sprintf("prefer a custom Gomega matcher for reusable assertion helper %s", funcName)
 }
 
+func ginkgoTopLevelItDiagnostic() string {
+	return "top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason"
+}
+
+func ginkgoTestNameDiagnostic(name string) string {
+	return fmt.Sprintf("Ginkgo node name %q preserves a migrated testing.T name; describe observable behavior instead", name)
+}
+
+func ginkgoTestingTInSpecDiagnostic(name string) string {
+	return fmt.Sprintf("avoid %s adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers", name)
+}
+
+func ginkgoTestingTAssertionDiagnostic(name string) string {
+	return fmt.Sprintf("avoid %s assertion inside Ginkgo specs; use Gomega expectations and Ginkgo helpers", name)
+}
+
+func ginkgoLinterRawIgnoreDiagnostic() string {
+	return "raw ginkgolinter ignore comments are not allowed; fix the generic lint or use semh waivers only for waivable semantic-hygiene rules"
+}
+
 func ginkgoGlobalStateCleanupDiagnostic(name string) string {
 	return fmt.Sprintf("restore global state changes with DeferCleanup next to %s", name)
 }

@@ -18,6 +18,135 @@ var _ = ginkgo.Describe("policy helpers", func() {
 		edge              bool
 	}
 
+	ginkgo.Describe("rule metadata", func() {
+		ginkgo.It("classifies hard semantic rules and the first waivable BDD rule", func() {
+			hard, ok := metadataForRule(ruleDirectCast)
+			Expect(ok).To(BeTrue())
+			Expect(hard).To(Equal(ruleMetadata{
+				messagePrefix: string(ruleDirectCast),
+				waivable:      false,
+				scope:         waiverScopeNone,
+			}))
+
+			waivable, ok := metadataForRule(ruleGinkgoTopLevelIt)
+			Expect(ok).To(BeTrue())
+			Expect(waivable).To(Equal(ruleMetadata{
+				messagePrefix: string(ruleGinkgoTopLevelIt),
+				waivable:      true,
+				scope:         waiverScopeCall,
+			}))
+		})
+
+		ginkgo.It("requires every waivable rule to have an explicit positive budget", func() {
+			for id, metadata := range allRuleMetadata() {
+				if !metadata.waivable {
+					continue
+				}
+				budget, ok := waiverBudgetForRule(id)
+				Expect(ok).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
+				Expect(budget).To(BeNumerically(">", 0), "waivable rule %s should have a positive budget", id)
+			}
+		})
+
+		ginkgo.It("rejects unknown rule IDs", func() {
+			_, ok := metadataForRule(ruleID("unknown.rule"))
+			Expect(ok).To(BeFalse())
+		})
+
+		ginkgo.DescribeTable("registers the checker rule taxonomy",
+			func(id ruleID, waivable bool, scope waiverScopeKind) {
+				metadata, ok := metadataForRule(id)
+				Expect(ok).To(BeTrue(), "rule %s should be registered", id)
+				Expect(metadata).To(Equal(ruleMetadata{
+					messagePrefix: string(id),
+					waivable:      waivable,
+					scope:         scope,
+				}))
+			},
+			ginkgo.Entry("semantic string leak", ruleID("semantic.string-leak"), false, waiverScopeNone),
+			ginkgo.Entry("semantic direct cast", ruleID("semantic.direct-cast"), false, waiverScopeNone),
+			ginkgo.Entry("semantic unchecked constructor", ruleID("semantic.unchecked-constructor"), false, waiverScopeNone),
+			ginkgo.Entry("semantic raw signature", ruleID("semantic.raw-signature"), false, waiverScopeNone),
+			ginkgo.Entry("semantic raw field", ruleID("semantic.raw-field"), false, waiverScopeNone),
+			ginkgo.Entry("semantic raw primitive", ruleID("semantic.raw-primitive"), false, waiverScopeNone),
+			ginkgo.Entry("semantic validator return", ruleID("semantic.validator-return"), false, waiverScopeNone),
+			ginkgo.Entry("i18n raw prose", ruleID("i18n.raw-prose"), false, waiverScopeNone),
+			ginkgo.Entry("i18n raw prose sink", ruleID("i18n.raw-prose-sink"), false, waiverScopeNone),
+			ginkgo.Entry("i18n localized error passthrough", ruleID("i18n.localized-error-passthrough"), false, waiverScopeNone),
+			ginkgo.Entry("i18n response status forward", ruleID("i18n.response-status-forward"), false, waiverScopeNone),
+			ginkgo.Entry("i18n message field", ruleID("i18n.message-field"), false, waiverScopeNone),
+			ginkgo.Entry("i18n message parameter", ruleID("i18n.message-parameter"), false, waiverScopeNone),
+			ginkgo.Entry("contract raw literal", ruleID("contract.raw-literal"), false, waiverScopeNone),
+			ginkgo.Entry("dependency direction", ruleID("dependency.e2e-proxy-internal-import"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo focus", ruleID("ginkgo.focus"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo pending", ruleID("ginkgo.pending"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo flake attempts", ruleID("ginkgo.flake-attempts"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo restricted decorator", ruleID("ginkgo.restricted-decorator"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo container call", ruleID("ginkgo.container-call"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo container state initialization", ruleID("ginkgo.container-state-initialization"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo entry setup value", ruleID("ginkgo.entry-setup-value"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo goroutine recover", ruleID("ginkgo.goroutine-recover"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo blocking receive", ruleID("ginkgo.blocking-receive"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo helper first", ruleID("ginkgo.helper-first"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo global state cleanup", ruleID("ginkgo.global-state-cleanup"), false, waiverScopeNone),
+			ginkgo.Entry("gomega error string", ruleID("gomega.err-error-string"), false, waiverScopeNone),
+			ginkgo.Entry("gomega raw string match error", ruleID("gomega.raw-string-match-error"), false, waiverScopeNone),
+			ginkgo.Entry("gomega error nil matcher", ruleID("gomega.error-nil-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega inline error succeed", ruleID("gomega.inline-error-succeed"), false, waiverScopeNone),
+			ginkgo.Entry("gomega multi return error matcher", ruleID("gomega.multi-return-error-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega strings contains", ruleID("gomega.strings-contains"), false, waiverScopeNone),
+			ginkgo.Entry("gomega string predicate", ruleID("gomega.string-predicate"), false, waiverScopeNone),
+			ginkgo.Entry("gomega regexp match string", ruleID("gomega.regexp-match-string"), false, waiverScopeNone),
+			ginkgo.Entry("gomega errors is matcher", ruleID("gomega.errors-is-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega errors as matcher", ruleID("gomega.errors-as-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega os is not exist matcher", ruleID("gomega.os-is-not-exist-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega len equal", ruleID("gomega.len-equal"), false, waiverScopeNone),
+			ginkgo.Entry("gomega binary boolean", ruleID("gomega.binary-boolean"), false, waiverScopeNone),
+			ginkgo.Entry("gomega map index", ruleID("gomega.map-index"), false, waiverScopeNone),
+			ginkgo.Entry("gomega http status", ruleID("gomega.http-status"), false, waiverScopeNone),
+			ginkgo.Entry("gomega http body", ruleID("gomega.http-body"), false, waiverScopeNone),
+			ginkgo.Entry("gomega repeated http body", ruleID("gomega.repeated-http-body"), false, waiverScopeNone),
+			ginkgo.Entry("gomega http header", ruleID("gomega.http-header"), false, waiverScopeNone),
+			ginkgo.Entry("gomega structured error matcher", ruleID("gomega.structured-error-matcher"), false, waiverScopeNone),
+			ginkgo.Entry("gomega structured protocol key", ruleID("gomega.structured-protocol-key"), false, waiverScopeNone),
+			ginkgo.Entry("gomega structured protocol payload", ruleID("gomega.structured-protocol-payload"), false, waiverScopeNone),
+			ginkgo.Entry("gomega async context", ruleID("gomega.async-context"), false, waiverScopeNone),
+			ginkgo.Entry("gomega async boolean", ruleID("gomega.async-boolean"), false, waiverScopeNone),
+			ginkgo.Entry("gomega async negative receive", ruleID("gomega.async-negative-receive"), false, waiverScopeNone),
+			ginkgo.Entry("gomega async bare value", ruleID("gomega.async-bare-value"), false, waiverScopeNone),
+			ginkgo.Entry("gomega async callback expect", ruleID("gomega.async-callback-expect"), false, waiverScopeNone),
+			ginkgo.Entry("gomega helper offset", ruleID("gomega.helper-offset"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo top-level It", ruleID("ginkgo.top-level-it"), true, waiverScopeCall),
+			ginkgo.Entry("ginkgo wide entry", ruleID("ginkgo.wide-entry"), true, waiverScopeCall),
+			ginkgo.Entry("gomega helper should be matcher", ruleID("gomega.helper-should-be-matcher"), true, waiverScopeDeclaration),
+			ginkgo.Entry("gomega repeated field assertions", ruleID("gomega.repeated-field-assertions"), true, waiverScopeCall),
+			ginkgo.Entry("gomega collection index assertion", ruleID("gomega.collection-index-assertion"), true, waiverScopeCall),
+			ginkgo.Entry("gomega equal empty", ruleID("gomega.equal-empty"), true, waiverScopeCall),
+			ginkgo.Entry("gomega equal zero", ruleID("gomega.equal-zero"), true, waiverScopeCall),
+			ginkgo.Entry("gomega numeric equivalent", ruleID("gomega.numeric-equivalent"), true, waiverScopeCall),
+			ginkgo.Entry("gomega time equal", ruleID("gomega.time-equal"), true, waiverScopeCall),
+		)
+
+		ginkgo.It("uses the documented initial waiver budgets", func() {
+			Expect(totalWaiverBudget).To(Equal(10))
+			for _, id := range []ruleID{
+				ruleID("ginkgo.top-level-it"),
+				ruleID("ginkgo.wide-entry"),
+				ruleID("gomega.helper-should-be-matcher"),
+				ruleID("gomega.repeated-field-assertions"),
+				ruleID("gomega.collection-index-assertion"),
+				ruleID("gomega.equal-empty"),
+				ruleID("gomega.equal-zero"),
+				ruleID("gomega.numeric-equivalent"),
+				ruleID("gomega.time-equal"),
+			} {
+				budget, ok := waiverBudgetForRule(id)
+				Expect(ok).To(BeTrue(), "rule %s should have an explicit budget", id)
+				Expect(budget).To(Equal(3), "rule %s should use the initial per-rule budget", id)
+			}
+		})
+	})
+
 	ginkgo.DescribeTable("canonicalName normalizes semantic identifiers",
 		func(input string, want string) {
 			Expect(canonicalName(input)).To(Equal(want))

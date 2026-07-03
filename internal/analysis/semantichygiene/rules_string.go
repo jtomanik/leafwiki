@@ -67,10 +67,10 @@ func reportSemanticStringEscape(ctx *analysisContext, expr ast.Expr, typeName st
 			checkStringKeyValue(ctx, expr, typeName, p)
 			return
 		case *ast.CompositeLit:
-			ctx.pass.Reportf(expr.Pos(), "%s", stringFieldDiagnostic(typeName, "composite literal"))
+			ctx.report(ruleSemanticStringLeak, expr, stringFieldDiagnostic(typeName, "composite literal"))
 			return
 		case *ast.IndexExpr:
-			ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, "map index"))
+			ctx.report(ruleSemanticStringLeak, expr, stringLocalDiagnostic(typeName, "map index"))
 			return
 		case *ast.ReturnStmt:
 			if isAllowedAdapterStringReturn(ctx, expr) ||
@@ -90,7 +90,7 @@ func handleStringBinaryEscape(ctx *analysisContext, expr ast.Expr, typeName stri
 		return false
 	}
 	if !isAllowedSerializedTestComparison(ctx, expr, binary) && !isEmptyOrRootString(binary.X) && !isEmptyOrRootString(binary.Y) {
-		ctx.pass.Reportf(expr.Pos(), "%s", stringComparisonDiagnostic(typeName))
+		ctx.report(ruleSemanticStringLeak, expr, stringComparisonDiagnostic(typeName))
 	}
 	return true
 }
@@ -105,7 +105,7 @@ func handleStringCallEscape(ctx *analysisContext, expr ast.Expr, typeName string
 	if isAllowedTerminalStringCall(ctx, call) {
 		return isAllowedTerminalCallBoundary(ctx, call)
 	}
-	ctx.pass.Reportf(expr.Pos(), "%s", stringCallDiagnostic(typeName, callName(call)))
+	ctx.report(ruleSemanticStringLeak, expr, stringCallDiagnostic(typeName, callName(call)))
 	return true
 }
 
@@ -122,14 +122,14 @@ func checkStringAssignment(ctx *analysisContext, expr ast.Expr, typeName string,
 			continue
 		}
 		if semanticName(fieldName) {
-			ctx.pass.Reportf(expr.Pos(), "%s", stringFieldDiagnostic(typeName, fieldName))
+			ctx.report(ruleSemanticStringLeak, expr, stringFieldDiagnostic(typeName, fieldName))
 			continue
 		}
-		ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, fieldName))
+		ctx.report(ruleSemanticStringLeak, expr, stringLocalDiagnostic(typeName, fieldName))
 	}
 	for _, lhs := range stmt.Lhs {
 		if containsNode(lhs, expr) {
-			ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, "map index"))
+			ctx.report(ruleSemanticStringLeak, expr, stringLocalDiagnostic(typeName, "map index"))
 			return
 		}
 	}
@@ -143,7 +143,7 @@ func checkStringValueSpec(ctx *analysisContext, expr ast.Expr, typeName string, 
 		if !containsNode(value, expr) || i >= len(spec.Names) {
 			continue
 		}
-		ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, spec.Names[i].Name))
+		ctx.report(ruleSemanticStringLeak, expr, stringLocalDiagnostic(typeName, spec.Names[i].Name))
 	}
 }
 
@@ -156,14 +156,14 @@ func checkStringKeyValue(ctx *analysisContext, expr ast.Expr, typeName string, k
 		return
 	}
 	if containsNode(kv.Key, expr) {
-		ctx.pass.Reportf(expr.Pos(), "%s", stringLocalDiagnostic(typeName, "map key"))
+		ctx.report(ruleSemanticStringLeak, expr, stringLocalDiagnostic(typeName, "map key"))
 		return
 	}
 	fieldName := keyName(kv.Key)
 	if fieldName == "" {
 		return
 	}
-	ctx.pass.Reportf(expr.Pos(), "%s", stringFieldDiagnostic(typeName, fieldName))
+	ctx.report(ruleSemanticStringLeak, expr, stringFieldDiagnostic(typeName, fieldName))
 }
 
 func isAllowedGinRouteParamKeyValue(ctx *analysisContext, kv *ast.KeyValueExpr) bool {
@@ -178,7 +178,7 @@ func checkStringReturn(ctx *analysisContext, expr ast.Expr, typeName string) {
 	if isAllowedStringBoundaryFile(ctx.filename(expr.Pos())) {
 		return
 	}
-	ctx.pass.Reportf(expr.Pos(), "%s", stringReturnDiagnostic(typeName, enclosingFuncName(ctx, expr)))
+	ctx.report(ruleSemanticStringLeak, expr, stringReturnDiagnostic(typeName, enclosingFuncName(ctx, expr)))
 }
 
 func isBuiltinStringConversion(ctx *analysisContext, call *ast.CallExpr) bool {

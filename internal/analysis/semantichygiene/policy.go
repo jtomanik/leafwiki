@@ -12,9 +12,231 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
+type ruleID string
+
+const (
+	ruleSemanticStringLeak                 ruleID = "semantic.string-leak"
+	ruleDirectCast                         ruleID = "semantic.direct-cast"
+	ruleSemanticUncheckedConstructor       ruleID = "semantic.unchecked-constructor"
+	ruleSemanticRawSignature               ruleID = "semantic.raw-signature"
+	ruleSemanticRawField                   ruleID = "semantic.raw-field"
+	ruleSemanticRawPrimitive               ruleID = "semantic.raw-primitive"
+	ruleSemanticValidatorReturn            ruleID = "semantic.validator-return"
+	ruleI18nRawProse                       ruleID = "i18n.raw-prose"
+	ruleI18nRawProseSink                   ruleID = "i18n.raw-prose-sink"
+	ruleI18nLocalizedErrorPassthrough      ruleID = "i18n.localized-error-passthrough"
+	ruleI18nResponseStatusForward          ruleID = "i18n.response-status-forward"
+	ruleI18nMessageField                   ruleID = "i18n.message-field"
+	ruleI18nMessageParameter               ruleID = "i18n.message-parameter"
+	ruleContractRawLiteral                 ruleID = "contract.raw-literal"
+	ruleDependencyE2EProxyInternalImport   ruleID = "dependency.e2e-proxy-internal-import"
+	ruleGinkgoFocus                        ruleID = "ginkgo.focus"
+	ruleGinkgoPending                      ruleID = "ginkgo.pending"
+	ruleGinkgoFlakeAttempts                ruleID = "ginkgo.flake-attempts"
+	ruleGinkgoRestrictedDecorator          ruleID = "ginkgo.restricted-decorator"
+	ruleGinkgoContainerCall                ruleID = "ginkgo.container-call"
+	ruleGinkgoContainerStateInitialization ruleID = "ginkgo.container-state-initialization"
+	ruleGinkgoEntrySetupValue              ruleID = "ginkgo.entry-setup-value"
+	ruleGinkgoGoroutineRecover             ruleID = "ginkgo.goroutine-recover"
+	ruleGinkgoBlockingReceive              ruleID = "ginkgo.blocking-receive"
+	ruleGinkgoHelperFirst                  ruleID = "ginkgo.helper-first"
+	ruleGinkgoGlobalStateCleanup           ruleID = "ginkgo.global-state-cleanup"
+	ruleGinkgoTestName                     ruleID = "ginkgo.test-name"
+	ruleGinkgoTestingTInSpec               ruleID = "ginkgo.testing-t-in-spec"
+	ruleGinkgoLinterRawIgnore              ruleID = "ginkgo-linter.raw-ignore"
+	ruleGomegaErrorString                  ruleID = "gomega.err-error-string"
+	ruleGomegaRawStringMatchError          ruleID = "gomega.raw-string-match-error"
+	ruleGomegaErrorNilMatcher              ruleID = "gomega.error-nil-matcher"
+	ruleGomegaInlineErrorSucceed           ruleID = "gomega.inline-error-succeed"
+	ruleGomegaMultiReturnErrorMatcher      ruleID = "gomega.multi-return-error-matcher"
+	ruleGomegaStringsContains              ruleID = "gomega.strings-contains"
+	ruleGomegaStringPredicate              ruleID = "gomega.string-predicate"
+	ruleGomegaRegexpMatchString            ruleID = "gomega.regexp-match-string"
+	ruleGomegaErrorsIsMatcher              ruleID = "gomega.errors-is-matcher"
+	ruleGomegaErrorsAsMatcher              ruleID = "gomega.errors-as-matcher"
+	ruleGomegaOSIsNotExistMatcher          ruleID = "gomega.os-is-not-exist-matcher"
+	ruleGomegaLenEqual                     ruleID = "gomega.len-equal"
+	ruleGomegaBinaryBoolean                ruleID = "gomega.binary-boolean"
+	ruleGomegaMapIndex                     ruleID = "gomega.map-index"
+	ruleGomegaHTTPStatus                   ruleID = "gomega.http-status"
+	ruleGomegaHTTPBody                     ruleID = "gomega.http-body"
+	ruleGomegaRepeatedHTTPBody             ruleID = "gomega.repeated-http-body"
+	ruleGomegaHTTPHeader                   ruleID = "gomega.http-header"
+	ruleGomegaStructuredErrorMatcher       ruleID = "gomega.structured-error-matcher"
+	ruleGomegaStructuredProtocolKey        ruleID = "gomega.structured-protocol-key"
+	ruleGomegaStructuredProtocolPayload    ruleID = "gomega.structured-protocol-payload"
+	ruleGomegaAsyncContext                 ruleID = "gomega.async-context"
+	ruleGomegaAsyncBoolean                 ruleID = "gomega.async-boolean"
+	ruleGomegaAsyncNegativeReceive         ruleID = "gomega.async-negative-receive"
+	ruleGomegaAsyncBareValue               ruleID = "gomega.async-bare-value"
+	ruleGomegaAsyncCallbackExpect          ruleID = "gomega.async-callback-expect"
+	ruleGomegaHelperOffset                 ruleID = "gomega.helper-offset"
+	ruleGinkgoTopLevelIt                   ruleID = "ginkgo.top-level-it"
+	ruleGinkgoWideEntry                    ruleID = "ginkgo.wide-entry"
+	ruleGomegaHelperShouldBeMatcher        ruleID = "gomega.helper-should-be-matcher"
+	ruleGomegaRepeatedFieldAssertions      ruleID = "gomega.repeated-field-assertions"
+	ruleGomegaCollectionIndexAssertion     ruleID = "gomega.collection-index-assertion"
+	ruleGomegaEqualEmpty                   ruleID = "gomega.equal-empty"
+	ruleGomegaEqualZero                    ruleID = "gomega.equal-zero"
+	ruleGomegaNumericEquivalent            ruleID = "gomega.numeric-equivalent"
+	ruleGomegaTimeEqual                    ruleID = "gomega.time-equal"
+	ruleWaiverBudgetExceeded               ruleID = "waiver.budget-exceeded"
+	ruleWaiverDuplicate                    ruleID = "waiver.duplicate"
+	ruleWaiverMalformed                    ruleID = "waiver.malformed"
+	ruleWaiverMissingExplanation           ruleID = "waiver.missing-explanation"
+	ruleWaiverNonWaivableRule              ruleID = "waiver.non-waivable-rule"
+	ruleWaiverStale                        ruleID = "waiver.stale"
+	ruleWaiverUnknownRule                  ruleID = "waiver.unknown-rule"
+)
+
+type waiverScopeKind int
+
+const (
+	waiverScopeNone waiverScopeKind = iota
+	waiverScopeNextNode
+	waiverScopeCall
+	waiverScopeDeclaration
+)
+
+type ruleMetadata struct {
+	messagePrefix string
+	waivable      bool
+	scope         waiverScopeKind
+}
+
+var ruleMetadataByID = map[ruleID]ruleMetadata{
+	ruleSemanticStringLeak:                 hardRule(ruleSemanticStringLeak),
+	ruleDirectCast:                         hardRule(ruleDirectCast),
+	ruleSemanticUncheckedConstructor:       hardRule(ruleSemanticUncheckedConstructor),
+	ruleSemanticRawSignature:               hardRule(ruleSemanticRawSignature),
+	ruleSemanticRawField:                   hardRule(ruleSemanticRawField),
+	ruleSemanticRawPrimitive:               hardRule(ruleSemanticRawPrimitive),
+	ruleSemanticValidatorReturn:            hardRule(ruleSemanticValidatorReturn),
+	ruleI18nRawProse:                       hardRule(ruleI18nRawProse),
+	ruleI18nRawProseSink:                   hardRule(ruleI18nRawProseSink),
+	ruleI18nLocalizedErrorPassthrough:      hardRule(ruleI18nLocalizedErrorPassthrough),
+	ruleI18nResponseStatusForward:          hardRule(ruleI18nResponseStatusForward),
+	ruleI18nMessageField:                   hardRule(ruleI18nMessageField),
+	ruleI18nMessageParameter:               hardRule(ruleI18nMessageParameter),
+	ruleContractRawLiteral:                 hardRule(ruleContractRawLiteral),
+	ruleDependencyE2EProxyInternalImport:   hardRule(ruleDependencyE2EProxyInternalImport),
+	ruleGinkgoFocus:                        hardRule(ruleGinkgoFocus),
+	ruleGinkgoPending:                      hardRule(ruleGinkgoPending),
+	ruleGinkgoFlakeAttempts:                hardRule(ruleGinkgoFlakeAttempts),
+	ruleGinkgoRestrictedDecorator:          hardRule(ruleGinkgoRestrictedDecorator),
+	ruleGinkgoContainerCall:                hardRule(ruleGinkgoContainerCall),
+	ruleGinkgoContainerStateInitialization: hardRule(ruleGinkgoContainerStateInitialization),
+	ruleGinkgoEntrySetupValue:              hardRule(ruleGinkgoEntrySetupValue),
+	ruleGinkgoGoroutineRecover:             hardRule(ruleGinkgoGoroutineRecover),
+	ruleGinkgoBlockingReceive:              hardRule(ruleGinkgoBlockingReceive),
+	ruleGinkgoHelperFirst:                  hardRule(ruleGinkgoHelperFirst),
+	ruleGinkgoGlobalStateCleanup:           hardRule(ruleGinkgoGlobalStateCleanup),
+	ruleGinkgoTestName:                     hardRule(ruleGinkgoTestName),
+	ruleGinkgoTestingTInSpec:               hardRule(ruleGinkgoTestingTInSpec),
+	ruleGinkgoLinterRawIgnore:              hardRule(ruleGinkgoLinterRawIgnore),
+	ruleGomegaErrorString:                  hardRule(ruleGomegaErrorString),
+	ruleGomegaRawStringMatchError:          hardRule(ruleGomegaRawStringMatchError),
+	ruleGomegaErrorNilMatcher:              hardRule(ruleGomegaErrorNilMatcher),
+	ruleGomegaInlineErrorSucceed:           hardRule(ruleGomegaInlineErrorSucceed),
+	ruleGomegaMultiReturnErrorMatcher:      hardRule(ruleGomegaMultiReturnErrorMatcher),
+	ruleGomegaStringsContains:              hardRule(ruleGomegaStringsContains),
+	ruleGomegaStringPredicate:              hardRule(ruleGomegaStringPredicate),
+	ruleGomegaRegexpMatchString:            hardRule(ruleGomegaRegexpMatchString),
+	ruleGomegaErrorsIsMatcher:              hardRule(ruleGomegaErrorsIsMatcher),
+	ruleGomegaErrorsAsMatcher:              hardRule(ruleGomegaErrorsAsMatcher),
+	ruleGomegaOSIsNotExistMatcher:          hardRule(ruleGomegaOSIsNotExistMatcher),
+	ruleGomegaLenEqual:                     hardRule(ruleGomegaLenEqual),
+	ruleGomegaBinaryBoolean:                hardRule(ruleGomegaBinaryBoolean),
+	ruleGomegaMapIndex:                     hardRule(ruleGomegaMapIndex),
+	ruleGomegaHTTPStatus:                   hardRule(ruleGomegaHTTPStatus),
+	ruleGomegaHTTPBody:                     hardRule(ruleGomegaHTTPBody),
+	ruleGomegaRepeatedHTTPBody:             hardRule(ruleGomegaRepeatedHTTPBody),
+	ruleGomegaHTTPHeader:                   hardRule(ruleGomegaHTTPHeader),
+	ruleGomegaStructuredErrorMatcher:       hardRule(ruleGomegaStructuredErrorMatcher),
+	ruleGomegaStructuredProtocolKey:        hardRule(ruleGomegaStructuredProtocolKey),
+	ruleGomegaStructuredProtocolPayload:    hardRule(ruleGomegaStructuredProtocolPayload),
+	ruleGomegaAsyncContext:                 hardRule(ruleGomegaAsyncContext),
+	ruleGomegaAsyncBoolean:                 hardRule(ruleGomegaAsyncBoolean),
+	ruleGomegaAsyncNegativeReceive:         hardRule(ruleGomegaAsyncNegativeReceive),
+	ruleGomegaAsyncBareValue:               hardRule(ruleGomegaAsyncBareValue),
+	ruleGomegaAsyncCallbackExpect:          hardRule(ruleGomegaAsyncCallbackExpect),
+	ruleGomegaHelperOffset:                 hardRule(ruleGomegaHelperOffset),
+	ruleGinkgoTopLevelIt:                   waivableRule(ruleGinkgoTopLevelIt, waiverScopeCall),
+	ruleGinkgoWideEntry:                    waivableRule(ruleGinkgoWideEntry, waiverScopeCall),
+	ruleGomegaHelperShouldBeMatcher:        waivableRule(ruleGomegaHelperShouldBeMatcher, waiverScopeDeclaration),
+	ruleGomegaRepeatedFieldAssertions:      waivableRule(ruleGomegaRepeatedFieldAssertions, waiverScopeCall),
+	ruleGomegaCollectionIndexAssertion:     waivableRule(ruleGomegaCollectionIndexAssertion, waiverScopeCall),
+	ruleGomegaEqualEmpty:                   waivableRule(ruleGomegaEqualEmpty, waiverScopeCall),
+	ruleGomegaEqualZero:                    waivableRule(ruleGomegaEqualZero, waiverScopeCall),
+	ruleGomegaNumericEquivalent:            waivableRule(ruleGomegaNumericEquivalent, waiverScopeCall),
+	ruleGomegaTimeEqual:                    waivableRule(ruleGomegaTimeEqual, waiverScopeCall),
+	ruleWaiverBudgetExceeded:               hardRule(ruleWaiverBudgetExceeded),
+	ruleWaiverDuplicate:                    hardRule(ruleWaiverDuplicate),
+	ruleWaiverMalformed:                    hardRule(ruleWaiverMalformed),
+	ruleWaiverMissingExplanation:           hardRule(ruleWaiverMissingExplanation),
+	ruleWaiverNonWaivableRule:              hardRule(ruleWaiverNonWaivableRule),
+	ruleWaiverStale:                        hardRule(ruleWaiverStale),
+	ruleWaiverUnknownRule:                  hardRule(ruleWaiverUnknownRule),
+}
+
+const totalWaiverBudget = 10
+
+var waiverBudgetsByRule = map[ruleID]int{
+	ruleGinkgoTopLevelIt:               3,
+	ruleGinkgoWideEntry:                3,
+	ruleGomegaHelperShouldBeMatcher:    3,
+	ruleGomegaRepeatedFieldAssertions:  3,
+	ruleGomegaCollectionIndexAssertion: 3,
+	ruleGomegaEqualEmpty:               3,
+	ruleGomegaEqualZero:                3,
+	ruleGomegaNumericEquivalent:        3,
+	ruleGomegaTimeEqual:                3,
+}
+
+func hardRule(id ruleID) ruleMetadata {
+	return ruleMetadata{messagePrefix: string(id), waivable: false, scope: waiverScopeNone}
+}
+
+func waivableRule(id ruleID, scope waiverScopeKind) ruleMetadata {
+	return ruleMetadata{messagePrefix: string(id), waivable: true, scope: scope}
+}
+
+func metadataForRule(id ruleID) (ruleMetadata, bool) {
+	metadata, ok := ruleMetadataByID[id]
+	return metadata, ok
+}
+
+func allRuleMetadata() map[ruleID]ruleMetadata {
+	metadata := make(map[ruleID]ruleMetadata, len(ruleMetadataByID))
+	for id, value := range ruleMetadataByID {
+		metadata[id] = value
+	}
+	return metadata
+}
+
+func waiverBudgetForRule(id ruleID) (int, bool) {
+	budget, ok := waiverBudgetsByRule[id]
+	return budget, ok
+}
+
+type semanticDiagnostic struct {
+	rule    ruleID
+	pos     token.Pos
+	node    ast.Node
+	message string
+}
+
+type parsedWaiver struct {
+	rule        ruleID
+	pos         token.Pos
+	explanation string
+	used        bool
+}
+
 type analysisContext struct {
-	pass    *analysis.Pass
-	parents map[ast.Node]ast.Node
+	pass        *analysis.Pass
+	parents     map[ast.Node]ast.Node
+	diagnostics []semanticDiagnostic
 }
 
 func newAnalysisContext(pass *analysis.Pass) *analysisContext {
@@ -42,6 +264,280 @@ func buildParentMap(files []*ast.File) map[ast.Node]ast.Node {
 
 func (ctx *analysisContext) parent(node ast.Node) ast.Node {
 	return ctx.parents[node]
+}
+
+func (ctx *analysisContext) report(rule ruleID, node ast.Node, message string) {
+	ctx.diagnostics = append(ctx.diagnostics, semanticDiagnostic{
+		rule:    rule,
+		pos:     node.Pos(),
+		node:    node,
+		message: message,
+	})
+}
+
+func (ctx *analysisContext) finalizeDiagnostics() {
+	waivers, waiverDiagnostics := ctx.collectWaivers()
+	for _, diagnostic := range waiverDiagnostics {
+		ctx.reportDiagnostic(diagnostic)
+	}
+	for _, diagnostic := range ctx.diagnostics {
+		if ctx.diagnosticSuppressedByWaiver(diagnostic, waivers) {
+			continue
+		}
+		ctx.reportDiagnostic(diagnostic)
+	}
+	ctx.diagnostics = nil
+	for i, waiver := range waivers {
+		if waiver.used {
+			continue
+		}
+		if ctx.waiverIsDuplicateOfUsedNeighbor(waivers, i) {
+			ctx.reportDiagnostic(semanticDiagnostic{
+				rule:    ruleWaiverDuplicate,
+				pos:     waiver.pos,
+				message: "duplicate semh waiver for " + string(waiver.rule) + "; one waiver can suppress one diagnostic",
+			})
+			continue
+		}
+		ctx.reportDiagnostic(semanticDiagnostic{
+			rule:    ruleWaiverStale,
+			pos:     waiver.pos,
+			message: "semh waiver for " + string(waiver.rule) + " did not match any diagnostic",
+		})
+	}
+	ctx.reportWaiverBudgetDiagnostics(waivers)
+}
+
+func (ctx *analysisContext) waiverIsDuplicateOfUsedNeighbor(waivers []parsedWaiver, index int) bool {
+	if index+1 >= len(waivers) {
+		return false
+	}
+	current := waivers[index]
+	next := waivers[index+1]
+	return next.used &&
+		current.rule == next.rule &&
+		ctx.filename(current.pos) == ctx.filename(next.pos) &&
+		ctx.lineAfter(current.pos, next.pos)
+}
+
+func (ctx *analysisContext) reportDiagnostic(diagnostic semanticDiagnostic) {
+	ctx.pass.Report(analysis.Diagnostic{
+		Pos:     diagnostic.pos,
+		Message: formatDiagnosticMessage(diagnostic),
+	})
+}
+
+func (ctx *analysisContext) diagnosticSuppressedByWaiver(diagnostic semanticDiagnostic, waivers []parsedWaiver) bool {
+	metadata, ok := metadataForRule(diagnostic.rule)
+	if !ok || !metadata.waivable {
+		return false
+	}
+	for i := range waivers {
+		if waivers[i].used || waivers[i].rule != diagnostic.rule {
+			continue
+		}
+		if ctx.waiverMatchesDiagnostic(waivers[i], diagnostic, metadata.scope) {
+			waivers[i].used = true
+			return true
+		}
+	}
+	return false
+}
+
+func (ctx *analysisContext) waiverMatchesDiagnostic(waiver parsedWaiver, diagnostic semanticDiagnostic, scope waiverScopeKind) bool {
+	if ctx.filename(waiver.pos) != ctx.filename(diagnostic.pos) {
+		return false
+	}
+	switch scope {
+	case waiverScopeNextNode:
+		if diagnostic.node == nil {
+			return false
+		}
+		return ctx.lineAfter(waiver.pos, diagnostic.node.Pos())
+	case waiverScopeCall:
+		return ctx.waiverMatchesEnclosingCall(waiver, diagnostic.node)
+	case waiverScopeDeclaration:
+		decl := ctx.enclosingDeclaration(diagnostic.node)
+		if decl == nil {
+			return false
+		}
+		return ctx.lineAfter(waiver.pos, decl.Pos())
+	default:
+		return false
+	}
+}
+
+func (ctx *analysisContext) waiverMatchesEnclosingCall(waiver parsedWaiver, node ast.Node) bool {
+	for current := node; current != nil; current = ctx.parent(current) {
+		switch current.(type) {
+		case *ast.FuncDecl, *ast.FuncLit:
+			return false
+		}
+		call, ok := current.(*ast.CallExpr)
+		if ok && ctx.lineAfter(waiver.pos, call.Pos()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (ctx *analysisContext) enclosingCall(node ast.Node) *ast.CallExpr {
+	for current := node; current != nil; current = ctx.parent(current) {
+		if call, ok := current.(*ast.CallExpr); ok {
+			return call
+		}
+	}
+	return nil
+}
+
+func (ctx *analysisContext) enclosingDeclaration(node ast.Node) ast.Node {
+	for current := node; current != nil; current = ctx.parent(current) {
+		switch current.(type) {
+		case *ast.FuncDecl, *ast.TypeSpec, *ast.ValueSpec:
+			return current
+		}
+	}
+	return nil
+}
+
+func (ctx *analysisContext) lineAfter(first token.Pos, second token.Pos) bool {
+	return ctx.pass.Fset.Position(first).Line+1 == ctx.pass.Fset.Position(second).Line
+}
+
+func (ctx *analysisContext) reportWaiverBudgetDiagnostics(waivers []parsedWaiver) {
+	totalUsed := 0
+	ruleCounts := map[ruleID]int{}
+	reportedRule := map[ruleID]bool{}
+	totalReported := false
+	for _, waiver := range waivers {
+		if !waiver.used {
+			continue
+		}
+		totalUsed++
+		ruleCounts[waiver.rule]++
+		if budget, ok := waiverBudgetForRule(waiver.rule); ok && ruleCounts[waiver.rule] > budget && !reportedRule[waiver.rule] {
+			ctx.reportDiagnostic(semanticDiagnostic{
+				rule: ruleWaiverBudgetExceeded,
+				pos:  waiver.pos,
+				message: "waiver budget exceeded for " + string(waiver.rule) +
+					": used " + strconv.Itoa(ruleCounts[waiver.rule]) +
+					", budget " + strconv.Itoa(budget),
+			})
+			reportedRule[waiver.rule] = true
+		}
+		if totalUsed > totalWaiverBudget && !totalReported {
+			ctx.reportDiagnostic(semanticDiagnostic{
+				rule: ruleWaiverBudgetExceeded,
+				pos:  waiver.pos,
+				message: "total waiver budget exceeded: used " + strconv.Itoa(totalUsed) +
+					", budget " + strconv.Itoa(totalWaiverBudget),
+			})
+			totalReported = true
+		}
+	}
+}
+
+func (ctx *analysisContext) collectWaivers() ([]parsedWaiver, []semanticDiagnostic) {
+	var waivers []parsedWaiver
+	var diagnostics []semanticDiagnostic
+	for _, file := range ctx.pass.Files {
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				if !strings.HasPrefix(comment.Text, "//") {
+					continue
+				}
+				text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+				if isGinkgoLinterRawIgnoreDirective(text) {
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    ruleGinkgoLinterRawIgnore,
+						pos:     comment.Slash,
+						message: ginkgoLinterRawIgnoreDiagnostic(),
+					})
+				}
+				if !strings.HasPrefix(text, "semh:") {
+					if strings.Contains(text, "semh:allow") {
+						diagnostics = append(diagnostics, semanticDiagnostic{
+							rule:    ruleWaiverMalformed,
+							pos:     comment.Slash,
+							message: "semh directive must be a standalone line comment",
+						})
+					}
+					continue
+				}
+				if !isAllowWaiverDirective(text) {
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    ruleWaiverMalformed,
+						pos:     comment.Slash,
+						message: "unsupported semh directive; use semh:allow <rule-id> -- <explanation>",
+					})
+					continue
+				}
+				body := strings.TrimSpace(strings.TrimPrefix(text, "semh:allow"))
+				ruleText, explanation, ok := strings.Cut(body, "--")
+				if !ok || strings.TrimSpace(explanation) == "" {
+					rule := ruleWaiverMissingExplanation
+					if strings.TrimSpace(ruleText) == "" {
+						rule = ruleWaiverMalformed
+					}
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    rule,
+						pos:     comment.Slash,
+						message: "semh:allow " + body + " must include an explanation after --",
+					})
+					continue
+				}
+				ruleName := strings.TrimSpace(ruleText)
+				if ruleName == "" || strings.ContainsAny(ruleName, " \t") {
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    ruleWaiverMalformed,
+						pos:     comment.Slash,
+						message: "semh:allow waiver must name exactly one rule ID before --",
+					})
+					continue
+				}
+				rule := ruleID(ruleName)
+				metadata, ok := metadataForRule(rule)
+				if !ok {
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    ruleWaiverUnknownRule,
+						pos:     comment.Slash,
+						message: "unknown semh waiver rule " + string(rule),
+					})
+					continue
+				}
+				if !metadata.waivable {
+					diagnostics = append(diagnostics, semanticDiagnostic{
+						rule:    ruleWaiverNonWaivableRule,
+						pos:     comment.Slash,
+						message: "semh waiver for " + string(rule) + " cannot suppress hard diagnostics",
+					})
+					continue
+				}
+				waivers = append(waivers, parsedWaiver{
+					rule:        rule,
+					pos:         comment.Slash,
+					explanation: strings.TrimSpace(explanation),
+				})
+			}
+		}
+	}
+	return waivers, diagnostics
+}
+
+func isAllowWaiverDirective(text string) bool {
+	return text == "semh:allow" || strings.HasPrefix(text, "semh:allow ")
+}
+
+func isGinkgoLinterRawIgnoreDirective(text string) bool {
+	return strings.HasPrefix(text, "ginkgo-linter:ignore-")
+}
+
+func formatDiagnosticMessage(diagnostic semanticDiagnostic) string {
+	metadata, ok := metadataForRule(diagnostic.rule)
+	if !ok {
+		return "semh:" + string(diagnostic.rule) + ": " + diagnostic.message
+	}
+	return "semh:" + metadata.messagePrefix + ": " + diagnostic.message
 }
 
 func (ctx *analysisContext) filename(pos token.Pos) string {

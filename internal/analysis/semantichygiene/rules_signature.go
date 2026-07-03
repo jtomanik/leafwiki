@@ -36,15 +36,15 @@ func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 				continue
 			}
 			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
-				ctx.pass.Reportf(name.Pos(), "%s", testHelperSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				ctx.report(ruleSemanticRawSignature, name, testHelperSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
 				continue
 			}
 			if testHelperMessageParamName(name.Name, fn.Name.Name) {
-				ctx.pass.Reportf(name.Pos(), "%s", testHelperMessageParameterDiagnostic(fn.Name.Name, name.Name))
+				ctx.report(ruleI18nMessageParameter, name, testHelperMessageParameterDiagnostic(fn.Name.Name, name.Name))
 				continue
 			}
 			if testHelperFieldParamName(name.Name, fn.Name.Name) {
-				ctx.pass.Reportf(name.Pos(), "%s", testHelperFieldParameterDiagnostic(fn.Name.Name, name.Name))
+				ctx.report(ruleSemanticRawField, name, testHelperFieldParameterDiagnostic(fn.Name.Name, name.Name))
 			}
 		}
 	}
@@ -62,7 +62,7 @@ func checkLocalizedProseSinkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 			if name == nil || canonicalName(name.Name) != "message" {
 				continue
 			}
-			ctx.pass.Reportf(name.Pos(), "%s", localizedProseSinkSignatureDiagnostic(fn.Name.Name))
+			ctx.report(ruleI18nRawProseSink, name, localizedProseSinkSignatureDiagnostic(fn.Name.Name))
 		}
 	}
 }
@@ -91,7 +91,7 @@ func checkStringSignatureField(ctx *analysisContext, field *ast.Field, funcName 
 		if !ok {
 			return
 		}
-		ctx.pass.Reportf(field.Type.Pos(), "%s", parameterDiagnostic(paramName, funcName, typeName))
+		ctx.report(ruleSemanticRawSignature, field.Type, parameterDiagnostic(paramName, funcName, typeName))
 		return
 	}
 	for _, name := range field.Names {
@@ -102,7 +102,7 @@ func checkStringSignatureField(ctx *analysisContext, field *ast.Field, funcName 
 		if !ok {
 			continue
 		}
-		ctx.pass.Reportf(name.Pos(), "%s", parameterDiagnostic(name.Name, funcName, typeName))
+		ctx.report(ruleSemanticRawSignature, name, parameterDiagnostic(name.Name, funcName, typeName))
 	}
 }
 
@@ -115,7 +115,7 @@ func checkPrimitiveSignatureField(ctx *analysisContext, field *ast.Field, funcNa
 		if name == nil || !semanticPrimitiveNameInContext(name.Name, semanticContext) {
 			continue
 		}
-		ctx.pass.Reportf(name.Pos(), "%s", primitiveParameterDiagnostic(name.Name, funcName, primitiveType))
+		ctx.report(ruleSemanticRawPrimitive, name, primitiveParameterDiagnostic(name.Name, funcName, primitiveType))
 	}
 }
 
@@ -190,7 +190,7 @@ func checkStructFields(ctx *analysisContext, spec *ast.TypeSpec) {
 				if name == nil || !semanticPrimitiveNameInContext(name.Name, spec.Name.Name) {
 					continue
 				}
-				ctx.pass.Reportf(name.Pos(), "%s", primitiveFieldDiagnostic(name.Name, spec.Name.Name, primitiveType))
+				ctx.report(ruleSemanticRawPrimitive, name, primitiveFieldDiagnostic(name.Name, spec.Name.Name, primitiveType))
 			}
 			continue
 		}
@@ -203,11 +203,11 @@ func checkStructFields(ctx *analysisContext, spec *ast.TypeSpec) {
 			}
 			if messageBearing && !hasMessageID {
 				if messageFieldName(name.Name) {
-					ctx.pass.Reportf(name.Pos(), "%s", messageFieldDiagnostic(name.Name, spec.Name.Name))
+					ctx.report(ruleI18nMessageField, name, messageFieldDiagnostic(name.Name, spec.Name.Name))
 					continue
 				}
 				if warningStringsFieldName(name.Name) {
-					ctx.pass.Reportf(name.Pos(), "%s", warningStringsFieldDiagnostic(name.Name, spec.Name.Name))
+					ctx.report(ruleI18nMessageField, name, warningStringsFieldDiagnostic(name.Name, spec.Name.Name))
 					continue
 				}
 			}
@@ -218,7 +218,7 @@ func checkStructFields(ctx *analysisContext, spec *ast.TypeSpec) {
 			if !ok {
 				continue
 			}
-			ctx.pass.Reportf(name.Pos(), "%s", fieldDiagnostic(name.Name, spec.Name.Name, typeName))
+			ctx.report(ruleSemanticRawField, name, fieldDiagnostic(name.Name, spec.Name.Name, typeName))
 		}
 	}
 }
@@ -236,7 +236,7 @@ func checkValidatorReturn(ctx *analysisContext, fn *ast.FuncDecl) {
 	}
 	for _, result := range fn.Type.Results.List {
 		if typ := ctx.pass.TypesInfo.TypeOf(result.Type); typ != nil && isPrimitiveStringResult(typ) {
-			ctx.pass.Reportf(result.Pos(), "%s", validatorReturnDiagnostic(fn.Name.Name, semanticName, typeName))
+			ctx.report(ruleSemanticValidatorReturn, result, validatorReturnDiagnostic(fn.Name.Name, semanticName, typeName))
 			return
 		}
 	}

@@ -150,6 +150,67 @@ The script runs `cmd/leafwiki-vet`, which currently contains the
   values.
 - Raw stable contract literals for error codes, field validation codes,
   message IDs, validation issue codes, and MCP tool IDs.
+- LeafWiki-specific Ginkgo/Gomega quality rules such as top-level specs,
+  migrated `Test...` node names, `GinkgoT()` adapters inside spec bodies,
+  committed focused/pending nodes, flake retries, unsafe goroutine assertions,
+  blocking receives, wide table rows, and project-specific matcher pressure.
+- Raw `ginkgo-linter:ignore-*` comments, which are not explanation-required or
+  budgeted and therefore cannot bypass the semantic-hygiene waiver model.
+
+Checker diagnostics are either errors or waivable diagnostics. Errors are hard
+failures. Waivable diagnostics still fail the checker unless a local waiver
+suppresses one matching diagnostic:
+
+```go
+// semh:allow ginkgo.top-level-it -- package-level invariant reads clearer without an artificial container
+```
+
+A waiver names one stable dotted rule ID and must include a specific
+explanation after `--`. Waiver scope is rule-owned metadata: call-scoped
+waivers apply to the immediately following DSL/assertion call,
+declaration-scoped waivers apply to the immediately following function, type,
+or value declaration, and next-node waivers apply only to the immediately
+following AST node. One waiver suppresses one diagnostic.
+
+The active v1 waivable rule surface is reviewer-owned policy in
+`internal/analysis/semantichygiene/policy.go`. The current rule IDs and
+per-rule budgets are:
+
+| Rule ID | Budget | Scope |
+|---|---:|---|
+| `ginkgo.top-level-it` | 3 | call |
+| `ginkgo.wide-entry` | 3 | call |
+| `gomega.helper-should-be-matcher` | 3 | declaration |
+| `gomega.repeated-field-assertions` | 3 | call |
+| `gomega.collection-index-assertion` | 3 | call |
+| `gomega.equal-empty` | 3 | call |
+| `gomega.equal-zero` | 3 | call |
+| `gomega.numeric-equivalent` | 3 | call |
+| `gomega.time-equal` | 3 | call |
+
+For `ginkgo.top-level-it`, top-level Ginkgo `It`/`Specify` calls should be
+placed under a behavior container or waived with a specific local reason.
+Migrated `Test...` node names and `GinkgoT()` wrappers inside spec bodies are
+hard diagnostics (`ginkgo.test-name` and `ginkgo.testing-t-in-spec`), not
+waivable readability findings. `ginkgo.top-level-it` protects real repo test
+packages, not analyzer-only fixtures; existing migrated specs must be cleaned up
+or locally waived within the active budget.
+
+Malformed waivers, unknown rule IDs, non-waivable rule IDs, stale waivers,
+duplicate adjacent waivers, and total or per-rule budget overages are hard
+checker failures. Budgets live in Go policy code beside rule metadata; v1 uses
+a package-local total active waiver budget of 10 and explicit package-local
+per-rule budgets only for waivable readability rules. The current analyzer runs
+one context per package through `singlechecker`, so v1 budget accounting is not
+repo-global. Suppressed diagnostics are not printed as ordinary warnings.
+
+Semantic leaks, raw localized prose, raw stable contract literals, direct casts,
+unchecked semantic constructors, weak error-string assertions, unsafe async
+assertions, committed focused or pending specs, flake retries, goroutine
+assertions without Ginkgo recovery, blocking receives, migrated `Test...`
+Ginkgo names, `GinkgoT()`/`testing.T` assertions inside specs, raw
+`ginkgo-linter:ignore-*` comments, and global state cleanup violations are never
+waivable.
 
 Primitive values remain valid at real I/O edges: HTTP and MCP payloads, JSON
 DTOs, CLI/env/config parsing, persistence adapters, filesystem/frontmatter

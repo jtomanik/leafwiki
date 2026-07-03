@@ -19,13 +19,13 @@ func checkStableLiteral(ctx *analysisContext, lit *ast.BasicLit) {
 			!isStableTestContractLiteral(ctx, lit, value) {
 			return
 		}
-		ctx.pass.Reportf(lit.Pos(), "%s", testStableLiteralDiagnostic(value))
+		ctx.report(ruleContractRawLiteral, lit, testStableLiteralDiagnostic(value))
 		return
 	}
 	if isStableLiteralAllowed(ctx, lit) || !isStableContractLiteral(ctx, lit, value) {
 		return
 	}
-	ctx.pass.Reportf(lit.Pos(), "%s", stableLiteralDiagnostic(value))
+	ctx.report(ruleContractRawLiteral, lit, stableLiteralDiagnostic(value))
 }
 
 func checkLocalizedProseLiteral(ctx *analysisContext, lit *ast.BasicLit) {
@@ -42,7 +42,7 @@ func checkLocalizedProseLiteral(ctx *analysisContext, lit *ast.BasicLit) {
 			!isTestLocalizedProseContractLiteralContext(ctx, lit) {
 			return
 		}
-		ctx.pass.Reportf(lit.Pos(), "%s", testRawLocalizedProseDiagnostic(value))
+		ctx.report(ruleI18nRawProse, lit, testRawLocalizedProseDiagnostic(value))
 		return
 	}
 	if isLocalizedProseLiteralAllowed(ctx, lit) || !isRawLocalizedProseContractLiteral(ctx, lit) {
@@ -51,5 +51,5 @@ func checkLocalizedProseLiteral(ctx *analysisContext, lit *ast.BasicLit) {
 	if !looksLikeLocalizedProse(value) && !isStrictLocalizedProseContractLiteral(ctx, lit, value) {
 		return
 	}
-	ctx.pass.Reportf(lit.Pos(), "%s", rawLocalizedProseDiagnostic(value))
+	ctx.report(ruleI18nRawProse, lit, rawLocalizedProseDiagnostic(value))
 }

@@ -7,16 +7,18 @@ import (
 )
 
 type dependencyDirectionRule struct {
-	importerPath           string
+	importerPath          string
 	forbiddenImportPrefix string
 	diagnostic            string
+	rule                  ruleID
 }
 
 var dependencyDirectionRules = []dependencyDirectionRule{
 	{
-		importerPath:           "github.com/perber/wiki/e2e-proxy",
+		importerPath:          "github.com/perber/wiki/e2e-proxy",
 		forbiddenImportPrefix: "github.com/perber/wiki/internal/",
 		diagnostic:            dependencyDirectionDiagnostic(),
+		rule:                  ruleDependencyE2EProxyInternalImport,
 	},
 }
 
@@ -35,7 +37,7 @@ func checkDependencyDirection(ctx *analysisContext, spec *ast.ImportSpec) {
 	importerPath := ctx.pass.Pkg.Path()
 	for _, rule := range dependencyDirectionRules {
 		if importerPath == rule.importerPath && strings.HasPrefix(importPath, rule.forbiddenImportPrefix) {
-			ctx.pass.Reportf(spec.Path.Pos(), "%s", rule.diagnostic)
+			ctx.report(rule.rule, spec.Path, rule.diagnostic)
 		}
 	}
 }

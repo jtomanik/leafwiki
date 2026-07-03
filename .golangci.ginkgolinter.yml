@@ -1,0 +1,19 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+  settings:
+    ginkgolinter:
+      allow-havelen-zero: true
+      forbid-focus-container: true
+      suppress-len-assertion: true
+      validate-async-intervals: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

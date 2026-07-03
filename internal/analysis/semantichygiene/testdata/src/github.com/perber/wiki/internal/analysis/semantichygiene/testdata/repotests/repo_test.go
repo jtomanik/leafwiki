@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/gin-gonic/gin"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,8 +65,6 @@ type pageWireResponse struct {
 }
 
 type bddDSL struct{}
-
-var ginkgo bddDSL
 
 func (bddDSL) Describe(description string, args ...any) bool { return true }
 
@@ -262,6 +261,24 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func
 		}),
 	)
 })
+
+var _ = ginkgo.It("documents a package invariant without a container", func() {}) // want "semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason"
+
+// semh:allow ginkgo.top-level-it -- package-level invariant reads clearer without an artificial container
+var _ = ginkgo.It("documents an exceptional package invariant", func() {})
+
+// semh:allow ginkgo.top-level-it -- first budgeted package invariant
+var _ = ginkgo.It("documents a first budgeted package invariant", func() {})
+
+// semh:allow ginkgo.top-level-it -- second budgeted package invariant
+var _ = ginkgo.It("documents a second budgeted package invariant", func() {})
+
+// semh:allow ginkgo.top-level-it -- third budgeted package invariant // want "semh:waiver.budget-exceeded: waiver budget exceeded for ginkgo.top-level-it: used 4, budget 3"
+var _ = ginkgo.It("documents a third budgeted package invariant", func() {})
+
+func It(description string, args ...any) bool { return true }
+
+var _ = It("local helper is not a Ginkgo DSL call", func() {})
 
 var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
 	shared := strings.Builder{}           // want "move state initialization out of Ginkgo container body; declare variables in containers and initialize in setup nodes"

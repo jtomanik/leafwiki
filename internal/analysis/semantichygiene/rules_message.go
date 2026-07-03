@@ -16,15 +16,15 @@ func checkMessageFieldValue(ctx *analysisContext, kv *ast.KeyValueExpr) {
 	switch {
 	case messageFieldName(fieldName):
 		if named, ok := messageFieldValueFreeFormPassthroughNamed(ctx, kv); ok {
-			ctx.pass.Reportf(kv.Key.Pos(), "%s", messageFieldPassthroughDiagnostic(fieldName, named.Obj().Name()))
+			ctx.report(ruleI18nMessageField, kv.Key, messageFieldPassthroughDiagnostic(fieldName, named.Obj().Name()))
 			return
 		}
 		if named, ok := messageFieldValueMissingMessageIDNamed(ctx, kv); ok {
-			ctx.pass.Reportf(kv.Key.Pos(), "%s", messageFieldValueDiagnostic(fieldName, named.Obj().Name()))
+			ctx.report(ruleI18nMessageField, kv.Key, messageFieldValueDiagnostic(fieldName, named.Obj().Name()))
 		}
 	case warningStringsFieldName(fieldName):
 		if named, ok := warningFieldValueMissingMessageIDNamed(ctx, kv); ok {
-			ctx.pass.Reportf(kv.Key.Pos(), "%s", warningFieldValueDiagnostic(fieldName, named.Obj().Name()))
+			ctx.report(ruleI18nMessageField, kv.Key, warningFieldValueDiagnostic(fieldName, named.Obj().Name()))
 		}
 	default:
 		return
@@ -39,7 +39,7 @@ func checkMessagePassthroughCall(ctx *analysisContext, call *ast.CallExpr) {
 	if !localizedProseConstructorCalls[name] || !callHasFreeFormMessageArg(ctx, call) {
 		return
 	}
-	ctx.pass.Reportf(call.Fun.Pos(), "%s", localizedErrorConstructorPassthroughDiagnostic(name))
+	ctx.report(ruleI18nLocalizedErrorPassthrough, call.Fun, localizedErrorConstructorPassthroughDiagnostic(name))
 }
 
 func checkResponseStatusForward(ctx *analysisContext, kv *ast.KeyValueExpr) bool {
@@ -50,7 +50,7 @@ func checkResponseStatusForward(ctx *analysisContext, kv *ast.KeyValueExpr) bool
 	if !isResponsePayloadLiteral(ctx, kv) || !exprSuggestsMessageStatusForward(kv.Value) {
 		return false
 	}
-	ctx.pass.Reportf(kv.Key.Pos(), "%s", responseStatusForwardDiagnostic(fieldName))
+	ctx.report(ruleI18nResponseStatusForward, kv.Key, responseStatusForwardDiagnostic(fieldName))
 	return true
 }
 

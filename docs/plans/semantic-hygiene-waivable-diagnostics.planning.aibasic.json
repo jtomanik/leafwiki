@@ -1,0 +1,63 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "semantic-hygiene-waivable-diagnostics",
+  "createdAt": "2026-07-01T00:00:00Z",
+  "status": "plan-written",
+  "thread": {
+    "currentThreadId": "019f1c68-23fd-7bf3-8825-53ecb49465f3",
+    "currentThreadLink": "codex://threads/019f1c68-23fd-7bf3-8825-53ecb49465f3",
+    "sourceThreadId": "019f1527-f284-7ed3-8b91-072d53850114",
+    "sourceThreadLink": "codex://threads/019f1527-f284-7ed3-8b91-072d53850114",
+    "sourceThreadTitle": "Audit semantic checker coverage"
+  },
+  "artifacts": {
+    "observe": "docs/plans/semantic-hygiene-waivable-diagnostics.OBSERVE.md",
+    "context": "docs/plans/semantic-hygiene-waivable-diagnostics.CONTEXT.md",
+    "decision": "docs/plans/semantic-hygiene-waivable-diagnostics.DECISION.md",
+    "plan": "docs/plans/semantic-hygiene-waivable-diagnostics.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/semantic-hygiene-checker.PLAN.md",
+    "docs/plans/semantic-hygiene-checker.OBSERVE.md",
+    "docs/plans/semantic-hygiene-checker.CONTEXT.md",
+    "docs/plans/semantic-hygiene-checker.DECISION.md",
+    "docs/typed-ids.md",
+    "scripts/check-semantic-hygiene.sh",
+    "cmd/leafwiki-vet/main.go",
+    "cmd/leafwiki-vet/main_test.go",
+    "internal/analysis/semantichygiene/analyzer.go",
+    "internal/analysis/semantichygiene/diagnostics.go",
+    "internal/analysis/semantichygiene/policy.go",
+    "internal/analysis/semantichygiene/rules_ginkgo.go",
+    "internal/analysis/semantichygiene/rules_gomega.go",
+    "internal/analysis/semantichygiene/rules_cast.go",
+    "internal/analysis/semantichygiene/rules_dependency.go",
+    "internal/analysis/semantichygiene/rules_literal.go",
+    "internal/analysis/semantichygiene/rules_message.go",
+    "internal/analysis/semantichygiene/rules_signature.go",
+    "internal/analysis/semantichygiene/rules_string.go",
+    "internal/analysis/semantichygiene/analyzer_test.go",
+    "internal/analysis/semantichygiene/policy_test.go",
+    "internal/analysis/semantichygiene/rule_edges_gomega_test.go",
+    "docs/todo/ginkgo-gomega-second-pass.md"
+  ],
+  "subagents": [],
+  "subagentNote": "No subagents were spawned because the available multi-agent tool requires an explicit user request for delegation; observe, context, and decision research was performed locally.",
+  "decisions": [
+    "Use waivable diagnostics rather than advisory warnings.",
+    "Keep semantic leaks and dangerous Ginkgo/Gomega patterns never-waivable.",
+    "Use inline comments with syntax `semh:allow <rule-id> -- <explanation>`.",
+    "Represent rule IDs as stable dotted identifiers in analyzer policy code.",
+    "Keep waiver budgets in Go policy tables for v1.",
+    "Fail on unknown, malformed, stale, non-waivable, duplicate, and over-budget waivers.",
+    "Add waiver infrastructure before adding new BDD/readability rules.",
+    "Use `ginkgo.top-level-it` as the first new waivable rule."
+  ],
+  "validation": {
+    "artifactWrite": "created observe, context, decision, plan, and workflow-state artifacts",
+    "threadCapture": "recorded current thread and source thread IDs",
+    "sourceThreadCheck": "read source thread 019f1527-f284-7ed3-8b91-072d53850114 via Codex thread tool",
+    "verification": "documentation-only plan artifacts; validate JSON, scan for incomplete markers, and run git diff whitespace check"
+  }
+}
