@@ -15,6 +15,7 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	checkGinkgoTopLevelIt(ctx, call, name)
 	checkGinkgoTestName(ctx, call, name)
 	checkGinkgoCoverageName(ctx, call, name)
+	checkGinkgoVagueName(ctx, call, name)
 	checkGinkgoTestingTInSpec(ctx, call, name)
 	checkGinkgoFailInSpec(ctx, call, name)
 	switch {
@@ -68,6 +69,18 @@ func checkGinkgoCoverageName(ctx *analysisContext, call *ast.CallExpr, name stri
 	}
 }
 
+func checkGinkgoVagueName(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoNameCarrier(name) || !isGinkgoDSLCall(ctx, call) || len(call.Args) == 0 {
+		return
+	}
+	reportGinkgoVagueName(ctx, call.Args[0])
+	if isDescribeTableCall(name) {
+		for _, arg := range call.Args[1:] {
+			reportGinkgoTableEntryVagueName(ctx, arg)
+		}
+	}
+}
+
 func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoStaticDescription(expr)
 	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
@@ -84,6 +97,14 @@ func reportGinkgoCoverageName(ctx *analysisContext, expr ast.Expr) {
 	ctx.report(ruleGinkgoCoverageName, expr, ginkgoCoverageNameDiagnostic(description))
 }
 
+func reportGinkgoVagueName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoStaticDescription(expr)
+	if !ok || !ginkgoDescriptionIsVague(description) {
+		return
+	}
+	ctx.report(ruleGinkgoVagueName, expr, ginkgoVagueNameDiagnostic(description))
+}
+
 func reportGinkgoTableEntryDescriptionName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoEntryDescriptionValue(expr)
 	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
@@ -98,6 +119,14 @@ func reportGinkgoTableEntryCoverageName(ctx *analysisContext, expr ast.Expr) {
 		return
 	}
 	ctx.report(ruleGinkgoCoverageName, expr, ginkgoCoverageNameDiagnostic(description))
+}
+
+func reportGinkgoTableEntryVagueName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoEntryDescriptionValue(expr)
+	if !ok || !ginkgoDescriptionIsVague(description) {
+		return
+	}
+	ctx.report(ruleGinkgoVagueName, expr, ginkgoVagueNameDiagnostic(description))
 }
 
 func ginkgoDescriptionUsesCoverageBucket(description string) bool {
@@ -130,6 +159,23 @@ func isCoverageBucketVerb(field string) bool {
 
 func isCoverageBucketBranchPhrase(previous string, current string) bool {
 	return previous == "edge" && (current == "branch" || current == "branches")
+}
+
+func ginkgoDescriptionIsVague(description string) bool {
+	normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(description))), " ")
+	switch normalized {
+	case "preserves behavior",
+		"preserves existing behavior",
+		"keeps behavior",
+		"keeps existing behavior",
+		"works",
+		"handles cases",
+		"handles edge cases",
+		"does the right thing":
+		return true
+	default:
+		return false
+	}
 }
 
 func ginkgoDescriptionLooksMigratedTestName(description string) bool {

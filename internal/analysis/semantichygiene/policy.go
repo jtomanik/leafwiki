@@ -43,6 +43,7 @@ const (
 	ruleGinkgoGlobalStateCleanup           ruleID = "ginkgo.global-state-cleanup"
 	ruleGinkgoTestName                     ruleID = "ginkgo.test-name"
 	ruleGinkgoCoverageName                 ruleID = "ginkgo.coverage-name"
+	ruleGinkgoVagueName                    ruleID = "ginkgo.vague-name"
 	ruleGinkgoTestingTInSpec               ruleID = "ginkgo.testing-t-in-spec"
 	ruleGinkgoFailInSpec                   ruleID = "ginkgo.fail-in-spec"
 	ruleGinkgoLinterRawIgnore              ruleID = "ginkgo-linter.raw-ignore"
@@ -143,6 +144,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoGlobalStateCleanup:           hardRule(ruleGinkgoGlobalStateCleanup),
 	ruleGinkgoTestName:                     hardRule(ruleGinkgoTestName),
 	ruleGinkgoCoverageName:                 hardRule(ruleGinkgoCoverageName),
+	ruleGinkgoVagueName:                    hardRule(ruleGinkgoVagueName),
 	ruleGinkgoTestingTInSpec:               hardRule(ruleGinkgoTestingTInSpec),
 	ruleGinkgoFailInSpec:                   hardRule(ruleGinkgoFailInSpec),
 	ruleGinkgoLinterRawIgnore:              hardRule(ruleGinkgoLinterRawIgnore),

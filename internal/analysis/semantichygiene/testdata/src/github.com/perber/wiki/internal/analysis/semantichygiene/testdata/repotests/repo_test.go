@@ -305,6 +305,7 @@ var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
 	ginkgo.It("covers filesystem seam branches", func() {})                            // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("exercises fail-fast startup validation through the exit seam", func() { // want "Ginkgo node name \"exercises fail-fast startup validation through the exit seam\" reads like a coverage bucket; describe observable behavior instead"
 	})
+	ginkgo.It("preserves behavior", func() {})                                               // want "Ginkgo node name \"preserves behavior\" is too vague to document behavior; describe the observable outcome instead"
 	ginkgo.Describe("markdown parser and renderer edge branches", func() {})                 // want "Ginkgo node name \"markdown parser and renderer edge branches\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("ensure Page Endpoint Creates Section Twin When Page Route Exists", func() {}) // want "Ginkgo node name \"ensure Page Endpoint Creates Section Twin When Page Route Exists\" preserves a migrated testing.T name; describe observable behavior instead"
 	ginkgo.It("auth Refresh Token", func() {})                                               // want "Ginkgo node name \"auth Refresh Token\" preserves a migrated testing.T name; describe observable behavior instead"

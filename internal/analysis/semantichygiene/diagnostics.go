@@ -334,6 +334,10 @@ func ginkgoCoverageNameDiagnostic(name string) string {
 	return fmt.Sprintf("Ginkgo node name %q reads like a coverage bucket; describe observable behavior instead", name)
 }
 
+func ginkgoVagueNameDiagnostic(name string) string {
+	return fmt.Sprintf("Ginkgo node name %q is too vague to document behavior; describe the observable outcome instead", name)
+}
+
 func ginkgoTestingTInSpecDiagnostic(name string) string {
 	return fmt.Sprintf("avoid %s adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers", name)
 }
