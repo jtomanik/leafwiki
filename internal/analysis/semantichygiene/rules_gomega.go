@@ -2195,6 +2195,9 @@ func matchErrorArgumentUsesRawString(ctx *analysisContext, expr ast.Expr) bool {
 	if isMatcherNamed(call, "Equal", "ContainSubstring", "HavePrefix", "HaveSuffix", "MatchRegexp") {
 		return callHasStringArg(ctx, call)
 	}
+	if callConstructsRawErrorMessage(ctx, call) {
+		return true
+	}
 	if isMatcherNamed(call, "And", "Or", "SatisfyAll", "SatisfyAny") {
 		for _, arg := range call.Args {
 			if matchErrorArgumentUsesRawString(ctx, arg) {
@@ -2203,6 +2206,21 @@ func matchErrorArgumentUsesRawString(ctx *analysisContext, expr ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+func callConstructsRawErrorMessage(ctx *analysisContext, call *ast.CallExpr) bool {
+	fn := calledFunctionObject(ctx, call)
+	if fn == nil || fn.Pkg() == nil {
+		return false
+	}
+	switch fn.Pkg().Path() {
+	case "errors":
+		return fn.Name() == "New" && callHasStringArg(ctx, call)
+	case "fmt":
+		return fn.Name() == "Errorf" && callHasStringArg(ctx, call)
+	default:
+		return false
+	}
 }
 
 func callHasStringArg(ctx *analysisContext, call *ast.CallExpr) bool {

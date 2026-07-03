@@ -3,6 +3,7 @@ package repotests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"net/http"
@@ -579,6 +580,10 @@ func HaveReadMethodErrors() GomegaMatcher {
 
 func hiddenRawStringErrorMatcher() any {
 	return MatchError(ContainSubstring("Scan error")) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+}
+
+func hiddenConstructedErrorMatcher() any {
+	return MatchError(fmt.Errorf("Scan error: %s", "table")) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 }
 
 func TestRepoTestGomegaAsyncShortcutsAreRejected(t *testing.T) {
