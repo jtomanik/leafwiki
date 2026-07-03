@@ -451,6 +451,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(err).To(MatchError("boom"))                           // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	Expect(err).To(MatchError(ContainSubstring("boom")))         // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	Expect(err).To(MatchError(ContainSubstring(messageFixture))) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+	_ = hiddenRawStringErrorMatcher()
 	Expect(len(items)).To(Equal(1))                              // want "use HaveLen matcher instead of asserting len\\(\\) with Equal"
 	Expect(count == 1).To(BeTrue())                              // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 	Expect(count > 0).To(BeTrue())                               // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
@@ -554,6 +555,10 @@ func TestRepoTestGomegaInlineErrorShortcutsAreRejected(t *testing.T) {
 	err := returnError()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(err).To(HaveOccurred()) // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+}
+
+func hiddenRawStringErrorMatcher() any {
+	return MatchError(ContainSubstring("Scan error")) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 }
 
 func TestRepoTestGomegaAsyncShortcutsAreRejected(t *testing.T) {

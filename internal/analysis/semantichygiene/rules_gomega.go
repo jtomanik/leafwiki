@@ -27,6 +27,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherCallUsesMatcherValueAsExpected(ctx, call) {
 		ctx.report(ruleGomegaMatcherAsValue, call, gomegaMatcherAsValueDiagnostic(callName(call)))
 	}
+	if rawStringMatchErrorMatcherCall(ctx, call) && !callIsInsideGomegaAssertion(ctx, call) {
+		ctx.report(ruleGomegaRawStringMatchError, call, gomegaRawStringMatchErrorDiagnostic())
+	}
 	if matcherUsesPositionalTransform(ctx, call) {
 		ctx.report(ruleGomegaPositionalTransform, call, gomegaPositionalTransformDiagnostic())
 	}
@@ -1935,15 +1938,36 @@ func assertionUsesRawStringMatchError(ctx *analysisContext, assertion gomegaAsse
 	return matcherTreeContainsRawStringMatchError(ctx, assertion.matcher)
 }
 
+func rawStringMatchErrorMatcherCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "MatchError") || len(call.Args) == 0 {
+		return false
+	}
+	return matchErrorArgumentUsesRawString(ctx, call.Args[0])
+}
+
+func callIsInsideGomegaAssertion(ctx *analysisContext, call *ast.CallExpr) bool {
+	for parent := ctx.parent(call); parent != nil; parent = ctx.parent(parent) {
+		parentCall, ok := parent.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		if _, ok := gomegaAssertionFromCall(ctx, parentCall); ok {
+			return true
+		}
+		if _, ok := gomegaAsyncAssertionFromCall(parentCall); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func matcherTreeContainsRawStringMatchError(ctx *analysisContext, expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
-	if isMatcherNamed(call, "MatchError") && len(call.Args) > 0 {
-		if matchErrorArgumentUsesRawString(ctx, call.Args[0]) {
-			return true
-		}
+	if rawStringMatchErrorMatcherCall(ctx, call) {
+		return true
 	}
 	for _, arg := range call.Args {
 		if matcherTreeContainsRawStringMatchError(ctx, arg) {
