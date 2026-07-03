@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -315,6 +316,15 @@ var _ = ginkgo.Describe("search routes", func() {
 	})
 })
 
+func tempSearchDataDir() string {
+	ginkgo.GinkgoHelper()
+
+	dataDir, err := os.MkdirTemp("", "leafwiki-search-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dataDir)
+	return dataDir
+}
+
 type searchFixture struct {
 	dataDir string
 	tree    *tree.TreeService
@@ -325,7 +335,7 @@ type searchFixture struct {
 
 func newSearchFixture() *searchFixture {
 	ginkgo.GinkgoHelper()
-	dataDir := ginkgo.GinkgoT().TempDir()
+	dataDir := tempSearchDataDir()
 	treeService := tree.NewTreeService(dataDir)
 	Expect(treeService.LoadTree()).To(Succeed())
 

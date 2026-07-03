@@ -17,7 +17,7 @@ import (
 )
 
 var _ = ginkgo.Describe("search error responses", func() {
-	ginkgo.It("TestRespondWithSearchError_ServiceUnavailable", func() {
+	ginkgo.It("returns a localized service-unavailable response for unavailable search", func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchError(ctx, ErrSearchUnavailable)
@@ -25,7 +25,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 		Expect(rec).To(matchSearchStructuredError(http.StatusServiceUnavailable, ErrCodeSearchUnavailable))
 	})
 
-	ginkgo.It("TestRespondWithSearchError_InternalErrorIsSanitized", func() {
+	ginkgo.It("sanitizes unknown search failures as internal structured errors", func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchError(ctx, errors.New("sqlite disk I/O error"))
