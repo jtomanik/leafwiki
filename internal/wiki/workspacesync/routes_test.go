@@ -327,12 +327,9 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 	ginkgo.It("does not call restore when middleware did not attach a user", func() {
 		gin.SetMode(gin.TestMode)
-		called := false
+		restore := &restoreWorkspaceRecorder{}
 		routes := NewRoutes(RoutesConfig{
-			RestoreWorkspace: func(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error) {
-				called = true
-				return workspacesync.SyncStatus{}, nil
-			},
+			RestoreWorkspace: restore.RestoreWorkspace,
 		})
 		router := gin.New()
 		router.POST("/restore/:commit", routes.handleRestoreWorkspace)
@@ -340,9 +337,28 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		rec := performWorkspaceSyncRequest(router, http.MethodPost, "/restore/abc123")
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
-		Expect(called).To(BeFalse())
+		Expect(restore.requests).To(BeEmpty())
 	})
 })
+
+type restoreWorkspaceRequest struct {
+	Commit workspacesync.CommitHash
+	Actor  workspacesync.Actor
+	Source workspacesync.Source
+}
+
+type restoreWorkspaceRecorder struct {
+	requests []restoreWorkspaceRequest
+}
+
+func (r *restoreWorkspaceRecorder) RestoreWorkspace(_ context.Context, commit workspacesync.CommitHash, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
+	r.requests = append(r.requests, restoreWorkspaceRequest{
+		Commit: commit,
+		Actor:  actor,
+		Source: source,
+	})
+	return workspacesync.SyncStatus{}, nil
+}
 
 func newWorkspaceSyncTestRouter(cfg RoutesConfig) http.Handler {
 	ginkgo.GinkgoHelper()
