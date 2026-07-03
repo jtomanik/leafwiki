@@ -11,7 +11,7 @@ import (
 )
 
 var _ = Describe("committed localization catalog", func() {
-	It("covers every production message ID constant", func() {
+	It("contains every production message ID constant", func() {
 		root := repoRoot()
 		catalog, err := committedCatalog()
 		Expect(err).NotTo(HaveOccurred())
@@ -40,7 +40,7 @@ var _ = Describe("committed localization catalog", func() {
 		Expect(ids).To(HaveKey("mcp.tools.wiki_move_page.description"))
 	})
 
-	It("covers message IDs derived from production error codes", func() {
+	It("contains every message ID derived from production error codes", func() {
 		root := repoRoot()
 		catalog, err := committedCatalog()
 		Expect(err).NotTo(HaveOccurred())
