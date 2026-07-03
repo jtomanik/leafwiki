@@ -485,10 +485,10 @@ var _ = ginkgo.Describe("service", func() {
 			HaveField("ExtraFrontmatterHash", BeEmpty()),
 			HaveField("PageMetadata", Not(BeNil())),
 		))
-		Expect(secondRev.PageMetadata.Fields).To(HaveKeyWithValue("customKey", "second"))
-		aliases, ok := secondRev.PageMetadata.Extra["aliases"].([]interface{})
-		Expect(ok).To(BeTrue())
-		Expect(aliases).To(HaveExactElements("two"))
+		Expect(secondRev.PageMetadata).To(SatisfyAll(
+			HaveField("Fields", HaveKeyWithValue("customKey", "second")),
+			HaveField("Extra", HaveKeyWithValue("aliases", HaveExactElements("two"))),
+		))
 	})
 
 	ginkgo.It("restores historical custom frontmatter while keeping managed fields current", func() {
@@ -552,9 +552,7 @@ var _ = ginkgo.Describe("service", func() {
 			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
 			HaveField("ExtraFields", HaveKeyWithValue("customKey", "first")),
 		))
-		aliases, ok := fm.ExtraFields["aliases"].([]interface{})
-		Expect(ok).To(BeTrue())
-		Expect(aliases).To(HaveExactElements("one"))
+		Expect(fm.ExtraFields).To(HaveKeyWithValue("aliases", HaveExactElements("one")))
 		Expect(body).To(Equal("Body"))
 	})
 
@@ -725,11 +723,13 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("status", "legacy"))
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		Expect(ok).To(BeTrue())
-		Expect(aliases).To(HaveExactElements("old"))
-		Expect(doc.Body).To(Equal("Legacy body with extra"))
+		Expect(doc).To(SatisfyAll(
+			HaveField("Metadata", SatisfyAll(
+				HaveField("Fields", HaveKeyWithValue("status", "legacy")),
+				HaveField("Extra", HaveKeyWithValue("aliases", HaveExactElements("old"))),
+			)),
+			HaveField("Body", Equal("Legacy body with extra")),
+		))
 	})
 
 	ginkgo.It("keeps legacy YAML-looking content in the page body", func() {
