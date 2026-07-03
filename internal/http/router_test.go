@@ -18,17 +18,22 @@ import (
 	"testing/fstest"
 	"time"
 
+	"fmt"
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
+	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikiauth "github.com/perber/wiki/internal/wiki/auth"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -47,33 +52,38 @@ func pageNodeKind() *tree.NodeKind {
 	kind := tree.NodeKindPage
 	return &kind
 }
-
-type routerTestTB interface {
-	Helper()
-	TempDir() string
-	Fatal(args ...any)
-	Fatalf(format string, args ...any)
-	Error(args ...any)
-	Errorf(format string, args ...any)
-	Logf(format string, args ...any)
+func httpTestTempDir() string {
+	GinkgoHelper()
+	dir, err := os.
+		MkdirTemp("",
+			"leafwiki-http-*",
+		)
+	Expect(err).To(Succeed())
+	DeferCleanup(func() {
+		Expect(
+			os.RemoveAll(dir),
+		).To(Succeed())
+	})
+	return dir
 }
 
-func wrapCloseWithErrorCheck(closer func() error, t routerTestTB) {
-	t.Helper()
+func wrapCloseWithErrorCheck(closer func() error) {
+	GinkgoHelper()
+
 	DeferCleanup(func() {
-		if err := closer(); err != nil {
-			t.Fatalf("failed to close resource: %v", err)
+		{
+			err := closer()
+			Expect(err).NotTo(HaveOccurred(), "failed to close resource: %v", err)
 		}
+
 	})
 }
 
-func fixturePathForHTTPTests(t routerTestTB, rel string, candidates ...string) string {
-	t.Helper()
+func fixturePathForHTTPTests(rel string, candidates ...string) string {
+	GinkgoHelper()
 
 	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "getwd: %v", err)
 
 	for _, candidate := range candidates {
 		abs := filepath.Join(wd, candidate, rel)
@@ -81,31 +91,32 @@ func fixturePathForHTTPTests(t routerTestTB, rel string, candidates ...string) s
 			return abs
 		}
 	}
-
-	t.Fatalf("fixture path not found for %q from working directory %q", rel, wd)
+	Fail(fmt.Sprintf("fixture path not found for %q from working directory %q", rel, wd))
 	return ""
 }
 
-func createWikiTestInstance(t routerTestTB) *wiki.Wiki {
-	return createWikiTestInstanceWithRevisionFlag(t, true)
+func createWikiTestInstance() *wiki.Wiki {
+	GinkgoHelper()
+	return createWikiTestInstanceWithRevisionFlag(true)
 }
 
-func createWikiTestInstanceWithRevisionFlag(t routerTestTB, _ bool) *wiki.Wiki {
+func createWikiTestInstanceWithRevisionFlag(_ bool) *wiki.Wiki {
+	GinkgoHelper()
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		StorageDir:          t.TempDir(),
+		StorageDir:          httpTestTempDir(),
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "Failed to create wiki instance: %v", err)
+
 	return w
 }
 
-func createWikiTestInstanceWithWorkspace(t routerTestTB, workspace wiki.Workspace) *wiki.Wiki {
-	t.Helper()
+func createWikiTestInstanceWithWorkspace(workspace wiki.Workspace) *wiki.Wiki {
+	GinkgoHelper()
+
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		Workspace:           workspace,
 		AdminPassword:       "admin",
@@ -113,17 +124,18 @@ func createWikiTestInstanceWithWorkspace(t routerTestTB, workspace wiki.Workspac
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "Failed to create wiki instance: %v", err)
+
 	return w
 }
 
-func createRouterTestInstance(w *wiki.Wiki, t routerTestTB) *gin.Engine {
-	return createRouterTestInstanceWithMaxAssetUploadSize(w, t, assets.DefaultMaxUploadSizeBytes)
+func createRouterTestInstance(w *wiki.Wiki) *gin.Engine {
+	GinkgoHelper()
+	return createRouterTestInstanceWithMaxAssetUploadSize(w, assets.DefaultMaxUploadSizeBytes)
 }
 
-func createRouterTestInstanceWithRevision(w *wiki.Wiki, t routerTestTB) *gin.Engine {
+func createRouterTestInstanceWithRevision(w *wiki.Wiki) *gin.Engine {
+	GinkgoHelper()
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
 		InjectCodeInHeader:      "",
@@ -137,7 +149,8 @@ func createRouterTestInstanceWithRevision(w *wiki.Wiki, t routerTestTB) *gin.Eng
 	})
 }
 
-func createRouterTestInstanceWithMaxAssetUploadSize(w *wiki.Wiki, t routerTestTB, maxAssetUploadSizeBytes shared.MaxBytes) *gin.Engine {
+func createRouterTestInstanceWithMaxAssetUploadSize(w *wiki.Wiki, maxAssetUploadSizeBytes shared.MaxBytes) *gin.Engine {
+	GinkgoHelper()
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
 		InjectCodeInHeader:      "",
@@ -150,7 +163,8 @@ func createRouterTestInstanceWithMaxAssetUploadSize(w *wiki.Wiki, t routerTestTB
 	})
 }
 
-func createRouterTestInstanceWithAllowInsecure(w *wiki.Wiki, allowInsecure bool, t routerTestTB) *gin.Engine {
+func createRouterTestInstanceWithAllowInsecure(w *wiki.Wiki, allowInsecure bool) *gin.Engine {
+	GinkgoHelper()
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 		PublicAccess:            false,
 		InjectCodeInHeader:      "",
@@ -163,25 +177,21 @@ func createRouterTestInstanceWithAllowInsecure(w *wiki.Wiki, allowInsecure bool,
 	})
 }
 
-func authenticatedRequest(t routerTestTB, router http.Handler, method, url string, body *strings.Reader) *httptest.ResponseRecorder {
-	// Login
+func authenticatedRequest(router http.Handler, method, url string, body *strings.Reader) *httptest.ResponseRecorder {
+	GinkgoHelper()
+
 	loginBody := `{"identifier": "admin", "password": "admin"}`
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
 	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close)
 
 	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
+	Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
 
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
 	if csrfToken == "" {
@@ -192,10 +202,7 @@ func authenticatedRequest(t routerTestTB, router http.Handler, method, url strin
 			}
 		}
 	}
-
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
+	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
 	// Perform authenticated request
 	if body == nil {
@@ -216,8 +223,9 @@ func authenticatedRequest(t routerTestTB, router http.Handler, method, url strin
 	return rec
 }
 
-func authenticatedRequestAs(t routerTestTB, router http.Handler, username, password, method, url string, body *strings.Reader) *httptest.ResponseRecorder {
-	// Login with specific credentials
+func authenticatedRequestAs(router http.Handler, username, password, method, url string, body *strings.Reader) *httptest.ResponseRecorder {
+	GinkgoHelper()
+
 	loginData := map[string]string{
 		"identifier": username,
 		"password":   password,
@@ -227,18 +235,13 @@ func authenticatedRequestAs(t routerTestTB, router http.Handler, username, passw
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login as %s: %d - %s", username, loginRec.Code, loginRec.Body.String())
-	}
+	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login as %s: %d - %s", username, loginRec.Code, loginRec.Body.String())
 
 	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close)
 
 	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
+	Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
 
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
 	if csrfToken == "" {
@@ -249,10 +252,7 @@ func authenticatedRequestAs(t routerTestTB, router http.Handler, username, passw
 			}
 		}
 	}
-
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
+	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
 	// Perform authenticated request
 	var reqBody io.Reader
@@ -274,30 +274,19 @@ func authenticatedRequestAs(t routerTestTB, router http.Handler, username, passw
 	return rec
 }
 
-func assertNoStoreHeaders(t routerTestTB, rec *httptest.ResponseRecorder) {
-	t.Helper()
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("Cache-Control = %q, want no-store", got)
-	}
-	if got := rec.Header().Get("Pragma"); got != "no-cache" {
-		t.Fatalf("Pragma = %q, want no-cache", got)
-	}
-	if got := rec.Header().Get("Expires"); got != "Thu, 01 Jan 1970 00:00:00 GMT" {
-		t.Fatalf("Expires = %q, want expired header", got)
-	}
+func haveNoStoreHeaders() types.GomegaMatcher {
+	return SatisfyAll(
+		HaveHTTPHeaderWithValue("Cache-Control", "no-store"),
+		HaveHTTPHeaderWithValue("Pragma", "no-cache"),
+		HaveHTTPHeaderWithValue("Expires", "Thu, 01 Jan 1970 00:00:00 GMT"),
+	)
 }
 
-func assertAPIKeyNullMetadata(t routerTestTB, key map[string]any) {
-	t.Helper()
-	for _, field := range []string{"lastUsedAt", "revokedAt"} {
-		value, ok := key[field]
-		if !ok {
-			t.Fatalf("api key metadata missing %q: %#v", field, key)
-		}
-		if value != nil {
-			t.Fatalf("api key metadata %q = %#v, want null", field, value)
-		}
-	}
+func haveNullAPIKeyLifecycleMetadata() types.GomegaMatcher {
+	return SatisfyAll(
+		HaveKeyWithValue("lastUsedAt", BeNil()),
+		HaveKeyWithValue("revokedAt", BeNil()),
+	)
 }
 
 type apiPageDTO struct {
@@ -334,8 +323,8 @@ type createPagePayloadDTO struct {
 	Kind     tree.NodeKind `json:"kind,omitempty"`
 }
 
-func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPageDTO {
-	t.Helper()
+func createPageViaAPI(router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPageDTO {
+	GinkgoHelper()
 
 	payload := createPagePayloadDTO{
 		Title: title,
@@ -349,118 +338,112 @@ func createPageViaAPI(t routerTestTB, router http.Handler, title, slug string, p
 	}
 
 	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("Marshal(create page payload) failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "Marshal(create page payload) failed: %v", err)
 
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(string(body)))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(string(body)))
+	Expect(rec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created, got %d - %s", rec.Code, rec.Body.String())
 
 	var page apiPageDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("Unmarshal(create page response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &page)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(create page response) failed: %v", err)
 	}
 
 	return &page
 }
 
-func getPageByPathViaAPI(t routerTestTB, router http.Handler, path string) *apiPageDTO {
-	t.Helper()
+func getPageByPathViaAPI(router http.Handler, path string) *apiPageDTO {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path="+path, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path="+path, nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var page apiPageDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("Unmarshal(get page by path response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &page)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(get page by path response) failed: %v", err)
 	}
 
 	return &page
 }
 
-func getPermalinkTargetViaAPI(t routerTestTB, router http.Handler, id string) *apiPermalinkTargetDTO {
-	t.Helper()
+func getPermalinkTargetViaAPI(router http.Handler, id string) *apiPermalinkTargetDTO {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/permalink/"+id, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/permalink/"+id, nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var target apiPermalinkTargetDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &target); err != nil {
-		t.Fatalf("Unmarshal(get permalink target response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &target)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(get permalink target response) failed: %v", err)
 	}
 
 	return &target
 }
 
-func getTreeViaAPI(t routerTestTB, router http.Handler) *apiPageDTO {
-	t.Helper()
+func getTreeViaAPI(router http.Handler) *apiPageDTO {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/tree", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/tree", nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var node apiPageDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &node); err != nil {
-		t.Fatalf("Unmarshal(tree response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &node)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(tree response) failed: %v", err)
 	}
 
 	return &node
 }
 
-func deletePageViaAPI(t routerTestTB, router http.Handler, pageID string, version string, recursive bool) {
-	t.Helper()
+func deletePageViaAPI(router http.Handler, pageID string, version string, recursive bool) {
+	GinkgoHelper()
 
 	url := "/api/pages/" + pageID + "?version=" + version
 	if recursive {
 		url += "&recursive=true"
 	}
 
-	rec := authenticatedRequest(t, router, http.MethodDelete, url, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodDelete, url, nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
 }
 
-func listAssetsViaAPI(t routerTestTB, router http.Handler, pageID string) []string {
-	t.Helper()
+func listAssetsViaAPI(router http.Handler, pageID string) []string {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+pageID+"/assets", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID+"/assets", nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var resp struct {
 		Files []string `json:"files"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Unmarshal(list assets response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(list assets response) failed: %v", err)
 	}
 
 	return resp.Files
 }
 
-func uploadAssetViaAPI(t routerTestTB, router http.Handler, pageID, filename, content string) string {
-	t.Helper()
+func uploadAssetViaAPI(router http.Handler, pageID, filename, content string) string {
+	GinkgoHelper()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
 	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
+	Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+	{
+
+		_, err := part.Write([]byte(content))
+		Expect(err).NotTo(HaveOccurred(), "Write(asset payload) failed: %v", err)
 	}
-	if _, err := part.Write([]byte(content)); err != nil {
-		t.Fatalf("Write(asset payload) failed: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Close(writer) failed: %v", err)
+	{
+
+		err := writer.Close()
+		Expect(err).NotTo(HaveOccurred(), "Close(writer) failed: %v", err)
 	}
 
 	loginBody := `{"identifier": "admin", "password": "admin"}`
@@ -468,13 +451,10 @@ func uploadAssetViaAPI(t routerTestTB, router http.Handler, pageID, filename, co
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
 
 	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -486,9 +466,7 @@ func uploadAssetViaAPI(t routerTestTB, router http.Handler, pageID, filename, co
 			}
 		}
 	}
-	if csrfToken == "" {
-		t.Fatal("Expected CSRF token after login, got none")
-	}
+	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
 	uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID+"/assets", body)
 	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
@@ -499,46 +477,44 @@ func uploadAssetViaAPI(t routerTestTB, router http.Handler, pageID, filename, co
 
 	uploadRec := httptest.NewRecorder()
 	router.ServeHTTP(uploadRec, uploadReq)
-
-	if uploadRec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
-	}
+	Expect(uploadRec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
 
 	var uploadResp map[string]string
-	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
-		t.Fatalf("Unmarshal(upload asset response) failed: %v", err)
+	{
+		err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(upload asset response) failed: %v", err)
 	}
 
 	return uploadResp["file"]
 }
 
-func getLatestRevisionViaAPI(t routerTestTB, router http.Handler, pageID string) map[string]any {
-	t.Helper()
+func getLatestRevisionViaAPI(router http.Handler, pageID string) map[string]any {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+pageID+"/revisions/latest", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID+"/revisions/latest", nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var rev map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &rev); err != nil {
-		t.Fatalf("Unmarshal(latest revision response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &rev)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(latest revision response) failed: %v", err)
 	}
+
 	return rev
 }
 
-func getAdminUserIDViaAPI(t routerTestTB, router http.Handler) string {
-	t.Helper()
+func getAdminUserIDViaAPI(router http.Handler) string {
+	GinkgoHelper()
 
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/users", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+	rec := authenticatedRequest(router, http.MethodGet, "/api/users", nil)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var users []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &users); err != nil {
-		t.Fatalf("Unmarshal(users response) failed: %v", err)
+	{
+		err := json.Unmarshal(rec.Body.Bytes(), &users)
+		Expect(err).NotTo(HaveOccurred(), "Unmarshal(users response) failed: %v", err)
 	}
+
 	for _, user := range users {
 		if role, _ := user["role"].(string); role == "admin" {
 			if id, _ := user["id"].(string); id != "" {
@@ -546,33 +522,37 @@ func getAdminUserIDViaAPI(t routerTestTB, router http.Handler) string {
 			}
 		}
 	}
-	t.Fatal("admin user not found")
+	Fail(fmt.Sprint("admin user not found"))
 	return ""
 }
 
-func writePageMarkdownForTest(t routerTestTB, w *wiki.Wiki, page *apiPageDTO, raw string) {
-	t.Helper()
+func writePageMarkdownForTest(w *wiki.Wiki, page *apiPageDTO, raw string) {
+	GinkgoHelper()
 
 	pagePath := filepath.Join(w.GetRootDir(), filepath.FromSlash(page.Path)+".md")
-	if err := os.WriteFile(pagePath, []byte(raw), 0o644); err != nil {
-		t.Fatalf("WriteFile(page markdown) failed: %v", err)
+	{
+		err := os.WriteFile(pagePath, []byte(raw), 0o644)
+		Expect(err).NotTo(HaveOccurred(), "WriteFile(page markdown) failed: %v", err)
 	}
+
 }
 
-func uploadBrandingLogoViaAPI(t routerTestTB, router http.Handler, filename string, content []byte) {
-	t.Helper()
+func uploadBrandingLogoViaAPI(router http.Handler, filename string, content []byte) {
+	GinkgoHelper()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
+	Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+	{
+
+		_, err := part.Write(content)
+		Expect(err).NotTo(HaveOccurred(), "Write(logo payload) failed: %v", err)
 	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("Write(logo payload) failed: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Close(writer) failed: %v", err)
+	{
+
+		err := writer.Close()
+		Expect(err).NotTo(HaveOccurred(), "Close(writer) failed: %v", err)
 	}
 
 	loginBody := `{"identifier": "admin", "password": "admin"}`
@@ -580,13 +560,10 @@ func uploadBrandingLogoViaAPI(t routerTestTB, router http.Handler, filename stri
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
 
 	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -598,9 +575,7 @@ func uploadBrandingLogoViaAPI(t routerTestTB, router http.Handler, filename stri
 			}
 		}
 	}
-	if csrfToken == "" {
-		t.Fatal("Expected CSRF token after login, got none")
-	}
+	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/branding/logo", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -611,26 +586,26 @@ func uploadBrandingLogoViaAPI(t routerTestTB, router http.Handler, filename stri
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
 }
 
-func uploadBrandingFaviconViaAPI(t routerTestTB, router http.Handler, filename string, content []byte) {
-	t.Helper()
+func uploadBrandingFaviconViaAPI(router http.Handler, filename string, content []byte) {
+	GinkgoHelper()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
+	Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+	{
+
+		_, err := part.Write(content)
+		Expect(err).NotTo(HaveOccurred(), "Write(favicon payload) failed: %v", err)
 	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("Write(favicon payload) failed: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Close(writer) failed: %v", err)
+	{
+
+		err := writer.Close()
+		Expect(err).NotTo(HaveOccurred(), "Close(writer) failed: %v", err)
 	}
 
 	loginBody := `{"identifier": "admin", "password": "admin"}`
@@ -638,13 +613,10 @@ func uploadBrandingFaviconViaAPI(t routerTestTB, router http.Handler, filename s
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
 
 	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+	wrapCloseWithErrorCheck(loginRes.Body.Close)
 
 	cookies := loginRes.Cookies()
 	csrfToken := loginRec.Header().Get("X-CSRF-Token")
@@ -656,9 +628,7 @@ func uploadBrandingFaviconViaAPI(t routerTestTB, router http.Handler, filename s
 			}
 		}
 	}
-	if csrfToken == "" {
-		t.Fatal("Expected CSRF token after login, got none")
-	}
+	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/branding/favicon", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -669,20 +639,18 @@ func uploadBrandingFaviconViaAPI(t routerTestTB, router http.Handler, filename s
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
 }
 
-func importerFixturePathForHTTPTests(t routerTestTB, rel string) string {
-	t.Helper()
+func importerFixturePathForHTTPTests(rel string) string {
+	GinkgoHelper()
 
-	return fixturePathForHTTPTests(t, rel, "../importer/fixtures", "internal/importer/fixtures")
+	return fixturePathForHTTPTests(rel, "../importer/fixtures", "internal/importer/fixtures")
 }
 
-func createZipFromDir(t routerTestTB, root string) []byte {
-	t.Helper()
+func createZipFromDir(root string) []byte {
+	GinkgoHelper()
 
 	var body bytes.Buffer
 	zipWriter := zip.NewWriter(&body)
@@ -712,1060 +680,1014 @@ func createZipFromDir(t routerTestTB, root string) []byte {
 		_, err = entry.Write(raw)
 		return err
 	})
-	if err != nil {
-		t.Fatalf("create zip from dir: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "create zip from dir: %v", err)
+	{
 
-	if err := zipWriter.Close(); err != nil {
-		t.Fatalf("close zip writer: %v", err)
+		err := zipWriter.Close()
+		Expect(err).NotTo(HaveOccurred(), "close zip writer: %v", err)
 	}
 
 	return body.Bytes()
 }
 
-var _ = It("TestDisableRequestLog_DoesNotCrash", func() {
-	t := GinkgoT()
-	logs := captureDefaultLogs(t)
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		DisableRequestLog:       true,
+var _ = Describe("HTTP router", func() {
+	It("handles disabled request logging without crashing", func() {
+
+		logs := captureDefaultLogs()
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			DisableRequestLog:       true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d: %s", rec.Code, rec.Body.String())
+		Expect(logs.String()).NotTo(ContainSubstring("http request"), "request log was written despite DisableRequestLog: %s", logs.String())
+
 	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(logs.String(), "http request") {
-		t.Fatalf("request log was written despite DisableRequestLog: %s", logs.String())
-	}
-
 })
 
-var _ = It("TestRequestLogsGoToDefaultSlogSink", func() {
-	t := GinkgoT()
-	logs := captureDefaultLogs(t)
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+var _ = Describe("HTTP router", func() {
+	It("writes request logs to the default slog sink", func() {
+
+		logs := captureDefaultLogs()
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d: %s", rec.Code, rec.Body.String())
+
+		entry := findJSONLogEntry(logs.String(), "http request")
+		Expect(entry).To(SatisfyAll(
+			HaveKeyWithValue("method", http.MethodGet),
+			HaveKeyWithValue("path", "/api/health"),
+			HaveKeyWithValue("status", float64(http.StatusOK)),
+			HaveKey("latency"),
+			HaveKey("ip"),
+		), "http request log entry = %#v", entry)
+
 	})
+})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+var _ = Describe("HTTP router", func() {
+	It("writes recovery logs to the default slog sink", func() {
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	entry := findJSONLogEntry(t, logs.String(), "http request")
-	for _, key := range []string{"method", "path", "status", "latency", "ip"} {
-		if _, ok := entry[key]; !ok {
-			t.Fatalf("http request log missing %q: %#v", key, entry)
+		logs := captureDefaultLogs()
+		router := httpinternal.NewRouter([]httpinternal.RouteRegistrar{panicRegistrar{}}, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError), "expected 500, got %d: %s", rec.Code, rec.Body.String())
+		Expect(logs.String()).To(ContainSubstring("panic route"), "recovery log did not include panic text: %s", logs.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns a null current user for unauthenticated requests", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200 for unauthenticated /auth/me, got %d: %s", rec.Code, rec.Body.String())
+		{
+
+			body := strings.TrimSpace(rec.Body.String())
+			Expect(body).To(Equal("null"), "expected null body for unauthenticated request, got %q", body)
 		}
-	}
-	if entry["method"] != http.MethodGet {
-		t.Fatalf("method = %v, want GET", entry["method"])
-	}
-	if entry["path"] != "/api/health" {
-		t.Fatalf("path = %v, want /api/health", entry["path"])
-	}
-	if entry["status"] != float64(http.StatusOK) {
-		t.Fatalf("status = %v, want 200", entry["status"])
-	}
 
-})
-
-var _ = It("TestGinRecoveryLogsGoToDefaultSlogSink", func() {
-	t := GinkgoT()
-	logs := captureDefaultLogs(t)
-	router := httpinternal.NewRouter([]httpinternal.RouteRegistrar{panicRegistrar{}}, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 	})
-
-	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(logs.String(), "panic route") {
-		t.Fatalf("recovery log did not include panic text: %s", logs.String())
-	}
-
 })
 
-var _ = It("TestMeEndpoint_Unauthenticated_Returns200WithNullBody", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("returns the authenticated current user", func() {
 
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for unauthenticated /auth/me, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if body := strings.TrimSpace(rec.Body.String()); body != "null" {
-		t.Errorf("expected null body for unauthenticated request, got %q", body)
-	}
+		rec := authenticatedRequest(router, http.MethodGet, "/api/auth/me", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200 for authenticated /auth/me, got %d: %s", rec.Code, rec.Body.String())
 
+		var body map[string]any
+		{
+			err := json.NewDecoder(rec.Body).Decode(&body)
+			Expect(err).NotTo(HaveOccurred(), "failed to decode /auth/me response: %v", err)
+		}
+		Expect(body).To(SatisfyAll(
+			HaveKeyWithValue("username", "admin"),
+			HaveKeyWithValue("role", "admin"),
+		), "authenticated user response = %#v", body)
+
+	})
 })
 
-var _ = It("TestMeEndpoint_Authenticated_ReturnsUser", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/auth/me", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for authenticated /auth/me, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode /auth/me response: %v", err)
-	}
-	if body["username"] != "admin" {
-		t.Errorf("expected username=admin, got %v", body["username"])
-	}
-	if body["role"] != "admin" {
-		t.Errorf("expected role=admin, got %v", body["role"])
-	}
-
-})
-
-var _ = DescribeTable("TestMeEndpoint_HasNoCacheHeaders",
+var _ = DescribeTable("current-user responses are uncacheable",
 	func(authenticated bool) {
-		t := GinkgoT()
-		w := createWikiTestInstance(t)
-		wrapCloseWithErrorCheck(w.Close, t)
-		router := createRouterTestInstance(w, t)
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
 		var rec *httptest.ResponseRecorder
 		if authenticated {
-			rec = authenticatedRequest(t, router, http.MethodGet, "/api/auth/me", nil)
+			rec = authenticatedRequest(router, http.MethodGet, "/api/auth/me", nil)
 		} else {
 			req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 			rec = httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 		}
+		{
 
-		if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
-			t.Errorf("expected Cache-Control: no-store, got %q", cc)
+			cc := rec.Header().Get("Cache-Control")
+			Expect(cc).To(Equal("no-store"), "expected Cache-Control: no-store, got %q", cc)
 		}
-		if p := rec.Header().Get("Pragma"); p != "no-cache" {
-			t.Errorf("expected Pragma: no-cache, got %q", p)
+		{
+
+			p := rec.Header().Get("Pragma")
+			Expect(p).To(Equal("no-cache"), "expected Pragma: no-cache, got %q", p)
 		}
-		if exp := rec.Header().Get("Expires"); exp == "" {
-			t.Error("expected Expires header to be set")
+		{
+
+			exp := rec.Header().Get("Expires")
+			Expect(exp).NotTo(BeEmpty(), "expected Expires header to be set")
 		}
+
 	},
 	Entry("unauthenticated", false),
 	Entry("authenticated", true),
 )
 
-var _ = It("TestCreatePageEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("creates a page through the authenticated router", func() {
 
-	title := "Getting Started"
-	expectedSlug := "getting-started"
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	body := `{"title": "Getting Started", "slug": "getting-started"}`
+		title := "Getting Started"
+		expectedSlug := "getting-started"
 
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		body := `{"title": "Getting Started", "slug": "getting-started"}`
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("Expected status 201, got %d", rec.Code)
-	}
+		rec := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), "Expected status 201, got %d", rec.Code)
 
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	if resp["id"] == nil {
-		t.Errorf("Expected id in response, got: %v", resp)
-	}
-
-	if resp["title"] != title {
-		t.Errorf("Expected title in response, got: %v", resp)
-	}
-
-	if resp["slug"] != expectedSlug {
-		t.Errorf("Expected slug in response, got: %v", resp)
-	}
-
-})
-
-var _ = It("TestConfigEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstanceWithAllowInsecure(w, false, t)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", rec.Code)
-	}
-
-	if !strings.Contains(rec.Body.String(), "--allow-insecure") {
-		t.Fatalf("expected response to explain allow-insecure requirement, got %s", rec.Body.String())
-	}
-
-})
-
-var _ = It("TestLoginEndpoint_ExplainsAllowInsecureRequirementOnHTTP", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstanceWithAllowInsecure(w, false, t)
-
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d with body %s", rec.Code, rec.Body.String())
-	}
-
-	if !strings.Contains(rec.Body.String(), "--allow-insecure") {
-		t.Fatalf("expected response to explain allow-insecure requirement, got %s", rec.Body.String())
-	}
-
-})
-
-var _ = It("TestCreatePageEndpoint_MissingTitle", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"title": ""}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(body))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for missing title, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestCreatePageEndpoint_InvalidJSON", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `this is not valid json`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(body))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for invalid JSON, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestCreatePageEndpoint_PageAlreadyExists", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"title": "Page Exists", "slug": "page-exists"}`
-	rec1 := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(body))
-
-	if rec1.Code != http.StatusCreated {
-		t.Fatalf("Expected status 201, got %d", rec1.Code)
-	}
-
-	rec2 := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(body))
-
-	if rec2.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec2.Code)
-	}
-
-})
-
-var _ = It("TestGetTreeEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/tree", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
-
-	var resp map[string]interface{}
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	if _, ok := resp["id"]; !ok {
-		t.Errorf("Expected root node in response")
-	}
-
-	if resp["title"] != "root" {
-		t.Errorf("Expected root node title to be 'Root', got: %v", resp)
-	}
-
-	if resp["slug"] != "root" {
-		t.Errorf("Expected root node slug to be 'root', got: %v", resp)
-	}
-
-	if resp["id"] != "root" {
-		t.Errorf("Expected root node id to be 'root', got: %v", resp)
-	}
-
-})
-
-var _ = It("TestConfigEndpoint_IncludesMaxAssetUploadSizeBytes", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	const maxAssetUploadSizeBytes shared.MaxBytes = 123456
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: maxAssetUploadSizeBytes,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	gotSize, ok := resp["maxAssetUploadSizeBytes"].(float64)
-	if !ok {
-		t.Fatalf("Expected maxAssetUploadSizeBytes in config response, got %v", resp)
-	}
-
-	if int64(gotSize) != int64(maxAssetUploadSizeBytes) {
-		t.Fatalf("Expected maxAssetUploadSizeBytes=%d, got %v", maxAssetUploadSizeBytes, gotSize)
-	}
-
-})
-
-var _ = It("TestConfigEndpoint_IncludesEnableLinkRefactor", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableLinkRefactor:      true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	gotEnabled, ok := resp["enableLinkRefactor"].(bool)
-	if !ok {
-		t.Fatalf("Expected enableLinkRefactor in config response, got %v", resp)
-	}
-
-	if !gotEnabled {
-		t.Fatalf("Expected enableLinkRefactor=true, got %v", gotEnabled)
-	}
-
-})
-
-var _ = It("TestConfigEndpoint_IncludesMarkdownLinkRootPrefix", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MarkdownLinkRootPrefix:  "/docs",
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	if got := resp["markdownLinkRootPrefix"]; got != "/docs" {
-		t.Fatalf("Expected markdownLinkRootPrefix=/docs, got %v in %v", got, resp)
-	}
-
-})
-
-var _ = It("TestConfigEndpoint_IncludesEnableWorkspaceSyncWhenDisabled", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	gotEnabled, ok := resp["enableWorkspaceSync"].(bool)
-	if !ok {
-		t.Fatalf("Expected enableWorkspaceSync in config response, got %v", resp)
-	}
-
-	if gotEnabled {
-		t.Fatalf("Expected enableWorkspaceSync=false, got %v", gotEnabled)
-	}
-
-})
-
-var _ = It("TestWorkspaceSyncStatusEndpoint_WhenEnabled", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
-		if err := os.MkdirAll(rootDir, 0o755); err != nil {
-			t.Fatalf("create root dir: %v", err)
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
 		}
+		Expect(resp).To(SatisfyAll(
+			HaveKey("id"),
+			HaveKeyWithValue("title", title),
+			HaveKeyWithValue("slug", expectedSlug),
+		), "created page response = %#v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("explains the insecure-transport requirement in the config route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstanceWithAllowInsecure(w, false)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "expected status 400, got %d", rec.Code)
+		Expect(rec).To(HaveHTTPBody(ContainSubstring("--allow-insecure")), "expected response to explain allow-insecure requirement, got %s", rec.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("explains the insecure-transport requirement during login", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstanceWithAllowInsecure(w, false)
+
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "expected status 400, got %d with body %s", rec.Code, rec.Body.String())
+		Expect(rec).To(HaveHTTPBody(ContainSubstring("--allow-insecure")), "expected response to explain allow-insecure requirement, got %s", rec.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page creation when the title is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"title": ""}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request for missing title, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page creation with invalid JSON", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `this is not valid json`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request for invalid JSON, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page creation when the route already exists", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"title": "Page Exists", "slug": "page-exists"}`
+		rec1 := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		Expect(rec1).To(HaveHTTPStatus(http.StatusCreated), "Expected status 201, got %d", rec1.Code)
+
+		rec2 := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(body))
+		Expect(rec2).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec2.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns the page tree", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/tree", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
+
+		var resp map[string]interface{}
+		{
+
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveKeyWithValue("id", "root"),
+			HaveKeyWithValue("title", "root"),
+			HaveKeyWithValue("slug", "root"),
+		), "tree root response = %#v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("publishes the configured maximum asset upload size", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		const maxAssetUploadSizeBytes shared.MaxBytes = 123456
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: maxAssetUploadSizeBytes,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+
+		Expect(resp).To(HaveKeyWithValue("maxAssetUploadSizeBytes", BeNumerically("==", maxAssetUploadSizeBytes)), "Expected maxAssetUploadSizeBytes=%d in config response, got %v", maxAssetUploadSizeBytes, resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("publishes whether link refactoring is enabled", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableLinkRefactor:      true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+
+		Expect(resp).To(HaveKeyWithValue("enableLinkRefactor", BeTrue()), "Expected enableLinkRefactor=true in config response, got %v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("publishes the markdown link root prefix", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MarkdownLinkRootPrefix:  "/docs",
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+		Expect(resp).To(HaveKeyWithValue("markdownLinkRootPrefix", "/docs"), "Expected markdownLinkRootPrefix=/docs in %v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("reports workspace sync as disabled when no sync root is configured", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+
+		Expect(resp).To(HaveKeyWithValue("enableWorkspaceSync", BeFalse()), "Expected enableWorkspaceSync=false in config response, got %v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns workspace sync status when sync is enabled", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
 		if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
-			t.Fatalf("write page: %v", err)
+			{
+				err := os.MkdirAll(rootDir, 0o755)
+				Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+			}
+			{
+
+				err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644)
+				Expect(err).NotTo(HaveOccurred(), "write page: %v", err)
+			}
+
 		}
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace: wiki.Workspace{
-			DataDir: dataDir,
-			RootDir: rootDir,
-		},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace: wiki.Workspace{
+				DataDir: dataDir,
+				RootDir: rootDir,
+			},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET status = %d: %s", rec.Code, rec.Body.String())
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode status: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveKeyWithValue("enabled", BeTrue()),
+			HaveKeyWithValue("lastCommitHash", Not(BeEmpty())),
+		), "workspace sync status response = %#v", resp)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET status = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode status: %v", err)
-	}
-	if resp["enabled"] != true {
-		t.Fatalf("enabled = %v, want true: %#v", resp["enabled"], resp)
-	}
-	if resp["lastCommitHash"] == "" {
-		t.Fatalf("lastCommitHash missing: %#v", resp)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncRefreshEndpoint_SyncsDirectMarkdownCreate", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace: wiki.Workspace{
-			DataDir: dataDir,
-			RootDir: rootDir,
-		},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("refreshes workspace sync after markdown is created on disk", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace: wiki.Workspace{
+				DataDir: dataDir,
+				RootDir: rootDir,
+			},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write direct markdown: %v", err)
+		}
+
+		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		configRec := httptest.NewRecorder()
+		router.ServeHTTP(configRec, configReq)
+		csrfToken := configRec.Header().Get("X-CSRF-Token")
+		req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/refresh", nil)
+		req.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range configRec.Result().Cookies() {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "POST refresh = %d: %s", rec.Code, rec.Body.String())
+
+		pageReq := httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=direct", nil)
+		pageRec := httptest.NewRecorder()
+		router.ServeHTTP(pageRec, pageReq)
+		Expect(pageRec).To(HaveHTTPStatus(http.StatusOK), "GET synced page = %d: %s", pageRec.Code, pageRec.Body.String())
+
+		var page apiPageDTO
+		{
+			err := json.Unmarshal(pageRec.Body.Bytes(), &page)
+			Expect(err).NotTo(HaveOccurred(), "decode synced page: %v", err)
+		}
+
+		Expect(page).To(SatisfyAll(
+			HaveField("ID", "direct"),
+			HaveField("Title", "Direct"),
+		), "synced page = %#v, want direct page", page)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	if err := os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644); err != nil {
-		t.Fatalf("write direct markdown: %v", err)
-	}
-	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	configRec := httptest.NewRecorder()
-	router.ServeHTTP(configRec, configReq)
-	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/refresh", nil)
-	req.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range configRec.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST refresh = %d: %s", rec.Code, rec.Body.String())
-	}
-	pageReq := httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=direct", nil)
-	pageRec := httptest.NewRecorder()
-	router.ServeHTTP(pageRec, pageReq)
-	if pageRec.Code != http.StatusOK {
-		t.Fatalf("GET synced page = %d: %s", pageRec.Code, pageRec.Body.String())
-	}
-	var page apiPageDTO
-	if err := json.Unmarshal(pageRec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("decode synced page: %v", err)
-	}
-	if page.ID != "direct" || page.Title != "Direct" {
-		t.Fatalf("synced page = %#v, want direct page", page)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncSnapshotsEndpoint_WhenEnabled", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
-		t.Fatalf("write page: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("lists workspace sync snapshots when sync is enabled", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET snapshots = %d: %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Snapshots  []map[string]any `json:"snapshots"`
+			NextCursor string           `json:"nextCursor"`
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode snapshots: %v", err)
+		}
+
+		Expect(resp.Snapshots).To(ContainElement(HaveKeyWithValue("id", Not(BeEmpty()))), "snapshots missing commit id: %#v", resp)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET snapshots = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Snapshots  []map[string]any `json:"snapshots"`
-		NextCursor string           `json:"nextCursor"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode snapshots: %v", err)
-	}
-	if len(resp.Snapshots) == 0 || resp.Snapshots[0]["id"] == "" {
-		t.Fatalf("snapshots missing commit id: %#v", resp)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncSnapshotsEndpoint_RespectsLimit", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
-		t.Fatalf("write page: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("limits workspace sync snapshots to the requested page size", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		{
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page update: %v", err)
+		}
+		{
+
+			_, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+				Reason: workspacesync.ReasonExplicit,
+				Source: workspacesync.SourceFilesystem,
+				Actor:  workspacesync.PublicEditorActor(),
+			})
+			Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncRefresh: %v", err)
+		}
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET snapshots limit = %d: %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Snapshots  []map[string]any `json:"snapshots"`
+			NextCursor string           `json:"nextCursor"`
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode snapshots: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveField("Snapshots", HaveLen(1)),
+			HaveField("NextCursor", Not(BeEmpty())),
+		), "first page snapshot response = %#v", resp)
+
+		firstID := resp.Snapshots[0]["id"]
+
+		req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
+
+		resp = struct {
+			Snapshots  []map[string]any `json:"snapshots"`
+			NextCursor string           `json:"nextCursor"`
+		}{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode second page snapshots: %v", err)
+		}
+		Expect(resp.Snapshots).To(HaveExactElements(
+			HaveKeyWithValue("id", Not(Equal(firstID))),
+		), "second page returned same snapshot id %v: %#v", firstID, resp.Snapshots)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page 2\n"), 0o644); err != nil {
-		t.Fatalf("write page update: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh: %v", err)
-	}
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET snapshots limit = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Snapshots  []map[string]any `json:"snapshots"`
-		NextCursor string           `json:"nextCursor"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode snapshots: %v", err)
-	}
-	if len(resp.Snapshots) != 1 {
-		t.Fatalf("snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
-	}
-	if resp.NextCursor == "" {
-		t.Fatalf("next cursor is empty, want second page cursor: %#v", resp)
-	}
-	firstID := resp.Snapshots[0]["id"]
-
-	req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
-	}
-	resp = struct {
-		Snapshots  []map[string]any `json:"snapshots"`
-		NextCursor string           `json:"nextCursor"`
-	}{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode second page snapshots: %v", err)
-	}
-	if len(resp.Snapshots) != 1 {
-		t.Fatalf("second page snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
-	}
-	if resp.Snapshots[0]["id"] == firstID {
-		t.Fatalf("second page returned same snapshot id %v", firstID)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncSnapshotsEndpoint_StableCursorSurvivesNewerCommit", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 1\n"), 0o644); err != nil {
-		t.Fatalf("write page: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("keeps workspace sync snapshot cursors stable after newer commits", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 1\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		initialCommit := w.WorkspaceSyncStatus().LastCommitHash
+		Expect(initialCommit).NotTo(BeZero(), "initial workspace commit is empty")
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 2\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page update: %v", err)
+		}
+		{
+
+			_, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+				Reason: workspacesync.ReasonExplicit,
+				Source: workspacesync.SourceFilesystem,
+				Actor:  workspacesync.PublicEditorActor(),
+			})
+			Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncRefresh page 2: %v", err)
+		}
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET snapshots first page = %d: %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Snapshots  []map[string]any `json:"snapshots"`
+			NextCursor string           `json:"nextCursor"`
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode first page snapshots: %v", err)
+		}
+
+		Expect(resp).To(SatisfyAll(
+			HaveField("Snapshots", HaveLen(1)),
+			HaveField("NextCursor", Not(BeEmpty())),
+		), "first page response = %#v, want one snapshot with cursor", resp)
+		firstPageID, _ := resp.Snapshots[0]["id"].(string)
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 3\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page newer update: %v", err)
+		}
+		{
+
+			_, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+				Reason: workspacesync.ReasonExplicit,
+				Source: workspacesync.SourceFilesystem,
+				Actor:  workspacesync.PublicEditorActor(),
+			})
+			Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncRefresh page 3: %v", err)
+		}
+
+		req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
+
+		resp = struct {
+			Snapshots  []map[string]any `json:"snapshots"`
+			NextCursor string           `json:"nextCursor"`
+		}{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode second page snapshots: %v", err)
+		}
+		Expect(resp.Snapshots).To(HaveExactElements(HaveKeyWithValue("id", SatisfyAll(
+			Not(Equal(firstPageID)),
+			WithTransform(func(raw string) workspacesync.CommitHash {
+				return workspacesync.CommitHashFromString(raw)
+			}, Equal(initialCommit)),
+		))), "second page snapshots = %#v, want original older commit %s without duplicating first page %s", resp.Snapshots, initialCommit, firstPageID)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	initialCommit := w.WorkspaceSyncStatus().LastCommitHash
-	if initialCommit == "" {
-		t.Fatalf("initial workspace commit is empty")
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 2\n"), 0o644); err != nil {
-		t.Fatalf("write page update: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh page 2: %v", err)
-	}
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET snapshots first page = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Snapshots  []map[string]any `json:"snapshots"`
-		NextCursor string           `json:"nextCursor"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode first page snapshots: %v", err)
-	}
-	if len(resp.Snapshots) != 1 || resp.NextCursor == "" {
-		t.Fatalf("first page response = %#v, want one snapshot with cursor", resp)
-	}
-	firstPageID, _ := resp.Snapshots[0]["id"].(string)
-
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("<!-- leafwiki\nversion: 1\npage:\n  id: page\n  title: Page\n-->\n\n# Page 3\n"), 0o644); err != nil {
-		t.Fatalf("write page newer update: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh page 3: %v", err)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/workspace-sync/snapshots?limit=1&cursor="+resp.NextCursor, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET snapshots second page = %d: %s", rec.Code, rec.Body.String())
-	}
-	resp = struct {
-		Snapshots  []map[string]any `json:"snapshots"`
-		NextCursor string           `json:"nextCursor"`
-	}{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode second page snapshots: %v", err)
-	}
-	if len(resp.Snapshots) != 1 {
-		t.Fatalf("second page snapshot count = %d, want 1: %#v", len(resp.Snapshots), resp)
-	}
-	secondPageID, _ := resp.Snapshots[0]["id"].(string)
-	if secondPageID == firstPageID {
-		t.Fatalf("second page duplicated first page snapshot %s after newer commit", firstPageID)
-	}
-	if workspacesync.CommitHashFromString(secondPageID) != initialCommit {
-		t.Fatalf("second page snapshot = %s, want original older commit %s", secondPageID, initialCommit)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncStatusEndpoint_PublicAccessAllowsUnauthenticatedRead", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644); err != nil {
-		t.Fatalf("write page: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+var _ = Describe("HTTP router", func() {
+	It("allows unauthenticated workspace sync status reads in public mode", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("---\nleafwiki_id: page\nleafwiki_title: Page\n---\n# Page\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write page: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET public workspace status = %d: %s", rec.Code, rec.Body.String())
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspace-sync/status", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET public workspace status = %d: %s", rec.Code, rec.Body.String())
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncSnapshotRestoreEndpoint_RestoresMarkdownOnly", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One A\n"), 0o644); err != nil {
-		t.Fatalf("write one.md: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("restores markdown files from a workspace sync snapshot", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One A\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write one.md: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+		status := w.WorkspaceSyncStatus()
+		Expect(status.LastCommitHash).NotTo(BeZero(), "missing initial snapshot hash")
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One current\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write current one.md: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "two.md"), []byte("---\nleafwiki_id: two\nleafwiki_title: Two\n---\n# Two current\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write two.md: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "image.png"), []byte("png"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write image: %v", err)
+		}
+
+		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		configRec := httptest.NewRecorder()
+		router.ServeHTTP(configRec, configReq)
+		csrfToken := configRec.Header().Get("X-CSRF-Token")
+		req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/snapshots/"+status.LastCommitHash.String()+"/restore", nil)
+		req.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range configRec.Result().Cookies() {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "POST restore = %d: %s", rec.Code, rec.Body.String())
+
+		raw, err := os.ReadFile(filepath.Join(rootDir, "one.md"))
+		Expect(err).NotTo(HaveOccurred(), "read restored one.md: %v", err)
+		Expect(string(raw)).To(ContainSubstring("# One A"), "one.md was not restored: %q", string(raw))
+		Expect(filepath.Join(rootDir, "two.md")).NotTo(BeAnExistingFile(), "two.md should be removed")
+
+		raw, err = os.ReadFile(filepath.Join(rootDir, "image.png"))
+		Expect(err).NotTo(HaveOccurred(), "image.png = %q, %v; want untouched png", string(raw), err)
+		Expect(string(raw)).To(Equal("png"), "image.png = %q, %v; want untouched png", string(raw), err)
+		snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 1)
+		Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncSnapshots: %v", err)
+		Expect(snapshots).To(ContainElement(HaveField("Source", string(workspacesync.SourceWeb))), "snapshots after restore = %#v", snapshots)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-	status := w.WorkspaceSyncStatus()
-	if status.LastCommitHash == "" {
-		t.Fatalf("missing initial snapshot hash")
-	}
-
-	if err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One current\n"), 0o644); err != nil {
-		t.Fatalf("write current one.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "two.md"), []byte("---\nleafwiki_id: two\nleafwiki_title: Two\n---\n# Two current\n"), 0o644); err != nil {
-		t.Fatalf("write two.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "image.png"), []byte("png"), 0o644); err != nil {
-		t.Fatalf("write image: %v", err)
-	}
-	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	configRec := httptest.NewRecorder()
-	router.ServeHTTP(configRec, configReq)
-	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace-sync/snapshots/"+status.LastCommitHash.String()+"/restore", nil)
-	req.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range configRec.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST restore = %d: %s", rec.Code, rec.Body.String())
-	}
-	raw, err := os.ReadFile(filepath.Join(rootDir, "one.md"))
-	if err != nil {
-		t.Fatalf("read restored one.md: %v", err)
-	}
-	if !strings.Contains(string(raw), "# One A") {
-		t.Fatalf("one.md was not restored: %q", string(raw))
-	}
-	if _, err := os.Stat(filepath.Join(rootDir, "two.md")); !os.IsNotExist(err) {
-		t.Fatalf("two.md state = %v, want removed", err)
-	}
-	if raw, err := os.ReadFile(filepath.Join(rootDir, "image.png")); err != nil || string(raw) != "png" {
-		t.Fatalf("image.png = %q, %v; want untouched png", string(raw), err)
-	}
-	snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
-	}
-	if len(snapshots) == 0 {
-		t.Fatalf("snapshots empty after restore")
-	}
-	if snapshots[0].Source != string(workspacesync.SourceWeb) {
-		t.Fatalf("restore snapshot source = %q, want web", snapshots[0].Source)
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncPageRevisionsEndpoint_UsesGitBackedHistory", func() {
-	t := GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+var _ = Describe("HTTP router", func() {
+	It("returns page revision history from the git-backed store", func() {
+
+		dataDir := filepath.Join(httpTestTempDir(), "data")
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		configRec := httptest.NewRecorder()
+		router.ServeHTTP(configRec, configReq)
+		Expect(configRec).To(HaveHTTPStatus(http.StatusOK), "GET config = %d: %s", configRec.Code, configRec.Body.String())
+
+		csrfToken := configRec.Header().Get("X-CSRF-Token")
+		createReq := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Git History","slug":"git-history"}`))
+		createReq.Header.Set("Content-Type", "application/json")
+		createReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range configRec.Result().Cookies() {
+			createReq.AddCookie(cookie)
+		}
+		createRec := httptest.NewRecorder()
+		router.ServeHTTP(createRec, createReq)
+		Expect(createRec).To(HaveHTTPStatus(http.StatusCreated), "POST page = %d: %s", createRec.Code, createRec.Body.String())
+
+		var page apiPageDTO
+		{
+			err := json.Unmarshal(createRec.Body.Bytes(), &page)
+			Expect(err).NotTo(HaveOccurred(), "decode page: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/revisions", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET workspace revisions = %d: %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Revisions  []map[string]any `json:"revisions"`
+			NextCursor string           `json:"nextCursor"`
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "decode revisions: %v", err)
+		}
+		Expect(resp.Revisions).To(ContainElement(SatisfyAll(
+			HaveKeyWithValue("id", Not(BeEmpty())),
+			HaveKeyWithValue("pageId", page.ID),
+		)), "unexpected workspace revision: %#v", resp.Revisions)
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	configRec := httptest.NewRecorder()
-	router.ServeHTTP(configRec, configReq)
-	if configRec.Code != http.StatusOK {
-		t.Fatalf("GET config = %d: %s", configRec.Code, configRec.Body.String())
-	}
-	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	createReq := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title":"Git History","slug":"git-history"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range configRec.Result().Cookies() {
-		createReq.AddCookie(cookie)
-	}
-	createRec := httptest.NewRecorder()
-	router.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("POST page = %d: %s", createRec.Code, createRec.Body.String())
-	}
-	var page apiPageDTO
-	if err := json.Unmarshal(createRec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("decode page: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/revisions", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET workspace revisions = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Revisions  []map[string]any `json:"revisions"`
-		NextCursor string           `json:"nextCursor"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode revisions: %v", err)
-	}
-	if len(resp.Revisions) == 0 {
-		t.Fatalf("expected at least one Git-backed revision: %#v", resp)
-	}
-	if resp.Revisions[0]["id"] == "" || resp.Revisions[0]["pageId"] != page.ID {
-		t.Fatalf("unexpected workspace revision: %#v", resp.Revisions[0])
-	}
-
 })
 
-var _ = It("TestWorkspaceSyncRevisionSnapshotAndRestoreEndpoint_UseGitBackend", func() {
-	t := GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	previous := `---
+var _ = Describe("HTTP router", func() {
+	It("serves revision snapshots and restores them through the git backend", func() {
+
+		dataDir := filepath.Join(httpTestTempDir(), "data")
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
+		}
+
+		previous := `---
 leafwiki_id: restore-page
 leafwiki_title: Restore Page
 ---
@@ -1773,1843 +1695,1654 @@ leafwiki_title: Restore Page
 # Restore Page
 
 previous content`
-	if err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(previous), 0o644); err != nil {
-		t.Fatalf("write previous markdown: %v", err)
-	}
-	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
+		{
+			err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(previous), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write previous markdown: %v", err)
+		}
+
+		w, err := wiki.NewWiki(&wiki.WikiOptions{
+			Workspace:           wiki.Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).NotTo(HaveOccurred(), "NewWiki: %v", err)
+
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			AuthDisabled:            true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+		})
+
+		revisionsReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions", nil)
+		revisionsRec := httptest.NewRecorder()
+		router.ServeHTTP(revisionsRec, revisionsReq)
+		Expect(revisionsRec).To(HaveHTTPStatus(http.StatusOK), "GET revisions = %d: %s", revisionsRec.Code, revisionsRec.Body.String())
+
+		type revisionListItem struct {
+			ID string `json:"id"`
+		}
+		var revisionsResp struct {
+			Revisions []revisionListItem `json:"revisions"`
+		}
+		{
+			err := json.Unmarshal(revisionsRec.Body.Bytes(), &revisionsResp)
+			Expect(err).NotTo(HaveOccurred(), "decode revisions: %v", err)
+		}
+		Expect(revisionsResp.Revisions).To(SatisfyAll(
+			Not(BeEmpty()),
+			HaveEach(HaveField("ID", Not(BeEmpty()))),
+		), "expected initial revision with an id: %#v", revisionsResp)
+
+		oldRevisionID := revisionsResp.Revisions[0].ID
+
+		current := strings.Replace(previous, "previous content", "current content", 1)
+		{
+			err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(current), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write current markdown: %v", err)
+		}
+		{
+
+			_, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+				Reason: workspacesync.ReasonExplicit,
+				Source: workspacesync.SourceFilesystem,
+				Actor:  workspacesync.PublicEditorActor(),
+			})
+			Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncRefresh current: %v", err)
+		}
+
+		snapshotReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions/"+oldRevisionID, nil)
+		snapshotRec := httptest.NewRecorder()
+		router.ServeHTTP(snapshotRec, snapshotReq)
+		Expect(snapshotRec).To(HaveHTTPStatus(http.StatusOK), "GET revision snapshot = %d: %s", snapshotRec.Code, snapshotRec.Body.String())
+
+		var snapshot struct {
+			Content string `json:"content"`
+			Assets  []any  `json:"assets"`
+		}
+		{
+			err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshot)
+			Expect(err).NotTo(HaveOccurred(), "decode snapshot: %v", err)
+		}
+
+		Expect(snapshot).To(SatisfyAll(
+			HaveField("Content", ContainSubstring("previous content")),
+			HaveField("Assets", BeEmpty()),
+		), "unexpected snapshot: %#v", snapshot)
+
+		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		configRec := httptest.NewRecorder()
+		router.ServeHTTP(configRec, configReq)
+		csrfToken := configRec.Header().Get("X-CSRF-Token")
+		restoreReq := httptest.NewRequest(http.MethodPost, "/api/pages/restore-page/revisions/"+oldRevisionID+"/restore", nil)
+		restoreReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range configRec.Result().Cookies() {
+			restoreReq.AddCookie(cookie)
+		}
+		restoreRec := httptest.NewRecorder()
+		router.ServeHTTP(restoreRec, restoreReq)
+		Expect(restoreRec).To(HaveHTTPStatus(http.StatusOK), "POST restore = %d: %s", restoreRec.Code, restoreRec.Body.String())
+
+		raw, err := os.ReadFile(filepath.Join(rootDir, "restore-page.md"))
+		Expect(err).NotTo(HaveOccurred(), "read restored markdown: %v", err)
+		Expect(string(raw)).To(ContainSubstring("previous content"), "restored markdown = %q, want previous content", string(raw))
+
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		AuthDisabled:            true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-	})
-
-	revisionsReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions", nil)
-	revisionsRec := httptest.NewRecorder()
-	router.ServeHTTP(revisionsRec, revisionsReq)
-	if revisionsRec.Code != http.StatusOK {
-		t.Fatalf("GET revisions = %d: %s", revisionsRec.Code, revisionsRec.Body.String())
-	}
-	var revisionsResp struct {
-		Revisions []map[string]any `json:"revisions"`
-	}
-	if err := json.Unmarshal(revisionsRec.Body.Bytes(), &revisionsResp); err != nil {
-		t.Fatalf("decode revisions: %v", err)
-	}
-	if len(revisionsResp.Revisions) == 0 {
-		t.Fatalf("expected initial revision: %#v", revisionsResp)
-	}
-	oldRevisionID, _ := revisionsResp.Revisions[0]["id"].(string)
-	if oldRevisionID == "" {
-		t.Fatalf("old revision id missing: %#v", revisionsResp.Revisions[0])
-	}
-
-	current := strings.Replace(previous, "previous content", "current content", 1)
-	if err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(current), 0o644); err != nil {
-		t.Fatalf("write current markdown: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh current: %v", err)
-	}
-
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions/"+oldRevisionID, nil)
-	snapshotRec := httptest.NewRecorder()
-	router.ServeHTTP(snapshotRec, snapshotReq)
-	if snapshotRec.Code != http.StatusOK {
-		t.Fatalf("GET revision snapshot = %d: %s", snapshotRec.Code, snapshotRec.Body.String())
-	}
-	var snapshot struct {
-		Content string `json:"content"`
-		Assets  []any  `json:"assets"`
-	}
-	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshot); err != nil {
-		t.Fatalf("decode snapshot: %v", err)
-	}
-	if !strings.Contains(snapshot.Content, "previous content") || len(snapshot.Assets) != 0 {
-		t.Fatalf("unexpected snapshot: %#v", snapshot)
-	}
-
-	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	configRec := httptest.NewRecorder()
-	router.ServeHTTP(configRec, configReq)
-	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	restoreReq := httptest.NewRequest(http.MethodPost, "/api/pages/restore-page/revisions/"+oldRevisionID+"/restore", nil)
-	restoreReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range configRec.Result().Cookies() {
-		restoreReq.AddCookie(cookie)
-	}
-	restoreRec := httptest.NewRecorder()
-	router.ServeHTTP(restoreRec, restoreReq)
-	if restoreRec.Code != http.StatusOK {
-		t.Fatalf("POST restore = %d: %s", restoreRec.Code, restoreRec.Body.String())
-	}
-	raw, err := os.ReadFile(filepath.Join(rootDir, "restore-page.md"))
-	if err != nil {
-		t.Fatalf("read restored markdown: %v", err)
-	}
-	if !strings.Contains(string(raw), "previous content") {
-		t.Fatalf("restored markdown = %q, want previous content", string(raw))
-	}
-
 })
 
-var _ = It("TestRefactorPreviewEndpoint_UsesFrontendJSONShape", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("returns the frontend JSON shape for refactor previews", func() {
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableLinkRefactor:      true,
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableLinkRefactor:      true,
+		})
+		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
+		ref := createPageViaAPI(router, "Ref", "ref", nil, pageNodeKind())
+
+		updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
+		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
+		Expect(updateRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
+
+		previewBody := strings.NewReader(`{"kind":"rename","title":"Target","slug":"target-renamed"}`)
+		previewRec := authenticatedRequest(router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/preview", previewBody)
+		Expect(previewRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on refactor preview, got %d - %s", previewRec.Code, previewRec.Body.String())
+
+		var resp map[string]any
+		{
+			err := json.Unmarshal(previewRec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid refactor preview JSON: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveKey("affectedPages"),
+			Not(HaveKey("Counts")),
+			Not(HaveKey("AffectedPages")),
+			HaveKeyWithValue("counts", SatisfyAll(
+				HaveKeyWithValue("affectedPages", BeNumerically("==", 1)),
+				HaveKey("matchedLinks"),
+			)),
+		), "refactor preview response = %#v", resp)
+
 	})
-	target := createPageViaAPI(t, router, "Target", "target", nil, pageNodeKind())
-	ref := createPageViaAPI(t, router, "Ref", "ref", nil, pageNodeKind())
-
-	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
-	updateRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
-	}
-
-	previewBody := strings.NewReader(`{"kind":"rename","title":"Target","slug":"target-renamed"}`)
-	previewRec := authenticatedRequest(t, router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/preview", previewBody)
-	if previewRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on refactor preview, got %d - %s", previewRec.Code, previewRec.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(previewRec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid refactor preview JSON: %v", err)
-	}
-
-	if _, ok := resp["counts"]; !ok {
-		t.Fatalf("Expected lowercase counts in response, got %v", resp)
-	}
-	if _, ok := resp["affectedPages"]; !ok {
-		t.Fatalf("Expected lowercase affectedPages in response, got %v", resp)
-	}
-	if _, ok := resp["Counts"]; ok {
-		t.Fatalf("Did not expect legacy Counts key in response, got %v", resp)
-	}
-	if _, ok := resp["AffectedPages"]; ok {
-		t.Fatalf("Did not expect legacy AffectedPages key in response, got %v", resp)
-	}
-
-	counts, ok := resp["counts"].(map[string]any)
-	if !ok {
-		t.Fatalf("Expected counts object, got %T", resp["counts"])
-	}
-	if got := counts["affectedPages"]; got != float64(1) {
-		t.Fatalf("Expected counts.affectedPages=1, got %v", got)
-	}
-	if _, ok := counts["matchedLinks"]; !ok {
-		t.Fatalf("Expected counts.matchedLinks in response, got %v", counts)
-	}
-
 })
 
-var _ = It("TestRefactorPreviewEndpoint_IsDisabledWhenFlagIsOff", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects refactor previews when the feature flag is disabled", func() {
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableLinkRefactor:      false,
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableLinkRefactor:      false,
+		})
+
+		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
+		previewBody := strings.NewReader(`{"kind":"rename","title":"Target","slug":"target-renamed"}`)
+		previewRec := authenticatedRequest(router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/preview", previewBody)
+		Expect(previewRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected 404 when link refactor is disabled, got %d - %s", previewRec.Code, previewRec.Body.String())
+
 	})
-
-	target := createPageViaAPI(t, router, "Target", "target", nil, pageNodeKind())
-	previewBody := strings.NewReader(`{"kind":"rename","title":"Target","slug":"target-renamed"}`)
-	previewRec := authenticatedRequest(t, router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/preview", previewBody)
-	if previewRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected 404 when link refactor is disabled, got %d - %s", previewRec.Code, previewRec.Body.String())
-	}
-
 })
 
-var _ = It("TestRefactorApply_UsesGitHistoryWithoutLegacyRevisionStorage", func() {
-	t := GinkgoT()
-	w := createWikiTestInstanceWithRevisionFlag(t, false)
-	wrapCloseWithErrorCheck(w.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("records refactor application through git history without legacy revisions", func() {
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		EnableLinkRefactor:      true,
+		w := createWikiTestInstanceWithRevisionFlag(false)
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			EnableLinkRefactor:      true,
+		})
+
+		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
+		ref := createPageViaAPI(router, "Ref", "ref", nil, pageNodeKind())
+
+		updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
+		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
+		Expect(updateRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
+
+		applyBody := strings.NewReader(`{"kind":"rename","version":"` + target.Version + `","title":"Target","slug":"target-renamed","rewriteLinks":true}`)
+		applyRec := authenticatedRequest(router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/apply", applyBody)
+		Expect(applyRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on refactor apply, got %d - %s", applyRec.Code, applyRec.Body.String())
+
+		refPageRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+ref.ID, strings.NewReader(""))
+		Expect(refPageRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on ref page fetch, got %d - %s", refPageRec.Code, refPageRec.Body.String())
+
+		var refPage map[string]any
+		{
+			err := json.Unmarshal(refPageRec.Body.Bytes(), &refPage)
+			Expect(err).NotTo(HaveOccurred(), "Invalid ref page JSON: %v", err)
+		}
+		Expect(refPage).To(HaveKeyWithValue("content", "[Target](/target-renamed.md)"), "Expected rewritten ref content, got %#v", refPage)
+
+		revisionsRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+target.ID+"/revisions", strings.NewReader(""))
+		Expect(revisionsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on Git-backed revisions endpoint, got %d - %s", revisionsRec.Code, revisionsRec.Body.String())
+
+		revisionsDir := filepath.Join(w.GetStorageDir(), ".leafwiki", "revisions")
+		Expect(revisionsDir).NotTo(BeADirectory(), "revision storage directory should not exist")
+
 	})
-
-	target := createPageViaAPI(t, router, "Target", "target", nil, pageNodeKind())
-	ref := createPageViaAPI(t, router, "Ref", "ref", nil, pageNodeKind())
-
-	updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
-	updateRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on page update, got %d - %s", updateRec.Code, updateRec.Body.String())
-	}
-
-	applyBody := strings.NewReader(`{"kind":"rename","version":"` + target.Version + `","title":"Target","slug":"target-renamed","rewriteLinks":true}`)
-	applyRec := authenticatedRequest(t, router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/apply", applyBody)
-	if applyRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on refactor apply, got %d - %s", applyRec.Code, applyRec.Body.String())
-	}
-
-	refPageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+ref.ID, strings.NewReader(""))
-	if refPageRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on ref page fetch, got %d - %s", refPageRec.Code, refPageRec.Body.String())
-	}
-
-	var refPage map[string]any
-	if err := json.Unmarshal(refPageRec.Body.Bytes(), &refPage); err != nil {
-		t.Fatalf("Invalid ref page JSON: %v", err)
-	}
-
-	if got, _ := refPage["content"].(string); got != "[Target](/target-renamed.md)" {
-		t.Fatalf("Expected rewritten ref content, got %q", got)
-	}
-
-	revisionsRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+target.ID+"/revisions", strings.NewReader(""))
-	if revisionsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on Git-backed revisions endpoint, got %d - %s", revisionsRec.Code, revisionsRec.Body.String())
-	}
-
-	revisionsDir := filepath.Join(w.GetStorageDir(), ".leafwiki", "revisions")
-	if _, err := os.Stat(revisionsDir); !os.IsNotExist(err) {
-		t.Fatalf("Expected no revision storage directory, got err=%v", err)
-	}
-
 })
 
-var _ = It("TestUploadAssetEndpoint_RejectsFilesExceedingConfiguredLimit", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects asset uploads that exceed the configured size limit", func() {
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: 32,
-	})
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
 
-	page := createPageViaAPI(t, router, "Asset Limit Test", "asset-limit-test", nil, pageNodeKind())
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: 32,
+		})
 
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
+		page := createPageViaAPI(router, "Asset Limit Test", "asset-limit-test", nil, pageNodeKind())
 
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
-	cookies := loginRec.Result().Cookies()
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
+		cookies := loginRec.Result().Cookies()
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
 			}
 		}
-	}
 
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "large.txt")
-	if err != nil {
-		t.Fatalf("Failed to create form file: %v", err)
-	}
-	if _, err := part.Write([]byte(strings.Repeat("a", 128))); err != nil {
-		t.Fatalf("Failed to write file content: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Failed to close multipart writer: %v", err)
-	}
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		part, err := writer.CreateFormFile("file", "large.txt")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create form file: %v", err)
+		{
 
-	uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+page.ID+"/assets", body)
-	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
-	uploadReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		uploadReq.AddCookie(cookie)
-	}
-
-	uploadRec := httptest.NewRecorder()
-	router.ServeHTTP(uploadRec, uploadReq)
-
-	if uploadRec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("Expected 413 Request Entity Too Large, got %d - %s", uploadRec.Code, uploadRec.Body.String())
-	}
-
-	assetDir := filepath.Join(w.GetStorageDir(), "assets", page.ID)
-	entries, err := os.ReadDir(assetDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
+			_, err := part.Write([]byte(strings.Repeat("a", 128)))
+			Expect(err).NotTo(HaveOccurred(), "Failed to write file content: %v", err)
 		}
-		t.Fatalf("Failed to read asset directory: %v", err)
-	}
+		{
 
-	if len(entries) != 0 {
-		t.Fatalf("Expected no files after rejected upload, got %d", len(entries))
-	}
-
-})
-
-var _ = It("TestSuggestSlugEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstanceWithRevision(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/slug-suggestion?title=NewPage", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	if resp["slug"] == "" {
-		t.Errorf("Expected a slug suggestion, got: %v", resp)
-	}
-
-	if resp["slug"] != "newpage" {
-		t.Errorf("Expected 'newpage' as slug suggestion, got: %v", resp)
-	}
-
-})
-
-var _ = It("TestCancelImportPlanEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	fileWriter, err := writer.CreateFormFile("file", "fixture-1.zip")
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
-	}
-
-	zipFile, err := os.Open("../importer/fixtures/fixture-1.zip")
-	if err != nil {
-		t.Fatalf("Open fixture zip failed: %v", err)
-	}
-	wrapCloseWithErrorCheck(zipFile.Close, t)
-
-	if _, err := io.Copy(fileWriter, zipFile); err != nil {
-		t.Fatalf("Copy zip fixture failed: %v", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Close multipart writer failed: %v", err)
-	}
-
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
-	}
-
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
-
-	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
+			err := writer.Close()
+			Expect(err).NotTo(HaveOccurred(), "Failed to close multipart writer: %v", err)
 		}
-	}
 
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &body)
-	createReq.Header.Set("Content-Type", writer.FormDataContentType())
-	createReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		createReq.AddCookie(cookie)
-	}
-
-	createRec := httptest.NewRecorder()
-	router.ServeHTTP(createRec, createReq)
-
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 when creating import plan, got %d: %s", createRec.Code, createRec.Body.String())
-	}
-
-	cancelReq := httptest.NewRequest(http.MethodDelete, "/api/import/plan", nil)
-	cancelReq.Header.Set("Content-Type", "application/json")
-	cancelReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		cancelReq.AddCookie(cookie)
-	}
-
-	cancelRec := httptest.NewRecorder()
-	router.ServeHTTP(cancelRec, cancelReq)
-
-	if cancelRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 when canceling import plan, got %d: %s", cancelRec.Code, cancelRec.Body.String())
-	}
-	if got := strings.TrimSpace(cancelRec.Body.String()); got != "null" {
-		t.Fatalf("Expected null response body when clearing import plan, got %q", got)
-	}
-
-	getRec := authenticatedRequest(t, router, http.MethodGet, "/api/import/plan", nil)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404 when fetching canceled import plan, got %d: %s", getRec.Code, getRec.Body.String())
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(getRec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	errObj, ok := resp["error"].(map[string]interface{})
-	if !ok || errObj["code"] == nil {
-		t.Fatalf("Expected structured error response after canceling import plan, got: %v", resp)
-	}
-
-})
-
-var _ = It("TestImportExecuteEndpoint_WithZipUpload_ImportsPagesLinksAndAssets", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	fixtureDir := importerFixturePathForHTTPTests(t, "link-assets-package")
-	zipBytes := createZipFromDir(t, fixtureDir)
-
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
-	}
-
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
-
-	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
-		}
-	}
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
-
-	var planBody bytes.Buffer
-	planWriter := multipart.NewWriter(&planBody)
-	fileWriter, err := planWriter.CreateFormFile("file", "link-assets-package.zip")
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
-	}
-	if _, err := fileWriter.Write(zipBytes); err != nil {
-		t.Fatalf("Write zip bytes failed: %v", err)
-	}
-	if err := planWriter.Close(); err != nil {
-		t.Fatalf("Close multipart writer failed: %v", err)
-	}
-
-	planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
-	planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
-	planReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		planReq.AddCookie(cookie)
-	}
-
-	planRec := httptest.NewRecorder()
-	router.ServeHTTP(planRec, planReq)
-
-	if planRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 when creating import plan, got %d: %s", planRec.Code, planRec.Body.String())
-	}
-
-	var planResp struct {
-		Items []map[string]any `json:"items"`
-	}
-	if err := json.Unmarshal(planRec.Body.Bytes(), &planResp); err != nil {
-		t.Fatalf("Invalid import plan response JSON: %v", err)
-	}
-	if len(planResp.Items) != 5 {
-		t.Fatalf("expected 5 plan items, got %d", len(planResp.Items))
-	}
-
-	execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
-	execReq.Header.Set("Content-Type", "application/json")
-	execReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		execReq.AddCookie(cookie)
-	}
-
-	execRec := httptest.NewRecorder()
-	router.ServeHTTP(execRec, execReq)
-
-	if execRec.Code != http.StatusAccepted {
-		t.Fatalf("Expected status 202 when starting import, got %d: %s", execRec.Code, execRec.Body.String())
-	}
-
-	var execResp struct {
-		ImportedCount   int    `json:"imported_count"`
-		SkippedCount    int    `json:"skipped_count"`
-		ExecutionStatus string `json:"execution_status"`
-		ExecutionResult *struct {
-			ImportedCount int `json:"imported_count"`
-			SkippedCount  int `json:"skipped_count"`
-		} `json:"execution_result"`
-	}
-	if err := json.Unmarshal(execRec.Body.Bytes(), &execResp); err != nil {
-		t.Fatalf("Invalid import execute response JSON: %v", err)
-	}
-
-	if execResp.ExecutionStatus != "running" {
-		t.Fatalf("expected running execution status, got %q", execResp.ExecutionStatus)
-	}
-
-	var completedResp struct {
-		ExecutionStatus string `json:"execution_status"`
-		ExecutionResult *struct {
-			ImportedCount int `json:"imported_count"`
-			SkippedCount  int `json:"skipped_count"`
-		} `json:"execution_result"`
-	}
-
-	Eventually(func(g Gomega) {
-		statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
+		uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+page.ID+"/assets", body)
+		uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+		uploadReq.Header.Set("X-CSRF-Token", csrfToken)
 		for _, cookie := range cookies {
-			statusReq.AddCookie(cookie)
+			uploadReq.AddCookie(cookie)
 		}
 
-		statusRec := httptest.NewRecorder()
-		router.ServeHTTP(statusRec, statusReq)
+		uploadRec := httptest.NewRecorder()
+		router.ServeHTTP(uploadRec, uploadReq)
+		Expect(uploadRec).To(HaveHTTPStatus(http.StatusRequestEntityTooLarge), "Expected 413 Request Entity Too Large, got %d - %s", uploadRec.Code, uploadRec.Body.String())
 
-		g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
-		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
-		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
-	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
-
-	if completedResp.ExecutionStatus != "completed" || completedResp.ExecutionResult == nil {
-		t.Fatalf("expected completed execution result, got %#v", completedResp)
-	}
-	if completedResp.ExecutionResult.ImportedCount != 4 || completedResp.ExecutionResult.SkippedCount != 1 {
-		t.Fatalf(
-			"unexpected execution result: imported=%d skipped=%d",
-			completedResp.ExecutionResult.ImportedCount,
-			completedResp.ExecutionResult.SkippedCount,
-		)
-	}
-
-	setupPage := getPageByPathViaAPI(t, router, "guides/setup")
-	for _, expected := range []string{
-		"[Relative MD](/reference/endpoints.md)",
-		"[Absolute MD](/reference/endpoints.md)",
-		"[Container](/guides)",
-		"[Endpoints](/reference/endpoints.md)",
-		"[API Alias](/reference/endpoints.md)",
-		"![Relative Image](/assets/" + setupPage.ID + "/logo.png)",
-		"[Manual](/assets/" + setupPage.ID + "/manual.pdf)",
-	} {
-		if !strings.Contains(setupPage.Content, expected) {
-			t.Fatalf("expected setup content to contain %q, got:\n%s", expected, setupPage.Content)
+		assetDir := filepath.Join(w.GetStorageDir(), "assets", page.ID)
+		entries, err := os.ReadDir(assetDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return
+			}
+			Expect(err).NotTo(HaveOccurred(), "Failed to read asset directory: %v", err)
 		}
-	}
+		Expect(entries).To(HaveLen(0), "Expected no files after rejected upload, got %d", len(entries))
 
-	assets := listAssetsViaAPI(t, router, setupPage.ID)
-	if len(assets) != 2 {
-		t.Fatalf("expected 2 uploaded assets, got %#v", assets)
-	}
-	_ = getPageByPathViaAPI(t, router, "reference/api-1")
-
+	})
 })
 
-var _ = It("TestImportExecuteEndpoint_UsesConfiguredAssetUploadLimit", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstanceWithMaxAssetUploadSize(w, t, 1024)
+var _ = Describe("HTTP router", func() {
+	It("suggests a slug for a page title", func() {
 
-	fixtureDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(fixtureDir, "docs"), 0o755); err != nil {
-		t.Fatalf("mkdir fixture dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fixtureDir, "docs", "setup.md"), []byte("# Setup\n\n[Manual](./manual.pdf)\n"), 0o644); err != nil {
-		t.Fatalf("write markdown fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fixtureDir, "docs", "manual.pdf"), bytes.Repeat([]byte("a"), 2048), 0o644); err != nil {
-		t.Fatalf("write oversized asset fixture: %v", err)
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstanceWithRevision(w)
 
-	zipBytes := createZipFromDir(t, fixtureDir)
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/slug-suggestion?title=NewPage", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
 
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+		Expect(resp).To(HaveKeyWithValue("slug", "newpage"), "slug suggestion response = %#v", resp)
 
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
-	}
+	})
+})
 
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("cancels the current import plan", func() {
 
-	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+
+		fileWriter, err := writer.CreateFormFile("file", "fixture-1.zip")
+		Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+
+		zipFile, err := os.Open("../importer/fixtures/fixture-1.zip")
+		Expect(err).NotTo(HaveOccurred(), "Open fixture zip failed: %v", err)
+
+		wrapCloseWithErrorCheck(zipFile.Close)
+		{
+
+			_, err := io.Copy(fileWriter, zipFile)
+			Expect(err).NotTo(HaveOccurred(), "Copy zip fixture failed: %v", err)
+		}
+		{
+
+			err := writer.Close()
+			Expect(err).NotTo(HaveOccurred(), "Close multipart writer failed: %v", err)
+		}
+
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
+
+		loginRes := loginRec.Result()
+		wrapCloseWithErrorCheck(loginRes.Body.Close)
+
+		cookies := loginRes.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
+
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
 			}
 		}
-	}
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
+		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
 
-	var planBody bytes.Buffer
-	planWriter := multipart.NewWriter(&planBody)
-	fileWriter, err := planWriter.CreateFormFile("file", "oversized-assets.zip")
-	if err != nil {
-		t.Fatalf("CreateFormFile failed: %v", err)
-	}
-	if _, err := fileWriter.Write(zipBytes); err != nil {
-		t.Fatalf("Write zip bytes failed: %v", err)
-	}
-	if err := planWriter.Close(); err != nil {
-		t.Fatalf("Close multipart writer failed: %v", err)
-	}
+		createReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &body)
+		createReq.Header.Set("Content-Type", writer.FormDataContentType())
+		createReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			createReq.AddCookie(cookie)
+		}
 
-	planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
-	planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
-	planReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		planReq.AddCookie(cookie)
-	}
+		createRec := httptest.NewRecorder()
+		router.ServeHTTP(createRec, createReq)
+		Expect(createRec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200 when creating import plan, got %d: %s", createRec.Code, createRec.Body.String())
 
-	planRec := httptest.NewRecorder()
-	router.ServeHTTP(planRec, planReq)
+		cancelReq := httptest.NewRequest(http.MethodDelete, "/api/import/plan", nil)
+		cancelReq.Header.Set("Content-Type", "application/json")
+		cancelReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			cancelReq.AddCookie(cookie)
+		}
 
-	if planRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 when creating import plan, got %d: %s", planRec.Code, planRec.Body.String())
-	}
+		cancelRec := httptest.NewRecorder()
+		router.ServeHTTP(cancelRec, cancelReq)
+		Expect(cancelRec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200 when canceling import plan, got %d: %s", cancelRec.Code, cancelRec.Body.String())
+		{
 
-	execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
-	execReq.Header.Set("Content-Type", "application/json")
-	execReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		execReq.AddCookie(cookie)
-	}
+			got := strings.TrimSpace(cancelRec.Body.String())
+			Expect(got).To(Equal("null"), "Expected null response body when clearing import plan, got %q", got)
+		}
 
-	execRec := httptest.NewRecorder()
-	router.ServeHTTP(execRec, execReq)
+		getRec := authenticatedRequest(router, http.MethodGet, "/api/import/plan", nil)
+		Expect(getRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404 when fetching canceled import plan, got %d: %s", getRec.Code, getRec.Body.String())
 
-	if execRec.Code != http.StatusAccepted {
-		t.Fatalf("Expected status 202 when starting import, got %d: %s", execRec.Code, execRec.Body.String())
-	}
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(getRec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
 
-	var execResp struct {
-		ExecutionStatus string `json:"execution_status"`
-	}
-	if err := json.Unmarshal(execRec.Body.Bytes(), &execResp); err != nil {
-		t.Fatalf("Invalid import execute response JSON: %v", err)
-	}
-	if execResp.ExecutionStatus != "running" {
-		t.Fatalf("expected running execution status, got %q", execResp.ExecutionStatus)
-	}
+		Expect(resp).To(HaveKeyWithValue("error", HaveKey("code")), "Expected structured error response after canceling import plan, got: %v", resp)
 
-	var completedResp struct {
-		ExecutionStatus string `json:"execution_status"`
-		ExecutionResult *struct {
-			ImportedCount int `json:"imported_count"`
-			SkippedCount  int `json:"skipped_count"`
-			Items         []struct {
-				Error *string `json:"error"`
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("imports pages links and assets from an uploaded zip", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		fixtureDir := importerFixturePathForHTTPTests("link-assets-package")
+		zipBytes := createZipFromDir(fixtureDir)
+
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
+
+		loginRes := loginRec.Result()
+		wrapCloseWithErrorCheck(loginRes.Body.Close)
+
+		cookies := loginRes.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
+
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
+			}
+		}
+		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+
+		var planBody bytes.Buffer
+		planWriter := multipart.NewWriter(&planBody)
+		fileWriter, err := planWriter.CreateFormFile("file", "link-assets-package.zip")
+		Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+		{
+
+			_, err := fileWriter.Write(zipBytes)
+			Expect(err).NotTo(HaveOccurred(), "Write zip bytes failed: %v", err)
+		}
+		{
+
+			err := planWriter.Close()
+			Expect(err).NotTo(HaveOccurred(), "Close multipart writer failed: %v", err)
+		}
+
+		planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
+		planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
+		planReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			planReq.AddCookie(cookie)
+		}
+
+		planRec := httptest.NewRecorder()
+		router.ServeHTTP(planRec, planReq)
+		Expect(planRec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200 when creating import plan, got %d: %s", planRec.Code, planRec.Body.String())
+
+		var planResp struct {
+			Items []map[string]any `json:"items"`
+		}
+		{
+			err := json.Unmarshal(planRec.Body.Bytes(), &planResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid import plan response JSON: %v", err)
+		}
+		Expect(planResp.Items).To(HaveLen(5), "expected 5 plan items, got %d", len(planResp.Items))
+
+		execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
+		execReq.Header.Set("Content-Type", "application/json")
+		execReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			execReq.AddCookie(cookie)
+		}
+
+		execRec := httptest.NewRecorder()
+		router.ServeHTTP(execRec, execReq)
+		Expect(execRec).To(HaveHTTPStatus(http.StatusAccepted), "Expected status 202 when starting import, got %d: %s", execRec.Code, execRec.Body.String())
+
+		var execResp struct {
+			ImportedCount   int    `json:"imported_count"`
+			SkippedCount    int    `json:"skipped_count"`
+			ExecutionStatus string `json:"execution_status"`
+			ExecutionResult *struct {
+				ImportedCount int `json:"imported_count"`
+				SkippedCount  int `json:"skipped_count"`
+			} `json:"execution_result"`
+		}
+		{
+			err := json.Unmarshal(execRec.Body.Bytes(), &execResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid import execute response JSON: %v", err)
+		}
+		Expect(execResp.ExecutionStatus).To(Equal("running"), "expected running execution status, got %q", execResp.ExecutionStatus)
+
+		var completedResp struct {
+			ExecutionStatus string `json:"execution_status"`
+			ExecutionResult *struct {
+				ImportedCount int `json:"imported_count"`
+				SkippedCount  int `json:"skipped_count"`
+			} `json:"execution_result"`
+		}
+
+		Eventually(func(g Gomega) {
+			statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
+			for _, cookie := range cookies {
+				statusReq.AddCookie(cookie)
+			}
+
+			statusRec := httptest.NewRecorder()
+			router.ServeHTTP(statusRec, statusReq)
+
+			g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
+			g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
+			g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
+		}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
+
+		Expect(completedResp).To(SatisfyAll(
+			HaveField("ExecutionStatus", "completed"),
+			HaveField("ExecutionResult", Not(BeNil())),
+		), "expected completed execution result, got %#v", completedResp)
+		Expect(completedResp.ExecutionResult).To(HaveValue(SatisfyAll(
+			HaveField("ImportedCount", 4),
+			HaveField("SkippedCount", 1),
+		)), "unexpected execution result: %#v", completedResp.ExecutionResult)
+
+		setupPage := getPageByPathViaAPI(router, "guides/setup")
+		for _, expected := range []string{
+			"[Relative MD](/reference/endpoints.md)",
+			"[Absolute MD](/reference/endpoints.md)",
+			"[Container](/guides)",
+			"[Endpoints](/reference/endpoints.md)",
+			"[API Alias](/reference/endpoints.md)",
+			"![Relative Image](/assets/" + setupPage.ID + "/logo.png)",
+			"[Manual](/assets/" + setupPage.ID + "/manual.pdf)",
+		} {
+			Expect(setupPage.Content).To(ContainSubstring(expected), "expected setup content to contain %q, got:\n%s", expected, setupPage.Content)
+
+		}
+
+		assets := listAssetsViaAPI(router, setupPage.ID)
+		Expect(assets).To(HaveLen(2), "expected 2 uploaded assets, got %#v", assets)
+
+		_ = getPageByPathViaAPI(router, "reference/api-1")
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("applies the configured asset upload limit during import execution", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstanceWithMaxAssetUploadSize(w, 1024)
+
+		fixtureDir := httpTestTempDir()
+		{
+			err := os.MkdirAll(filepath.Join(fixtureDir, "docs"), 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir fixture dir: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(fixtureDir, "docs", "setup.md"), []byte("# Setup\n\n[Manual](./manual.pdf)\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write markdown fixture: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(fixtureDir, "docs", "manual.pdf"), bytes.Repeat([]byte("a"), 2048), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write oversized asset fixture: %v", err)
+		}
+
+		zipBytes := createZipFromDir(fixtureDir)
+
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
+
+		loginRes := loginRec.Result()
+		wrapCloseWithErrorCheck(loginRes.Body.Close)
+
+		cookies := loginRes.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
+
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
+			}
+		}
+		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+
+		var planBody bytes.Buffer
+		planWriter := multipart.NewWriter(&planBody)
+		fileWriter, err := planWriter.CreateFormFile("file", "oversized-assets.zip")
+		Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
+		{
+
+			_, err := fileWriter.Write(zipBytes)
+			Expect(err).NotTo(HaveOccurred(), "Write zip bytes failed: %v", err)
+		}
+		{
+
+			err := planWriter.Close()
+			Expect(err).NotTo(HaveOccurred(), "Close multipart writer failed: %v", err)
+		}
+
+		planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
+		planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
+		planReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			planReq.AddCookie(cookie)
+		}
+
+		planRec := httptest.NewRecorder()
+		router.ServeHTTP(planRec, planReq)
+		Expect(planRec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200 when creating import plan, got %d: %s", planRec.Code, planRec.Body.String())
+
+		execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
+		execReq.Header.Set("Content-Type", "application/json")
+		execReq.Header.Set("X-CSRF-Token", csrfToken)
+		for _, cookie := range cookies {
+			execReq.AddCookie(cookie)
+		}
+
+		execRec := httptest.NewRecorder()
+		router.ServeHTTP(execRec, execReq)
+		Expect(execRec).To(HaveHTTPStatus(http.StatusAccepted), "Expected status 202 when starting import, got %d: %s", execRec.Code, execRec.Body.String())
+
+		var execResp struct {
+			ExecutionStatus string `json:"execution_status"`
+		}
+		{
+			err := json.Unmarshal(execRec.Body.Bytes(), &execResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid import execute response JSON: %v", err)
+		}
+		Expect(execResp.ExecutionStatus).To(Equal("running"), "expected running execution status, got %q", execResp.ExecutionStatus)
+
+		var completedResp struct {
+			ExecutionStatus string `json:"execution_status"`
+			ExecutionResult *struct {
+				ImportedCount int `json:"imported_count"`
+				SkippedCount  int `json:"skipped_count"`
+				Items         []struct {
+					Error *string `json:"error"`
+				} `json:"items"`
+			} `json:"execution_result"`
+		}
+
+		Eventually(func(g Gomega) {
+			statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
+			for _, cookie := range cookies {
+				statusReq.AddCookie(cookie)
+			}
+
+			statusRec := httptest.NewRecorder()
+			router.ServeHTTP(statusRec, statusReq)
+
+			g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
+			g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
+			g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
+		}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
+
+		Expect(completedResp).To(SatisfyAll(
+			HaveField("ExecutionStatus", "completed"),
+			HaveField("ExecutionResult", Not(BeNil())),
+		), "expected completed execution result, got %#v", completedResp)
+		Expect(completedResp.ExecutionResult).To(HaveValue(SatisfyAll(
+			HaveField("ImportedCount", BeZero()),
+			HaveField("SkippedCount", 1),
+			HaveField("Items", HaveExactElements(HaveField("Error", Not(BeNil())))),
+		)), "unexpected execution result: %#v", completedResp.ExecutionResult)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects slug suggestions when the title is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/slug-suggestion", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("deletes a page through the authenticated router", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Delete Me", "delete-me", nil, pageNodeKind())
+		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+page.ID+"?version="+page.Version, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		getRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+page.ID, nil)
+		Expect(getRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected deleted page to return 404, got %d", getRec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns not found when deleting a missing page", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/not-found-id", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected 404 Not Found, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects deleting a page that has children", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		parent := createPageViaAPI(router, "Parent", "parent", nil, pageNodeKind())
+		createPageViaAPI(router, "Child", "child", &parent.ID, pageNodeKind())
+
+		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+parent.ID+"?version="+parent.Version, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("deletes a page tree recursively when requested", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		parent := createPageViaAPI(router, "Parent", "parent", nil, pageNodeKind())
+		createPageViaAPI(router, "Child", "child", &parent.ID, pageNodeKind())
+
+		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+parent.ID+"?recursive=true&version="+parent.Version, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		getRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+parent.ID, nil)
+		Expect(getRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected deleted page to return 404, got %d", getRec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("updates page content through the authenticated router", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+
+		payload := map[string]string{
+			"version": page.Version,
+			"title":   "Updated Title",
+			"slug":    "updated-title",
+			"content": "# Updated Content\nWith **Markdown** support.",
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
+		}
+		Expect(resp).To(HaveKeyWithValue("title", "Updated Title"), "Expected updated title, got %q", resp["title"])
+		Expect(resp).To(HaveKeyWithValue("slug", "updated-title"), "Expected updated slug, got %q", resp["slug"])
+		Expect(resp).To(HaveKeyWithValue("content", "# Updated Content\nWith **Markdown** support."), "Expected updated content, got %q", resp["content"])
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("writes page tags and string properties", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+
+		payload := map[string]interface{}{
+			"version": page.Version,
+			"title":   "Updated Title",
+			"slug":    "updated-title",
+			"content": "# Updated Content",
+			"tags":    []string{"React", "TypeScript"},
+			"properties": map[string]string{
+				"status": "published",
+				"author": "alice",
+			},
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		getRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+page.ID, nil)
+		Expect(getRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on get, got %d", getRec.Code)
+
+		var fetched apiPageDTO
+		{
+			err := json.Unmarshal(getRec.Body.Bytes(), &fetched)
+			Expect(err).NotTo(HaveOccurred(), "Invalid get response JSON: %v", err)
+		}
+		Expect(fetched).To(SatisfyAll(
+			HaveField("Tags", Equal([]string{"react", "typescript"})),
+			HaveField("Properties", SatisfyAll(
+				HaveKeyWithValue("status", "published"),
+				HaveKeyWithValue("author", "alice"),
+			)),
+		), "updated page metadata = %#v", fetched)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("removes page tags when an empty tag list is sent", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+
+		firstPayload := map[string]interface{}{
+			"version": page.Version,
+			"title":   "Original Title",
+			"slug":    "original-title",
+			"content": "# Updated Content",
+			"tags":    []string{"React", "TypeScript"},
+		}
+		firstBody, _ := json.Marshal(firstPayload)
+
+		firstRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(firstBody)))
+		Expect(firstRec).To(HaveHTTPStatus(http.StatusOK), "Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
+
+		var updated apiPageDTO
+		{
+			err := json.Unmarshal(firstRec.Body.Bytes(), &updated)
+			Expect(err).NotTo(HaveOccurred(), "Invalid first update response JSON: %v", err)
+		}
+
+		secondPayload := map[string]interface{}{
+			"version": updated.Version,
+			"title":   updated.Title,
+			"slug":    updated.Slug,
+			"content": updated.Content,
+			"tags":    []string{},
+		}
+		secondBody, _ := json.Marshal(secondPayload)
+
+		secondRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(secondBody)))
+		Expect(secondRec).To(HaveHTTPStatus(http.StatusOK), "Expected second update to return 200 OK, got %d - %s", secondRec.Code, secondRec.Body.String())
+
+		getRec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+page.ID, nil)
+		Expect(getRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on get, got %d", getRec.Code)
+
+		var fetched apiPageDTO
+		{
+			err := json.Unmarshal(getRec.Body.Bytes(), &fetched)
+			Expect(err).NotTo(HaveOccurred(), "Invalid get response JSON: %v", err)
+		}
+		Expect(fetched.Tags).To(HaveLen(0), "expected tags to be removed, got %#v", fetched.Tags)
+
+		tagsRec := authenticatedRequest(router, http.MethodGet, "/api/tags?q=react&limit=20", nil)
+		Expect(tagsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
+
+		var tagsResp []map[string]interface{}
+		{
+			err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid tags response JSON: %v", err)
+		}
+
+		for _, entry := range tagsResp {
+			Expect(entry).NotTo(HaveKeyWithValue("tag", "react"), "expected react tag to be removed from index, got %#v", tagsResp)
+
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("preserves omitted tags and properties while clearing explicit empty values", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Metadata Preserve", "metadata-preserve", nil, pageNodeKind())
+
+		firstPayload := map[string]interface{}{
+			"version": page.Version,
+			"title":   page.Title,
+			"slug":    page.Slug,
+			"content": "# Metadata Preserve\n\nFirst",
+			"tags":    []string{"React"},
+			"properties": map[string]string{
+				"status": "draft",
+			},
+		}
+		firstBody, _ := json.Marshal(firstPayload)
+		firstRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(firstBody)))
+		Expect(firstRec).To(HaveHTTPStatus(http.StatusOK), "Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
+
+		var firstUpdated apiPageDTO
+		{
+			err := json.Unmarshal(firstRec.Body.Bytes(), &firstUpdated)
+			Expect(err).NotTo(HaveOccurred(), "Invalid first update response JSON: %v", err)
+		}
+
+		rawAfterFirstBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
+		Expect(err).NotTo(HaveOccurred(), "ReadFile first metadata update: %v", err)
+
+		rawAfterFirst := string(rawAfterFirstBytes)
+		Expect(rawAfterFirst).To(HavePrefix("<!-- leafwiki\n"), "HTTP update should write canonical LeafWiki metadata, got: %q", rawAfterFirst)
+		Expect(rawAfterFirst).NotTo(HavePrefix("---\n"), "HTTP update should not write legacy YAML frontmatter, got: %q", rawAfterFirst)
+
+		firstDoc, _, err := markdown.ParsePageDocument(rawAfterFirst)
+		Expect(err).NotTo(HaveOccurred(), "ParsePageDocument first metadata update: %v", err)
+
+		Expect(firstDoc.Metadata).To(SatisfyAll(
+			HaveField("Tags", Equal([]string{"react"})),
+			HaveField("Fields", HaveKeyWithValue("status", "draft")),
+		), "first raw metadata = %#v", firstDoc.Metadata)
+
+		metadataOnlyPayload := map[string]interface{}{
+			"version": firstUpdated.Version,
+			"title":   firstUpdated.Title,
+			"slug":    firstUpdated.Slug,
+			"tags":    []string{"Ready"},
+			"properties": map[string]string{
+				"status": "ready",
+			},
+		}
+		metadataOnlyBody, _ := json.Marshal(metadataOnlyPayload)
+		metadataOnlyRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(metadataOnlyBody)))
+		Expect(metadataOnlyRec).To(HaveHTTPStatus(http.StatusOK), "Expected metadata-only update to return 200 OK, got %d - %s", metadataOnlyRec.Code, metadataOnlyRec.Body.String())
+
+		var metadataOnlyUpdated apiPageDTO
+		{
+			err := json.Unmarshal(metadataOnlyRec.Body.Bytes(), &metadataOnlyUpdated)
+			Expect(err).NotTo(HaveOccurred(), "Invalid metadata-only update response JSON: %v", err)
+		}
+		Expect(metadataOnlyUpdated).To(SatisfyAll(
+			HaveField("Content", "# Metadata Preserve\n\nFirst"),
+			HaveField("Tags", Equal([]string{"ready"})),
+			HaveField("Properties", HaveKeyWithValue("status", "ready")),
+		), "metadata-only update = %#v", metadataOnlyUpdated)
+
+		omittedPayload := map[string]interface{}{
+			"version": metadataOnlyUpdated.Version,
+			"title":   metadataOnlyUpdated.Title,
+			"slug":    metadataOnlyUpdated.Slug,
+			"content": "# Metadata Preserve\n\nSecond",
+		}
+		omittedBody, _ := json.Marshal(omittedPayload)
+		omittedRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(omittedBody)))
+		Expect(omittedRec).To(HaveHTTPStatus(http.StatusOK), "Expected omitted metadata update to return 200 OK, got %d - %s", omittedRec.Code, omittedRec.Body.String())
+
+		var omittedUpdated apiPageDTO
+		{
+			err := json.Unmarshal(omittedRec.Body.Bytes(), &omittedUpdated)
+			Expect(err).NotTo(HaveOccurred(), "Invalid omitted update response JSON: %v", err)
+		}
+
+		Expect(omittedUpdated).To(SatisfyAll(
+			HaveField("Tags", Equal([]string{"ready"})),
+			HaveField("Properties", HaveKeyWithValue("status", "ready")),
+		), "omitted metadata update = %#v", omittedUpdated)
+
+		clearPayload := map[string]interface{}{
+			"version":    omittedUpdated.Version,
+			"title":      omittedUpdated.Title,
+			"slug":       omittedUpdated.Slug,
+			"content":    "# Metadata Preserve\n\nThird",
+			"tags":       []string{},
+			"properties": map[string]string{},
+		}
+		clearBody, _ := json.Marshal(clearPayload)
+		clearRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(clearBody)))
+		Expect(clearRec).To(HaveHTTPStatus(http.StatusOK), "Expected explicit clear update to return 200 OK, got %d - %s", clearRec.Code, clearRec.Body.String())
+
+		var cleared apiPageDTO
+		{
+			err := json.Unmarshal(clearRec.Body.Bytes(), &cleared)
+			Expect(err).NotTo(HaveOccurred(), "Invalid clear update response JSON: %v", err)
+		}
+		Expect(cleared).To(SatisfyAll(
+			HaveField("Tags", BeEmpty()),
+			HaveField("Properties", BeEmpty()),
+		), "explicit clear update = %#v", cleared)
+
+		rawAfterClearBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
+		Expect(err).NotTo(HaveOccurred(), "ReadFile clear metadata update: %v", err)
+
+		rawAfterClear := string(rawAfterClearBytes)
+		Expect(rawAfterClear).To(HavePrefix("<!-- leafwiki\n"), "clear update should keep canonical storage, got: %q", rawAfterClear)
+		Expect(rawAfterClear).NotTo(HavePrefix("---\n"), "clear update should keep canonical storage, got: %q", rawAfterClear)
+		clearDoc, _, err := markdown.ParsePageDocument(rawAfterClear)
+		Expect(err).NotTo(HaveOccurred(), "ParsePageDocument clear metadata update: %v", err)
+
+		Expect(clearDoc.Metadata).To(SatisfyAll(
+			HaveField("Tags", BeEmpty()),
+			HaveField("Fields", BeEmpty()),
+		), "clear raw metadata = %#v", clearDoc.Metadata)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("indexes updated page tags for the tags route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+
+		payload := map[string]interface{}{
+			"version": page.Version,
+			"title":   "Updated Title",
+			"slug":    "updated-title",
+			"content": "# Updated Content",
+			"tags":    []string{"react", "typescript"},
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		tagsRec := authenticatedRequest(router, http.MethodGet, "/api/tags?q=react&limit=20", nil)
+		Expect(tagsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
+
+		var tagsResp []map[string]interface{}
+		{
+			err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid tags response JSON: %v", err)
+		}
+		Expect(tagsResp).To(ContainElement(HaveKeyWithValue("tag", "react")), "expected indexed tags, got %#v", tagsResp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("counts tag suggestions within the selected tags", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		pageA := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
+		pageB := createPageViaAPI(router, "Page B", "page-b", nil, pageNodeKind())
+		pageC := createPageViaAPI(router, "Page C", "page-c", nil, pageNodeKind())
+
+		updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
+			payload := map[string]interface{}{
+				"version": page.Version,
+				"title":   title,
+				"slug":    slug,
+				"content": "# Content",
+				"tags":    tags,
+			}
+			body, _ := json.Marshal(payload)
+			rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		}
+
+		updatePageTags(pageA, "Page A", "page-a", []string{"react", "typescript"})
+		updatePageTags(pageB, "Page B", "page-b", []string{"react", "testing"})
+		updatePageTags(pageC, "Page C", "page-c", []string{"react", "typescript"})
+
+		tagsRec := authenticatedRequest(router, http.MethodGet, "/api/tags?q=t&limit=20&selected=react", nil)
+		Expect(tagsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
+
+		var tagsResp []map[string]interface{}
+		{
+			err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid tags response JSON: %v", err)
+		}
+		Expect(tagsResp).To(HaveExactElements(
+			SatisfyAll(HaveKeyWithValue("tag", "typescript"), HaveKeyWithValue("count", float64(2))),
+			SatisfyAll(HaveKeyWithValue("tag", "testing"), HaveKeyWithValue("count", float64(1))),
+		), "expected selected-tag suggestions, got %#v", tagsResp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("accepts repeated selected tag parameters", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
+
+		payload := map[string]interface{}{
+			"version": page.Version,
+			"title":   "Page A",
+			"slug":    "page-a",
+			"content": "# Content",
+			"tags":    []string{"react", "typescript", "testing"},
+		}
+		body, _ := json.Marshal(payload)
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		tagsRec := authenticatedRequest(router, http.MethodGet, "/api/tags?q=t&limit=20&selected=react&selected=typescript", nil)
+		Expect(tagsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
+
+		var tagsResp []map[string]interface{}
+		{
+			err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid tags response JSON: %v", err)
+		}
+		Expect(tagsResp).To(HaveExactElements(
+			SatisfyAll(HaveKeyWithValue("tag", "testing"), HaveKeyWithValue("count", float64(1))),
+		), "expected repeated-selected-tag suggestion, got %#v", tagsResp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("filters search results by selected tags", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		reactPage := createPageViaAPI(router, "React Search Match", "react-search-match", nil, pageNodeKind())
+		plainPage := createPageViaAPI(router, "Plain Search Match", "plain-search-match", nil, pageNodeKind())
+
+		updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
+			payload := map[string]interface{}{
+				"version": page.Version,
+				"title":   title,
+				"slug":    slug,
+				"content": content,
+				"tags":    tags,
+			}
+			body, _ := json.Marshal(payload)
+			rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		}
+
+		updatePage(reactPage, "React Search Match", "react-search-match", "Body with shared search token.", []string{"react"})
+		updatePage(plainPage, "Plain Search Match", "plain-search-match", "Body with shared search token.", []string{"docs"})
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/search?q=shared%20search&tags=react", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Count     int `json:"count"`
+			TagFacets []struct {
+				Tag   string `json:"tag"`
+				Count int    `json:"count"`
+			} `json:"tag_facets"`
+			Items []struct {
+				PageID string `json:"page_id"`
+				Title  string `json:"title"`
 			} `json:"items"`
-		} `json:"execution_result"`
-	}
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid search response JSON: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveField("Count", 1),
+			HaveField("Items", ConsistOf(HaveField("PageID", reactPage.ID))),
+			HaveField("TagFacets", ConsistOf(SatisfyAll(
+				HaveField("Tag", "react"),
+				HaveField("Count", 1),
+			))),
+		), "filtered search response = %#v", resp)
 
-	Eventually(func(g Gomega) {
-		statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
-		for _, cookie := range cookies {
-			statusReq.AddCookie(cookie)
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns tag matches without a text query", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		reactPage := createPageViaAPI(router, "React Tag Match", "react-tag-match", nil, pageNodeKind())
+		plainPage := createPageViaAPI(router, "Plain Tag Match", "plain-tag-match", nil, pageNodeKind())
+
+		updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
+			payload := map[string]interface{}{
+				"version": page.Version,
+				"title":   title,
+				"slug":    slug,
+				"content": content,
+				"tags":    tags,
+			}
+			body, _ := json.Marshal(payload)
+			rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
 		}
 
-		statusRec := httptest.NewRecorder()
-		router.ServeHTTP(statusRec, statusReq)
+		updatePage(reactPage, "React Tag Match", "react-tag-match", "Body without search token.", []string{"react"})
+		updatePage(plainPage, "Plain Tag Match", "plain-tag-match", "Body without search token.", []string{"docs"})
 
-		g.Expect(statusRec).To(HaveHTTPStatus(http.StatusOK), statusRec.Body.String())
-		g.Expect(json.Unmarshal(statusRec.Body.Bytes(), &completedResp)).To(Succeed(), statusRec.Body.String())
-		g.Expect(completedResp.ExecutionStatus).To(Equal("completed"))
-	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Succeed())
+		rec := authenticatedRequest(router, http.MethodGet, "/api/search?tags=react", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
-	if completedResp.ExecutionStatus != "completed" || completedResp.ExecutionResult == nil {
-		t.Fatalf("expected completed execution result, got %#v", completedResp)
-	}
-	if completedResp.ExecutionResult.ImportedCount != 0 || completedResp.ExecutionResult.SkippedCount != 1 {
-		t.Fatalf(
-			"unexpected execution result: imported=%d skipped=%d",
-			completedResp.ExecutionResult.ImportedCount,
-			completedResp.ExecutionResult.SkippedCount,
-		)
-	}
-	if len(completedResp.ExecutionResult.Items) != 1 || completedResp.ExecutionResult.Items[0].Error == nil || !strings.Contains(*completedResp.ExecutionResult.Items[0].Error, "file too large") {
-		t.Fatalf("expected import error about configured asset limit, got %#v", completedResp.ExecutionResult.Items)
-	}
-
-})
-
-var _ = It("TestSuggestSlugEndpoint_MissingTitle", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/slug-suggestion", nil)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestDeletePageEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Delete Me", "delete-me", nil, pageNodeKind())
-	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/pages/"+page.ID+"?version="+page.Version, nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	getRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+page.ID, nil)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected deleted page to return 404, got %d", getRec.Code)
-	}
-
-})
-
-var _ = It("TestDeletePageEndpoint_NotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/pages/not-found-id", nil)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected 404 Not Found, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestDeletePageEndpoint_HasChildren", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	parent := createPageViaAPI(t, router, "Parent", "parent", nil, pageNodeKind())
-	createPageViaAPI(t, router, "Child", "child", &parent.ID, pageNodeKind())
-
-	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/pages/"+parent.ID+"?version="+parent.Version, nil)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected 400 Bad Request, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestDeletePageEndpoint_Recursive", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	parent := createPageViaAPI(t, router, "Parent", "parent", nil, pageNodeKind())
-	createPageViaAPI(t, router, "Child", "child", &parent.ID, pageNodeKind())
-
-	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/pages/"+parent.ID+"?recursive=true&version="+parent.Version, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	getRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+parent.ID, nil)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected deleted page to return 404, got %d", getRec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePageEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-
-	payload := map[string]string{
-		"version": page.Version,
-		"title":   "Updated Title",
-		"slug":    "updated-title",
-		"content": "# Updated Content\nWith **Markdown** support.",
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid JSON response: %v", err)
-	}
-
-	if resp["title"] != "Updated Title" {
-		t.Errorf("Expected updated title, got %q", resp["title"])
-	}
-	if resp["slug"] != "updated-title" {
-		t.Errorf("Expected updated slug, got %q", resp["slug"])
-	}
-	if resp["content"] != "# Updated Content\nWith **Markdown** support." {
-		t.Errorf("Expected updated content, got %q", resp["content"])
-	}
-
-})
-
-var _ = It("TestUpdatePageEndpoint_WritesTagsAndStringProperties", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Updated Title",
-		"slug":    "updated-title",
-		"content": "# Updated Content",
-		"tags":    []string{"React", "TypeScript"},
-		"properties": map[string]string{
-			"status": "published",
-			"author": "alice",
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	getRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+page.ID, nil)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on get, got %d", getRec.Code)
-	}
-
-	var fetched apiPageDTO
-	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
-		t.Fatalf("Invalid get response JSON: %v", err)
-	}
-
-	if len(fetched.Tags) != 2 {
-		t.Fatalf("expected 2 tags, got %#v", fetched.Tags)
-	}
-	if fetched.Tags[0] != "react" || fetched.Tags[1] != "typescript" {
-		t.Fatalf("expected lowercase normalized tags, got %#v", fetched.Tags)
-	}
-	if fetched.Properties["status"] != "published" {
-		t.Fatalf("expected status=published, got %#v", fetched.Properties)
-	}
-	if fetched.Properties["author"] != "alice" {
-		t.Fatalf("expected author=alice, got %#v", fetched.Properties)
-	}
-
-})
-
-var _ = It("TestUpdatePageEndpoint_RemovesTagsWhenEmptyListIsSent", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-
-	firstPayload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Original Title",
-		"slug":    "original-title",
-		"content": "# Updated Content",
-		"tags":    []string{"React", "TypeScript"},
-	}
-	firstBody, _ := json.Marshal(firstPayload)
-
-	firstRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(firstBody)))
-	if firstRec.Code != http.StatusOK {
-		t.Fatalf("Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
-	}
-
-	var updated apiPageDTO
-	if err := json.Unmarshal(firstRec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("Invalid first update response JSON: %v", err)
-	}
-
-	secondPayload := map[string]interface{}{
-		"version": updated.Version,
-		"title":   updated.Title,
-		"slug":    updated.Slug,
-		"content": updated.Content,
-		"tags":    []string{},
-	}
-	secondBody, _ := json.Marshal(secondPayload)
-
-	secondRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(secondBody)))
-	if secondRec.Code != http.StatusOK {
-		t.Fatalf("Expected second update to return 200 OK, got %d - %s", secondRec.Code, secondRec.Body.String())
-	}
-
-	getRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+page.ID, nil)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on get, got %d", getRec.Code)
-	}
-
-	var fetched apiPageDTO
-	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
-		t.Fatalf("Invalid get response JSON: %v", err)
-	}
-
-	if len(fetched.Tags) != 0 {
-		t.Fatalf("expected tags to be removed, got %#v", fetched.Tags)
-	}
-
-	tagsRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags?q=react&limit=20", nil)
-	if tagsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
-	}
-
-	var tagsResp []map[string]interface{}
-	if err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp); err != nil {
-		t.Fatalf("Invalid tags response JSON: %v", err)
-	}
-
-	for _, entry := range tagsResp {
-		if entry["tag"] == "react" {
-			t.Fatalf("expected react tag to be removed from index, got %#v", tagsResp)
+		var resp struct {
+			Count     int `json:"count"`
+			TagFacets []struct {
+				Tag   string `json:"tag"`
+				Count int    `json:"count"`
+			} `json:"tag_facets"`
+			Items []struct {
+				PageID string `json:"page_id"`
+			} `json:"items"`
 		}
-	}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid search response JSON: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveField("Count", 1),
+			HaveField("Items", ConsistOf(HaveField("PageID", reactPage.ID))),
+			HaveField("TagFacets", ConsistOf(SatisfyAll(
+				HaveField("Tag", "react"),
+				HaveField("Count", 1),
+			))),
+		), "tag-only search response = %#v", resp)
 
+	})
 })
 
-var _ = It("TestUpdatePageEndpoint_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("normalizes pagination bounds for tag-only searches", func() {
 
-	page := createPageViaAPI(t, router, "Metadata Preserve", "metadata-preserve", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	firstPayload := map[string]interface{}{
-		"version": page.Version,
-		"title":   page.Title,
-		"slug":    page.Slug,
-		"content": "# Metadata Preserve\n\nFirst",
-		"tags":    []string{"React"},
-		"properties": map[string]string{
-			"status": "draft",
-		},
-	}
-	firstBody, _ := json.Marshal(firstPayload)
-	firstRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(firstBody)))
-	if firstRec.Code != http.StatusOK {
-		t.Fatalf("Expected first update to return 200 OK, got %d - %s", firstRec.Code, firstRec.Body.String())
-	}
-	var firstUpdated apiPageDTO
-	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstUpdated); err != nil {
-		t.Fatalf("Invalid first update response JSON: %v", err)
-	}
-	rawAfterFirstBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
-	if err != nil {
-		t.Fatalf("ReadFile first metadata update: %v", err)
-	}
-	rawAfterFirst := string(rawAfterFirstBytes)
-	if !strings.HasPrefix(rawAfterFirst, "<!-- leafwiki\n") {
-		t.Fatalf("HTTP update should write canonical LeafWiki metadata, got: %q", rawAfterFirst)
-	}
-	if strings.HasPrefix(rawAfterFirst, "---\n") {
-		t.Fatalf("HTTP update should not write legacy YAML frontmatter, got: %q", rawAfterFirst)
-	}
-	firstDoc, _, err := markdown.ParsePageDocument(rawAfterFirst)
-	if err != nil {
-		t.Fatalf("ParsePageDocument first metadata update: %v", err)
-	}
-	if len(firstDoc.Metadata.Tags) != 1 || firstDoc.Metadata.Tags[0] != "react" {
-		t.Fatalf("first raw tags = %#v, want [react]", firstDoc.Metadata.Tags)
-	}
-	if firstDoc.Metadata.Fields["status"] != "draft" {
-		t.Fatalf("first raw fields = %#v, want status=draft", firstDoc.Metadata.Fields)
-	}
+		page := createPageViaAPI(router, "React Tag Match", "react-tag-match-bounds", nil, pageNodeKind())
 
-	metadataOnlyPayload := map[string]interface{}{
-		"version": firstUpdated.Version,
-		"title":   firstUpdated.Title,
-		"slug":    firstUpdated.Slug,
-		"tags":    []string{"Ready"},
-		"properties": map[string]string{
-			"status": "ready",
-		},
-	}
-	metadataOnlyBody, _ := json.Marshal(metadataOnlyPayload)
-	metadataOnlyRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(metadataOnlyBody)))
-	if metadataOnlyRec.Code != http.StatusOK {
-		t.Fatalf("Expected metadata-only update to return 200 OK, got %d - %s", metadataOnlyRec.Code, metadataOnlyRec.Body.String())
-	}
-	var metadataOnlyUpdated apiPageDTO
-	if err := json.Unmarshal(metadataOnlyRec.Body.Bytes(), &metadataOnlyUpdated); err != nil {
-		t.Fatalf("Invalid metadata-only update response JSON: %v", err)
-	}
-	if metadataOnlyUpdated.Content != "# Metadata Preserve\n\nFirst" {
-		t.Fatalf("expected metadata-only update to preserve body, got %q", metadataOnlyUpdated.Content)
-	}
-	if len(metadataOnlyUpdated.Tags) != 1 || metadataOnlyUpdated.Tags[0] != "ready" {
-		t.Fatalf("expected metadata-only tags to update, got %#v", metadataOnlyUpdated.Tags)
-	}
-	if metadataOnlyUpdated.Properties["status"] != "ready" {
-		t.Fatalf("expected metadata-only properties to update, got %#v", metadataOnlyUpdated.Properties)
-	}
-
-	omittedPayload := map[string]interface{}{
-		"version": metadataOnlyUpdated.Version,
-		"title":   metadataOnlyUpdated.Title,
-		"slug":    metadataOnlyUpdated.Slug,
-		"content": "# Metadata Preserve\n\nSecond",
-	}
-	omittedBody, _ := json.Marshal(omittedPayload)
-	omittedRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(omittedBody)))
-	if omittedRec.Code != http.StatusOK {
-		t.Fatalf("Expected omitted metadata update to return 200 OK, got %d - %s", omittedRec.Code, omittedRec.Body.String())
-	}
-	var omittedUpdated apiPageDTO
-	if err := json.Unmarshal(omittedRec.Body.Bytes(), &omittedUpdated); err != nil {
-		t.Fatalf("Invalid omitted update response JSON: %v", err)
-	}
-	if len(omittedUpdated.Tags) != 1 || omittedUpdated.Tags[0] != "ready" {
-		t.Fatalf("expected omitted tags to be preserved, got %#v", omittedUpdated.Tags)
-	}
-	if omittedUpdated.Properties["status"] != "ready" {
-		t.Fatalf("expected omitted properties to be preserved, got %#v", omittedUpdated.Properties)
-	}
-
-	clearPayload := map[string]interface{}{
-		"version":    omittedUpdated.Version,
-		"title":      omittedUpdated.Title,
-		"slug":       omittedUpdated.Slug,
-		"content":    "# Metadata Preserve\n\nThird",
-		"tags":       []string{},
-		"properties": map[string]string{},
-	}
-	clearBody, _ := json.Marshal(clearPayload)
-	clearRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(clearBody)))
-	if clearRec.Code != http.StatusOK {
-		t.Fatalf("Expected explicit clear update to return 200 OK, got %d - %s", clearRec.Code, clearRec.Body.String())
-	}
-	var cleared apiPageDTO
-	if err := json.Unmarshal(clearRec.Body.Bytes(), &cleared); err != nil {
-		t.Fatalf("Invalid clear update response JSON: %v", err)
-	}
-	if len(cleared.Tags) != 0 {
-		t.Fatalf("expected explicit empty tags to clear metadata, got %#v", cleared.Tags)
-	}
-	if len(cleared.Properties) != 0 {
-		t.Fatalf("expected explicit empty properties to clear metadata, got %#v", cleared.Properties)
-	}
-	rawAfterClearBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "metadata-preserve.md"))
-	if err != nil {
-		t.Fatalf("ReadFile clear metadata update: %v", err)
-	}
-	rawAfterClear := string(rawAfterClearBytes)
-	if !strings.HasPrefix(rawAfterClear, "<!-- leafwiki\n") || strings.HasPrefix(rawAfterClear, "---\n") {
-		t.Fatalf("clear update should keep canonical storage, got: %q", rawAfterClear)
-	}
-	clearDoc, _, err := markdown.ParsePageDocument(rawAfterClear)
-	if err != nil {
-		t.Fatalf("ParsePageDocument clear metadata update: %v", err)
-	}
-	if len(clearDoc.Metadata.Tags) != 0 || len(clearDoc.Metadata.Fields) != 0 {
-		t.Fatalf("clear raw metadata = tags %#v fields %#v, want both empty", clearDoc.Metadata.Tags, clearDoc.Metadata.Fields)
-	}
-
-})
-
-var _ = It("TestUpdatePageEndpoint_IndexesTagsForTagsEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Updated Title",
-		"slug":    "updated-title",
-		"content": "# Updated Content",
-		"tags":    []string{"react", "typescript"},
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	tagsRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags?q=react&limit=20", nil)
-	if tagsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
-	}
-
-	var tagsResp []map[string]interface{}
-	if err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp); err != nil {
-		t.Fatalf("Invalid tags response JSON: %v", err)
-	}
-
-	if len(tagsResp) == 0 {
-		t.Fatalf("expected indexed tags, got empty response")
-	}
-	if tagsResp[0]["tag"] != "react" {
-		t.Fatalf("expected first indexed tag to be react, got %#v", tagsResp)
-	}
-
-})
-
-var _ = It("TestGetTagsEndpoint_CountsSuggestionsWithinSelectedTags", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	pageA := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
-	pageB := createPageViaAPI(t, router, "Page B", "page-b", nil, pageNodeKind())
-	pageC := createPageViaAPI(t, router, "Page C", "page-c", nil, pageNodeKind())
-
-	updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
 		payload := map[string]interface{}{
 			"version": page.Version,
-			"title":   title,
-			"slug":    slug,
-			"content": "# Content",
-			"tags":    tags,
+			"title":   "React Tag Match",
+			"slug":    "react-tag-match-bounds",
+			"content": "Body without search token.",
+			"tags":    []string{"react"},
 		}
 		body, _ := json.Marshal(payload)
-		rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		boundsRec := authenticatedRequest(router, http.MethodGet, "/api/search?tags=react&offset=-1&limit=0", nil)
+		Expect(boundsRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", boundsRec.Code, boundsRec.Body.String())
+
+		var resp struct {
+			Count  int `json:"count"`
+			Limit  int `json:"limit"`
+			Offset int `json:"offset"`
+			Items  []struct {
+				PageID string `json:"page_id"`
+			} `json:"items"`
 		}
-	}
+		{
+			err := json.Unmarshal(boundsRec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid search response JSON: %v", err)
+		}
+		Expect(resp).To(SatisfyAll(
+			HaveField("Count", 1),
+			HaveField("Offset", BeZero()),
+			HaveField("Limit", 20),
+			HaveField("Items", ConsistOf(HaveField("PageID", page.ID))),
+		), "normalized tag search response = %#v", resp)
 
-	updatePageTags(pageA, "Page A", "page-a", []string{"react", "typescript"})
-	updatePageTags(pageB, "Page B", "page-b", []string{"react", "testing"})
-	updatePageTags(pageC, "Page C", "page-c", []string{"react", "typescript"})
-
-	tagsRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags?q=t&limit=20&selected=react", nil)
-	if tagsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
-	}
-
-	var tagsResp []map[string]interface{}
-	if err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp); err != nil {
-		t.Fatalf("Invalid tags response JSON: %v", err)
-	}
-
-	if len(tagsResp) != 2 {
-		t.Fatalf("expected 2 suggestion tags, got %#v", tagsResp)
-	}
-	if tagsResp[0]["tag"] != "typescript" || tagsResp[0]["count"] != float64(2) {
-		t.Fatalf("expected first suggestion to be typescript with count 2, got %#v", tagsResp[0])
-	}
-	if tagsResp[1]["tag"] != "testing" || tagsResp[1]["count"] != float64(1) {
-		t.Fatalf("expected second suggestion to be testing with count 1, got %#v", tagsResp[1])
-	}
-
+	})
 })
 
-var _ = It("TestGetTagsEndpoint_AcceptsRepeatedSelectedParams", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("shrinks tag facets as additional filters are applied", func() {
 
-	page := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Page A",
-		"slug":    "page-a",
-		"content": "# Content",
-		"tags":    []string{"react", "typescript", "testing"},
-	}
-	body, _ := json.Marshal(payload)
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
+		type searchResponse struct {
+			Count     int `json:"count"`
+			TagFacets []struct {
+				Tag   string `json:"tag"`
+				Count int    `json:"count"`
+			} `json:"tag_facets"`
+		}
 
-	tagsRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags?q=t&limit=20&selected=react&selected=typescript", nil)
-	if tagsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags endpoint, got %d - %s", tagsRec.Code, tagsRec.Body.String())
-	}
+		updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
+			payload := map[string]interface{}{
+				"version": page.Version,
+				"title":   title,
+				"slug":    slug,
+				"content": content,
+				"tags":    tags,
+			}
+			body, _ := json.Marshal(payload)
+			rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
-	var tagsResp []map[string]interface{}
-	if err := json.Unmarshal(tagsRec.Body.Bytes(), &tagsResp); err != nil {
-		t.Fatalf("Invalid tags response JSON: %v", err)
-	}
+		}
 
-	if len(tagsResp) != 1 {
-		t.Fatalf("expected 1 suggestion tag, got %#v", tagsResp)
-	}
-	if tagsResp[0]["tag"] != "testing" || tagsResp[0]["count"] != float64(1) {
-		t.Fatalf("expected testing with count 1, got %#v", tagsResp[0])
-	}
+		pageOne := createPageViaAPI(router, "Facet Alpha", "facet-alpha", nil, pageNodeKind())
+		pageTwo := createPageViaAPI(router, "Facet Beta", "facet-beta", nil, pageNodeKind())
+		pageThree := createPageViaAPI(router, "Facet Gamma", "facet-gamma", nil, pageNodeKind())
 
+		updatePage(pageOne, "Facet Alpha", "facet-alpha", "Body with facet token.", []string{"alpha", "shared"})
+		updatePage(pageTwo, "Facet Beta", "facet-beta", "Body with facet token.", []string{"beta", "shared"})
+		updatePage(pageThree, "Facet Gamma", "facet-gamma", "Body with facet token.", []string{"alpha", "shared", "narrow"})
+
+		baseRec := authenticatedRequest(router, http.MethodGet, "/api/search?q=facet%20token", nil)
+		Expect(baseRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", baseRec.Code, baseRec.Body.String())
+
+		var baseResp searchResponse
+		{
+			err := json.Unmarshal(baseRec.Body.Bytes(), &baseResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid search response JSON: %v", err)
+		}
+
+		narrowRec := authenticatedRequest(router, http.MethodGet, "/api/search?q=facet%20token&tags=alpha", nil)
+		Expect(narrowRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", narrowRec.Code, narrowRec.Body.String())
+
+		var narrowResp searchResponse
+		{
+			err := json.Unmarshal(narrowRec.Body.Bytes(), &narrowResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid filtered search response JSON: %v", err)
+		}
+		Expect(baseResp.Count).To(Equal(3), "expected 3 base results, got %d", baseResp.Count)
+		Expect(narrowResp.Count).To(Equal(2), "expected 2 narrowed results, got %d", narrowResp.Count)
+
+		baseFacets := map[string]int{}
+		for _, facet := range baseResp.TagFacets {
+			baseFacets[facet.Tag] = facet.Count
+		}
+		narrowFacets := map[string]int{}
+		for _, facet := range narrowResp.TagFacets {
+			narrowFacets[facet.Tag] = facet.Count
+		}
+		Expect(baseFacets).To(HaveLen(4), "expected 4 base facets, got %#v", baseResp.TagFacets)
+		Expect(narrowFacets).To(HaveLen(3), "expected 3 narrowed facets, got %#v", narrowResp.TagFacets)
+		Expect(baseFacets).To(HaveKeyWithValue("beta", 1), "expected base facets to include beta=1, got %#v", baseResp.TagFacets)
+		Expect(narrowFacets).NotTo(HaveKey("beta"), "expected beta to disappear after narrowing, got %#v", narrowResp.TagFacets)
+
+		Expect(narrowFacets).To(HaveKeyWithValue("alpha", 2), "unexpected narrowed facets: %#v", narrowResp.TagFacets)
+		Expect(narrowFacets).To(HaveKeyWithValue("shared", 2), "unexpected narrowed facets: %#v", narrowResp.TagFacets)
+		Expect(narrowFacets).To(HaveKeyWithValue("narrow", 1), "unexpected narrowed facets: %#v", narrowResp.TagFacets)
+
+	})
 })
 
-var _ = It("TestSearchEndpoint_FiltersResultsByTags", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("returns excerpts for pages matched by tags", func() {
 
-	reactPage := createPageViaAPI(t, router, "React Search Match", "react-search-match", nil, pageNodeKind())
-	plainPage := createPageViaAPI(t, router, "Plain Search Match", "plain-search-match", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
+		page := createPageViaAPI(router, "Excerpt Page", "excerpt-page", nil, pageNodeKind())
+
 		payload := map[string]interface{}{
 			"version": page.Version,
-			"title":   title,
-			"slug":    slug,
-			"content": content,
-			"tags":    tags,
+			"title":   "Excerpt Page",
+			"slug":    "excerpt-page",
+			"content": "# Heading\n\nThis is a tagged page with useful excerpt text and a [link](/docs) inside the content.",
+			"tags":    []string{"react"},
 		}
 		body, _ := json.Marshal(payload)
-		rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		pagesRec := authenticatedRequest(router, http.MethodGet, "/api/tags/pages?tags=react", nil)
+		Expect(pagesRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags pages endpoint, got %d - %s", pagesRec.Code, pagesRec.Body.String())
+
+		var pagesResp []apiTaggedPageSummaryDTO
+		{
+			err := json.Unmarshal(pagesRec.Body.Bytes(), &pagesResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid pages response JSON: %v", err)
 		}
-	}
+		Expect(pagesResp).To(HaveExactElements(SatisfyAll(
+			HaveField("Kind", tree.NodeKindPage),
+			HaveField("Excerpt", SatisfyAll(
+				Not(BeEmpty()),
+				Not(ContainSubstring("#")),
+				Not(ContainSubstring("[link]")),
+				ContainSubstring("This is a tagged page with useful excerpt text"),
+			)),
+		)), "expected tagged page excerpt, got %#v", pagesResp)
 
-	updatePage(reactPage, "React Search Match", "react-search-match", "Body with shared search token.", []string{"react"})
-	updatePage(plainPage, "Plain Search Match", "plain-search-match", "Body with shared search token.", []string{"docs"})
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/search?q=shared%20search&tags=react", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var resp struct {
-		Count     int `json:"count"`
-		TagFacets []struct {
-			Tag   string `json:"tag"`
-			Count int    `json:"count"`
-		} `json:"tag_facets"`
-		Items []struct {
-			PageID string `json:"page_id"`
-			Title  string `json:"title"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid search response JSON: %v", err)
-	}
-
-	if resp.Count != 1 {
-		t.Fatalf("expected 1 filtered search result, got %d", resp.Count)
-	}
-	if len(resp.Items) != 1 {
-		t.Fatalf("expected 1 filtered search item, got %d", len(resp.Items))
-	}
-	if resp.Items[0].PageID != reactPage.ID {
-		t.Fatalf("expected filtered page %q, got %#v", reactPage.ID, resp.Items)
-	}
-	if len(resp.TagFacets) != 1 || resp.TagFacets[0].Tag != "react" || resp.TagFacets[0].Count != 1 {
-		t.Fatalf("expected tag facets to contain only react=1, got %#v", resp.TagFacets)
-	}
-
+	})
 })
 
-var _ = It("TestSearchEndpoint_ReturnsTagMatchesWithoutQuery", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("accepts repeated tag parameters when listing tagged pages", func() {
 
-	reactPage := createPageViaAPI(t, router, "React Tag Match", "react-tag-match", nil, pageNodeKind())
-	plainPage := createPageViaAPI(t, router, "Plain Tag Match", "plain-tag-match", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
+		pageA := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
+		pageB := createPageViaAPI(router, "Page B", "page-b", nil, pageNodeKind())
+
+		updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
+			payload := map[string]interface{}{
+				"version": page.Version,
+				"title":   title,
+				"slug":    slug,
+				"content": "# Content",
+				"tags":    tags,
+			}
+			body, _ := json.Marshal(payload)
+			rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		}
+
+		updatePageTags(pageA, "Page A", "page-a", []string{"react", "typescript"})
+		updatePageTags(pageB, "Page B", "page-b", []string{"react"})
+
+		pagesRec := authenticatedRequest(router, http.MethodGet, "/api/tags/pages?tags=react&tags=typescript", nil)
+		Expect(pagesRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK from tags pages endpoint, got %d - %s", pagesRec.Code, pagesRec.Body.String())
+
+		var pagesResp []map[string]interface{}
+		{
+			err := json.Unmarshal(pagesRec.Body.Bytes(), &pagesResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid pages response JSON: %v", err)
+		}
+		Expect(pagesResp).To(HaveExactElements(
+			HaveKeyWithValue("title", "Page A"),
+		), "expected Page A, got %#v", pagesResp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns not found when updating a missing page", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"version":"stale-version","title":"Updated","slug":"updated","content":"New content"}`
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/not-found-id", strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected 404 for unknown page, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("keeps a page slug when the update does not change it", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a page
+		created := createPageViaAPI(router, "Immutable Slug", "immutable-slug", nil, pageNodeKind())
+
+		// Update title, but reuse slug
+		payload := map[string]string{
+			"version": created.Version,
+			"title":   "Updated Title",
+			"slug":    created.Slug,
+			"content": "Updated content",
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+created.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
+
+		var updated map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &updated)
+			Expect(err).NotTo(HaveOccurred(), "Invalid response JSON: %v", err)
+		}
+		Expect(updated).To(HaveKeyWithValue("slug", created.Slug), "Expected slug to remain unchanged, got: %v", updated["slug"])
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page updates that would collide with an existing route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		createPageViaAPI(router, "Conflict Title", "conflict-title", nil, pageNodeKind())
+
+		payload := map[string]string{
+			"version": page.Version,
+			"title":   "Conflict Title",
+			"slug":    "conflict-title",
+			"content": "Updated content",
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page updates with invalid JSON", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `this is not valid json`
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/invalid-id", strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 for invalid JSON, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page updates when the title is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"version":"required","slug":"updated","content":"New content"}`
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/missing-title", strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 for missing title, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page updates when the slug is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"version":"required","title":"Updated","content":"New content"}`
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/missing-slug", strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 for missing slug, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page updates with invalid properties", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+
 		payload := map[string]interface{}{
 			"version": page.Version,
-			"title":   title,
-			"slug":    slug,
-			"content": content,
-			"tags":    tags,
+			"title":   "Updated Title",
+			"slug":    "updated-title",
+			"content": "Updated content",
+			"properties": map[string]string{
+				"leafwiki_hidden": "forbidden",
+			},
 		}
 		body, _ := json.Marshal(payload)
-		rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request, got %d - %s", rec.Code, rec.Body.String())
+
+		var resp struct {
+			Error  string `json:"error"`
+			Fields []struct {
+				Field     string `json:"field"`
+				Code      string `json:"code"`
+				MessageID string `json:"messageId"`
+				Message   string `json:"message"`
+			} `json:"fields"`
 		}
-	}
-
-	updatePage(reactPage, "React Tag Match", "react-tag-match", "Body without search token.", []string{"react"})
-	updatePage(plainPage, "Plain Tag Match", "plain-tag-match", "Body without search token.", []string{"docs"})
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/search?tags=react", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var resp struct {
-		Count     int `json:"count"`
-		TagFacets []struct {
-			Tag   string `json:"tag"`
-			Count int    `json:"count"`
-		} `json:"tag_facets"`
-		Items []struct {
-			PageID string `json:"page_id"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid search response JSON: %v", err)
-	}
-
-	if resp.Count != 1 {
-		t.Fatalf("expected 1 tag-only result, got %d", resp.Count)
-	}
-	if len(resp.Items) != 1 {
-		t.Fatalf("expected 1 tag-only item, got %d", len(resp.Items))
-	}
-	if resp.Items[0].PageID != reactPage.ID {
-		t.Fatalf("expected tag-only page %q, got %#v", reactPage.ID, resp.Items)
-	}
-	if len(resp.TagFacets) != 1 || resp.TagFacets[0].Tag != "react" || resp.TagFacets[0].Count != 1 {
-		t.Fatalf("expected tag facets to contain only react=1, got %#v", resp.TagFacets)
-	}
-
-})
-
-var _ = It("TestSearchEndpoint_NormalizesTagOnlyPaginationBounds", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "React Tag Match", "react-tag-match-bounds", nil, pageNodeKind())
-
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "React Tag Match",
-		"slug":    "react-tag-match-bounds",
-		"content": "Body without search token.",
-		"tags":    []string{"react"},
-	}
-	body, _ := json.Marshal(payload)
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	boundsRec := authenticatedRequest(t, router, http.MethodGet, "/api/search?tags=react&offset=-1&limit=0", nil)
-	if boundsRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", boundsRec.Code, boundsRec.Body.String())
-	}
-
-	var resp struct {
-		Count  int `json:"count"`
-		Limit  int `json:"limit"`
-		Offset int `json:"offset"`
-		Items  []struct {
-			PageID string `json:"page_id"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(boundsRec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid search response JSON: %v", err)
-	}
-
-	if resp.Count != 1 {
-		t.Fatalf("expected 1 tag-only result, got %d", resp.Count)
-	}
-	if resp.Offset != 0 {
-		t.Fatalf("expected offset to normalize to 0, got %d", resp.Offset)
-	}
-	if resp.Limit != 20 {
-		t.Fatalf("expected limit to normalize to 20, got %d", resp.Limit)
-	}
-	if len(resp.Items) != 1 || resp.Items[0].PageID != page.ID {
-		t.Fatalf("expected normalized request to return page %q, got %#v", page.ID, resp.Items)
-	}
-
-})
-
-var _ = It("TestSearchEndpoint_TagFacetsShrinkWithAdditionalFilters", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	type searchResponse struct {
-		Count     int `json:"count"`
-		TagFacets []struct {
-			Tag   string `json:"tag"`
-			Count int    `json:"count"`
-		} `json:"tag_facets"`
-	}
-
-	updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
-		payload := map[string]interface{}{
-			"version": page.Version,
-			"title":   title,
-			"slug":    slug,
-			"content": content,
-			"tags":    tags,
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid validation response JSON: %v", err)
 		}
-		body, _ := json.Marshal(payload)
-		rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+		Expect(resp.Fields).To(testmatchers.ContainFieldError(
+			testmatchers.ValidationFieldName("properties.leafwiki_hidden"),
+			wikipages.FieldCodePagePropertyKeyReserved,
+			wikipages.MessageIDPagePropertyKeyReservedPrefix,
+		), "expected reserved prefix validation error, got %#v", resp.Fields)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns a page by id", func() {
+
+		dataDir := filepath.Join(httpTestTempDir(), "data")
+		rootDir := filepath.Join(httpTestTempDir(), "content")
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a page
+		page := createPageViaAPI(router, "Welcome", "welcome", nil, pageNodeKind())
+		{
+			_, err := os.Stat(filepath.Join(rootDir, "welcome.md"))
+			Expect(err).NotTo(HaveOccurred(), "expected API-created page in root dir: %v", err)
 		}
-	}
+		{
 
-	pageOne := createPageViaAPI(t, router, "Facet Alpha", "facet-alpha", nil, pageNodeKind())
-	pageTwo := createPageViaAPI(t, router, "Facet Beta", "facet-beta", nil, pageNodeKind())
-	pageThree := createPageViaAPI(t, router, "Facet Gamma", "facet-gamma", nil, pageNodeKind())
-
-	updatePage(pageOne, "Facet Alpha", "facet-alpha", "Body with facet token.", []string{"alpha", "shared"})
-	updatePage(pageTwo, "Facet Beta", "facet-beta", "Body with facet token.", []string{"beta", "shared"})
-	updatePage(pageThree, "Facet Gamma", "facet-gamma", "Body with facet token.", []string{"alpha", "shared", "narrow"})
-
-	baseRec := authenticatedRequest(t, router, http.MethodGet, "/api/search?q=facet%20token", nil)
-	if baseRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", baseRec.Code, baseRec.Body.String())
-	}
-
-	var baseResp searchResponse
-	if err := json.Unmarshal(baseRec.Body.Bytes(), &baseResp); err != nil {
-		t.Fatalf("Invalid search response JSON: %v", err)
-	}
-
-	narrowRec := authenticatedRequest(t, router, http.MethodGet, "/api/search?q=facet%20token&tags=alpha", nil)
-	if narrowRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", narrowRec.Code, narrowRec.Body.String())
-	}
-
-	var narrowResp searchResponse
-	if err := json.Unmarshal(narrowRec.Body.Bytes(), &narrowResp); err != nil {
-		t.Fatalf("Invalid filtered search response JSON: %v", err)
-	}
-
-	if baseResp.Count != 3 {
-		t.Fatalf("expected 3 base results, got %d", baseResp.Count)
-	}
-	if narrowResp.Count != 2 {
-		t.Fatalf("expected 2 narrowed results, got %d", narrowResp.Count)
-	}
-
-	baseFacets := map[string]int{}
-	for _, facet := range baseResp.TagFacets {
-		baseFacets[facet.Tag] = facet.Count
-	}
-	narrowFacets := map[string]int{}
-	for _, facet := range narrowResp.TagFacets {
-		narrowFacets[facet.Tag] = facet.Count
-	}
-
-	if len(baseFacets) != 4 {
-		t.Fatalf("expected 4 base facets, got %#v", baseResp.TagFacets)
-	}
-	if len(narrowFacets) != 3 {
-		t.Fatalf("expected 3 narrowed facets, got %#v", narrowResp.TagFacets)
-	}
-	if baseFacets["beta"] != 1 {
-		t.Fatalf("expected base facets to include beta=1, got %#v", baseResp.TagFacets)
-	}
-	if _, ok := narrowFacets["beta"]; ok {
-		t.Fatalf("expected beta to disappear after narrowing, got %#v", narrowResp.TagFacets)
-	}
-	if narrowFacets["alpha"] != 2 || narrowFacets["shared"] != 2 || narrowFacets["narrow"] != 1 {
-		t.Fatalf("unexpected narrowed facets: %#v", narrowResp.TagFacets)
-	}
-
-})
-
-var _ = It("TestGetPagesByTagsEndpoint_ReturnsExcerpt", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Excerpt Page", "excerpt-page", nil, pageNodeKind())
-
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Excerpt Page",
-		"slug":    "excerpt-page",
-		"content": "# Heading\n\nThis is a tagged page with useful excerpt text and a [link](/docs) inside the content.",
-		"tags":    []string{"react"},
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	pagesRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags/pages?tags=react", nil)
-	if pagesRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags pages endpoint, got %d - %s", pagesRec.Code, pagesRec.Body.String())
-	}
-
-	var pagesResp []apiTaggedPageSummaryDTO
-	if err := json.Unmarshal(pagesRec.Body.Bytes(), &pagesResp); err != nil {
-		t.Fatalf("Invalid pages response JSON: %v", err)
-	}
-
-	if len(pagesResp) != 1 {
-		t.Fatalf("expected 1 tagged page, got %#v", pagesResp)
-	}
-	if pagesResp[0].Kind != tree.NodeKindPage {
-		t.Fatalf("expected tagged page kind page, got %#v", pagesResp[0].Kind)
-	}
-
-	excerpt := pagesResp[0].Excerpt
-	if excerpt == "" {
-		t.Fatalf("expected excerpt to be present, got %#v", pagesResp[0])
-	}
-	if strings.Contains(excerpt, "#") {
-		t.Fatalf("expected excerpt without markdown heading markers, got %q", excerpt)
-	}
-	if strings.Contains(excerpt, "[link]") {
-		t.Fatalf("expected excerpt without markdown link syntax, got %q", excerpt)
-	}
-	if !strings.Contains(excerpt, "This is a tagged page with useful excerpt text") {
-		t.Fatalf("expected excerpt to contain page text, got %q", excerpt)
-	}
-
-})
-
-var _ = It("TestGetPagesByTagsEndpoint_AcceptsRepeatedTagsParams", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	pageA := createPageViaAPI(t, router, "Page A", "page-a", nil, pageNodeKind())
-	pageB := createPageViaAPI(t, router, "Page B", "page-b", nil, pageNodeKind())
-
-	updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
-		payload := map[string]interface{}{
-			"version": page.Version,
-			"title":   title,
-			"slug":    slug,
-			"content": "# Content",
-			"tags":    tags,
+			Expect(filepath.Join(dataDir, "root", "welcome.md")).NotTo(BeAnExistingFile(), "expected no API-created page in data dir root")
 		}
-		body, _ := json.Marshal(payload)
-		rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-		}
-	}
 
-	updatePageTags(pageA, "Page A", "page-a", []string{"react", "typescript"})
-	updatePageTags(pageB, "Page B", "page-b", []string{"react"})
-
-	pagesRec := authenticatedRequest(t, router, http.MethodGet, "/api/tags/pages?tags=react&tags=typescript", nil)
-	if pagesRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK from tags pages endpoint, got %d - %s", pagesRec.Code, pagesRec.Body.String())
-	}
-
-	var pagesResp []map[string]interface{}
-	if err := json.Unmarshal(pagesRec.Body.Bytes(), &pagesResp); err != nil {
-		t.Fatalf("Invalid pages response JSON: %v", err)
-	}
-
-	if len(pagesResp) != 1 {
-		t.Fatalf("expected 1 tagged page, got %#v", pagesResp)
-	}
-	if pagesResp[0]["title"] != "Page A" {
-		t.Fatalf("expected Page A, got %#v", pagesResp[0])
-	}
-
-})
-
-var _ = It("TestUpdatePage_NotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"version":"stale-version","title":"Updated","slug":"updated","content":"New content"}`
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/not-found-id", strings.NewReader(string(body)))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("Expected 404 for unknown page, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePage_SlugRemainsIfUnchanged", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a page
-	created := createPageViaAPI(t, router, "Immutable Slug", "immutable-slug", nil, pageNodeKind())
-
-	// Update title, but reuse slug
-	payload := map[string]string{
-		"version": created.Version,
-		"title":   "Updated Title",
-		"slug":    created.Slug,
-		"content": "Updated content",
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+created.ID, strings.NewReader(string(body)))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
-
-	var updated map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("Invalid response JSON: %v", err)
-	}
-
-	if updated["slug"] != created.Slug {
-		t.Errorf("Expected slug to remain unchanged, got: %v", updated["slug"])
-	}
-
-})
-
-var _ = It("TestUpdatePage_PageAlreadyExists", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-	createPageViaAPI(t, router, "Conflict Title", "conflict-title", nil, pageNodeKind())
-
-	payload := map[string]string{
-		"version": page.Version,
-		"title":   "Conflict Title",
-		"slug":    "conflict-title",
-		"content": "Updated content",
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected 400 Bad Request, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePage_InvalidJSON", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `this is not valid json`
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/invalid-id", strings.NewReader(string(body)))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for invalid JSON, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePage_MissingTitle", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"version":"required","slug":"updated","content":"New content"}`
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/missing-title", strings.NewReader(string(body)))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for missing title, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePage_MissingSlug", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"version":"required","title":"Updated","content":"New content"}`
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/missing-slug", strings.NewReader(string(body)))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for missing slug, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdatePage_InvalidProperties", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	page := createPageViaAPI(t, router, "Original Title", "original-title", nil, pageNodeKind())
-
-	payload := map[string]interface{}{
-		"version": page.Version,
-		"title":   "Updated Title",
-		"slug":    "updated-title",
-		"content": "Updated content",
-		"properties": map[string]string{
-			"leafwiki_hidden": "forbidden",
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+page.ID, strings.NewReader(string(body)))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected 400 Bad Request, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var resp struct {
-		Error  string `json:"error"`
-		Fields []struct {
-			Field   string `json:"field"`
-			Message string `json:"message"`
-		} `json:"fields"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Invalid validation response JSON: %v", err)
-	}
-
-	if resp.Error != "validation_error" {
-		t.Fatalf("expected validation_error, got %q", resp.Error)
-	}
-
-	gotFields := map[string]string{}
-	for _, field := range resp.Fields {
-		gotFields[field.Field] = field.Message
-	}
-
-	if gotFields["properties.leafwiki_hidden"] != "Property key uses a reserved prefix" {
-		t.Fatalf("expected reserved prefix validation error, got %#v", gotFields)
-	}
-
-})
-
-var _ = It("TestGetPageEndpoint", func() {
-	t := GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a page
-	page := createPageViaAPI(t, router, "Welcome", "welcome", nil, pageNodeKind())
-	if _, err := os.Stat(filepath.Join(rootDir, "welcome.md")); err != nil {
-		t.Fatalf("expected API-created page in root dir: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "root", "welcome.md")); !os.IsNotExist(err) {
-		t.Fatalf("expected no API-created page in data dir root, got err=%v", err)
-	}
-	writePageMarkdownForTest(t, w, page, `---
+		writePageMarkdownForTest(w, page, `---
 leafwiki_id: `+page.ID+`
 leafwiki_title: Welcome
 tags:
@@ -3625,1441 +3358,1331 @@ owners:
 Body
 `)
 
-	// Get page
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/"+page.ID, nil)
+		// Get page
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+page.ID, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to parse JSON: %v", err)
-	}
-
-	if resp["id"] == nil {
-		t.Errorf("Expected id in response, got: %v", resp)
-	}
-
-	if resp["title"] != page.Title {
-		t.Errorf("Expected title in response, got: %v", resp)
-	}
-
-	if resp["slug"] != page.Slug {
-		t.Errorf("Expected slug in response, got: %v", resp)
-	}
-
-	tagsValue, ok := resp["tags"].([]interface{})
-	if !ok || len(tagsValue) != 2 || tagsValue[0] != "alpha" || tagsValue[1] != "beta" {
-		t.Fatalf("Expected tags in response, got %#v", resp["tags"])
-	}
-
-	// Only string scalar properties are returned; numbers, booleans, and lists are excluded.
-	propertiesValue, ok := resp["properties"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Expected properties map in response, got %#v", resp["properties"])
-	}
-	if _, exists := propertiesValue["priority"]; exists {
-		t.Fatalf("Numeric property must not be returned, got %#v", propertiesValue)
-	}
-	if _, exists := propertiesValue["published"]; exists {
-		t.Fatalf("Boolean property must not be returned, got %#v", propertiesValue)
-	}
-	if _, exists := propertiesValue["owners"]; exists {
-		t.Fatalf("List property must not be returned, got %#v", propertiesValue)
-	}
-
-})
-
-var _ = It("TestGetPageEndpoint_NotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/not-found-id", nil)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestGetPageEndpoint_MissingID", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/", nil)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_MissingPath", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path", nil)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_ExplicitEmptyPathReturnsRootSection", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "root")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("mkdir root fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: root\nleafwiki_title: Root README\n---\n# Root README\n"), 0o644); err != nil {
-		t.Fatalf("write root README: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "child.md"), []byte("---\nleafwiki_id: child\nleafwiki_title: Child\n---\n# Child\n"), 0o644); err != nil {
-		t.Fatalf("write child: %v", err)
-	}
-	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=&kind=section", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected root path status 200, got %d - %s", rec.Code, rec.Body.String())
-	}
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("parse root response: %v", err)
-	}
-	if resp["id"] != "root" || resp["kind"] != "section" || resp["title"] != "Root README" {
-		t.Fatalf("root response = %#v, want root README section", resp)
-	}
-	if !strings.Contains(resp["content"].(string), "Root README") {
-		t.Fatalf("root content = %#v, want README body", resp["content"])
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_NotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=does-not-exist", nil)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_PageReturnsNoChildren", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a standalone page (no children – adding children auto-converts it to a section)
-	createPageViaAPI(t, router, "My Page", "my-page", nil, pageNodeKind())
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=my-page", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to parse JSON: %v", err)
-	}
-
-	// Page kind (depth=0): the node must be returned with children absent or null
-	if resp["kind"] != "page" {
-		t.Errorf("Expected kind 'page', got: %v", resp["kind"])
-	}
-	if children, ok := resp["children"]; ok && children != nil {
-		t.Errorf("Expected no children for page kind (depth=0), got: %v", children)
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_SectionReturnsDirectChildrenOnly", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	sectionKind := tree.NodeKindSection
-
-	// Create a section with a child page that itself has a grandchild
-	section := createPageViaAPI(t, router, "My Section", "my-section", nil, &sectionKind)
-	child := createPageViaAPI(t, router, "Child Page", "child-page", &section.ID, pageNodeKind())
-	createPageViaAPI(t, router, "Grandchild Page", "grandchild-page", &child.ID, pageNodeKind())
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=my-section", nil)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to parse JSON: %v", err)
-	}
-
-	// Section kind (depth=1): direct children must be present
-	children, ok := resp["children"].([]interface{})
-	if !ok || len(children) == 0 {
-		t.Fatalf("Expected direct children for section kind (depth=1), got: %v", resp["children"])
-	}
-
-	// Grandchildren must be absent or null (depth=1 means children's children are not included)
-	firstChild, ok := children[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Expected child to be an object, got: %v", children[0])
-	}
-	if grandchildren, ok := firstChild["children"]; ok && grandchildren != nil {
-		t.Errorf("Expected no grandchildren for section kind (depth=1), got: %v", grandchildren)
-	}
-
-})
-
-var _ = It("TestGetPageByPathEndpoint_KindDistinguishesSameBasenamePageAndSection", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "root")
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755); err != nil {
-		t.Fatalf("mkdir fixture: %v", err)
-	}
-	write := func(relPath, content string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s: %v", relPath, err)
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse JSON: %v", err)
 		}
-	}
-	write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
-	write("docs/sync.md", "---\nleafwiki_id: sync-page\nleafwiki_title: Sync Page\n---\n# Sync Page\n")
-	write("docs/sync/index.md", "---\nleafwiki_id: sync-section\nleafwiki_title: Sync Section\n---\n# Sync Section\n")
+		Expect(resp).To(SatisfyAll(
+			HaveKey("id"),
+			HaveKeyWithValue("title", page.Title),
+			HaveKeyWithValue("slug", page.Slug),
+			HaveKeyWithValue("tags", HaveExactElements("alpha", "beta")),
+			HaveKeyWithValue("properties", SatisfyAll(
+				Not(HaveKey("priority")),
+				Not(HaveKey("published")),
+				Not(HaveKey("owners")),
+			)),
+		), "page response = %#v", resp)
 
-	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+	})
+})
 
-	pageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=page", nil)
-	if pageRec.Code != http.StatusOK {
-		t.Fatalf("Expected page status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
-	}
-	var pageResp map[string]interface{}
-	if err := json.Unmarshal(pageRec.Body.Bytes(), &pageResp); err != nil {
-		t.Fatalf("parse page response: %v", err)
-	}
-	if pageResp["id"] != "sync-page" || pageResp["kind"] != "page" {
-		t.Fatalf("page response = %#v, want sync-page page", pageResp)
-	}
+var _ = Describe("HTTP router", func() {
+	It("returns not found for a missing page id", func() {
 
-	pageMarkdownPathRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync.md", nil)
-	if pageMarkdownPathRec.Code != http.StatusOK {
-		t.Fatalf("Expected page markdown-path status 200, got %d - %s", pageMarkdownPathRec.Code, pageMarkdownPathRec.Body.String())
-	}
-	var pageMarkdownPathResp map[string]interface{}
-	if err := json.Unmarshal(pageMarkdownPathRec.Body.Bytes(), &pageMarkdownPathResp); err != nil {
-		t.Fatalf("parse page markdown-path response: %v", err)
-	}
-	if pageMarkdownPathResp["id"] != "sync-page" || pageMarkdownPathResp["kind"] != "page" {
-		t.Fatalf("page markdown-path response = %#v, want sync-page page", pageMarkdownPathResp)
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	sectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=section", nil)
-	if sectionRec.Code != http.StatusOK {
-		t.Fatalf("Expected section status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
-	}
-	var sectionResp map[string]interface{}
-	if err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionResp); err != nil {
-		t.Fatalf("parse section response: %v", err)
-	}
-	if sectionResp["id"] != "sync-section" || sectionResp["kind"] != "section" {
-		t.Fatalf("section response = %#v, want sync-section section", sectionResp)
-	}
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/not-found-id", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
 
-	sectionCanonicalRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/sync", nil)
-	if sectionCanonicalRec.Code != http.StatusOK {
-		t.Fatalf("Expected canonical section status 200, got %d - %s", sectionCanonicalRec.Code, sectionCanonicalRec.Body.String())
-	}
-	var sectionCanonicalResp map[string]interface{}
-	if err := json.Unmarshal(sectionCanonicalRec.Body.Bytes(), &sectionCanonicalResp); err != nil {
-		t.Fatalf("parse canonical section response: %v", err)
-	}
-	if sectionCanonicalResp["id"] != "sync-section" || sectionCanonicalResp["kind"] != "section" {
-		t.Fatalf("canonical section response = %#v, want sync-section section", sectionCanonicalResp)
-	}
+	})
+})
 
+var _ = Describe("HTTP router", func() {
+	It("rejects page reads when the id is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects page-by-path reads when the path is missing", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns the root section for an explicit empty path", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "root")
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir root fixture: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: root\nleafwiki_title: Root README\n---\n# Root README\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write root README: %v", err)
+		}
+		{
+
+			err := os.WriteFile(filepath.Join(rootDir, "child.md"), []byte("---\nleafwiki_id: child\nleafwiki_title: Child\n---\n# Child\n"), 0o644)
+			Expect(err).NotTo(HaveOccurred(), "write child: %v", err)
+		}
+
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=&kind=section", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected root path status 200, got %d - %s", rec.Code, rec.Body.String())
+
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "parse root response: %v", err)
+		}
+
+		Expect(resp).To(SatisfyAll(
+			HaveKeyWithValue("id", "root"),
+			HaveKeyWithValue("kind", "section"),
+			HaveKeyWithValue("title", "Root README"),
+			HaveKeyWithValue("content", ContainSubstring("Root README")),
+		), "root response = %#v, want root README section", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns not found for a missing page path", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=does-not-exist", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("omits children when page-by-path resolves to a page", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a standalone page (no children – adding children auto-converts it to a section)
+		createPageViaAPI(router, "My Page", "my-page", nil, pageNodeKind())
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=my-page", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d - %s", rec.Code, rec.Body.String())
+
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse JSON: %v", err)
+		}
+		// Page kind (depth=0): the node must be returned with children absent or null.
+		Expect(resp).To(SatisfyAll(
+			HaveKeyWithValue("kind", "page"),
+			HaveKeyWithValue("children", BeNil()),
+		), "page-kind response = %#v", resp)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("returns only direct children when page-by-path resolves to a section", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		sectionKind := tree.NodeKindSection
+
+		// Create a section with a child page that itself has a grandchild
+		section := createPageViaAPI(router, "My Section", "my-section", nil, &sectionKind)
+		child := createPageViaAPI(router, "Child Page", "child-page", &section.ID, pageNodeKind())
+		createPageViaAPI(router, "Grandchild Page", "grandchild-page", &child.ID, pageNodeKind())
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=my-section", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d - %s", rec.Code, rec.Body.String())
+
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse JSON: %v", err)
+		}
+
+		Expect(resp).To(HaveKeyWithValue("children", ContainElement(HaveKeyWithValue("children", BeNil()))), "Expected direct children without grandchildren for section kind (depth=1), got: %v", resp["children"])
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("uses the requested kind to distinguish same-basename pages and sections", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "root")
+		{
+			err := os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir fixture: %v", err)
+		}
+
+		write := func(relPath, content string) {
+			GinkgoHelper()
+			{
+
+				err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644)
+				Expect(err).NotTo(HaveOccurred(), "write %s: %v", relPath, err)
+			}
+
+		}
+		write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
+		write("docs/sync.md", "---\nleafwiki_id: sync-page\nleafwiki_title: Sync Page\n---\n# Sync Page\n")
+		write("docs/sync/index.md", "---\nleafwiki_id: sync-section\nleafwiki_title: Sync Section\n---\n# Sync Section\n")
+
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		pageRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=page", nil)
+		Expect(pageRec).To(HaveHTTPStatus(http.StatusOK), "Expected page status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
+
+		var pageResp map[string]interface{}
+		{
+			err := json.Unmarshal(pageRec.Body.Bytes(), &pageResp)
+			Expect(err).NotTo(HaveOccurred(), "parse page response: %v", err)
+		}
+
+		Expect(pageResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-page"), HaveKeyWithValue("kind", "page")), "page response = %#v, want sync-page page", pageResp)
+
+		pageMarkdownPathRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync.md", nil)
+		Expect(pageMarkdownPathRec).To(HaveHTTPStatus(http.StatusOK), "Expected page markdown-path status 200, got %d - %s", pageMarkdownPathRec.Code, pageMarkdownPathRec.Body.String())
+
+		var pageMarkdownPathResp map[string]interface{}
+		{
+			err := json.Unmarshal(pageMarkdownPathRec.Body.Bytes(), &pageMarkdownPathResp)
+			Expect(err).NotTo(HaveOccurred(), "parse page markdown-path response: %v", err)
+		}
+
+		Expect(pageMarkdownPathResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-page"), HaveKeyWithValue("kind", "page")), "page markdown-path response = %#v, want sync-page page", pageMarkdownPathResp)
+
+		sectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=section", nil)
+		Expect(sectionRec).To(HaveHTTPStatus(http.StatusOK), "Expected section status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
+
+		var sectionResp map[string]interface{}
+		{
+			err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionResp)
+			Expect(err).NotTo(HaveOccurred(), "parse section response: %v", err)
+		}
+
+		Expect(sectionResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-section"), HaveKeyWithValue("kind", "section")), "section response = %#v, want sync-section section", sectionResp)
+
+		sectionCanonicalRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync", nil)
+		Expect(sectionCanonicalRec).To(HaveHTTPStatus(http.StatusOK), "Expected canonical section status 200, got %d - %s", sectionCanonicalRec.Code, sectionCanonicalRec.Body.String())
+
+		var sectionCanonicalResp map[string]interface{}
+		{
+			err := json.Unmarshal(sectionCanonicalRec.Body.Bytes(), &sectionCanonicalResp)
+			Expect(err).NotTo(HaveOccurred(), "parse canonical section response: %v", err)
+		}
+
+		Expect(sectionCanonicalResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-section"), HaveKeyWithValue("kind", "section")), "canonical section response = %#v, want sync-section section", sectionCanonicalResp)
+
+	})
 })
 
 // - Explicit README.md page link stays a page when index.md exists
-var _ = It("TestGetPageByPathEndpoint_ReadmeMarkdownPathUsesFallbackOnlyWhenActive", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "root")
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755); err != nil {
-		t.Fatalf("mkdir guides fixture: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755); err != nil {
-		t.Fatalf("mkdir indexed fixture: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755); err != nil {
-		t.Fatalf("mkdir no-readme fixture: %v", err)
-	}
-	write := func(relPath, content string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s: %v", relPath, err)
+var _ = Describe("HTTP router", func() {
+	It("serves README.md as a section fallback only when no explicit page exists", func() {
+
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "root")
+		{
+			err := os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir guides fixture: %v", err)
 		}
-	}
-	write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
-	write("README.md", "---\nleafwiki_id: root-section\nleafwiki_title: Root\n---\n# Root\n")
-	write("docs/guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides\n")
-	write("docs/indexed/index.md", "---\nleafwiki_id: indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n")
-	write("docs/indexed/README.md", "---\nleafwiki_id: indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n")
-	write("docs/no-readme/index.md", "---\nleafwiki_id: no-readme-section\nleafwiki_title: No README\n---\n# No README\n")
+		{
 
-	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	fallbackRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md", nil)
-	if fallbackRec.Code != http.StatusOK {
-		t.Fatalf("Expected README fallback status 200, got %d - %s", fallbackRec.Code, fallbackRec.Body.String())
-	}
-	var fallbackResp map[string]interface{}
-	if err := json.Unmarshal(fallbackRec.Body.Bytes(), &fallbackResp); err != nil {
-		t.Fatalf("parse README fallback response: %v", err)
-	}
-	if fallbackResp["id"] != "guides-section" || fallbackResp["kind"] != "section" {
-		t.Fatalf("README fallback response = %#v, want guides section", fallbackResp)
-	}
-
-	explicitSectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md&kind=section", nil)
-	if explicitSectionRec.Code != http.StatusOK {
-		t.Fatalf("Expected explicit README section fallback status 200, got %d - %s", explicitSectionRec.Code, explicitSectionRec.Body.String())
-	}
-	var explicitSectionResp map[string]interface{}
-	if err := json.Unmarshal(explicitSectionRec.Body.Bytes(), &explicitSectionResp); err != nil {
-		t.Fatalf("parse explicit README section fallback response: %v", err)
-	}
-	if explicitSectionResp["id"] != "guides-section" || explicitSectionResp["kind"] != "section" {
-		t.Fatalf("explicit README section fallback response = %#v, want guides section", explicitSectionResp)
-	}
-
-	readmePageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md", nil)
-	if readmePageRec.Code != http.StatusOK {
-		t.Fatalf("Expected README page status 200, got %d - %s", readmePageRec.Code, readmePageRec.Body.String())
-	}
-	var readmePageResp map[string]interface{}
-	if err := json.Unmarshal(readmePageRec.Body.Bytes(), &readmePageResp); err != nil {
-		t.Fatalf("parse README page response: %v", err)
-	}
-	if readmePageResp["id"] != "indexed-readme-page" || readmePageResp["kind"] != "page" {
-		t.Fatalf("README page response = %#v, want indexed README page", readmePageResp)
-	}
-
-	inactiveExplicitSectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md&kind=section", nil)
-	if inactiveExplicitSectionRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected inactive explicit README section status 404, got %d - %s", inactiveExplicitSectionRec.Code, inactiveExplicitSectionRec.Body.String())
-	}
-
-	missingReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/no-readme/README.md", nil)
-	if missingReadmeRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected missing README status 404, got %d - %s", missingReadmeRec.Code, missingReadmeRec.Body.String())
-	}
-
-	lowercaseReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=docs/guides/readme.md", nil)
-	if lowercaseReadmeRec.Code != http.StatusNotFound {
-		t.Fatalf("Expected lowercase readme.md status 404, got %d - %s", lowercaseReadmeRec.Code, lowercaseReadmeRec.Body.String())
-	}
-
-	traversalReadmeRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=../README.md&kind=section", nil)
-	if traversalReadmeRec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected traversal README status 400, got %d - %s", traversalReadmeRec.Code, traversalReadmeRec.Body.String())
-	}
-
-})
-
-var _ = It("TestGetTreeEndpoint_ContentPathUsesCaseInsensitiveIndexPrecedence", func() {
-	t := GinkgoT()
-	dataDir := t.TempDir()
-	rootDir := filepath.Join(t.TempDir(), "root")
-	for _, dir := range []string{"docs", "guides"} {
-		if err := os.MkdirAll(filepath.Join(rootDir, dir), 0o755); err != nil {
-			t.Fatalf("create %s dir: %v", dir, err)
+			err := os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir indexed fixture: %v", err)
 		}
-	}
-	write := func(relPath, content string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s: %v", relPath, err)
+		{
+
+			err := os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755)
+			Expect(err).NotTo(HaveOccurred(), "mkdir no-readme fixture: %v", err)
 		}
-	}
-	write("docs/INDEX.MD", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs Index\n")
-	write("docs/README.md", "---\nleafwiki_id: docs-readme\nleafwiki_title: Docs README\n---\n# Docs README\n")
-	write("guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides README\n")
 
-	w := createWikiTestInstanceWithWorkspace(t, wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+		write := func(relPath, content string) {
+			GinkgoHelper()
+			{
 
-	root := getTreeViaAPI(t, router)
-	var docs, guides *apiPageDTO
-	for _, child := range root.Children {
-		if child.Path == "docs" {
-			docs = child
+				err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644)
+				Expect(err).NotTo(HaveOccurred(), "write %s: %v", relPath, err)
+			}
+
 		}
-		if child.Path == "guides" {
-			guides = child
+		write("docs/index.md", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs\n")
+		write("README.md", "---\nleafwiki_id: root-section\nleafwiki_title: Root\n---\n# Root\n")
+		write("docs/guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides\n")
+		write("docs/indexed/index.md", "---\nleafwiki_id: indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n")
+		write("docs/indexed/README.md", "---\nleafwiki_id: indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n")
+		write("docs/no-readme/index.md", "---\nleafwiki_id: no-readme-section\nleafwiki_title: No README\n---\n# No README\n")
+
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		fallbackRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md", nil)
+		Expect(fallbackRec).To(HaveHTTPStatus(http.StatusOK), "Expected README fallback status 200, got %d - %s", fallbackRec.Code, fallbackRec.Body.String())
+
+		var fallbackResp map[string]interface{}
+		{
+			err := json.Unmarshal(fallbackRec.Body.Bytes(), &fallbackResp)
+			Expect(err).NotTo(HaveOccurred(), "parse README fallback response: %v", err)
 		}
-	}
-	if docs == nil {
-		t.Fatalf("docs section missing from tree: %#v", root.Children)
-	}
-	if guides == nil {
-		t.Fatalf("guides section missing from tree: %#v", root.Children)
-	}
-	if docs.ContentPath != "docs/INDEX.MD" {
-		t.Fatalf("docs contentPath = %q, want docs/INDEX.MD", docs.ContentPath)
-	}
-	if docs.ReadmeFallback {
-		t.Fatalf("docs readmeFallback = true, want false for index-backed section")
-	}
-	if !guides.ReadmeFallback {
-		t.Fatalf("guides readmeFallback = false, want true for README-backed section")
-	}
 
-})
+		Expect(fallbackResp).To(SatisfyAll(HaveKeyWithValue("id", "guides-section"), HaveKeyWithValue("kind", "section")), "README fallback response = %#v, want guides section", fallbackResp)
 
-var _ = It("TestEnsurePageEndpoint_CreatesSectionTwinWhenPageRouteExists", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+		explicitSectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/guides/README.md&kind=section", nil)
+		Expect(explicitSectionRec).To(HaveHTTPStatus(http.StatusOK), "Expected explicit README section fallback status 200, got %d - %s", explicitSectionRec.Code, explicitSectionRec.Body.String())
 
-	sectionKind := tree.NodeKindSection
-	page := createPageViaAPI(t, router, "Sync Page", "sync", nil, pageNodeKind())
-	body := `{"path":"sync","title":"Sync Section","kind":"section"}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/pages/ensure", strings.NewReader(body))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on ensure, got %d - %s", rec.Code, rec.Body.String())
-	}
-	var ensured apiPageDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &ensured); err != nil {
-		t.Fatalf("Unmarshal(ensure response) failed: %v", err)
-	}
-	if ensured.ID == page.ID {
-		t.Fatalf("ensure returned existing page %q instead of section twin", page.ID)
-	}
-	if ensured.Kind != sectionKind {
-		t.Fatalf("ensure kind = %q, want section", ensured.Kind)
-	}
+		var explicitSectionResp map[string]interface{}
+		{
+			err := json.Unmarshal(explicitSectionRec.Body.Bytes(), &explicitSectionResp)
+			Expect(err).NotTo(HaveOccurred(), "parse explicit README section fallback response: %v", err)
+		}
 
-	pageRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=sync&kind=page", nil)
-	if pageRec.Code != http.StatusOK {
-		t.Fatalf("Expected page twin lookup status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
-	}
-	var pageTwin apiPageDTO
-	if err := json.Unmarshal(pageRec.Body.Bytes(), &pageTwin); err != nil {
-		t.Fatalf("Unmarshal(page twin response) failed: %v", err)
-	}
-	if pageTwin.ID != page.ID || pageTwin.Kind != tree.NodeKindPage {
-		t.Fatalf("page twin response = %#v, want original page %q", pageTwin, page.ID)
-	}
+		Expect(explicitSectionResp).To(SatisfyAll(HaveKeyWithValue("id", "guides-section"), HaveKeyWithValue("kind", "section")), "explicit README section fallback response = %#v, want guides section", explicitSectionResp)
 
-	sectionRec := authenticatedRequest(t, router, http.MethodGet, "/api/pages/by-path?path=sync&kind=section", nil)
-	if sectionRec.Code != http.StatusOK {
-		t.Fatalf("Expected section twin lookup status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
-	}
-	var sectionTwin apiPageDTO
-	if err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionTwin); err != nil {
-		t.Fatalf("Unmarshal(section twin response) failed: %v", err)
-	}
-	if sectionTwin.ID != ensured.ID || sectionTwin.Kind != tree.NodeKindSection {
-		t.Fatalf("section twin response = %#v, want ensured section %q", sectionTwin, ensured.ID)
-	}
+		readmePageRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md", nil)
+		Expect(readmePageRec).To(HaveHTTPStatus(http.StatusOK), "Expected README page status 200, got %d - %s", readmePageRec.Code, readmePageRec.Body.String())
 
-})
+		var readmePageResp map[string]interface{}
+		{
+			err := json.Unmarshal(readmePageRec.Body.Bytes(), &readmePageResp)
+			Expect(err).NotTo(HaveOccurred(), "parse README page response: %v", err)
+		}
 
-var _ = It("TestGetPagePermalinkEndpoint_ReturnsCurrentPath", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+		Expect(readmePageResp).To(SatisfyAll(HaveKeyWithValue("id", "indexed-readme-page"), HaveKeyWithValue("kind", "page")), "README page response = %#v, want indexed README page", readmePageResp)
 
-	docs := createPageViaAPI(t, router, "Docs", "docs", nil, pageNodeKind())
-	guide := createPageViaAPI(t, router, "Guide", "guide", &docs.ID, pageNodeKind())
-	archive := createPageViaAPI(t, router, "Archive", "archive", nil, pageNodeKind())
+		inactiveExplicitSectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md&kind=section", nil)
+		Expect(inactiveExplicitSectionRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected inactive explicit README section status 404, got %d - %s", inactiveExplicitSectionRec.Code, inactiveExplicitSectionRec.Body.String())
 
-	movePayload := `{"version":"` + guide.Version + `","parentId":"` + archive.ID + `"}`
-	moveRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+guide.ID+"/move", strings.NewReader(movePayload))
-	if moveRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on move, got %d - %s", moveRec.Code, moveRec.Body.String())
-	}
+		missingReadmeRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/no-readme/README.md", nil)
+		Expect(missingReadmeRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected missing README status 404, got %d - %s", missingReadmeRec.Code, missingReadmeRec.Body.String())
 
-	guide = getPageByPathViaAPI(t, router, "archive/guide")
+		lowercaseReadmeRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/guides/readme.md", nil)
+		Expect(lowercaseReadmeRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected lowercase readme.md status 404, got %d - %s", lowercaseReadmeRec.Code, lowercaseReadmeRec.Body.String())
 
-	updatePayload := `{"version":"` + guide.Version + `","title":"User Guide","slug":"user-guide","content":""}`
-	updateRec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+guide.ID, strings.NewReader(updatePayload))
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on update, got %d - %s", updateRec.Code, updateRec.Body.String())
-	}
+		traversalReadmeRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=../README.md&kind=section", nil)
+		Expect(traversalReadmeRec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected traversal README status 400, got %d - %s", traversalReadmeRec.Code, traversalReadmeRec.Body.String())
 
-	target := getPermalinkTargetViaAPI(t, router, guide.ID)
-	if target.ID != guide.ID {
-		t.Fatalf("expected ID %q, got %q", guide.ID, target.ID)
-	}
-	if target.Slug != "user-guide" {
-		t.Fatalf("expected slug user-guide, got %q", target.Slug)
-	}
-	if target.Path != "archive/user-guide" {
-		t.Fatalf("expected path archive/user-guide, got %q", target.Path)
-	}
-	if target.Kind != tree.NodeKindPage {
-		t.Fatalf("expected kind page, got %q", target.Kind)
-	}
-
-})
-
-var _ = It("TestGetPagePermalinkEndpoint_PublicAccessAllowsUnauthenticatedReads", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            true,
-		InjectCodeInHeader:      "",
-		CustomStylesheet:        "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
 	})
-
-	page := createPageViaAPI(t, router, "Public Page", "public-page", nil, pageNodeKind())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pages/permalink/"+page.ID, nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var target apiPermalinkTargetDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &target); err != nil {
-		t.Fatalf("Unmarshal(permalink response) failed: %v", err)
-	}
-	if target.Path != "public-page" {
-		t.Fatalf("expected path public-page, got %q", target.Path)
-	}
-	if target.Kind != tree.NodeKindPage {
-		t.Fatalf("expected kind page, got %q", target.Kind)
-	}
-
 })
 
-var _ = It("TestMovePageEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("prefers case-insensitive index files when building tree content paths", func() {
 
-	// Create two pages a and b
-	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
-	b := createPageViaAPI(t, router, "Section B", "section-b", nil, pageNodeKind())
+		dataDir := httpTestTempDir()
+		rootDir := filepath.Join(httpTestTempDir(), "root")
+		for _, dir := range []string{"docs", "guides"} {
+			{
+				err := os.MkdirAll(filepath.Join(rootDir, dir), 0o755)
+				Expect(err).NotTo(HaveOccurred(), "create %s dir: %v", dir, err)
+			}
 
-	// Move a under b
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"`+b.ID+`"}`))
+		}
+		write := func(relPath, content string) {
+			GinkgoHelper()
+			{
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
+				err := os.WriteFile(filepath.Join(rootDir, filepath.FromSlash(relPath)), []byte(content), 0o644)
+				Expect(err).NotTo(HaveOccurred(), "write %s: %v", relPath, err)
+			}
 
-	// Check if a is now a child of b
-	movedParent := getPageByPathViaAPI(t, router, "section-b")
-	if len(movedParent.Children) != 1 || movedParent.Children[0].ID != a.ID {
-		t.Errorf("Expected page to be moved under new parent")
-	}
+		}
+		write("docs/INDEX.MD", "---\nleafwiki_id: docs-section\nleafwiki_title: Docs\n---\n# Docs Index\n")
+		write("docs/README.md", "---\nleafwiki_id: docs-readme\nleafwiki_title: Docs README\n---\n# Docs README\n")
+		write("guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides README\n")
 
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		root := getTreeViaAPI(router)
+		Expect(root.Children).To(ContainElement(SatisfyAll(
+			HaveField("Path", "docs"),
+			HaveField("ContentPath", "docs/INDEX.MD"),
+			HaveField("ReadmeFallback", BeFalse()),
+		)), "docs section missing from tree: %#v", root.Children)
+		Expect(root.Children).To(ContainElement(SatisfyAll(
+			HaveField("Path", "guides"),
+			HaveField("ReadmeFallback", BeTrue()),
+		)), "guides section missing from tree: %#v", root.Children)
+
+	})
 })
 
-var _ = It("TestMovePageEndpoint_NotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("creates a section twin when a page route already exists", func() {
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/not-found-id/move", strings.NewReader(`{"version":"missing","parentId":"root"}`))
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
+		sectionKind := tree.NodeKindSection
+		page := createPageViaAPI(router, "Sync Page", "sync", nil, pageNodeKind())
+		body := `{"path":"sync","title":"Sync Section","kind":"section"}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/pages/ensure", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on ensure, got %d - %s", rec.Code, rec.Body.String())
 
+		var ensured apiPageDTO
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &ensured)
+			Expect(err).NotTo(HaveOccurred(), "Unmarshal(ensure response) failed: %v", err)
+		}
+		Expect(ensured).To(SatisfyAll(
+			HaveField("ID", Not(Equal(page.ID))),
+			HaveField("Kind", sectionKind),
+		), "ensure response = %#v", ensured)
+
+		pageRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=sync&kind=page", nil)
+		Expect(pageRec).To(HaveHTTPStatus(http.StatusOK), "Expected page twin lookup status 200, got %d - %s", pageRec.Code, pageRec.Body.String())
+
+		var pageTwin apiPageDTO
+		{
+			err := json.Unmarshal(pageRec.Body.Bytes(), &pageTwin)
+			Expect(err).NotTo(HaveOccurred(), "Unmarshal(page twin response) failed: %v", err)
+		}
+
+		Expect(pageTwin).To(SatisfyAll(HaveField("ID", page.ID), HaveField("Kind", tree.NodeKindPage)), "page twin response = %#v, want original page %q", pageTwin, page.ID)
+
+		sectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=sync&kind=section", nil)
+		Expect(sectionRec).To(HaveHTTPStatus(http.StatusOK), "Expected section twin lookup status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())
+
+		var sectionTwin apiPageDTO
+		{
+			err := json.Unmarshal(sectionRec.Body.Bytes(), &sectionTwin)
+			Expect(err).NotTo(HaveOccurred(), "Unmarshal(section twin response) failed: %v", err)
+		}
+
+		Expect(sectionTwin).To(SatisfyAll(HaveField("ID", ensured.ID), HaveField("Kind", tree.NodeKindSection)), "section twin response = %#v, want ensured section %q", sectionTwin, ensured.ID)
+
+	})
 })
 
-var _ = It("TestMovePageEndpoint_InvalidJSON", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("returns the current path for a page permalink", func() {
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/invalid-id/move", strings.NewReader(`this is not valid json`))
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
+		docs := createPageViaAPI(router, "Docs", "docs", nil, pageNodeKind())
+		guide := createPageViaAPI(router, "Guide", "guide", &docs.ID, pageNodeKind())
+		archive := createPageViaAPI(router, "Archive", "archive", nil, pageNodeKind())
 
+		movePayload := `{"version":"` + guide.Version + `","parentId":"` + archive.ID + `"}`
+		moveRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+guide.ID+"/move", strings.NewReader(movePayload))
+		Expect(moveRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on move, got %d - %s", moveRec.Code, moveRec.Body.String())
+
+		guide = getPageByPathViaAPI(router, "archive/guide")
+
+		updatePayload := `{"version":"` + guide.Version + `","title":"User Guide","slug":"user-guide","content":""}`
+		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+guide.ID, strings.NewReader(updatePayload))
+		Expect(updateRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on update, got %d - %s", updateRec.Code, updateRec.Body.String())
+
+		target := getPermalinkTargetViaAPI(router, guide.ID)
+		Expect(target).To(SatisfyAll(
+			HaveField("ID", guide.ID),
+			HaveField("Slug", "user-guide"),
+			HaveField("Path", "archive/user-guide"),
+			HaveField("Kind", tree.NodeKindPage),
+		), "permalink target = %#v", target)
+
+	})
 })
 
-var _ = It("TestMovePageEndpoint_MissingParentID", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("allows unauthenticated permalink reads in public mode", func() {
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/missing-parent/move", strings.NewReader(`{"version":"missing","parentId":""}`))
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            true,
+			InjectCodeInHeader:      "",
+			CustomStylesheet:        "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+		})
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
+		page := createPageViaAPI(router, "Public Page", "public-page", nil, pageNodeKind())
 
+		req := httptest.NewRequest(http.MethodGet, "/api/pages/permalink/"+page.ID, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
+
+		var target apiPermalinkTargetDTO
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &target)
+			Expect(err).NotTo(HaveOccurred(), "Unmarshal(permalink response) failed: %v", err)
+		}
+		Expect(target).To(SatisfyAll(
+			HaveField("Path", "public-page"),
+			HaveField("Kind", tree.NodeKindPage),
+		), "public permalink target = %#v", target)
+
+	})
 })
 
-var _ = It("TestMovePageEndpoint_ParentNotFound", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("moves a page to a new parent", func() {
 
-	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"not-found-id"}`))
+		// Create two pages a and b
+		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
+		b := createPageViaAPI(router, "Section B", "section-b", nil, pageNodeKind())
 
-	t.Logf("Response: %s", rec.Body.String())
-	t.Logf("Response Code: %d", rec.Code)
+		// Move a under b
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"`+b.ID+`"}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("Expected status 404, got %d", rec.Code)
-	}
+		// Check if a is now a child of b
+		movedParent := getPageByPathViaAPI(router, "section-b")
+		Expect(movedParent.Children).To(ConsistOf(HaveField("ID", a.ID)), "Expected page to be moved under new parent")
 
+	})
 })
 
-var _ = It("TestMovePageEndpoint_CircularReference", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("returns not found when moving a missing page", func() {
 
-	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
-	b := createPageViaAPI(t, router, "Section B", "section-b", &a.ID, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	// Verschiebe a → unter b
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+b.ID+"/move", strings.NewReader(`{"version":"`+b.Version+`","parentId":"`+a.ID+`"}`))
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/not-found-id/move", strings.NewReader(`{"version":"missing","parentId":"root"}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
-
+	})
 })
 
-var _ = It("TestMovePage_FailsIfTargetAlreadyHasPageWithSameSlug", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects page moves with invalid JSON", func() {
 
-	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
-	createPageViaAPI(t, router, "Section B", "section-b", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	// Create Conflict Page in b
-	conflictPage := createPageViaAPI(t, router, "Section B", "section-b", &a.ID, pageNodeKind())
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/invalid-id/move", strings.NewReader(`this is not valid json`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
 
-	// move conflictPage under root (where section-b already exists)
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+conflictPage.ID+"/move", strings.NewReader(`{"version":"`+conflictPage.Version+`","parentId":"root"}`))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
-
+	})
 })
 
-var _ = It("TestMovePage_InTheSamePlace", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects page moves when the parent id is missing", func() {
 
-	a := createPageViaAPI(t, router, "Section A", "section-a", nil, pageNodeKind())
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"root"}`))
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/missing-parent/move", strings.NewReader(`{"version":"missing","parentId":""}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400, got %d", rec.Code)
-	}
-
+	})
 })
 
-var _ = It("TestSortPagesEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects page moves when the parent is missing", func() {
 
-	// Create pages
-	page1 := createPageViaAPI(t, router, "Page 1", "page-1", nil, pageNodeKind())
-	page2 := createPageViaAPI(t, router, "Page 2", "page-2", nil, pageNodeKind())
-	page3 := createPageViaAPI(t, router, "Page 3", "page-3", nil, pageNodeKind())
-	welcomePage := getPageByPathViaAPI(t, router, "welcome-to-leafwiki")
-	deletePageViaAPI(t, router, welcomePage.ID, welcomePage.Version, false)
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	// Sort pages
-	payload := map[string]interface{}{
-		"orderedIds": []string{page3.ID, page1.ID, page2.ID},
-	}
-	body, _ := json.Marshal(payload)
+		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
 
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/pages/root/sort", strings.NewReader(string(body)))
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"not-found-id"}`))
+		fmt.Fprintf(GinkgoWriter, "Response: %s", rec.Body.String())
+		fmt.Fprintf(GinkgoWriter, "Response Code: %d", rec.Code)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to parse JSON: %v", err)
-	}
-
-	if resp["message"] != "Pages sorted successfully" {
-		t.Errorf("Expected success message, got: %v", resp["message"])
-	}
-	if resp["messageId"] != "api.pages.sort.success" {
-		t.Errorf("Expected API-scoped success messageId, got: %v", resp["messageId"])
-	}
-
-	root := getTreeViaAPI(t, router)
-	if len(root.Children) != 3 {
-		t.Fatalf("Expected 3 children in root, got: %d", len(root.Children))
-	}
-
-	if root.Children[0].ID != page3.ID {
-		t.Errorf("Expected first child to be page 3, got: %v", root.Children[0].ID)
-	}
-	if root.Children[1].ID != page1.ID {
-		t.Errorf("Expected second child to be page 1, got: %v", root.Children[1].ID)
-	}
-	if root.Children[2].ID != page2.ID {
-		t.Errorf("Expected third child to be page 2, got: %v", root.Children[2].ID)
-	}
-
+	})
 })
 
-var _ = It("TestAuthLoginEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects page moves that would create a cycle", func() {
 
-	body := `{"identifier": "admin", "password": "admin"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	router.ServeHTTP(rec, req)
+		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
+		b := createPageViaAPI(router, "Section B", "section-b", &a.ID, pageNodeKind())
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK for valid login, got %d", rec.Code)
-	}
+		// Verschiebe a → unter b
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+b.ID+"/move", strings.NewReader(`{"version":"`+b.Version+`","parentId":"`+a.ID+`"}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
 
-	res := rec.Result()
-	wrapCloseWithErrorCheck(res.Body.Close, t)
-
-	// Prüfen, ob Cookies gesetzt wurden
-	cookies := res.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies to be set on login")
-	}
-
+	})
 })
 
-var _ = It("TestAuthLogin_InvalidCredentials", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("rejects page moves when the target already has the same slug", func() {
 
-	body := `{"identifier": "admin", "password": "wrong"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	router.ServeHTTP(rec, req)
+		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
+		createPageViaAPI(router, "Section B", "section-b", nil, pageNodeKind())
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 Unauthorized for wrong credentials, got %d", rec.Code)
-	}
+		// Create Conflict Page in b
+		conflictPage := createPageViaAPI(router, "Section B", "section-b", &a.ID, pageNodeKind())
 
+		// move conflictPage under root (where section-b already exists)
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+conflictPage.ID+"/move", strings.NewReader(`{"version":"`+conflictPage.Version+`","parentId":"root"}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
+
+	})
 })
 
-var _ = It("TestAuthRefreshToken", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("allows moving a page to its current location", func() {
 
-	type authResponse struct {
-		AccessTokenExpiresAt int64 `json:"accessTokenExpiresAt"`
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	// 1) Login
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
+		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
 
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d", loginRec.Code)
-	}
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"root"}`))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
 
-	var loginPayload authResponse
-	if err := json.Unmarshal(loginRec.Body.Bytes(), &loginPayload); err != nil {
-		t.Fatalf("Expected valid login JSON response, got error: %v", err)
-	}
-	if loginPayload.AccessTokenExpiresAt <= time.Now().Unix() {
-		t.Fatalf("Expected login response to include a future access token expiry, got %d", loginPayload.AccessTokenExpiresAt)
-	}
+	})
+})
 
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
-	cookies := loginRes.Cookies()
+var _ = Describe("HTTP router", func() {
+	It("sorts sibling pages in the requested order", func() {
 
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies on login response, got none")
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
+		// Create pages
+		page1 := createPageViaAPI(router, "Page 1", "page-1", nil, pageNodeKind())
+		page2 := createPageViaAPI(router, "Page 2", "page-2", nil, pageNodeKind())
+		page3 := createPageViaAPI(router, "Page 3", "page-3", nil, pageNodeKind())
+		welcomePage := getPageByPathViaAPI(router, "welcome-to-leafwiki")
+		deletePageViaAPI(router, welcomePage.ID, welcomePage.Version, false)
+
+		// Sort pages
+		payload := map[string]interface{}{
+			"orderedIds": []string{page3.ID, page1.ID, page2.ID},
+		}
+		body, _ := json.Marshal(payload)
+
+		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/root/sort", strings.NewReader(string(body)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d", rec.Code)
+
+		var resp map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse JSON: %v", err)
+		}
+		Expect(resp).To(testmatchers.HaveMessageID(wikipages.MessageIDAPIPagesSortSuccess), "Expected API-scoped success messageId, got: %v", resp["messageId"])
+
+		root := getTreeViaAPI(router)
+		Expect(root.Children).To(HaveExactElements(
+			HaveField("ID", page3.ID),
+			HaveField("ID", page1.ID),
+			HaveField("ID", page2.ID),
+		), "root children after sort = %#v", root.Children)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("logs in with valid credentials", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"identifier": "admin", "password": "admin"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK for valid login, got %d", rec.Code)
+
+		res := rec.Result()
+		wrapCloseWithErrorCheck(res.Body.Close)
+
+		// Prüfen, ob Cookies gesetzt wurden
+		cookies := res.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies to be set on login")
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects login with invalid credentials", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"identifier": "admin", "password": "wrong"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), "Expected 401 Unauthorized for wrong credentials, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("refreshes an authenticated session token", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		type authResponse struct {
+			AccessTokenExpiresAt int64 `json:"accessTokenExpiresAt"`
+		}
+
+		// 1) Login
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d", loginRec.Code)
+
+		var loginPayload authResponse
+		{
+			err := json.Unmarshal(loginRec.Body.Bytes(), &loginPayload)
+			Expect(err).NotTo(HaveOccurred(), "Expected valid login JSON response, got error: %v", err)
+		}
+		Expect(loginPayload.AccessTokenExpiresAt).To(BeNumerically(">", time.Now().Unix()), "Expected login response to include a future access token expiry, got %d", loginPayload.AccessTokenExpiresAt)
+
+		loginRes := loginRec.Result()
+		wrapCloseWithErrorCheck(loginRes.Body.Close)
+		cookies := loginRes.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
+
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
+			}
+		}
+		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+
+		// call refresh token endpoint with cookies from login
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh-token", nil)
 		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
+			req.AddCookie(c)
 		}
-	}
-
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
-
-	// call refresh token endpoint with cookies from login
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh-token", nil)
-	for _, c := range cookies {
-		req.AddCookie(c)
-	}
-	req.Header.Set("X-CSRF-Token", csrfToken)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on refresh, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	var refreshPayload authResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &refreshPayload); err != nil {
-		t.Fatalf("Expected valid refresh JSON response, got error: %v", err)
-	}
-	if refreshPayload.AccessTokenExpiresAt <= time.Now().Unix() {
-		t.Fatalf("Expected refresh response to include a future access token expiry, got %d", refreshPayload.AccessTokenExpiresAt)
-	}
-
-	// optional: check if new cookies are set
-	refreshRes := rec.Result()
-	wrapCloseWithErrorCheck(refreshRes.Body.Close, t)
-	newCookies := refreshRes.Cookies()
-	if len(newCookies) == 0 {
-		t.Fatalf("Expected new auth cookies on refresh")
-	}
-
-})
-
-var _ = It("TestCreateUserEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"username": "john", "email": "john@example.com", "password": "secret123", "role": "editor"}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(body))
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestCreateUser_DuplicateEmailOrUsername", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create initial user
-	payload := `{"username": "john", "email": "john@example.com", "password": "secret", "role": "editor"}`
-	_ = authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(payload))
-
-	// Attempt with duplicate username
-	payloadDuplicate := `{"username": "john", "email": "john2@example.com", "password": "secret", "role": "editor"}`
-	rec1 := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(payloadDuplicate))
-	if rec1.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for duplicate username, got %d", rec1.Code)
-	}
-
-	// Attempt with duplicate email
-	payloadDuplicateEmail := `{"username": "johnny", "email": "john@example.com", "password": "secret", "role": "editor"}`
-	rec2 := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(payloadDuplicateEmail))
-	if rec2.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for duplicate email, got %d", rec2.Code)
-	}
-
-})
-
-var _ = It("TestCreateUser_InvalidRole", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"username": "sam", "email": "sam@example.com", "password": "secret1234", "role": "undefined"}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(body))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for invalid role, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestCreateUser_WithViewerRole", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	body := `{"username": "vieweruser", "email": "viewer@example.com", "password": "secret1234", "role": "viewer"}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(body))
-
-	if rec.Code != http.StatusCreated {
-		t.Errorf("Expected 201 Created for viewer role, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestUpdateUser_RoleToViewer", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create user
-	create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
-	resp := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(create))
-	var user map[string]interface{}
-	_ = json.Unmarshal(resp.Body.Bytes(), &user)
-
-	updatePayload := map[string]string{
-		"username": "jane-updated",
-		"email":    "jane-updated@example.com",
-		"password": "newpassword",
-		"role":     "viewer",
-	}
-	data, _ := json.Marshal(updatePayload)
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/users/"+user["id"].(string), strings.NewReader(string(data)))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK for user update, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestViewer_CannotCreatePage", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a viewer user
-	createUserBody := `{"username": "vieweruser", "email": "viewer@example.com", "password": "viewerpass", "role": "viewer"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
-
-	// Try to create a page as viewer
-	pageBody := `{"title": "Test Page", "slug": "test-page"}`
-	rec := authenticatedRequestAs(t, router, "vieweruser", "viewerpass", http.MethodPost, "/api/pages", strings.NewReader(pageBody))
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for viewer creating page, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestViewer_CannotUploadAsset", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a viewer user
-	createUserBody := `{"username": "vieweruser2", "email": "viewer2@example.com", "password": "viewerpass2", "role": "viewer"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
-
-	// First create a page as admin to have a page ID
-	pageBody := `{"title": "Test Page for Assets", "slug": "test-page-assets"}`
-	pageResp := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
-	var page map[string]interface{}
-	_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
-	pageID := page["id"].(string)
-
-	// Try to upload an asset as viewer
-	rec := authenticatedRequestAs(t, router, "vieweruser2", "viewerpass2", http.MethodPost, "/api/pages/"+pageID+"/assets", strings.NewReader(""))
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for viewer uploading asset, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestViewer_CannotUpdatePage", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a viewer user
-	createUserBody := `{"username": "vieweruser3", "email": "viewer3@example.com", "password": "viewerpass3", "role": "viewer"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
-
-	// First create a page as admin
-	pageBody := `{"title": "Test Page to Update", "slug": "test-page-update"}`
-	pageResp := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
-	var page map[string]interface{}
-	_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
-	pageID := page["id"].(string)
-
-	// Try to update the page as viewer
-	updateBody := `{"title": "Updated Title", "slug": "updated-slug"}`
-	rec := authenticatedRequestAs(t, router, "vieweruser3", "viewerpass3", http.MethodPut, "/api/pages/"+pageID, strings.NewReader(updateBody))
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for viewer updating page, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestViewer_CannotDeletePage", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create a viewer user
-	createUserBody := `{"username": "vieweruser4", "email": "viewer4@example.com", "password": "viewerpass4", "role": "viewer"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
-
-	// First create a page as admin
-	pageBody := `{"title": "Test Page to Delete", "slug": "test-page-delete"}`
-	pageResp := authenticatedRequest(t, router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
-	var page map[string]interface{}
-	_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
-	pageID := page["id"].(string)
-
-	// Try to delete the page as viewer
-	rec := authenticatedRequestAs(t, router, "vieweruser4", "viewerpass4", http.MethodDelete, "/api/pages/"+pageID, nil)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for viewer deleting page, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestGetUsersEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/users", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
-
-	var users []map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &users); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
-
-	if len(users) == 0 {
-		t.Errorf("Expected at least one user (admin), got none")
-	}
-
-})
-
-var _ = It("TestUpdateUserEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Create user
-	create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
-	resp := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(create))
-	var user map[string]interface{}
-	_ = json.Unmarshal(resp.Body.Bytes(), &user)
-
-	updatePayload := map[string]string{
-		"username": "jane-updated",
-		"email":    "jane-updated@example.com",
-		"password": "newpassword",
-		"role":     "editor",
-	}
-	data, _ := json.Marshal(updatePayload)
-	rec := authenticatedRequest(t, router, http.MethodPut, "/api/users/"+user["id"].(string), strings.NewReader(string(data)))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK for user update, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestChangeOwnPasswordEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
-	resp := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(create))
-	var user map[string]interface{}
-	_ = json.Unmarshal(resp.Body.Bytes(), &user)
-
-	changePayload := `{"oldPassword":"secretpassword","newPassword":"newsecretpassword"}`
-	rec := authenticatedRequestAs(t, router, "jane", "secretpassword", http.MethodPut, "/api/users/me/password", strings.NewReader(changePayload))
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("Expected 204 No Content for own password change, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	loginWithOld := map[string]string{
-		"identifier": "jane",
-		"password":   "secretpassword",
-	}
-	loginWithOldBody, _ := json.Marshal(loginWithOld)
-	oldReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginWithOldBody))
-	oldReq.Header.Set("Content-Type", "application/json")
-	oldRec := httptest.NewRecorder()
-	router.ServeHTTP(oldRec, oldReq)
-
-	if oldRec.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 Unauthorized with old password, got %d - %s", oldRec.Code, oldRec.Body.String())
-	}
-
-	loginWithNew := map[string]string{
-		"identifier": "jane",
-		"password":   "newsecretpassword",
-	}
-	loginWithNewBody, _ := json.Marshal(loginWithNew)
-	newReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginWithNewBody))
-	newReq.Header.Set("Content-Type", "application/json")
-	newRec := httptest.NewRecorder()
-	router.ServeHTTP(newRec, newReq)
-
-	if newRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK with new password, got %d - %s", newRec.Code, newRec.Body.String())
-	}
-
-})
-
-var _ = It("TestMCPAPIKeys_AdminCreatesListsAndRevokesUserKey", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	createUser := `{"username": "keyuser", "email": "keyuser@example.com", "password": "secretpassword", "role": "editor"}`
-	userRec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createUser))
-	if userRec.Code != http.StatusCreated {
-		t.Fatalf("create user = %d: %s", userRec.Code, userRec.Body.String())
-	}
-	var user map[string]any
-	if err := json.Unmarshal(userRec.Body.Bytes(), &user); err != nil {
-		t.Fatalf("decode user: %v", err)
-	}
-	userID := user["id"].(string)
-
-	createKey := authenticatedRequest(t, router, http.MethodPost, "/api/users/"+userID+"/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
-	if createKey.Code != http.StatusCreated {
-		t.Fatalf("create api key = %d: %s", createKey.Code, createKey.Body.String())
-	}
-	assertNoStoreHeaders(t, createKey)
-	var created map[string]any
-	if err := json.Unmarshal(createKey.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode created key: %v", err)
-	}
-	secret, _ := created["secret"].(string)
-	if !strings.HasPrefix(secret, "lwk_") {
-		t.Fatalf("secret = %q, want lwk_ prefix", secret)
-	}
-	key := created["key"].(map[string]any)
-	keyID := key["id"].(string)
-	if key["userId"] != userID || key["name"] != "CLI" {
-		t.Fatalf("created key metadata = %#v", key)
-	}
-	assertAPIKeyNullMetadata(t, key)
-
-	listKeys := authenticatedRequest(t, router, http.MethodGet, "/api/users/"+userID+"/mcp-api-keys", nil)
-	if listKeys.Code != http.StatusOK {
-		t.Fatalf("list api keys = %d: %s", listKeys.Code, listKeys.Body.String())
-	}
-	var listed []map[string]any
-	if err := json.Unmarshal(listKeys.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode listed keys: %v", err)
-	}
-	if len(listed) != 1 || listed[0]["id"] != keyID {
-		t.Fatalf("listed keys = %#v, want created key", listed)
-	}
-	if _, ok := listed[0]["secret"]; ok {
-		t.Fatalf("list response exposed secret: %#v", listed[0])
-	}
-	if _, ok := listed[0]["secretHash"]; ok {
-		t.Fatalf("list response exposed secretHash: %#v", listed[0])
-	}
-	assertAPIKeyNullMetadata(t, listed[0])
-
-	revoke := authenticatedRequest(t, router, http.MethodDelete, "/api/users/"+userID+"/mcp-api-keys/"+keyID, nil)
-	if revoke.Code != http.StatusNoContent {
-		t.Fatalf("revoke api key = %d: %s", revoke.Code, revoke.Body.String())
-	}
-	listAfterRevoke := authenticatedRequest(t, router, http.MethodGet, "/api/users/"+userID+"/mcp-api-keys", nil)
-	var after []map[string]any
-	if err := json.Unmarshal(listAfterRevoke.Body.Bytes(), &after); err != nil {
-		t.Fatalf("decode keys after revoke: %v", err)
-	}
-	if len(after) != 0 {
-		t.Fatalf("revoked key still listed: %#v", after)
-	}
-
-})
-
-var _ = It("TestMCPAPIKeys_RoutePermissionsAndValidation", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	createEditor := `{"username": "editor-key-user", "email": "editor-key-user@example.com", "password": "secretpassword", "role": "editor"}`
-	editorRec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
-	var editor map[string]any
-	if err := json.Unmarshal(editorRec.Body.Bytes(), &editor); err != nil {
-		t.Fatalf("decode editor: %v", err)
-	}
-	editorID := editor["id"].(string)
-
-	invalidName := authenticatedRequest(t, router, http.MethodPost, "/api/users/"+editorID+"/mcp-api-keys", strings.NewReader(`{"name":"   "}`))
-	if invalidName.Code != http.StatusBadRequest {
-		t.Fatalf("invalid name status = %d: %s", invalidName.Code, invalidName.Body.String())
-	}
-	var validation struct {
-		Error  string `json:"error"`
-		Fields []struct {
-			Field   string `json:"field"`
-			Message string `json:"message"`
-		} `json:"fields"`
-	}
-	if err := json.Unmarshal(invalidName.Body.Bytes(), &validation); err != nil {
-		t.Fatalf("decode validation: %v", err)
-	}
-	if validation.Error != "validation_error" || len(validation.Fields) == 0 || validation.Fields[0].Field != "name" {
-		t.Fatalf("validation body = %#v", validation)
-	}
-
-	missingUser := authenticatedRequest(t, router, http.MethodPost, "/api/users/missing/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
-	if missingUser.Code != http.StatusNotFound {
-		t.Fatalf("missing user create = %d: %s", missingUser.Code, missingUser.Body.String())
-	}
-
-	emptyList := authenticatedRequest(t, router, http.MethodGet, "/api/users/"+editorID+"/mcp-api-keys", nil)
-	if emptyList.Code != http.StatusOK {
-		t.Fatalf("empty key list = %d: %s", emptyList.Code, emptyList.Body.String())
-	}
-	if strings.TrimSpace(emptyList.Body.String()) != "[]" {
-		t.Fatalf("empty key list body = %q, want []", emptyList.Body.String())
-	}
-
-	asEditor := authenticatedRequestAs(t, router, "editor-key-user", "secretpassword", http.MethodPost, "/api/users/missing/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
-	if asEditor.Code != http.StatusForbidden {
-		t.Fatalf("non-admin administer other user = %d: %s", asEditor.Code, asEditor.Body.String())
-	}
-
-})
-
-var _ = It("TestMCPAPIKeys_SelfServiceRequiresCurrentPasswordAndIsMCPOnly", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	createEditor := `{"username": "self-key-user", "email": "self-key-user@example.com", "password": "secretpassword", "role": "editor"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
-
-	wrongPassword := authenticatedRequestAs(t, router, "self-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
-	if wrongPassword.Code != http.StatusBadRequest {
-		t.Fatalf("wrong current password = %d: %s", wrongPassword.Code, wrongPassword.Body.String())
-	}
-
-	createKey := authenticatedRequestAs(t, router, "self-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"secretpassword"}`))
-	if createKey.Code != http.StatusCreated {
-		t.Fatalf("self create api key = %d: %s", createKey.Code, createKey.Body.String())
-	}
-	assertNoStoreHeaders(t, createKey)
-	var created map[string]any
-	if err := json.Unmarshal(createKey.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode self-created key: %v", err)
-	}
-	secret := created["secret"].(string)
-	key := created["key"].(map[string]any)
-	keyID := key["id"].(string)
-	assertAPIKeyNullMetadata(t, key)
-
-	list := authenticatedRequestAs(t, router, "self-key-user", "secretpassword", http.MethodGet, "/api/users/me/mcp-api-keys", nil)
-	if list.Code != http.StatusOK {
-		t.Fatalf("self list api keys = %d: %s", list.Code, list.Body.String())
-	}
-	var listed []map[string]any
-	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode self list: %v", err)
-	}
-	if len(listed) != 1 || listed[0]["id"] != keyID {
-		t.Fatalf("self list = %#v, want own key", listed)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
-	req.Header.Set("Authorization", "Bearer "+secret)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("api key authenticated protected normal HTTP API = %d, want 401", rec.Code)
-	}
-
-	revoke := authenticatedRequestAs(t, router, "self-key-user", "secretpassword", http.MethodDelete, "/api/users/me/mcp-api-keys/"+keyID, nil)
-	if revoke.Code != http.StatusNoContent {
-		t.Fatalf("self revoke api key = %d: %s", revoke.Code, revoke.Body.String())
-	}
-
-})
-
-var _ = It("TestMCPAPIKeys_SelfCreateRateLimited", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	createEditor := `{"username": "rate-key-user", "email": "rate-key-user@example.com", "password": "secretpassword", "role": "editor"}`
-	authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
-
-	for i := 0; i < 10; i++ {
-		rec := authenticatedRequestAs(t, router, "rate-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("wrong current password attempt %d = %d: %s", i+1, rec.Code, rec.Body.String())
+		req.Header.Set("X-CSRF-Token", csrfToken)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on refresh, got %d - %s", rec.Code, rec.Body.String())
+
+		var refreshPayload authResponse
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &refreshPayload)
+			Expect(err).NotTo(HaveOccurred(), "Expected valid refresh JSON response, got error: %v", err)
 		}
-	}
-	limited := authenticatedRequestAs(t, router, "rate-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
-	if limited.Code != http.StatusTooManyRequests {
-		t.Fatalf("rate-limited self create = %d: %s", limited.Code, limited.Body.String())
-	}
+		Expect(refreshPayload.AccessTokenExpiresAt).To(BeNumerically(">", time.Now().Unix()), "Expected refresh response to include a future access token expiry, got %d", refreshPayload.AccessTokenExpiresAt)
 
-})
+		// optional: check if new cookies are set
+		refreshRes := rec.Result()
+		wrapCloseWithErrorCheck(refreshRes.Body.Close)
+		newCookies := refreshRes.Cookies()
+		Expect(newCookies).NotTo(BeEmpty(), "Expected new auth cookies on refresh")
 
-var _ = It("TestMCPAPIKeys_RemoteUserSelfCreateDisabled", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
-	if err != nil {
-		t.Fatalf("ParseTrustedProxies failed: %v", err)
-	}
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		HTTPRemoteUser: httpinternal.HTTPRemoteUserConfig{
-			Enabled:        true,
-			HeaderName:     "Remote-User",
-			TrustedProxies: trustedProxies,
-			UserService:    w.UserService(),
-		},
 	})
+})
 
-	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	configReq.RemoteAddr = "192.0.2.1:1234"
-	configRec := httptest.NewRecorder()
-	router.ServeHTTP(configRec, configReq)
-	if configRec.Code != http.StatusOK {
-		t.Fatalf("remote-user config = %d: %s", configRec.Code, configRec.Body.String())
-	}
-	csrfToken := configRec.Header().Get("X-CSRF-Token")
-	cookies := configRec.Result().Cookies()
-	if csrfToken == "" {
-		for _, cookie := range cookies {
-			if cookie.Name == "leafwiki_csrf" || cookie.Name == "__Host-leafwiki_csrf" {
-				csrfToken = cookie.Value
-				break
+var _ = Describe("HTTP router", func() {
+	It("creates a user as an administrator", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"username": "john", "email": "john@example.com", "password": "secret123", "role": "editor"}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects duplicate user email or username", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create initial user
+		payload := `{"username": "john", "email": "john@example.com", "password": "secret", "role": "editor"}`
+		_ = authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(payload))
+
+		// Attempt with duplicate username
+		payloadDuplicate := `{"username": "john", "email": "john2@example.com", "password": "secret", "role": "editor"}`
+		rec1 := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(payloadDuplicate))
+		Expect(rec1).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 for duplicate username, got %d", rec1.Code)
+
+		// Attempt with duplicate email
+		payloadDuplicateEmail := `{"username": "johnny", "email": "john@example.com", "password": "secret", "role": "editor"}`
+		rec2 := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(payloadDuplicateEmail))
+		Expect(rec2).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 for duplicate email, got %d", rec2.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects user creation with an invalid role", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"username": "sam", "email": "sam@example.com", "password": "secret1234", "role": "undefined"}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request for invalid role, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("creates a viewer user", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		body := `{"username": "vieweruser", "email": "viewer@example.com", "password": "secret1234", "role": "viewer"}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created for viewer role, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("updates a user role to viewer", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create user
+		create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
+		resp := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(create))
+		var user map[string]interface{}
+		_ = json.Unmarshal(resp.Body.Bytes(), &user)
+
+		updatePayload := map[string]string{
+			"username": "jane-updated",
+			"email":    "jane-updated@example.com",
+			"password": "newpassword",
+			"role":     "viewer",
+		}
+		data, _ := json.Marshal(updatePayload)
+		rec := authenticatedRequest(router, http.MethodPut, "/api/users/"+user["id"].(string), strings.NewReader(string(data)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK for user update, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("prevents a viewer from creating pages", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a viewer user
+		createUserBody := `{"username": "vieweruser", "email": "viewer@example.com", "password": "viewerpass", "role": "viewer"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
+
+		// Try to create a page as viewer
+		pageBody := `{"title": "Test Page", "slug": "test-page"}`
+		rec := authenticatedRequestAs(router, "vieweruser", "viewerpass", http.MethodPost, "/api/pages", strings.NewReader(pageBody))
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for viewer creating page, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("prevents a viewer from uploading assets", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a viewer user
+		createUserBody := `{"username": "vieweruser2", "email": "viewer2@example.com", "password": "viewerpass2", "role": "viewer"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
+
+		// First create a page as admin to have a page ID
+		pageBody := `{"title": "Test Page for Assets", "slug": "test-page-assets"}`
+		pageResp := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
+		var page map[string]interface{}
+		_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
+		pageID := page["id"].(string)
+
+		// Try to upload an asset as viewer
+		rec := authenticatedRequestAs(router, "vieweruser2", "viewerpass2", http.MethodPost, "/api/pages/"+pageID+"/assets", strings.NewReader(""))
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for viewer uploading asset, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("prevents a viewer from updating pages", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a viewer user
+		createUserBody := `{"username": "vieweruser3", "email": "viewer3@example.com", "password": "viewerpass3", "role": "viewer"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
+
+		// First create a page as admin
+		pageBody := `{"title": "Test Page to Update", "slug": "test-page-update"}`
+		pageResp := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
+		var page map[string]interface{}
+		_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
+		pageID := page["id"].(string)
+
+		// Try to update the page as viewer
+		updateBody := `{"title": "Updated Title", "slug": "updated-slug"}`
+		rec := authenticatedRequestAs(router, "vieweruser3", "viewerpass3", http.MethodPut, "/api/pages/"+pageID, strings.NewReader(updateBody))
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for viewer updating page, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("prevents a viewer from deleting pages", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create a viewer user
+		createUserBody := `{"username": "vieweruser4", "email": "viewer4@example.com", "password": "viewerpass4", "role": "viewer"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createUserBody))
+
+		// First create a page as admin
+		pageBody := `{"title": "Test Page to Delete", "slug": "test-page-delete"}`
+		pageResp := authenticatedRequest(router, http.MethodPost, "/api/pages", strings.NewReader(pageBody))
+		var page map[string]interface{}
+		_ = json.Unmarshal(pageResp.Body.Bytes(), &page)
+		pageID := page["id"].(string)
+
+		// Try to delete the page as viewer
+		rec := authenticatedRequestAs(router, "vieweruser4", "viewerpass4", http.MethodDelete, "/api/pages/"+pageID, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for viewer deleting page, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("lists users for administrators", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		rec := authenticatedRequest(router, http.MethodGet, "/api/users", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
+
+		var users []map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &users)
+			Expect(err).NotTo(HaveOccurred(), "Failed to decode response: %v", err)
+		}
+		Expect(users).NotTo(BeEmpty(), "Expected at least one user (admin), got none")
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("updates a user as an administrator", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Create user
+		create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
+		resp := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(create))
+		var user map[string]interface{}
+		_ = json.Unmarshal(resp.Body.Bytes(), &user)
+
+		updatePayload := map[string]string{
+			"username": "jane-updated",
+			"email":    "jane-updated@example.com",
+			"password": "newpassword",
+			"role":     "editor",
+		}
+		data, _ := json.Marshal(updatePayload)
+		rec := authenticatedRequest(router, http.MethodPut, "/api/users/"+user["id"].(string), strings.NewReader(string(data)))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK for user update, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("changes the current user's password", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		create := `{"username": "jane", "email": "jane@example.com", "password": "secretpassword", "role": "editor"}`
+		resp := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(create))
+		var user map[string]interface{}
+		_ = json.Unmarshal(resp.Body.Bytes(), &user)
+
+		changePayload := `{"oldPassword":"secretpassword","newPassword":"newsecretpassword"}`
+		rec := authenticatedRequestAs(router, "jane", "secretpassword", http.MethodPut, "/api/users/me/password", strings.NewReader(changePayload))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent), "Expected 204 No Content for own password change, got %d - %s", rec.Code, rec.Body.String())
+
+		loginWithOld := map[string]string{
+			"identifier": "jane",
+			"password":   "secretpassword",
+		}
+		loginWithOldBody, _ := json.Marshal(loginWithOld)
+		oldReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginWithOldBody))
+		oldReq.Header.Set("Content-Type", "application/json")
+		oldRec := httptest.NewRecorder()
+		router.ServeHTTP(oldRec, oldReq)
+		Expect(oldRec).To(HaveHTTPStatus(http.StatusUnauthorized), "Expected 401 Unauthorized with old password, got %d - %s", oldRec.Code, oldRec.Body.String())
+
+		loginWithNew := map[string]string{
+			"identifier": "jane",
+			"password":   "newsecretpassword",
+		}
+		loginWithNewBody, _ := json.Marshal(loginWithNew)
+		newReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginWithNewBody))
+		newReq.Header.Set("Content-Type", "application/json")
+		newRec := httptest.NewRecorder()
+		router.ServeHTTP(newRec, newReq)
+		Expect(newRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK with new password, got %d - %s", newRec.Code, newRec.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("lets administrators create list and revoke user mcp api keys", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		createUser := `{"username": "keyuser", "email": "keyuser@example.com", "password": "secretpassword", "role": "editor"}`
+		userRec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createUser))
+		Expect(userRec).To(HaveHTTPStatus(http.StatusCreated), "create user = %d: %s", userRec.Code, userRec.Body.String())
+
+		var user map[string]any
+		{
+			err := json.Unmarshal(userRec.Body.Bytes(), &user)
+			Expect(err).NotTo(HaveOccurred(), "decode user: %v", err)
+		}
+
+		userID := user["id"].(string)
+
+		createKey := authenticatedRequest(router, http.MethodPost, "/api/users/"+userID+"/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
+		Expect(createKey).To(HaveHTTPStatus(http.StatusCreated), "create api key = %d: %s", createKey.Code, createKey.Body.String())
+
+		Expect(createKey).To(haveNoStoreHeaders())
+		var created struct {
+			Secret string         `json:"secret"`
+			Key    map[string]any `json:"key"`
+		}
+		{
+			err := json.Unmarshal(createKey.Body.Bytes(), &created)
+			Expect(err).NotTo(HaveOccurred(), "decode created key: %v", err)
+		}
+
+		Expect(created).To(SatisfyAll(
+			HaveField("Secret", HavePrefix("lwk_")),
+			HaveField("Key", SatisfyAll(
+				HaveKeyWithValue("id", Not(BeEmpty())),
+				HaveKeyWithValue("userId", userID),
+				HaveKeyWithValue("name", "CLI"),
+				haveNullAPIKeyLifecycleMetadata(),
+			)),
+		), "created key response = %#v", created)
+
+		key := created.Key
+		keyID := key["id"].(string)
+
+		listKeys := authenticatedRequest(router, http.MethodGet, "/api/users/"+userID+"/mcp-api-keys", nil)
+		Expect(listKeys).To(HaveHTTPStatus(http.StatusOK), "list api keys = %d: %s", listKeys.Code, listKeys.Body.String())
+
+		var listed []map[string]any
+		{
+			err := json.Unmarshal(listKeys.Body.Bytes(), &listed)
+			Expect(err).NotTo(HaveOccurred(), "decode listed keys: %v", err)
+		}
+
+		Expect(listed).To(ConsistOf(SatisfyAll(
+			HaveKeyWithValue("id", keyID),
+			Not(HaveKey("secret")),
+			Not(HaveKey("secretHash")),
+			haveNullAPIKeyLifecycleMetadata(),
+		)), "listed keys = %#v, want created key without secrets", listed)
+
+		revoke := authenticatedRequest(router, http.MethodDelete, "/api/users/"+userID+"/mcp-api-keys/"+keyID, nil)
+		Expect(revoke).To(HaveHTTPStatus(http.StatusNoContent), "revoke api key = %d: %s", revoke.Code, revoke.Body.String())
+
+		listAfterRevoke := authenticatedRequest(router, http.MethodGet, "/api/users/"+userID+"/mcp-api-keys", nil)
+		var after []map[string]any
+		{
+			err := json.Unmarshal(listAfterRevoke.Body.Bytes(), &after)
+			Expect(err).NotTo(HaveOccurred(), "decode keys after revoke: %v", err)
+		}
+		Expect(after).To(HaveLen(0), "revoked key still listed: %#v", after)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("enforces permissions and validation for mcp api key routes", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		createEditor := `{"username": "editor-key-user", "email": "editor-key-user@example.com", "password": "secretpassword", "role": "editor"}`
+		editorRec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
+		var editor map[string]any
+		{
+			err := json.Unmarshal(editorRec.Body.Bytes(), &editor)
+			Expect(err).NotTo(HaveOccurred(), "decode editor: %v", err)
+		}
+
+		editorID := editor["id"].(string)
+
+		invalidName := authenticatedRequest(router, http.MethodPost, "/api/users/"+editorID+"/mcp-api-keys", strings.NewReader(`{"name":"   "}`))
+		Expect(invalidName).To(HaveHTTPStatus(http.StatusBadRequest), "invalid name status = %d: %s", invalidName.Code, invalidName.Body.String())
+
+		var validation struct {
+			Error  string `json:"error"`
+			Fields []struct {
+				Field     string `json:"field"`
+				Code      string `json:"code"`
+				MessageID string `json:"messageId"`
+				Message   string `json:"message"`
+			} `json:"fields"`
+		}
+		{
+			err := json.Unmarshal(invalidName.Body.Bytes(), &validation)
+			Expect(err).NotTo(HaveOccurred(), "decode validation: %v", err)
+		}
+
+		Expect(validation.Fields).To(testmatchers.ContainFieldError(
+			testmatchers.ValidationFieldName("name"),
+			wikiauth.FieldCodeAuthAPIKeyNameRequired,
+			wikiauth.MessageIDAuthAPIKeyNameRequired,
+		), "validation body = %#v", validation)
+
+		missingUser := authenticatedRequest(router, http.MethodPost, "/api/users/missing/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
+		Expect(missingUser).To(HaveHTTPStatus(http.StatusNotFound), "missing user create = %d: %s", missingUser.Code, missingUser.Body.String())
+
+		emptyList := authenticatedRequest(router, http.MethodGet, "/api/users/"+editorID+"/mcp-api-keys", nil)
+		Expect(emptyList).To(HaveHTTPStatus(http.StatusOK), "empty key list = %d: %s", emptyList.Code, emptyList.Body.String())
+		Expect(strings.TrimSpace(emptyList.Body.String())).To(Equal("[]"), "empty key list body = %q, want []", emptyList.Body.String())
+
+		asEditor := authenticatedRequestAs(router, "editor-key-user", "secretpassword", http.MethodPost, "/api/users/missing/mcp-api-keys", strings.NewReader(`{"name":"CLI"}`))
+		Expect(asEditor).To(HaveHTTPStatus(http.StatusForbidden), "non-admin administer other user = %d: %s", asEditor.Code, asEditor.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("requires the current password and mcp scope for self-service api keys", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		createEditor := `{"username": "self-key-user", "email": "self-key-user@example.com", "password": "secretpassword", "role": "editor"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
+
+		wrongPassword := authenticatedRequestAs(router, "self-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
+		Expect(wrongPassword).To(HaveHTTPStatus(http.StatusBadRequest), "wrong current password = %d: %s", wrongPassword.Code, wrongPassword.Body.String())
+
+		createKey := authenticatedRequestAs(router, "self-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"secretpassword"}`))
+		Expect(createKey).To(HaveHTTPStatus(http.StatusCreated), "self create api key = %d: %s", createKey.Code, createKey.Body.String())
+
+		Expect(createKey).To(haveNoStoreHeaders())
+		var created struct {
+			Secret string         `json:"secret"`
+			Key    map[string]any `json:"key"`
+		}
+		{
+			err := json.Unmarshal(createKey.Body.Bytes(), &created)
+			Expect(err).NotTo(HaveOccurred(), "decode self-created key: %v", err)
+		}
+
+		Expect(created).To(SatisfyAll(
+			HaveField("Secret", Not(BeEmpty())),
+			HaveField("Key", SatisfyAll(
+				HaveKeyWithValue("id", Not(BeEmpty())),
+				haveNullAPIKeyLifecycleMetadata(),
+			)),
+		), "self-created key response = %#v", created)
+
+		secret := created.Secret
+		key := created.Key
+		keyID := key["id"].(string)
+
+		list := authenticatedRequestAs(router, "self-key-user", "secretpassword", http.MethodGet, "/api/users/me/mcp-api-keys", nil)
+		Expect(list).To(HaveHTTPStatus(http.StatusOK), "self list api keys = %d: %s", list.Code, list.Body.String())
+
+		var listed []map[string]any
+		{
+			err := json.Unmarshal(list.Body.Bytes(), &listed)
+			Expect(err).NotTo(HaveOccurred(), "decode self list: %v", err)
+		}
+
+		Expect(listed).To(ConsistOf(HaveKeyWithValue("id", keyID)), "self list = %#v, want own key", listed)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), "api key authenticated protected normal HTTP API = %d, want 401", rec.Code)
+
+		revoke := authenticatedRequestAs(router, "self-key-user", "secretpassword", http.MethodDelete, "/api/users/me/mcp-api-keys/"+keyID, nil)
+		Expect(revoke).To(HaveHTTPStatus(http.StatusNoContent), "self revoke api key = %d: %s", revoke.Code, revoke.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rate limits self-service mcp api key creation", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		createEditor := `{"username": "rate-key-user", "email": "rate-key-user@example.com", "password": "secretpassword", "role": "editor"}`
+		authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(createEditor))
+
+		for i := 0; i < 10; i++ {
+			rec := authenticatedRequestAs(router, "rate-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
+			Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "wrong current password attempt %d = %d: %s", i+1, rec.Code, rec.Body.String())
+
+		}
+		limited := authenticatedRequestAs(router, "rate-key-user", "secretpassword", http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Self","currentPassword":"wrong"}`))
+		Expect(limited).To(HaveHTTPStatus(http.StatusTooManyRequests), "rate-limited self create = %d: %s", limited.Code, limited.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("disables self-service mcp api key creation for remote users", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
+		Expect(err).NotTo(HaveOccurred(), "ParseTrustedProxies failed: %v", err)
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			HTTPRemoteUser: httpinternal.HTTPRemoteUserConfig{
+				Enabled:        true,
+				HeaderName:     "Remote-User",
+				TrustedProxies: trustedProxies,
+				UserService:    w.UserService(),
+			},
+		})
+
+		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		configReq.RemoteAddr = "192.0.2.1:1234"
+		configRec := httptest.NewRecorder()
+		router.ServeHTTP(configRec, configReq)
+		Expect(configRec).To(HaveHTTPStatus(http.StatusOK), "remote-user config = %d: %s", configRec.Code, configRec.Body.String())
+
+		csrfToken := configRec.Header().Get("X-CSRF-Token")
+		cookies := configRec.Result().Cookies()
+		if csrfToken == "" {
+			for _, cookie := range cookies {
+				if cookie.Name == "leafwiki_csrf" || cookie.Name == "__Host-leafwiki_csrf" {
+					csrfToken = cookie.Value
+					break
+				}
 			}
 		}
-	}
-	if csrfToken == "" {
-		t.Fatalf("remote-user config did not issue CSRF token")
-	}
+		Expect(csrfToken).NotTo(BeEmpty(), "remote-user config did not issue CSRF token")
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/users/me/mcp-api-keys", nil)
-	listReq.RemoteAddr = "192.0.2.1:1234"
-	listReq.Header.Set("Remote-User", "admin")
-	for _, cookie := range cookies {
-		listReq.AddCookie(cookie)
-	}
-	listRec := httptest.NewRecorder()
-	router.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("remote-user self list = %d: %s", listRec.Code, listRec.Body.String())
-	}
+		listReq := httptest.NewRequest(http.MethodGet, "/api/users/me/mcp-api-keys", nil)
+		listReq.RemoteAddr = "192.0.2.1:1234"
+		listReq.Header.Set("Remote-User", "admin")
+		for _, cookie := range cookies {
+			listReq.AddCookie(cookie)
+		}
+		listRec := httptest.NewRecorder()
+		router.ServeHTTP(listRec, listReq)
+		Expect(listRec).To(HaveHTTPStatus(http.StatusOK), "remote-user self list = %d: %s", listRec.Code, listRec.Body.String())
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Proxy"}`))
-	createReq.RemoteAddr = "192.0.2.1:1234"
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-CSRF-Token", csrfToken)
-	createReq.Header.Set("Remote-User", "admin")
-	for _, cookie := range cookies {
-		createReq.AddCookie(cookie)
-	}
-	createRec := httptest.NewRecorder()
-	router.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusForbidden {
-		t.Fatalf("remote-user self create = %d: %s", createRec.Code, createRec.Body.String())
-	}
+		createReq := httptest.NewRequest(http.MethodPost, "/api/users/me/mcp-api-keys", strings.NewReader(`{"name":"Proxy"}`))
+		createReq.RemoteAddr = "192.0.2.1:1234"
+		createReq.Header.Set("Content-Type", "application/json")
+		createReq.Header.Set("X-CSRF-Token", csrfToken)
+		createReq.Header.Set("Remote-User", "admin")
+		for _, cookie := range cookies {
+			createReq.AddCookie(cookie)
+		}
+		createRec := httptest.NewRecorder()
+		router.ServeHTTP(createRec, createReq)
+		Expect(createRec).To(HaveHTTPStatus(http.StatusForbidden), "remote-user self create = %d: %s", createRec.Code, createRec.Body.String())
 
+	})
 })
 
 type authDisabledSelfAPIKeyRoute struct {
@@ -5068,11 +4691,11 @@ type authDisabledSelfAPIKeyRoute struct {
 	body   string
 }
 
-var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
+var _ = DescribeTable("self-service mcp api key routes are blocked when auth is disabled",
 	func(tc authDisabledSelfAPIKeyRoute) {
-		t := GinkgoT()
-		w := createWikiTestInstance(t)
-		wrapCloseWithErrorCheck(w.Close, t)
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
 
 		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 			PublicAccess:            false,
@@ -5087,9 +4710,8 @@ var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
 		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 		configRec := httptest.NewRecorder()
 		router.ServeHTTP(configRec, configReq)
-		if configRec.Code != http.StatusOK {
-			t.Fatalf("auth-disabled config = %d: %s", configRec.Code, configRec.Body.String())
-		}
+		Expect(configRec).To(HaveHTTPStatus(http.StatusOK), "auth-disabled config = %d: %s", configRec.Code, configRec.Body.String())
+
 		csrfToken := configRec.Header().Get("X-CSRF-Token")
 		cookies := configRec.Result().Cookies()
 		if csrfToken == "" {
@@ -5100,9 +4722,7 @@ var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
 				}
 			}
 		}
-		if csrfToken == "" {
-			t.Fatalf("auth-disabled config did not issue CSRF token")
-		}
+		Expect(csrfToken).NotTo(BeEmpty(), "auth-disabled config did not issue CSRF token")
 
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		if tc.body != "" {
@@ -5116,365 +4736,342 @@ var _ = DescribeTable("TestMCPAPIKeys_SelfRoutesBlockedWhenAuthDisabled",
 		}
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "%s auth-disabled self API-key route = %d: %s", tc.method, rec.Code, rec.Body.String())
 
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("%s auth-disabled self API-key route = %d: %s", tc.method, rec.Code, rec.Body.String())
-		}
 		var authErr wikiauth.AuthErrorResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &authErr); err != nil {
-			t.Fatalf("decode auth-disabled error: %v", err)
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &authErr)
+			Expect(err).NotTo(HaveOccurred(), "decode auth-disabled error: %v", err)
 		}
-		if authErr.Error.Code != wikiauth.ErrCodeAuthDisabled {
-			t.Fatalf("error code = %q, want %q; body=%s", authErr.Error.Code, wikiauth.ErrCodeAuthDisabled, rec.Body.String())
-		}
+		Expect(authErr.Error).To(testmatchers.HaveErrorCode(wikiauth.ErrCodeAuthDisabled), "body=%s", rec.Body.String())
+
 	},
 	Entry("list", authDisabledSelfAPIKeyRoute{method: http.MethodGet, path: "/api/users/me/mcp-api-keys"}),
 	Entry("create", authDisabledSelfAPIKeyRoute{method: http.MethodPost, path: "/api/users/me/mcp-api-keys", body: `{"name":"CLI","currentPassword":"admin"}`}),
 	Entry("revoke", authDisabledSelfAPIKeyRoute{method: http.MethodDelete, path: "/api/users/me/mcp-api-keys/some-key"}),
 )
 
-var _ = It("TestDeleteUserEndpoint", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("deletes a user as an administrator", func() {
 
-	// Create user
-	create := `{"username": "todelete", "email": "delete@example.com", "password": "secrepassword", "role": "editor"}`
-	resp := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(create))
-	var user map[string]interface{}
-	_ = json.Unmarshal(resp.Body.Bytes(), &user)
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	// Delete user
-	rec := authenticatedRequest(t, router, http.MethodDelete, "/api/users/"+user["id"].(string), nil)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("Expected 204 OK on delete, got %d", rec.Code)
-	}
+		// Create user
+		create := `{"username": "todelete", "email": "delete@example.com", "password": "secrepassword", "role": "editor"}`
+		resp := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(create))
+		var user map[string]interface{}
+		_ = json.Unmarshal(resp.Body.Bytes(), &user)
 
-})
+		// Delete user
+		rec := authenticatedRequest(router, http.MethodDelete, "/api/users/"+user["id"].(string), nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent), "Expected 204 OK on delete, got %d", rec.Code)
 
-var _ = It("TestDeleteAdminUser_ShouldFail", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Get default admin
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/users", nil)
-	var users []map[string]interface{}
-	_ = json.Unmarshal(rec.Body.Bytes(), &users)
-
-	var adminID string
-	for _, u := range users {
-		if u["role"] == "admin" {
-			adminID = u["id"].(string)
-		}
-	}
-
-	if adminID == "" {
-		t.Fatal("No admin user found")
-	}
-
-	// Attempt to delete the admin
-	recDel := authenticatedRequest(t, router, http.MethodDelete, "/api/users/"+adminID, nil)
-	if recDel.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 when deleting admin user, got %d", recDel.Code)
-	}
-
-})
-
-var _ = It("TestRequireAdminMiddleware", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Default Admin create user should succeed
-	body := `{"username": "mod", "email": "mod@example.com", "password": "secretpassword", "role": "editor"}`
-	rec := authenticatedRequest(t, router, http.MethodPost, "/api/users", strings.NewReader(body))
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created by admin, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestRequireAdminMiddleware_BlockedWhenAuthDisabled", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	// Create router with auth disabled
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		AuthDisabled:            true, // Auth is disabled
 	})
-
-	// Test POST /api/users (admin-only endpoint)
-	createUserBody := `{"username": "testuser", "email": "test@example.com", "password": "password", "role": "editor"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/users", strings.NewReader(createUserBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for POST /api/users when auth disabled, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	// Test GET /api/users (admin-only endpoint)
-	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for GET /api/users when auth disabled, got %d - %s", rec.Code, rec.Body.String())
-	}
-
-	// Test DELETE /api/users/:id (admin-only endpoint)
-	req = httptest.NewRequest(http.MethodDelete, "/api/users/some-user-id", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden for DELETE /api/users/:id when auth disabled, got %d - %s", rec.Code, rec.Body.String())
-	}
-
 })
 
-var _ = It("TestRequireAuthMiddleware_Unauthorized", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("prevents deleting the administrator account", func() {
 
-	// Request ohne Token
-	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title": "Oops", "slug": "oops"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	router.ServeHTTP(rec, req)
+		// Get default admin
+		rec := authenticatedRequest(router, http.MethodGet, "/api/users", nil)
+		var users []struct {
+			ID   string `json:"id"`
+			Role string `json:"role"`
+		}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &users)
+			Expect(err).NotTo(HaveOccurred(), "decode users: %v", err)
+		}
+		Expect(users).To(ContainElement(SatisfyAll(
+			HaveField("ID", Not(BeEmpty())),
+			HaveField("Role", "admin"),
+		)), "No admin user found")
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 Unauthorized, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestRequireAuthMiddleware_InvalidToken", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title": "Bad", "slug": "bad"}`))
-	req.Header.Set("Authorization", "Bearer invalidtoken")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 Unauthorized for invalid token, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestAssetEndpoints", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
-
-	// Step 0: Login als Admin und Cookies holen
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-
-	router.ServeHTTP(loginRec, loginReq)
-
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-	}
-
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close, t)
-
-	cookies := loginRes.Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("Expected auth cookies after login, got none")
-	}
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
+		var adminID string
+		for _, u := range users {
+			if u.Role == "admin" {
+				adminID = u.ID
 			}
 		}
-	}
 
-	if csrfToken == "" {
-		t.Fatalf("Expected CSRF token after login, got none")
-	}
+		// Attempt to delete the admin
+		recDel := authenticatedRequest(router, http.MethodDelete, "/api/users/"+adminID, nil)
+		Expect(recDel).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 when deleting admin user, got %d", recDel.Code)
 
-	addCookies := func(req *http.Request) {
-		for _, c := range cookies {
-			req.AddCookie(c)
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("allows administrators through the admin middleware", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Default Admin create user should succeed
+		body := `{"username": "mod", "email": "mod@example.com", "password": "secretpassword", "role": "editor"}`
+		rec := authenticatedRequest(router, http.MethodPost, "/api/users", strings.NewReader(body))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created by admin, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("blocks admin middleware access when auth is disabled", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		// Create router with auth disabled
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			AuthDisabled:            true, // Auth is disabled
+		})
+
+		// Test POST /api/users (admin-only endpoint)
+		createUserBody := `{"username": "testuser", "email": "test@example.com", "password": "password", "role": "editor"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/users", strings.NewReader(createUserBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for POST /api/users when auth disabled, got %d - %s", rec.Code, rec.Body.String())
+
+		// Test GET /api/users (admin-only endpoint)
+		req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for GET /api/users when auth disabled, got %d - %s", rec.Code, rec.Body.String())
+
+		// Test DELETE /api/users/:id (admin-only endpoint)
+		req = httptest.NewRequest(http.MethodDelete, "/api/users/some-user-id", nil)
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), "Expected 403 Forbidden for DELETE /api/users/:id when auth disabled, got %d - %s", rec.Code, rec.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects unauthenticated requests in auth middleware", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Request ohne Token
+		req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title": "Oops", "slug": "oops"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), "Expected 401 Unauthorized, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects invalid tokens in auth middleware", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"title": "Bad", "slug": "bad"}`))
+		req.Header.Set("Authorization", "Bearer invalidtoken")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), "Expected 401 Unauthorized for invalid token, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("serves asset endpoints through the authenticated router", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
+
+		// Step 0: Login als Admin und Cookies holen
+		loginBody := `{"identifier": "admin", "password": "admin"}`
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := httptest.NewRecorder()
+
+		router.ServeHTTP(loginRec, loginReq)
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
+
+		loginRes := loginRec.Result()
+		wrapCloseWithErrorCheck(loginRes.Body.Close)
+
+		cookies := loginRes.Cookies()
+		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies after login, got none")
+
+		csrfToken := loginRec.Header().Get("X-CSRF-Token")
+		if csrfToken == "" {
+			for _, c := range cookies {
+				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+					csrfToken = c.Value
+					break
+				}
+			}
+		}
+		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+
+		addCookies := func(req *http.Request) {
+			for _, c := range cookies {
+				req.AddCookie(c)
+			}
+
+			if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
+				req.Header.Set("X-CSRF-Token", csrfToken)
+			}
 		}
 
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
-			req.Header.Set("X-CSRF-Token", csrfToken)
+		// Step 1: Create page direkt über Wiki-API
+		page := createPageViaAPI(router, "Assets Page", "assets-page", nil, pageNodeKind())
+
+		// Step 2: Upload file
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+
+		part, err := writer.CreateFormFile("file", "testfile.txt")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create form file: %v", err)
+		{
+
+			_, err := part.Write([]byte("Hello, asset!"))
+			Expect(err).NotTo(HaveOccurred(), "Failed to write file: %v", err)
 		}
-	}
+		{
 
-	// Step 1: Create page direkt über Wiki-API
-	page := createPageViaAPI(t, router, "Assets Page", "assets-page", nil, pageNodeKind())
+			err := writer.Close()
+			Expect(err).NotTo(HaveOccurred(), "Failed to close multipart writer: %v", err)
+		}
 
-	// Step 2: Upload file
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+		uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+page.ID+"/assets", body)
+		uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+		addCookies(uploadReq)
 
-	part, err := writer.CreateFormFile("file", "testfile.txt")
-	if err != nil {
-		t.Fatalf("Failed to create form file: %v", err)
-	}
-	if _, err := part.Write([]byte("Hello, asset!")); err != nil {
-		t.Fatalf("Failed to write file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Failed to close multipart writer: %v", err)
-	}
+		uploadRec := httptest.NewRecorder()
+		router.ServeHTTP(uploadRec, uploadReq)
+		Expect(uploadRec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
 
-	uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+page.ID+"/assets", body)
-	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
-	addCookies(uploadReq)
+		var uploadResp map[string]string
+		{
+			err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid upload JSON: %v", err)
+		}
+		Expect(uploadResp).To(HaveKeyWithValue("file", Not(BeEmpty())), "Expected file field in upload response")
 
-	uploadRec := httptest.NewRecorder()
-	router.ServeHTTP(uploadRec, uploadReq)
+		// Step 3: List assets
+		listReq := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/assets", nil)
+		addCookies(listReq)
 
-	if uploadRec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
-	}
+		listRec := httptest.NewRecorder()
+		router.ServeHTTP(listRec, listReq)
+		Expect(listRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on listing, got %d - %s", listRec.Code, listRec.Body.String())
 
-	var uploadResp map[string]string
-	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
-		t.Fatalf("Invalid upload JSON: %v", err)
-	}
-	if uploadResp["file"] == "" {
-		t.Error("Expected file field in upload response")
-	}
+		var listResp map[string][]string
+		{
+			err := json.Unmarshal(listRec.Body.Bytes(), &listResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid listing JSON: %v", err)
+		}
 
-	// Step 3: List assets
-	listReq := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/assets", nil)
-	addCookies(listReq)
+		Expect(listResp).To(HaveKeyWithValue("files", ConsistOf("/assets/"+page.ID+"/testfile.txt")), "Expected file in listing, got: %v", listResp)
 
-	listRec := httptest.NewRecorder()
-	router.ServeHTTP(listRec, listReq)
+		// Step 4: Delete asset
+		delReq := httptest.NewRequest(http.MethodDelete, "/api/pages/"+page.ID+"/assets/testfile.txt", nil)
+		addCookies(delReq)
 
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on listing, got %d - %s", listRec.Code, listRec.Body.String())
-	}
+		delRec := httptest.NewRecorder()
+		router.ServeHTTP(delRec, delReq)
+		Expect(delRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on delete, got %d - %s", delRec.Code, delRec.Body.String())
 
-	var listResp map[string][]string
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
-		t.Fatalf("Invalid listing JSON: %v", err)
-	}
-	if len(listResp["files"]) != 1 || listResp["files"][0] != "/assets/"+page.ID+"/testfile.txt" {
-		t.Errorf("Expected file in listing, got: %v", listResp["files"])
-	}
+		var deleteResp map[string]interface{}
+		{
+			err := json.Unmarshal(delRec.Body.Bytes(), &deleteResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid delete JSON: %v", err)
+		}
+		Expect(deleteResp).To(testmatchers.HaveMessageID(wikiassets.MessageIDAssetDeleteSuccess), "Expected API-scoped asset delete messageId, got: %v", deleteResp["messageId"])
 
-	// Step 4: Delete asset
-	delReq := httptest.NewRequest(http.MethodDelete, "/api/pages/"+page.ID+"/assets/testfile.txt", nil)
-	addCookies(delReq)
+		// Step 5: Verify asset is gone
+		listReq2 := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/assets", nil)
+		addCookies(listReq2)
 
-	delRec := httptest.NewRecorder()
-	router.ServeHTTP(delRec, delReq)
+		listRec2 := httptest.NewRecorder()
+		router.ServeHTTP(listRec2, listReq2)
+		Expect(listRec2).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on listing after delete, got %d - %s", listRec2.Code, listRec2.Body.String())
 
-	if delRec.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK on delete, got %d - %s", delRec.Code, delRec.Body.String())
-	}
-	var deleteResp map[string]interface{}
-	if err := json.Unmarshal(delRec.Body.Bytes(), &deleteResp); err != nil {
-		t.Fatalf("Invalid delete JSON: %v", err)
-	}
-	if deleteResp["messageId"] != "api.assets.delete.success" {
-		t.Errorf("Expected API-scoped asset delete messageId, got: %v", deleteResp["messageId"])
-	}
+		var listResp2 map[string][]string
+		{
+			err := json.Unmarshal(listRec2.Body.Bytes(), &listResp2)
+			Expect(err).NotTo(HaveOccurred(), "Invalid listing JSON: %v", err)
+		}
+		Expect(listResp2).To(HaveKeyWithValue("files", BeEmpty()), "Expected asset to be deleted, got: %v", listResp2)
 
-	// Step 5: Verify asset is gone
-	listReq2 := httptest.NewRequest(http.MethodGet, "/api/pages/"+page.ID+"/assets", nil)
-	addCookies(listReq2)
-
-	listRec2 := httptest.NewRecorder()
-	router.ServeHTTP(listRec2, listReq2)
-
-	if listRec2.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK on listing after delete, got %d - %s", listRec2.Code, listRec2.Body.String())
-	}
-
-	var listResp2 map[string][]string
-	if err := json.Unmarshal(listRec2.Body.Bytes(), &listResp2); err != nil {
-		t.Fatalf("Invalid listing JSON: %v", err)
-	}
-	if len(listResp2["files"]) != 0 {
-		t.Errorf("Expected asset to be deleted, got: %v", listResp2["files"])
-	}
-
+	})
 })
 
 // Lets check the indexing status
-var _ = It("TestIndexingStatusEndpoint", func() {
-	t := GinkgoT()
-	// Lets call /api/search/status
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-	router := createRouterTestInstance(w, t)
+var _ = Describe("HTTP router", func() {
+	It("returns indexing status", func() {
 
-	// Default Admin holen
-	rec := authenticatedRequest(t, router, http.MethodGet, "/api/search/status", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK, got %d", rec.Code)
-	}
+		// Lets call /api/search/status
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+		router := createRouterTestInstance(w)
 
-	var status map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("Failed to parse JSON: %v", err)
-	}
+		// Default Admin holen
+		rec := authenticatedRequest(router, http.MethodGet, "/api/search/status", nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
 
-	if status["active"] == nil {
-		t.Errorf("Expected 'active' field in response, got: %v", status)
-	}
+		var status map[string]interface{}
+		{
+			err := json.Unmarshal(rec.Body.Bytes(), &status)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse JSON: %v", err)
+		}
+		Expect(status).To(HaveKey("active"), "Expected 'active' field in response, got: %v", status)
 
+	})
 })
 
 // uploadTestAsset is a helper function that creates a page, uploads an asset, and returns the asset URL and auth cookies.
 // If needsAuth is true, it will obtain authentication cookies; otherwise it will get CSRF token only (for AuthDisabled mode).
-func uploadTestAsset(t routerTestTB, router *gin.Engine, w *wiki.Wiki, content string, needsAuth bool) (assetURL string, cookies []*http.Cookie) {
-	// Create a page
+func uploadTestAsset(router *gin.Engine, w *wiki.Wiki, content string, needsAuth bool) (assetURL string, cookies []*http.Cookie) {
+	GinkgoHelper()
+
 	pageID := ""
 	if needsAuth {
-		pageID = createPageViaAPI(t, router, "Test Page", "test-page", nil, pageNodeKind()).ID
+		pageID = createPageViaAPI(router, "Test Page", "test-page", nil, pageNodeKind()).ID
 	}
 
 	// Prepare the file upload
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", "test.txt")
-	if err != nil {
-		t.Fatalf("Failed to create form file: %v", err)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create form file: %v", err)
+	{
+
+		_, err := part.Write([]byte(content))
+		Expect(err).NotTo(HaveOccurred(), "Failed to write file: %v", err)
 	}
-	if _, err := part.Write([]byte(content)); err != nil {
-		t.Fatalf("Failed to write file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Failed to close multipart writer: %v", err)
+	{
+
+		err := writer.Close()
+		Expect(err).NotTo(HaveOccurred(), "Failed to close multipart writer: %v", err)
 	}
 
 	var csrfToken string
@@ -5486,10 +5083,7 @@ func uploadTestAsset(t routerTestTB, router *gin.Engine, w *wiki.Wiki, content s
 		loginReq.Header.Set("Content-Type", "application/json")
 		loginRec := httptest.NewRecorder()
 		router.ServeHTTP(loginRec, loginReq)
-
-		if loginRec.Code != http.StatusOK {
-			t.Fatalf("Expected 200 OK on login, got %d", loginRec.Code)
-		}
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d", loginRec.Code)
 
 		cookies = loginRec.Result().Cookies()
 		csrfToken = loginRec.Header().Get("X-CSRF-Token")
@@ -5529,15 +5123,14 @@ func uploadTestAsset(t routerTestTB, router *gin.Engine, w *wiki.Wiki, content s
 
 		createRec := httptest.NewRecorder()
 		router.ServeHTTP(createRec, createReq)
-
-		if createRec.Code != http.StatusCreated {
-			t.Fatalf("Expected 201 Created on page creation, got %d - %s", createRec.Code, createRec.Body.String())
-		}
+		Expect(createRec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created on page creation, got %d - %s", createRec.Code, createRec.Body.String())
 
 		var pageResp apiPageDTO
-		if err := json.Unmarshal(createRec.Body.Bytes(), &pageResp); err != nil {
-			t.Fatalf("Invalid page creation JSON: %v", err)
+		{
+			err := json.Unmarshal(createRec.Body.Bytes(), &pageResp)
+			Expect(err).NotTo(HaveOccurred(), "Invalid page creation JSON: %v", err)
 		}
+
 		pageID = pageResp.ID
 	}
 
@@ -5551,20 +5144,18 @@ func uploadTestAsset(t routerTestTB, router *gin.Engine, w *wiki.Wiki, content s
 
 	uploadRec := httptest.NewRecorder()
 	router.ServeHTTP(uploadRec, uploadReq)
+	Expect(uploadRec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
 
-	if uploadRec.Code != http.StatusCreated {
-		t.Fatalf("Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
+	var uploadResp struct {
+		File string `json:"file"`
 	}
+	{
+		err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp)
+		Expect(err).NotTo(HaveOccurred(), "Invalid upload JSON: %v", err)
+	}
+	Expect(uploadResp).To(HaveField("File", Not(BeEmpty())), "Expected file URL in upload response")
 
-	var uploadResp map[string]string
-	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp); err != nil {
-		t.Fatalf("Invalid upload JSON: %v", err)
-	}
-
-	assetURL = uploadResp["file"]
-	if assetURL == "" {
-		t.Fatal("Expected file URL in upload response")
-	}
+	assetURL = uploadResp.File
 
 	return assetURL, cookies
 }
@@ -5579,11 +5170,11 @@ type assetAccessControlScenario struct {
 }
 
 // TestAssetAccessControl tests the access control for static asset routes
-var _ = DescribeTable("TestAssetAccessControl",
+var _ = DescribeTable("asset routes enforce access control",
 	func(tc assetAccessControlScenario) {
-		t := GinkgoT()
-		w := createWikiTestInstance(t)
-		wrapCloseWithErrorCheck(w.Close, t)
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
 
 		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
 			PublicAccess:            tc.publicAccess,
@@ -5596,7 +5187,7 @@ var _ = DescribeTable("TestAssetAccessControl",
 			AuthDisabled:            tc.authDisabled,
 		})
 
-		assetURL, cookies := uploadTestAsset(t, router, w, tc.content, tc.needsAuth)
+		assetURL, cookies := uploadTestAsset(router, w, tc.content, tc.needsAuth)
 
 		assetReq := httptest.NewRequest(http.MethodGet, assetURL, nil)
 		if tc.sendCookies {
@@ -5606,36 +5197,32 @@ var _ = DescribeTable("TestAssetAccessControl",
 		}
 		assetRec := httptest.NewRecorder()
 		router.ServeHTTP(assetRec, assetReq)
-
-		if assetRec.Code != tc.wantStatus {
-			t.Errorf("Expected status %d when accessing asset, got %d", tc.wantStatus, assetRec.Code)
-		}
+		Expect(assetRec).To(HaveHTTPStatus(tc.wantStatus), "Expected status %d when accessing asset, got %d", tc.wantStatus, assetRec.Code)
 
 		if tc.wantStatus == http.StatusOK {
 			content := assetRec.Body.String()
-			if content != tc.content {
-				t.Errorf("Expected %q, got %q", tc.content, content)
-			}
+			Expect(content).To(Equal(tc.content), "Expected %q, got %q", tc.content, content)
+
 		}
 	},
-	Entry("PrivateMode_UnauthenticatedAccess_Returns401", assetAccessControlScenario{
+	Entry("rejects unauthenticated reads in private mode", assetAccessControlScenario{
 		content:    "test content",
 		needsAuth:  true,
 		wantStatus: http.StatusUnauthorized,
 	}),
-	Entry("PrivateMode_AuthenticatedAccess_Returns200", assetAccessControlScenario{
+	Entry("allows authenticated reads in private mode", assetAccessControlScenario{
 		content:     "test content",
 		needsAuth:   true,
 		sendCookies: true,
 		wantStatus:  http.StatusOK,
 	}),
-	Entry("PublicAccessMode_UnauthenticatedAccess_Returns200", assetAccessControlScenario{
+	Entry("allows unauthenticated reads in public mode", assetAccessControlScenario{
 		publicAccess: true,
 		content:      "test content public",
 		needsAuth:    true,
 		wantStatus:   http.StatusOK,
 	}),
-	Entry("AuthDisabledMode_UnauthenticatedAccess_Returns200", assetAccessControlScenario{
+	Entry("allows unauthenticated reads when auth is disabled", assetAccessControlScenario{
 		authDisabled: true,
 		content:      "test content no auth",
 		needsAuth:    false,
@@ -5643,38 +5230,37 @@ var _ = DescribeTable("TestAssetAccessControl",
 	}),
 )
 
-var _ = It("TestBuildCustomStylesheetTag", func() {
-	t := GinkgoT()
-	tag := httpinternal.BuildCustomStylesheetTag("/wiki", "/tmp/custom.css")
+var _ = Describe("HTTP router", func() {
+	It("build Custom Stylesheet Tag", func() {
 
-	expected := `<link rel="stylesheet" href="/wiki/custom.css">`
-	if tag != expected {
-		t.Fatalf("expected %q, got %q", expected, tag)
-	}
+		tag := httpinternal.BuildCustomStylesheetTag("/wiki", "/tmp/custom.css")
 
+		expected := `<link rel="stylesheet" href="/wiki/custom.css">`
+		Expect(tag).To(Equal(expected), "expected %q, got %q", expected, tag)
+
+	})
 })
 
-var _ = It("TestBuildCustomStylesheetTag_EmptyPath", func() {
-	t := GinkgoT()
-	tag := httpinternal.BuildCustomStylesheetTag("", "")
-	if tag != "" {
-		t.Fatalf("expected empty tag, got %q", tag)
-	}
+var _ = Describe("HTTP router", func() {
+	It("omits custom stylesheet tags for an empty path", func() {
 
+		tag := httpinternal.BuildCustomStylesheetTag("", "")
+		Expect(tag).To(BeEmpty(), "expected empty tag, got %q", tag)
+
+	})
 })
 
-var _ = It("TestInjectIntoHead", func() {
-	t := GinkgoT()
-	html := "<html><head></head><body></body></html>"
-	got := httpinternal.InjectIntoHead(html, `<link rel="stylesheet" href="/custom.css">`)
+var _ = Describe("HTTP router", func() {
+	It("injects configured markup into the document head", func() {
 
-	if !strings.Contains(got, `<link rel="stylesheet" href="/custom.css">`) {
-		t.Fatalf("expected stylesheet link to be injected, got %q", got)
-	}
+		html := "<html><head></head><body></body></html>"
+		got := httpinternal.InjectIntoHead(html, `<link rel="stylesheet" href="/custom.css">`)
+		Expect(got).To(ContainSubstring(`<link rel="stylesheet" href="/custom.css">`), "expected stylesheet link to be injected, got %q", got)
 
+	})
 })
 
-var _ = Describe("router edge coverage", func() {
+var _ = Describe("router edge behavior", func() {
 	It("sets Gin release mode in production", func() {
 		previous := httpinternal.Environment
 		httpinternal.Environment = "production"
@@ -5689,7 +5275,7 @@ var _ = Describe("router edge coverage", func() {
 	})
 
 	It("normalizes empty and relative custom stylesheet paths", func() {
-		storageDir := GinkgoT().TempDir()
+		storageDir := httpTestTempDir()
 
 		empty, err := httpinternal.NormalizeCustomStylesheetPath(storageDir, " \t\n ")
 		Expect(err).NotTo(HaveOccurred())
@@ -5763,7 +5349,7 @@ var _ = Describe("router edge coverage", func() {
 	})
 
 	It("returns the relative path error while validating a custom stylesheet", func() {
-		storageDir := GinkgoT().TempDir()
+		storageDir := httpTestTempDir()
 		relErr := errors.New("relative path failed")
 		DeferCleanup(httpinternal.SetCustomStylesheetRelPathForTest(func(base, path string) (string, error) {
 			Expect(base).To(Equal(filepath.Clean(storageDir)))
@@ -5778,7 +5364,7 @@ var _ = Describe("router edge coverage", func() {
 	})
 
 	It("returns 404 for a configured custom stylesheet that is missing on disk", func() {
-		storageDir := GinkgoT().TempDir()
+		storageDir := httpTestTempDir()
 		missingCSSPath := filepath.Join(storageDir, "missing.css")
 		router := httpinternal.NewRouter(nil, httpinternal.FrontendConfig{
 			CustomStylesheetPath: missingCSSPath,
@@ -5808,7 +5394,7 @@ var _ = Describe("router edge coverage", func() {
 			httpinternal.EmbedFrontend = previous
 		})
 		router := httpinternal.NewRouter(nil, httpinternal.FrontendConfig{
-			CustomStylesheetPath: filepath.Join(GinkgoT().TempDir(), "style.css"),
+			CustomStylesheetPath: filepath.Join(httpTestTempDir(), "style.css"),
 			GetSiteName: func() string {
 				return "Test Wiki"
 			},
@@ -5849,14 +5435,12 @@ type frontendFaviconHrefScenario struct {
 	want        string
 }
 
-var _ = DescribeTable("TestBuildFrontendFaviconHref",
+var _ = DescribeTable("frontend favicon hrefs include the base path and branding file",
 	func(tt frontendFaviconHrefScenario) {
-		t := GinkgoT()
 
 		got := httpinternal.BuildFrontendFaviconHref(tt.basePath, tt.faviconFile)
-		if got != tt.want {
-			t.Fatalf("BuildFrontendFaviconHref(%q, %q) = %q, want %q", tt.basePath, tt.faviconFile, got, tt.want)
-		}
+		Expect(got).To(Equal(tt.want), "BuildFrontendFaviconHref(%q, %q) = %q, want %q", tt.basePath, tt.faviconFile, got, tt.want)
+
 	},
 	Entry("default favicon without base path", frontendFaviconHrefScenario{
 		want:     "/favicon.svg",
@@ -5877,289 +5461,298 @@ var _ = DescribeTable("TestBuildFrontendFaviconHref",
 	}),
 )
 
-var _ = It("TestCustomStylesheetRoute", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
+var _ = Describe("HTTP router", func() {
+	It("serves configured custom stylesheets", func() {
 
-	customCSSPath := filepath.Join(w.GetStorageDir(), "custom.css")
-	if err := os.WriteFile(customCSSPath, []byte("body { color: red; }"), 0644); err != nil {
-		t.Fatalf("failed to create custom stylesheet: %v", err)
-	}
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
 
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		CustomStylesheet:        customCSSPath,
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		AuthDisabled:            false,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	if got := rec.Header().Get("Content-Type"); got != "text/css; charset=utf-8" {
-		t.Fatalf("expected css content-type, got %q", got)
-	}
-
-	if !strings.Contains(rec.Body.String(), "body { color: red; }") {
-		t.Fatalf("expected CSS body, got %q", rec.Body.String())
-	}
-
-})
-
-var _ = It("TestCustomStylesheetRoute_RejectsPathOutsideStorageDir", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	outsideCSSPath := filepath.Join(t.TempDir(), "outside.css")
-	if err := os.WriteFile(outsideCSSPath, []byte("body { color: blue; }"), 0644); err != nil {
-		t.Fatalf("failed to create stylesheet outside storage dir: %v", err)
-	}
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		CustomStylesheet:        outsideCSSPath,
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		AuthDisabled:            false,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when stylesheet path is outside storage dir, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestCustomStylesheetRoute_RejectsNonCSSFile", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	textFilePath := filepath.Join(w.GetStorageDir(), "custom.txt")
-	if err := os.WriteFile(textFilePath, []byte("not css"), 0644); err != nil {
-		t.Fatalf("failed to create non-css file: %v", err)
-	}
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		CustomStylesheet:        textFilePath,
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		AuthDisabled:            false,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when stylesheet path is not a css file, got %d", rec.Code)
-	}
-
-})
-
-var _ = It("TestBrandingAssetRoute_DisablesClientCache", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := createRouterTestInstance(w, t)
-	uploadBrandingLogoViaAPI(t, router, "logo.png", []byte("logo"))
-
-	req := httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("expected Cache-Control no-store, got %q", got)
-	}
-
-})
-
-var _ = It("TestFaviconRoute_DisablesClientCache", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	EmbedFrontendOrig := httpinternal.EmbedFrontend
-	httpinternal.EmbedFrontend = "true"
-	DeferCleanup(func() {
-		httpinternal.EmbedFrontend = EmbedFrontendOrig
-	})
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		PublicAccess:            false,
-		InjectCodeInHeader:      "",
-		CustomStylesheet:        "",
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		HideLinkMetadataSection: false,
-		AuthDisabled:            false,
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("expected Cache-Control no-store, got %q", got)
-	}
-
-})
-
-var _ = It("TestOAuthApprovalFrontendRoute_HasApprovalSecurityHeaders", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	embedFrontendOrig := httpinternal.EmbedFrontend
-	httpinternal.EmbedFrontend = "true"
-	DeferCleanup(func() {
-		httpinternal.EmbedFrontend = embedFrontendOrig
-	})
-
-	router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		AllowInsecure:           true,
-		AccessTokenTimeout:      15 * time.Minute,
-		RefreshTokenTimeout:     7 * 24 * time.Hour,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPBindHost:             "127.0.0.1",
-	})
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/oauth/approve", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /oauth/approve = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("approval Cache-Control = %q, want no-store", got)
-	}
-	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
-		t.Fatalf("approval Content-Security-Policy = %q, want frame-ancestors 'none'", got)
-	}
-	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
-		t.Fatalf("approval X-Frame-Options = %q, want DENY", got)
-	}
-
-})
-
-var _ = It("TestFaviconICORoute_ServesCustomBrandingFavicon", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := createRouterTestInstance(w, t)
-	uploadBrandingFaviconViaAPI(t, router, "favicon.ico", []byte("custom-favicon"))
-
-	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("expected Cache-Control no-store, got %q", got)
-	}
-
-	if got := rec.Body.String(); got != "custom-favicon" {
-		t.Fatalf("expected custom favicon payload, got %q", got)
-	}
-
-})
-
-var _ = It("TestFaviconICORoute_FallsBackToDefaultSVG", func() {
-	t := GinkgoT()
-	w := createWikiTestInstance(t)
-	wrapCloseWithErrorCheck(w.Close, t)
-
-	router := createRouterTestInstance(w, t)
-
-	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("expected Cache-Control no-store, got %q", got)
-	}
-
-	if got := rec.Body.String(); !strings.Contains(got, "<svg") {
-		t.Fatalf("expected default svg favicon response, got %q", got)
-	}
-
-})
-
-var _ = It("TestBuildCustomStylesheetTag_WhitespacePath", func() {
-	t := GinkgoT()
-	tag := httpinternal.BuildCustomStylesheetTag("/wiki", "   ")
-	if tag != "" {
-		t.Fatalf("expected empty tag for whitespace path, got %q", tag)
-	}
-
-})
-
-var _ = DescribeTable("IsLoopbackHost",
-	func(host string, want bool) {
-		t := GinkgoT()
-		if got := httpinternal.IsLoopbackHost(host); got != want {
-			t.Fatalf("IsLoopbackHost(%q) = %v, want %v", host, got, want)
+		customCSSPath := filepath.Join(w.GetStorageDir(), "custom.css")
+		{
+			err := os.WriteFile(customCSSPath, []byte("body { color: red; }"), 0644)
+			Expect(err).NotTo(HaveOccurred(), "failed to create custom stylesheet: %v", err)
 		}
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			CustomStylesheet:        customCSSPath,
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			AuthDisabled:            false,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d", rec.Code)
+		{
+
+			got := rec.Header().Get("Content-Type")
+			Expect(got).To(Equal("text/css; charset=utf-8"), "expected css content-type, got %q", got)
+		}
+		Expect(rec).To(HaveHTTPBody(ContainSubstring("body { color: red; }")), "expected CSS body, got %q", rec.Body.String())
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects custom stylesheet paths outside the storage directory", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		outsideCSSPath := filepath.Join(httpTestTempDir(), "outside.css")
+		{
+			err := os.WriteFile(outsideCSSPath, []byte("body { color: blue; }"), 0644)
+			Expect(err).NotTo(HaveOccurred(), "failed to create stylesheet outside storage dir: %v", err)
+		}
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			CustomStylesheet:        outsideCSSPath,
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			AuthDisabled:            false,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "expected 404 when stylesheet path is outside storage dir, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("rejects custom stylesheet paths that are not css files", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		textFilePath := filepath.Join(w.GetStorageDir(), "custom.txt")
+		{
+			err := os.WriteFile(textFilePath, []byte("not css"), 0644)
+			Expect(err).NotTo(HaveOccurred(), "failed to create non-css file: %v", err)
+		}
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			CustomStylesheet:        textFilePath,
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			AuthDisabled:            false,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/custom.css", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "expected 404 when stylesheet path is not a css file, got %d", rec.Code)
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("disables client caching for branding assets", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := createRouterTestInstance(w)
+		uploadBrandingLogoViaAPI(router, "logo.png", []byte("logo"))
+
+		req := httptest.NewRequest(http.MethodGet, "/branding/logo.png", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d", rec.Code)
+		{
+
+			got := rec.Header().Get("Cache-Control")
+			Expect(got).To(Equal("no-store"), "expected Cache-Control no-store, got %q", got)
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("disables client caching for favicon assets", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		EmbedFrontendOrig := httpinternal.EmbedFrontend
+		httpinternal.EmbedFrontend = "true"
+		DeferCleanup(func() {
+			httpinternal.EmbedFrontend = EmbedFrontendOrig
+		})
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			PublicAccess:            false,
+			InjectCodeInHeader:      "",
+			CustomStylesheet:        "",
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			HideLinkMetadataSection: false,
+			AuthDisabled:            false,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d", rec.Code)
+		{
+
+			got := rec.Header().Get("Cache-Control")
+			Expect(got).To(Equal("no-store"), "expected Cache-Control no-store, got %q", got)
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("adds approval security headers to the oauth approval frontend route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		embedFrontendOrig := httpinternal.EmbedFrontend
+		httpinternal.EmbedFrontend = "true"
+		DeferCleanup(func() {
+			httpinternal.EmbedFrontend = embedFrontendOrig
+		})
+
+		router := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			AllowInsecure:           true,
+			AccessTokenTimeout:      15 * time.Minute,
+			RefreshTokenTimeout:     7 * 24 * time.Hour,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPBindHost:             "127.0.0.1",
+		})
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/oauth/approve", nil))
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "GET /oauth/approve = %d, want 200: %s", rec.Code, rec.Body.String())
+		{
+
+			got := rec.Header().Get("Cache-Control")
+			Expect(got).To(Equal("no-store"), "approval Cache-Control = %q, want no-store", got)
+		}
+		{
+
+			got := rec.Header().Get("Content-Security-Policy")
+			Expect(got).To(ContainSubstring("frame-ancestors 'none'"), "approval Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+		}
+		{
+
+			got := rec.Header().Get("X-Frame-Options")
+			Expect(got).To(Equal("DENY"), "approval X-Frame-Options = %q, want DENY", got)
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("serves the configured branding favicon from the ico route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := createRouterTestInstance(w)
+		uploadBrandingFaviconViaAPI(router, "favicon.ico", []byte("custom-favicon"))
+
+		req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d", rec.Code)
+		{
+
+			got := rec.Header().Get("Cache-Control")
+			Expect(got).To(Equal("no-store"), "expected Cache-Control no-store, got %q", got)
+		}
+		{
+
+			got := rec.Body.String()
+			Expect(got).To(Equal("custom-favicon"), "expected custom favicon payload, got %q", got)
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("falls back to the default svg favicon from the ico route", func() {
+
+		w := createWikiTestInstance()
+		wrapCloseWithErrorCheck(w.Close)
+
+		router := createRouterTestInstance(w)
+
+		req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d", rec.Code)
+		{
+
+			got := rec.Header().Get("Cache-Control")
+			Expect(got).To(Equal("no-store"), "expected Cache-Control no-store, got %q", got)
+		}
+		{
+
+			got := rec.Body.String()
+			Expect(got).To(ContainSubstring("<svg"), "expected default svg favicon response, got %q", got)
+		}
+
+	})
+})
+
+var _ = Describe("HTTP router", func() {
+	It("omits custom stylesheet tags for whitespace-only paths", func() {
+
+		tag := httpinternal.BuildCustomStylesheetTag("/wiki", "   ")
+		Expect(tag).To(BeEmpty(), "expected empty tag for whitespace path, got %q", tag)
+
+	})
+})
+
+var _ = DescribeTable("loopback host detection",
+	func(host string, want bool) {
+		{
+
+			got := httpinternal.IsLoopbackHost(host)
+			Expect(got).To(Equal(want), "IsLoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+
 	},
 	Entry("localhost", "localhost", true),
 	Entry("localhost with whitespace and uppercase", " LOCALHOST ", true),
-	Entry("IPv4 loopback", "127.0.0.1", true),
-	Entry("IPv6 loopback", "::1", true),
-	Entry("bracketed IPv6 loopback", "[::1]", true),
-	Entry("non-loopback IPv4", "192.0.2.10", false),
+	Entry("i Pv 4 loopback", "127.0.0.1", true),
+	Entry("i Pv 6 loopback", "::1", true),
+	Entry("bracketed I Pv 6 loopback", "[::1]", true),
+	Entry("non-loopback I Pv 4", "192.0.2.10", false),
 	Entry("empty host", "", false),
 	Entry("malformed host", "not a host", false),
 )
 
-var _ = DescribeTable("IsLoopbackRemoteAddr",
+var _ = DescribeTable("loopback remote address detection",
 	func(remoteAddr string, want bool) {
-		t := GinkgoT()
-		if got := httpinternal.IsLoopbackRemoteAddr(remoteAddr); got != want {
-			t.Fatalf("IsLoopbackRemoteAddr(%q) = %v, want %v", remoteAddr, got, want)
+		{
+
+			got := httpinternal.IsLoopbackRemoteAddr(remoteAddr)
+			Expect(got).To(Equal(want), "IsLoopbackRemoteAddr(%q) = %v, want %v", remoteAddr, got, want)
 		}
+
 	},
-	Entry("IPv4 host port", "127.0.0.1:8080", true),
-	Entry("IPv6 host port", "[::1]:8080", true),
+	Entry("i Pv 4 host port", "127.0.0.1:8080", true),
+	Entry("i Pv 6 host port", "[::1]:8080", true),
 	Entry("localhost host port", "localhost:8080", true),
 	Entry("loopback without port", "127.0.0.1", true),
 	Entry("non-loopback host port", "203.0.113.5:8080", false),
@@ -6167,56 +5760,50 @@ var _ = DescribeTable("IsLoopbackRemoteAddr",
 	Entry("malformed remote addr", "not a remote addr", false),
 )
 
-var _ = It("LocalOnlyHandler allows loopback requests", func() {
-	t := GinkgoT()
-	called := false
-	handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		called = true
-		w.Header().Set("X-Local-Only", "allowed")
-		w.WriteHeader(http.StatusNoContent)
-	}))
+var _ = Describe("HTTP router", func() {
+	It("allows loopback requests through the local-only handler", func() {
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.RemoteAddr = "127.0.0.1:3456"
-	rec := httptest.NewRecorder()
+		handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("X-Local-Only", "allowed")
+			w.WriteHeader(http.StatusNoContent)
+		}))
 
-	handler.ServeHTTP(rec, req)
+		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+		req.RemoteAddr = "127.0.0.1:3456"
+		rec := httptest.NewRecorder()
 
-	if !called {
-		t.Fatal("expected wrapped handler to be called for loopback request")
-	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("LocalOnlyHandler loopback status = %d, want %d", rec.Code, http.StatusNoContent)
-	}
-	if got := rec.Header().Get("X-Local-Only"); got != "allowed" {
-		t.Fatalf("LocalOnlyHandler did not preserve wrapped response header, got %q", got)
-	}
+		handler.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent), "LocalOnlyHandler loopback status = %d, want %d", rec.Code, http.StatusNoContent)
+		{
+
+			got := rec.Header().Get("X-Local-Only")
+			Expect(got).To(Equal("allowed"), "LocalOnlyHandler did not preserve wrapped response header, got %q", got)
+		}
+
+	})
 })
 
-var _ = It("LocalOnlyHandler rejects non-loopback requests", func() {
-	t := GinkgoT()
-	called := false
-	handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+var _ = Describe("HTTP router", func() {
+	It("rejects non-loopback requests before they reach the wrapped handler", func() {
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.RemoteAddr = "203.0.113.5:3456"
-	rec := httptest.NewRecorder()
+		handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("X-Local-Only", "called")
+			w.WriteHeader(http.StatusNoContent)
+		}))
 
-	handler.ServeHTTP(rec, req)
+		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+		req.RemoteAddr = "203.0.113.5:3456"
+		rec := httptest.NewRecorder()
 
-	if called {
-		t.Fatal("wrapped handler was called for non-loopback request")
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("LocalOnlyHandler non-loopback status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
+		handler.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "LocalOnlyHandler non-loopback status = %d, want %d", rec.Code, http.StatusNotFound)
+		Expect(rec.Header()).NotTo(HaveKey("X-Local-Only"), "wrapped handler response header should not be present")
+
+	})
 })
 
-func captureDefaultLogs(t routerTestTB) *bytes.Buffer {
-	t.Helper()
+func captureDefaultLogs() *bytes.Buffer {
+	GinkgoHelper()
 
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -6227,21 +5814,23 @@ func captureDefaultLogs(t routerTestTB) *bytes.Buffer {
 	return &logs
 }
 
-func findJSONLogEntry(t routerTestTB, logs string, msg string) map[string]any {
-	t.Helper()
+func findJSONLogEntry(logs string, msg string) map[string]any {
+	GinkgoHelper()
 
 	for _, line := range strings.Split(strings.TrimSpace(logs), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		var entry map[string]any
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatalf("log line is not JSON: %v\n%s", err, line)
+		{
+			err := json.Unmarshal([]byte(line), &entry)
+			Expect(err).NotTo(HaveOccurred(), "log line is not JSON: %v\n%s", err, line)
 		}
+
 		if entry["msg"] == msg {
 			return entry
 		}
 	}
-	t.Fatalf("logs did not contain msg %q:\n%s", msg, logs)
+	Fail(fmt.Sprintf("logs did not contain msg %q:\n%s", msg, logs))
 	return nil
 }
