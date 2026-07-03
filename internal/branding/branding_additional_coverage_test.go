@@ -109,7 +109,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(err).To(Satisfy(wrapsJSONSyntaxError))
 	})
 
-	Describe("persistence edge coverage", func() {
+	Describe("branding persistence failure behavior", func() {
 		It("reports branding asset directory creation errors during service startup", func() {
 			storageFile := filepath.Join(tempBrandingDir(), "storage")
 			Expect(os.WriteFile(storageFile, []byte("not a directory"), 0o600)).To(Succeed())
