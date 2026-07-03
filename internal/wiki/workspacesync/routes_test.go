@@ -78,9 +78,9 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(response).To(HaveKeyWithValue("lastCommitHash", workspacesync.CommitHashFromString("abc123")))
 		Expect(response).To(HaveKeyWithValue("recentChangedMarkdownPaths", []string{"docs/page.md"}))
 		Expect(response).To(HaveKeyWithValue("validationErrorDetails", status.ValidationErrors))
-		detail, ok := response["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
-		Expect(ok).To(BeTrue())
-		Expect(detail).To(testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)))
+		Expect(response).To(HaveKeyWithValue("lastErrorDetail",
+			testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)),
+		))
 	})
 
 	ginkgo.It("omits last-error detail for blank status errors", func() {
