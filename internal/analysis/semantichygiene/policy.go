@@ -60,6 +60,7 @@ const (
 	ruleGomegaLenEqual                     ruleID = "gomega.len-equal"
 	ruleGomegaBinaryBoolean                ruleID = "gomega.binary-boolean"
 	ruleGomegaBooleanLiteral               ruleID = "gomega.boolean-literal"
+	ruleGomegaCommaOKAssertion             ruleID = "gomega.comma-ok-assertion"
 	ruleGomegaMapIndex                     ruleID = "gomega.map-index"
 	ruleGomegaHTTPStatus                   ruleID = "gomega.http-status"
 	ruleGomegaHTTPBody                     ruleID = "gomega.http-body"
@@ -156,6 +157,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaLenEqual:                     hardRule(ruleGomegaLenEqual),
 	ruleGomegaBinaryBoolean:                hardRule(ruleGomegaBinaryBoolean),
 	ruleGomegaBooleanLiteral:               hardRule(ruleGomegaBooleanLiteral),
+	ruleGomegaCommaOKAssertion:             hardRule(ruleGomegaCommaOKAssertion),
 	ruleGomegaMapIndex:                     hardRule(ruleGomegaMapIndex),
 	ruleGomegaHTTPStatus:                   hardRule(ruleGomegaHTTPStatus),
 	ruleGomegaHTTPBody:                     hardRule(ruleGomegaHTTPBody),

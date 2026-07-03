@@ -75,6 +75,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesBooleanLiteral(assertion) {
 		ctx.report(ruleGomegaBooleanLiteral, assertion.actual, gomegaBooleanLiteralMatcherDiagnostic())
 	}
+	if assertionUsesCommaOKBoolean(ctx, assertion) {
+		ctx.report(ruleGomegaCommaOKAssertion, assertion.actual, gomegaCommaOKAssertionDiagnostic())
+	}
 	if assertionUsesMapIndexEqual(ctx, assertion) {
 		ctx.report(ruleGomegaMapIndex, assertion.actual, gomegaMapIndexMatcherDiagnostic())
 	}
@@ -563,6 +566,52 @@ func assertionUsesBinaryBoolean(assertion gomegaAssertion) bool {
 func assertionUsesBooleanLiteral(assertion gomegaAssertion) bool {
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
 	return ok && (ident.Name == "true" || ident.Name == "false") && isBooleanMatcher(assertion.matcher)
+}
+
+func assertionUsesCommaOKBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
+	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
+	return ok && isBooleanMatcher(assertion.matcher) && identIsCommaOKResult(ctx, ident)
+}
+
+func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {
+	body := enclosingFunctionBody(ctx, ident)
+	if body == nil {
+		return false
+	}
+	targetObject := ctx.pass.TypesInfo.ObjectOf(ident)
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok || assign.Pos() > ident.Pos() || len(assign.Lhs) != 2 || len(assign.Rhs) != 1 {
+			return true
+		}
+		lhsIdent, ok := unparenExpr(assign.Lhs[1]).(*ast.Ident)
+		if !ok || !sameIdentifierObject(ctx, lhsIdent, ident, targetObject) {
+			return true
+		}
+		found = exprIsCommaOKSource(ctx, assign.Rhs[0])
+		return !found
+	})
+	return found
+}
+
+func exprIsCommaOKSource(ctx *analysisContext, expr ast.Expr) bool {
+	switch source := unparenExpr(expr).(type) {
+	case *ast.TypeAssertExpr:
+		return true
+	case *ast.IndexExpr:
+		return typeIsMap(ctx.pass.TypesInfo.TypeOf(source.X))
+	case *ast.UnaryExpr:
+		return source.Op == token.ARROW
+	default:
+		return false
+	}
 }
 
 func isComparisonOp(op token.Token) bool {

@@ -104,6 +104,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega len equal", ruleID("gomega.len-equal"), false, waiverScopeNone),
 			ginkgo.Entry("gomega binary boolean", ruleID("gomega.binary-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega boolean literal", ruleID("gomega.boolean-literal"), false, waiverScopeNone),
+			ginkgo.Entry("gomega comma-ok assertion", ruleID("gomega.comma-ok-assertion"), false, waiverScopeNone),
 			ginkgo.Entry("gomega map index", ruleID("gomega.map-index"), false, waiverScopeNone),
 			ginkgo.Entry("gomega http status", ruleID("gomega.http-status"), false, waiverScopeNone),
 			ginkgo.Entry("gomega http body", ruleID("gomega.http-body"), false, waiverScopeNone),

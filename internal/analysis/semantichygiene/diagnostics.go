@@ -154,6 +154,10 @@ func gomegaBooleanLiteralMatcherDiagnostic() string {
 	return "use semantic Gomega assertions instead of forcing pass/fail with boolean literals"
 }
 
+func gomegaCommaOKAssertionDiagnostic() string {
+	return "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }

@@ -451,10 +451,15 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(len(items)).To(Equal(1))                              // want "use HaveLen matcher instead of asserting len\\(\\) with Equal"
 	Expect(count == 1).To(BeTrue())                              // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 	Expect(count > 0).To(BeTrue())                               // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
-	Expect(values["a"]).To(Equal(1))                             // want "use HaveKeyWithValue matcher instead of asserting a direct map index value"
-	Expect(rec.Code).To(Equal(http.StatusOK))                    // want "use HaveHTTPStatus matcher instead of asserting response status fields directly"
-	Expect(resp.StatusCode).To(Equal(http.StatusCreated))        // want "use HaveHTTPStatus matcher instead of asserting response status fields directly"
-	Expect(rec.Body.String()).To(ContainSubstring("ok"))         // want "use HaveHTTPBody matcher instead of matching recorder body strings directly"
+	decoded, ok := any(text).(string)
+	Expect(ok).To(BeTrue()) // want "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
+	_ = decoded
+	_, hasValue := values["a"]
+	Expect(hasValue).To(BeFalse())                        // want "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
+	Expect(values["a"]).To(Equal(1))                      // want "use HaveKeyWithValue matcher instead of asserting a direct map index value"
+	Expect(rec.Code).To(Equal(http.StatusOK))             // want "use HaveHTTPStatus matcher instead of asserting response status fields directly"
+	Expect(resp.StatusCode).To(Equal(http.StatusCreated)) // want "use HaveHTTPStatus matcher instead of asserting response status fields directly"
+	Expect(rec.Body.String()).To(ContainSubstring("ok"))  // want "use HaveHTTPBody matcher instead of matching recorder body strings directly"
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("ok")))
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                                                     // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
 	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                                                   // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
