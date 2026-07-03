@@ -55,6 +55,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesGenericHaveOccurred(ctx, assertion) {
 		ctx.report(ruleGomegaGenericHaveOccurred, assertion.matcher, gomegaGenericHaveOccurredDiagnostic())
 	}
+	if assertionMatcherTreeUsesGenericHaveOccurred(assertion) {
+		ctx.report(ruleGomegaGenericHaveOccurred, assertion.matcher, gomegaGenericHaveOccurredDiagnostic())
+	}
 	if assertionUsesInlineErrorReturnHaveOccurred(ctx, assertion) {
 		ctx.report(ruleGomegaInlineErrorSucceed, assertion.actual, gomegaInlineErrorSucceedDiagnostic())
 	}
@@ -351,6 +354,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	if !isTestFile(filename) && !isTestSupportFile(filename) {
 		return
 	}
+	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
 	for _, field := range fn.Type.Params.List {
 		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
 			continue
@@ -372,6 +376,25 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 			}
 		}
 	}
+}
+
+func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.FuncDecl) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case nil:
+			return false
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			for _, result := range current.Results {
+				if matcherTreeContainsPositiveHaveOccurred(result) {
+					ctx.report(ruleGomegaGenericHaveOccurred, result, gomegaGenericHaveOccurredDiagnostic())
+				}
+			}
+			return false
+		}
+		return true
+	})
 }
 
 func gomegaAssertionFromCall(ctx *analysisContext, call *ast.CallExpr) (gomegaAssertion, bool) {
@@ -649,6 +672,41 @@ func assertionUsesGenericHaveOccurred(ctx *analysisContext, assertion gomegaAsse
 		return false
 	}
 	return typeImplementsError(ctx.pass.TypesInfo.TypeOf(assertion.actual))
+}
+
+func assertionMatcherTreeUsesGenericHaveOccurred(assertion gomegaAssertion) bool {
+	if isNegativeAssertionMethod(assertion.method) || isMatcherNamed(assertion.matcher, "HaveOccurred") {
+		return false
+	}
+	return matcherTreeContainsPositiveHaveOccurred(assertion.matcher)
+}
+
+func matcherTreeContainsPositiveHaveOccurred(expr ast.Expr) bool {
+	switch current := unparenExpr(expr).(type) {
+	case *ast.CallExpr:
+		if isMatcherNamed(current, "Not") {
+			return false
+		}
+		if isMatcherNamed(current, "HaveOccurred") {
+			return true
+		}
+		for _, arg := range current.Args {
+			if matcherTreeContainsPositiveHaveOccurred(arg) {
+				return true
+			}
+		}
+	case *ast.CompositeLit:
+		for _, elt := range current.Elts {
+			if matcherTreeContainsPositiveHaveOccurred(elt) {
+				return true
+			}
+		}
+	case *ast.KeyValueExpr:
+		return matcherTreeContainsPositiveHaveOccurred(current.Value)
+	case *ast.TypeAssertExpr:
+		return matcherTreeContainsPositiveHaveOccurred(current.X)
+	}
+	return false
 }
 
 func assertionUsesMultiReturnErrorMatcher(ctx *analysisContext, assertion gomegaAssertion) bool {

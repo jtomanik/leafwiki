@@ -561,6 +561,22 @@ func TestRepoTestGomegaInlineErrorShortcutsAreRejected(t *testing.T) {
 	Expect(err).To(HaveOccurred()) // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 }
 
+type readMethodErrors struct {
+	TableColumns error
+}
+
+func TestRepoTestGomegaNestedGenericHaveOccurredIsRejected(t *testing.T) {
+	Expect(readMethodErrors{TableColumns: returnError()}).To(MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+		"TableColumns": HaveOccurred(),
+	}))
+}
+
+func HaveReadMethodErrors() GomegaMatcher {
+	return MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+		"TableColumns": HaveOccurred(),
+	}).(GomegaMatcher)
+}
+
 func hiddenRawStringErrorMatcher() any {
 	return MatchError(ContainSubstring("Scan error")) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 }
