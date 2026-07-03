@@ -7,7 +7,7 @@ import (
 
 var _ = ginkgo.Describe("TagsService page index deletion", func() {
 	ginkgo.It("deletes both tags and excerpts for a page", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		service := NewTagsService(store)
 
 		content := "---\ntags:\n  - Go\n  - Testing\n---\n\n# Page\n\nA useful excerpt."
@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("TagsService page index deletion", func() {
 
 var _ = ginkgo.Describe("selection-aware tag suggestions", func() {
 	ginkgo.It("suggests additive tags for pages matching the selected tags", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		Expect(store.SetTagsForPage("page-1", []string{"go", "react", "testing"})).To(Succeed())
 		Expect(store.SetTagsForPage("page-2", []string{"go", "react"})).To(Succeed())
 		Expect(store.SetTagsForPage("page-3", []string{"go", "rust"})).To(Succeed())
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("selection-aware tag suggestions", func() {
 	})
 
 	ginkgo.It("falls back to normal tag listing when no tags are selected", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		service := NewTagsService(store)
 		Expect(store.SetTagsForPage("page-1", []string{"go", "react"})).To(Succeed())
 		Expect(store.SetTagsForPage("page-2", []string{"react"})).To(Succeed())
@@ -72,7 +72,7 @@ var _ = ginkgo.Describe("tag normalization", func() {
 
 var _ = ginkgo.Describe("TagsStore duplicate tag writes", func() {
 	ginkgo.It("stores duplicate input tags only once for a page", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		Expect(store.SetTagsForPage("page-1", []string{"go", "go", "rust"})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))

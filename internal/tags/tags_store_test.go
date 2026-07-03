@@ -1,851 +1,465 @@
 package tags
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
-
 	"os"
 	"path/filepath"
-	"sort"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-func newTestStore(t tagsTestT) *TagsStore {
-	t.Helper()
-	store, err := NewTagsStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewTagsStore: %v", err)
-	}
-	closeTagsStoreForTest(store, t)
-	return store
-}
+var _ = ginkgo.Describe("TagsStore database lifecycle", func() {
+	ginkgo.It("creates the tag database inside the storage directory", func() {
+		tmp := tempTagsDir()
 
-func testPageIDs[T ~string](ids ...T) []tree.PageID {
-	pageIDs := make([]tree.PageID, 0, len(ids))
-	for _, id := range ids {
-		pageIDs = append(pageIDs, newFixturePageID(id))
-	}
-	return pageIDs
-}
-
-func sortTestPageIDs(ids []tree.PageID) {
-	sort.Slice(ids, func(i, j int) bool {
-		return ids[i] < ids[j]
-	})
-}
-
-func assertPageIDSliceEqual(t tagsTestT, got []tree.PageID, want []string) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("expected %v, got %v", want, got)
-	}
-	for i, w := range want {
-		if got[i] != newFixturePageID(w) {
-			t.Errorf("[%d] = %q, want %q", i, got[i], w)
-		}
-	}
-}
-
-// ─── DB lifecycle ────────────────────────────────────────────────────────────
-
-var _ = ginkgo.Describe("TestTagsStore_CreatesDatabaseInStorageDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
 		store, err := NewTagsStore(tmp)
-		if err != nil {
-			t.Fatalf("NewTagsStore: %v", err)
-		}
-		closeTagsStoreForTest(store, t)
+		Expect(err).NotTo(HaveOccurred())
+		closeTagsStoreForTest(store)
 
-		if _, err := os.Stat(filepath.Join(tmp, "tags.db")); err != nil {
-			t.Fatalf("expected tags.db to exist: %v", err)
-		}
-
+		_, err = os.Stat(filepath.Join(tmp, "tags.db"))
+		Expect(err).NotTo(HaveOccurred())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_IdempotentSchema", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+	ginkgo.It("can initialize the same schema repeatedly", func() {
+		tmp := tempTagsDir()
+
 		for i := 0; i < 3; i++ {
 			store, err := NewTagsStore(tmp)
-			if err != nil {
-				t.Fatalf("NewTagsStore (run %d): %v", i, err)
-			}
-			if err := store.Close(); err != nil {
-				t.Fatalf("Close (run %d): %v", i, err)
-			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(store.Close()).To(Succeed())
 		}
-
 	})
 })
 
-// ─── SetTagsForPage ──────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore page tag writes", func() {
+	ginkgo.It("stores tags for a page", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_SetTagsForPage_StoresTags", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		if err := store.SetTagsForPage("page-1", []string{"go", "testing"}); err != nil {
-			t.Fatalf("SetTagsForPage: %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-
-		want := []string{"go", "testing"}
-		assertStringSliceEqual(t, got["page-1"], want)
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), matchTagSet("go", "testing")))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_SetTagsForPage_ReplacesOnSecondCall", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("replaces existing tags on the next write", func() {
+		store := newTestStore()
 
-		if err := store.SetTagsForPage("page-1", []string{"go", "testing"}); err != nil {
-			t.Fatalf("first SetTagsForPage: %v", err)
-		}
-		if err := store.SetTagsForPage("page-1", []string{"typescript"}); err != nil {
-			t.Fatalf("second SetTagsForPage: %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"typescript"})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		assertStringSliceEqual(t, got["page-1"], []string{"typescript"})
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), matchTagSet("typescript")))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_SetTagsForPage_EmptyTagsClearsExisting", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("clears existing tags when an empty tag list is written", func() {
+		store := newTestStore()
 
-		if err := store.SetTagsForPage("page-1", []string{"go", "testing"}); err != nil {
-			t.Fatalf("SetTagsForPage: %v", err)
-		}
-		if err := store.SetTagsForPage("page-1", []string{}); err != nil {
-			t.Fatalf("SetTagsForPage (clear): %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(got["page-1"]) != 0 {
-			t.Fatalf("expected empty tags, got %v", got["page-1"])
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(HaveKey(newFixturePageID("page-1")))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_SetTagsForPage_NilTagsClearsExisting", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("clears existing tags when nil tags are written", func() {
+		store := newTestStore()
 
-		if err := store.SetTagsForPage("page-1", []string{"go"}); err != nil {
-			t.Fatalf("SetTagsForPage: %v", err)
-		}
-		if err := store.SetTagsForPage("page-1", nil); err != nil {
-			t.Fatalf("SetTagsForPage (nil): %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), nil)).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(got["page-1"]) != 0 {
-			t.Fatalf("expected empty tags after nil set, got %v", got["page-1"])
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(HaveKey(newFixturePageID("page-1")))
 	})
 })
 
-// ─── DeleteTagsForPage ───────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore page tag deletion", func() {
+	ginkgo.It("removes tags for the requested page", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_DeleteTagsForPage_RemovesTags", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		if err := store.SetTagsForPage("page-1", []string{"go", "testing"}); err != nil {
-			t.Fatalf("SetTagsForPage: %v", err)
-		}
-		if err := store.DeleteTagsForPage("page-1"); err != nil {
-			t.Fatalf("DeleteTagsForPage: %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
+		Expect(store.DeleteTagsForPage(newFixturePageID("page-1"))).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(got["page-1"]) != 0 {
-			t.Fatalf("expected empty tags after delete, got %v", got["page-1"])
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(HaveKey(newFixturePageID("page-1")))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_DeleteTagsForPage_NonExistentPageIsNoop", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-		if err := store.DeleteTagsForPage("does-not-exist"); err != nil {
-			t.Fatalf("DeleteTagsForPage on unknown page: %v", err)
-		}
+	ginkgo.It("treats deleting an unknown page as a no-op", func() {
+		store := newTestStore()
 
+		Expect(store.DeleteTagsForPage(newFixturePageID("does-not-exist"))).To(Succeed())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_DeleteTagsForPage_DoesNotAffectOtherPages", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("does not affect other pages when deleting one page", func() {
+		store := newTestStore()
 
-		if err := store.SetTagsForPage("page-1", []string{"go"}); err != nil {
-			t.Fatalf("SetTagsForPage page-1: %v", err)
-		}
-		if err := store.SetTagsForPage("page-2", []string{"typescript"}); err != nil {
-			t.Fatalf("SetTagsForPage page-2: %v", err)
-		}
-
-		if err := store.DeleteTagsForPage("page-1"); err != nil {
-			t.Fatalf("DeleteTagsForPage: %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"typescript"})).To(Succeed())
+		Expect(store.DeleteTagsForPage(newFixturePageID("page-1"))).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-2"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		assertStringSliceEqual(t, got["page-2"], []string{"typescript"})
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-2"), matchTagSet("typescript")))
 	})
 })
 
-// ─── GetAllTags ──────────────────────────────────────────────────────────────
-
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_EmptyDB", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
-		if len(tags) != 0 {
-			t.Fatalf("expected empty result, got %v", tags)
-		}
-
-	})
-})
-
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_ReturnsTagsWithCount", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetTagsForPage("page-1", []string{"go", "testing"})
-		_ = store.SetTagsForPage("page-2", []string{"go", "typescript"})
-		_ = store.SetTagsForPage("page-3", []string{"typescript"})
+var _ = ginkgo.Describe("TagsStore tag listing", func() {
+	ginkgo.It("returns an empty list when no tags are stored", func() {
+		store := newTestStore()
 
 		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
 
-		byTag := make(map[string]int, len(tags))
-		for _, tc := range tags {
-			byTag[tc.Tag] = tc.Count
-		}
-
-		if byTag["go"] != 2 {
-			t.Errorf("go count = %d, want 2", byTag["go"])
-		}
-		if byTag["typescript"] != 2 {
-			t.Errorf("typescript count = %d, want 2", byTag["typescript"])
-		}
-		if byTag["testing"] != 1 {
-			t.Errorf("testing count = %d, want 1", byTag["testing"])
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(BeEmpty())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_OrderByCountDescThenTagAsc", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns tag counts across pages", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"alpha", "beta", "gamma"})
-		_ = store.SetTagsForPage("page-2", []string{"alpha", "beta"})
-		_ = store.SetTagsForPage("page-3", []string{"alpha"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "typescript"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"typescript"})).To(Succeed())
 
 		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
 
-		if len(tags) != 3 {
-			t.Fatalf("expected 3 tags, got %d", len(tags))
-		}
-		// alpha: 3, beta: 2, gamma: 1
-		if tags[0].Tag != "alpha" || tags[0].Count != 3 {
-			t.Errorf("tags[0] = %+v, want {alpha 3}", tags[0])
-		}
-		if tags[1].Tag != "beta" || tags[1].Count != 2 {
-			t.Errorf("tags[1] = %+v, want {beta 2}", tags[1])
-		}
-		if tags[2].Tag != "gamma" || tags[2].Count != 1 {
-			t.Errorf("tags[2] = %+v, want {gamma 1}", tags[2])
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(matchTagCounts(map[string]int{
+			"go":         2,
+			"testing":    1,
+			"typescript": 2,
+		}))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_OrderAlphaForSameCount", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("orders tags by descending count and then alphabetically", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"zebra", "apple"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"alpha", "beta", "gamma"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"alpha", "beta"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"alpha"})).To(Succeed())
 
 		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
-		if len(tags) < 2 {
-			t.Fatalf("expected 2 tags, got %d", len(tags))
-		}
-		if tags[0].Tag != "apple" {
-			t.Errorf("expected apple first (same count, alphabetic), got %q", tags[0].Tag)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(Equal([]TagCount{
+			{Tag: "alpha", Count: 3},
+			{Tag: "beta", Count: 2},
+			{Tag: "gamma", Count: 1},
+		}))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_FilterByPrefix", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("orders equally common tags alphabetically", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"react", "redux", "rails", "node"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"zebra", "apple"})).To(Succeed())
+
+		tags, err := store.GetAllTags("", 50)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(Equal([]TagCount{
+			{Tag: "apple", Count: 1},
+			{Tag: "zebra", Count: 1},
+		}))
+	})
+
+	ginkgo.It("filters tags by prefix", func() {
+		store := newTestStore()
+
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react", "redux", "rails", "node"})).To(Succeed())
 
 		tags, err := store.GetAllTags("re", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
 
-		for _, tc := range tags {
-			if len(tc.Tag) < 2 || tc.Tag[:2] != "re" {
-				t.Errorf("tag %q does not start with 're'", tc.Tag)
-			}
-		}
-		if len(tags) != 2 {
-			t.Errorf("expected 2 tags matching 're', got %d: %v", len(tags), tags)
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(Equal([]TagCount{
+			{Tag: "react", Count: 1},
+			{Tag: "redux", Count: 1},
+		}))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_EmptyFilterReturnsAll", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns all tags when the filter is empty", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"alpha", "beta", "gamma"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"alpha", "beta", "gamma"})).To(Succeed())
 
 		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
-		if len(tags) != 3 {
-			t.Errorf("expected 3 tags, got %d", len(tags))
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(HaveLen(3))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_RespectsLimit", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("limits the number of returned tags", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"a", "b", "c", "d", "e"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"a", "b", "c", "d", "e"})).To(Succeed())
 
 		tags, err := store.GetAllTags("", 3)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
-		if len(tags) != 3 {
-			t.Errorf("expected 3 tags (limit), got %d", len(tags))
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(HaveLen(3))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_ZeroLimitReturnsAll", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns all tags when the limit is zero", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"a", "b", "c", "d", "e"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"a", "b", "c", "d", "e"})).To(Succeed())
 
 		tags, err := store.GetAllTags("", 0)
-		if err != nil {
-			t.Fatalf("GetAllTags: %v", err)
-		}
-		if len(tags) != 5 {
-			t.Errorf("expected all 5 tags, got %d", len(tags))
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(HaveLen(5))
+	})
+
+	ginkgo.It("treats LIKE wildcard characters in filters as literals", func() {
+		store := newTestStore()
+
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react", "redux"})).To(Succeed())
+
+		tags, err := store.GetAllTags("%", 50)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(BeEmpty())
+
+		tags, err = store.GetAllTags("_eact", 50)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(BeEmpty())
 	})
 })
 
-// ─── GetPageIDsByTags ────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore tag filtering", func() {
+	ginkgo.It("returns pages that have all requested tags", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_GetPageIDsByTags_ANDLogic", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react", "typescript"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"react"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"typescript"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-4"), []string{"vue", "typescript"})).To(Succeed())
 
-		_ = store.SetTagsForPage("page-1", []string{"react", "typescript"})
-		_ = store.SetTagsForPage("page-2", []string{"react"})
-		_ = store.SetTagsForPage("page-3", []string{"typescript"})
-		_ = store.SetTagsForPage("page-4", []string{"vue", "typescript"})
-
-		// Only page-1 has BOTH react AND typescript
 		ids, err := store.GetPageIDsByTags([]string{"react", "typescript"})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags: %v", err)
-		}
-		if len(ids) != 1 || ids[0] != "page-1" {
-			t.Errorf("expected [page-1], got %v", ids)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).To(matchFixturePageIDSet("page-1"))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetPageIDsByTags_SingleTag", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns all pages that have a single requested tag", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"react", "typescript"})
-		_ = store.SetTagsForPage("page-2", []string{"react"})
-		_ = store.SetTagsForPage("page-3", []string{"vue"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react", "typescript"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"react"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"vue"})).To(Succeed())
 
 		ids, err := store.GetPageIDsByTags([]string{"react"})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags: %v", err)
-		}
 
-		sortTestPageIDs(ids)
-		want := []string{"page-1", "page-2"}
-		assertPageIDSliceEqual(t, ids, want)
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sortedPageIDs(ids)).To(matchPageIDsInOrder("page-1", "page-2"))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetPageIDsByTags_NoMatch", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns no page IDs when no pages match the requested tag", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"react"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react"})).To(Succeed())
 
 		ids, err := store.GetPageIDsByTags([]string{"vue"})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags: %v", err)
-		}
-		if len(ids) != 0 {
-			t.Errorf("expected no matches, got %v", ids)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).To(BeEmpty())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetPageIDsByTags_EmptyInputReturnsNil", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-		_ = store.SetTagsForPage("page-1", []string{"react"})
+	ginkgo.It("returns nil page IDs when no tags are requested", func() {
+		store := newTestStore()
+
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"react"})).To(Succeed())
 
 		ids, err := store.GetPageIDsByTags([]string{})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags: %v", err)
-		}
-		if ids != nil {
-			t.Errorf("expected nil, got %v", ids)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).To(BeNil())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetPageIDsByTags_ThreeTagAND", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("requires every requested tag when filtering by three tags", func() {
+		store := newTestStore()
 
-		_ = store.SetTagsForPage("page-1", []string{"a", "b", "c"})
-		_ = store.SetTagsForPage("page-2", []string{"a", "b"})
-		_ = store.SetTagsForPage("page-3", []string{"a"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"a", "b", "c"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"a", "b"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"a"})).To(Succeed())
 
 		ids, err := store.GetPageIDsByTags([]string{"a", "b", "c"})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags: %v", err)
-		}
-		if len(ids) != 1 || ids[0] != "page-1" {
-			t.Errorf("expected [page-1], got %v", ids)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).To(matchFixturePageIDSet("page-1"))
 	})
 })
 
-// ─── GetTagsForPages ─────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore tags by page", func() {
+	ginkgo.It("returns tags for the requested pages", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_GetTagsForPages_ReturnsTagsForMultiplePages", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetTagsForPage("page-1", []string{"go", "testing"})
-		_ = store.SetTagsForPage("page-2", []string{"typescript"})
-		_ = store.SetTagsForPage("page-3", []string{"react", "vue"})
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"typescript"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"react", "vue"})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1", "page-3"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
 
-		assertStringSliceEqual(t, got["page-1"], []string{"go", "testing"})
-		assertStringSliceEqual(t, got["page-3"], []string{"react", "vue"})
-		if _, ok := got["page-2"]; ok {
-			t.Errorf("page-2 should not be in result")
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(SatisfyAll(
+			HaveKeyWithValue(newFixturePageID("page-1"), matchTagSet("go", "testing")),
+			HaveKeyWithValue(newFixturePageID("page-3"), matchTagSet("react", "vue")),
+			Not(HaveKey(newFixturePageID("page-2"))),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetTagsForPages_EmptyInputReturnsEmptyMap", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns an empty map when no page IDs are requested", func() {
+		store := newTestStore()
 
 		got, err := store.GetTagsForPages(testPageIDs[string]())
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if got == nil {
-			t.Fatalf("expected empty map, got nil")
-		}
-		if len(got) != 0 {
-			t.Errorf("expected empty map, got %v", got)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetTagsForPages_UnknownIDReturnsNoEntry", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns no entry for unknown page IDs", func() {
+		store := newTestStore()
 
 		got, err := store.GetTagsForPages(testPageIDs("does-not-exist"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(got) != 0 {
-			t.Errorf("expected empty map for unknown IDs, got %v", got)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
 	})
 })
 
-// ─── Clear ───────────────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore clearing", func() {
+	ginkgo.It("removes all tag entries", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_Clear_RemovesAllEntries", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetTagsForPage("page-1", []string{"go"})
-		_ = store.SetTagsForPage("page-2", []string{"typescript"})
-
-		if err := store.Clear(); err != nil {
-			t.Fatalf("Clear: %v", err)
-		}
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"typescript"})).To(Succeed())
+		Expect(store.Clear()).To(Succeed())
 
 		tags, err := store.GetAllTags("", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags after Clear: %v", err)
-		}
-		if len(tags) != 0 {
-			t.Errorf("expected empty after Clear, got %v", tags)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).To(BeEmpty())
+	})
 
+	ginkgo.It("removes page excerpt metadata as well as tags", func() {
+		store := newTestStore()
+
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "some excerpt")).To(Succeed())
+		Expect(store.Clear()).To(Succeed())
+
+		excerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(excerpts).NotTo(HaveKey(newFixturePageID("page-1")))
 	})
 })
 
-// ─── SetPageIndex ─────────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore page index writes", func() {
+	ginkgo.It("stores tags and excerpts together", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_SetPageIndex_StoresTagsAndExcerpt", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		if err := store.SetPageIndex("page-1", []string{"go", "testing"}, "some excerpt"); err != nil {
-			t.Fatalf("SetPageIndex: %v", err)
-		}
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go", "testing"}, "some excerpt")).To(Succeed())
 
 		gotTags, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		assertStringSliceEqual(t, gotTags["page-1"], []string{"go", "testing"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gotTags).To(HaveKeyWithValue(newFixturePageID("page-1"), matchTagSet("go", "testing")))
 
 		gotExcerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if gotExcerpts["page-1"] != "some excerpt" {
-			t.Errorf("excerpt = %q, want %q", gotExcerpts["page-1"], "some excerpt")
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gotExcerpts).To(HaveKeyWithValue(newFixturePageID("page-1"), "some excerpt"))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_SetPageIndex_UpdatesExcerptOnSecondCall", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("updates the stored excerpt on the next page index write", func() {
+		store := newTestStore()
 
-		_ = store.SetPageIndex("page-1", []string{"go"}, "first excerpt")
-		_ = store.SetPageIndex("page-1", []string{"go"}, "updated excerpt")
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "first excerpt")).To(Succeed())
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "updated excerpt")).To(Succeed())
 
 		got, err := store.GetExcerptsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if got["page-1"] != "updated excerpt" {
-			t.Errorf("excerpt = %q, want %q", got["page-1"], "updated excerpt")
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), "updated excerpt"))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_SetPageIndex_EmptyTagsClearsTagsButKeepsExcerpt", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("keeps the excerpt when an empty tag set clears tags", func() {
+		store := newTestStore()
 
-		_ = store.SetPageIndex("page-1", []string{"go"}, "excerpt here")
-		_ = store.SetPageIndex("page-1", []string{}, "excerpt here")
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "excerpt here")).To(Succeed())
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{}, "excerpt here")).To(Succeed())
 
 		tags, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(tags["page-1"]) != 0 {
-			t.Errorf("expected no tags, got %v", tags["page-1"])
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).NotTo(HaveKey(newFixturePageID("page-1")))
 
-		exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if exc["page-1"] != "excerpt here" {
-			t.Errorf("excerpt = %q, want 'excerpt here'", exc["page-1"])
-		}
-
+		excerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(excerpts).To(HaveKeyWithValue(newFixturePageID("page-1"), "excerpt here"))
 	})
 })
 
-// ─── DeletePageIndex ─────────────────────────────────────────────────────────
+var _ = ginkgo.Describe("TagsStore page index deletion", func() {
+	ginkgo.It("removes both tags and excerpt metadata", func() {
+		store := newTestStore()
 
-var _ = ginkgo.Describe("TestTagsStore_DeletePageIndex_RemovesTagsAndExcerpt", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetPageIndex("page-1", []string{"go"}, "some excerpt")
-		if err := store.DeletePageIndex("page-1"); err != nil {
-			t.Fatalf("DeletePageIndex: %v", err)
-		}
+		Expect(store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "some excerpt")).To(Succeed())
+		Expect(store.DeletePageIndex(newFixturePageID("page-1"))).To(Succeed())
 
 		tags, err := store.GetTagsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetTagsForPages: %v", err)
-		}
-		if len(tags["page-1"]) != 0 {
-			t.Errorf("expected no tags after delete, got %v", tags["page-1"])
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tags).NotTo(HaveKey(newFixturePageID("page-1")))
 
-		exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if exc["page-1"] != "" {
-			t.Errorf("expected empty excerpt after delete, got %q", exc["page-1"])
-		}
+		excerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(excerpts).NotTo(HaveKey(newFixturePageID("page-1")))
+	})
 
+	ginkgo.It("treats deleting an unknown page index as a no-op", func() {
+		store := newTestStore()
+
+		Expect(store.DeletePageIndex(newFixturePageID("does-not-exist"))).To(Succeed())
 	})
 })
 
-var _ = ginkgo.Describe("TestTagsStore_DeletePageIndex_NonExistentPageIsNoop", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-		if err := store.DeletePageIndex("does-not-exist"); err != nil {
-			t.Fatalf("DeletePageIndex on unknown page: %v", err)
-		}
+var _ = ginkgo.Describe("TagsStore excerpts by page", func() {
+	ginkgo.It("returns excerpts for requested pages", func() {
+		store := newTestStore()
 
-	})
-})
-
-// ─── GetExcerptsForPages ─────────────────────────────────────────────────────
-
-var _ = ginkgo.Describe("TestTagsStore_GetExcerptsForPages_ReturnsCorrectExcerpts", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetPageIndex("p1", []string{"go"}, "excerpt one")
-		_ = store.SetPageIndex("p2", []string{"ts"}, "excerpt two")
+		Expect(store.SetPageIndex(newFixturePageID("p1"), []string{"go"}, "excerpt one")).To(Succeed())
+		Expect(store.SetPageIndex(newFixturePageID("p2"), []string{"ts"}, "excerpt two")).To(Succeed())
 
 		got, err := store.GetExcerptsForPages(testPageIDs("p1", "p2"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if got["p1"] != "excerpt one" {
-			t.Errorf("p1 = %q", got["p1"])
-		}
-		if got["p2"] != "excerpt two" {
-			t.Errorf("p2 = %q", got["p2"])
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(SatisfyAll(
+			HaveKeyWithValue(newFixturePageID("p1"), "excerpt one"),
+			HaveKeyWithValue(newFixturePageID("p2"), "excerpt two"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetExcerptsForPages_UnknownIDReturnsNoEntry", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns no entry for unknown page IDs", func() {
+		store := newTestStore()
 
 		got, err := store.GetExcerptsForPages(testPageIDs("ghost"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if _, ok := got["ghost"]; ok {
-			t.Errorf("ghost should not be present")
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(HaveKey(newFixturePageID("ghost")))
 	})
-})
 
-var _ = ginkgo.Describe("TestTagsStore_GetExcerptsForPages_EmptyInputReturnsEmptyMap", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
+	ginkgo.It("returns an empty map when no page IDs are requested", func() {
+		store := newTestStore()
 
 		got, err := store.GetExcerptsForPages(testPageIDs[string]())
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages: %v", err)
-		}
-		if got == nil {
-			t.Fatalf("expected non-nil empty map")
-		}
-		if len(got) != 0 {
-			t.Errorf("expected empty map, got %v", got)
-		}
 
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
 	})
 })
 
-// ─── Clear (with page_meta) ───────────────────────────────────────────────────
-
-var _ = ginkgo.Describe("TestTagsStore_Clear_AlsoRemovesPageMeta", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		_ = store.SetPageIndex("page-1", []string{"go"}, "some excerpt")
-
-		if err := store.Clear(); err != nil {
-			t.Fatalf("Clear: %v", err)
-		}
-
-		exc, err := store.GetExcerptsForPages(testPageIDs("page-1"))
-		if err != nil {
-			t.Fatalf("GetExcerptsForPages after Clear: %v", err)
-		}
-		if exc["page-1"] != "" {
-			t.Errorf("expected empty excerpt after Clear, got %q", exc["page-1"])
-		}
-
+var _ = ginkgo.Describe("tag page ID fixtures", func() {
+	ginkgo.It("builds typed page IDs for shared tag queries", func() {
+		Expect(testPageIDs("page-1", "page-2")).To(Equal([]tree.PageID{
+			newFixturePageID("page-1"),
+			newFixturePageID("page-2"),
+		}))
 	})
 })
-
-// ─── GetAllTags — LIKE wildcard escaping ─────────────────────────────────────
-
-var _ = ginkgo.Describe("TestTagsStore_GetAllTags_FilterEscapesLikeWildcards", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		store := newTestStore(t)
-
-		// Tags that would accidentally match if % or _ were treated as wildcards.
-		_ = store.SetTagsForPage("page-1", []string{"react", "redux"})
-
-		// A filter of "%" would match everything without escaping.
-		tags, err := store.GetAllTags("%", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags with %% filter: %v", err)
-		}
-		if len(tags) != 0 {
-			t.Errorf("filter '%%' should match no tags (literal), got %v", tags)
-		}
-
-		// A filter of "_eact" would match "react" without escaping.
-		tags, err = store.GetAllTags("_eact", 50)
-		if err != nil {
-			t.Fatalf("GetAllTags with _ filter: %v", err)
-		}
-		if len(tags) != 0 {
-			t.Errorf("filter '_eact' should match no tags (literal), got %v", tags)
-		}
-
-	})
-})
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-// assertStringSliceEqual checks that got and want contain the same elements,
-// sorting both to allow for any insertion order.
-func assertStringSliceEqual(t tagsTestT, got, want []string) {
-	t.Helper()
-
-	gc := append([]string(nil), got...)
-	wc := append([]string(nil), want...)
-	sort.Strings(gc)
-	sort.Strings(wc)
-
-	if len(gc) != len(wc) {
-		t.Errorf("len = %d, want %d\n got:  %v\n want: %v", len(gc), len(wc), gc, wc)
-		return
-	}
-	for i := range gc {
-		if gc[i] != wc[i] {
-			t.Errorf("[%d] = %q, want %q\n got:  %v\n want: %v", i, gc[i], wc[i], gc, wc)
-			return
-		}
-	}
-}

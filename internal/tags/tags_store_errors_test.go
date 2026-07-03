@@ -25,14 +25,14 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			openTagsDB = previousOpen
 		})
 
-		store, err := NewTagsStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewTagsStore(tempTagsDir())
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(openErr))
 	})
 
 	ginkgo.It("recovers from a corrupt tags database during initialization", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempTagsDir()
 		Expect(os.WriteFile(filepath.Join(storageDir, "tags.db"), []byte("not sqlite"), 0o644)).To(Succeed())
 
 		store, err := NewTagsStore(storageDir)
@@ -79,7 +79,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			removeTagsSQLiteFiles = previousRemove
 		})
 
-		store, err := NewTagsStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewTagsStore(tempTagsDir())
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(reopenErr))
@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			removeTagsSQLiteFiles = previousRemove
 		})
 
-		store, err := NewTagsStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewTagsStore(tempTagsDir())
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(finalErr))
@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns initialization errors for locked databases", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempTagsDir()
 		db, err := sql.Open("sqlite", filepath.Join(storageDir, "tags.db"))
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
@@ -175,7 +175,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 				},
 			},
 		} {
-			store := newTestStore(ginkgo.GinkgoT())
+			store := newTestStore()
 			Expect(store.db.Close()).To(Succeed(), subject.name)
 
 			err := subject.call(store)
@@ -185,13 +185,13 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns SetTagsForPage write errors from malformed tag tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_tags`)
 
 		err := store.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		prepareErrorStore := newTestStore(ginkgo.GinkgoT())
+		prepareErrorStore := newTestStore()
 		execTagsSQL(prepareErrorStore,
 			`DROP TABLE page_tags`,
 			`CREATE TABLE page_tags (page_id TEXT PRIMARY KEY)`,
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 		err = prepareErrorStore.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		insertErrorStore := newTestStore(ginkgo.GinkgoT())
+		insertErrorStore := newTestStore()
 		execTagsSQL(insertErrorStore,
 			`CREATE TRIGGER block_tag_insert
 			 BEFORE INSERT ON page_tags
@@ -212,13 +212,13 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns SetPageIndex write errors from malformed tag and excerpt tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_tags`)
 
 		err := store.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "excerpt")
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		prepareErrorStore := newTestStore(ginkgo.GinkgoT())
+		prepareErrorStore := newTestStore()
 		execTagsSQL(prepareErrorStore,
 			`DROP TABLE page_tags`,
 			`CREATE TABLE page_tags (page_id TEXT PRIMARY KEY)`,
@@ -226,7 +226,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 		err = prepareErrorStore.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "excerpt")
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		insertErrorStore := newTestStore(ginkgo.GinkgoT())
+		insertErrorStore := newTestStore()
 		execTagsSQL(insertErrorStore,
 			`CREATE TRIGGER block_page_index_tag_insert
 			 BEFORE INSERT ON page_tags
@@ -237,40 +237,40 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 		err = insertErrorStore.SetPageIndex(newFixturePageID("page-1"), []string{"go"}, "excerpt")
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 
-		excerptErrorStore := newTestStore(ginkgo.GinkgoT())
+		excerptErrorStore := newTestStore()
 		execTagsSQL(excerptErrorStore, `DROP TABLE page_meta`)
 		err = excerptErrorStore.SetPageIndex(newFixturePageID("page-1"), nil, "excerpt")
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns DeletePageIndex write errors from malformed tag and meta tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_tags`)
 
 		err := store.DeletePageIndex(newFixturePageID("page-1"))
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		metaErrorStore := newTestStore(ginkgo.GinkgoT())
+		metaErrorStore := newTestStore()
 		execTagsSQL(metaErrorStore, `DROP TABLE page_meta`)
 		err = metaErrorStore.DeletePageIndex(newFixturePageID("page-1"))
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns Clear write errors from malformed tag and meta tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_tags`)
 
 		err := store.Clear()
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		metaErrorStore := newTestStore(ginkgo.GinkgoT())
+		metaErrorStore := newTestStore()
 		execTagsSQL(metaErrorStore, `DROP TABLE page_meta`)
 		err = metaErrorStore.Clear()
 		Expect(err).To(matchTagsSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns read query errors from missing tag tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_tags`)
 
 		tagCounts, err := store.GetAllTags("", 50)
@@ -295,7 +295,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns read query errors from missing excerpt tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execTagsSQL(store, `DROP TABLE page_meta`)
 
 		excerpts, err := store.GetExcerptsForPages(testPageIDs("page-1"))
@@ -305,7 +305,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns scan errors from malformed tag rows", func() {
-		excerptsStore := newTestStore(ginkgo.GinkgoT())
+		excerptsStore := newTestStore()
 		execTagsSQL(excerptsStore,
 			`DROP TABLE page_meta`,
 			`CREATE TABLE page_meta (page_id INTEGER, excerpt TEXT)`,
@@ -318,7 +318,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			MatchError(tree.ErrScanPageID),
 		))
 
-		pageIDsStore := newTestStore(ginkgo.GinkgoT())
+		pageIDsStore := newTestStore()
 		execTagsSQL(pageIDsStore,
 			`DROP TABLE page_tags`,
 			`CREATE TABLE page_tags (page_id INTEGER, tag TEXT)`,
@@ -331,7 +331,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			MatchError(tree.ErrScanPageID),
 		))
 
-		tagsByPageStore := newTestStore(ginkgo.GinkgoT())
+		tagsByPageStore := newTestStore()
 		execTagsSQL(tagsByPageStore,
 			`DROP TABLE page_tags`,
 			`CREATE TABLE page_tags (page_id TEXT, tag TEXT)`,
@@ -343,7 +343,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns tag-count scan errors from all tag-count readers", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "docs"})).To(Succeed())
 		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"go"})).To(Succeed())
 		previousScan := scanTagCount
@@ -385,7 +385,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns close errors without clearing the database handle", func() {
-		store, err := NewTagsStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewTagsStore(tempTagsDir())
 		Expect(err).NotTo(HaveOccurred())
 		previousClose := closeTagsDB
 		closeErr := errors.New("close failed")
