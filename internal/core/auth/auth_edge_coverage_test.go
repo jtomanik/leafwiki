@@ -17,7 +17,7 @@ func signAuthClaims(service *AuthService, claims jwt.MapClaims) string {
 	return token
 }
 
-var _ = ginkgo.Describe("auth edge coverage", func() {
+var _ = ginkgo.Describe("auth boundary behavior", func() {
 	ginkgo.Describe("login attempts", func() {
 		ginkgo.It("locks an account after repeated failed attempts and resets after the lock expires", func() {
 			tracker := newLoginAttemptTracker()
@@ -75,7 +75,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		})
 
 		ginkgo.It("closes a backing store through the service", func() {
-			store, err := NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+			store, err := NewAPIKeyStore(authTempDir())
 			Expect(err).NotTo(HaveOccurred())
 			service := NewAPIKeyService(store, nil)
 
@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		})
 
 		ginkgo.It("rejects empty names and missing referenced users before storing a key", func() {
-			_, _, _, service, user := setupTestAPIKeyService(ginkgo.GinkgoT())
+			_, _, _, service, user := setupTestAPIKeyService()
 			userID := newFixtureUserID(user.ID)
 
 			_, err := service.CreateAPIKey(userID, "  \t  ", userID)
@@ -106,7 +106,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		var service *AuthService
 
 		ginkgo.BeforeEach(func() {
-			service = setupTestAuthService(ginkgo.GinkgoT())
+			service = setupTestAuthService()
 		})
 
 		ginkgo.AfterEach(func() {
@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 			Expect(service.userService.Close()).To(Succeed())
 		})
 
-		ginkgo.It("covers invalid login credentials, account lockout, and short secret construction", func() {
+		ginkgo.It("locks repeated invalid logins and preserves short configured secrets", func() {
 			shortSecretService := NewAuthService(nil, nil, "short", time.Minute, time.Hour)
 			Expect(shortSecretService.secretKey).To(Equal([]byte("short")))
 
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 
 	ginkgo.Describe("session store state transitions", func() {
 		ginkgo.It("treats expired, revoked, and missing sessions as inactive", func() {
-			store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
+			store, err := NewSessionStore(authTempDir())
 			Expect(err).NotTo(HaveOccurred())
 			ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
@@ -242,7 +242,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		})
 
 		ginkgo.It("cleans up a partially opened connection when schema initialization fails", func() {
-			storageFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-directory")
+			storageFile := filepath.Join(authTempDir(), "not-a-directory")
 			Expect(os.WriteFile(storageFile, []byte("file"), 0o644)).To(Succeed())
 
 			store, err := NewSessionStore(storageFile)
@@ -255,7 +255,7 @@ var _ = ginkgo.Describe("auth edge coverage", func() {
 		var service *UserService
 
 		ginkgo.BeforeEach(func() {
-			service = setupTestUserService(ginkgo.GinkgoT())
+			service = setupTestUserService()
 		})
 
 		ginkgo.AfterEach(func() {

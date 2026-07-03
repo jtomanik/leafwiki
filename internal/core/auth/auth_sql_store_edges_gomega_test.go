@@ -151,14 +151,14 @@ func (s authFakeScanner) Scan(dest ...any) error {
 	return nil
 }
 
-var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
+var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 	ginkgo.Describe("API key store", func() {
-		ginkgo.It("covers connection, construction, close, and scanner failures", func() {
+		ginkgo.It("reports API key store connection construction close and scanner failures", func() {
 			openErr := errors.New("api key open failed")
 			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
 				return nil, openErr
 			})
-			_, err := NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+			_, err := NewAPIKeyStore(authTempDir())
 			Expect(err).To(MatchError(openErr))
 			Expect((&APIKeyStore{}).Connect()).To(MatchError(openErr))
 			restoreOpen()
@@ -176,7 +176,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 					},
 				}), nil
 			})
-			_, err = NewAPIKeyStore(ginkgo.GinkgoT().TempDir())
+			_, err = NewAPIKeyStore(authTempDir())
 			Expect(err).To(MatchError(schemaErr))
 			Expect(closed).To(BeTrue())
 			restoreOpen()
@@ -200,7 +200,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		ginkgo.It("covers store method SQL error paths", func() {
+		ginkgo.It("reports API key store method SQL failures", func() {
 			key := fixtureAPIKey()
 
 			openErr := errors.New("api key method open failed")
@@ -286,7 +286,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 	})
 
 	ginkgo.Describe("session store", func() {
-		ginkgo.It("covers database open, close, and active-check errors", func() {
+		ginkgo.It("reports session database open close and active-check failures", func() {
 			openErr := errors.New("session open failed")
 			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
 				return nil, openErr
@@ -322,7 +322,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 	})
 
 	ginkgo.Describe("user resolver", func() {
-		ginkgo.It("covers preload, double-check, and reload errors", func() {
+		ginkgo.It("reports user resolver preload reload and cache-race failures", func() {
 			service := NewUserService(&UserStore{})
 			listErr := errors.New("list users failed")
 			restoreUsers := setAuthSeam(&authUserStoreGetAllUsers, func(*UserStore) ([]*User, error) {
@@ -351,12 +351,12 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 	})
 
 	ginkgo.Describe("user store", func() {
-		ginkgo.It("covers connection, schema, close, and connect-failure branches", func() {
+		ginkgo.It("reports user store connection schema close and connect failures", func() {
 			openErr := errors.New("user open failed")
 			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
 				return nil, openErr
 			})
-			_, err := NewUserStore(ginkgo.GinkgoT().TempDir())
+			_, err := NewUserStore(authTempDir())
 			Expect(err).To(MatchError(openErr))
 			Expect((&UserStore{}).Connect()).To(MatchError(openErr))
 			Expect((&UserStore{}).ensureSchema()).To(MatchError(openErr))
@@ -400,7 +400,7 @@ var _ = ginkgo.Describe("auth SQL store edge coverage", func() {
 			Expect((&UserStore{}).mapConstraintViolationToError(errPlainConstraint)).To(MatchError(errPlainConstraint))
 		})
 
-		ginkgo.It("covers query, scan, result, and exec errors", func() {
+		ginkgo.It("reports user store query scan result and exec failures", func() {
 			user := fixtureUser()
 
 			insertErr := errors.New("user insert failed")

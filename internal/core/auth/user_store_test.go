@@ -1,247 +1,159 @@
 package auth
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"strings"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 )
 
-func setupTestUserStore(t authTestT) *UserStore {
-	t.Helper()
-	// Create a temporary directory for the database
-	storageDir := t.TempDir()
-	userStore, err := NewUserStore(storageDir)
-	if err != nil {
-		t.Fatalf("Failed to create user store: %v", err)
-	}
+func setupTestUserStore() *UserStore {
+	ginkgo.GinkgoHelper()
+
+	userStore, err := NewUserStore(authTempDir())
+	Expect(err).To(Succeed())
+	ginkgo.DeferCleanup(closeWithErrorCheck, userStore.Close)
 	return userStore
 }
 
+func matchStoredUser(user *User) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("ID", user.ID),
+		HaveField("Username", user.Username),
+		HaveField("Email", user.Email),
+		HaveField("Role", user.Role),
+		HaveField("Password", user.Password),
+	)
+}
+
 var _ = ginkgo.Describe("user store", func() {
-	ginkgo.It("TestDatabasePath_WindowsPath", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("normalizes Windows storage paths under the user database file", func() {
 		got := strings.ReplaceAll(databasePath(`C:\wiki\data`, "users.db"), `\`, `/`)
-		want := `C:/wiki/data/users.db`
-		if got != want {
-			t.Fatalf("path = %q, want %q", got, want)
-		}
+
+		Expect(got).To(Equal(`C:/wiki/data/users.db`))
 	})
 
-	ginkgo.It("TestUserStore_CreatesDatabaseInStorageDir", func() {
-		t := ginkgo.GinkgoT()
-		storageDir := t.TempDir()
+	ginkgo.It("creates the user database inside the configured storage directory", func() {
+		storageDir := authTempDir()
 		userStore, err := NewUserStore(storageDir)
-		if err != nil {
-			t.Fatalf("Failed to create user store: %v", err)
-		}
+		Expect(err).To(Succeed())
 		ginkgo.DeferCleanup(closeWithErrorCheck, userStore.Close)
 
-		if _, err := os.Stat(filepath.Join(storageDir, "users.db")); err != nil {
-			t.Fatalf("expected users.db in storage dir, got err: %v", err)
-		}
+		Expect(os.Stat(filepath.Join(storageDir, "users.db"))).Error().To(Succeed())
 	})
 
-	ginkgo.It("TestUserStore_CreateUser", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("persists and retrieves user records by ID", func() {
+		store := setupTestUserStore()
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
 			Password: "password",
 			Email:    "user1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err := store.CreateUser(user)
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
+		Expect(store.CreateUser(user)).To(Succeed())
 
-		// Verify the user was created
 		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-
-		if retrievedUser.ID != user.ID {
-			t.Errorf("Expected user ID %s, got %s", user.ID, retrievedUser.ID)
-		}
-		if retrievedUser.Username != user.Username {
-			t.Errorf("Expected username %s, got %s", user.Username, retrievedUser.Username)
-		}
-		if retrievedUser.Email != user.Email {
-			t.Errorf("Expected email %s, got %s", user.Email, retrievedUser.Email)
-		}
-		if retrievedUser.Role != user.Role {
-			t.Errorf("Expected role %s, got %s", user.Role, retrievedUser.Role)
-		}
-		if retrievedUser.Password != user.Password {
-			t.Errorf("Expected password %s, got %s", user.Password, retrievedUser.Password)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(matchStoredUser(user))
 	})
 
-	ginkgo.It("TestUserStore_CreateUser_EmailAlreadyExists", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
+	ginkgo.It("rejects duplicate email addresses", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
-			Email:    "testuser1@example.com",
-			Role:     "admin",
-		}
-		err = store.CreateUser(user2)
-		if err == nil {
-			t.Fatalf("Expected error for duplicate email, got nil")
+			Email:    user1.Email,
+			Role:     RoleAdmin,
 		}
 
-		if err != ErrUserAlreadyExists {
-			t.Fatalf("Expected ErrUserAlreadyExists, got %v", err)
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
 
+		Expect(store.CreateUser(user2)).To(MatchError(ErrUserAlreadyExists))
 	})
 
-	ginkgo.It("TestUserStore_CreateUser_UsernameAlreadyExists", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
+	ginkgo.It("rejects duplicate usernames", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
+			Role:     RoleAdmin,
 		}
 		user2 := &User{
 			ID:       "2",
-			Username: "testuser1",
+			Username: user1.Username,
 			Password: "password2",
 			Email:    "testuser2@example.com",
+			Role:     RoleAdmin,
 		}
 
-		err = store.CreateUser(user2)
-		if err == nil {
-			t.Fatalf("Expected error for duplicate username, got nil")
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
 
-		if err != ErrUserAlreadyExists {
-			t.Fatalf("Expected ErrUserAlreadyExists, got %v", err)
-		}
+		Expect(store.CreateUser(user2)).To(MatchError(ErrUserAlreadyExists))
 	})
 
-	ginkgo.It("TestUserStore_GetUserByID_NotExisting", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
+	ginkgo.It("returns a not-found error for missing IDs while preserving existing users", func() {
+		store := setupTestUserStore()
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-		err := store.CreateUser(user)
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
+		Expect(store.CreateUser(user)).To(Succeed())
 
-		// Attempt to retrieve a non-existing user
-		_, err = store.GetUserByID(newFixtureUserID("non-existing-id"))
-		if err == nil {
-			t.Fatalf("Expected error for non-existing user, got nil")
-		}
-		if err != ErrUserNotFound {
-			t.Fatalf("Expected ErrUserNotFound, got %v", err)
-		}
+		_, err := store.GetUserByID(newFixtureUserID("non-existing-id"))
+		Expect(err).To(MatchError(ErrUserNotFound))
 
-		// Attempt to retrieve an existing user
 		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-		if retrievedUser.ID != user.ID {
-			t.Errorf("Expected user ID %s, got %s", user.ID, retrievedUser.ID)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(matchStoredUser(user))
 	})
 
-	ginkgo.It("TestUserStore_UpdateUser", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
+	ginkgo.It("updates stored profile and password fields", func() {
+		store := setupTestUserStore()
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
+		Expect(store.CreateUser(user)).To(Succeed())
 
-		err := store.CreateUser(user)
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
-
-		// Update the user
 		user.Username = "updateduser"
 		user.Password = "newpassword"
+		Expect(store.UpdateUser(user)).To(Succeed())
 
-		err = store.UpdateUser(user)
-		if err != nil {
-			t.Fatalf("Failed to update user: %v", err)
-		}
-
-		// Verify the user was updated
 		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-
-		if retrievedUser.Username != user.Username {
-			t.Errorf("Expected username %s, got %s", user.Username, retrievedUser.Username)
-		}
-
-		if retrievedUser.Password != user.Password {
-			t.Errorf("Expected password %s, got %s", user.Password, retrievedUser.Password)
-		}
-
-		// Verify error message when the user does not exist
-		nonExistingUser := &User{
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(matchStoredUser(user))
+		Expect(store.UpdateUser(&User{
 			ID:       "non-existing-id",
 			Username: "nonexistinguser",
 			Password: "nonexistingpassword",
-		}
-		err = store.UpdateUser(nonExistingUser)
-		if err == nil {
-			t.Fatalf("Expected error for non-existing user, got nil")
-		}
+			Email:    "nonexisting@example.com",
+			Role:     RoleViewer,
+		})).To(MatchError(ErrUserNotFound))
 	})
 
-	ginkgo.It("TestUserStore_UpdateUser_LastAdminCannotBeDemoted", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("protects the final administrator from demotion", func() {
+		store := setupTestUserStore()
 		admin := &User{
 			ID:       "1",
 			Username: "admin",
@@ -249,420 +161,212 @@ var _ = ginkgo.Describe("user store", func() {
 			Email:    "admin@example.com",
 			Role:     RoleAdmin,
 		}
-		if err := store.CreateUser(admin); err != nil {
-			t.Fatalf("Failed to create admin: %v", err)
-		}
+		Expect(store.CreateUser(admin)).To(Succeed())
 
 		admin.Role = RoleViewer
-		err := store.UpdateUser(admin)
-		if err != ErrLastAdminCannotBeDemoted {
-			t.Fatalf("expected ErrLastAdminCannotBeDemoted, got %v", err)
-		}
+		Expect(store.UpdateUser(admin)).To(MatchError(ErrLastAdminCannotBeDemoted))
 	})
 
-	ginkgo.It("TestUserStore_UpdateUser_EMailAlreadyExists", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("rejects profile updates that would reuse another user's email", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
 
 		updateUser := &User{
 			ID:       user2.ID,
 			Username: user2.Username,
 			Password: user2.Password,
-			Email:    user1.Email, // This email already exists
+			Email:    user1.Email,
 			Role:     user2.Role,
 		}
 
-		err = store.UpdateUser(updateUser)
-		if err == nil {
-			t.Fatalf("Expected error for duplicate email, got nil")
-		}
-
-		if err != ErrUserAlreadyExists {
-			t.Fatalf("Expected ErrUserAlreadyExists, got %v", err)
-		}
+		Expect(store.UpdateUser(updateUser)).To(MatchError(ErrUserAlreadyExists))
 	})
 
-	ginkgo.It("TestUserStore_UpdateUser_UsernameAlreadyExists", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("rejects profile updates that would reuse another user's username", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
 
 		updateUser := &User{
 			ID:       user2.ID,
-			Username: user1.Username, // This username already exists
+			Username: user1.Username,
 			Password: user2.Password,
 			Email:    user2.Email,
 			Role:     user2.Role,
 		}
 
-		err = store.UpdateUser(updateUser)
-		if err == nil {
-			t.Fatalf("Expected error for duplicate email, got nil")
-		}
-
-		if err != ErrUserAlreadyExists {
-			t.Fatalf("Expected ErrUserAlreadyExists, got %v", err)
-		}
+		Expect(store.UpdateUser(updateUser)).To(MatchError(ErrUserAlreadyExists))
 	})
 
-	ginkgo.It("TestUserStore_DeleteUser", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
+	ginkgo.It("deletes existing users and reports missing users as not found", func() {
+		store := setupTestUserStore()
 		user := &User{
 			ID:       "1",
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err := store.CreateUser(user)
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
-
-		// Count the number of users before deletion
+		Expect(store.CreateUser(user)).To(Succeed())
 		users, err := store.GetAllUsers()
-		if err != nil {
-			t.Fatalf("Failed to get all users: %v", err)
-		}
+		Expect(err).To(Succeed())
 		initialCount := len(users)
-		// Delete the user
-		err = store.DeleteUser(newFixtureUserID(user.ID))
-		if err != nil {
-			t.Fatalf("Failed to delete user: %v", err)
-		}
 
-		// Verify the user was deleted
+		Expect(store.DeleteUser(newFixtureUserID(user.ID))).To(Succeed())
+
 		_, err = store.GetUserByID(newFixtureUserID(user.ID))
-		if err == nil {
-			t.Fatalf("Expected error for deleted user, got nil")
-		}
-
-		if err != ErrUserNotFound {
-			t.Fatalf("Expected ErrUserNotFound, got %v", err)
-		}
-
-		// Count the number of users after deletion
+		Expect(err).To(MatchError(ErrUserNotFound))
 		users, err = store.GetAllUsers()
-		if err != nil {
-			t.Fatalf("Failed to get all users: %v", err)
-		}
-
-		finalCount := len(users)
-		if finalCount != initialCount-1 {
-			t.Errorf("Expected user count %d, got %d", initialCount-1, finalCount)
-		}
-
-	})
-	ginkgo.It("TestUserStore_DeleteUser_NotExisting", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
-		// Attempt to delete a non-existing user
-		err := store.DeleteUser(newFixtureUserID("non-existing-id"))
-		if err == nil {
-			t.Fatalf("Expected error for non-existing user, got nil")
-		}
-		if err != ErrUserNotFound {
-			t.Fatalf("Expected ErrUserNotFound, got %v", err)
-		}
+		Expect(err).To(Succeed())
+		Expect(users).To(HaveLen(initialCount - 1))
+		Expect(store.DeleteUser(newFixtureUserID("non-existing-id"))).To(MatchError(ErrUserNotFound))
 	})
 
-	ginkgo.It("TestUserStore_GetAllUsers", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("lists all persisted users", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
 
-		// Retrieve all users
 		users, err := store.GetAllUsers()
-		if err != nil {
-			t.Fatalf("Failed to get all users: %v", err)
-		}
-
-		if len(users) != 2 {
-			t.Fatalf("Expected 2 users, got %d", len(users))
-		}
-
-		if users[0].ID != user1.ID && users[1].ID != user2.ID {
-			t.Fatalf("Expected user IDs %s and %s, got %s and %s", user1.ID, user2.ID, users[0].ID, users[1].ID)
-		}
-
-		if users[0].Username != user1.Username && users[1].Username != user2.Username {
-			t.Fatalf("Expected usernames %s and %s, got %s and %s", user1.Username, user2.Username, users[0].Username, users[1].Username)
-		}
-
-		if users[0].Email != user1.Email && users[1].Email != user2.Email {
-			t.Fatalf("Expected emails %s and %s, got %s and %s", user1.Email, user2.Email, users[0].Email, users[1].Email)
-		}
-
-		if users[0].Role != user1.Role && users[1].Role != user2.Role {
-			t.Fatalf("Expected roles %s and %s, got %s and %s", user1.Role, user2.Role, users[0].Role, users[1].Role)
-		}
-		if users[0].Password != user1.Password && users[1].Password != user2.Password {
-			t.Fatalf("Expected passwords %s and %s, got %s and %s", user1.Password, user2.Password, users[0].Password, users[1].Password)
-		}
-
+		Expect(err).To(Succeed())
+		Expect(users).To(ConsistOf(matchStoredUser(user1), matchStoredUser(user2)))
 	})
-	ginkgo.It("TestUserStore_GetUserCount", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
 
+	ginkgo.It("counts persisted users", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
 
-		// Retrieve the user count
 		count, err := store.GetUserCount()
-		if err != nil {
-			t.Fatalf("Failed to get user count: %v", err)
-		}
-
-		if count != 2 {
-			t.Fatalf("Expected user count 2, got %d", count)
-		}
+		Expect(err).To(Succeed())
+		Expect(count).To(Equal(2))
 	})
 
-	ginkgo.It("TestUserStore_GetUserByEmail", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("retrieves users by email address", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
-		// Retrieve user by email
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
+
 		retrievedUser, err := store.GetUserByEmail(user1.Email)
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-		if retrievedUser.ID != user1.ID {
-			t.Errorf("Expected user ID %s, got %s", user1.ID, retrievedUser.ID)
-		}
-		if retrievedUser.Username != user1.Username {
-			t.Errorf("Expected username %s, got %s", user1.Username, retrievedUser.Username)
-		}
-		if retrievedUser.Email != user1.Email {
-			t.Errorf("Expected email %s, got %s", user1.Email, retrievedUser.Email)
-		}
-		if retrievedUser.Role != user1.Role {
-			t.Errorf("Expected role %s, got %s", user1.Role, retrievedUser.Role)
-		}
-		if retrievedUser.Password != user1.Password {
-			t.Errorf("Expected password %s, got %s", user1.Password, retrievedUser.Password)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(matchStoredUser(user1))
 	})
 
-	ginkgo.It("TestUserStore_GetUserByUsername", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
+	ginkgo.It("retrieves users by username", func() {
+		store := setupTestUserStore()
 		user1 := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
-
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
-
 		user2 := &User{
 			ID:       "2",
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err = store.CreateUser(user2)
-		if err != nil {
-			t.Fatalf("Failed to create user2: %v", err)
-		}
-		// Retrieve user by email
+		Expect(store.CreateUser(user1)).To(Succeed())
+		Expect(store.CreateUser(user2)).To(Succeed())
+
 		retrievedUser, err := store.GetUserByUsername(user1.Username)
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-		if retrievedUser.ID != user1.ID {
-			t.Errorf("Expected user ID %s, got %s", user1.ID, retrievedUser.ID)
-		}
-		if retrievedUser.Username != user1.Username {
-			t.Errorf("Expected username %s, got %s", user1.Username, retrievedUser.Username)
-		}
-		if retrievedUser.Email != user1.Email {
-			t.Errorf("Expected email %s, got %s", user1.Email, retrievedUser.Email)
-		}
-		if retrievedUser.Role != user1.Role {
-			t.Errorf("Expected role %s, got %s", user1.Role, retrievedUser.Role)
-		}
-		if retrievedUser.Password != user1.Password {
-			t.Errorf("Expected password %s, got %s", user1.Password, retrievedUser.Password)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(matchStoredUser(user1))
 	})
 
-	ginkgo.It("TestUserStoreUpdatePassword", func() {
-		t := ginkgo.GinkgoT()
-		store := setupTestUserStore(t)
-		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
-
-		user1 := &User{
+	ginkgo.It("updates a user's password by ID", func() {
+		store := setupTestUserStore()
+		user := &User{
 			ID:       "1",
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
-			Role:     "admin",
+			Role:     RoleAdmin,
 		}
 
-		err := store.CreateUser(user1)
-		if err != nil {
-			t.Fatalf("Failed to create user1: %v", err)
-		}
+		Expect(store.CreateUser(user)).To(Succeed())
+		Expect(store.UpdatePassword(newFixtureUserID(user.ID), "newpassword")).To(Succeed())
 
-		// Update the user's password
-		err = store.UpdatePassword(newFixtureUserID(user1.ID), "newpassword")
-		if err != nil {
-			t.Fatalf("Failed to update password: %v", err)
-		}
-
-		// Verify the password was updated
-		retrievedUser, err := store.GetUserByID(newFixtureUserID(user1.ID))
-		if err != nil {
-			t.Fatalf("Failed to retrieve user: %v", err)
-		}
-		if retrievedUser.Password != "newpassword" {
-			t.Errorf("Expected password %s, got %s", "newpassword", retrievedUser.Password)
-		}
-
+		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
+		Expect(err).To(Succeed())
+		Expect(retrievedUser).To(HaveField("Password", "newpassword"))
 	})
 })

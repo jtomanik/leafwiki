@@ -11,10 +11,10 @@ import (
 	"github.com/onsi/gomega/gbytes"
 )
 
-var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
+var _ = ginkgo.Describe("auth seam failure behavior", func() {
 	ginkgo.Describe("API key service branches", func() {
 		ginkgo.It("propagates random and store failures while creating API keys", func() {
-			_, _, _, service, user := setupTestAPIKeyService(ginkgo.GinkgoT())
+			_, _, _, service, user := setupTestAPIKeyService()
 			userID := newFixtureUserID(user.ID)
 
 			idRandomErr := errors.New("id random failed")
@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 		})
 
 		ginkgo.It("maps verification store and user failures through token semantics", func() {
-			_, _, _, service, _ := setupTestAPIKeyService(ginkgo.GinkgoT())
+			_, _, _, service, _ := setupTestAPIKeyService()
 			raw := "lwk_key_secret"
 			key := &APIKey{ID: newFixtureAPIKeyID("key"), UserID: newFixtureUserID("user-1")}
 			stored := &storedAPIKey{key: key, secretHash: hashAPIKey(raw)}
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 
 	ginkgo.Describe("JWT auth service branches", func() {
 		ginkgo.It("surfaces token generation and session creation failures during login", func() {
-			service := setupTestAuthService(ginkgo.GinkgoT())
+			service := setupTestAuthService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.sessionStore.Close()).To(Succeed())
 				Expect(service.userService.Close()).To(Succeed())
@@ -169,7 +169,7 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 		})
 
 		ginkgo.It("surfaces token generation and session creation failures during refresh", func() {
-			service := setupTestAuthService(ginkgo.GinkgoT())
+			service := setupTestAuthService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.sessionStore.Close()).To(Succeed())
 				Expect(service.userService.Close()).To(Succeed())
@@ -218,8 +218,8 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreRevoke()
 		})
 
-		ginkgo.It("covers direct token helper errors", func() {
-			service := setupTestAuthService(ginkgo.GinkgoT())
+		ginkgo.It("reports token helper failures from random and signing seams", func() {
+			service := setupTestAuthService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.sessionStore.Close()).To(Succeed())
 				Expect(service.userService.Close()).To(Succeed())
@@ -244,8 +244,8 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreSign()
 		})
 
-		ginkgo.It("covers parser type assertions and cleanup retry seams", func() {
-			service := setupTestAuthService(ginkgo.GinkgoT())
+		ginkgo.It("rejects non-map JWT claims and logs cleanup retry failures", func() {
+			service := setupTestAuthService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.sessionStore.Close()).To(Succeed())
 				Expect(service.userService.Close()).To(Succeed())
@@ -281,7 +281,7 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			log.SetOutput(logBuffer)
 			ginkgo.DeferCleanup(log.SetOutput, previousLogOutput)
 
-			store, err := NewSessionStore(ginkgo.GinkgoT().TempDir())
+			store, err := NewSessionStore(authTempDir())
 			Expect(err).NotTo(HaveOccurred())
 			store.mu.Lock()
 			Expect(store.db.Close()).To(Succeed())
@@ -293,7 +293,7 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 
 	ginkgo.Describe("user service branches", func() {
 		ginkgo.It("propagates create, update, password, delete, and reset failures", func() {
-			service := setupTestUserService(ginkgo.GinkgoT())
+			service := setupTestUserService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.Close()).To(Succeed())
 			})
@@ -401,8 +401,8 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restorePassword()
 		})
 
-		ginkgo.It("covers default-admin creation failure branches", func() {
-			service := setupTestUserService(ginkgo.GinkgoT())
+		ginkgo.It("reports default-admin creation failures during initialization and reset", func() {
+			service := setupTestUserService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.Close()).To(Succeed())
 			})
@@ -421,8 +421,8 @@ var _ = ginkgo.Describe("auth seam-driven edge coverage", func() {
 			restoreAdmin()
 		})
 
-		ginkgo.It("covers missing user paths through service seams", func() {
-			service := setupTestUserService(ginkgo.GinkgoT())
+		ginkgo.It("reports missing-user paths through service seams", func() {
+			service := setupTestUserService()
 			ginkgo.DeferCleanup(func() {
 				Expect(service.Close()).To(Succeed())
 			})

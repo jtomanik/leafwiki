@@ -2,228 +2,133 @@ package auth
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"time"
 )
 
-func setupTestAuthService(t authTestT) *AuthService {
-	t.Helper()
-	store, err := NewUserStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+func setupTestAuthService() *AuthService {
+	ginkgo.GinkgoHelper()
+	store, err := NewUserStore(authTempDir())
+	Expect(err).NotTo(HaveOccurred())
 	userService := NewUserService(store)
 
 	// Create test user
 	_, err = userService.CreateUser("testuser", "test@example.com", "securepass", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	// Create Session store
-	sessionStore, err := NewSessionStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sessionStore, err := NewSessionStore(authTempDir())
+	Expect(err).NotTo(HaveOccurred())
 
 	authService := NewAuthService(userService, sessionStore, "test-secret-key-for-unit-tests-1", 1*time.Hour, 24*time.Hour*7)
 	return authService
 }
 
 var _ = ginkgo.Describe("auth service", func() {
-	ginkgo.It("TestAuthService_LoginAndValidateToken", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("issues access and refresh tokens that validate to the authenticated user", func() {
+		authService := setupTestAuthService()
 
 		tokens, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("Login failed: %v", err)
-		}
-
-		if tokens.Token == "" || tokens.RefreshToken == "" {
-			t.Fatal("Expected access and refresh token")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tokens).To(SatisfyAll(
+			HaveField("Token", Not(BeEmpty())),
+			HaveField("RefreshToken", Not(BeEmpty())),
+		))
 
 		user, err := authService.ValidateToken(tokens.Token)
-		if err != nil {
-			t.Fatalf("ValidateToken failed: %v", err)
-		}
-
-		if user.Username != "testuser" {
-			t.Errorf("Expected username 'testuser', got '%s'", user.Username)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(user.Username).To(Equal("testuser"))
 	})
 
-	ginkgo.It("TestAuthService_RevokeRefreshToken", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("rejects a refresh token after it is revoked", func() {
+		authService := setupTestAuthService()
 
-		// Login to get a refresh token
 		tokens, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("Login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tokens.RefreshToken).NotTo(BeEmpty())
 
-		if tokens.RefreshToken == "" {
-			t.Fatal("Expected refresh token")
-		}
-
-		// Refresh token should work before revocation
 		newTokens, err := authService.RefreshToken(tokens.RefreshToken)
-		if err != nil {
-			t.Fatalf("RefreshToken should work before revocation: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(newTokens).To(SatisfyAll(
+			HaveField("Token", Not(BeEmpty())),
+			HaveField("RefreshToken", Not(BeEmpty())),
+		))
 
-		if newTokens.Token == "" || newTokens.RefreshToken == "" {
-			t.Fatal("Expected new access and refresh tokens")
-		}
-
-		// Revoke the new refresh token
 		err = authService.RevokeRefreshToken(newTokens.RefreshToken)
-		if err != nil {
-			t.Fatalf("RevokeRefreshToken failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Try to use the revoked refresh token - should fail
 		_, err = authService.RefreshToken(newTokens.RefreshToken)
-		if err == nil {
-			t.Fatal("Expected error when using revoked refresh token, got nil")
-		}
-
-		if err != ErrInvalidToken {
-			t.Errorf("Expected ErrInvalidToken, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 	})
 
-	ginkgo.It("TestAuthService_RevokeRefreshToken_InvalidToken", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("rejects revocation for malformed refresh tokens", func() {
+		authService := setupTestAuthService()
 
-		// Try to revoke an invalid token
 		err := authService.RevokeRefreshToken("invalid-token")
-		if err == nil {
-			t.Fatal("Expected error when revoking invalid token, got nil")
-		}
-
-		if err != ErrInvalidToken {
-			t.Errorf("Expected ErrInvalidToken, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 	})
 
-	ginkgo.It("TestAuthService_RevokeRefreshToken_AccessToken", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("rejects revocation when an access token is supplied as refresh token", func() {
+		authService := setupTestAuthService()
 
-		// Login to get tokens
 		tokens, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("Login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Try to revoke an access token (should fail as it's not a refresh token)
 		err = authService.RevokeRefreshToken(tokens.Token)
-		if err == nil {
-			t.Fatal("Expected error when revoking access token, got nil")
-		}
-
-		if err != ErrInvalidToken {
-			t.Errorf("Expected ErrInvalidToken, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 	})
 
-	ginkgo.It("TestAuthService_RevokeAllUserSessions", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("revokes all refresh sessions for one authenticated user", func() {
+		authService := setupTestAuthService()
 
-		// Create multiple sessions by logging in multiple times
 		tokens1, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("First login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		tokens2, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("Second login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Both refresh tokens should work before revocation
 		_, err = authService.RefreshToken(tokens1.RefreshToken)
-		if err != nil {
-			t.Fatalf("First refresh token should work: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		_, err = authService.RefreshToken(tokens2.RefreshToken)
-		if err != nil {
-			t.Fatalf("Second refresh token should work: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Get user ID
 		user, err := authService.ValidateToken(tokens1.Token)
-		if err != nil {
-			t.Fatalf("ValidateToken failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Revoke all sessions for the user
 		err = authService.RevokeAllUserSessions(newFixtureUserID(user.ID))
-		if err != nil {
-			t.Fatalf("RevokeAllUserSessions failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Both refresh tokens should now fail
 		_, err = authService.RefreshToken(tokens1.RefreshToken)
-		if err == nil {
-			t.Fatal("Expected error when using first revoked refresh token, got nil")
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 
 		_, err = authService.RefreshToken(tokens2.RefreshToken)
-		if err == nil {
-			t.Fatal("Expected error when using second revoked refresh token, got nil")
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 	})
 
-	ginkgo.It("TestAuthService_RevokeAllUserSessions_MultipleUsers", func() {
-		t := ginkgo.GinkgoT()
-		authService := setupTestAuthService(t)
+	ginkgo.It("leaves other users refresh sessions active when one user is revoked", func() {
+		authService := setupTestAuthService()
 
-		// Create a second user
 		userService := authService.userService
 		_, err := userService.CreateUser("testuser2", "test2@example.com", "securepass2", "admin")
-		if err != nil {
-			t.Fatalf("Failed to create second user: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Login both users
 		tokens1, err := authService.Login("testuser", "securepass")
-		if err != nil {
-			t.Fatalf("First user login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		tokens2, err := authService.Login("testuser2", "securepass2")
-		if err != nil {
-			t.Fatalf("Second user login failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Get first user's ID
 		user1, err := authService.ValidateToken(tokens1.Token)
-		if err != nil {
-			t.Fatalf("ValidateToken failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// Revoke all sessions for first user only
 		err = authService.RevokeAllUserSessions(newFixtureUserID(user1.ID))
-		if err != nil {
-			t.Fatalf("RevokeAllUserSessions failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		// First user's refresh token should fail
 		_, err = authService.RefreshToken(tokens1.RefreshToken)
-		if err == nil {
-			t.Fatal("Expected error when using first user's revoked refresh token, got nil")
-		}
+		Expect(err).To(MatchError(ErrInvalidToken))
 
-		// Second user's refresh token should still work
 		_, err = authService.RefreshToken(tokens2.RefreshToken)
-		if err != nil {
-			t.Fatalf("Second user's refresh token should still work: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 	})
 })
