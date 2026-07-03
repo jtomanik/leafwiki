@@ -1489,7 +1489,7 @@ var _ = ginkgo.Describe("service example configuration", func() {
 			"mcp",
 			"port",
 		} {
-			Expect(visited[expected]).To(BeTrue(), fmt.Sprintf("service config example active keys = %#v, want %q", visited, expected))
+			Expect(visited).To(HaveKeyWithValue(expected, true), fmt.Sprintf("service config example active keys = %#v, want %q", visited, expected))
 
 		}
 
