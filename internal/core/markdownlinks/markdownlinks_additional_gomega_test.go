@@ -106,7 +106,7 @@ func markdownLinksTempDir() string {
 }
 
 var _ = ginkgo.Describe("markdown link parser internals", func() {
-	ginkgo.It("handles index construction and root walking edge cases", func() {
+	ginkgo.It("skips unsupported entries hidden paths and non-markdown files while building the link index", func() {
 		index := NewIndexWithOptions([]Entry{
 			{Kind: EntryKindPage},
 			{Kind: EntryKindAsset},
@@ -179,7 +179,7 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 		Expect(missing).To(matchResolution(TargetKindUnresolved, IssueCodeBrokenLink))
 	})
 
-	ginkgo.It("covers code-range, inline-link, and reference-definition scanner edges", func() {
+	ginkgo.It("ignores incomplete code spans inline links and image-only reference definitions", func() {
 		Expect(excludedCodeRanges("`unterminated")).To(BeEmpty())
 		Expect(collectBlockRanges(nilLineBlock{})).To(BeNil())
 		Expect(findClosingBacktickRun("``code```", 2, 2, nil)).To(Equal(-1))
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 		Expect(ok).To(BeFalse())
 	})
 
-	ginkgo.It("covers inline destination and title parser edge cases", func() {
+	ginkgo.It("parses escaped inline destinations titles and bracket boundaries", func() {
 		_, ok := parseDestination("", 0)
 		Expect(ok).To(BeFalse())
 
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 		Expect(findClosingBracket(`[unclosed`, 0)).To(Equal(-1))
 	})
 
-	ginkgo.It("covers replacement, suffix, href formatting, and encoded section helpers", func() {
+	ginkgo.It("preserves link rewrite boundaries and formats root and encoded-section hrefs", func() {
 		Expect(mergeRanges([]textRange{{Start: 0, End: 2}, {Start: 1, End: 4}})).To(Equal([]textRange{{Start: 0, End: 4}}))
 
 		unchanged, changed := applyReplacements("abc", nil)
