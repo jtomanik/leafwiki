@@ -11,7 +11,7 @@ import (
 )
 
 var _ = Describe("agent hook normalization", func() {
-	It("TestNormalizeCodexToolEventSanitizesSessionAndMetadata", func() {
+	It("hashes Codex session identity while preserving safe tool metadata", func() {
 		seenAt := time.Date(2026, 6, 7, 10, 11, 12, 0, time.UTC)
 		raw := []byte(`{
 			"hook_event_name":"PreToolUse",
@@ -37,7 +37,7 @@ var _ = Describe("agent hook normalization", func() {
 		}))
 	})
 
-	It("TestNormalizeUsesSemanticProviderEventSourceAndToolTypes", func() {
+	It("stores provider event source and tool fields as semantic types", func() {
 		var provider ProviderID = ProviderCodex
 		var eventName AgentEventName = AgentEventPreToolUse
 		var source AgentSource = AgentSourceCLI
@@ -59,7 +59,7 @@ var _ = Describe("agent hook normalization", func() {
 		}))
 	})
 
-	It("TestNormalizeRedactsUnsafeModelSourceAndToolMetadata", func() {
+	It("redacts unsafe model source and tool metadata", func() {
 		event, ok := Normalize(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"raw-codex-session",
@@ -77,7 +77,7 @@ var _ = Describe("agent hook normalization", func() {
 		}))
 	})
 
-	It("TestNormalizeCursorConversationFallbackHashesConversationID", func() {
+	It("hashes Cursor conversation IDs when session IDs are absent", func() {
 		seenAt := time.Date(2026, 6, 7, 13, 0, 0, 0, time.UTC)
 		raw := []byte(`{"hook_event_name":"sessionStart","conversation_id":"cursor-conversation","user_email":"secret@example.com"}`)
 
@@ -104,7 +104,7 @@ type supportedProviderEventCase struct {
 	wantEndsSession   bool
 }
 
-var _ = DescribeTable("TestNormalizeSupportedProviderEvents",
+var _ = DescribeTable("supported provider event normalization",
 	func(tc supportedProviderEventCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 
@@ -157,7 +157,7 @@ type normalizeFailureCase struct {
 	payload  string
 }
 
-var _ = DescribeTable("TestNormalizeFailsOpenForUnknownMalformedAndIncompletePayloads",
+var _ = DescribeTable("normalization failure handling",
 	func(tc normalizeFailureCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC)
 
@@ -186,7 +186,7 @@ const (
 	rawProviderUnsupportedFixture = "unsupported"
 )
 
-var _ = DescribeTable("TestAllowResponseUsesProviderProtocol",
+var _ = DescribeTable("provider permission response protocol",
 	func(tc allowResponseCase) {
 		Expect(string(AllowResponse(tc.provider))).To(Equal(tc.want))
 	},

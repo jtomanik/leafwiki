@@ -1,14 +1,23 @@
 package semantichygiene_test
 
 import (
+	"fmt"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	semantichygiene "github.com/perber/wiki/internal/analysis/semantichygiene"
 	analysischeck "golang.org/x/tools/go/analysis/analysistest"
 )
 
-var _ = ginkgo.DescribeTable("TestAnalyzerFixtures",
+type analysisFixtureFailures struct{}
+
+func (analysisFixtureFailures) Errorf(format string, args ...any) {
+	ginkgo.GinkgoHelper()
+	ginkgo.Fail(fmt.Sprintf(format, args...))
+}
+
+var _ = ginkgo.DescribeTable("semantic hygiene analyzer fixtures",
 	func(pkg string) {
-		analysischeck.Run(ginkgo.GinkgoT(), analysischeck.TestData(), semantichygiene.Analyzer, pkg)
+		analysischeck.Run(analysisFixtureFailures{}, analysischeck.TestData(), semantichygiene.Analyzer, pkg)
 	},
 	ginkgo.Entry("semanticcases", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/semanticcases"),
 	ginkgo.Entry("identity", "github.com/perber/wiki/internal/core/identity"),
