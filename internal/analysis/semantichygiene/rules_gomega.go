@@ -81,6 +81,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesCommaOKBoolean(ctx, assertion) {
 		ctx.report(ruleGomegaCommaOKAssertion, assertion.actual, gomegaCommaOKAssertionDiagnostic())
 	}
+	if assertionUsesProxyBoolean(ctx, assertion) {
+		ctx.report(ruleGomegaProxyBoolean, assertion.actual, gomegaProxyBooleanDiagnostic())
+	}
 	if assertionUsesMapIndexEqual(ctx, assertion) {
 		ctx.report(ruleGomegaMapIndex, assertion.actual, gomegaMapIndexMatcherDiagnostic())
 	}
@@ -571,6 +574,26 @@ func assertionUsesBooleanLiteral(assertion gomegaAssertion) bool {
 func assertionUsesCommaOKBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
 	return ok && isBooleanMatcher(assertion.matcher) && identIsCommaOKResult(ctx, ident)
+}
+
+func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
+	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
+	if !ok || !isBooleanMatcher(assertion.matcher) || !isProxyBooleanName(ident.Name) {
+		return false
+	}
+	if identIsCommaOKResult(ctx, ident) {
+		return false
+	}
+	return isBoolType(ctx.pass.TypesInfo.TypeOf(ident))
+}
+
+func isProxyBooleanName(name string) bool {
+	switch strings.ToLower(name) {
+	case "ok", "found", "exists", "present", "matched", "valid", "success", "done":
+		return true
+	default:
+		return false
+	}
 }
 
 func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {

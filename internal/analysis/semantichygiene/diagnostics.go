@@ -158,6 +158,10 @@ func gomegaCommaOKAssertionDiagnostic() string {
 	return "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 }
 
+func gomegaProxyBooleanDiagnostic() string {
+	return "assert a semantic value or domain outcome instead of proxy boolean variables with BeTrue/BeFalse"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }

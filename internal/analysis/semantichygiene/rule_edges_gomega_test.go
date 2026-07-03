@@ -1236,6 +1236,33 @@ func TestCLIBehavior() {
 				"semh:gomega.boolean-literal: use semantic Gomega assertions instead of forcing pass/fail with boolean literals",
 			))
 		})
+
+		ginkgo.It("reports proxy boolean assertions that hide the semantic value", func() {
+			h := newRuleHarness("/repo/internal/projectdaemon/agent_presence_test.go", "github.com/perber/wiki/internal/projectdaemon", `package projectdaemon
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func BeTrue() any { return nil }
+
+func normalize() (string, bool) { return "", true }
+
+func TestAgentPresence() {
+	_, ok := normalize()
+	Expect(ok).To(BeTrue())
+
+	agentEnabled := true
+	Expect(agentEnabled).To(BeTrue())
+}
+`)
+			for _, call := range h.findCalls("To") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with BeTrue/BeFalse",
+			))
+		})
 	})
 
 	ginkgo.Describe("waiver comments", func() {
@@ -1351,34 +1378,34 @@ func TestPage() {}
 
 	ginkgo.Describe("policy helper branches", func() {
 		ginkgo.It("classifies semantic and primitive type fallback cases", func() {
-			name, ok := semanticTypeNameOf(nil)
-			Expect(ok).To(BeFalse())
+			name, hasSemanticType := semanticTypeNameOf(nil)
+			Expect(hasSemanticType).To(BeFalse())
 			Expect(name).To(BeEmpty())
-			name, ok = semanticTypeNameOf(types.Typ[types.String])
-			Expect(ok).To(BeFalse())
+			name, hasSemanticType = semanticTypeNameOf(types.Typ[types.String])
+			Expect(hasSemanticType).To(BeFalse())
 			Expect(name).To(BeEmpty())
-			name, ok = semanticTypeNameOf(namedStringType("PlainID"))
-			Expect(ok).To(BeFalse())
+			name, hasSemanticType = semanticTypeNameOf(namedStringType("PlainID"))
+			Expect(hasSemanticType).To(BeFalse())
 			Expect(name).To(BeEmpty())
-			name, ok = semanticTypeNameOf(types.NewPointer(namedStringType("WorkspaceID")))
-			Expect(ok).To(BeTrue())
+			name, hasSemanticType = semanticTypeNameOf(types.NewPointer(namedStringType("WorkspaceID")))
+			Expect(hasSemanticType).To(BeTrue())
 			Expect(name).To(Equal("WorkspaceID"))
 
 			Expect(isString(nil)).To(BeFalse())
 			Expect(isString(types.Typ[types.UntypedString])).To(BeTrue())
 			Expect(isString(types.Typ[types.Int])).To(BeFalse())
 
-			primitive, ok := primitiveCarrierTypeName(nil)
-			Expect(ok).To(BeFalse())
+			primitive, hasPrimitiveCarrier := primitiveCarrierTypeName(nil)
+			Expect(hasPrimitiveCarrier).To(BeFalse())
 			Expect(primitive).To(BeEmpty())
-			primitive, ok = primitiveCarrierTypeName(types.NewStruct(nil, nil))
-			Expect(ok).To(BeFalse())
+			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.NewStruct(nil, nil))
+			Expect(hasPrimitiveCarrier).To(BeFalse())
 			Expect(primitive).To(BeEmpty())
-			primitive, ok = primitiveCarrierTypeName(types.Typ[types.Uint32])
-			Expect(ok).To(BeTrue())
+			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.Typ[types.Uint32])
+			Expect(hasPrimitiveCarrier).To(BeTrue())
 			Expect(primitive).To(Equal("uint32"))
-			primitive, ok = primitiveCarrierTypeName(types.Typ[types.Float64])
-			Expect(ok).To(BeFalse())
+			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.Typ[types.Float64])
+			Expect(hasPrimitiveCarrier).To(BeFalse())
 			Expect(primitive).To(BeEmpty())
 
 			Expect(semanticConstructorAllowsSource("", "ErrorCode")).To(BeFalse())
@@ -1422,37 +1449,37 @@ func TestPage() {}
 			target := &ast.Ident{Name: "target"}
 			fn := &ast.FuncDecl{Name: &ast.Ident{Name: "Stop"}}
 			ctx := &analysisContext{parents: map[ast.Node]ast.Node{target: fn}}
-			named, typedStruct, lit, ok := enclosingNamedCompositeStructLiteral(ctx, target)
-			Expect(ok).To(BeFalse())
+			named, typedStruct, lit, hasCompositeContext := enclosingNamedCompositeStructLiteral(ctx, target)
+			Expect(hasCompositeContext).To(BeFalse())
 			Expect(named).To(BeNil())
 			Expect(typedStruct).To(BeNil())
 			Expect(lit).To(BeNil())
 
 			ctx.parents = map[ast.Node]ast.Node{}
-			_, _, _, ok = enclosingNamedCompositeStructLiteral(ctx, target)
-			Expect(ok).To(BeFalse())
+			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, target)
+			Expect(hasCompositeContext).To(BeFalse())
 
 			litNode := &ast.CompositeLit{}
 			ctx.pass = &analysis.Pass{TypesInfo: &types.Info{Types: map[ast.Expr]types.TypeAndValue{
 				litNode: {Type: types.NewStruct(nil, nil)},
 			}}}
-			_, _, _, ok = enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(ok).To(BeFalse())
+			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, litNode)
+			Expect(hasCompositeContext).To(BeFalse())
 
 			namedBasic := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("example.com/p", "p"), "NamedBasic", nil), types.Typ[types.String], nil)
 			ctx.pass.TypesInfo.Types[litNode] = types.TypeAndValue{Type: namedBasic}
-			_, _, _, ok = enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(ok).To(BeFalse())
+			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, litNode)
+			Expect(hasCompositeContext).To(BeFalse())
 
 			namedStruct := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("example.com/p", "p"), "Payload", nil), types.NewStruct(nil, nil), nil)
 			ctx.pass.TypesInfo.Types[litNode] = types.TypeAndValue{Type: types.NewPointer(namedStruct)}
-			gotNamed, gotStruct, gotLit, ok := enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(ok).To(BeTrue())
+			gotNamed, gotStruct, gotLit, hasCompositeContext := enclosingNamedCompositeStructLiteral(ctx, litNode)
+			Expect(hasCompositeContext).To(BeTrue())
 			Expect(gotNamed.Obj().Name()).To(Equal("Payload"))
 			Expect(gotStruct.NumFields()).To(BeZero())
 			Expect(gotLit).To(Equal(litNode))
-			wrappedNamed, wrappedStruct, ok := enclosingNamedCompositeStruct(ctx, litNode)
-			Expect(ok).To(BeTrue())
+			wrappedNamed, wrappedStruct, hasCompositeContext := enclosingNamedCompositeStruct(ctx, litNode)
+			Expect(hasCompositeContext).To(BeTrue())
 			Expect(wrappedNamed).To(Equal(gotNamed))
 			Expect(wrappedStruct).To(Equal(gotStruct))
 		})
@@ -2067,8 +2094,8 @@ func makeError(message string) { NewLocalizedError("ok", message) }
 			outside := &ast.KeyValueExpr{Key: &ast.Ident{Name: "Message"}, Value: &ast.BasicLit{Kind: token.STRING, Value: `"plain"`}}
 			checkMessageFieldValue(&analysisContext{parents: map[ast.Node]ast.Node{}, pass: h.ctx.pass}, outside)
 			checkResponseStatusForward(h.ctx, &ast.KeyValueExpr{Key: &ast.BasicLit{Kind: token.STRING, Value: `"lastError"`}, Value: &ast.Ident{Name: "other"}})
-			_, ok := warningFieldValueMissingMessageIDNamed(&analysisContext{parents: map[ast.Node]ast.Node{}, pass: h.ctx.pass}, outside)
-			Expect(ok).To(BeFalse())
+			_, warningHasMessageID := warningFieldValueMissingMessageIDNamed(&analysisContext{parents: map[ast.Node]ast.Node{}, pass: h.ctx.pass}, outside)
+			Expect(warningHasMessageID).To(BeFalse())
 
 			Expect(exprIsFreeFormMessageParam(h.ctx, &ast.BasicLit{Kind: token.STRING, Value: `"message"`})).To(BeFalse())
 			defsMessage := &ast.Ident{Name: "message"}
@@ -2129,8 +2156,8 @@ func ValidatePlain(raw string) (bool, error) { return true, nil }
 			))
 
 			Expect(semanticContextName(nil)).To(BeEmpty())
-			paramName, typeName, ok := semanticTypeForUnnamedParam("Other", "Other", 1)
-			Expect(ok).To(BeFalse())
+			paramName, typeName, hasSemanticType := semanticTypeForUnnamedParam("Other", "Other", 1)
+			Expect(hasSemanticType).To(BeFalse())
 			Expect(paramName).To(BeEmpty())
 			Expect(typeName).To(BeEmpty())
 			Expect(isRawStringCarrier(nil)).To(BeFalse())
@@ -2147,8 +2174,8 @@ func ValidatePlain(raw string) (bool, error) { return true, nil }
 			h.ctx.pass.TypesInfo.Types[primitiveNilNameField.Type] = types.TypeAndValue{Type: types.Typ[types.Int]}
 			checkPrimitiveSignatureField(h.ctx, primitiveNilNameField, "Search", "SearchPage")
 
-			_, _, ok = semanticTypeForUnnamedParam("Other", "Other", 0)
-			Expect(ok).To(BeFalse())
+			_, _, hasSemanticType = semanticTypeForUnnamedParam("Other", "Other", 0)
+			Expect(hasSemanticType).To(BeFalse())
 
 			testFile := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 type PageID string

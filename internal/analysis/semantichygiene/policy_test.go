@@ -20,16 +20,16 @@ var _ = ginkgo.Describe("policy helpers", func() {
 
 	ginkgo.Describe("rule metadata", func() {
 		ginkgo.It("classifies hard semantic rules and the first waivable BDD rule", func() {
-			hard, ok := metadataForRule(ruleDirectCast)
-			Expect(ok).To(BeTrue())
+			hard, metadataFound := metadataForRule(ruleDirectCast)
+			Expect(metadataFound).To(BeTrue())
 			Expect(hard).To(Equal(ruleMetadata{
 				messagePrefix: string(ruleDirectCast),
 				waivable:      false,
 				scope:         waiverScopeNone,
 			}))
 
-			waivable, ok := metadataForRule(ruleGinkgoTopLevelIt)
-			Expect(ok).To(BeTrue())
+			waivable, metadataFound := metadataForRule(ruleGinkgoTopLevelIt)
+			Expect(metadataFound).To(BeTrue())
 			Expect(waivable).To(Equal(ruleMetadata{
 				messagePrefix: string(ruleGinkgoTopLevelIt),
 				waivable:      true,
@@ -42,21 +42,21 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				if !metadata.waivable {
 					continue
 				}
-				budget, ok := waiverBudgetForRule(id)
-				Expect(ok).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
+				budget, budgetFound := waiverBudgetForRule(id)
+				Expect(budgetFound).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
 				Expect(budget).To(BeNumerically(">", 0), "waivable rule %s should have a positive budget", id)
 			}
 		})
 
 		ginkgo.It("rejects unknown rule IDs", func() {
-			_, ok := metadataForRule(ruleID("unknown.rule"))
-			Expect(ok).To(BeFalse())
+			_, metadataFound := metadataForRule(ruleID("unknown.rule"))
+			Expect(metadataFound).To(BeFalse())
 		})
 
 		ginkgo.DescribeTable("registers the checker rule taxonomy",
 			func(id ruleID, waivable bool, scope waiverScopeKind) {
-				metadata, ok := metadataForRule(id)
-				Expect(ok).To(BeTrue(), "rule %s should be registered", id)
+				metadata, metadataFound := metadataForRule(id)
+				Expect(metadataFound).To(BeTrue(), "rule %s should be registered", id)
 				Expect(metadata).To(Equal(ruleMetadata{
 					messagePrefix: string(id),
 					waivable:      waivable,
@@ -105,6 +105,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega binary boolean", ruleID("gomega.binary-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega boolean literal", ruleID("gomega.boolean-literal"), false, waiverScopeNone),
 			ginkgo.Entry("gomega comma-ok assertion", ruleID("gomega.comma-ok-assertion"), false, waiverScopeNone),
+			ginkgo.Entry("gomega proxy boolean", ruleID("gomega.proxy-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega map index", ruleID("gomega.map-index"), false, waiverScopeNone),
 			ginkgo.Entry("gomega http status", ruleID("gomega.http-status"), false, waiverScopeNone),
 			ginkgo.Entry("gomega http body", ruleID("gomega.http-body"), false, waiverScopeNone),
@@ -146,8 +147,8 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				ruleID("gomega.numeric-equivalent"),
 				ruleID("gomega.time-equal"),
 			} {
-				budget, ok := waiverBudgetForRule(id)
-				Expect(ok).To(BeTrue(), "rule %s should have an explicit budget", id)
+				budget, budgetFound := waiverBudgetForRule(id)
+				Expect(budgetFound).To(BeTrue(), "rule %s should have an explicit budget", id)
 				Expect(budget).To(Equal(3), "rule %s should use the initial per-rule budget", id)
 			}
 		})
