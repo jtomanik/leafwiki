@@ -1,246 +1,118 @@
 package security
 
 import (
-	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = It("TestRateLimiter_NewKey", func() {
-	t := GinkgoT()
-	// This test ensures that the rate limiter doesn't panic when encountering a new key
-	gin.SetMode(gin.TestMode)
+func newRateLimiterRouter(limit int, window time.Duration, resetOnSuccess bool) *gin.Engine {
+	GinkgoHelper()
 
-	limiter := NewRateLimiter(3, time.Minute, false)
-
-	// Create a test router with the rate limiter
 	router := gin.New()
-	router.Use(limiter)
+	router.Use(NewRateLimiter(limit, window, resetOnSuccess))
 	router.GET("/test", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
+	return router
+}
 
-	// Make a request with a new IP (this would panic with the old code)
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.1:1234"
-	w := httptest.NewRecorder()
+func rateLimitedRequest(router *gin.Engine, remoteAddr string) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
-	router.ServeHTTP(w, req)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = remoteAddr
+	return performSecurityRequest(router, req)
+}
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestRateLimiter_ExceedsLimit", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	limiter := NewRateLimiter(3, time.Minute, false)
-
-	router := gin.New()
-	router.Use(limiter)
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	// Make requests up to the limit
-	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.RemoteAddr = "192.168.1.2:1234"
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("Request %d: Expected status 200, got %d", i+1, w.Code)
-		}
-	}
-
-	// The next request should be rate limited
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.2:1234"
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusTooManyRequests {
-		t.Errorf("Expected status 429, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestRateLimiter_ExceedsLimitReturnsStructuredLocalizedError", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	limiter := NewRateLimiter(1, time.Minute, false)
-
-	router := gin.New()
-	router.Use(limiter)
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.6:1234"
-	router.ServeHTTP(httptest.NewRecorder(), req)
-
-	req = httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.6:1234"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusTooManyRequests, w.Body.String())
-	}
-	var body struct {
-		Error sharederrors.LocalizedErrorDetail `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
-	}
-	if body.Error.Code != ErrCodeRateLimitExceeded {
-		t.Fatalf("error.code = %q, want %q; body=%s", body.Error.Code, ErrCodeRateLimitExceeded, w.Body.String())
-	}
-	if body.Error.MessageID != "errors.rate.limit_exceeded" {
-		t.Fatalf("error.messageId = %q, want errors.rate.limit_exceeded", body.Error.MessageID)
-	}
-	if body.Error.Message != "Too many requests, please try again later" {
-		t.Fatalf("error.message = %q, want catalog-rendered rate-limit message", body.Error.Message)
-	}
-
-})
-
-var _ = It("TestRateLimiter_ReleasesLockAfterLimit", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	limiter := NewRateLimiter(1, time.Minute, false)
-
-	router := gin.New()
-	router.Use(limiter)
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.4:1234"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-	req = httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.4:1234"
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("Expected status 429, got %d", w.Code)
-	}
-
-	done := make(chan int, 1)
-
-	go func() {
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.RemoteAddr = "192.168.1.5:1234"
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		done <- w.Code
-	}()
-
-	Eventually(done).
-		WithTimeout(2*time.Second).
-		Should(Receive(Equal(http.StatusOK)), "request for a different key should not block after a limit hit")
-
-})
-
-var _ = It("TestRateLimiter_WindowExpires", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	// Use a very short window for testing
-	limiter := NewRateLimiter(2, 100*time.Millisecond, false)
-
-	router := gin.New()
-	router.Use(limiter)
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	// Make requests up to the limit
-	for i := 0; i < 2; i++ {
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.RemoteAddr = "192.168.1.3:1234"
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("Request %d: Expected status 200, got %d", i+1, w.Code)
-		}
-	}
-
-	Eventually(func() int {
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.RemoteAddr = "192.168.1.3:1234"
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		return w.Code
-	}).
-		WithTimeout(500*time.Millisecond).
-		WithPolling(10*time.Millisecond).
-		Should(Equal(http.StatusOK), "request should succeed after the rate limit window expires")
-
-})
-
-var _ = Describe("rate limiter edge coverage", func() {
-	It("uses the raw remote address when no port is present", func() {
+var _ = Describe("rate limiter", func() {
+	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
-		limiter := NewRateLimiter(1, time.Minute, false)
-		router := gin.New()
-		router.Use(limiter)
-		router.GET("/test", func(c *gin.Context) {
-			c.Status(http.StatusOK)
+	})
+
+	When("a client key has not used its quota", func() {
+		It("allows the first request", func() {
+			router := newRateLimiterRouter(3, time.Minute, false)
+
+			Expect(rateLimitedRequest(router, "192.168.1.1:1234")).To(HaveHTTPStatus(http.StatusOK))
+		})
+	})
+
+	When("a client key exceeds its quota", func() {
+		It("returns too many requests", func() {
+			router := newRateLimiterRouter(3, time.Minute, false)
+
+			for range 3 {
+				Expect(rateLimitedRequest(router, "192.168.1.2:1234")).To(HaveHTTPStatus(http.StatusOK))
+			}
+
+			Expect(rateLimitedRequest(router, "192.168.1.2:1234")).To(HaveHTTPStatus(http.StatusTooManyRequests))
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		req.RemoteAddr = "192.0.2.10"
-		router.ServeHTTP(httptest.NewRecorder(), req)
+		It("returns a structured localized rate-limit error", func() {
+			router := newRateLimiterRouter(1, time.Minute, false)
 
-		req = httptest.NewRequest(http.MethodGet, "/test", nil)
-		req.RemoteAddr = "192.0.2.10"
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+			Expect(rateLimitedRequest(router, "192.168.1.6:1234")).To(HaveHTTPStatus(http.StatusOK))
+			rec := rateLimitedRequest(router, "192.168.1.6:1234")
 
-		Expect(w).To(HaveHTTPStatus(http.StatusTooManyRequests))
-	})
-
-	It("resets the request count after successful responses when configured", func() {
-		gin.SetMode(gin.TestMode)
-		limiter := NewRateLimiter(1, time.Minute, true)
-		router := gin.New()
-		router.Use(limiter)
-		router.GET("/test", func(c *gin.Context) {
-			c.Status(http.StatusOK)
+			Expect(rec).To(HaveHTTPStatus(http.StatusTooManyRequests))
+			Expect(rec.Body.Bytes()).To(haveStructuredSecurityError(ErrCodeRateLimitExceeded))
 		})
 
-		for i := 0; i < 2; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			req.RemoteAddr = "192.0.2.11:1234"
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
-			Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		}
+		It("continues serving other client keys after a limit hit", func() {
+			router := newRateLimiterRouter(1, time.Minute, false)
+
+			Expect(rateLimitedRequest(router, "192.168.1.4:1234")).To(HaveHTTPStatus(http.StatusOK))
+			Expect(rateLimitedRequest(router, "192.168.1.4:1234")).To(HaveHTTPStatus(http.StatusTooManyRequests))
+
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				done <- rateLimitedRequest(router, "192.168.1.5:1234")
+			}()
+
+			Eventually(done).
+				WithTimeout(2*time.Second).
+				Should(Receive(HaveHTTPStatus(http.StatusOK)), "request for a different key should not block after a limit hit")
+		})
+	})
+
+	When("the rate-limit window expires", func() {
+		It("allows the client again", func() {
+			router := newRateLimiterRouter(2, 100*time.Millisecond, false)
+
+			for range 2 {
+				Expect(rateLimitedRequest(router, "192.168.1.3:1234")).To(HaveHTTPStatus(http.StatusOK))
+			}
+
+			Eventually(func() *httptest.ResponseRecorder {
+				return rateLimitedRequest(router, "192.168.1.3:1234")
+			}).
+				WithTimeout(500*time.Millisecond).
+				WithPolling(10*time.Millisecond).
+				Should(HaveHTTPStatus(http.StatusOK), "request should succeed after the rate limit window expires")
+		})
+	})
+
+	When("client keys come from non-host-port remote addresses", func() {
+		It("uses the raw remote address as the rate-limit key", func() {
+			router := newRateLimiterRouter(1, time.Minute, false)
+
+			Expect(rateLimitedRequest(router, "192.0.2.10")).To(HaveHTTPStatus(http.StatusOK))
+			Expect(rateLimitedRequest(router, "192.0.2.10")).To(HaveHTTPStatus(http.StatusTooManyRequests))
+		})
+	})
+
+	When("successful responses reset rate-limit state", func() {
+		It("allows consecutive successful requests for the same client key", func() {
+			router := newRateLimiterRouter(1, time.Minute, true)
+
+			for range 2 {
+				Expect(rateLimitedRequest(router, "192.0.2.11:1234")).To(HaveHTTPStatus(http.StatusOK))
+			}
+		})
 	})
 })

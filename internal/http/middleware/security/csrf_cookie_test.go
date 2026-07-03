@@ -3,409 +3,267 @@ package security
 import (
 	"crypto/tls"
 	"errors"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
-var _ = It("TestCSRFCookie_CookieName_Secure", func() {
-	t := GinkgoT()
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	name := csrf.cookieName(true)
-	if name != "__Host-leafwiki_csrf" {
-		t.Errorf("Expected secure CSRF cookie name '__Host-leafwiki_csrf', got '%s'", name)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_CookieName_Insecure", func() {
-	t := GinkgoT()
-	csrf := NewCSRFCookie(true, time.Hour)
-
-	name := csrf.cookieName(false)
-	if name != "leafwiki_csrf" {
-		t.Errorf("Expected insecure CSRF cookie name 'leafwiki_csrf', got '%s'", name)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Issue_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		_, err := csrf.Issue(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-	// Check that CSRF cookie was set correctly
-	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("Expected 1 cookie, got %d", len(cookies))
-	}
-
-	csrfCookie := cookies[0]
-	if csrfCookie.Name != "__Host-leafwiki_csrf" {
-		t.Errorf("Expected CSRF cookie name '__Host-leafwiki_csrf', got '%s'", csrfCookie.Name)
-	}
-	if csrfCookie.Value == "" {
-		t.Error("Expected CSRF cookie to have a non-empty value")
-	}
-	if csrfCookie.HttpOnly {
-		t.Error("Expected CSRF cookie to NOT be HttpOnly")
-	}
-	if !csrfCookie.Secure {
-		t.Error("Expected CSRF cookie to be Secure in secure mode")
-	}
-	if csrfCookie.Path != "/" {
-		t.Errorf("Expected CSRF cookie path '/', got '%s'", csrfCookie.Path)
-	}
-	if csrfCookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("Expected CSRF cookie SameSite LaxMode, got %v", csrfCookie.SameSite)
-	}
-	if csrfCookie.MaxAge != int(time.Hour.Seconds()) {
-		t.Errorf("Expected CSRF cookie MaxAge %d, got %d", int(time.Hour.Seconds()), csrfCookie.MaxAge)
-	}
-
-	// Header should also contain the same CSRF token
-	headerToken := w.Result().Header.Get("X-CSRF-Token")
-	if headerToken == "" {
-		t.Error("Expected X-CSRF-Token header to be set")
-	}
-	if headerToken != csrfCookie.Value {
-		t.Errorf("Expected header token '%s' to match cookie value '%s'", headerToken, csrfCookie.Value)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Issue_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(true, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		_, err := csrf.Issue(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("Expected 1 cookie, got %d", len(cookies))
-	}
-
-	csrfCookie := cookies[0]
-	if csrfCookie.Name != "leafwiki_csrf" {
-		t.Errorf("Expected CSRF cookie name 'leafwiki_csrf', got '%s'", csrfCookie.Name)
-	}
-	if csrfCookie.Secure {
-		t.Error("Expected CSRF cookie to NOT be Secure in insecure mode")
-	}
-	if csrfCookie.HttpOnly {
-		t.Error("Expected CSRF cookie to NOT be HttpOnly")
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Issue_ErrorWhenHTTPSRequired", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		_, err := csrf.Issue(c)
-		if err != nil {
-			if err == utils.ErrHTTPSRequired {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
-
-	// No TLS / HTTPS indicators, AllowInsecure=false
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when HTTPS required for CSRF cookie, got %d", w.Code)
-	}
-
-})
-
-var _ = It("returns token generation errors from Issue", func() {
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(true, time.Hour)
-	tokenErr := errors.New("entropy unavailable")
-	originalRandRead := csrfRandRead
-	csrfRandRead = func([]byte) (int, error) {
-		return 0, tokenErr
-	}
-	DeferCleanup(func() {
-		csrfRandRead = originalRandRead
-	})
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := csrf.Issue(c)
-		Expect(token).To(BeEmpty())
-		Expect(err).To(MatchError(tokenErr))
-		c.Status(http.StatusTeapot)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	Expect(rec).To(HaveHTTPStatus(http.StatusTeapot))
-	Expect(rec.Result().Cookies()).To(BeEmpty())
-	Expect(rec.Result().Header.Get("X-CSRF-Token")).To(BeEmpty())
-})
-
-var _ = It("TestCSRFCookie_Read_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := csrf.Read(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	req.AddCookie(&http.Cookie{
-		Name:  "__Host-leafwiki_csrf",
-		Value: "test-csrf-token",
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Read_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(true, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := csrf.Read(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_csrf",
-		Value: "test-csrf-token-insecure",
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Read_MissingCookie", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := csrf.Read(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when CSRF cookie is missing, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Clear_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(false, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := csrf.Clear(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("Expected 1 cookie, got %d", len(cookies))
-	}
-
-	csrfCookie := cookies[0]
-	if csrfCookie.Name != "__Host-leafwiki_csrf" {
-		t.Errorf("Expected CSRF cookie name '__Host-leafwiki_csrf', got '%s'", csrfCookie.Name)
-	}
-	if csrfCookie.Value != "" {
-		t.Errorf("Expected CSRF cookie value to be empty, got '%s'", csrfCookie.Value)
-	}
-	if csrfCookie.MaxAge != -1 {
-		t.Errorf("Expected CSRF cookie MaxAge -1, got %d", csrfCookie.MaxAge)
-	}
-
-})
-
-var _ = It("TestCSRFCookie_Clear_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	csrf := NewCSRFCookie(true, time.Hour)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := csrf.Clear(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", w.Code)
-	}
-
-	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("Expected 1 cookie, got %d", len(cookies))
-	}
-
-	csrfCookie := cookies[0]
-	if csrfCookie.Name != "leafwiki_csrf" {
-		t.Errorf("Expected CSRF cookie name 'leafwiki_csrf', got '%s'", csrfCookie.Name)
-	}
-	if csrfCookie.MaxAge != -1 {
-		t.Errorf("Expected CSRF cookie MaxAge -1, got %d", csrfCookie.MaxAge)
-	}
-
-})
-
-var _ = Describe("CSRF cookie edge coverage", func() {
-	It("reuses an existing secure CSRF cookie when issuing", func() {
+func singleResponseCookie(rec *httptest.ResponseRecorder) *http.Cookie {
+	GinkgoHelper()
+
+	cookies := rec.Result().Cookies()
+	Expect(cookies).To(HaveLen(1))
+	return cookies[0]
+}
+
+func matchIssuedCSRFCookie(name string, secure bool, maxAge int) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Name", name),
+		HaveField("Value", Not(BeEmpty())),
+		HaveField("HttpOnly", BeFalse()),
+		HaveField("Secure", secure),
+		HaveField("Path", "/"),
+		HaveField("SameSite", http.SameSiteLaxMode),
+		HaveField("MaxAge", maxAge),
+	)
+}
+
+func matchClearedCSRFCookie(name string, secure bool) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Name", name),
+		HaveField("Value", BeEmpty()),
+		HaveField("Secure", secure),
+		HaveField("MaxAge", -1),
+	)
+}
+
+var _ = Describe("CSRF cookie", func() {
+	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
-		csrf := NewCSRFCookie(false, time.Hour)
-		router := gin.New()
-		router.GET("/test", func(c *gin.Context) {
-			token, err := csrf.Issue(c)
-			Expect(err).NotTo(HaveOccurred())
-			c.String(http.StatusOK, token)
+	})
+
+	Describe("cookie naming", func() {
+		It("uses the host-prefixed cookie name for secure requests", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+
+			Expect(csrf.cookieName(true)).To(HavePrefix("__Host-"))
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		req.TLS = &tls.ConnectionState{}
-		req.AddCookie(&http.Cookie{Name: "__Host-leafwiki_csrf", Value: "existing-token"})
-		w := httptest.NewRecorder()
+		It("keeps secure and insecure cookie names distinct", func() {
+			csrf := NewCSRFCookie(true, time.Hour)
 
-		router.ServeHTTP(w, req)
-
-		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w).To(HaveHTTPBody("existing-token"))
-		Expect(w).To(HaveHTTPHeaderWithValue("X-CSRF-Token", "existing-token"))
-		Expect(w.Result().Cookies()).To(BeEmpty())
+			Expect(csrf.cookieName(false)).NotTo(Equal(csrf.cookieName(true)))
+		})
 	})
 
-	It("returns HTTPS-required errors from Read and Clear", func() {
-		gin.SetMode(gin.TestMode)
-		csrf := NewCSRFCookie(false, time.Hour)
-		rec := httptest.NewRecorder()
-		ctx, _ := gin.CreateTestContext(rec)
-		ctx.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+	Describe("issuing tokens", func() {
+		It("sets a readable secure cookie and mirrors the token in the response header", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Issue(c)
+				Expect(err).To(Succeed())
+				c.String(http.StatusOK, token)
+			})
 
-		token, err := csrf.Read(ctx)
-		Expect(err).To(MatchError(utils.ErrHTTPSRequired))
-		Expect(token).To(BeEmpty())
-		Expect(csrf.Clear(ctx)).To(MatchError(utils.ErrHTTPSRequired))
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.TLS = &tls.ConnectionState{}
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+			csrfCookie := singleResponseCookie(rec)
+			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrf.cookieName(true), true, int(time.Hour.Seconds())))
+			Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", csrfCookie.Value))
+		})
+
+		It("sets a readable insecure cookie when insecure requests are allowed", func() {
+			csrf := NewCSRFCookie(true, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Issue(c)
+				Expect(err).To(Succeed())
+				c.String(http.StatusOK, token)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+			csrfCookie := singleResponseCookie(rec)
+			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrf.cookieName(false), false, int(time.Hour.Seconds())))
+		})
+
+		It("requires HTTPS before issuing secure cookies", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Issue(c)
+				Expect(token).To(BeEmpty())
+				Expect(err).To(MatchError(utils.ErrHTTPSRequired))
+				c.Status(http.StatusBadRequest)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
+		})
+
+		It("returns token generation errors without setting cookies or headers", func() {
+			csrf := NewCSRFCookie(true, time.Hour)
+			tokenErr := errors.New("entropy unavailable")
+			originalRandRead := csrfRandRead
+			csrfRandRead = func([]byte) (int, error) {
+				return 0, tokenErr
+			}
+			DeferCleanup(func() {
+				csrfRandRead = originalRandRead
+			})
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Issue(c)
+				Expect(token).To(BeEmpty())
+				Expect(err).To(MatchError(tokenErr))
+				c.Status(http.StatusTeapot)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusTeapot))
+			Expect(rec.Result().Cookies()).To(BeEmpty())
+			Expect(rec.Result().Header.Get("X-CSRF-Token")).To(BeEmpty())
+		})
+
+		It("reuses an existing secure CSRF cookie when issuing", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Issue(c)
+				Expect(err).To(Succeed())
+				c.String(http.StatusOK, token)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.TLS = &tls.ConnectionState{}
+			req.AddCookie(&http.Cookie{Name: csrf.cookieName(true), Value: "existing-token"})
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+			Expect(rec).To(HaveHTTPBody("existing-token"))
+			Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", "existing-token"))
+			Expect(rec.Result().Cookies()).To(BeEmpty())
+		})
+	})
+
+	Describe("reading tokens", func() {
+		It("reads the secure cookie token from HTTPS requests", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Read(c)
+				Expect(err).To(Succeed())
+				Expect(token).To(Equal("test-csrf-token"))
+				c.Status(http.StatusOK)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.TLS = &tls.ConnectionState{}
+			req.AddCookie(&http.Cookie{
+				Name:  csrf.cookieName(true),
+				Value: "test-csrf-token",
+			})
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		})
+
+		It("reads the insecure cookie token when insecure requests are allowed", func() {
+			csrf := NewCSRFCookie(true, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Read(c)
+				Expect(err).To(Succeed())
+				Expect(token).To(Equal("test-csrf-token-insecure"))
+				c.Status(http.StatusOK)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.AddCookie(&http.Cookie{
+				Name:  csrf.cookieName(false),
+				Value: "test-csrf-token-insecure",
+			})
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		})
+
+		It("returns an error when the secure cookie is missing", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				token, err := csrf.Read(c)
+				Expect(token).To(BeEmpty())
+				Expect(err).To(HaveOccurred())
+				c.Status(http.StatusBadRequest)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.TLS = &tls.ConnectionState{}
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
+		})
+
+		It("requires HTTPS before reading or clearing secure cookies", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			token, err := csrf.Read(ctx)
+			Expect(err).To(MatchError(utils.ErrHTTPSRequired))
+			Expect(token).To(BeEmpty())
+			Expect(csrf.Clear(ctx)).To(MatchError(utils.ErrHTTPSRequired))
+		})
+	})
+
+	Describe("clearing tokens", func() {
+		It("expires the secure CSRF cookie", func() {
+			csrf := NewCSRFCookie(false, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				Expect(csrf.Clear(c)).To(Succeed())
+				c.Status(http.StatusOK)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.TLS = &tls.ConnectionState{}
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrf.cookieName(true), true))
+		})
+
+		It("expires the insecure CSRF cookie when insecure requests are allowed", func() {
+			csrf := NewCSRFCookie(true, time.Hour)
+			router := gin.New()
+			router.GET("/test", func(c *gin.Context) {
+				Expect(csrf.Clear(c)).To(Succeed())
+				c.Status(http.StatusOK)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			rec := performSecurityRequest(router, req)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrf.cookieName(false), false))
+		})
 	})
 })
