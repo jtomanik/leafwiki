@@ -33,8 +33,8 @@ func matchResolvedConfig(target Target, filePath types.GomegaMatcher, level slog
 }
 
 var _ = Describe("logging configuration", func() {
-	It("TestResolve_DefaultsToFileUnderDataDir", func() {
-		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
+	It("defaults file logging to the LeafWiki log path under the data directory", func() {
+		dataDir := filepath.Join(loggingTempDir(), "data")
 
 		cfg, err := Resolve(ConfigInput{DataDir: dataDir})
 
@@ -46,8 +46,8 @@ var _ = Describe("logging configuration", func() {
 		))
 	})
 
-	It("TestResolve_RelativeLogFileResolvesUnderDataDir", func() {
-		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
+	It("resolves relative log file paths under the data directory", func() {
+		dataDir := filepath.Join(loggingTempDir(), "data")
 
 		cfg, err := Resolve(ConfigInput{
 			DataDir:         dataDir,
@@ -62,9 +62,9 @@ var _ = Describe("logging configuration", func() {
 		Expect(cfg).To(matchResolvedConfig(TargetFile, Equal(filepath.Join(dataDir, "logs", "custom.log")), slog.LevelDebug))
 	})
 
-	It("TestResolve_RejectsRelativeLogFileEscapingDataDir", func() {
+	It("rejects relative log file paths that escape the data directory", func() {
 		_, err := Resolve(ConfigInput{
-			DataDir:     filepath.Join(GinkgoT().TempDir(), "data"),
+			DataDir:     filepath.Join(loggingTempDir(), "data"),
 			FilePath:    "../leafwiki.log",
 			FilePathSet: true,
 		})
@@ -72,11 +72,11 @@ var _ = Describe("logging configuration", func() {
 		Expect(err).To(MatchError(ErrLogFilePathOutsideDataDir))
 	})
 
-	It("TestResolve_AbsoluteLogFileIsUsedAsIs", func() {
-		logPath := filepath.Join(GinkgoT().TempDir(), "leafwiki.log")
+	It("preserves absolute log file paths", func() {
+		logPath := filepath.Join(loggingTempDir(), "leafwiki.log")
 
 		cfg, err := Resolve(ConfigInput{
-			DataDir:     filepath.Join(GinkgoT().TempDir(), "data"),
+			DataDir:     filepath.Join(loggingTempDir(), "data"),
 			FilePath:    logPath,
 			FilePathSet: true,
 		})
@@ -91,13 +91,13 @@ type resolveErrorCase struct {
 	want  types.GomegaMatcher
 }
 
-var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile",
+var _ = DescribeTable("logging target validation",
 	func(tc resolveErrorCase) {
 		_, err := Resolve(tc.input)
 
 		Expect(err).To(tc.want)
 	},
-	Entry("invalid target", resolveErrorCase{
+	Entry("rejects an unknown log target", resolveErrorCase{
 		input: ConfigInput{
 			DataDir:   "data",
 			Target:    "system",
@@ -105,7 +105,7 @@ var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile"
 		},
 		want: MatchError(ErrInvalidLogTarget),
 	}),
-	Entry("stderr with file", resolveErrorCase{
+	Entry("rejects log file paths for stderr logging", resolveErrorCase{
 		input: ConfigInput{
 			DataDir:     "data",
 			Target:      "stderr",
@@ -118,8 +118,8 @@ var _ = DescribeTable("TestResolve_RejectsInvalidTargetAndNonFileTargetWithFile"
 )
 
 var _ = Describe("opening loggers", func() {
-	It("TestOpenLogger_FileCreatesParentAndAppendsJSON", func() {
-		logPath := filepath.Join(GinkgoT().TempDir(), "nested", "leafwiki.log")
+	It("creates parent directories and appends JSON records to file logs", func() {
+		logPath := filepath.Join(loggingTempDir(), "nested", "leafwiki.log")
 		err := os.WriteFile(logPath, []byte("previous line\n"), 0o600)
 		Expect(err).To(MatchError(os.ErrNotExist))
 
@@ -152,8 +152,8 @@ var _ = Describe("opening loggers", func() {
 		Expect(entry).To(HaveKeyWithValue("msg", testLogStartupMessage))
 	})
 
-	It("TestOpenLogger_AppendsExistingFile", func() {
-		logPath := filepath.Join(GinkgoT().TempDir(), "leafwiki.log")
+	It("appends JSON records to existing file logs", func() {
+		logPath := filepath.Join(loggingTempDir(), "leafwiki.log")
 		Expect(os.WriteFile(logPath, []byte(testLogPreviousLine+"\n"), 0o600)).To(Succeed())
 
 		logger, closer, err := Open(Config{
@@ -173,8 +173,8 @@ var _ = Describe("opening loggers", func() {
 		))
 	})
 
-	It("TestOpenLogger_FileOpenFailureIsVisible", func() {
-		parentFile := filepath.Join(GinkgoT().TempDir(), "not-a-directory")
+	It("returns visible errors when file log parent creation cannot proceed", func() {
+		parentFile := filepath.Join(loggingTempDir(), "not-a-directory")
 		Expect(os.WriteFile(parentFile, []byte("file"), 0o600)).To(Succeed())
 
 		_, _, err := Open(Config{
@@ -187,7 +187,7 @@ var _ = Describe("opening loggers", func() {
 	})
 
 	It("returns file open errors after parent creation succeeds", func() {
-		logPath := GinkgoT().TempDir()
+		logPath := loggingTempDir()
 
 		_, _, err := Open(Config{
 			Target:   TargetFile,
@@ -198,7 +198,7 @@ var _ = Describe("opening loggers", func() {
 		Expect(err).To(MatchError(ErrOpenLogFile))
 	})
 
-	It("TestOpenLogger_StdoutStderrAndStdlibBridgeUseSelectedSink", func() {
+	It("routes slog and stdlib log output to the selected stderr sink", func() {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 
@@ -228,7 +228,7 @@ var _ = Describe("opening loggers", func() {
 		))
 	})
 
-	It("TestOpenLogger_StreamTargetsRespectLevel", func() {
+	It("filters stream log records below the configured level", func() {
 		var stdout bytes.Buffer
 
 		logger, closer, err := Open(Config{
@@ -251,7 +251,7 @@ var _ = Describe("opening loggers", func() {
 	})
 })
 
-var _ = Describe("logging edge coverage", func() {
+var _ = Describe("logging fallback behavior", func() {
 	It("rejects blank data dir when file logging is required", func() {
 		_, err := Resolve(ConfigInput{Target: "file", TargetSet: true, DataDir: " \t\n "})
 
@@ -308,3 +308,11 @@ var _ = Describe("logging edge coverage", func() {
 		Expect(closer.Close()).To(Succeed())
 	})
 })
+
+func loggingTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-logging-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
