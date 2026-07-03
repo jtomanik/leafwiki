@@ -749,14 +749,14 @@ func isProxyBooleanName(name string) bool {
 	switch strings.ToLower(name) {
 	case "ok", "found", "exists", "present", "matched", "valid", "success", "done", "called",
 		"changed", "created", "updated", "modified", "deleted", "removed", "rewritten", "applied",
-		"accepted", "rejected", "enabled", "disabled", "ready", "started", "stopped", "invoked",
+		"accepted", "rejected", "renamed", "enabled", "disabled", "ready", "started", "stopped", "invoked",
 		"canceled", "cancelled":
 		return true
 	}
 	for _, suffix := range []string{
 		"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called",
 		"Changed", "Created", "Updated", "Modified", "Deleted", "Removed", "Rewritten", "Applied",
-		"Accepted", "Rejected", "Enabled", "Disabled", "Ready", "Started", "Stopped", "Invoked",
+		"Accepted", "Rejected", "Renamed", "Enabled", "Disabled", "Ready", "Started", "Stopped", "Invoked",
 		"Canceled", "Cancelled",
 	} {
 		if strings.HasSuffix(name, suffix) {
