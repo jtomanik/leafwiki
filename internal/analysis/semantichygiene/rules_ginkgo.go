@@ -155,6 +155,10 @@ func checkGinkgoTestingTInSpec(ctx *analysisContext, call *ast.CallExpr, name st
 			ctx.report(ruleGinkgoTestingTInSpec, candidate, ginkgoTestingTAssertionDiagnostic(name))
 			return true
 		}
+		if name, ok := ginkgoTestingTAdapterMethod(ctx, candidate); ok {
+			ctx.report(ruleGinkgoTestingTInSpec, candidate, ginkgoTestingTInSpecDiagnostic(name))
+			return true
+		}
 		name, ok := ginkgoTestingTAdapter(ctx, candidate)
 		if !ok {
 			return true
@@ -166,10 +170,73 @@ func checkGinkgoTestingTInSpec(ctx *analysisContext, call *ast.CallExpr, name st
 
 func ginkgoTestingTAssertion(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
 	selector, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
-	if !ok || !isTestingTFailureMethod(selector.Sel.Name) || !isTestingTType(ctx.pass.TypesInfo.TypeOf(selector.X)) {
+	if !ok || !isTestingTFailureMethod(selector.Sel.Name) {
 		return "", false
 	}
-	return "testing.T." + selector.Sel.Name, true
+	receiverType := ctx.pass.TypesInfo.TypeOf(selector.X)
+	if isTestingTType(receiverType) {
+		return "testing.T." + selector.Sel.Name, true
+	}
+	if isTestingTLikeAdapterType(receiverType) {
+		return "testing.T-like." + selector.Sel.Name, true
+	}
+	return "", false
+}
+
+func ginkgoTestingTAdapterMethod(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
+	selector, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
+	if !ok || !isTestingTFixtureMethod(selector.Sel.Name) {
+		return "", false
+	}
+	receiverType := ctx.pass.TypesInfo.TypeOf(selector.X)
+	if isTestingTType(receiverType) {
+		return "testing.T." + selector.Sel.Name, true
+	}
+	if isTestingTLikeAdapterType(receiverType) {
+		return "testing.T-like." + selector.Sel.Name, true
+	}
+	return "", false
+}
+
+func isTestingTFixtureMethod(name string) bool {
+	switch name {
+	case "Cleanup", "Helper", "Log", "Logf", "Name", "Setenv", "Skip", "Skipf", "SkipNow", "TempDir":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTestingTLikeAdapterType(typ types.Type) bool {
+	if typ == nil || isTestingTType(typ) {
+		return false
+	}
+	methods := map[string]struct{}{}
+	collectTestingTLikeMethods(types.Unalias(typ), methods)
+	if len(methods) >= 2 {
+		return true
+	}
+	named := namedType(typ)
+	return named != nil && strings.Contains(strings.ToLower(named.Obj().Name()), "testt") && len(methods) >= 1
+}
+
+func collectTestingTLikeMethods(typ types.Type, methods map[string]struct{}) {
+	if typ == nil {
+		return
+	}
+	methodSet := types.NewMethodSet(typ)
+	for i := 0; i < methodSet.Len(); i++ {
+		name := methodSet.At(i).Obj().Name()
+		if isTestingTFailureMethod(name) || isTestingTFixtureMethod(name) {
+			methods[name] = struct{}{}
+		}
+	}
+	if _, ok := typ.(*types.Pointer); ok {
+		return
+	}
+	if named, ok := typ.(*types.Named); ok {
+		collectTestingTLikeMethods(types.NewPointer(named), methods)
+	}
 }
 
 func isTestingTFailureMethod(name string) bool {
