@@ -21,6 +21,13 @@ func (nilLineBlock) Lines() *text.Segments { return nil }
 
 var errRelMarkdownLinkPathFailed = errors.New("rel markdown link path failed")
 
+var (
+	errReferenceDefinitionRejected  = errors.New("reference definition rejected")
+	errReferenceDestinationRejected = errors.New("reference destination rejected")
+	errInlineDestinationRejected    = errors.New("inline destination rejected")
+	errInlineLinkTailRejected       = errors.New("inline link tail rejected")
+)
+
 type indexEntryMapCounts struct {
 	PageCount  int
 	AssetCount int
@@ -95,6 +102,48 @@ func matchInlineDestination(destination string, image bool) types.GomegaMatcher 
 		"Destination": Equal(destination),
 		"Image":       Equal(image),
 	})
+}
+
+func parseReferenceDefinitionLineResult(content string, lineStart int, lineEnd int) (linkOccurrence, error) {
+	ginkgo.GinkgoHelper()
+	occurrence, accepted := parseReferenceDefinitionLine(content, lineStart, lineEnd)
+	if !accepted {
+		return linkOccurrence{}, errReferenceDefinitionRejected
+	}
+	return occurrence, nil
+}
+
+func parseReferenceDestinationResult(content string, start int, lineEnd int) (linkOccurrence, error) {
+	ginkgo.GinkgoHelper()
+	occurrence, accepted := parseReferenceDestination(content, start, lineEnd)
+	if !accepted {
+		return linkOccurrence{}, errReferenceDestinationRejected
+	}
+	return occurrence, nil
+}
+
+func parseDestinationResult(content string, start int) (linkOccurrence, error) {
+	ginkgo.GinkgoHelper()
+	occurrence, accepted := parseDestination(content, start)
+	if !accepted {
+		return linkOccurrence{}, errInlineDestinationRejected
+	}
+	return occurrence, nil
+}
+
+func inlineLinkTailEndResult(content string, start int) (int, error) {
+	ginkgo.GinkgoHelper()
+	end, accepted := inlineLinkTailEnd(content, start)
+	if !accepted {
+		return end, errInlineLinkTailRejected
+	}
+	return end, nil
+}
+
+func applyReplacementsResult(content string, replacements []replacement) RewriteResult {
+	ginkgo.GinkgoHelper()
+	rewritten, changed := applyReplacements(content, replacements)
+	return RewriteResult{Content: rewritten, Changed: changed}
 }
 
 func markdownLinksTempDir() string {
@@ -198,48 +247,48 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 		imageOnlyReference := "[img]: /assets/logo.png"
 		Expect(scanReferenceDefinitions(imageOnlyReference, nil, usage)).To(BeEmpty())
 
-		_, ok := parseReferenceDefinitionLine("[empty]:   ", 0, len("[empty]:   "))
-		Expect(ok).To(BeFalse())
-		_, ok = parseReferenceDefinitionLine("[empty]: <>", 0, len("[empty]: <>"))
-		Expect(ok).To(BeFalse())
+		_, err := parseReferenceDefinitionLineResult("[empty]:   ", 0, len("[empty]:   "))
+		Expect(err).To(MatchError(errReferenceDefinitionRejected))
+		_, err = parseReferenceDefinitionLineResult("[empty]: <>", 0, len("[empty]: <>"))
+		Expect(err).To(MatchError(errReferenceDefinitionRejected))
 
-		occurrence, ok := parseReferenceDestination("<docs/page.md>", 0, len("<docs/page.md>"))
-		Expect(ok).To(BeTrue())
+		occurrence, err := parseReferenceDestinationResult("<docs/page.md>", 0, len("<docs/page.md>"))
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref("docs/page.md"))
 
-		occurrence, ok = parseReferenceDestination("docs/page.md \"title\"", 0, len("docs/page.md \"title\""))
-		Expect(ok).To(BeTrue())
+		occurrence, err = parseReferenceDestinationResult("docs/page.md \"title\"", 0, len("docs/page.md \"title\""))
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref("docs/page.md"))
 
-		_, ok = parseReferenceDestination("", 0, 0)
-		Expect(ok).To(BeFalse())
-		_, ok = parseReferenceDestination("<>", 0, len("<>"))
-		Expect(ok).To(BeFalse())
+		_, err = parseReferenceDestinationResult("", 0, 0)
+		Expect(err).To(MatchError(errReferenceDestinationRejected))
+		_, err = parseReferenceDestinationResult("<>", 0, len("<>"))
+		Expect(err).To(MatchError(errReferenceDestinationRejected))
 	})
 
 	ginkgo.It("parses escaped inline destinations titles and bracket boundaries", func() {
-		_, ok := parseDestination("", 0)
-		Expect(ok).To(BeFalse())
+		_, err := parseDestinationResult("", 0)
+		Expect(err).To(MatchError(errInlineDestinationRejected))
 
-		occurrence, ok := parseDestination(`<a\>b>)`, 0)
-		Expect(ok).To(BeTrue())
+		occurrence, err := parseDestinationResult(`<a\>b>)`, 0)
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref(`a\>b`))
 
-		occurrence, ok = parseDestination(`a\(b\))`, 0)
-		Expect(ok).To(BeTrue())
+		occurrence, err = parseDestinationResult(`a\(b\))`, 0)
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref(`a\(b\)`))
 
-		occurrence, ok = parseDestination(`a(b))`, 0)
-		Expect(ok).To(BeTrue())
+		occurrence, err = parseDestinationResult(`a(b))`, 0)
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref("a(b)"))
 
-		occurrence, ok = parseDestination(`target "escaped \" title")`, 0)
-		Expect(ok).To(BeTrue())
+		occurrence, err = parseDestinationResult(`target "escaped \" title")`, 0)
+		Expect(err).To(Succeed())
 		Expect(occurrence).To(matchLinkOccurrenceHref("target"))
 
-		tailEnd, ok := inlineLinkTailEnd("   ", 0)
+		tailEnd, err := inlineLinkTailEndResult("   ", 0)
 		Expect(tailEnd).To(BeZero())
-		Expect(ok).To(BeFalse())
+		Expect(err).To(MatchError(errInlineLinkTailRejected))
 		Expect(parseInlineLinkTitleEnd(`"a\"b"`, 0)).To(Equal(len(`"a\"b"`)))
 		Expect(parseInlineLinkTitleEnd(`(a\(b))`, 0)).To(Equal(len(`(a\(b)`)))
 		Expect(parseInlineLinkTitleEnd(`(a(b))`, 0)).To(Equal(len(`(a(b))`)))
@@ -250,17 +299,13 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 	ginkgo.It("preserves link rewrite boundaries and formats root and encoded-section hrefs", func() {
 		Expect(mergeRanges([]textRange{{Start: 0, End: 2}, {Start: 1, End: 4}})).To(Equal([]textRange{{Start: 0, End: 4}}))
 
-		unchanged, changed := applyReplacements("abc", nil)
-		Expect(unchanged).To(Equal("abc"))
-		Expect(changed).To(BeFalse())
+		Expect(applyReplacementsResult("abc", nil)).To(matchRewriteResult("abc", false))
 
-		rewritten, changed := applyReplacements("abcdef", []replacement{
+		Expect(applyReplacementsResult("abcdef", []replacement{
 			{Start: 2, End: 1, Value: "skip"},
 			{Start: 1, End: 3, Value: "X"},
 			{Start: 1, End: 2, Value: "Y"},
-		})
-		Expect(rewritten).To(Equal("aYcdef"))
-		Expect(changed).To(BeTrue())
+		})).To(matchRewriteResult("aYcdef", true))
 
 		base, suffix := splitURLSuffix("docs/page#section?query")
 		Expect(base).To(Equal("docs/page"))
