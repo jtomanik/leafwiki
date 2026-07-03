@@ -4,6 +4,9 @@ import (
 	"errors"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/types"
 )
 
 type testNode struct{}
@@ -59,49 +62,40 @@ var missingDependencyCases = []missingDependencyCase{
 	{name: "nil save schema", mutate: func(d *Dependencies) { d.SaveSchema = nil }, want: ErrSaveSchemaCallbackRequired},
 }
 
+func matchMigrationError(want error) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual error) (bool, error) {
+		return errors.Is(actual, want), nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap migration error\n{{format .Data 1}}", want)
+}
+
 var _ = ginkgo.Describe("runner validation", func() {
-	ginkgo.It("TestRun_RejectsNegativeFromVersion", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rejects negative stored schema versions", func() {
 		deps := validDependencies()
 
 		err := Run(-1, deps)
-		if err == nil {
-			t.Fatalf("expected error for negative schema version")
-		}
-		if !errors.Is(err, ErrInvalidSchemaVersion) {
-			t.Fatalf("expected invalid schema version error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMigrationError(ErrInvalidSchemaVersion))
 	})
 
-	ginkgo.Describe("TestRun_RejectsMissingRequiredDependencies", func() {
+	ginkgo.Describe("required migration dependencies", func() {
 		for _, tt := range missingDependencyCases {
 			tt := tt
-			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
+			ginkgo.It("rejects "+tt.name, func() {
 				deps := validDependencies()
 				tt.mutate(&deps)
 				err := Run(0, deps)
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if !errors.Is(err, tt.want) {
-					t.Fatalf("expected error %v, got: %v", tt.want, err)
-				}
+				Expect(err).To(HaveOccurred())
+				Expect(err).To(matchMigrationError(tt.want))
 			})
 		}
 	})
 
-	ginkgo.It("TestRun_RejectsUnsupportedMigrationVersion", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rejects unsupported migration versions", func() {
 		deps := validDependencies()
 		deps.CurrentSchemaVersion = 6
 
 		err := Run(4, deps)
-		if err == nil {
-			t.Fatalf("expected error for unsupported migration version")
-		}
-		if !errors.Is(err, ErrUnsupportedSchemaMigrationVersion) {
-			t.Fatalf("expected unsupported migration version error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMigrationError(ErrUnsupportedSchemaMigrationVersion))
 	})
 })

@@ -192,9 +192,18 @@ func recordMigrationMessages(expected expectedMigrationMessages) OmegaMatcher {
 	})
 }
 
-var _ = ginkgo.Describe("runner helper coverage", func() {
+func tempMigrationScratchDir() string {
+	ginkgo.GinkgoHelper()
+
+	path, err := os.MkdirTemp("", "leafwiki-treemigration-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, path)
+	return path
+}
+
+var _ = ginkgo.Describe("tree migration helper behavior", func() {
 	ginkgo.It("backfillMetadata uses filesystem modtime and preserves author metadata", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := tempMigrationScratchDir()
 		path := filepath.Join(tmp, "page.md")
 		Expect(os.WriteFile(path, []byte("# Page\n"), 0o644)).To(Succeed())
 		modTime := time.Date(2026, 6, 25, 10, 11, 12, 0, time.FixedZone("offset", 2*60*60))
@@ -345,7 +354,7 @@ var _ = ginkgo.Describe("runner helper coverage", func() {
 
 	ginkgo.It("addManagedMetadata recurses through missing parent content", func() {
 		missingContentErr := errors.New("missing content")
-		childPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "child.md")
+		childPath := filepath.Join(tempMigrationScratchDir(), "child.md")
 		child := &mutableMigrationNode{id: "child", title: "Child", kind: NodeKindPage}
 		parent := &mutableMigrationNode{id: "parent", title: "Parent", kind: NodeKindSection, children: []Node{child}}
 		store := &configurableMigrationStore{
@@ -395,7 +404,7 @@ var _ = ginkgo.Describe("runner helper coverage", func() {
 	})
 
 	ginkgo.It("addManagedMetadata reports write-path, parse, write, and recursive child failures", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := tempMigrationScratchDir()
 		page := &mutableMigrationNode{id: "page", title: "Page", kind: NodeKindPage}
 
 		pathErr := errors.New("path failed")
@@ -472,7 +481,7 @@ page:
 			},
 		}, page)).To(MatchError(pathFailedErr))
 
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := tempMigrationScratchDir()
 		invalidPath := filepath.Join(tmp, "invalid.md")
 		Expect(os.WriteFile(invalidPath, []byte("<!-- leafwiki bad\n"), 0o644)).To(Succeed())
 		Expect(backfillNodeMetadata(Dependencies{

@@ -11,131 +11,143 @@ import (
 	"strings"
 	"time"
 
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/core/treemigration"
 )
 
-type treemigrationTestT interface {
-	Helper()
-	Fatalf(format string, args ...interface{})
-}
-
-func assertOrderIDs(t treemigrationTestT, got []string, want ...tree.PageID) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("unexpected persisted order length: got %v want %v", got, want)
-	}
-	for i, rawID := range got {
-		if id := newFixturePageID(rawID); id != want[i] {
-			t.Fatalf("unexpected persisted order: got %v want %v", got, want)
-		}
-	}
-}
-
-func writeSchema(t treemigrationTestT, dir string, version int) {
-	t.Helper()
+func writeSchema(dir string, version int) {
+	ginkgo.GinkgoHelper()
 
 	raw, err := json.MarshalIndent(struct {
 		Version int `json:"version"`
 	}{Version: version}, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal schema failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	if err := os.WriteFile(filepath.Join(dir, "schema.json"), raw, 0o644); err != nil {
-		t.Fatalf("write schema failed: %v", err)
-	}
+	Expect(os.WriteFile(filepath.Join(dir, "schema.json"), raw, 0o644)).To(Succeed())
 }
 
 func ptrKind(kind tree.NodeKind) *tree.NodeKind { return &kind }
 
-func persistLegacyTreeSnapshot(t treemigrationTestT, storageDir string, root *tree.PageNode) {
-	t.Helper()
+func persistLegacyTreeSnapshot(storageDir string, root *tree.PageNode) {
+	ginkgo.GinkgoHelper()
+
 	raw, err := json.Marshal(root)
-	if err != nil {
-		t.Fatalf("marshal legacy tree snapshot failed: %v", err)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(os.WriteFile(filepath.Join(storageDir, "tree.json"), raw, 0o644)).To(Succeed())
+}
+
+func tempMigrationDir() string {
+	ginkgo.GinkgoHelper()
+
+	path, err := os.MkdirTemp("", "leafwiki-treemigration-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, path)
+	return path
+}
+
+func removeIfPresent(path string) error {
+	ginkgo.GinkgoHelper()
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	if err := os.WriteFile(filepath.Join(storageDir, "tree.json"), raw, 0o644); err != nil {
-		t.Fatalf("write legacy tree snapshot failed: %v", err)
+	return nil
+}
+
+func skipUnlessSchemaVersionAtLeast(version int) {
+	ginkgo.GinkgoHelper()
+
+	if tree.CurrentSchemaVersion < version {
+		ginkgo.Skip(fmt.Sprintf("requires schema v%d+", version))
 	}
 }
 
-var _ = ginkgo.Describe("runner", func() {
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV2_AddsFrontmatterAndPreservesBody", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
-		}
+func matchMigrationError(want error) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual error) (bool, error) {
+		return errors.Is(actual, want), nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap migration error\n{{format .Data 1}}", want)
+}
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, 1)
+func matchOrderIDs(want ...tree.PageID) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual []string) (bool, error) {
+		gotIDs := make([]tree.PageID, 0, len(actual))
+		for _, rawID := range actual {
+			gotIDs = append(gotIDs, newFixturePageID(rawID))
+		}
+		return Equal(want).Match(gotIDs)
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} preserve tree page IDs in order\n{{format .Data 1}}", want)
+}
+
+func matchManagedMetadata(createdAt string, updatedAt string, creatorID string, lastAuthorID string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"LeafWikiCreatedAt":    Equal(createdAt),
+		"LeafWikiUpdatedAt":    Equal(updatedAt),
+		"LeafWikiCreatorID":    Equal(creatorID),
+		"LeafWikiLastAuthorID": Equal(lastAuthorID),
+	})
+}
+
+func matchSectionFrontmatter(id tree.PageID, title string, createdAt string, updatedAt string, creatorID string, lastAuthorID string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"LeafWikiID":           WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(id)),
+		"LeafWikiTitle":        Equal(title),
+		"LeafWikiCreatedAt":    Equal(createdAt),
+		"LeafWikiUpdatedAt":    Equal(updatedAt),
+		"LeafWikiCreatorID":    Equal(creatorID),
+		"LeafWikiLastAuthorID": Equal(lastAuthorID),
+	})
+}
+
+var _ = ginkgo.Describe("runner", func() {
+	ginkgo.It("adds managed frontmatter during V2 migration while preserving page body", func() {
+		skipUnlessSchemaVersionAtLeast(2)
+
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, 1)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		Expect(err).NotTo(HaveOccurred())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		body := "# Page 1 Content\nHello World\n"
-		if err := os.WriteFile(pagePath, []byte(body), 0o644); err != nil {
-			t.Fatalf("write old content failed: %v", err)
-		}
-		writeSchema(t, tmpDir, 1)
+		Expect(os.WriteFile(pagePath, []byte(body), 0o644)).To(Succeed())
+		writeSchema(tmpDir, 1)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration, got:\n%s", string(raw))
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if strings.TrimSpace(fm.LeafWikiTitle) == "" {
-			t.Fatalf("expected leafwiki_title to be set")
-		}
-		if migratedBody != body {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s", string(raw))
+		Expect(newFixturePageID(fm.LeafWikiID)).To(Equal(*id))
+		Expect(strings.TrimSpace(fm.LeafWikiTitle)).NotTo(BeEmpty())
+		Expect(migratedBody).To(Equal(body))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV2_PreservesExistingCustomFrontmatter", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
-		}
+	ginkgo.It("preserves custom frontmatter while adding V2 managed metadata", func() {
+		skipUnlessSchemaVersionAtLeast(2)
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, 1)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, 1)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		Expect(err).NotTo(HaveOccurred())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := `---
@@ -146,71 +158,42 @@ tags:
 # Page 1 Content
 Hello World
 `
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
-		writeSchema(t, tmpDir, 1)
+		Expect(os.WriteFile(pagePath, []byte(legacyContent), 0o644)).To(Succeed())
+		writeSchema(tmpDir, 1)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		migrated := string(raw)
-		if !strings.Contains(migrated, "custom_key: keep-me") {
-			t.Fatalf("expected custom frontmatter to be preserved, got:\n%s", migrated)
-		}
-		if !strings.Contains(migrated, "- alpha") {
-			t.Fatalf("expected list frontmatter to be preserved, got:\n%s", migrated)
-		}
+		Expect(migrated).To(ContainSubstring("custom_key: keep-me"))
+		Expect(migrated).To(ContainSubstring("- alpha"))
 
 		fm, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration, got:\n%s", migrated)
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if strings.TrimSpace(fm.LeafWikiTitle) == "" {
-			t.Fatalf("expected leafwiki_title to be set")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s", migrated)
+		Expect(newFixturePageID(fm.LeafWikiID)).To(Equal(*id))
+		Expect(strings.TrimSpace(fm.LeafWikiTitle)).NotTo(BeEmpty())
 		wantBody := "# Page 1 Content\nHello World\n"
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).To(Equal(wantBody))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV3_BackfillsMetadataFrontmatter", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 3 {
-			t.Skip("requires schema v3+")
-		}
+	ginkgo.It("backfills V3 metadata frontmatter from stored page metadata", func() {
+		skipUnlessSchemaVersionAtLeast(3)
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, 2)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, 2)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC),
@@ -218,70 +201,42 @@ Hello World
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n", *id)
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
-		writeSchema(t, tmpDir, 2)
+		Expect(os.WriteFile(pagePath, []byte(legacyContent), 0o644)).To(Succeed())
+		writeSchema(tmpDir, 2)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-21T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-21T11:16:31Z" {
-			t.Fatalf("expected metadata timestamps to be backfilled, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("expected metadata authors to be backfilled, got %#v", fm)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue())
+		Expect(fm).To(matchManagedMetadata("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z", "alice", "bob"))
 		wantBody := "# Page 1 Content\nHello World\n"
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).To(Equal(wantBody))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV5_BackfillsChildOrderFiles", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 5 {
-			t.Skip("requires schema v5+")
-		}
+	ginkgo.It("backfills V5 child order files from the legacy tree order", func() {
+		skipUnlessSchemaVersionAtLeast(5)
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, tree.CurrentSchemaVersion)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, tree.CurrentSchemaVersion)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode docs failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		alphaID, err := svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		betaID, err := svc.CreateNode("system", docsID, "Beta", "beta", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode beta failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		root := svc.GetTree()
 		root.Children = []*tree.PageNode{root.Children[1], root.Children[0]}
@@ -289,69 +244,46 @@ Hello World
 			child.Position = i
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove root order file: %v", err)
-		}
-		if err := os.Remove(filepath.Join(tmpDir, "root", "docs", ".order.json")); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove docs order file: %v", err)
-		}
+		Expect(removeIfPresent(filepath.Join(tmpDir, "root", ".order.json"))).To(Succeed())
+		Expect(removeIfPresent(filepath.Join(tmpDir, "root", "docs", ".order.json"))).To(Succeed())
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
-		writeSchema(t, tmpDir, 4)
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
+		writeSchema(tmpDir, 4)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		var rootOrder struct {
 			OrderedIDs []string `json:"ordered_ids"`
 		}
 		rawRootOrder, err := os.ReadFile(filepath.Join(tmpDir, "root", ".order.json"))
-		if err != nil {
-			t.Fatalf("read root order file: %v", err)
-		}
-		if err := json.Unmarshal(rawRootOrder, &rootOrder); err != nil {
-			t.Fatalf("unmarshal root order file: %v", err)
-		}
-		assertOrderIDs(t, rootOrder.OrderedIDs, *alphaID, *docsID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(json.Unmarshal(rawRootOrder, &rootOrder)).To(Succeed())
+		Expect(rootOrder.OrderedIDs).To(matchOrderIDs(*alphaID, *docsID))
 
 		var docsOrder struct {
 			OrderedIDs []string `json:"ordered_ids"`
 		}
 		rawDocsOrder, err := os.ReadFile(filepath.Join(tmpDir, "root", "docs", ".order.json"))
-		if err != nil {
-			t.Fatalf("read docs order file: %v", err)
-		}
-		if err := json.Unmarshal(rawDocsOrder, &docsOrder); err != nil {
-			t.Fatalf("unmarshal docs order file: %v", err)
-		}
-		assertOrderIDs(t, docsOrder.OrderedIDs, *betaID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(json.Unmarshal(rawDocsOrder, &docsOrder)).To(Succeed())
+		Expect(docsOrder.OrderedIDs).To(matchOrderIDs(*betaID))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV4_MaterializesMissingSectionIndex", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 4 {
-			t.Skip("requires schema v4+")
-		}
+	ginkgo.It("materializes missing V4 section index frontmatter from section metadata", func() {
+		skipUnlessSchemaVersionAtLeast(4)
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, 3)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, 3)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
@@ -359,76 +291,45 @@ Hello World
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		indexPath := filepath.Join(tmpDir, "root", "docs", "index.md")
-		if err := os.Remove(indexPath); err != nil {
-			t.Fatalf("remove section index failed: %v", err)
-		}
-		writeSchema(t, tmpDir, 3)
+		Expect(os.Remove(indexPath)).To(Succeed())
+		writeSchema(tmpDir, 3)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		raw, err := os.ReadFile(indexPath)
-		if err != nil {
-			t.Fatalf("read migrated section index: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("expected section frontmatter to be materialized, got %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
-			t.Fatalf("expected timestamps to be materialized, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("expected author metadata to be materialized, got %#v", fm)
-		}
-		if strings.TrimSpace(body) != "" {
-			t.Fatalf("expected empty section body after migration, got %q", body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue())
+		Expect(fm).To(matchSectionFrontmatter(*id, "Docs", "2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z", "alice", "bob"))
+		Expect(strings.TrimSpace(body)).To(BeEmpty())
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV5_PageNodeWithChildrenPreservesChildOrder", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("coerces legacy page nodes with children so V5 preserves child order", func() {
 		// Regression test for: https://github.com/perber/wiki/issues/932
 		// Legacy trees could contain page nodes that have children when a folder and an .md file
 		// shared the same name. The V5 migration must coerce such nodes to section so that
 		// SaveChildOrder can write the .order.json and the legacy child ordering is preserved.
-		if tree.CurrentSchemaVersion < 5 {
-			t.Skip("requires schema v5+")
-		}
+		skipUnlessSchemaVersionAtLeast(5)
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, tree.CurrentSchemaVersion)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, tree.CurrentSchemaVersion)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		// Build: root → notes (section) → zebra, alpha (pages in non-alphabetical order)
 		// so we can verify the legacy ordering is preserved, not reset to alphabetical.
 		notesID, err := svc.CreateNode("system", nil, "Notes", "notes", ptrKind(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode notes failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		zebraID, err := svc.CreateNode("system", notesID, "Zebra", "zebra", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode zebra failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		alphaID, err := svc.CreateNode("system", notesID, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		// Corrupt the tree snapshot: flip "notes" kind from section → page to simulate
 		// the legacy data shape reported in issue #932 (folder and .md file with same name).
@@ -439,20 +340,14 @@ Hello World
 			}
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove root order file: %v", err)
-		}
-		if err := os.Remove(filepath.Join(tmpDir, "root", "notes", ".order.json")); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove notes order file: %v", err)
-		}
+		Expect(removeIfPresent(filepath.Join(tmpDir, "root", ".order.json"))).To(Succeed())
+		Expect(removeIfPresent(filepath.Join(tmpDir, "root", "notes", ".order.json"))).To(Succeed())
 
-		persistLegacyTreeSnapshot(t, tmpDir, root)
-		writeSchema(t, tmpDir, 4)
+		persistLegacyTreeSnapshot(tmpDir, root)
+		writeSchema(tmpDir, 4)
 
 		loaded := tree.NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("migration failed for page node with children (issue #932): %v", err)
-		}
+		Expect(loaded.LoadTree()).To(Succeed())
 
 		// .order.json for notes must exist and reflect the legacy order (zebra before alpha),
 		// not the alphabetical fallback order that ReconstructTreeFromFS would produce without it.
@@ -460,85 +355,55 @@ Hello World
 			OrderedIDs []string `json:"ordered_ids"`
 		}
 		rawOrder, err := os.ReadFile(filepath.Join(tmpDir, "root", "notes", ".order.json"))
-		if err != nil {
-			t.Fatalf("read notes order file: %v", err)
-		}
-		if err := json.Unmarshal(rawOrder, &notesOrder); err != nil {
-			t.Fatalf("unmarshal notes order file: %v", err)
-		}
-		assertOrderIDs(t, notesOrder.OrderedIDs, *zebraID, *alphaID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(json.Unmarshal(rawOrder, &notesOrder)).To(Succeed())
+		Expect(notesOrder.OrderedIDs).To(matchOrderIDs(*zebraID, *alphaID))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV5_ReturnsErrorWhenOrderFileCannotBeWritten", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 5 {
-			t.Skip("requires schema v5+")
-		}
+	ginkgo.It("returns a V5 child-order persistence error when order files cannot be written", func() {
+		skipUnlessSchemaVersionAtLeast(5)
 		if runtime.GOOS == "windows" {
-			t.Skip("permission-based migration failure test is not reliable on Windows")
+			ginkgo.Skip("permission-based migration failure test is not reliable on Windows")
 		}
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, tree.CurrentSchemaVersion)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, tree.CurrentSchemaVersion)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		_, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		_, err = svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove root order file failed: %v", err)
-		}
-		if err := os.Mkdir(filepath.Join(tmpDir, "root", ".order.json"), 0o755); err != nil {
-			t.Fatalf("mkdir root order path failed: %v", err)
-		}
-		writeSchema(t, tmpDir, 4)
+		Expect(removeIfPresent(filepath.Join(tmpDir, "root", ".order.json"))).To(Succeed())
+		Expect(os.Mkdir(filepath.Join(tmpDir, "root", ".order.json"), 0o755)).To(Succeed())
+		writeSchema(tmpDir, 4)
 
 		loaded := tree.NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		if err == nil {
-			t.Fatalf("expected migration error when order file cannot be written")
-		}
-		if !errors.Is(err, treemigration.ErrPersistChildOrder) {
-			t.Fatalf("expected migration error to mention child order persistence, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMigrationError(treemigration.ErrPersistChildOrder))
 	})
 
-	ginkgo.It("TestTreeMigration_LoadTree_MigratesToV4_ReturnsErrorWhenSectionIndexCannotBeWritten", func() {
-		t := ginkgo.GinkgoT()
-		if tree.CurrentSchemaVersion < 4 {
-			t.Skip("requires schema v4+")
-		}
+	ginkgo.It("returns a V4 section-index materialization error when index files cannot be written", func() {
+		skipUnlessSchemaVersionAtLeast(4)
 		if runtime.GOOS == "windows" {
-			t.Skip("permission-based migration failure test is not reliable on Windows")
+			ginkgo.Skip("permission-based migration failure test is not reliable on Windows")
 		}
 
-		tmpDir := t.TempDir()
-		writeSchema(t, tmpDir, 3)
+		tmpDir := tempMigrationDir()
+		writeSchema(tmpDir, 3)
 
 		svc := tree.NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
-		}
+		Expect(svc.LoadTree()).To(Succeed())
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
@@ -546,26 +411,18 @@ Hello World
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		sectionDir := filepath.Join(tmpDir, "root", "docs")
 		indexPath := filepath.Join(sectionDir, "index.md")
-		if err := os.Remove(indexPath); err != nil {
-			t.Fatalf("remove section index failed: %v", err)
-		}
-		if err := os.Chmod(sectionDir, 0o555); err != nil {
-			t.Fatalf("chmod section dir failed: %v", err)
-		}
+		Expect(os.Remove(indexPath)).To(Succeed())
+		Expect(os.Chmod(sectionDir, 0o555)).To(Succeed())
 		ginkgo.DeferCleanup(os.Chmod, sectionDir, os.FileMode(0o755))
-		writeSchema(t, tmpDir, 3)
+		writeSchema(tmpDir, 3)
 
 		loaded := tree.NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		if err == nil {
-			t.Fatalf("expected migration error when section index cannot be written")
-		}
-		if !errors.Is(err, treemigration.ErrMaterializeSectionIndex) {
-			t.Fatalf("expected migration error to mention section index materialization, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMigrationError(treemigration.ErrMaterializeSectionIndex))
 	})
 })
