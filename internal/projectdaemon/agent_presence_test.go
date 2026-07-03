@@ -1,269 +1,239 @@
 package projectdaemon
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"encoding/json"
-	"strings"
 	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/agenthooks"
 )
 
-var _ = ginkgo.It("TestAgentPresenceRegistryRecordCreatesSanitizedSession", func() {
-	t := ginkgo.GinkgoT()
-	now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
-	var counts []int
-	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, func(count int) {
-		counts = append(counts, count)
-	})
-	registry.now = func() time.Time {
-		return now
-	}
-
-	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","source":"cli","tool_name":"mcp__leafwiki__wiki_get_page"}`)
-	event.SeenAt = now
-	registry.Record(event)
-
-	if registry.Count() != 1 {
-		t.Fatalf("Count = %d, want 1", registry.Count())
-	}
-	sessions := registry.List()
-	if len(sessions) != 1 {
-		t.Fatalf("List length = %d, want 1", len(sessions))
-	}
-	session := sessions[0]
-	if session.Provider != agenthooks.ProviderCodex || session.SessionIDHash != event.SessionIDHash {
-		t.Fatalf("identity = %q/%q, want codex/%s", session.Provider, session.SessionIDHash, event.SessionIDHash)
-	}
-	if session.FirstSeenAt != now || session.LastSeenAt != now || session.LastEvent != "PreToolUse" {
-		t.Fatalf("timestamps/event = %s/%s/%q", session.FirstSeenAt, session.LastSeenAt, session.LastEvent)
-	}
-	if session.Model != "gpt-5.4" || session.Source != "cli" || session.ToolName != "mcp__leafwiki__wiki_get_page" || !session.IsMCPTool {
-		t.Fatalf("metadata = %#v", session)
-	}
-	if got, want := joinCounts(counts), "1"; got != want {
-		t.Fatalf("counts = %s, want %s", got, want)
-	}
-	raw, err := json.Marshal(session)
-	if err != nil {
-		t.Fatalf("marshal session: %v", err)
-	}
-	if !strings.Contains(string(raw), `"provider":"codex"`) ||
-		!strings.Contains(string(raw), `"lastEvent":"PreToolUse"`) ||
-		!strings.Contains(string(raw), `"source":"cli"`) ||
-		!strings.Contains(string(raw), `"toolName":"mcp__leafwiki__wiki_get_page"`) {
-		t.Fatalf("session JSON = %s, want string compatibility fields", raw)
-	}
-
-})
-
-var _ = ginkgo.It("TestAgentPresenceRegistryRedactsUnsafeMetadata", func() {
-	t := ginkgo.GinkgoT()
-	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
-	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","tool_name":"mcp__leafwiki__wiki_get_page"}`)
-	event.Model = "/Users/example/token-model"
-	event.Source = "/Users/example/.codex/session.jsonl"
-
-	registry.Record(event)
-
-	sessions := registry.List()
-	if len(sessions) != 1 {
-		t.Fatalf("sessions = %#v, want one", sessions)
-	}
-	if sessions[0].Model != "" || sessions[0].Source != "" || sessions[0].ToolName != "mcp__leafwiki__wiki_get_page" || !sessions[0].IsMCPTool {
-		t.Fatalf("unsafe metadata was not redacted: %#v", sessions[0])
-	}
-
-})
-
-var _ = ginkgo.It("AgentPresenceRegistry exposes seen state after accepted events", func() {
-	t := ginkgo.GinkgoT()
-	registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
-	if registry.SeenPresence() {
-		t.Fatalf("SeenPresence = true before any accepted event")
-	}
-
-	event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session"}`)
-	registry.Record(event)
-
-	if !registry.SeenPresence() {
-		t.Fatalf("SeenPresence = false after accepted event")
-	}
-	if seen, count := registry.SeenPresenceCount(); !seen || count != 1 {
-		t.Fatalf("SeenPresenceCount = %v/%d, want true/1", seen, count)
-	}
-})
-
-var _ = ginkgo.It("TestAgentPresenceRegistryUpdatesLifecycleAndExpires", func() {
-	t := ginkgo.GinkgoT()
-	now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
-	var counts []int
-	registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
-		counts = append(counts, count)
-	})
-	registry.now = func() time.Time {
-		return now
-	}
-
-	event := normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SessionStart","session_id":"claude-session","model":"claude-opus-4"}`)
-	event.SeenAt = now
-	registry.Record(event)
-	now = now.Add(10 * time.Second)
-	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read"}`)
-	event.SeenAt = now
-	registry.Record(event)
-
-	session := registry.List()[0]
-	if session.FirstSeenAt != time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC) {
-		t.Fatalf("FirstSeenAt changed to %s", session.FirstSeenAt)
-	}
-	if session.LastSeenAt != now || session.LastEvent != "PreToolUse" || session.ToolName != "Read" {
-		t.Fatalf("updated session = %#v", session)
-	}
-	if got, want := joinCounts(counts), "1"; got != want {
-		t.Fatalf("counts after update = %s, want %s", got, want)
-	}
-
-	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
-	event.SeenAt = now.Add(1 * time.Second)
-	registry.Record(event)
-	if got := registry.List()[0].ActiveSubagents; got != 0 {
-		t.Fatalf("ActiveSubagents after early stop = %d, want 0", got)
-	}
-	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStart","session_id":"claude-session"}`)
-	event.SeenAt = now.Add(2 * time.Second)
-	registry.Record(event)
-	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
-	event.SeenAt = now.Add(3 * time.Second)
-	registry.Record(event)
-	if got := registry.List()[0].ActiveSubagents; got != 0 {
-		t.Fatalf("ActiveSubagents after start/stop = %d, want 0", got)
-	}
-
-	event = normalizedPresenceEvent(t, agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-session"}`)
-	event.SeenAt = now.Add(4 * time.Second)
-	registry.Record(event)
-	if registry.Count() != 0 {
-		t.Fatalf("Count after SessionEnd = %d, want 0", registry.Count())
-	}
-
-	event = normalizedPresenceEvent(t, agenthooks.ProviderCursor, `{"hook_event_name":"sessionStart","session_id":"cursor-session"}`)
-	event.SeenAt = now
-	registry.Record(event)
-	now = now.Add(2 * time.Minute)
-	if got := registry.PruneExpired(); got != 0 {
-		t.Fatalf("PruneExpired count = %d, want 0 after TTL expiry", got)
-	}
-	if got, want := joinCounts(counts), "1,0,1,0"; got != want {
-		t.Fatalf("counts = %s, want %s", got, want)
-	}
-
-})
-
-var _ = ginkgo.DescribeTable("TestAgentPresenceRegistryIgnoresMissingEndEventsAsFirstActivity",
-	func(provider agenthooks.ProviderID, payload string) {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("agent presence registry", func() {
+	ginkgo.It("records sanitized session metadata for accepted agent events", func() {
+		now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
 		var counts []int
-		registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, func(count int) {
 			counts = append(counts, count)
 		})
-		event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
-		if !ok {
-			t.Fatalf("Normalize(%s) returned false", provider)
+		registry.now = func() time.Time {
+			return now
 		}
+
+		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","source":"cli","tool_name":"mcp__leafwiki__wiki_get_page"}`)
+		event.SeenAt = now
+		registry.Record(event)
+
+		Expect(registry.Count()).To(Equal(1))
+		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
+			"Provider":      Equal(agenthooks.ProviderCodex),
+			"SessionIDHash": Equal(event.SessionIDHash),
+			"FirstSeenAt":   BeTemporally("==", now),
+			"LastSeenAt":    BeTemporally("==", now),
+			"LastEvent":     Equal(agenthooks.AgentEventName("PreToolUse")),
+			"Model":         Equal("gpt-5.4"),
+			"Source":        Equal(agenthooks.AgentSourceCLI),
+			"ToolName":      Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"IsMCPTool":     BeTrue(),
+		})))
+		Expect(counts).To(Equal([]int{1}))
+
+		raw, err := json.Marshal(registry.List()[0])
+		Expect(err).NotTo(HaveOccurred())
+		var wire struct {
+			Provider  agenthooks.ProviderID     `json:"provider"`
+			LastEvent agenthooks.AgentEventName `json:"lastEvent"`
+			Source    agenthooks.AgentSource    `json:"source"`
+			ToolName  agenthooks.AgentToolName  `json:"toolName"`
+		}
+		Expect(json.Unmarshal(raw, &wire)).To(Succeed())
+		Expect(wire).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Provider":  Equal(agenthooks.ProviderCodex),
+			"LastEvent": Equal(agenthooks.AgentEventPreToolUse),
+			"Source":    Equal(agenthooks.AgentSourceCLI),
+			"ToolName":  Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+		}))
+	})
+
+	ginkgo.It("redacts unsafe model and source metadata while preserving safe MCP tool names", func() {
+		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
+		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","tool_name":"mcp__leafwiki__wiki_get_page"}`)
+		event.Model = "/Users/example/token-model"
+		event.Source = "/Users/example/.codex/session.jsonl"
 
 		registry.Record(event)
 
-		if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
-			t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
-		}
-		if got := joinCounts(counts); got != "" {
-			t.Fatalf("counts = %s, want no notifications", got)
-		}
-	},
-	ginkgo.Entry("claude session end", agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-ended-before-start"}`),
-	ginkgo.Entry("cursor session end", agenthooks.ProviderCursor, `{"hook_event_name":"sessionEnd","session_id":"cursor-ended-before-start"}`),
-)
+		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
+			"Model":     BeEmpty(),
+			"Source":    BeEmpty(),
+			"ToolName":  Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"IsMCPTool": BeTrue(),
+		})))
+	})
 
-var _ = ginkgo.DescribeTable("TestAgentPresenceRegistryRejectsUnsafeControlEvents",
-	func(eventFactory func(projectdaemonTestT) agenthooks.Event) {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("reports seen state after accepted events", func() {
+		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
+		Expect(registry.SeenPresence()).To(BeFalse())
+
+		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session"}`)
+		registry.Record(event)
+
+		Expect(registry.SeenPresence()).To(BeTrue())
+		Expect(registry).To(reportSeenPresenceState(true, 1))
+	})
+
+	ginkgo.It("updates lifecycle metadata and expires idle sessions", func() {
+		now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
 		var counts []int
 		registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
 			counts = append(counts, count)
 		})
-
-		registry.Record(eventFactory(t))
-
-		if seen, count := registry.SeenPresenceCount(); seen || count != 0 {
-			t.Fatalf("SeenPresenceCount = %v/%d, want false/0", seen, count)
+		registry.now = func() time.Time {
+			return now
 		}
-		if got := joinCounts(counts); got != "" {
-			t.Fatalf("counts = %s, want no notifications", got)
-		}
-	},
-	ginkgo.Entry("raw session id", func(projectdaemonTestT) agenthooks.Event {
-		return agenthooks.Event{
-			Provider:      agenthooks.ProviderCodex,
-			SessionIDHash: "raw-session-secret",
-			EventName:     "SessionStart",
-		}
-	}),
-	ginkgo.Entry("unsupported provider", func(t projectdaemonTestT) agenthooks.Event {
-		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-		event.Provider = "sidecar"
-		return event
-	}),
-	ginkgo.Entry("unsupported event", func(t projectdaemonTestT) agenthooks.Event {
-		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-		event.EventName = "MadeUpHook"
-		return event
-	}),
-	ginkgo.Entry("mismatched subagent delta", func(t projectdaemonTestT) agenthooks.Event {
-		event := normalizedPresenceEvent(t, agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-		event.SubagentDelta = 1
-		return event
-	}),
-)
 
-var _ = ginkgo.It("TestAgentPresenceRegistryZeroTTLExpiresImmediately", func() {
-	t := ginkgo.GinkgoT()
-	now := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
-	var counts []int
-	registry := NewAgentPresenceRegistry(0, func(count int) {
-		counts = append(counts, count)
+		event := normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"SessionStart","session_id":"claude-session","model":"claude-opus-4"}`)
+		event.SeenAt = now
+		registry.Record(event)
+		now = now.Add(10 * time.Second)
+		event = normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read"}`)
+		event.SeenAt = now
+		registry.Record(event)
+
+		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
+			"FirstSeenAt": BeTemporally("==", time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)),
+			"LastSeenAt":  BeTemporally("==", now),
+			"LastEvent":   Equal(agenthooks.AgentEventName("PreToolUse")),
+			"ToolName":    Equal(agenthooks.AgentToolName("Read")),
+		})))
+		Expect(counts).To(Equal([]int{1}))
+
+		event = normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
+		event.SeenAt = now.Add(1 * time.Second)
+		registry.Record(event)
+		Expect(registry.List()).To(ConsistOf(HaveField("ActiveSubagents", 0)))
+		event = normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStart","session_id":"claude-session"}`)
+		event.SeenAt = now.Add(2 * time.Second)
+		registry.Record(event)
+		event = normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"SubagentStop","session_id":"claude-session"}`)
+		event.SeenAt = now.Add(3 * time.Second)
+		registry.Record(event)
+		Expect(registry.List()).To(ConsistOf(HaveField("ActiveSubagents", 0)))
+
+		event = normalizedPresenceEvent(agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-session"}`)
+		event.SeenAt = now.Add(4 * time.Second)
+		registry.Record(event)
+		Expect(registry.Count()).To(BeZero())
+
+		event = normalizedPresenceEvent(agenthooks.ProviderCursor, `{"hook_event_name":"sessionStart","session_id":"cursor-session"}`)
+		event.SeenAt = now
+		registry.Record(event)
+		now = now.Add(2 * time.Minute)
+		Expect(registry.PruneExpired()).To(BeZero())
+		Expect(counts).To(Equal([]int{1, 0, 1, 0}))
 	})
-	registry.now = func() time.Time {
-		return now
-	}
-	event, ok := agenthooks.Normalize(
-		agenthooks.ProviderCodex,
-		[]byte(`{"hook_event_name":"SessionStart","session_id":"zero-ttl-session"}`),
-		now,
+
+	ginkgo.DescribeTable("ignores end events before any matching start event",
+		func(provider agenthooks.ProviderID, payload string) {
+			var counts []int
+			registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+				counts = append(counts, count)
+			})
+			event := normalizedPresenceEvent(provider, payload)
+
+			registry.Record(event)
+
+			Expect(registry).To(reportSeenPresenceState(false, 0))
+			Expect(counts).To(BeEmpty())
+		},
+		ginkgo.Entry("claude session end", agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-ended-before-start"}`),
+		ginkgo.Entry("cursor session end", agenthooks.ProviderCursor, `{"hook_event_name":"sessionEnd","session_id":"cursor-ended-before-start"}`),
 	)
-	if !ok {
-		t.Fatalf("Normalize returned false")
-	}
 
-	registry.Record(event)
-	if registry.Count() != 1 {
-		t.Fatalf("Count after Record = %d, want 1 before pruning", registry.Count())
-	}
+	ginkgo.DescribeTable("rejects unsafe control events",
+		func(eventFactory func() agenthooks.Event) {
+			var counts []int
+			registry := NewAgentPresenceRegistry(time.Minute, func(count int) {
+				counts = append(counts, count)
+			})
 
-	if got := registry.PruneExpired(); got != 0 {
-		t.Fatalf("PruneExpired count = %d, want 0 for zero TTL", got)
-	}
-	if got, want := joinCounts(counts), "1,0"; got != want {
-		t.Fatalf("counts = %s, want %s", got, want)
-	}
+			registry.Record(eventFactory())
 
+			Expect(registry).To(reportSeenPresenceState(false, 0))
+			Expect(counts).To(BeEmpty())
+		},
+		ginkgo.Entry("raw session id", func() agenthooks.Event {
+			return agenthooks.Event{
+				Provider:      agenthooks.ProviderCodex,
+				SessionIDHash: "raw-session-secret",
+				EventName:     "SessionStart",
+			}
+		}),
+		ginkgo.Entry("unsupported provider", func() agenthooks.Event {
+			event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+			event.Provider = "sidecar"
+			return event
+		}),
+		ginkgo.Entry("unsupported event", func() agenthooks.Event {
+			event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+			event.EventName = "MadeUpHook"
+			return event
+		}),
+		ginkgo.Entry("mismatched subagent delta", func() agenthooks.Event {
+			event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
+			event.SubagentDelta = 1
+			return event
+		}),
+	)
+
+	ginkgo.It("keeps zero-TTL sessions until pruning removes them immediately", func() {
+		now := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
+		var counts []int
+		registry := NewAgentPresenceRegistry(0, func(count int) {
+			counts = append(counts, count)
+		})
+		registry.now = func() time.Time {
+			return now
+		}
+		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"zero-ttl-session"}`)
+		event.SeenAt = now
+
+		registry.Record(event)
+		Expect(registry.Count()).To(Equal(1))
+
+		Expect(registry.PruneExpired()).To(BeZero())
+		Expect(counts).To(Equal([]int{1, 0}))
+	})
 })
 
-func normalizedPresenceEvent(t projectdaemonTestT, provider agenthooks.ProviderID, payload string) agenthooks.Event {
-	t.Helper()
-	event, ok := agenthooks.Normalize(provider, []byte(payload), time.Now())
-	if !ok {
-		t.Fatalf("Normalize(%s, %s) returned false", provider, payload)
-	}
+func normalizedPresenceEvent(provider agenthooks.ProviderID, payload string) agenthooks.Event {
+	ginkgo.GinkgoHelper()
+
+	event, _ := agenthooks.Normalize(provider, []byte(payload), time.Now())
+	Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Provider":      Equal(provider.Normalize()),
+		"SessionIDHash": Not(BeEmpty()),
+		"EventName":     Not(BeEmpty()),
+	}))
 	return event
+}
+
+func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func reportSeenPresenceState(seen bool, count int) types.GomegaMatcher {
+	return WithTransform(func(registry *AgentPresenceRegistry) agentPresenceSeenState {
+		ginkgo.GinkgoHelper()
+		gotSeen, gotCount := registry.SeenPresenceCount()
+		return agentPresenceSeenState{seen: gotSeen, count: gotCount}
+	}, Equal(agentPresenceSeenState{seen: seen, count: count}))
+}
+
+type agentPresenceSeenState struct {
+	seen  bool
+	count int
 }

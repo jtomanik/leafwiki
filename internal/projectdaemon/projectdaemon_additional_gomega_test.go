@@ -51,8 +51,7 @@ func (f *fakeDescriptorTempFile) Close() error {
 
 var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", func() {
-		t := ginkgo.GinkgoT()
-		baseDir := t.TempDir()
+		baseDir := tempProjectdaemonDir()
 		dataDir := filepath.Join(baseDir, "missing", "data")
 		rootDir := filepath.Join(baseDir, "missing", "root")
 		resolvedBase, err := filepath.EvalSymlinks(baseDir)
@@ -81,8 +80,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	})
 
 	ginkgo.It("handles descriptor IO trust and write error edges", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := t.TempDir()
+		dataDir := tempProjectdaemonDir()
 		path := DescriptorPath(dataDir)
 
 		Expect(WriteDescriptorAtomic(path, nil)).To(MatchError(errDescriptorRequired))
@@ -90,15 +88,15 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(os.WriteFile(path, []byte("{"), 0o600)).To(Succeed())
 		_, err := ReadDescriptor(path)
 		Expect(err).To(HaveOccurred())
-		_, err = ReadDescriptor(filepath.Join(t.TempDir(), "missing.json"))
+		_, err = ReadDescriptor(filepath.Join(tempProjectdaemonDir(), "missing.json"))
 		Expect(err).To(MatchError(os.ErrNotExist))
-		_, err = ReadTrustedDescriptor(filepath.Join(t.TempDir(), "missing.json"))
+		_, err = ReadTrustedDescriptor(filepath.Join(tempProjectdaemonDir(), "missing.json"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
 		_, err = ReadTrustedDescriptor(filepath.Dir(path))
 		Expect(err).To(MatchError(errDescriptorNotRegularFile))
 
-		parentFile := filepath.Join(t.TempDir(), "descriptor-parent-file")
+		parentFile := filepath.Join(tempProjectdaemonDir(), "descriptor-parent-file")
 		Expect(os.WriteFile(parentFile, []byte("not a directory"), 0o600)).To(Succeed())
 		originalMkdirAllDescriptorPath := mkdirAllDescriptorPath
 		mkdirDescriptorErr := errors.New("descriptor mkdir failed")
@@ -238,7 +236,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	})
 
 	ginkgo.It("handles control client and control error parsing edge cases", func() {
-		Expect(IsControlStatus(&ControlHTTPError{StatusCode: http.StatusTeapot}, http.StatusTeapot)).To(BeTrue())
+		Expect(&ControlHTTPError{StatusCode: http.StatusTeapot}).To(haveControlStatus(http.StatusTeapot))
 		code, messageID, message := parseControlErrorBody([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))
 		Expect(code).To(Equal(errCodeDaemonControlUnauthorized))
 		Expect(messageID).To(Equal(sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized)))
@@ -281,7 +279,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		var _ workspaceid.WorkspaceID = "home"
 	})
 
-	ginkgo.It("covers actor-context and config failure seams", func() {
+	ginkgo.It("surfaces actor-context and config failure paths", func() {
 		marshalActorContextErr := errors.New("actor context marshal failed")
 		originalMarshalActorContext := marshalActorContextJSON
 		marshalActorContextJSON = func(any) ([]byte, error) {
@@ -397,7 +395,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	})
 
 	ginkgo.It("reports descriptor atomic-write failure branches", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := tempProjectdaemonDir()
 		desc := &Descriptor{SchemaVersion: DescriptorSchemaVersion}
 
 		originalMarshalDescriptor := marshalDescriptorJSON
@@ -462,7 +460,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		}
 	})
 
-	ginkgo.It("covers registry fallback timestamps and expiry-loop ticks", func() {
+	ginkgo.It("uses registry fallback timestamps and prunes from expiry-loop ticks", func() {
 		now := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
 		presenceChanges := make(chan int, 2)
 		presence := NewAgentPresenceRegistry(time.Millisecond, func(count int) {
@@ -471,8 +469,12 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		presence.now = func() time.Time {
 			return now
 		}
-		event, ok := agenthooks.Normalize(agenthooks.ProviderCodex, []byte(`{"hook_event_name":"SessionStart","session_id":"codex-session"}`), time.Time{})
-		Expect(ok).To(BeTrue())
+		event, _ := agenthooks.Normalize(agenthooks.ProviderCodex, []byte(`{"hook_event_name":"SessionStart","session_id":"codex-session"}`), time.Time{})
+		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Provider":      Equal(agenthooks.ProviderCodex),
+			"EventName":     Equal(agenthooks.AgentEventSessionStart),
+			"SessionIDHash": Not(BeEmpty()),
+		}))
 
 		presence.Record(event)
 		Expect(presence.List()).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -487,7 +489,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			defer close(done)
 			presence.RunExpiryLoop(ctx, time.Millisecond)
 		}()
-		Eventually(presenceChanges, 250*time.Millisecond).Should(Receive(Equal(0)))
+		Eventually(presenceChanges, 250*time.Millisecond).Should(Receive(BeZero()))
 		cancel()
 		Eventually(done, 250*time.Millisecond).Should(BeClosed())
 
@@ -505,7 +507,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			defer close(done)
 			sessions.RunExpiryLoop(ctx, time.Millisecond)
 		}()
-		Eventually(sessionChanges, 250*time.Millisecond).Should(Receive(Equal(0)))
+		Eventually(sessionChanges, 250*time.Millisecond).Should(Receive(BeZero()))
 		cancel()
 		Eventually(done, 250*time.Millisecond).Should(BeClosed())
 
@@ -516,7 +518,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(func() { zeroTTL.RunExpiryLoop(ctx, 0) }).ToNot(Panic())
 	})
 
-	ginkgo.It("covers control client and server error boundaries", func() {
+	ginkgo.It("reports control client and server error boundaries", func() {
 		originalReadRandom := readRandom
 		readRandom = func([]byte) (int, error) {
 			return 0, errors.New("random failed")
@@ -561,7 +563,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		}))
 		ginkgo.DeferCleanup(errorServer.Close)
 		err := NewClient(errorServer.URL, "control-token").doJSON(context.Background(), http.MethodGet, "/empty-error", nil, nil)
-		Expect(IsControlStatus(err, http.StatusServiceUnavailable)).To(BeTrue())
+		Expect(err).To(haveControlStatus(http.StatusServiceUnavailable))
 
 		emptySessionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			_ = json.NewEncoder(w).Encode(SessionHandle{})
