@@ -281,6 +281,8 @@ func It(description string, args ...any) bool { return true }
 var _ = It("local helper is not a Ginkgo DSL call", func() {})
 
 var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
+	ginkgo.Describe("git revision edge coverage", func() {}) // want "Ginkgo node name \"git revision edge coverage\" reads like a coverage bucket; describe observable behavior instead"
+
 	shared := strings.Builder{}           // want "move state initialization out of Ginkgo container body; declare variables in containers and initialize in setup nodes"
 	Expect(shared.String()).To(Equal("")) // want "move Expect out of Ginkgo container body; containers should only declare specs and setup nodes" "use BeEmpty matcher instead of Equal\\(empty\\) for empty collection/string assertions"
 	ginkgo.By("building the tree")        // want "move By out of Ginkgo container body; containers should only declare specs and setup nodes"

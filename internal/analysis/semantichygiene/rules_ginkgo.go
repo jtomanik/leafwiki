@@ -14,6 +14,7 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	name := callName(call)
 	checkGinkgoTopLevelIt(ctx, call, name)
 	checkGinkgoTestName(ctx, call, name)
+	checkGinkgoCoverageName(ctx, call, name)
 	checkGinkgoTestingTInSpec(ctx, call, name)
 	switch {
 	case isFocusedGinkgoNodeName(name):
@@ -54,6 +55,18 @@ func checkGinkgoTestName(ctx *analysisContext, call *ast.CallExpr, name string) 
 	}
 }
 
+func checkGinkgoCoverageName(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoNameCarrier(name) || !isGinkgoDSLCall(ctx, call) || len(call.Args) == 0 {
+		return
+	}
+	reportGinkgoCoverageName(ctx, call.Args[0])
+	if isDescribeTableCall(name) {
+		for _, arg := range call.Args[1:] {
+			reportGinkgoTableEntryCoverageName(ctx, arg)
+		}
+	}
+}
+
 func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoStaticDescription(expr)
 	if !ok || !strings.HasPrefix(description, "Test") {
@@ -62,12 +75,39 @@ func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
 	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
 }
 
+func reportGinkgoCoverageName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoStaticDescription(expr)
+	if !ok || !ginkgoDescriptionUsesCoverageBucket(description) {
+		return
+	}
+	ctx.report(ruleGinkgoCoverageName, expr, ginkgoCoverageNameDiagnostic(description))
+}
+
 func reportGinkgoTableEntryDescriptionName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoEntryDescriptionValue(expr)
 	if !ok || !strings.HasPrefix(description, "Test") {
 		return
 	}
 	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
+}
+
+func reportGinkgoTableEntryCoverageName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoEntryDescriptionValue(expr)
+	if !ok || !ginkgoDescriptionUsesCoverageBucket(description) {
+		return
+	}
+	ctx.report(ruleGinkgoCoverageName, expr, ginkgoCoverageNameDiagnostic(description))
+}
+
+func ginkgoDescriptionUsesCoverageBucket(description string) bool {
+	for _, field := range strings.FieldsFunc(strings.ToLower(description), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	}) {
+		if field == "coverage" {
+			return true
+		}
+	}
+	return false
 }
 
 func isGinkgoNameCarrier(name string) bool {

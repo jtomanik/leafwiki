@@ -240,7 +240,7 @@ func namedStringType(name string) *types.Named {
 	return types.NewNamed(types.NewTypeName(token.NoPos, pkg, name, nil), types.Typ[types.String], nil)
 }
 
-var _ = ginkgo.Describe("semantichygiene edge coverage", func() {
+var _ = ginkgo.Describe("semantichygiene diagnostic edge cases", func() {
 	ginkgo.Describe("structured diagnostics", func() {
 		ginkgo.It("delays rule diagnostics until finalization and prefixes the stable rule ID", func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p

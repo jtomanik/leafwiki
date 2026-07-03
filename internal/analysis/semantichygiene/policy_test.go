@@ -89,6 +89,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("ginkgo blocking receive", ruleID("ginkgo.blocking-receive"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo helper first", ruleID("ginkgo.helper-first"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo global state cleanup", ruleID("ginkgo.global-state-cleanup"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo BDD bucket name rule", ruleID("ginkgo.coverage-name"), false, waiverScopeNone),
 			ginkgo.Entry("gomega error string", ruleID("gomega.err-error-string"), false, waiverScopeNone),
 			ginkgo.Entry("gomega raw string match error", ruleID("gomega.raw-string-match-error"), false, waiverScopeNone),
 			ginkgo.Entry("gomega error nil matcher", ruleID("gomega.error-nil-matcher"), false, waiverScopeNone),

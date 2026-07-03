@@ -290,6 +290,10 @@ func ginkgoTestNameDiagnostic(name string) string {
 	return fmt.Sprintf("Ginkgo node name %q preserves a migrated testing.T name; describe observable behavior instead", name)
 }
 
+func ginkgoCoverageNameDiagnostic(name string) string {
+	return fmt.Sprintf("Ginkgo node name %q reads like a coverage bucket; describe observable behavior instead", name)
+}
+
 func ginkgoTestingTInSpecDiagnostic(name string) string {
 	return fmt.Sprintf("avoid %s adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers", name)
 }

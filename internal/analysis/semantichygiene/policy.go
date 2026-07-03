@@ -42,6 +42,7 @@ const (
 	ruleGinkgoHelperFirst                  ruleID = "ginkgo.helper-first"
 	ruleGinkgoGlobalStateCleanup           ruleID = "ginkgo.global-state-cleanup"
 	ruleGinkgoTestName                     ruleID = "ginkgo.test-name"
+	ruleGinkgoCoverageName                 ruleID = "ginkgo.coverage-name"
 	ruleGinkgoTestingTInSpec               ruleID = "ginkgo.testing-t-in-spec"
 	ruleGinkgoLinterRawIgnore              ruleID = "ginkgo-linter.raw-ignore"
 	ruleGomegaErrorString                  ruleID = "gomega.err-error-string"
@@ -133,6 +134,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoHelperFirst:                  hardRule(ruleGinkgoHelperFirst),
 	ruleGinkgoGlobalStateCleanup:           hardRule(ruleGinkgoGlobalStateCleanup),
 	ruleGinkgoTestName:                     hardRule(ruleGinkgoTestName),
+	ruleGinkgoCoverageName:                 hardRule(ruleGinkgoCoverageName),
 	ruleGinkgoTestingTInSpec:               hardRule(ruleGinkgoTestingTInSpec),
 	ruleGinkgoLinterRawIgnore:              hardRule(ruleGinkgoLinterRawIgnore),
 	ruleGomegaErrorString:                  hardRule(ruleGomegaErrorString),
