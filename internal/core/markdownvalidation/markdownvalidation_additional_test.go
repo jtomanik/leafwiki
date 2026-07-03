@@ -74,7 +74,7 @@ func matchWorkspaceResolverResult(kind tree.NodeKind, code IssueCode) types.Gome
 	})
 }
 
-var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
+var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 	ginkgo.It("ValidateMarkdownContent legacy wrapper returns OK for simple canonical content", func() {
 		result := ValidateMarkdownContent("docs/page", string(canonicalValidationMarkdown("page-1", "Page", "# Page\n")), "page-1")
 
@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 		Expect(issueCodes(reservedExtra)).To(ContainElement(IssueCodeReservedMetadata))
 	})
 
-	ginkgo.It("ValidateMarkdownContentWithOptions covers markdown link resolver fallbacks", func() {
+	ginkgo.It("reports markdown link resolver fallbacks as validation issues", func() {
 		markdownResolver := ValidateMarkdownContentWithOptions("docs/source", "[Missing](/missing)\n", ContentValidationOptions{
 			ResolveMarkdownLink: func(destination string) (tree.PageID, tree.NodeKind, bool, IssueCode) {
 				Expect(destination).To(Equal("/missing"))
@@ -273,7 +273,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	ginkgo.It("ValidateWorkspaceMarkdownFiles handles empty roots, hidden markdown warnings, and workspace asset callbacks", func() {
 		Expect(ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: "  "}).OK).To(BeTrue())
 
-		hiddenRoot := ginkgo.GinkgoT().TempDir()
+		hiddenRoot := markdownValidationTempDir()
 		Expect(os.WriteFile(filepath.Join(hiddenRoot, ".hidden.md"), canonicalValidationMarkdown("hidden", "Hidden", "# Hidden\n"), 0o644)).To(Succeed())
 		hiddenResult := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{
 			RootDir:         hiddenRoot,
@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 		Expect(hiddenResult.Summary.Warnings).To(Equal(1))
 		Expect(issueCodes(hiddenResult)).To(ContainElement(IssueCodeHiddenMarkdownPath))
 
-		assetRoot := ginkgo.GinkgoT().TempDir()
+		assetRoot := markdownValidationTempDir()
 		Expect(os.WriteFile(filepath.Join(assetRoot, "source.md"), canonicalValidationMarkdown("source-page", "Source", "# Source\n\n![Logo](assets/logo.png)\n"), 0o644)).To(Succeed())
 		var seenPageID tree.PageID
 		var seenDestination string
@@ -302,7 +302,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles reports invalid workspace directory and file routes", func() {
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := markdownValidationTempDir()
 		Expect(os.Mkdir(filepath.Join(rootDir, "!!!"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "!!!.md"), canonicalValidationMarkdown("invalid-file", "Invalid File", "# Invalid\n"), 0o644)).To(Succeed())
 
@@ -313,7 +313,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles reports callback and terminal walk errors", func() {
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := markdownValidationTempDir()
 		originalWalkWorkspaceDir := walkWorkspaceDir
 		ginkgo.DeferCleanup(func() {
 			walkWorkspaceDir = originalWalkWorkspaceDir
@@ -333,7 +333,7 @@ var _ = ginkgo.Describe("markdownvalidation additional coverage", func() {
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles skips hidden, static, and non-markdown entries while reporting scan failures", func() {
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := markdownValidationTempDir()
 		Expect(os.Mkdir(filepath.Join(rootDir, ".drafts"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, ".drafts", "ignored.md"), canonicalValidationMarkdown("draft", "Draft", "# Draft\n"), 0o644)).To(Succeed())
 		Expect(os.Mkdir(filepath.Join(rootDir, "assets"), 0o755)).To(Succeed())
