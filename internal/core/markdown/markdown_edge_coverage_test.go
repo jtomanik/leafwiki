@@ -22,12 +22,14 @@ var _ = ginkgo.Describe("markdown metadata parse render and writeback failures",
 		Expect(fm.ExtraFields).To(BeNil())
 		Expect(valueToString(nil)).To(BeEmpty())
 
-		yamlPart, body, has := splitFrontmatter("---")
-		Expect(yamlPart).To(BeEmpty())
-		Expect(body).To(Equal("---"))
-		Expect(has).To(BeFalse())
+		split, err := markdownBodyWithoutFrontmatterResult("---")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(split).To(SatisfyAll(
+			HaveField("YAML", BeEmpty()),
+			HaveField("Body", Equal("---")),
+		))
 
-		_, _, _, err = ParseFrontmatter("<!-- leafwiki")
+		err = parseFrontmatterWithMetadataResult("<!-- leafwiki")
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrMetadataParse))
 
@@ -202,6 +204,39 @@ type failingYAMLValue struct{}
 
 func (failingYAMLValue) MarshalYAML() (interface{}, error) {
 	return nil, errors.New("yaml failed")
+}
+
+var errFrontmatterPresent = errors.New("frontmatter present")
+var errFrontmatterAbsent = errors.New("frontmatter absent")
+
+type markdownBodyWithoutFrontmatter struct {
+	YAML string
+	Body string
+}
+
+func markdownBodyWithoutFrontmatterResult(md string) (markdownBodyWithoutFrontmatter, error) {
+	yamlPart, body, has := splitFrontmatter(md)
+	if has {
+		return markdownBodyWithoutFrontmatter{}, errFrontmatterPresent
+	}
+	return markdownBodyWithoutFrontmatter{
+		YAML: yamlPart,
+		Body: body,
+	}, nil
+}
+
+func parseFrontmatterWithMetadataResult(md string) error {
+	fm, body, has, err := ParseFrontmatter(md)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return errFrontmatterAbsent
+	}
+	if fm.LeafWikiID == "" && body == "" {
+		return errFrontmatterAbsent
+	}
+	return nil
 }
 
 type failingCanonicalMetadataYAMLEncoder struct {
