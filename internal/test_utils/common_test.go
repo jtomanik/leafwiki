@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 
 	ginkgo.It("WriteFile creates parent directories and writes content", func() {
 		tb := &fakeTestHelper{}
-		base := ginkgo.GinkgoT().TempDir()
+		base := tempTestUtilsDir()
 
 		path := WriteFile(tb, base, "nested/file.txt", "hello")
 
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 				tb := &fakeTestHelper{panicOnFatal: true}
 
 				Expect(func() {
-					WriteFile(tb, ginkgo.GinkgoT().TempDir(), "file.txt", "hello")
+					WriteFile(tb, tempTestUtilsDir(), "file.txt", "hello")
 				}).To(PanicWith(ContainSubstring(tc.want)))
 			}()
 		}
@@ -164,7 +164,7 @@ var _ = ginkgo.Describe("test utilities", func() {
 
 	ginkgo.It("FixturePath returns the first matching fixture directory", func() {
 		tb := &fakeTestHelper{}
-		base := ginkgo.GinkgoT().TempDir()
+		base := tempTestUtilsDir()
 		Expect(os.MkdirAll(filepath.Join(base, "fixtures", "pages"), 0o755)).To(Succeed())
 		restore := restoreTestUtilsSeams()
 		ginkgo.DeferCleanup(restore)
@@ -213,6 +213,15 @@ var _ = ginkgo.Describe("test utilities", func() {
 		)))
 	})
 })
+
+func tempTestUtilsDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-test-utils-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
 
 type fakeMultipartWriter struct {
 	part      io.Writer
