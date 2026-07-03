@@ -13,8 +13,8 @@ import (
 )
 
 var _ = ginkgo.Describe("asset routes", func() {
-	ginkgo.It("TestRoutesServeStaticAssetsWhenPublicAccessEnabled", func() {
-		assetsDir := ginkgo.GinkgoT().TempDir()
+	ginkgo.It("serves static asset files when public access is enabled", func() {
+		assetsDir := assetTempDir()
 		pageDir := filepath.Join(assetsDir, "page-1")
 		Expect(os.MkdirAll(pageDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(pageDir, "note.txt"), []byte("hello"), 0o644)).To(Succeed())
@@ -32,8 +32,8 @@ var _ = ginkgo.Describe("asset routes", func() {
 		Expect(rec).To(HaveHTTPBody("hello"))
 	})
 
-	ginkgo.It("TestRoutesRequireAuthForPrivateStaticAssets", func() {
-		assetsDir := ginkgo.GinkgoT().TempDir()
+	ginkgo.It("requires authentication before serving private static asset files", func() {
+		assetsDir := assetTempDir()
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{AssetsDir: assetsDir})},
 			httpinternal.FrontendConfig{},
@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("asset routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
-	ginkgo.It("TestRoutesRequireCSRFForAssetMutations", func() {
+	ginkgo.It("requires CSRF protection for asset mutations", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -62,3 +62,11 @@ var _ = ginkgo.Describe("asset routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
 	})
 })
+
+func assetTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-assets-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
+}

@@ -7,7 +7,7 @@ import (
 )
 
 var _ = ginkgo.Describe("asset semantic types", func() {
-	ginkgo.It("TestAssetUseCaseInputsUseSemanticIDs", func() {
+	ginkgo.It("keeps use-case boundaries typed with semantic asset identifiers", func() {
 		upload := UploadAssetInput{UserID: newFixtureUserID("user-1"), PageID: newFixturePageID("page-1"), Filename: tree.AssetName("diagram.png")}
 		var _ tree.UserID = upload.UserID
 		var _ tree.PageID = upload.PageID

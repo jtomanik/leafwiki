@@ -103,7 +103,7 @@ var _ = ginkgo.Describe("asset helpers", func() {
 var _ = ginkgo.Describe("asset use cases", func() {
 	ginkgo.It("upload, list, get, rename, and delete round-trip a page asset", func() {
 		treeService, pageID := setupAssetUseCaseTree()
-		assetService := coreassets.NewAssetService(ginkgo.GinkgoT().TempDir(), tree.NewSlugService())
+		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 
 		uploadOut, err := NewUploadAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
 			UserID:   newFixtureUserID("user-1"),
@@ -148,7 +148,7 @@ var _ = ginkgo.Describe("asset use cases", func() {
 
 	ginkgo.It("use cases return localized page-not-found errors", func() {
 		treeService, _ := setupAssetUseCaseTree()
-		assetService := coreassets.NewAssetService(ginkgo.GinkgoT().TempDir(), tree.NewSlugService())
+		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 
 		_, err := NewUploadAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
 			UserID:   newFixtureUserID("user-1"),
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("asset use cases", func() {
 
 	ginkgo.It("returns localized asset operation errors", func() {
 		treeService, pageID := setupAssetUseCaseTree()
-		assetService := coreassets.NewAssetService(ginkgo.GinkgoT().TempDir(), tree.NewSlugService())
+		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 
 		_, err := NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: *pageID, Filename: tree.AssetName("missing.png")})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetNotFound))
@@ -262,10 +262,10 @@ var _ = ginkgo.Describe("asset use cases", func() {
 
 	ginkgo.It("returns non-not-found tree lookup errors unchanged", func() {
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-			DataDir: ginkgo.GinkgoT().TempDir(),
-			RootDir: ginkgo.GinkgoT().TempDir(),
+			DataDir: assetTempDir(),
+			RootDir: assetTempDir(),
 		})
-		assetService := coreassets.NewAssetService(ginkgo.GinkgoT().TempDir(), tree.NewSlugService())
+		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 		pageID := newFixturePageID("page-1")
 
 		_, err := NewUploadAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
@@ -401,8 +401,8 @@ var _ = ginkgo.Describe("asset route handlers", func() {
 func setupAssetUseCaseTree() (*tree.TreeService, *tree.PageID) {
 	ginkgo.GinkgoHelper()
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: ginkgo.GinkgoT().TempDir(),
-		RootDir: ginkgo.GinkgoT().TempDir(),
+		DataDir: assetTempDir(),
+		RootDir: assetTempDir(),
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
@@ -421,7 +421,7 @@ type assetRouteFixture struct {
 func newAssetRouteFixture() assetRouteFixture {
 	ginkgo.GinkgoHelper()
 	treeService, pageID := setupAssetUseCaseTree()
-	assetService := coreassets.NewAssetService(ginkgo.GinkgoT().TempDir(), tree.NewSlugService())
+	assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 	routes := NewRoutes(RoutesConfig{
 		Upload: NewUploadAssetUseCase(treeService, assetService, slog.Default()),
 		List:   NewListAssetsUseCase(treeService, assetService),

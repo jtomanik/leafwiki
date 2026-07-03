@@ -8,7 +8,7 @@ import (
 )
 
 var _ = ginkgo.Describe("asset i18n", func() {
-	ginkgo.It("TestAssetDeleteSuccessMessageRendersFromCatalog", func() {
+	ginkgo.It("renders delete success messages from the localization catalog", func() {
 		rendered := localization.English.Render(MessageIDAssetDeleteSuccess, "")
 		Expect(rendered).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Missing": BeFalse(),
