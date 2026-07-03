@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.DescribeTable("TestDetectRevisionAssetMIMETypeFallsBackToExtensionThenOctetStream",
+var _ = ginkgo.DescribeTable("detects revision asset MIME types from manifest and filename fallbacks",
 	func(name string, manifestMIME string, want string) {
 		Expect(DetectRevisionAssetMIMEType(name, manifestMIME)).To(Equal(want))
 	},

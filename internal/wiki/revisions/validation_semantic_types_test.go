@@ -9,7 +9,7 @@ import (
 )
 
 var _ = ginkgo.Describe("revision validation", func() {
-	ginkgo.It("TestValidateRevisionInputsReturnSemanticValues", func() {
+	ginkgo.It("returns typed revision lookup and asset values from normalized inputs", func() {
 		pageID, revisionID, err := ValidateRevisionLookupInput(" page-1 ", " rev-1 ")
 		Expect(err).NotTo(HaveOccurred())
 

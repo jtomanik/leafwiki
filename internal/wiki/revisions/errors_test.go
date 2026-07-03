@@ -14,11 +14,11 @@ import (
 )
 
 var _ = ginkgo.Describe("revision errors", func() {
-	ginkgo.It("TestRevisionErrorStatus_InvalidLimitIsBadRequest", func() {
+	ginkgo.It("maps invalid list limits to bad request", func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionInvalidLimit)).To(Equal(http.StatusBadRequest))
 	})
 
-	ginkgo.It("TestRevisionErrorStatus_RevisionNotFoundIsNotFound", func() {
+	ginkgo.It("maps missing revisions to not found", func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionNotFound)).To(Equal(http.StatusNotFound))
 	})
 

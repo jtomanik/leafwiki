@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,11 +38,11 @@ var _ = ginkgo.Describe("revision routes", func() {
 		Expect(rec).To(HaveRevisionRouteError(http.StatusInternalServerError, ErrCodeRevisionInternalError), rec.Body.String())
 	})
 
-	ginkgo.It("TestRoutesListWorkspaceRevisionsPassesCursorAndReturnsNextCursor", func() {
+	ginkgo.It("passes pagination inputs to revision listing and returns the next cursor", func() {
 		gin.SetMode(gin.TestMode)
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-			DataDir: ginkgo.GinkgoT().TempDir(),
-			RootDir: ginkgo.GinkgoT().TempDir(),
+			DataDir: newRevisionTempDir(),
+			RootDir: newRevisionTempDir(),
 		})
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
@@ -492,7 +493,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 	})
 
 	ginkgo.It("ToRevisionResponse includes resolved author labels when a resolver is available", func() {
-		store, err := coreauth.NewUserStore(ginkgo.GinkgoT().TempDir())
+		store, err := coreauth.NewUserStore(newRevisionTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
 			Expect(store.Close()).To(Succeed())
@@ -618,8 +619,8 @@ func newRevisionRouteFixture() revisionRouteFixture {
 	gin.SetMode(gin.TestMode)
 
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: ginkgo.GinkgoT().TempDir(),
-		RootDir: ginkgo.GinkgoT().TempDir(),
+		DataDir: newRevisionTempDir(),
+		RootDir: newRevisionTempDir(),
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
@@ -630,6 +631,14 @@ func newRevisionRouteFixture() revisionRouteFixture {
 		treeService: treeService,
 		pageID:      *pageID,
 	}
+}
+
+func newRevisionTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-revisions-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func performRevisionHandlerRequest(handler gin.HandlerFunc, method, target string, params gin.Params, user *coreauth.User) *httptest.ResponseRecorder {

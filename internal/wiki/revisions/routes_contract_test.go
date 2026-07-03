@@ -11,7 +11,7 @@ import (
 )
 
 var _ = ginkgo.Describe("routes contracts", func() {
-	ginkgo.It("TestRoutesConfigUsesSemanticRevisionIDs", func() {
+	ginkgo.It("requires semantic revision IDs in route callbacks", func() {
 		_ = RoutesConfig{
 			GetWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error) {
 				return nil, nil
