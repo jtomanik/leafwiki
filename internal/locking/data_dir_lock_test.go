@@ -10,9 +10,43 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+func tempLockingDir() string {
+	GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-locking-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
+func setLockingEnv(key, value string) {
+	GinkgoHelper()
+
+	previous, hadPrevious := os.LookupEnv(key)
+	Expect(os.Setenv(key, value)).To(Succeed())
+	DeferCleanup(func() {
+		if hadPrevious {
+			Expect(os.Setenv(key, previous)).To(Succeed())
+			return
+		}
+		Expect(os.Unsetenv(key)).To(Succeed())
+	})
+}
+
+func createTempLockFile(pattern string) *os.File {
+	GinkgoHelper()
+
+	file, err := os.CreateTemp(tempLockingDir(), pattern)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func() {
+		_ = file.Close()
+	})
+	return file
+}
+
 var _ = Describe("directory locking", func() {
-	It("TestAcquireDataDirLockCreatesParentAndReleases", func() {
-		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
+	It("creates the data lock parent and releases ownership for a later acquisition", func() {
+		dataDir := filepath.Join(tempLockingDir(), "data")
 
 		lock, err := AcquireDataDirLock(dataDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -24,8 +58,8 @@ var _ = Describe("directory locking", func() {
 		Expect(lock.Release()).To(Succeed())
 	})
 
-	It("TestAcquireDataDirLockRejectsSecondOwner", func() {
-		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
+	It("rejects a second data-directory owner while the first lock is held", func() {
+		dataDir := filepath.Join(tempLockingDir(), "data")
 
 		first, err := AcquireDataDirLock(dataDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -38,8 +72,8 @@ var _ = Describe("directory locking", func() {
 		Expect(err).To(MatchError(errDataDirLockHeld))
 	})
 
-	It("TestAcquireRootDirLockRejectsSecondOwnerAndReleases", func() {
-		rootDir := filepath.Join(GinkgoT().TempDir(), "content")
+	It("rejects a second root-directory owner and allows acquisition after release", func() {
+		rootDir := filepath.Join(tempLockingDir(), "content")
 
 		first, err := AcquireRootDirLock(rootDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -57,8 +91,8 @@ var _ = Describe("directory locking", func() {
 		Expect(again.Release()).To(Succeed())
 	})
 
-	It("TestLockHeldPredicatesRecognizeWrappedSentinelErrors", func() {
-		dataDir := filepath.Join(GinkgoT().TempDir(), "data")
+	It("recognizes wrapped data and root lock contention errors", func() {
+		dataDir := filepath.Join(tempLockingDir(), "data")
 		dataLock, err := AcquireDataDirLock(dataDir)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(dataLock.Release)
@@ -69,7 +103,7 @@ var _ = Describe("directory locking", func() {
 		Expect(IsLockHeld(wrappedDataErr)).To(BeTrue())
 		Expect(IsRootDirLockHeld(wrappedDataErr)).To(BeFalse())
 
-		rootDir := filepath.Join(GinkgoT().TempDir(), "content")
+		rootDir := filepath.Join(tempLockingDir(), "content")
 		rootLock, err := AcquireRootDirLock(rootDir)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(rootLock.Release)
@@ -87,7 +121,7 @@ var _ = Describe("directory locking", func() {
 	})
 })
 
-var _ = Describe("locking edge coverage", func() {
+var _ = Describe("directory lock edge behavior", func() {
 	It("returns an empty path for a nil lock receiver", func() {
 		var lock *DataDirLock
 
@@ -101,7 +135,7 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("treats release as idempotent after a successful release", func() {
-		lock, err := AcquireDataDirLock(filepath.Join(GinkgoT().TempDir(), "data"))
+		lock, err := AcquireDataDirLock(filepath.Join(tempLockingDir(), "data"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(lock.Release()).To(Succeed())
@@ -109,7 +143,7 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("stores root-dir locks under the user cache root instead of the content root", func() {
-		rootDir := filepath.Join(GinkgoT().TempDir(), "content")
+		rootDir := filepath.Join(tempLockingDir(), "content")
 		cacheDir, err := os.UserCacheDir()
 		if err != nil || cacheDir == "" {
 			cacheDir = os.TempDir()
@@ -124,7 +158,7 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("canonicalizes symlinked root lock subjects to their resolved target", func() {
-		tempDir := GinkgoT().TempDir()
+		tempDir := tempLockingDir()
 		targetDir := filepath.Join(tempDir, "target")
 		linkDir := filepath.Join(tempDir, "link")
 		Expect(os.Mkdir(targetDir, 0o755)).To(Succeed())
@@ -155,7 +189,7 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("returns a create-directory error when the lock parent path is blocked by a file", func() {
-		blockedParent := filepath.Join(GinkgoT().TempDir(), "blocked")
+		blockedParent := filepath.Join(tempLockingDir(), "blocked")
 		Expect(os.WriteFile(blockedParent, []byte("not a directory"), 0o600)).To(Succeed())
 
 		lock, err := acquirePathLock(filepath.Join(blockedParent, "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
@@ -165,7 +199,7 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("returns an open-lock error when the requested lock path is a directory", func() {
-		lockPath := filepath.Join(GinkgoT().TempDir(), "lock-dir")
+		lockPath := filepath.Join(tempLockingDir(), "lock-dir")
 		Expect(os.Mkdir(lockPath, 0o755)).To(Succeed())
 
 		lock, err := acquirePathLock(lockPath, "subject", "custom", errDataDirLockHeld)
@@ -184,15 +218,14 @@ var _ = Describe("locking edge coverage", func() {
 			lockDataDirFileFn = previousLock
 		})
 
-		lock, err := acquirePathLock(filepath.Join(GinkgoT().TempDir(), "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
+		lock, err := acquirePathLock(filepath.Join(tempLockingDir(), "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
 		Expect(err).To(MatchError(lockErr))
 	})
 
 	It("reports release errors with the default data-directory label", func() {
-		file, err := os.CreateTemp(GinkgoT().TempDir(), "closed-lock-*")
-		Expect(err).NotTo(HaveOccurred())
+		file := createTempLockFile("closed-lock-*")
 		unlockErr := errors.New("unlock failed")
 		previousUnlock := unlockDataDirFileFn
 		unlockDataDirFileFn = func(*os.File) error {
@@ -203,18 +236,14 @@ var _ = Describe("locking edge coverage", func() {
 		})
 		lock := &DataDirLock{file: file}
 
-		err = lock.Release()
+		err := lock.Release()
 
 		Expect(err).To(MatchError(unlockErr))
 		Expect(lock.Release()).To(Succeed())
 	})
 
 	It("reports close errors when unlocking succeeds", func() {
-		file, err := os.CreateTemp(GinkgoT().TempDir(), "close-error-lock-*")
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func() {
-			_ = file.Close()
-		})
+		file := createTempLockFile("close-error-lock-*")
 		closeErr := errors.New("close failed")
 		previousUnlock := unlockDataDirFileFn
 		previousClose := closeDataDirLockFileFn
@@ -230,20 +259,20 @@ var _ = Describe("locking edge coverage", func() {
 		})
 		lock := &DataDirLock{file: file, label: "custom"}
 
-		err = lock.Release()
+		err := lock.Release()
 
 		Expect(err).To(MatchError(closeErr))
 		Expect(lock.Release()).To(Succeed())
 	})
 
 	It("falls back to temp storage when the user cache directory is unavailable", func() {
-		GinkgoT().Setenv("HOME", "")
-		GinkgoT().Setenv("XDG_CACHE_HOME", "")
+		setLockingEnv("HOME", "")
+		setLockingEnv("XDG_CACHE_HOME", "")
 		if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
 			Skip("platform still provides a user cache dir without HOME or XDG_CACHE_HOME")
 		}
 
-		rootDir := filepath.Join(GinkgoT().TempDir(), "content")
+		rootDir := filepath.Join(tempLockingDir(), "content")
 		lock, err := AcquireRootDirLock(rootDir)
 
 		Expect(err).NotTo(HaveOccurred())
@@ -254,11 +283,10 @@ var _ = Describe("locking edge coverage", func() {
 	})
 
 	It("returns non-contention lock errors from invalid lock files", func() {
-		file, err := os.CreateTemp(GinkgoT().TempDir(), "closed-lock-*")
-		Expect(err).NotTo(HaveOccurred())
+		file := createTempLockFile("closed-lock-*")
 		Expect(file.Close()).To(Succeed())
 
-		err = lockDataDirFile(file)
+		err := lockDataDirFile(file)
 
 		Expect(err).To(HaveOccurred())
 		Expect(err).NotTo(MatchError(errDataDirLockHeld))
