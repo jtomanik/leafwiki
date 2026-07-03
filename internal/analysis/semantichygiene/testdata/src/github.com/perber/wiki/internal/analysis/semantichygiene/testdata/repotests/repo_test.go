@@ -493,6 +493,12 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect([]string{seen.Path, seen.Body}).To(Equal([]string{"/mcp", "{}"})) // want "do not compare multiple fields through a positional composite assertion; use HaveField/MatchFields or a named matcher"
 }
 
+func matchEmptySearchResult() any {
+	return MatchFields(nil, Fields{
+		"Count": Equal(0), // want "use BeZero matcher instead of Equal\\(0\\) for zero-value assertions"
+	})
+}
+
 func matchValidationIssueMessageText(expected string) any {
 	type issue struct {
 		MessageID MessageID

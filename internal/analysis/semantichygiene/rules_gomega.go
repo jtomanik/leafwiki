@@ -26,6 +26,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherUsesPositionalTransform(ctx, call) {
 		ctx.report(ruleGomegaPositionalTransform, call, gomegaPositionalTransformDiagnostic())
 	}
+	if isEqualZeroMatcherCall(call) {
+		ctx.report(ruleGomegaEqualZero, call, gomegaEqualZeroDiagnostic())
+	}
 	assertion, ok := gomegaAssertionFromCall(ctx, call)
 	if !ok {
 		return
@@ -104,9 +107,6 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	}
 	if assertionUsesEqualEmpty(assertion) {
 		ctx.report(ruleGomegaEqualEmpty, assertion.matcher, gomegaEqualEmptyDiagnostic())
-	}
-	if assertionUsesEqualZero(assertion) {
-		ctx.report(ruleGomegaEqualZero, assertion.matcher, gomegaEqualZeroDiagnostic())
 	}
 	if assertionUsesRepeatedFieldAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaRepeatedFieldAssertions, assertion.actual, gomegaRepeatedFieldAssertionDiagnostic())
@@ -794,11 +794,11 @@ func assertionUsesEqualEmpty(assertion gomegaAssertion) bool {
 	}
 }
 
-func assertionUsesEqualZero(assertion gomegaAssertion) bool {
-	if !isMatcherNamed(assertion.matcher, "Equal") || len(assertion.matcher.Args) != 1 {
+func isEqualZeroMatcherCall(call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "Equal") || len(call.Args) != 1 {
 		return false
 	}
-	lit, ok := unparenExpr(assertion.matcher.Args[0]).(*ast.BasicLit)
+	lit, ok := unparenExpr(call.Args[0]).(*ast.BasicLit)
 	return ok && lit.Kind == token.INT && lit.Value == "0"
 }
 
