@@ -20,16 +20,16 @@ var _ = ginkgo.Describe("policy helpers", func() {
 
 	ginkgo.Describe("rule metadata", func() {
 		ginkgo.It("classifies hard semantic rules and the first waivable BDD rule", func() {
-			hard, metadataFound := metadataForRule(ruleDirectCast)
-			Expect(metadataFound).To(BeTrue())
+			hard, metadataRegistered := metadataForRule(ruleDirectCast)
+			Expect(metadataRegistered).To(BeTrue())
 			Expect(hard).To(Equal(ruleMetadata{
 				messagePrefix: string(ruleDirectCast),
 				waivable:      false,
 				scope:         waiverScopeNone,
 			}))
 
-			waivable, metadataFound := metadataForRule(ruleGinkgoTopLevelIt)
-			Expect(metadataFound).To(BeTrue())
+			waivable, metadataRegistered := metadataForRule(ruleGinkgoTopLevelIt)
+			Expect(metadataRegistered).To(BeTrue())
 			Expect(waivable).To(Equal(ruleMetadata{
 				messagePrefix: string(ruleGinkgoTopLevelIt),
 				waivable:      true,
@@ -42,21 +42,21 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				if !metadata.waivable {
 					continue
 				}
-				budget, budgetFound := waiverBudgetForRule(id)
-				Expect(budgetFound).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
+				budget, budgetConfigured := waiverBudgetForRule(id)
+				Expect(budgetConfigured).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
 				Expect(budget).To(BeNumerically(">", 0), "waivable rule %s should have a positive budget", id)
 			}
 		})
 
 		ginkgo.It("rejects unknown rule IDs", func() {
-			_, metadataFound := metadataForRule(ruleID("unknown.rule"))
-			Expect(metadataFound).To(BeFalse())
+			_, metadataRegistered := metadataForRule(ruleID("unknown.rule"))
+			Expect(metadataRegistered).To(BeFalse())
 		})
 
 		ginkgo.DescribeTable("registers the checker rule taxonomy",
 			func(id ruleID, waivable bool, scope waiverScopeKind) {
-				metadata, metadataFound := metadataForRule(id)
-				Expect(metadataFound).To(BeTrue(), "rule %s should be registered", id)
+				metadata, metadataRegistered := metadataForRule(id)
+				Expect(metadataRegistered).To(BeTrue(), "rule %s should be registered", id)
 				Expect(metadata).To(Equal(ruleMetadata{
 					messagePrefix: string(id),
 					waivable:      waivable,
@@ -147,8 +147,8 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				ruleID("gomega.numeric-equivalent"),
 				ruleID("gomega.time-equal"),
 			} {
-				budget, budgetFound := waiverBudgetForRule(id)
-				Expect(budgetFound).To(BeTrue(), "rule %s should have an explicit budget", id)
+				budget, budgetConfigured := waiverBudgetForRule(id)
+				Expect(budgetConfigured).To(BeTrue(), "rule %s should have an explicit budget", id)
 				Expect(budget).To(Equal(3), "rule %s should use the initial per-rule budget", id)
 			}
 		})

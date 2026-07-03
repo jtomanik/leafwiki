@@ -20,6 +20,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if !isTestFile(ctx.filename(call.Pos())) {
 		return
 	}
+	if callLaundersBooleanToStringState(ctx, call) {
+		ctx.report(ruleGomegaProxyBoolean, call, gomegaBooleanStateStringDiagnostic())
+	}
 	if matcherCallUsesMatcherValueAsExpected(ctx, call) {
 		ctx.report(ruleGomegaMatcherAsValue, call, gomegaMatcherAsValueDiagnostic(callName(call)))
 	}
@@ -600,9 +603,42 @@ func isProxyBooleanName(name string) bool {
 	switch strings.ToLower(name) {
 	case "ok", "found", "exists", "present", "matched", "valid", "success", "done":
 		return true
-	default:
+	}
+	for _, suffix := range []string{"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func callLaundersBooleanToStringState(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isString(ctx.pass.TypesInfo.TypeOf(call)) || !testLocalBooleanStateHelperCall(ctx, call) {
 		return false
 	}
+	for _, arg := range call.Args {
+		if isBoolType(ctx.pass.TypesInfo.TypeOf(arg)) {
+			return true
+		}
+	}
+	return false
+}
+
+func testLocalBooleanStateHelperCall(ctx *analysisContext, call *ast.CallExpr) bool {
+	name := strings.ToLower(callName(call))
+	if !strings.Contains(name, "state") && !strings.Contains(name, "status") && !strings.Contains(name, "label") {
+		return false
+	}
+	ident, ok := unparenExpr(call.Fun).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	obj := ctx.pass.TypesInfo.ObjectOf(ident)
+	if obj == nil {
+		return false
+	}
+	filename := ctx.filename(obj.Pos())
+	return isTestFile(filename) || isTestSupportFile(filename)
 }
 
 func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {

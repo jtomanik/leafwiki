@@ -162,6 +162,10 @@ func gomegaProxyBooleanDiagnostic() string {
 	return "assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers"
 }
 
+func gomegaBooleanStateStringDiagnostic() string {
+	return "do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }

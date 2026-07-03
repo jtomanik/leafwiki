@@ -1248,6 +1248,18 @@ func Equal(actual any) any { return nil }
 func HaveField(name string, matcher any) any { return nil }
 
 func normalize() (string, bool) { return "", true }
+func foundState(found bool) string {
+	if found {
+		return "found"
+	}
+	return "absent"
+}
+func boolState(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
 
 func TestAgentPresence() {
 	_, ok := normalize()
@@ -1256,19 +1268,32 @@ func TestAgentPresence() {
 		Event string
 		Found bool
 	}{Event: "start", Found: ok}).To(HaveField("Found", Equal(true)))
+	state := foundState(ok)
+	Expect(state).To(Equal("found"))
+	grantOK := ok
+	grantState := foundState(grantOK)
+	Expect(grantState).To(Equal("found"))
+	parsed := true
+	parsedState := boolState(parsed)
+	Expect(parsedState).To(Equal("true"))
 
 	agentEnabled := true
 	Expect(agentEnabled).To(BeTrue())
 	Expect(struct{ Enabled bool }{Enabled: agentEnabled}).To(HaveField("Enabled", Equal(true)))
 }
 `)
-			for _, call := range h.findCalls("To") {
+			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
+			calls = append(calls, h.findCalls("boolState")...)
+			for _, call := range calls {
 				checkGomegaSemanticMatcher(h.ctx, call)
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
+				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
+				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 			))
 		})
 	})
