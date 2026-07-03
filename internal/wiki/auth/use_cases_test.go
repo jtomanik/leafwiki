@@ -68,6 +68,19 @@ func setupAPIKeyService(userSvc *coreauth.UserService) *coreauth.APIKeyService {
 	return coreauth.NewAPIKeyService(store, userSvc)
 }
 
+var errAuthPasswordDidNotMatch = errors.New("auth password did not match")
+
+func authPasswordMatchesUser(userSvc *coreauth.UserService, userID coreauth.UserID, password string) error {
+	matched, err := userSvc.DoesIDAndPasswordMatch(userID, password)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return errAuthPasswordDidNotMatch
+	}
+	return nil
+}
+
 var _ = ginkgo.Describe("auth use cases", func() {
 	ginkgo.It("lets administrators assign a different role to a user", func() {
 		uc, svc := setupUpdateUserUseCase()
@@ -231,7 +244,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
 	})
 
-		ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", func() {
+	ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", func() {
 		_, err := NewLoginUseCase(nil).Execute(context.Background(), LoginInput{Identifier: "admin", Password: "password"})
 		Expect(err).To(MatchError(ErrAuthDisabled))
 
@@ -291,10 +304,8 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			NewPassword: "new-password",
 		})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = userSvc.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "old-password")
-		Expect(err).To(MatchError(coreauth.ErrUserInvalidCredentials))
-		_, err = userSvc.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "new-password")
-		Expect(err).NotTo(HaveOccurred())
+		Expect(authPasswordMatchesUser(userSvc, newFixtureUserID(user.ID), "old-password")).To(MatchError(coreauth.ErrUserInvalidCredentials))
+		Expect(authPasswordMatchesUser(userSvc, newFixtureUserID(user.ID), "new-password")).To(Succeed())
 	})
 
 	ginkgo.It("user mutation use cases continue when resolver reload only logs a warning", func() {
@@ -398,7 +409,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
 	})
 
-		ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", func() {
+	ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", func() {
 		userSvc := setupUserService()
 		sessionStore, err := coreauth.NewSessionStore(tempAuthStorageDir())
 		Expect(err).NotTo(HaveOccurred())
