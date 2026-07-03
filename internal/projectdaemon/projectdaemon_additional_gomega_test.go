@@ -469,7 +469,8 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		presence.now = func() time.Time {
 			return now
 		}
-		event, _ := agenthooks.Normalize(agenthooks.ProviderCodex, []byte(`{"hook_event_name":"SessionStart","session_id":"codex-session"}`), time.Time{})
+		event, err := normalizedAgentHookEventResult(agenthooks.ProviderCodex, []byte(`{"hook_event_name":"SessionStart","session_id":"codex-session"}`), time.Time{})
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Provider":      Equal(agenthooks.ProviderCodex),
 			"EventName":     Equal(agenthooks.AgentEventSessionStart),

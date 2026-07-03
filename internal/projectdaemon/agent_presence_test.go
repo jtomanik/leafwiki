@@ -2,6 +2,7 @@ package projectdaemon
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/perber/wiki/internal/agenthooks"
 )
+
+var errAgentHookEventRejected = errors.New("agent hook event rejected")
 
 var _ = ginkgo.Describe("agent presence registry", func() {
 	ginkgo.It("records sanitized session metadata for accepted agent events", func() {
@@ -212,13 +215,22 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 func normalizedPresenceEvent(provider agenthooks.ProviderID, payload string) agenthooks.Event {
 	ginkgo.GinkgoHelper()
 
-	event, _ := agenthooks.Normalize(provider, []byte(payload), time.Now())
+	event, err := normalizedAgentHookEventResult(provider, []byte(payload), time.Now())
+	Expect(err).To(Succeed())
 	Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Provider":      Equal(provider.Normalize()),
 		"SessionIDHash": Not(BeEmpty()),
 		"EventName":     Not(BeEmpty()),
 	}))
 	return event
+}
+
+func normalizedAgentHookEventResult(provider agenthooks.ProviderID, raw []byte, seenAt time.Time) (agenthooks.Event, error) {
+	event, accepted := agenthooks.Normalize(provider, raw, seenAt)
+	if !accepted {
+		return agenthooks.Event{}, errAgentHookEventRejected
+	}
+	return event, nil
 }
 
 func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
