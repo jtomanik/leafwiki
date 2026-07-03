@@ -437,7 +437,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		recoverableErr := errors.New("recoverable schema failed")
 		closeErr := errors.New("close failed")
 		var ensureCalls int
-		var removed bool
+		var cleanupRequests []string
 		ensureSearchSchema = func(index *SQLiteIndex) error {
 			ensureCalls++
 			if ensureCalls == 1 {
@@ -451,8 +451,8 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		isRecoverableSearchDBError = func(err error) bool {
 			return errors.Is(err, recoverableErr)
 		}
-		removeSearchSQLiteFiles = func(string) {
-			removed = true
+		removeSearchSQLiteFiles = func(dbPath string) {
+			cleanupRequests = append(cleanupRequests, dbPath)
 		}
 		closeSQLiteSearchDB = func(db *sql.DB) error {
 			_ = previousClose(db)
@@ -465,12 +465,13 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			closeSQLiteSearchDB = previousClose
 		})
 
-		index, err := NewSQLiteIndex(tempSearchDir())
+		storageDir := tempSearchDir()
+		index, err := NewSQLiteIndex(storageDir)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(index).NotTo(BeNil())
 		Expect(ensureCalls).To(Equal(2))
-		Expect(removed).To(BeTrue())
+		Expect(cleanupRequests).To(ConsistOf(searchIndexDatabasePath(storageDir, "search.db")))
 	})
 
 	ginkgo.It("returns second schema errors after recoverable initialization retry", func() {
