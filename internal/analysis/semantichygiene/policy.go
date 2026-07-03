@@ -1022,7 +1022,38 @@ func isStableTestContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value 
 	if strings.TrimSpace(value) == "" {
 		return false
 	}
+	if isLeafWikiTrailerProtocolLiteral(value) {
+		return isTestAssertionLiteralContext(ctx, lit) ||
+			isTestTrailerIndexLiteralContext(ctx, lit) ||
+			isTestContractLiteralContext(ctx, lit)
+	}
 	return isStableMessageLikeLiteral(value) && isTestContractLiteralContext(ctx, lit)
+}
+
+func isTestAssertionLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if isGomegaAssertionMethod(callName(n)) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func isTestTrailerIndexLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.IndexExpr:
+			return containsNode(n.Index, lit)
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
 }
 
 func isTestContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
@@ -2287,7 +2318,12 @@ var (
 	errorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+){1,}$`)
 	toolIDPattern    = regexp.MustCompile(`^wiki_[a-z0-9_]+$`)
 	messageIDPattern = regexp.MustCompile(`^(errors|validation|api|mcp|cli|shell|ui)(\.[a-z0-9]+(?:_[a-z0-9]+)*)+$`)
+	trailerPattern   = regexp.MustCompile(`^LeafWiki-[A-Za-z0-9-]+(?::.*)?$`)
 )
+
+func isLeafWikiTrailerProtocolLiteral(value string) bool {
+	return trailerPattern.MatchString(strings.TrimSpace(value))
+}
 
 func isStableContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value string) bool {
 	return toolIDPattern.MatchString(value) ||

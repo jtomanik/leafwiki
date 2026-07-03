@@ -260,6 +260,16 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func
 			wantMessage: "Page not found", // want "raw localized prose \"Page not found\" used in test assertion code; assert a semantic code/message ID instead"
 		}),
 	)
+	ginkgo.It("checks git revision trailer keys as stable protocol data", func() {
+		trailers := map[string]string{}
+		Expect(trailers).To(HaveKeyWithValue("LeafWiki-Source", "filesystem")) // want "raw stable contract literal \"LeafWiki-Source\" used in test assertion code; use the typed constant or semantic helper"
+	})
+
+	ginkgo.It("checks derived git revision trailer values as stable protocol data", func() {
+		trailers := map[string]string{}
+		changed := trailers["LeafWiki-Changed-Markdown"] // want "raw stable contract literal \"LeafWiki-Changed-Markdown\" used in test assertion code; use the typed constant or semantic helper"
+		Expect(changed).To(Equal("1"))
+	})
 })
 
 var _ = ginkgo.It("documents a package invariant without a container", func() {}) // want "semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason"
