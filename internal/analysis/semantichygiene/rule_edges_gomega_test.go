@@ -1312,7 +1312,7 @@ func TestPage() {}
 	})
 
 	ginkgo.Describe("policy helper branches", func() {
-		ginkgo.It("covers semantic and primitive type fallbacks", func() {
+		ginkgo.It("exercises semantic and primitive type fallbacks", func() {
 			name, ok := semanticTypeNameOf(nil)
 			Expect(ok).To(BeFalse())
 			Expect(name).To(BeEmpty())
@@ -1349,7 +1349,7 @@ func TestPage() {}
 			Expect(semanticConstructorAllowsSource("ToolDescriptionID", "ToolID")).To(BeTrue())
 		})
 
-		ginkgo.It("covers AST name and parent fallbacks", func() {
+		ginkgo.It("exercises AST name and parent fallbacks", func() {
 			target := &ast.Ident{Name: "target"}
 			Expect(exprName(&ast.SelectorExpr{Sel: &ast.Ident{Name: "Field"}})).To(Equal("Field"))
 			Expect(exprName(&ast.StarExpr{X: target})).To(Equal("target"))
@@ -1369,7 +1369,7 @@ func TestPage() {}
 			Expect(isConstOrTypeDefinition(ctx, target)).To(BeFalse())
 		})
 
-		ginkgo.It("covers AST struct and composite helper fallbacks", func() {
+		ginkgo.It("exercises AST struct and composite helper fallbacks", func() {
 			strct := &ast.StructType{Fields: &ast.FieldList{List: []*ast.Field{
 				{Names: []*ast.Ident{nil}},
 				{Names: []*ast.Ident{{Name: "StatusCode"}}},
@@ -1419,7 +1419,7 @@ func TestPage() {}
 			Expect(wrappedStruct).To(Equal(gotStruct))
 		})
 
-		ginkgo.DescribeTable("covers remaining edge adapter filename cases",
+		ginkgo.DescribeTable("classifies remaining edge adapter filename cases",
 			func(filename string) {
 				Expect(isEdgeAdapterFile(filename)).To(BeTrue())
 			},
@@ -1440,7 +1440,7 @@ func TestPage() {}
 			ginkgo.Entry("ordinary package", "github.com/perber/wiki/internal/wiki/pages", "/repo/internal/wiki/pages/page.go", false),
 		)
 
-		ginkgo.It("covers direct-cast policy allow contexts", func() {
+		ginkgo.It("exercises direct-cast policy allow contexts", func() {
 			source := `package p
 type PageID string
 func NewFixturePageID(raw string) PageID { return PageID(raw) }
@@ -1472,7 +1472,7 @@ func literal() PageID { return PageID("page-1") }
 			Expect(isConstOrTypeDefinition(normal.ctx, normalCasts[len(normalCasts)-1])).To(BeTrue())
 		})
 
-		ginkgo.It("covers type containment and semantic function context helpers", func() {
+		ginkgo.It("exercises type containment and semantic function context helpers", func() {
 			h := newRuleHarness("/repo/internal/core/tree/semantic_types.go", "github.com/perber/wiki/internal/core/tree", `package tree
 type PageID string
 func NewPageIDUnchecked(raw string) PageID { return PageID(raw) }
@@ -1508,7 +1508,7 @@ func Plain(raw string) string { return raw }
 			Expect(isAllowedSemanticOwnerAdapterFunc(plain.ctx, plain.findFunc("Plain"), "PageID")).To(BeFalse())
 		})
 
-		ginkgo.It("covers wire, persistence, and JSON composite helpers", func() {
+		ginkgo.It("exercises wire, persistence, and JSON composite helpers", func() {
 			wire := newRuleHarness("/repo/internal/service/page.go", "example.com/p", "package p\n"+
 				"type PageResponse struct {\n"+
 				"  PageID string `json:\"pageId\"`\n"+
@@ -1579,7 +1579,7 @@ func build(pageID string) *pageRecord { return &pageRecord{PageID: pageID} }
 			Expect(compositeFieldHasWireTag(manualCtx, composite, "PageID")).To(BeFalse())
 		})
 
-		ginkgo.It("covers stable and localized literal context helpers", func() {
+		ginkgo.It("exercises stable and localized literal context helpers", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 func respondError(code string) {}
 func validationMessage() string {
@@ -1646,7 +1646,7 @@ func plain() string { return "hello world" }
 	})
 
 	ginkgo.Describe("rule branches", func() {
-		ginkgo.It("covers string leak and conversion early exits", func() {
+		ginkgo.It("exercises string leak and conversion early exits", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PlainID string
 func (id PlainID) String() string { return string(id) }
@@ -1668,7 +1668,7 @@ func use(id PageID) { _ = id.String() }
 			Expect(allowed.diagnostics).To(BeEmpty())
 		})
 
-		ginkgo.It("covers string assignment, key-value, and return diagnostics", func() {
+		ginkgo.It("exercises string assignment, key-value, and return diagnostics", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PageID string
 func (id PageID) String() string { return string(id) }
@@ -1696,7 +1696,7 @@ func use(id PageID, values map[string]string) string {
 			))
 		})
 
-		ginkgo.It("covers string value specs and direct assignment helper edges", func() {
+		ginkgo.It("exercises string value specs and direct assignment helper edges", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PageID string
 func (id PageID) String() string { return string(id) }
@@ -1781,7 +1781,7 @@ func use(id PageID) {
 			Expect(ignoredExpression.diagnostics).To(BeEmpty())
 		})
 
-		ginkgo.It("covers terminal string call boundaries", func() {
+		ginkgo.It("exercises terminal string call boundaries", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 import (
 	"fmt"
@@ -1931,7 +1931,7 @@ func Other(id PageID) string { return id.String() }
 			Expect(isAllowedAdapterStringReturn(adapterReturn.ctx, adapterReturn.findCall("String"))).To(BeFalse())
 		})
 
-		ginkgo.It("covers direct cast and unchecked constructor branches", func() {
+		ginkgo.It("exercises direct cast and unchecked constructor branches", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PageID string
 func NewPageIDUnchecked(raw any) PageID { return "" }
@@ -1986,7 +1986,7 @@ func NewPageIDUnchecked(raw string) PageID { return NewPageIDUnchecked(raw) }
 			Expect(isAllowedUncheckedConstructorCall(semanticConstructor.ctx, semanticConstructor.findCall("NewPageIDUnchecked"), "PageID")).To(BeTrue())
 		})
 
-		ginkgo.It("covers message field, passthrough, and response status helpers", func() {
+		ginkgo.It("exercises message field, passthrough, and response status helpers", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type MessageID string
 type ErrorCode string
@@ -2062,7 +2062,7 @@ func makeError(message string) { NewLocalizedError("ok", message) }
 			Expect(exprIsFreeFormMessageParam(freeCtx, otherMessage)).To(BeFalse())
 		})
 
-		ginkgo.It("covers signature and validator helper branches", func() {
+		ginkgo.It("exercises signature and validator helper branches", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PageID string
 type CommitHash string

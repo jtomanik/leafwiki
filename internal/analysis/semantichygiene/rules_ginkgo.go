@@ -101,14 +101,27 @@ func reportGinkgoTableEntryCoverageName(ctx *analysisContext, expr ast.Expr) {
 }
 
 func ginkgoDescriptionUsesCoverageBucket(description string) bool {
-	for _, field := range strings.FieldsFunc(strings.ToLower(description), func(r rune) bool {
+	fields := strings.FieldsFunc(strings.ToLower(description), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
-	}) {
+	})
+	for i, field := range fields {
 		if field == "coverage" {
+			return true
+		}
+		if i == 0 && isCoverageBucketVerb(field) {
 			return true
 		}
 	}
 	return false
+}
+
+func isCoverageBucketVerb(field string) bool {
+	switch field {
+	case "cover", "covers", "covered", "covering":
+		return true
+	default:
+		return false
+	}
 }
 
 func isGinkgoNameCarrier(name string) bool {
