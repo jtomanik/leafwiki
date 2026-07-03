@@ -267,7 +267,12 @@ var _ = Describe("workspace sync deterministic service behavior", func() {
 		service = workspaceSyncCoverageService(store, &fakeTreeReconstructor{err: restoreReconstructErr})
 		status, err := service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), SourceMCP)
 		Expect(err).To(Succeed())
-		Expect(status.ValidationErrors).NotTo(BeEmpty())
+		Expect(status.ValidationErrors).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      Equal(wikivalidation.IssueCodeWorkspaceSyncError),
+			"MessageID": Equal(wikivalidation.IssueCodeWorkspaceSyncError.MessageID()),
+			"Path":      Equal("workspace"),
+			"Severity":  Equal(wikivalidation.IssueSeverityError),
+		})))
 
 		restoreAmendErr := errors.New("restore amend failed")
 		store = &fakeRevisionStore{capture: workspaceSyncCoverageCommit("restore-amend", "docs/a.md"), amendErr: restoreAmendErr}
