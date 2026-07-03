@@ -2,6 +2,7 @@ package plantrace
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -99,60 +100,46 @@ func evidence(file string, text string) canonicalPlanEvidence {
 	return canonicalPlanEvidence{file: file, text: text}
 }
 
-var _ = ginkgo.It("TestCanonicalMarkdownLinksPlanScenarioTitleAuditIndex", func() {
-	t := ginkgo.GinkgoT()
-	repoRoot := canonicalPlanRepoRoot(t)
-	planTitles := canonicalPlanScenarioTitles(t, filepath.Join(repoRoot, "docs", "plans", "canonical_markdown_links.PLAN.md"))
-	if len(planTitles) != len(canonicalMarkdownLinksPlanScenarioCoverage) {
-		t.Fatalf("plan scenario title count = %d, want %d mapped scenarios", len(planTitles), len(canonicalMarkdownLinksPlanScenarioCoverage))
-	}
+var _ = ginkgo.Describe("canonical Markdown link plan traceability", func() {
+	ginkgo.It("maps every plan scenario title to automated evidence", func() {
+		repoRoot := canonicalPlanRepoRoot()
+		planTitles := canonicalPlanScenarioTitles(filepath.Join(repoRoot, "docs", "plans", "canonical_markdown_links.PLAN.md"))
+		Expect(planTitles).To(HaveLen(len(canonicalMarkdownLinksPlanScenarioCoverage)), "plan scenarios should match mapped evidence")
 
-	coverageByTitle := map[string]canonicalPlanEvidence{}
-	for _, coverage := range canonicalMarkdownLinksPlanScenarioCoverage {
-		if coverage.title == "" {
-			t.Fatalf("scenario title must not be empty")
+		coverageByTitle := map[string]canonicalPlanEvidence{}
+		for _, coverage := range canonicalMarkdownLinksPlanScenarioCoverage {
+			Expect(coverage).To(haveCanonicalPlanScenarioMapping())
+			_, exists := coverageByTitle[coverage.title]
+			Expect(exists).To(BeFalse(), "duplicate scenario evidence title %q", coverage.title)
+			coverageByTitle[coverage.title] = coverage.evidence
 		}
-		if _, ok := coverageByTitle[coverage.title]; ok {
-			t.Fatalf("duplicate scenario coverage title %q", coverage.title)
-		}
-		if coverage.evidence.file == "" || coverage.evidence.text == "" {
-			t.Fatalf("scenario %q has empty evidence: %#v", coverage.title, coverage.evidence)
-		}
-		coverageByTitle[coverage.title] = coverage.evidence
-	}
 
-	planTitleSet := map[string]struct{}{}
-	for _, title := range planTitles {
-		planTitleSet[title] = struct{}{}
-		evidence, ok := coverageByTitle[title]
-		if !ok {
-			t.Fatalf("plan scenario %q has no automated-test evidence mapping", title)
+		planTitleSet := map[string]struct{}{}
+		for _, title := range planTitles {
+			planTitleSet[title] = struct{}{}
+			evidence, ok := coverageByTitle[title]
+			Expect(ok).To(BeTrue(), "plan scenario %q has no automated-test evidence mapping", title)
+			Expect(evidence).To(existInCanonicalPlanEvidenceFile(repoRoot, title))
 		}
-		assertCanonicalPlanEvidenceExists(t, repoRoot, title, evidence)
-	}
-	for title := range coverageByTitle {
-		if _, ok := planTitleSet[title]; !ok {
-			t.Fatalf("scenario coverage %q is not present in the plan", title)
+		for title := range coverageByTitle {
+			_, ok := planTitleSet[title]
+			Expect(ok).To(BeTrue(), "scenario evidence %q is not present in the plan", title)
 		}
-	}
 
+	})
 })
 
-func canonicalPlanRepoRoot(t plantraceTestT) string {
-	t.Helper()
+func canonicalPlanRepoRoot() string {
+	ginkgo.GinkgoHelper()
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
+	Expect(ok).To(BeTrue(), "runtime.Caller should locate the plantrace source file")
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-func canonicalPlanScenarioTitles(t plantraceTestT, planPath string) []string {
-	t.Helper()
+func canonicalPlanScenarioTitles(planPath string) []string {
+	ginkgo.GinkgoHelper()
 	raw, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("read canonical Markdown links plan: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "read canonical Markdown links plan")
 	titles := []string{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		title, ok := strings.CutPrefix(line, "  Scenario: ")
@@ -161,16 +148,4 @@ func canonicalPlanScenarioTitles(t plantraceTestT, planPath string) []string {
 		}
 	}
 	return titles
-}
-
-func assertCanonicalPlanEvidenceExists(t plantraceTestT, repoRoot string, title string, evidence canonicalPlanEvidence) {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repoRoot, evidence.file))
-	if err != nil {
-		t.Fatalf("scenario %q evidence file %s cannot be read: %v", title, evidence.file, err)
-	}
-	content := string(raw)
-	if !strings.Contains(content, evidence.text) {
-		t.Fatalf("scenario %q evidence %q not found in %s", title, evidence.text, evidence.file)
-	}
 }

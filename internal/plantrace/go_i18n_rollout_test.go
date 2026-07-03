@@ -2,60 +2,49 @@ package plantrace
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-var _ = ginkgo.It("TestGoI18nRolloutPlanScenarioEvidence", func() {
-	t := ginkgo.GinkgoT()
-	repoRoot := canonicalPlanRepoRoot(t)
-	planPath := filepath.Join(repoRoot, "docs", "plans", "go-i18n-rollout.PLAN.md")
-	titles := goI18nScenarioTitles(t, planPath)
-	if len(titles) == 0 {
-		t.Fatalf("no go-i18n rollout scenarios found")
-	}
-	for _, title := range titles {
-		evidence, ok := goI18nRolloutEvidence(title)
-		if !ok {
-			t.Fatalf("scenario %q has no evidence mapping", title)
+var _ = ginkgo.Describe("go-i18n rollout plan traceability", func() {
+	ginkgo.It("maps every rollout scenario to repository evidence", func() {
+		repoRoot := canonicalPlanRepoRoot()
+		planPath := filepath.Join(repoRoot, "docs", "plans", "go-i18n-rollout.PLAN.md")
+		titles := goI18nScenarioTitles(planPath)
+		Expect(titles).NotTo(BeEmpty(), "go-i18n rollout scenarios should exist")
+		for _, title := range titles {
+			evidence, ok := goI18nRolloutEvidence(title)
+			Expect(ok).To(BeTrue(), "scenario %q has no evidence mapping", title)
+			Expect(evidence).To(existInCanonicalPlanEvidenceFile(repoRoot, title))
 		}
-		assertCanonicalPlanEvidenceExists(t, repoRoot, title, evidence)
-	}
 
+	})
+
+	ginkgo.It("keeps CLI startup stderr evidence tied to the catalog-backed failure test", func() {
+		evidence, ok := goI18nRolloutEvidence("CLI startup error renders catalog-backed text to stderr")
+		Expect(ok).To(BeTrue(), "CLI startup scenario has no evidence mapping")
+		Expect(evidence).To(Equal(canonicalPlanEvidence{
+			file: "cmd/leafwiki/main_test.go",
+			text: "TestFailureMessageRendersCatalogBackedErrorBody",
+		}))
+
+	})
+
+	ginkgo.It("keeps the catalog gate running the CLI stderr evidence test", func() {
+		repoRoot := canonicalPlanRepoRoot()
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-i18n-catalog.sh"))
+		Expect(err).NotTo(HaveOccurred(), "read check-i18n-catalog.sh")
+		Expect(string(raw)).To(ContainSubstring("TestFailureMessageRendersCatalogBackedErrorBody"))
+
+	})
 })
 
-var _ = ginkgo.It("TestGoI18nRolloutCLIStartupEvidenceUsesCLIStderrTest", func() {
-	t := ginkgo.GinkgoT()
-	evidence, ok := goI18nRolloutEvidence("CLI startup error renders catalog-backed text to stderr")
-	if !ok {
-		t.Fatalf("CLI startup scenario has no evidence mapping")
-	}
-	if evidence.file != "cmd/leafwiki/main_test.go" || evidence.text != "TestFailureMessageRendersCatalogBackedErrorBody" {
-		t.Fatalf("CLI startup evidence = %#v, want cmd/leafwiki/main_test.go TestFailureMessageRendersCatalogBackedErrorBody", evidence)
-	}
-
-})
-
-var _ = ginkgo.It("TestGoI18nCatalogGateRunsCLIStderrEvidence", func() {
-	t := ginkgo.GinkgoT()
-	repoRoot := canonicalPlanRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-i18n-catalog.sh"))
-	if err != nil {
-		t.Fatalf("read check-i18n-catalog.sh: %v", err)
-	}
-	if !strings.Contains(string(raw), "TestFailureMessageRendersCatalogBackedErrorBody") {
-		t.Fatalf("check-i18n-catalog.sh does not run CLI stderr catalog evidence test")
-	}
-
-})
-
-func goI18nScenarioTitles(t plantraceTestT, planPath string) []string {
-	t.Helper()
+func goI18nScenarioTitles(planPath string) []string {
+	ginkgo.GinkgoHelper()
 	raw, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("read go-i18n rollout plan: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "read go-i18n rollout plan")
 	titles := []string{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		if title, ok := strings.CutPrefix(line, "Scenario: "); ok {
@@ -140,24 +129,21 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	}
 }
 
-var _ = ginkgo.It("TestGoI18nDocsPreserveEnglishOnlyLimit", func() {
-	t := ginkgo.GinkgoT()
-	repoRoot := canonicalPlanRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "i18n.md"))
-	if err != nil {
-		t.Fatalf("read docs/i18n.md: %v", err)
-	}
-	content := string(raw)
-	for _, want := range []string{
-		"English-only",
-		"does not negotiate locale",
-		"Arg0",
-		"scripts/run_messages.sh",
-		"code`, `messageId`, rendered `message`, `template`, and `args`",
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("docs/i18n.md missing %q", want)
+var _ = ginkgo.Describe("go-i18n public documentation", func() {
+	ginkgo.It("preserves the English-only rollout limits and compatibility fields", func() {
+		repoRoot := canonicalPlanRepoRoot()
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "i18n.md"))
+		Expect(err).NotTo(HaveOccurred(), "read docs/i18n.md")
+		content := string(raw)
+		for _, want := range []string{
+			"English-only",
+			"does not negotiate locale",
+			"Arg0",
+			"scripts/run_messages.sh",
+			"code`, `messageId`, rendered `message`, `template`, and `args`",
+		} {
+			Expect(content).To(ContainSubstring(want), "docs/i18n.md should preserve rollout limit")
 		}
-	}
 
+	})
 })
