@@ -11,10 +11,16 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/search"
 )
+
+type healthEvaluation struct {
+	Healthy bool
+	Checks  healthChecks
+}
 
 var _ = ginkgo.Describe("health routes", func() {
 	ginkgo.It("reports degraded health when a required runtime role has crashed", func() {
@@ -68,15 +74,15 @@ var _ = ginkgo.Describe("health routes", func() {
 var _ = ginkgo.Describe("health evaluation", func() {
 	ginkgo.It("marks missing or non-directory storage as failed", func() {
 		missing := filepath.Join(healthTempDir(), "missing")
-		healthy, checks := NewHealthUseCase(nil, nil, missing).Execute()
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(HaveKeyWithValue(healthCheckDataDir, healthStatusFailed))
+		Expect(evaluateHealth(NewHealthUseCase(nil, nil, missing))).To(reportUnhealthyHealthChecks(
+			HaveKeyWithValue(healthCheckDataDir, healthStatusFailed),
+		))
 
 		filePath := filepath.Join(healthTempDir(), "not-a-dir")
 		Expect(os.WriteFile(filePath, []byte("x"), 0o600)).To(Succeed())
-		healthy, checks = NewHealthUseCase(nil, nil, filePath).Execute()
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(HaveKeyWithValue(healthCheckDataDir, healthStatusFailed))
+		Expect(evaluateHealth(NewHealthUseCase(nil, nil, filePath))).To(reportUnhealthyHealthChecks(
+			HaveKeyWithValue(healthCheckDataDir, healthStatusFailed),
+		))
 	})
 
 	ginkgo.It("marks failed indexing status as unhealthy", func() {
@@ -85,25 +91,24 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		status.Fail()
 		status.Finish()
 
-		healthy, checks := NewHealthUseCase(nil, status, healthTempDir()).Execute()
-
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusFailed))
+		Expect(evaluateHealth(NewHealthUseCase(nil, status, healthTempDir()))).To(reportUnhealthyHealthChecks(
+			HaveKeyWithValue(healthCheckSearch, healthStatusFailed),
+		))
 	})
 
 	ginkgo.It("updates required role checks through SetRoleHealth", func() {
 		uc := NewHealthUseCase(nil, nil, healthTempDir())
-		healthy, checks := uc.Execute()
-		Expect(healthy).To(BeTrue())
-		Expect(checks).NotTo(HaveKey(healthCheckRoleWikid))
+		Expect(evaluateHealth(uc)).To(reportHealthyHealthChecks(
+			Not(HaveKey(healthCheckRoleWikid)),
+		))
 
 		uc.SetRoleHealth([]projectdaemon.RoleName{projectdaemon.RoleWikid}, func() []projectdaemon.RoleHealth {
 			return []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateCrashed}}
 		})
-		healthy, checks = uc.Execute()
 
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(HaveKeyWithValue(healthCheckRoleWikid, healthStatusCrashed))
+		Expect(evaluateHealth(uc)).To(reportUnhealthyHealthChecks(
+			HaveKeyWithValue(healthCheckRoleWikid, healthStatusCrashed),
+		))
 	})
 
 	ginkgo.It("reports ready and active indexing states", func() {
@@ -112,14 +117,14 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		status.Success()
 		status.Finish()
 
-		healthy, checks := NewHealthUseCase(nil, status, healthTempDir()).Execute()
-		Expect(healthy).To(BeTrue())
-		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusOK))
+		Expect(evaluateHealth(NewHealthUseCase(nil, status, healthTempDir()))).To(reportHealthyHealthChecks(
+			HaveKeyWithValue(healthCheckSearch, healthStatusOK),
+		))
 
 		status.Start()
-		healthy, checks = NewHealthUseCase(nil, status, healthTempDir()).Execute()
-		Expect(healthy).To(BeTrue())
-		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusIndexing))
+		Expect(evaluateHealth(NewHealthUseCase(nil, status, healthTempDir()))).To(reportHealthyHealthChecks(
+			HaveKeyWithValue(healthCheckSearch, healthStatusIndexing),
+		))
 	})
 
 	ginkgo.It("reports sqlite health for configured indexes and legacy constructor", func() {
@@ -129,11 +134,12 @@ var _ = ginkgo.Describe("health evaluation", func() {
 			Expect(index.Close()).To(Succeed())
 		})
 
-		healthy, checks := NewLegacyHealthUseCase(index, nil, healthTempDir()).Execute()
-
-		Expect(healthy).To(BeTrue())
-		Expect(checks).To(HaveKeyWithValue(healthCheckSQLite, healthStatusOK))
-		Expect(checks).To(HaveKeyWithValue(healthCheckSearch, healthStatusNotApplicable))
+		Expect(evaluateHealth(NewLegacyHealthUseCase(index, nil, healthTempDir()))).To(reportHealthyHealthChecks(
+			SatisfyAll(
+				HaveKeyWithValue(healthCheckSQLite, healthStatusOK),
+				HaveKeyWithValue(healthCheckSearch, healthStatusNotApplicable),
+			),
+		))
 	})
 
 	ginkgo.It("reports sqlite failure when a configured index cannot reopen its database", func() {
@@ -143,10 +149,9 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		Expect(index.Close()).To(Succeed())
 		Expect(os.RemoveAll(indexStorage)).To(Succeed())
 
-		healthy, checks := NewHealthUseCase(index, nil, healthTempDir()).Execute()
-
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(HaveKeyWithValue(healthCheckSQLite, healthStatusFailed))
+		Expect(evaluateHealth(NewHealthUseCase(index, nil, healthTempDir()))).To(reportUnhealthyHealthChecks(
+			HaveKeyWithValue(healthCheckSQLite, healthStatusFailed),
+		))
 	})
 
 	ginkgo.It("routes SetRoleHealth updates the health endpoint checks", func() {
@@ -166,7 +171,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 
 var _ = ginkgo.Describe("required role checks", func() {
 	ginkgo.It("reports ready, missing, unknown, and non-ready role states", func() {
-		checks, healthy := requiredRoleChecks(
+		Expect(evaluateRequiredRoles(
 			[]projectdaemon.RoleName{
 				projectdaemon.RoleWikid,
 				projectdaemon.RoleFrontd,
@@ -178,27 +183,49 @@ var _ = ginkgo.Describe("required role checks", func() {
 				{Name: projectdaemon.RoleFrontd},
 				{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateStarting},
 			},
-		)
-
-		Expect(healthy).To(BeFalse())
-		Expect(checks).To(Equal(healthChecks{
+		)).To(reportUnhealthyHealthChecks(Equal(healthChecks{
 			healthCheckRoleWikid:      healthStatusOK,
 			healthCheckRoleFrontd:     healthStatusUnknown,
 			healthCheckRoleWorkspaced: healthStatusStarting,
 			healthCheckRoleUnknown:    healthStatusMissing,
-		}))
+		})))
 	})
 
 	ginkgo.It("reports healthy when all required roles are ready", func() {
-		checks, healthy := requiredRoleChecks(
+		Expect(evaluateRequiredRoles(
 			[]projectdaemon.RoleName{projectdaemon.RoleWikid},
 			[]projectdaemon.RoleHealth{{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateReady}},
-		)
-
-		Expect(healthy).To(BeTrue())
-		Expect(checks).To(Equal(healthChecks{healthCheckRoleWikid: healthStatusOK}))
+		)).To(reportHealthyHealthChecks(Equal(healthChecks{healthCheckRoleWikid: healthStatusOK})))
 	})
 })
+
+func evaluateHealth(uc *HealthUseCase) healthEvaluation {
+	ginkgo.GinkgoHelper()
+	healthy, checks := uc.Execute()
+	return healthEvaluation{Healthy: healthy, Checks: checks}
+}
+
+func evaluateRequiredRoles(required []projectdaemon.RoleName, roles []projectdaemon.RoleHealth) healthEvaluation {
+	ginkgo.GinkgoHelper()
+	checks, healthy := requiredRoleChecks(required, roles)
+	return healthEvaluation{Healthy: healthy, Checks: checks}
+}
+
+func reportHealthyHealthChecks(checks types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Healthy": BeTrue(),
+		"Checks":  checks,
+	})
+}
+
+func reportUnhealthyHealthChecks(checks types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Healthy": BeFalse(),
+		"Checks":  checks,
+	})
+}
 
 func performHealthRequest(router http.Handler) *httptest.ResponseRecorder {
 	ginkgo.GinkgoHelper()
