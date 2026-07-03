@@ -20,7 +20,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-var _ = ginkgo.Describe("page save side-effect branch coverage", func() {
+var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", func() {
 	ginkgo.It("treats search bootstrap as a no-op when no index is configured", func() {
 		Expect(NewSearchIndexSideEffect(nil, nil, nil).IndexAllPages()).To(Succeed())
 	})
@@ -270,7 +270,7 @@ func setupTagsSideEffect() (string, *tree.TreeService, *tags.TagsService, *TagsS
 
 func setupTreeService() (string, *tree.TreeService) {
 	ginkgo.GinkgoHelper()
-	dir := ginkgo.GinkgoT().TempDir()
+	dir := tempPagesaveDir()
 	treeService := tree.NewTreeService(dir)
 	Expect(treeService.LoadTree()).To(Succeed())
 	return dir, treeService

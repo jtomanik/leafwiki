@@ -3,8 +3,11 @@ package pagesave
 import (
 	"context"
 	"errors"
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"log/slog"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -12,217 +15,151 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = ginkgo.It("TestNewLinkIndexSideEffect_DefaultsLogger", func() {
-	t := ginkgo.GinkgoT()
-	treeService := tree.NewTreeService(t.TempDir())
-	store, err := links.NewLinksStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLinksStore failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("LinksStore.Close: %v", err)
-		}
-	})
-	effect := NewLinkIndexSideEffect(links.NewLinkService(t.TempDir(), treeService, store), nil)
-	if effect.log == nil {
-		t.Fatal("expected default logger to be set")
-	}
-	if effect.log != slog.Default() {
-		t.Fatal("expected slog.Default() logger")
-	}
+var _ = ginkgo.Describe("page save side effects", func() {
+	ginkgo.Describe("constructor defaults", func() {
+		ginkgo.It("assigns the default logger to link indexing", func() {
+			dir := tempPagesaveDir()
+			treeService := tree.NewTreeService(dir)
+			store, err := links.NewLinksStore(dir)
+			Expect(err).NotTo(HaveOccurred())
+			ginkgo.DeferCleanup(func() {
+				Expect(store.Close()).To(Succeed())
+			})
 
-})
+			effect := NewLinkIndexSideEffect(links.NewLinkService(dir, treeService, store), nil)
 
-var _ = ginkgo.It("LinkIndexSideEffect Apply create records outgoing markdown links", func() {
-	t := ginkgo.GinkgoT()
-	dir := t.TempDir()
-	treeService := tree.NewTreeService(dir)
-	if err := treeService.LoadTree(); err != nil {
-		t.Fatalf("LoadTree: %v", err)
-	}
-	store, err := links.NewLinksStore(dir)
-	if err != nil {
-		t.Fatalf("NewLinksStore failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("LinksStore.Close: %v", err)
-		}
-	})
-	linkService := links.NewLinkService(dir, treeService, store)
-	effect := NewLinkIndexSideEffect(linkService, nil)
+			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
+		})
 
-	source := createPageWithContent(t, treeService, "Source Page", "source-page", "[Target](/target-page)")
+		ginkgo.It("assigns the default logger to search indexing", func() {
+			dir := tempPagesaveDir()
+			treeService := tree.NewTreeService(dir)
+			index, err := search.NewSQLiteIndex(dir)
+			Expect(err).NotTo(HaveOccurred())
+			ginkgo.DeferCleanup(func() {
+				Expect(index.Close()).To(Succeed())
+			})
 
-	effect.Apply(PageSaveEvent{
-		Operation: PageOperationCreate,
-		After:     source,
+			effect := NewSearchIndexSideEffect(index, treeService, nil)
+
+			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
+		})
+
+		ginkgo.It("assigns the default logger to tag indexing", func() {
+			effect := NewTagsSideEffect(nil, nil)
+
+			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
+		})
+
+		ginkgo.It("assigns the default logger to property indexing", func() {
+			effect := NewPropertiesSideEffect(nil, nil)
+
+			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
+		})
 	})
 
-	outgoing, err := linkService.GetOutgoingLinksForPage(source.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinksForPage: %v", err)
-	}
-	if outgoing.Count != 1 {
-		t.Fatalf("outgoing count = %d, want 1", outgoing.Count)
-	}
-	if outgoing.Outgoings[0].FromPageID != source.ID || outgoing.Outgoings[0].ToPath != "/target-page" || !outgoing.Outgoings[0].Broken {
-		t.Fatalf("outgoing link = %#v, want broken /target-page record from %q", outgoing.Outgoings[0], source.ID)
-	}
-})
+	ginkgo.Describe("link indexing", func() {
+		ginkgo.It("records outgoing markdown links for created pages", func() {
+			_, treeService, linkService, effect := setupLinkSideEffect()
+			source := createMarkdownPage(treeService, "Source Page", "source-page", "[Target](/target-page)")
 
-var _ = ginkgo.It("TestNewSearchIndexSideEffect_DefaultsLogger", func() {
-	t := ginkgo.GinkgoT()
-	treeService := tree.NewTreeService(t.TempDir())
-	index, err := search.NewSQLiteIndex(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSQLiteIndex failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		if err := index.Close(); err != nil {
-			t.Fatalf("Close failed: %v", err)
-		}
+			effect.Apply(PageSaveEvent{
+				Operation: PageOperationCreate,
+				After:     source,
+			})
+
+			outgoing, err := linkService.GetOutgoingLinksForPage(source.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(outgoing).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Count": Equal(1),
+				"Outgoings": ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"FromPageID": Equal(source.ID),
+					"ToPath":     Equal(tree.RoutePathFromString("/target-page")),
+					"Broken":     BeTrue(),
+				})),
+			})))
+		})
 	})
 
-	effect := NewSearchIndexSideEffect(index, treeService, nil)
-	if effect.log == nil {
-		t.Fatal("expected default logger to be set")
-	}
-	if effect.log != slog.Default() {
-		t.Fatal("expected slog.Default() logger")
-	}
+	ginkgo.Describe("orchestration", func() {
+		ginkgo.It("returns required effect errors before running best-effort effects", func() {
+			expected := errors.New("required sync failed")
+			required := &failingRequiredEffect{err: expected}
+			bestEffort := &countingSideEffect{}
+			orchestrator := NewPageSaveOrchestrator(required, bestEffort)
 
-})
-
-var _ = ginkgo.It("TestNewTagsSideEffect_DefaultsLogger", func() {
-	t := ginkgo.GinkgoT()
-	effect := NewTagsSideEffect(nil, nil)
-	if effect.log == nil {
-		t.Fatal("expected default logger to be set")
-	}
-	if effect.log != slog.Default() {
-		t.Fatal("expected slog.Default() logger")
-	}
-
-})
-
-var _ = ginkgo.It("TestNewPropertiesSideEffect_DefaultsLogger", func() {
-	t := ginkgo.GinkgoT()
-	effect := NewPropertiesSideEffect(nil, nil)
-	if effect.log == nil {
-		t.Fatal("expected default logger to be set")
-	}
-	if effect.log != slog.Default() {
-		t.Fatal("expected slog.Default() logger")
-	}
-
-})
-
-var _ = ginkgo.It("TestPageSaveOrchestrator_ReturnsRequiredEffectErrorBeforeBestEffortEffects", func() {
-	t := ginkgo.GinkgoT()
-	expected := errors.New("required sync failed")
-	required := &failingRequiredEffect{err: expected}
-	bestEffort := &countingSideEffect{}
-
-	orchestrator := NewPageSaveOrchestrator(required, bestEffort)
-
-	err := orchestrator.Run(PageSaveEvent{Operation: PageOperationUpdate})
-	if !errors.Is(err, expected) {
-		t.Fatalf("expected required effect error, got %v", err)
-	}
-	if required.calls != 1 {
-		t.Fatalf("expected required effect to be called once, got %d", required.calls)
-	}
-	if bestEffort.calls != 0 {
-		t.Fatalf("expected best-effort effect to be skipped after required failure, got %d calls", bestEffort.calls)
-	}
-
-})
-
-var _ = ginkgo.It("TestWorkspaceSyncSideEffect_UsesMCPSourceFromPageEvent", func() {
-	t := ginkgo.GinkgoT()
-	syncer := &captureWorkspaceSyncer{}
-	effect := NewWorkspaceSyncSideEffect(syncer, nil)
-
-	if err := effect.ApplyRequired(PageSaveEvent{
-		Operation: PageOperationCreate,
-		UserID:    "alice",
-		Source:    PageMutationSourceMCP,
-	}); err != nil {
-		t.Fatalf("ApplyRequired: %v", err)
-	}
-
-	if syncer.req.Source != workspacesync.SourceMCP {
-		t.Fatalf("sync source = %q, want mcp", syncer.req.Source)
-	}
-	if syncer.req.Actor.ID != "alice" {
-		t.Fatalf("sync actor = %q, want alice", syncer.req.Actor.ID)
-	}
-
-})
-
-var _ = ginkgo.It("TestWorkspaceSyncSideEffect_UsesResolvedActorMetadata", func() {
-	t := ginkgo.GinkgoT()
-	syncer := &captureWorkspaceSyncer{}
-	effect := NewWorkspaceSyncSideEffectWithActorLookup(syncer, nil, func(userID tree.UserID) workspacesync.Actor {
-		if userID != "alice" {
-			t.Fatalf("actor lookup userID = %q, want alice", userID)
-		}
-		return workspacesync.Actor{ID: "alice", Name: "Alice", Email: "alice@example.test"}
+			Expect(orchestrator.Run(PageSaveEvent{Operation: PageOperationUpdate})).To(MatchError(expected))
+			Expect(required.calls).To(Equal(1))
+			Expect(bestEffort.calls).To(BeZero())
+		})
 	})
 
-	if err := effect.ApplyRequired(PageSaveEvent{
-		Operation: PageOperationUpdate,
-		UserID:    "alice",
-		Source:    PageMutationSourceWeb,
-	}); err != nil {
-		t.Fatalf("ApplyRequired: %v", err)
-	}
+	ginkgo.Describe("workspace sync", func() {
+		ginkgo.It("maps MCP page mutations to MCP sync source and actor metadata", func() {
+			syncer := &captureWorkspaceSyncer{}
+			effect := NewWorkspaceSyncSideEffect(syncer, nil)
 
-	if syncer.req.Actor.ID != "alice" || syncer.req.Actor.Name != "Alice" || syncer.req.Actor.Email != "alice@example.test" {
-		t.Fatalf("sync actor = %#v, want resolved Alice metadata", syncer.req.Actor)
-	}
+			Expect(effect.ApplyRequired(PageSaveEvent{
+				Operation: PageOperationCreate,
+				UserID:    newFixtureUserID("alice"),
+				Source:    PageMutationSourceMCP,
+			})).To(Succeed())
 
-})
+			Expect(syncer.req).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Source": Equal(workspacesync.SourceMCP),
+				"Actor": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"ID": Equal(workspacesync.ActorIDFromUserID(newFixtureUserID("alice"))),
+				}),
+			}))
+		})
 
-var _ = ginkgo.It("TestWorkspaceSyncSideEffect_AllowsRetryAfterCaptureFailure", func() {
-	t := ginkgo.GinkgoT()
-	expected := errors.New("git capture failed")
-	syncer := &retryWorkspaceSyncer{err: expected}
-	effect := NewWorkspaceSyncSideEffect(syncer, nil)
-	event := PageSaveEvent{Operation: PageOperationUpdate, UserID: "alice"}
+		ginkgo.It("uses resolved actor metadata for workspace sync requests", func() {
+			syncer := &captureWorkspaceSyncer{}
+			effect := NewWorkspaceSyncSideEffectWithActorLookup(syncer, nil, func(userID tree.UserID) workspacesync.Actor {
+				Expect(userID).To(Equal(newFixtureUserID("alice")))
+				return workspacesync.Actor{ID: "alice", Name: "Alice", Email: "alice@example.test"}
+			})
 
-	if err := effect.ApplyRequired(event); !errors.Is(err, expected) {
-		t.Fatalf("first ApplyRequired error = %v, want %v", err, expected)
-	}
-	if err := effect.ApplyRequired(event); err != nil {
-		t.Fatalf("retry ApplyRequired: %v", err)
-	}
-	if syncer.calls != 2 {
-		t.Fatalf("sync calls = %d, want failed call plus retry", syncer.calls)
-	}
+			Expect(effect.ApplyRequired(PageSaveEvent{
+				Operation: PageOperationUpdate,
+				UserID:    newFixtureUserID("alice"),
+				Source:    PageMutationSourceWeb,
+			})).To(Succeed())
 
-})
+			Expect(syncer.req.Actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ID":    Equal(workspacesync.ActorIDFromUserID(newFixtureUserID("alice"))),
+				"Name":  Equal("Alice"),
+				"Email": Equal("alice@example.test"),
+			}))
+		})
 
-var _ = ginkgo.It("WorkspaceSyncSideEffect Apply logs and swallows sync errors", func() {
-	t := ginkgo.GinkgoT()
-	expected := errors.New("sync failed")
-	syncer := &retryWorkspaceSyncer{err: expected}
-	effect := NewWorkspaceSyncSideEffect(syncer, nil)
+		ginkgo.It("allows a required sync retry after a capture failure", func() {
+			expected := errors.New("git capture failed")
+			syncer := &retryWorkspaceSyncer{err: expected}
+			effect := NewWorkspaceSyncSideEffect(syncer, nil)
+			event := PageSaveEvent{Operation: PageOperationUpdate, UserID: newFixtureUserID("alice")}
 
-	effect.Apply(PageSaveEvent{
-		Operation: PageOperationUpdate,
-		UserID:    "alice",
-		Source:    PageMutationSourceWeb,
+			Expect(effect.ApplyRequired(event)).To(MatchError(expected))
+			Expect(effect.ApplyRequired(event)).To(Succeed())
+			Expect(syncer.calls).To(Equal(2))
+		})
+
+		ginkgo.It("logs best-effort sync failures without surfacing them", func() {
+			expected := errors.New("sync failed")
+			syncer := &retryWorkspaceSyncer{err: expected}
+			effect := NewWorkspaceSyncSideEffect(syncer, nil)
+
+			Expect(func() {
+				effect.Apply(PageSaveEvent{
+					Operation: PageOperationUpdate,
+					UserID:    newFixtureUserID("alice"),
+					Source:    PageMutationSourceWeb,
+				})
+			}).NotTo(Panic())
+
+			Expect(syncer.calls).To(Equal(1))
+		})
 	})
-
-	if syncer.calls != 1 {
-		t.Fatalf("sync calls = %d, want 1", syncer.calls)
-	}
-	if syncer.err != expected {
-		t.Fatalf("syncer err = %v, want %v", syncer.err, expected)
-	}
 })
 
 type failingRequiredEffect struct {
@@ -230,10 +167,7 @@ type failingRequiredEffect struct {
 	calls int
 }
 
-func (e *failingRequiredEffect) Apply(PageSaveEvent) {
-	t := e
-	_ = t
-}
+func (e *failingRequiredEffect) Apply(PageSaveEvent) {}
 
 func (e *failingRequiredEffect) ApplyRequired(PageSaveEvent) error {
 	e.calls++

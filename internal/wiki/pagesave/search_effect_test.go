@@ -2,356 +2,204 @@ package pagesave
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/search"
 )
 
-// setupSearchTest creates a temp-dir-backed tree, SQLiteIndex and SearchIndexSideEffect.
-func setupSearchTest(t pagesaveTestT) (*tree.TreeService, *search.SQLiteIndex, *SearchIndexSideEffect) {
-	t.Helper()
-	tmp := t.TempDir()
+func setupSearchTest() (*tree.TreeService, *search.SQLiteIndex, *SearchIndexSideEffect) {
+	ginkgo.GinkgoHelper()
 
+	tmp := tempPagesaveDir()
 	treeSvc := tree.NewTreeService(tmp)
-	if err := treeSvc.LoadTree(); err != nil {
-		t.Fatalf("LoadTree: %v", err)
-	}
+	Expect(treeSvc.LoadTree()).To(Succeed())
 
 	index, err := search.NewSQLiteIndex(tmp)
-	if err != nil {
-		t.Fatalf("NewSQLiteIndex: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
-		if err := index.Close(); err != nil {
-			t.Errorf("index.Close: %v", err)
-		}
+		Expect(index.Close()).To(Succeed())
 	})
 
-	effect := NewSearchIndexSideEffect(index, treeSvc, nil)
-	return treeSvc, index, effect
+	return treeSvc, index, NewSearchIndexSideEffect(index, treeSvc, nil)
 }
 
-// createPageWithContent creates a page node and writes content to it via UpdateNode.
-func createPageWithContent(t pagesaveTestT, treeSvc *tree.TreeService, title, slug, content string) *tree.Page {
-	t.Helper()
+func createPageWithContent(treeSvc *tree.TreeService, title, slug, content string) *tree.Page {
+	ginkgo.GinkgoHelper()
+	return createChildPageWithContent(treeSvc, nil, title, slug, content)
+}
+
+func createChildPageWithContent(treeSvc *tree.TreeService, parentID *tree.PageID, title, slug, content string) *tree.Page {
+	ginkgo.GinkgoHelper()
+
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode("system", nil, title, newFixtureSlug(slug), &kind)
-	if err != nil {
-		t.Fatalf("CreateNode(%q): %v", title, err)
-	}
+	id, err := treeSvc.CreateNode(newFixtureUserID("system"), parentID, title, newFixtureSlug(slug), &kind)
+	Expect(err).NotTo(HaveOccurred())
 	page, err := treeSvc.GetPage(*id)
-	if err != nil {
-		t.Fatalf("GetPage after CreateNode: %v", err)
-	}
-	if err := treeSvc.UpdateNode(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &content, newFixturePageVersion(page.Version()), false); err != nil {
-		t.Fatalf("UpdateNode(%q): %v", title, err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(treeSvc.UpdateNode(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &content, newFixturePageVersion(page.Version()), false)).To(Succeed())
 	page, err = treeSvc.GetPage(*id)
-	if err != nil {
-		t.Fatalf("GetPage after UpdateNode: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return page
 }
 
-// ─── IndexAllPages ────────────────────────────────────────────────────────────
+func searchForTerm(index *search.SQLiteIndex, term string) *search.SearchResult {
+	ginkgo.GinkgoHelper()
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_IndexesExistingPages", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
+	result, err := index.Search(term, nil, 0, 10)
+	Expect(err).NotTo(HaveOccurred())
+	return result
+}
 
-	page := createPageWithContent(t, treeSvc, "Search Test Page", "search-test", "# Search Test Page\nThis is some uniquecontent for indexing.")
+func haveSearchHitForPage(pageID tree.PageID) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Count": BeNumerically(">=", 1),
+		"Items": ContainElement(HaveField("PageID", Equal(pageID))),
+	}))
+}
 
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
+func haveSearchHitForPageAtPath(pageID tree.PageID, path string) types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Count": BeNumerically(">=", 1),
+		"Items": ContainElement(SatisfyAll(
+			HaveField("PageID", Equal(pageID)),
+			HaveField("Path", Equal(path)),
+		)),
+	}))
+}
 
-	result, err := index.Search("uniquecontent", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count == 0 {
-		t.Fatal("expected at least one search hit, got 0")
-	}
-	if result.Items[0].PageID != page.ID {
-		t.Errorf("expected pageID %q, got %q", page.ID, result.Items[0].PageID)
-	}
+func haveNoSearchHits() types.GomegaMatcher {
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Count": BeZero(),
+		"Items": BeEmpty(),
+	}))
+}
 
-})
+var _ = ginkgo.Describe("search indexing side effect", func() {
+	ginkgo.When("search bootstrap runs", func() {
+		ginkgo.It("indexes existing pages in the tree", func() {
+			treeSvc, index, effect := setupSearchTest()
+			page := createPageWithContent(treeSvc, "Search Test Page", "search-test", "# Search Test Page\nThis is some uniquecontent for indexing.")
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_ClearsStaleEntries", func() {
-	t := ginkgo.GinkgoT()
-	_, index, effect := setupSearchTest(t)
+			Expect(effect.IndexAllPages()).To(Succeed())
 
-	// Pre-populate the index with a stale entry not present in the tree.
-	if err := index.IndexPage("stale/path", "stale.md", "stale-id", "Stale Page", tree.NodeKindPage, "stale content ghostpage"); err != nil {
-		t.Fatalf("IndexPage (stale): %v", err)
-	}
+			Expect(searchForTerm(index, "uniquecontent")).To(haveSearchHitForPage(page.ID))
+		})
 
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
+		ginkgo.It("clears stale index entries that are absent from the tree", func() {
+			_, index, effect := setupSearchTest()
+			Expect(index.IndexPage("stale/path", "stale.md", newFixturePageID("stale-id"), "Stale Page", tree.NodeKindPage, "stale content ghostpage")).To(Succeed())
 
-	result, err := index.Search("ghostpage", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count != 0 {
-		t.Errorf("expected stale entry to be cleared, got %d hits", result.Count)
-	}
+			Expect(effect.IndexAllPages()).To(Succeed())
 
-})
+			Expect(searchForTerm(index, "ghostpage")).To(haveNoSearchHits())
+		})
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_IndexAllPages_EmptyTree", func() {
-	t := ginkgo.GinkgoT()
-	_, index, effect := setupSearchTest(t)
+		ginkgo.It("succeeds without adding hits for an empty tree", func() {
+			_, index, effect := setupSearchTest()
 
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("expected no error on empty tree, got: %v", err)
-	}
+			Expect(effect.IndexAllPages()).To(Succeed())
 
-	result, err := index.Search("anything", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count != 0 {
-		t.Errorf("expected 0 hits on empty tree, got %d", result.Count)
-	}
-
-})
-
-// ─── Apply ───────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Create_IndexesPage", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
-
-	page := createPageWithContent(t, treeSvc, "Created Page", "created", "some uniqueterm_create content")
-
-	effect.Apply(PageSaveEvent{
-		Operation: PageOperationCreate,
-		After:     page,
+			Expect(searchForTerm(index, "anything")).To(haveNoSearchHits())
+		})
 	})
 
-	result, err := index.Search("uniqueterm_create", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count == 0 {
-		t.Fatal("expected page to be indexed after Create event")
-	}
-	if result.Items[0].PageID != page.ID {
-		t.Errorf("expected pageID %q, got %q", page.ID, result.Items[0].PageID)
-	}
+	ginkgo.When("a page is created", func() {
+		ginkgo.It("indexes the saved page content", func() {
+			treeSvc, index, effect := setupSearchTest()
+			page := createPageWithContent(treeSvc, "Created Page", "created", "some uniqueterm_create content")
 
-})
+			effect.Apply(PageSaveEvent{
+				Operation: PageOperationCreate,
+				After:     page,
+			})
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Update_ReplacesContentAfterBootstrap", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
-
-	page := createPageWithContent(t, treeSvc, "My Page", "my-page", "initial uniqueword_before content")
-
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
-
-	before, err := index.Search("uniqueword_before", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search (before): %v", err)
-	}
-	if before.Count == 0 {
-		t.Fatal("expected initial content to be indexed after bootstrap")
-	}
-
-	newContent := "updated uniqueword_after content"
-	if err := treeSvc.UpdateNode(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &newContent, newFixturePageVersion(page.Version()), false); err != nil {
-		t.Fatalf("UpdateNode: %v", err)
-	}
-	updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
-	if err != nil {
-		t.Fatalf("GetPage after update: %v", err)
-	}
-
-	effect.Apply(PageSaveEvent{
-		Operation: PageOperationUpdate,
-		After:     updated,
+			Expect(searchForTerm(index, "uniqueterm_create")).To(haveSearchHitForPage(page.ID))
+		})
 	})
 
-	stale, err := index.Search("uniqueword_before", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search (stale): %v", err)
-	}
-	if stale.Count != 0 {
-		t.Errorf("expected old content to be replaced, but 'uniqueword_before' still found")
-	}
+	ginkgo.When("a page is updated after bootstrap", func() {
+		ginkgo.It("replaces stale indexed terms with the updated content", func() {
+			treeSvc, index, effect := setupSearchTest()
+			page := createPageWithContent(treeSvc, "My Page", "my-page", "initial uniqueword_before content")
+			Expect(effect.IndexAllPages()).To(Succeed())
+			Expect(searchForTerm(index, "uniqueword_before")).To(haveSearchHitForPage(page.ID))
 
-	fresh, err := index.Search("uniqueword_after", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search (fresh): %v", err)
-	}
-	if fresh.Count == 0 {
-		t.Error("expected new content to be searchable after Update event")
-	}
+			newContent := "updated uniqueword_after content"
+			Expect(treeSvc.UpdateNode(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &newContent, newFixturePageVersion(page.Version()), false)).To(Succeed())
+			updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(err).NotTo(HaveOccurred())
 
-})
+			effect.Apply(PageSaveEvent{
+				Operation: PageOperationUpdate,
+				After:     updated,
+			})
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Delete_RemovesFromIndex", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
-
-	page := createPageWithContent(t, treeSvc, "Delete Me", "delete-me", "deletable uniqueterm_delete content")
-
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
-
-	before, err := index.Search("uniqueterm_delete", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search (before): %v", err)
-	}
-	if before.Count == 0 {
-		t.Fatal("expected page to be indexed before deletion")
-	}
-
-	effect.Apply(PageSaveEvent{
-		Operation:     PageOperationDelete,
-		AffectedPages: []*tree.Page{page},
+			Expect(searchForTerm(index, "uniqueword_before")).To(haveNoSearchHits())
+			Expect(searchForTerm(index, "uniqueword_after")).To(haveSearchHitForPage(updated.ID))
+		})
 	})
 
-	after, err := index.Search("uniqueterm_delete", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search (after): %v", err)
-	}
-	if after.Count != 0 {
-		t.Errorf("expected page to be removed from index after Delete event, got %d hits", after.Count)
-	}
+	ginkgo.When("a page is deleted", func() {
+		ginkgo.It("removes the page from the search index", func() {
+			treeSvc, index, effect := setupSearchTest()
+			page := createPageWithContent(treeSvc, "Delete Me", "delete-me", "deletable uniqueterm_delete content")
+			Expect(effect.IndexAllPages()).To(Succeed())
+			Expect(searchForTerm(index, "uniqueterm_delete")).To(haveSearchHitForPage(page.ID))
 
-})
+			effect.Apply(PageSaveEvent{
+				Operation:     PageOperationDelete,
+				AffectedPages: []*tree.Page{page},
+			})
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Delete_Recursive_RemovesAllPagesFromIndex", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
+			Expect(searchForTerm(index, "uniqueterm_delete")).To(haveNoSearchHits())
+		})
 
-	parent := createPageWithContent(t, treeSvc, "Parent Section", "parent", "parent uniqueterm_parent content")
+		ginkgo.It("removes every affected page in a recursive delete", func() {
+			treeSvc, index, effect := setupSearchTest()
+			parent := createPageWithContent(treeSvc, "Parent Section", "parent", "parent uniqueterm_parent content")
 
-	kind := tree.NodeKindPage
-	parentID := newFixturePageID(parent.ID)
-	child1ID, err := treeSvc.CreateNode("system", &parentID, "Child One", "child-one", &kind)
-	if err != nil {
-		t.Fatalf("CreateNode child1: %v", err)
-	}
-	child1, err := treeSvc.GetPage(*child1ID)
-	if err != nil {
-		t.Fatalf("GetPage child1: %v", err)
-	}
-	content1 := "child one uniqueterm_child1 content"
-	if err := treeSvc.UpdateNode(newFixtureUserID("system"), newFixturePageID(child1.ID), child1.Title, newFixtureSlug(child1.Slug), &content1, newFixturePageVersion(child1.Version()), false); err != nil {
-		t.Fatalf("UpdateNode child1: %v", err)
-	}
+			parentID := newFixturePageID(parent.ID)
+			child1 := createChildPageWithContent(treeSvc, &parentID, "Child One", "child-one", "child one uniqueterm_child1 content")
+			child2 := createChildPageWithContent(treeSvc, &parentID, "Child Two", "child-two", "child two uniqueterm_child2 content")
+			Expect(effect.IndexAllPages()).To(Succeed())
 
-	child2ID, err := treeSvc.CreateNode("system", &parentID, "Child Two", "child-two", &kind)
-	if err != nil {
-		t.Fatalf("CreateNode child2: %v", err)
-	}
-	child2, err := treeSvc.GetPage(*child2ID)
-	if err != nil {
-		t.Fatalf("GetPage child2: %v", err)
-	}
-	content2 := "child two uniqueterm_child2 content"
-	if err := treeSvc.UpdateNode(newFixtureUserID("system"), newFixturePageID(child2.ID), child2.Title, newFixtureSlug(child2.Slug), &content2, newFixturePageVersion(child2.Version()), false); err != nil {
-		t.Fatalf("UpdateNode child2: %v", err)
-	}
+			Expect(searchForTerm(index, "uniqueterm_parent")).To(haveSearchHitForPage(parent.ID))
+			Expect(searchForTerm(index, "uniqueterm_child1")).To(haveSearchHitForPage(child1.ID))
+			Expect(searchForTerm(index, "uniqueterm_child2")).To(haveSearchHitForPage(child2.ID))
 
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
+			effect.Apply(PageSaveEvent{
+				Operation:     PageOperationDelete,
+				AffectedPages: []*tree.Page{child1, child2, parent},
+			})
 
-	for _, term := range []string{"uniqueterm_parent", "uniqueterm_child1", "uniqueterm_child2"} {
-		r, err := index.Search(term, nil, 0, 10)
-		if err != nil {
-			t.Fatalf("Search(%q) before delete: %v", term, err)
-		}
-		if r.Count == 0 {
-			t.Fatalf("expected %q to be indexed before delete", term)
-		}
-	}
-
-	// Simulate recursive delete: AffectedPages contains the full subtree.
-	child1Final, err := treeSvc.GetPage(*child1ID)
-	if err != nil {
-		t.Fatalf("GetPage child1Final: %v", err)
-	}
-	child2Final, err := treeSvc.GetPage(*child2ID)
-	if err != nil {
-		t.Fatalf("GetPage child2Final: %v", err)
-	}
-	parentFinal, err := treeSvc.GetPage(newFixturePageID(parent.ID))
-	if err != nil {
-		t.Fatalf("GetPage parentFinal: %v", err)
-	}
-	effect.Apply(PageSaveEvent{
-		Operation:     PageOperationDelete,
-		AffectedPages: []*tree.Page{child1Final, child2Final, parentFinal},
+			Expect(searchForTerm(index, "uniqueterm_parent")).To(haveNoSearchHits())
+			Expect(searchForTerm(index, "uniqueterm_child1")).To(haveNoSearchHits())
+			Expect(searchForTerm(index, "uniqueterm_child2")).To(haveNoSearchHits())
+		})
 	})
 
-	for _, term := range []string{"uniqueterm_parent", "uniqueterm_child1", "uniqueterm_child2"} {
-		r, err := index.Search(term, nil, 0, 10)
-		if err != nil {
-			t.Fatalf("Search(%q) after delete: %v", term, err)
-		}
-		if r.Count != 0 {
-			t.Errorf("expected %q to be removed after recursive delete, got %d hits", term, r.Count)
-		}
-	}
+	ginkgo.When("a page moves under another section", func() {
+		ginkgo.It("keeps the page searchable at its new path", func() {
+			treeSvc, index, effect := setupSearchTest()
+			kind := tree.NodeKindPage
+			parentID, err := treeSvc.CreateNode(newFixtureUserID("system"), nil, "Target Section", newFixtureSlug("target"), &kind)
+			Expect(err).NotTo(HaveOccurred())
+			page := createPageWithContent(treeSvc, "Movable Page", "movable", "movable uniqueterm_move content")
+			Expect(effect.IndexAllPages()).To(Succeed())
 
-})
+			Expect(treeSvc.MoveNode(newFixtureUserID("system"), newFixturePageID(page.ID), *parentID, newFixturePageVersion(page.Version()))).To(Succeed())
+			moved, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(err).NotTo(HaveOccurred())
 
-var _ = ginkgo.It("TestSearchIndexSideEffect_Apply_Move_PageStillSearchableAtNewPath", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, index, effect := setupSearchTest(t)
+			effect.Apply(PageSaveEvent{
+				Operation:     PageOperationMove,
+				AffectedPages: []*tree.Page{moved},
+			})
 
-	// Create a parent page (will auto-convert to section when child is added).
-	kind := tree.NodeKindPage
-	parentID, err := treeSvc.CreateNode("system", nil, "Target Section", "target", &kind)
-	if err != nil {
-		t.Fatalf("CreateNode parent: %v", err)
-	}
-
-	page := createPageWithContent(t, treeSvc, "Movable Page", "movable", "movable uniqueterm_move content")
-
-	if err := effect.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages: %v", err)
-	}
-
-	// Move the page under the parent section.
-	if err := treeSvc.MoveNode("system", newFixturePageID(page.ID), *parentID, newFixturePageVersion(page.Version())); err != nil {
-		t.Fatalf("MoveNode: %v", err)
-	}
-	moved, err := treeSvc.GetPage(newFixturePageID(page.ID))
-	if err != nil {
-		t.Fatalf("GetPage after move: %v", err)
-	}
-
-	effect.Apply(PageSaveEvent{
-		Operation:     PageOperationMove,
-		AffectedPages: []*tree.Page{moved},
+			Expect(searchForTerm(index, "uniqueterm_move")).To(haveSearchHitForPageAtPath(page.ID, "target/movable"))
+		})
 	})
-
-	result, err := index.Search("uniqueterm_move", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count == 0 {
-		t.Fatal("expected page to remain searchable after Move event")
-	}
-	if result.Items[0].PageID != page.ID {
-		t.Errorf("expected pageID %q, got %q", page.ID, result.Items[0].PageID)
-	}
-
-	// Path in index must reflect the new location.
-	wantPath := "target/movable"
-	if result.Items[0].Path != wantPath {
-		t.Errorf("expected path %q after move, got %q", wantPath, result.Items[0].Path)
-	}
-
 })

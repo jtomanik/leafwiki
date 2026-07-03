@@ -2,122 +2,89 @@ package pagesave
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/properties"
 )
 
-func setupPropertiesEffectTest(t pagesaveTestT) (*tree.TreeService, *properties.PropertiesService, *PropertiesSideEffect) {
-	t.Helper()
-	dir := t.TempDir()
+func setupPropertiesEffectTest() (*tree.TreeService, *properties.PropertiesService, *PropertiesSideEffect) {
+	ginkgo.GinkgoHelper()
 
+	dir := tempPagesaveDir()
 	treeSvc := tree.NewTreeService(dir)
-	if err := treeSvc.LoadTree(); err != nil {
-		t.Fatalf("LoadTree: %v", err)
-	}
+	Expect(treeSvc.LoadTree()).To(Succeed())
 
 	store, err := properties.NewPropertiesStore(dir)
-	if err != nil {
-		t.Fatalf("NewPropertiesStore: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("PropertiesStore.Close: %v", err)
-		}
+		Expect(store.Close()).To(Succeed())
 	})
 
 	svc := properties.NewPropertiesService(store)
-	effect := NewPropertiesSideEffect(svc, nil)
-	return treeSvc, svc, effect
+	return treeSvc, svc, NewPropertiesSideEffect(svc, nil)
 }
 
-// ─── PropertiesSideEffect ─────────────────────────────────────────────────────
+var _ = ginkgo.Describe("property indexing side effect", func() {
+	ginkgo.When("a page is created with property frontmatter", func() {
+		ginkgo.It("indexes the page under each declared property", func() {
+			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
+			raw := "---\nstatus: draft\nauthor: alice\n---\n\nPage body."
+			page := createPageWithFrontmatter(treeSvc, "Props Page", "props-page", raw)
 
-var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Create_IndexesPropertiesFromRawContent", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
+			effect.Apply(PageSaveEvent{
+				Operation: PageOperationCreate,
+				After:     page,
+			})
 
-	raw := "---\nstatus: draft\nauthor: alice\n---\n\nPage body."
-	page := createPageWithFrontmatter(t, treeSvc, "Props Page", "props-page", raw)
+			ids, err := propsSvc.GetPageIDsByProperty("status", "draft")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ids).To(ConsistOf(page.ID))
 
-	effect.Apply(PageSaveEvent{
-		Operation: PageOperationCreate,
-		After:     page,
+			ids, err = propsSvc.GetPageIDsByProperty("author", "alice")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ids).To(ConsistOf(page.ID))
+		})
 	})
 
-	ids, err := propsSvc.GetPageIDsByProperty("status", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-	if len(ids) != 1 || ids[0] != page.ID {
-		t.Errorf("expected page %q indexed under status=draft, got %v", page.ID, ids)
-	}
+	ginkgo.When("a page changes its property frontmatter", func() {
+		ginkgo.It("removes stale property mappings and indexes the new value", func() {
+			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
+			raw := "---\nstatus: draft\n---\n\nOriginal."
+			page := createPageWithFrontmatter(treeSvc, "Update Props", "update-props", raw)
+			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
-	ids2, err := propsSvc.GetPageIDsByProperty("author", "alice")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty (author): %v", err)
-	}
-	if len(ids2) != 1 || ids2[0] != page.ID {
-		t.Errorf("expected page %q indexed under author=alice, got %v", page.ID, ids2)
-	}
+			newRaw := "---\nstatus: published\n---\n\nUpdated."
+			Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), "Update Props", newFixtureSlug("update-props"), &newRaw, true)).To(Succeed())
+			updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(err).NotTo(HaveOccurred())
+			effect.Apply(PageSaveEvent{Operation: PageOperationUpdate, After: updated})
 
-})
+			old, err := propsSvc.GetPageIDsByProperty("status", "draft")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(old).To(BeEmpty())
 
-var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Update_ReindexesProperties", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
-
-	raw := "---\nstatus: draft\n---\n\nOriginal."
-	page := createPageWithFrontmatter(t, treeSvc, "Update Props", "update-props", raw)
-	effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
-
-	newRaw := "---\nstatus: published\n---\n\nUpdated."
-	if err := treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), "Update Props", newFixtureSlug("update-props"), &newRaw, true); err != nil {
-		t.Fatalf("UpdateNode: %v", err)
-	}
-	updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
-	if err != nil {
-		t.Fatalf("GetPage after update: %v", err)
-	}
-	effect.Apply(PageSaveEvent{Operation: PageOperationUpdate, After: updated})
-
-	old, err := propsSvc.GetPageIDsByProperty("status", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty (old): %v", err)
-	}
-	if len(old) != 0 {
-		t.Errorf("expected status=draft to be gone, got %v", old)
-	}
-
-	fresh, err := propsSvc.GetPageIDsByProperty("status", "published")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty (new): %v", err)
-	}
-	if len(fresh) != 1 || fresh[0] != updated.ID {
-		t.Errorf("expected status=published to be indexed, got %v", fresh)
-	}
-
-})
-
-var _ = ginkgo.It("TestPropertiesSideEffect_Apply_Delete_RemovesProperties", func() {
-	t := ginkgo.GinkgoT()
-	treeSvc, propsSvc, effect := setupPropertiesEffectTest(t)
-
-	raw := "---\nstatus: draft\n---\n\nBody."
-	page := createPageWithFrontmatter(t, treeSvc, "Delete Props", "delete-props", raw)
-	effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
-
-	effect.Apply(PageSaveEvent{
-		Operation:     PageOperationDelete,
-		AffectedPages: []*tree.Page{page},
+			fresh, err := propsSvc.GetPageIDsByProperty("status", "published")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fresh).To(ConsistOf(updated.ID))
+		})
 	})
 
-	ids, err := propsSvc.GetPageIDsByProperty("status", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-	if len(ids) != 0 {
-		t.Errorf("expected properties removed after delete, got %v", ids)
-	}
+	ginkgo.When("a page with properties is deleted", func() {
+		ginkgo.It("removes the page from property lookups", func() {
+			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
+			raw := "---\nstatus: draft\n---\n\nBody."
+			page := createPageWithFrontmatter(treeSvc, "Delete Props", "delete-props", raw)
+			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
+			effect.Apply(PageSaveEvent{
+				Operation:     PageOperationDelete,
+				AffectedPages: []*tree.Page{page},
+			})
+
+			ids, err := propsSvc.GetPageIDsByProperty("status", "draft")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ids).To(BeEmpty())
+		})
+	})
 })
