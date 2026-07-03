@@ -126,6 +126,10 @@ func gomegaStringsContainsMatcherDiagnostic() string {
 	return "use ContainSubstring matcher instead of asserting strings.Contains with BeTrue/BeFalse"
 }
 
+func gomegaRenderedMessageStringsContainsDiagnostic() string {
+	return "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+}
+
 func gomegaErrorsIsMatcherDiagnostic() string {
 	return "use MatchError matcher instead of asserting errors.Is with BeTrue/BeFalse"
 }

@@ -486,6 +486,18 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect([]string{seen.Path, seen.Body}).To(Equal([]string{"/mcp", "{}"})) // want "do not compare multiple fields through a positional composite assertion; use HaveField/MatchFields or a named matcher"
 }
 
+func matchValidationIssueMessageText(expected string) any {
+	type issue struct {
+		MessageID MessageID
+		Message   string
+	}
+
+	return func(actual issue) bool {
+		return strings.Contains(actual.Message, "page.id") && // want "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+			strings.Contains(actual.Message, expected) // want "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+	}
+}
+
 func matchMatcherBackedRecord(content GomegaMatcher) any {
 	type matcherBackedRecord struct {
 		Content any

@@ -386,6 +386,10 @@ func checkErrorStringPredicate(ctx *analysisContext, call *ast.CallExpr) {
 	}
 	if exprIsErrorStringCall(ctx, call.Args[0]) {
 		ctx.report(ruleGomegaErrorString, call.Args[0], gomegaErrorStringMatcherDiagnostic())
+		return
+	}
+	if exprSuggestsTestRenderedProseContract(call.Args[0]) {
+		ctx.report(ruleGomegaStringsContains, call, gomegaRenderedMessageStringsContainsDiagnostic())
 	}
 }
 
