@@ -1,87 +1,60 @@
 package links
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
-
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("TestLinksStore_CreatesDatabaseInStorageDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("links store persistence", func() {
+	ginkgo.It("creates its SQLite database inside the configured storage directory", func() {
+		tmp := linksTempDir()
 		store, err := NewLinksStore(tmp)
-		if err != nil {
-			t.Fatalf("NewLinksStore err: %v", err)
-		}
-		closeLinksStoreForTest(store, t)
+		Expect(err).NotTo(HaveOccurred())
+		closeLinksStoreForTest(store)
 
-		if _, err := os.Stat(filepath.Join(tmp, "links.db")); err != nil {
-			t.Fatalf("expected links.db in storage dir, got err: %v", err)
-		}
-
+		Expect(filepath.Join(tmp, "links.db")).To(BeAnExistingFile())
 	})
-})
 
-var _ = ginkgo.Describe("TestLinksDatabasePath_WindowsPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps Windows-style storage paths under the links database file", func() {
 		got := strings.ReplaceAll(linksDatabasePath(`C:\wiki\data`, "links.db"), `\`, `/`)
-		want := `C:/wiki/data/links.db`
-		if got != want {
-			t.Fatalf("path = %q, want %q", got, want)
-		}
 
+		Expect(got).To(Equal(`C:/wiki/data/links.db`))
 	})
-})
 
-var _ = ginkgo.Describe("TestLinksStore_GetOutgoingLinksForPages_BatchesLargeInputs", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		store, err := NewLinksStore(tmp)
-		if err != nil {
-			t.Fatalf("NewLinksStore err: %v", err)
-		}
-		closeLinksStoreForTest(store, t)
+	ginkgo.It("returns outgoing links for large page batches without dropping entries", func() {
+		store, err := NewLinksStore(linksTempDir())
+		Expect(err).NotTo(HaveOccurred())
+		closeLinksStoreForTest(store)
 
 		pageIDs := make([]tree.PageID, 0, maxOutgoingLinksQueryArgs+5)
 		for i := 0; i < maxOutgoingLinksQueryArgs+5; i++ {
 			pageID := newFixturePageID(fmt.Sprintf("page-%d", i))
 			pageIDs = append(pageIDs, pageID)
-			if err := store.AddLinks(pageID, fmt.Sprintf("Title %s", pageID), []TargetLink{{
+			Expect(store.AddLinks(pageID, fmt.Sprintf("Title %s", pageID), []TargetLink{{
 				TargetPageID:   newFixturePageID(fmt.Sprintf("target-%s", pageID)),
 				TargetPagePath: fmt.Sprintf("target/%s", pageID),
-			}}); err != nil {
-				t.Fatalf("AddLinks(%s) failed: %v", pageID, err)
-			}
+			}})).To(Succeed())
 		}
 
 		outgoingByPageID, err := store.GetOutgoingLinksForPages(pageIDs)
-		if err != nil {
-			t.Fatalf("GetOutgoingLinksForPages failed: %v", err)
-		}
-		if len(outgoingByPageID) != len(pageIDs) {
-			t.Fatalf("expected %d page entries, got %d", len(pageIDs), len(outgoingByPageID))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(outgoingByPageID).To(HaveLen(len(pageIDs)))
 
 		for _, pageID := range pageIDs {
-			outgoings := outgoingByPageID[pageID]
-			if len(outgoings) != 1 {
-				t.Fatalf("expected 1 outgoing for %s, got %d", pageID, len(outgoings))
-			}
-			if outgoings[0].FromPageID != pageID {
-				t.Fatalf("expected outgoing from %s, got %s", pageID, outgoings[0].FromPageID)
-			}
-			if wantPath := fmt.Sprintf("/target/%s", pageID); outgoings[0].ToPath.WikiPath() != wantPath {
-				t.Fatalf("expected target path %q, got %q", wantPath, outgoings[0].ToPath.WikiPath())
-			}
+			Expect(outgoingByPageID).To(HaveKeyWithValue(pageID, ConsistOf(
+				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"FromPageID": Equal(pageID),
+					"ToPath": WithTransform(func(path tree.RoutePath) string {
+						return path.WikiPath()
+					}, Equal(fmt.Sprintf("/target/%s", pageID))),
+				}),
+			)))
 		}
-
 	})
 })

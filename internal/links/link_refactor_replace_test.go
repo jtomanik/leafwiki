@@ -2,17 +2,15 @@ package links
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
-
-	"strings"
+	. "github.com/onsi/gomega"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Parentheses in destinations do not corrupt the rewrite
 // - Source page move recalculates relative links without changing absolute links
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_KeepsQueryAndFragment", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
+	ginkgo.It("keeps query strings and fragments attached to rewritten destinations", func() {
 		content := `[Link](/docs/b?mode=1#intro)`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -20,20 +18,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_KeepsQueryAndFragmen
 			NewPath: "/guides/b",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 rewrite, got %d", result.Count())
-		}
-		if result.Content != `[Link](/guides/b?mode=1#intro)` {
-			t.Fatalf("unexpected content: %q", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Link](/guides/b?mode=1#intro)`))
 	})
-})
 
-// - Parentheses in destinations do not corrupt the rewrite
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_SupportsParenthesesInDestination", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rewrites destinations containing parentheses without corrupting them", func() {
 		content := `[Draft](./page_(draft))`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -41,19 +30,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_SupportsParenthesesI
 			NewPath: "/guides/page_(draft)",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 rewrite, got %d", result.Count())
-		}
-		if result.Content != `[Draft](../guides/page_(draft))` {
-			t.Fatalf("unexpected content: %q", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Draft](../guides/page_(draft))`))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_OnlyChangesDestinationSegment", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("changes only the link destination segment when labels and titles contain punctuation", func() {
 		content := `[Label with (parens)](/docs/b "Title")`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -61,19 +42,13 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_OnlyChangesDestinati
 			NewPath: "/guides/b",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 rewrite, got %d", result.Count())
-		}
-		if !strings.Contains(result.Content, `[Label with (parens)](/guides/b "Title")`) {
-			t.Fatalf("unexpected content: %q", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(ContainSubstring(`[Label with (parens)](/guides/b "Title")`))
 	})
 })
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathChange_UsesFileSemanticsForCrossTreeMove", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("markdown refactor path-change rewriting", func() {
+	ginkgo.It("uses file-relative semantics when a page moves across trees", func() {
 		content := `[Target](./seite-a)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -88,20 +63,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathC
 			},
 		)
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 rewrite, got %d", result.Count())
-		}
-		if result.Content != `[Target](../../test-link-refactoring/seite-a)` {
-			t.Fatalf("unexpected content: %q", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Target](../../test-link-refactoring/seite-a)`))
 	})
-})
 
-// - Source page move recalculates relative links without changing absolute links
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathChange_PreservesCanonicalPageMdFromMovedSource", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("preserves canonical page markdown extensions after the source page moves", func() {
 		content := `[Target](../b/target.md)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -111,19 +77,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathC
 			nil,
 		)
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 rewrite, got %d", result.Count())
-		}
-		if result.Content != `[Target](../../docs/b/target.md)` {
-			t.Fatalf("unexpected content: %q", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Target](../../docs/b/target.md)`))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathChange_IgnoresRelativeAssetLinks", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("leaves relative asset links unchanged when a source page moves", func() {
 		content := `[Asset](assets/abc/manual.pdf)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -138,19 +96,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathC
 			},
 		)
 
-		if result.Count() != 0 {
-			t.Fatalf("expected no rewrite for asset link, got %d", result.Count())
-		}
-		if result.Content != content {
-			t.Fatalf("asset link should remain unchanged, got %q", result.Content)
-		}
-
+		Expect(result.Count()).To(BeZero())
+		Expect(result.Content).To(Equal(content))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathChange_DoesNotRewriteEscapedPseudoLinks", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("leaves escaped pseudo-links unchanged while recalculating real relative links", func() {
 		content := `\[Literal](./target.md)
 [Other](../shared/other.md)`
 
@@ -166,15 +116,8 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteRelativeLinksForPathC
 			},
 		)
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only the real link to be recalculated, got %d changes:\n%s", result.Count(), result.Content)
-		}
-		if strings.Contains(result.Content, `\[Literal](../../docs/a/target.md)`) {
-			t.Fatalf("escaped pseudo-link should remain unchanged:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, `\[Literal](./target.md)`) {
-			t.Fatalf("escaped pseudo-link should remain unchanged:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).NotTo(ContainSubstring(`\[Literal](../../docs/a/target.md)`))
+		Expect(result.Content).To(ContainSubstring(`\[Literal](./target.md)`))
 	})
 })

@@ -2,8 +2,7 @@ package links
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
-
-	"strings"
+	. "github.com/onsi/gomega"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -13,9 +12,8 @@ import (
 // - Page and section with the same basename are not cross-rewritten
 // - Broken non-canonical links are not silently rewritten by refactor
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_RewritesAbsoluteAndRelativeTargets", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
+	ginkgo.It("rewrites absolute relative and subtree wiki targets without touching external or image links", func() {
 		content := `
 [Absolute](/docs/b)
 	[Relative](./b)
@@ -29,33 +27,17 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_RewritesAbsoluteAndR
 			NewPath: "/guides/b",
 		}})
 
-		if result.Count() != 3 {
-			t.Fatalf("expected 3 changes, got %d", result.Count())
-		}
-		if !strings.Contains(result.Content, "[Absolute](/guides/b)") {
-			t.Fatalf("expected absolute link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Relative](../guides/b)") {
-			t.Fatalf("expected relative link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Nested](/guides/b/child#section)") {
-			t.Fatalf("expected subtree link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[External](https://example.com/docs/b)") {
-			t.Fatalf("external link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "![Image](/docs/b.png)") {
-			t.Fatalf("image link should remain unchanged, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(3))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Absolute](/guides/b)"),
+			ContainSubstring("[Relative](../guides/b)"),
+			ContainSubstring("[Nested](/guides/b/child#section)"),
+			ContainSubstring("[External](https://example.com/docs/b)"),
+			ContainSubstring("![Image](/docs/b.png)"),
+		))
 	})
-})
 
-// - Existing canonical relative page links preserve relative style
-// - Existing canonical absolute page links preserve absolute style
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelative", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps canonical page markdown extensions on absolute and relative rewritten links", func() {
 		content := "[Absolute](/docs/b.md)\n[Relative](./b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -63,22 +45,14 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKee
 			NewPath: "/guides/b",
 		}})
 
-		if result.Count() != 2 {
-			t.Fatalf("expected 2 changes, got %d; content:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Absolute](/guides/b.md)") {
-			t.Fatalf("expected absolute canonical page link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Relative](../guides/b.md)") {
-			t.Fatalf("expected relative canonical page link rewrite, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(2))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Absolute](/guides/b.md)"),
+			ContainSubstring("[Relative](../guides/b.md)"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixForAbsoluteOutput", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("uses the configured markdown root prefix for absolute output", func() {
 		content := "[Absolute](/sync/old.md)\n[Relative](./old.md)"
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
@@ -89,22 +63,14 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixFo
 			Kind:    "page",
 		}})
 
-		if result.Count() != 2 {
-			t.Fatalf("expected 2 changes, got %d; content:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Absolute](/docs/sync/new.md)") {
-			t.Fatalf("expected prefixed absolute canonical link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Relative](./new.md)") {
-			t.Fatalf("expected relative link to remain relative, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(2))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Absolute](/docs/sync/new.md)"),
+			ContainSubstring("[Relative](./new.md)"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixForPrefixedAbsoluteInput", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("recognizes absolute input that already includes the markdown root prefix", func() {
 		content := "[Absolute](/docs/sync/old.md)"
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
@@ -115,19 +81,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixFo
 			Kind:    "page",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 change, got %d; content:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Absolute](/docs/sync/new.md)") {
-			t.Fatalf("expected prefixed absolute canonical link rewrite, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(ContainSubstring("[Absolute](/docs/sync/new.md)"))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteCanonicalPageLinksPreservesExplicitDotSlashStyle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("preserves explicit dot-slash style for same-directory page links", func() {
 		content := "[Relative](./b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -136,20 +94,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteCanonicalPageLinksPre
 			Kind:    "page",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 change, got %d; content:\n%s", result.Count(), result.Content)
-		}
-		if result.Content != "[Relative](./c.md)" {
-			t.Fatalf("expected explicit ./ style to be preserved, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal("[Relative](./c.md)"))
 	})
-})
 
-// - Broken non-canonical links are not silently rewritten by refactor
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewriteLegacyExtensionlessPageLinks", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rewrites canonical page links without healing legacy extensionless page links", func() {
 		content := "[Target](/target)\n[Canonical](/target.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/source", []RewriteRule{{
@@ -158,22 +107,14 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewriteLegacyExtensio
 			Kind:    "page",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only the canonical page link to change, got %d changes:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Target](/target)") {
-			t.Fatalf("legacy extensionless page link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Canonical](/renamed-target.md)") {
-			t.Fatalf("canonical page link should be rewritten, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Target](/target)"),
+			ContainSubstring("[Canonical](/renamed-target.md)"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewritePseudoLinksWithWhitespaceBeforeDestination", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("ignores link-like text separated from a destination by whitespace", func() {
 		content := "[Space] (/docs/b.md)\n[Newline]\n(/docs/b.md)\n[Canonical](/docs/b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -182,25 +123,15 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewritePseudoLinksWit
 			Kind:    "page",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only the canonical link to change, got %d changes:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Space] (/docs/b.md)") {
-			t.Fatalf("space pseudo-link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Newline]\n(/docs/b.md)") {
-			t.Fatalf("newline pseudo-link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Canonical](/docs/c.md)") {
-			t.Fatalf("canonical link should be rewritten, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Space] (/docs/b.md)"),
+			ContainSubstring("[Newline]\n(/docs/b.md)"),
+			ContainSubstring("[Canonical](/docs/c.md)"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewriteLinkLikeTextInsideTitle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rewrites only the real destination when title text looks like a link", func() {
 		content := `[Outer](/docs/a.md "[Inner](/docs/b.md)")`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{
@@ -216,20 +147,11 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_DoesNotRewriteLinkLikeTextIn
 			},
 		})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only the real link destination to change, got %d changes:\n%s", result.Count(), result.Content)
-		}
-		if result.Content != `[Outer](/docs/renamed-a.md "[Inner](/docs/b.md)")` {
-			t.Fatalf("link-like title text should remain unchanged, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Outer](/docs/renamed-a.md "[Inner](/docs/b.md)")`))
 	})
-})
 
-// - Page and section with the same basename are not cross-rewritten
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_PageRefactorDoesNotRewriteSameBasenameSectionLink", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("does not cross-rewrite a same-basename section link during a page refactor", func() {
 		content := "[Page](/docs/sync.md)\n[Section](/docs/sync)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -238,22 +160,14 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_PageRefactorDoesNotRewriteSa
 			Kind:    "page",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only the canonical page link to change, got %d changes:\n%s", result.Count(), result.Content)
-		}
-		if !strings.Contains(result.Content, "[Page](/docs/sync-page.md)") {
-			t.Fatalf("expected page link rewrite, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Section](/docs/sync)") {
-			t.Fatalf("same-basename section link should remain unchanged, got:\n%s", result.Content)
-		}
-
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[Page](/docs/sync-page.md)"),
+			ContainSubstring("[Section](/docs/sync)"),
+		))
 	})
-})
 
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_LegacyPageOverrideDoesNotRewriteDescendants", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rewrites only the exact healed target for legacy page override rules", func() {
 		content := "[Sync page](/docs/sync)\n[Sync child](/docs/sync/child.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -263,57 +177,10 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_LegacyPageOverrideDoesNotRew
 			OutputKind: "page",
 		}})
 
-		if result.Content != "[Sync page](/docs/sync-page.md)\n[Sync child](/docs/sync/child.md)" {
-			t.Fatalf("legacy page override should only rewrite the exact healed target, got:\n%s", result.Content)
-		}
-
+		Expect(result.Content).To(Equal("[Sync page](/docs/sync-page.md)\n[Sync child](/docs/sync/child.md)"))
 	})
-})
 
-// - Section move keeps section links extensionless
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_RewriteSectionLinksUsesFilesystemRelativeSemantics", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		content := "[Section](../b)"
-
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/current", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
-		}})
-
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 change, got %d; content:\n%s", result.Count(), result.Content)
-		}
-		if result.Content != "[Section](../../guides/b)" {
-			t.Fatalf("expected section link rewrite from source file directory, got %q", result.Content)
-		}
-
-	})
-})
-
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_UsesMovedSourcePathForRelativeLinks", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		content := `[Relative](../shared)`
-
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/page", []RewriteRule{{
-			OldPath: "/docs",
-			NewPath: "/archive/docs",
-		}})
-
-		if result.Count() != 1 {
-			t.Fatalf("expected 1 change, got %d", result.Count())
-		}
-		if result.Content != `[Relative](../shared)` {
-			t.Fatalf("expected relative link to be recalculated against moved source path, got %q", result.Content)
-		}
-
-	})
-})
-
-var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_IgnoresAssetLinks", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("leaves asset links unchanged while rewriting wiki links", func() {
 		content := `
 [AssetAbs](/assets/abc/manual.pdf)
 [AssetRel](assets/abc/manual.pdf)
@@ -325,18 +192,37 @@ var _ = ginkgo.Describe("TestMarkdownRefactorEngine_Rewrite_IgnoresAssetLinks", 
 			NewPath: "/guides/b",
 		}})
 
-		if result.Count() != 1 {
-			t.Fatalf("expected only wiki link rewrite, got %d", result.Count())
-		}
-		if !strings.Contains(result.Content, "[AssetAbs](/assets/abc/manual.pdf)") {
-			t.Fatalf("absolute asset link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[AssetRel](assets/abc/manual.pdf)") {
-			t.Fatalf("relative asset link should remain unchanged, got:\n%s", result.Content)
-		}
-		if !strings.Contains(result.Content, "[Wiki](/guides/b)") {
-			t.Fatalf("wiki link should be rewritten, got:\n%s", result.Content)
-		}
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(SatisfyAll(
+			ContainSubstring("[AssetAbs](/assets/abc/manual.pdf)"),
+			ContainSubstring("[AssetRel](assets/abc/manual.pdf)"),
+			ContainSubstring("[Wiki](/guides/b)"),
+		))
+	})
+})
 
+var _ = ginkgo.Describe("markdown refactor relative path semantics", func() {
+	ginkgo.It("uses source-file directory semantics for moved section links", func() {
+		content := "[Section](../b)"
+
+		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/current", []RewriteRule{{
+			OldPath: "/docs/b",
+			NewPath: "/guides/b",
+		}})
+
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal("[Section](../../guides/b)"))
+	})
+
+	ginkgo.It("recalculates relative links against the moved source path", func() {
+		content := `[Relative](../shared)`
+
+		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/page", []RewriteRule{{
+			OldPath: "/docs",
+			NewPath: "/archive/docs",
+		}})
+
+		Expect(result.Count()).To(Equal(1))
+		Expect(result.Content).To(Equal(`[Relative](../shared)`))
 	})
 })

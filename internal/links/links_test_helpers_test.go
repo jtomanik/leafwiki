@@ -1,19 +1,23 @@
 package links
 
-import ginkgo "github.com/onsi/ginkgo/v2"
+import (
+	"os"
 
-type linksTestT interface {
-	Helper()
-	TempDir() string
-	Fatalf(format string, args ...any)
-	Errorf(format string, args ...any)
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+func linksTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-links-test-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
-func closeLinksStoreForTest(store *LinksStore, t linksTestT) {
-	t.Helper()
+func closeLinksStoreForTest(store *LinksStore) {
+	ginkgo.GinkgoHelper()
 	ginkgo.DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
+		Expect(store.Close()).To(Succeed())
 	})
 }

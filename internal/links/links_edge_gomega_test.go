@@ -1,6 +1,7 @@
 package links
 
 import (
+	"database/sql/driver"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdownlinks"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
@@ -58,9 +60,107 @@ func matchRewriteResult(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
-var _ = Describe("links edge coverage", func() {
+type appliedRewriteRuleResult struct {
+	Path    tree.RoutePath
+	Applied bool
+}
+
+type rewrittenLinkDestinationResult struct {
+	Destination string
+	Changed     bool
+	Warning     *RewriteWarning
+}
+
+func applyRewriteRulesResult(destination tree.RoutePath, rules []RewriteRule) appliedRewriteRuleResult {
+	path, applied := applyRewriteRules(destination, rules)
+	return appliedRewriteRuleResult{Path: path, Applied: applied}
+}
+
+func applyRewriteRulesForKindResult(destination tree.RoutePath, targetKind TargetKind, rules []RewriteRule) appliedRewriteRuleResult {
+	path, applied := applyRewriteRulesForKind(destination, targetKind, rules)
+	return appliedRewriteRuleResult{Path: path, Applied: applied}
+}
+
+func rewriteLinkDestinationResult(sourcePath tree.RoutePath, sourceKind MarkdownSourceKind, destination string, rules []RewriteRule, rootPrefix string) rewrittenLinkDestinationResult {
+	rewritten, changed, warning := rewriteLinkDestination(sourcePath, sourceKind, destination, rules, rootPrefix)
+	return rewrittenLinkDestinationResult{Destination: rewritten, Changed: changed, Warning: warning}
+}
+
+func rewriteRelativeLinkForPathChangeResult(sourcePath tree.RoutePath, newSourcePath tree.RoutePath, sourceKind MarkdownSourceKind, destination string, rules []RewriteRule) rewrittenLinkDestinationResult {
+	rewritten, changed, warning := rewriteRelativeLinkForPathChange(sourcePath, newSourcePath, sourceKind, destination, rules)
+	return rewrittenLinkDestinationResult{Destination: rewritten, Changed: changed, Warning: warning}
+}
+
+func matchAppliedRewriteRule(path tree.RoutePath) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path":    Equal(path),
+		"Applied": BeTrue(),
+	})
+}
+
+func matchUnappliedRewriteRule() types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Applied": BeFalse(),
+	})
+}
+
+func matchUnchangedLinkDestination(destination string, messageID sharederrors.MessageID) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination": Equal(destination),
+		"Changed":     BeFalse(),
+		"Warning":     testmatchers.HaveMessageID(messageID),
+	})
+}
+
+func matchRewrittenLinkDestination(destination string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination": Equal(destination),
+		"Changed":     BeTrue(),
+		"Warning":     BeNil(),
+	})
+}
+
+func matchUnchangedLinkDestinationWithoutWarning(destination string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination": Equal(destination),
+		"Changed":     BeFalse(),
+		"Warning":     BeNil(),
+	})
+}
+
+func matchTreePageContentError() types.GomegaMatcher {
+	return Satisfy(func(err error) bool {
+		return errors.Is(err, tree.ErrGetPageContent)
+	})
+}
+
+func matchLinksError(target error) types.GomegaMatcher {
+	return Satisfy(func(err error) bool {
+		return errors.Is(err, target)
+	})
+}
+
+func linksStoreWithExecError(err error) *LinksStore {
+	GinkgoHelper()
+	return newScriptedLinksStore(&linksScriptedDBScript{
+		exec: func(string, []driver.NamedValue) (driver.Result, error) {
+			return nil, err
+		},
+	})
+}
+
+func linksStoreWithQueryError(err error) *LinksStore {
+	GinkgoHelper()
+	return newScriptedLinksStore(&linksScriptedDBScript{
+		query: func(string, []driver.NamedValue) (driver.Rows, error) {
+			return nil, err
+		},
+	})
+}
+
+var _ = Describe("links persistence and rewrite edge behavior", func() {
 	It("migrates a legacy links table without target kinds", func() {
-		store := newManualLinksStore(GinkgoT().TempDir())
+		store := newManualLinksStore(linksTempDir())
 		_, err := store.db.Exec(`
 			CREATE TABLE links (
 				from_page_id TEXT NOT NULL,
@@ -85,7 +185,7 @@ var _ = Describe("links edge coverage", func() {
 	})
 
 	It("migrates a legacy links table with non-key target kind values", func() {
-		store := newManualLinksStore(GinkgoT().TempDir())
+		store := newManualLinksStore(linksTempDir())
 		_, err := store.db.Exec(`
 			CREATE TABLE links (
 				from_page_id TEXT NOT NULL,
@@ -109,7 +209,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("section-kind-source"), sectionStoredTargetKind))
 	})
 
-	It("exercises unfiltered prefix queries and non-kind broken-link wrappers", func() {
+	It("returns unfiltered prefix matches and marks broken links through service wrappers", func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
@@ -137,7 +237,12 @@ var _ = Describe("links edge coverage", func() {
 		Expect(store.HealLinksForPath("/docs/topic", newFixturePageID("healed-page"))).To(Succeed())
 		healed, err := store.GetBacklinksForPage(newFixturePageID("healed-page"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(healed).NotTo(BeEmpty())
+		Expect(healed).To(ConsistOf(matchBacklink(gstruct.Fields{
+			"FromPageID": Equal(newFixturePageID("source-page")),
+			"ToPageID":   Equal(newFixturePageID("healed-page")),
+			"ToKind":     Equal(TargetKindPage),
+			"Broken":     BeFalse(),
+		})))
 
 		Expect(service.MarkLinksBrokenForPath("docs/topic")).To(Succeed())
 		allBroken, err := store.GetBrokenIncomingForPath("/docs/topic")
@@ -161,7 +266,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(NewLinkService("", nil, nil).Close()).To(Succeed())
 	})
 
-	It("covers pure path, suffix, and target-kind helpers", func() {
+	It("normalizes wiki paths, suffixes, target kinds, and relative destinations", func() {
 		Expect(normalizeWikiPath("docs//topic/?x=1#frag")).To(Equal("/docs/topic"))
 		Expect(normalizeWikiPath("")).To(BeEmpty())
 		Expect(normalizeWikiPath("/")).To(Equal("/"))
@@ -200,7 +305,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(sourceMarkdownFileForKind("/docs/source", MarkdownSourceKindSection).FilesystemPath()).To(Equal(filepath.ToSlash("docs/source/index.md")))
 	})
 
-	It("deduplicates rewrite warnings and exercises rewrite-rule wrappers", func() {
+	It("deduplicates rewrite warnings and reports rewrite-rule application results", func() {
 		warnings := dedupeWarnings([]RewriteWarning{
 			{Message: "same"},
 			{Message: "same"},
@@ -211,26 +316,22 @@ var _ = Describe("links edge coverage", func() {
 			{Message: "different"},
 		}))
 
-		rewritten, ok := applyRewriteRules("/docs/old", []RewriteRule{{
+		Expect(applyRewriteRulesResult("/docs/old", []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/docs/new",
-		}})
-		Expect(ok).To(BeTrue())
-		Expect(rewritten).To(Equal(tree.RoutePathFromString("/docs/new").Clean()))
+		}})).To(matchAppliedRewriteRule(tree.RoutePathFromString("/docs/new").Clean()))
 
-		_, ok = applyRewriteRulesForKind("/docs/old/child", TargetKindPage, []RewriteRule{{
+		Expect(applyRewriteRulesForKindResult("/docs/old/child", TargetKindPage, []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/docs/new",
 			Kind:    TargetKindPage,
-		}})
-		Expect(ok).To(BeFalse())
+		}})).To(matchUnappliedRewriteRule())
 
-		_, ok = applyRewriteRulesForKind("/docs/old/child", TargetKindPage, []RewriteRule{{
+		Expect(applyRewriteRulesForKindResult("/docs/old/child", TargetKindPage, []RewriteRule{{
 			OldPath:    "/docs/old",
 			NewPath:    "/docs/new",
 			OutputKind: TargetKindPage,
-		}})
-		Expect(ok).To(BeFalse())
+		}})).To(matchUnappliedRewriteRule())
 
 		Expect(rewriteRuleMatchesExactKind(RewriteRule{Kind: TargetKindPage}, "")).To(BeFalse())
 	})
@@ -265,8 +366,8 @@ var _ = Describe("links edge coverage", func() {
 		Expect(resolved.RoutePath).To(Equal(tree.RoutePathFromString("/docs/topic").Clean()))
 	})
 
-	It("covers unloaded tree guards and fallback result mapping", func() {
-		unloadedTree := tree.NewTreeService(GinkgoT().TempDir())
+	It("returns empty fallbacks for unloaded tree resolution and missing result targets", func() {
+		unloadedTree := tree.NewTreeService(linksTempDir())
 
 		Expect(resolveTargetLinksForSourceKind(unloadedTree, "/docs/source", tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
 		Expect(resolveTargetLinksWithIndex(nil, nil, "/docs/source", tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
@@ -302,76 +403,90 @@ var _ = Describe("links edge coverage", func() {
 		}))
 	})
 
-	It("returns service errors from a closed database without relying on nil-store panics", func() {
+	It("propagates store failures through service operations without nil-store panics", func() {
 		loadedTree := newLoadedLinksTreeService()
 		page := createLoadedLinksPage(loadedTree, "Source", "source", "[Target](target.md)")
-		store := newSQLClosedLinksStore()
-		service := NewLinkService("", loadedTree, store)
 
-		Expect(service.ClearLinks()).To(HaveOccurred())
-		Expect(service.IndexAllPages()).To(HaveOccurred())
+		clearErr := errors.New("links service clear failed")
+		clearService := NewLinkService("", loadedTree, linksStoreWithExecError(clearErr))
+		Expect(clearService.ClearLinks()).To(matchLinksError(clearErr))
+		Expect(clearService.IndexAllPages()).To(matchLinksError(clearErr))
 
-		_, err := service.GetLinkStatusForPage(page.ID, page.CalculateRoutePath())
-		Expect(err).To(HaveOccurred())
-		Expect(service.UpdateLinksForPage(page, page.Content)).To(HaveOccurred())
-		Expect(service.UpdateRewrittenLinksAndHealForPages([]*tree.Page{page}, nil)).To(HaveOccurred())
+		statusErr := errors.New("links service status query failed")
+		_, err := NewLinkService("", loadedTree, linksStoreWithQueryError(statusErr)).GetLinkStatusForPage(page.ID, page.CalculateRoutePath())
+		Expect(err).To(matchLinksError(statusErr))
+
+		updateErr := errors.New("links service update failed")
+		Expect(NewLinkService("", loadedTree, linksStoreWithExecError(updateErr)).UpdateLinksForPage(page, page.Content)).To(matchLinksError(updateErr))
+
+		rewriteErr := errors.New("links service rewrite query failed")
+		Expect(NewLinkService("", loadedTree, linksStoreWithQueryError(rewriteErr)).UpdateRewrittenLinksAndHealForPages([]*tree.Page{page}, nil)).To(matchLinksError(rewriteErr))
 	})
 
-	It("returns store errors from a closed database handle", func() {
-		store := newSQLClosedLinksStore()
+	It("propagates store operation failures from the database layer", func() {
 		pageID := newFixturePageID("source-page")
 		target := tree.RoutePathFromString("/docs/target")
 
-		Expect(store.ensureSchema()).To(HaveOccurred())
-		Expect(store.ensureLinksTable()).To(HaveOccurred())
-		_, err := store.linksTableColumns()
-		Expect(err).To(HaveOccurred())
-		Expect(store.migrateLinksTableToKindAware(nil)).To(HaveOccurred())
+		schemaErr := errors.New("links schema query failed")
+		Expect(linksStoreWithQueryError(schemaErr).ensureSchema()).To(matchLinksError(schemaErr))
+		Expect(linksStoreWithQueryError(schemaErr).ensureLinksTable()).To(matchLinksError(schemaErr))
+		_, err := linksStoreWithQueryError(schemaErr).linksTableColumns()
+		Expect(err).To(matchLinksError(schemaErr))
 
-		Expect(store.DeleteOutgoingLinks(pageID)).To(HaveOccurred())
-		Expect(store.MarkIncomingLinksBroken(newFixturePageID("target-page"))).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPath(target)).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPathAndKind(target, tree.NodeKindPage)).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPrefix("/docs")).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindPage)).To(HaveOccurred())
-		Expect(store.MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindSection)).To(HaveOccurred())
-		Expect(store.AddLinks(pageID, "Source", []TargetLink{{
+		beginErr := errors.New("links migration begin failed")
+		Expect(newScriptedLinksStore(&linksScriptedDBScript{beginErr: beginErr}).migrateLinksTableToKindAware(nil)).To(matchLinksError(beginErr))
+
+		execErr := errors.New("links store exec failed")
+		Expect(linksStoreWithExecError(execErr).DeleteOutgoingLinks(pageID)).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkIncomingLinksBroken(newFixturePageID("target-page"))).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkLinksBrokenForPath(target)).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkLinksBrokenForPathAndKind(target, tree.NodeKindPage)).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkLinksBrokenForPrefix("/docs")).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindPage)).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).MarkLinksBrokenForPrefixAndKind("/docs", tree.NodeKindSection)).To(matchLinksError(execErr))
+		Expect(linksStoreWithExecError(execErr).AddLinks(pageID, "Source", []TargetLink{{
 			TargetPageID:   newFixturePageID("target-page"),
 			TargetPagePath: target.WikiPath(),
 			TargetKind:     TargetKindPage,
-		}})).To(HaveOccurred())
-		Expect(store.ReplaceLinksAndHeal([]PageLinkUpdate{{
+		}})).To(matchLinksError(execErr))
+
+		prepareErr := errors.New("links store prepare failed")
+		Expect(newScriptedLinksStore(&linksScriptedDBScript{
+			prepare: prepareErrorWhen("DELETE FROM links WHERE from_page_id", prepareErr),
+		}).ReplaceLinksAndHeal([]PageLinkUpdate{{
 			FromPageID: pageID,
 			FromTitle:  "Source",
 			ToPath:     "/docs/source",
 			ToKind:     tree.NodeKindPage,
-		}})).To(HaveOccurred())
+		}})).To(matchLinksError(prepareErr))
 
-		_, err = store.GetBacklinksForPage(newFixturePageID("target-page"))
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetOutgoingLinksForPage(pageID)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetOutgoingLinksForPages([]tree.PageID{pageID})
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorMatchesForPrefix("/docs")
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorSourcePageIDsForPrefix("/docs")
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetBrokenIncomingForPath(target)
-		Expect(err).To(HaveOccurred())
-		_, err = store.GetBrokenIncomingForPathAndKind(target, tree.NodeKindPage)
-		Expect(err).To(HaveOccurred())
+		queryErr := errors.New("links store query failed")
+		queryStore := linksStoreWithQueryError(queryErr)
+		_, err = queryStore.GetBacklinksForPage(newFixturePageID("target-page"))
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetOutgoingLinksForPage(pageID)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetOutgoingLinksForPages([]tree.PageID{pageID})
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorMatchesForPrefix("/docs")
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefix("/docs")
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetBrokenIncomingForPath(target)
+		Expect(err).To(matchLinksError(queryErr))
+		_, err = queryStore.GetBrokenIncomingForPathAndKind(target, tree.NodeKindPage)
+		Expect(err).To(matchLinksError(queryErr))
 	})
 
-	It("covers no-op returns and upward path-change normalization in markdown refactoring", func() {
+	It("keeps no-op markdown rewrites stable and normalizes upward path changes", func() {
 		engine := NewMarkdownRefactorEngine()
 		rules := []RewriteRule{{
 			OldPath: "/docs/old",
@@ -393,7 +508,7 @@ var _ = Describe("links edge coverage", func() {
 		))
 	})
 
-	It("covers defensive markdown resolution and index fallback branches", func() {
+	It("returns broken targets and loaded-tree fallbacks for defensive markdown resolution", func() {
 		loadedTree := newLoadedLinksTreeService()
 		index := markdownlinks.NewIndex([]markdownlinks.Entry{{
 			Kind:      markdownlinks.EntryKindPage,
@@ -423,7 +538,7 @@ var _ = Describe("links edge coverage", func() {
 		Expect(markdownLinkIndexFromLoadedTreeWithOptions(nil, markdownlinks.Options{})).NotTo(BeNil())
 	})
 
-	It("covers remaining rewrite warning and path fallback branches", func() {
+	It("reports rewrite warnings when destinations cannot be resolved or emitted", func() {
 		rules := []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/docs/new",
@@ -442,10 +557,7 @@ var _ = Describe("links edge coverage", func() {
 		)
 		Expect(warnings).To(ConsistOf(testmatchers.HaveMessageID(rewriteWarningUnresolved)))
 
-		_, changed, warning := rewriteLinkDestination("/docs/source", MarkdownSourceKindPage, "../../../escape.md", rules, "")
-		Expect(changed).To(BeFalse())
-		Expect(warning).NotTo(BeNil())
-		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningUnresolved))
+		Expect(rewriteLinkDestinationResult("/docs/source", MarkdownSourceKindPage, "../../../escape.md", rules, "")).To(matchUnchangedLinkDestination("../../../escape.md", rewriteWarningUnresolved))
 
 		_, warnings = buildPathChangeRewritePlan(
 			"/docs/source",
@@ -470,13 +582,10 @@ var _ = Describe("links edge coverage", func() {
 
 		Expect(normalizeCandidateDestination("")).To(BeEmpty())
 
-		_, changed, warning = rewriteLinkDestination("/docs/source", MarkdownSourceKindPage, "old", []RewriteRule{{
+		Expect(rewriteLinkDestinationResult("/docs/source", MarkdownSourceKindPage, "old", []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/",
-		}}, "")
-		Expect(changed).To(BeFalse())
-		Expect(warning).NotTo(BeNil())
-		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningEmptyDestination))
+		}}, "")).To(matchUnchangedLinkDestination("old", rewriteWarningEmptyDestination))
 
 		Expect(addMarkdownLinkRootPrefix("/", "wiki")).To(Equal("/wiki"))
 		Expect(stripMarkdownLinkRootPrefix("/wiki", "wiki")).To(Equal("/"))
@@ -494,24 +603,20 @@ var _ = Describe("links edge coverage", func() {
 		Expect(relativeWikiLinkPath("/docs/source", "")).To(BeEmpty())
 	})
 
-	It("covers remaining relative path-change rewrite branches", func() {
+	It("rewrites relative path-change destinations and reports unresolved moves", func() {
 		restoreResolve := setLinksSeam(&linksResolveMarkdownRoutePath, func(tree.MarkdownPath, string) (tree.RoutePath, error) {
 			return "", errors.New("resolve failed")
 		})
-		rewritten, changed, warning := rewriteRelativeLinkForPathChange(
+		Expect(rewriteRelativeLinkForPathChangeResult(
 			"/docs/source",
 			"/docs/moved",
 			MarkdownSourceKindPage,
 			"../../../escape.md",
 			nil,
-		)
-		Expect(rewritten).To(Equal("../../../escape.md"))
-		Expect(changed).To(BeFalse())
-		Expect(warning).NotTo(BeNil())
-		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningUnresolved))
+		)).To(matchUnchangedLinkDestination("../../../escape.md", rewriteWarningUnresolved))
 		restoreResolve()
 
-		rewritten, changed, warning = rewriteRelativeLinkForPathChange(
+		Expect(rewriteRelativeLinkForPathChangeResult(
 			"/docs/source",
 			"/docs/moved",
 			MarkdownSourceKindPage,
@@ -521,23 +626,17 @@ var _ = Describe("links edge coverage", func() {
 				NewPath:    "/docs/new-section",
 				OutputKind: TargetKindSection,
 			}},
-		)
-		Expect(warning).To(BeNil())
-		Expect(changed).To(BeTrue())
-		Expect(rewritten).To(Equal("new-section"))
+		)).To(matchRewrittenLinkDestination("new-section"))
 
-		rewritten, changed, warning = rewriteRelativeLinkForPathChange(
+		Expect(rewriteRelativeLinkForPathChangeResult(
 			"/docs/source",
 			"/docs/source",
 			MarkdownSourceKindPage,
 			"target.md",
 			nil,
-		)
-		Expect(warning).To(BeNil())
-		Expect(changed).To(BeFalse())
-		Expect(rewritten).To(Equal("target.md"))
+		)).To(matchUnchangedLinkDestinationWithoutWarning("target.md"))
 
-		rewritten, changed, warning = rewriteRelativeLinkForPathChange(
+		Expect(rewriteRelativeLinkForPathChangeResult(
 			"/docs/source",
 			"/docs/moved",
 			MarkdownSourceKindPage,
@@ -546,24 +645,22 @@ var _ = Describe("links edge coverage", func() {
 				OldPath: "/docs/old",
 				NewPath: "/",
 			}},
-		)
-		Expect(rewritten).To(Equal("old"))
-		Expect(changed).To(BeFalse())
-		Expect(warning).NotTo(BeNil())
-		Expect(warning).To(testmatchers.HaveMessageID(rewriteWarningEmptyDestination))
+		)).To(matchUnchangedLinkDestination("old", rewriteWarningEmptyDestination))
 	})
 
-	It("covers remaining service-level error and no-op branches", func() {
-		unloadedTree := tree.NewTreeService(GinkgoT().TempDir())
-		Expect(NewLinkService("", unloadedTree, newSQLClosedLinksStore()).IndexAllPages()).To(Succeed())
+	It("treats unloaded trees as no-ops and propagates service store failures", func() {
+		unloadedTree := tree.NewTreeService(linksTempDir())
+		unloadedStoreErr := errors.New("links unloaded store should not be used")
+		Expect(NewLinkService("", unloadedTree, linksStoreWithExecError(unloadedStoreErr)).IndexAllPages()).To(Succeed())
 
 		loadedTree := newLoadedLinksTreeService()
-		Expect(NewLinkService("", loadedTree, newSQLClosedLinksStore()).IndexAllPages()).To(HaveOccurred())
+		loadedStoreErr := errors.New("links loaded store clear failed")
+		Expect(NewLinkService("", loadedTree, linksStoreWithExecError(loadedStoreErr)).IndexAllPages()).To(matchLinksError(loadedStoreErr))
 
 		page := createLoadedLinksPage(loadedTree, "Missing Content", "missing-content", "[Target](target.md)")
 		contentPath := filepath.Join(loadedTree.RootDir(), page.CalculateRoutePath().MarkdownContentPath(page.Kind).FilesystemPath())
 		Expect(os.Remove(contentPath)).To(Succeed())
-		Expect(NewLinkService("", loadedTree, newAdditionalLinksStore()).IndexAllPages()).To(HaveOccurred())
+		Expect(NewLinkService("", loadedTree, newAdditionalLinksStore()).IndexAllPages()).To(matchTreePageContentError())
 
 		Expect(rewriteResolvedTargets("/docs/source", tree.NodeKindPage, nil, nil, loadedTree, markdownLinkIndexForTree(loadedTree))).To(BeNil())
 	})
@@ -576,7 +673,7 @@ func markdownlinksResolution(code markdownlinks.IssueCode) markdownlinks.Resolut
 func newLoadedLinksTreeService() *tree.TreeService {
 	GinkgoHelper()
 
-	treeService := tree.NewTreeService(GinkgoT().TempDir())
+	treeService := tree.NewTreeService(linksTempDir())
 	Expect(treeService.LoadTree()).To(Succeed())
 	return treeService
 }
@@ -593,18 +690,6 @@ func createLoadedLinksPage(treeService *tree.TreeService, title string, slug str
 	page, err := treeService.GetPage(*pageID)
 	Expect(err).NotTo(HaveOccurred())
 	return page
-}
-
-func newSQLClosedLinksStore() *LinksStore {
-	GinkgoHelper()
-
-	store, err := NewLinksStore(GinkgoT().TempDir())
-	Expect(err).NotTo(HaveOccurred())
-	Expect(store.db.Close()).To(Succeed())
-	DeferCleanup(func() {
-		_ = store.Close()
-	})
-	return store
 }
 
 func setLinksSeam[T any](target *T, replacement T) func() {

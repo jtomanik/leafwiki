@@ -34,8 +34,10 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 
 		outgoing, err := store.GetOutgoingLinksForPages(testAdditionalPageIDs("source-page", "section-source"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(outgoing[newFixturePageID("source-page")]).To(BeEmpty())
-		Expect(outgoing[newFixturePageID("section-source")]).To(HaveLen(1))
+		Expect(outgoing).To(SatisfyAll(
+			Not(HaveKey(newFixturePageID("source-page"))),
+			HaveKeyWithValue(newFixturePageID("section-source"), HaveLen(1)),
+		))
 	})
 
 	ginkgo.It("marks exact page-kind links broken without marking same-path section links", func() {
@@ -127,7 +129,7 @@ var _ = ginkgo.Describe("refactor prefix queries", func() {
 
 func newAdditionalLinksStore() *LinksStore {
 	ginkgo.GinkgoHelper()
-	store, err := NewLinksStore(ginkgo.GinkgoT().TempDir())
+	store, err := NewLinksStore(linksTempDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
 		Expect(store.Close()).To(Succeed())

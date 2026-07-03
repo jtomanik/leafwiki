@@ -208,13 +208,13 @@ func (r *linksScriptedRows) Next(dest []driver.Value) error {
 	return nil
 }
 
-var _ = Describe("links SQL store edge coverage", func() {
-	It("covers construction, recovery, schema, migration, and close errors", func() {
+var _ = Describe("links SQL store persistence edge behavior", func() {
+	It("propagates construction, recovery, schema, migration, and close failures", func() {
 		openErr := errors.New("links open failed")
 		restoreOpen := setLinksSeam(&linksSQLOpen, func(string, string) (*sql.DB, error) {
 			return nil, openErr
 		})
-		_, err := NewLinksStore(GinkgoT().TempDir())
+		_, err := NewLinksStore(linksTempDir())
 		Expect(err).To(MatchError(openErr))
 		Expect((&LinksStore{}).Connect()).To(MatchError(openErr))
 		Expect((&LinksStore{}).ensureSchema()).To(MatchError(openErr))
@@ -229,13 +229,14 @@ var _ = Describe("links SQL store edge coverage", func() {
 			}), nil
 		})
 		restoreRecoverable := setLinksSeam(&linksIsSQLiteRecoverableError, func(error) bool { return false })
-		_, err = NewLinksStore(GinkgoT().TempDir())
+		_, err = NewLinksStore(linksTempDir())
 		Expect(err).To(MatchError(schemaErr))
 		restoreOpen()
 		restoreRecoverable()
 
 		retryOpenErr := errors.New("links retry open failed")
-		removed := false
+		retryDir := linksTempDir()
+		removedPath := ""
 		openCount := 0
 		restoreOpen = setLinksSeam(&linksSQLOpen, func(string, string) (*sql.DB, error) {
 			openCount++
@@ -249,10 +250,10 @@ var _ = Describe("links SQL store edge coverage", func() {
 			return nil, retryOpenErr
 		})
 		restoreRecoverable = setLinksSeam(&linksIsSQLiteRecoverableError, func(error) bool { return true })
-		restoreRemove := setLinksSeam(&linksRemoveSQLiteFiles, func(string) { removed = true })
-		_, err = NewLinksStore(GinkgoT().TempDir())
+		restoreRemove := setLinksSeam(&linksRemoveSQLiteFiles, func(path string) { removedPath = path })
+		_, err = NewLinksStore(retryDir)
 		Expect(err).To(MatchError(retryOpenErr))
-		Expect(removed).To(BeTrue())
+		Expect(removedPath).To(Equal(linksDatabasePath(retryDir, "links.db")))
 		restoreOpen()
 		restoreRecoverable()
 		restoreRemove()
@@ -275,7 +276,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 			}), nil
 		})
 		restoreRecoverable = setLinksSeam(&linksIsSQLiteRecoverableError, func(error) bool { return true })
-		_, err = NewLinksStore(GinkgoT().TempDir())
+		_, err = NewLinksStore(linksTempDir())
 		Expect(err).To(MatchError(retrySchemaErr))
 		restoreOpen()
 		restoreRecoverable()
@@ -293,7 +294,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 			return openLinksScriptedDB(&linksScriptedDBScript{}), nil
 		})
 		restoreRecoverable = setLinksSeam(&linksIsSQLiteRecoverableError, func(error) bool { return true })
-		store, err := NewLinksStore(GinkgoT().TempDir())
+		store, err := NewLinksStore(linksTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(store.Close()).To(Succeed())
 		restoreOpen()
@@ -320,13 +321,14 @@ var _ = Describe("links SQL store edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		restoreCloseRows()
 
+		tableInfoErr := errors.New("links table info rows failed")
 		store = newScriptedLinksStore(&linksScriptedDBScript{
 			query: func(string, []driver.NamedValue) (driver.Rows, error) {
-				return linksRows([]string{"bad"}, []driver.Value{nil}), nil
+				return &linksScriptedRows{columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"}, nextErr: tableInfoErr}, nil
 			},
 		})
 		_, err = store.linksTableColumns()
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchLinksError(tableInfoErr))
 
 		migrateErr := errors.New("links migrate failed")
 		store = newScriptedLinksStore(&linksScriptedDBScript{
@@ -353,7 +355,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 		Expect(store.Close()).To(MatchError(closeErr))
 	})
 
-	It("covers add and replace transaction errors", func() {
+	It("propagates add and replace transaction failures", func() {
 		fromPageID := newFixturePageID("source-page")
 		targetLink := TargetLink{
 			TargetPageID:   newFixturePageID("target-page"),
@@ -469,7 +471,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 		Expect(service.IndexAllPages()).To(MatchError(beginErr))
 	})
 
-	It("covers query close, scan, rows error, and link-status branches", func() {
+	It("returns stable read results and propagates query row failures", func() {
 		store := newAdditionalLinksStore()
 		restoreCloseRows := setLinksSeam(&linksCloseRows, func(interface{ Close() error }) error {
 			return errors.New("links query close failed")
@@ -477,12 +479,13 @@ var _ = Describe("links SQL store edge coverage", func() {
 		expectAllReadMethodsSucceed(store)
 		restoreCloseRows()
 
-		scanStore := newScriptedLinksStore(&linksScriptedDBScript{
+		queryErr := errors.New("links read query failed")
+		queryErrStore := newScriptedLinksStore(&linksScriptedDBScript{
 			query: func(string, []driver.NamedValue) (driver.Rows, error) {
-				return linksRows([]string{"bad1", "bad2"}, []driver.Value{"one", "two"}), nil
+				return nil, queryErr
 			},
 		})
-		Expect(scanStore).To(HaveAllReadMethodsFail())
+		Expect(queryErrStore).To(HaveReadMethodsPropagate(queryErr))
 
 		rowsErr := errors.New("links rows failed")
 		rowsErrStore := newScriptedLinksStore(&linksScriptedDBScript{
@@ -490,7 +493,7 @@ var _ = Describe("links SQL store edge coverage", func() {
 				return &linksScriptedRows{columns: []string{"bad"}, nextErr: rowsErr}, nil
 			},
 		})
-		Expect(rowsErrStore).To(HaveAllReadMethodsFail())
+		Expect(rowsErrStore).To(HaveReadMethodsPropagate(rowsErr))
 
 		nullRowsStore := newScriptedLinksStore(&linksScriptedDBScript{
 			query: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
@@ -665,21 +668,21 @@ func expectAllReadMethodsSucceed(store *LinksStore) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func HaveAllReadMethodsFail() types.GomegaMatcher {
+func HaveReadMethodsPropagate(target error) types.GomegaMatcher {
 	GinkgoHelper()
 	return WithTransform(collectLinksReadMethodErrors, gstruct.MatchAllFields(gstruct.Fields{
-		"TableColumns":                       HaveOccurred(),
-		"Backlinks":                          HaveOccurred(),
-		"OutgoingForPage":                    HaveOccurred(),
-		"OutgoingForPages":                   HaveOccurred(),
-		"RefactorMatches":                    HaveOccurred(),
-		"RefactorMatchesForPageKind":         HaveOccurred(),
-		"RefactorMatchesForSectionKind":      HaveOccurred(),
-		"RefactorSourceIDs":                  HaveOccurred(),
-		"RefactorSourceIDsForPageKind":       HaveOccurred(),
-		"RefactorSourceIDsForSectionKind":    HaveOccurred(),
-		"BrokenIncomingForPath":              HaveOccurred(),
-		"BrokenIncomingForPathAndTargetKind": HaveOccurred(),
+		"TableColumns":                       matchLinksError(target),
+		"Backlinks":                          matchLinksError(target),
+		"OutgoingForPage":                    matchLinksError(target),
+		"OutgoingForPages":                   matchLinksError(target),
+		"RefactorMatches":                    matchLinksError(target),
+		"RefactorMatchesForPageKind":         matchLinksError(target),
+		"RefactorMatchesForSectionKind":      matchLinksError(target),
+		"RefactorSourceIDs":                  matchLinksError(target),
+		"RefactorSourceIDsForPageKind":       matchLinksError(target),
+		"RefactorSourceIDsForSectionKind":    matchLinksError(target),
+		"BrokenIncomingForPath":              matchLinksError(target),
+		"BrokenIncomingForPathAndTargetKind": matchLinksError(target),
 	}))
 }
 
