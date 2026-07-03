@@ -103,6 +103,32 @@ func matchSectionFrontmatter(id tree.PageID, title string, createdAt string, upd
 	})
 }
 
+var errMigratedFrontmatterMissing = errors.New("migrated frontmatter missing")
+
+type migratedFrontmatterResult struct {
+	Frontmatter markdown.Frontmatter
+	Body        string
+	Err         error
+}
+
+func parsedMigratedFrontmatter(fm markdown.Frontmatter, body string, has bool, err error) migratedFrontmatterResult {
+	if err != nil {
+		return migratedFrontmatterResult{Frontmatter: fm, Body: body, Err: err}
+	}
+	if !has {
+		return migratedFrontmatterResult{Frontmatter: fm, Body: body, Err: errMigratedFrontmatterMissing}
+	}
+	return migratedFrontmatterResult{Frontmatter: fm, Body: body}
+}
+
+func haveMigratedFrontmatter(frontmatter types.GomegaMatcher, body types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Frontmatter": frontmatter,
+		"Body":        body,
+		"Err":         Succeed(),
+	})
+}
+
 var _ = ginkgo.Describe("runner", func() {
 	ginkgo.It("adds managed frontmatter during V2 migration while preserving page body", func() {
 		skipUnlessSchemaVersionAtLeast(2)
@@ -128,12 +154,13 @@ var _ = ginkgo.Describe("runner", func() {
 		raw, err := os.ReadFile(pagePath)
 		Expect(err).NotTo(HaveOccurred())
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s", string(raw))
-		Expect(newFixturePageID(fm.LeafWikiID)).To(Equal(*id))
-		Expect(strings.TrimSpace(fm.LeafWikiTitle)).NotTo(BeEmpty())
-		Expect(migratedBody).To(Equal(body))
+		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(string(raw)))).To(haveMigratedFrontmatter(
+			SatisfyAll(
+				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(*id))),
+				HaveField("LeafWikiTitle", WithTransform(strings.TrimSpace, Not(BeEmpty()))),
+			),
+			Equal(body),
+		))
 	})
 
 	ginkgo.It("preserves custom frontmatter while adding V2 managed metadata", func() {
@@ -171,13 +198,14 @@ Hello World
 		Expect(migrated).To(ContainSubstring("custom_key: keep-me"))
 		Expect(migrated).To(ContainSubstring("- alpha"))
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s", migrated)
-		Expect(newFixturePageID(fm.LeafWikiID)).To(Equal(*id))
-		Expect(strings.TrimSpace(fm.LeafWikiTitle)).NotTo(BeEmpty())
 		wantBody := "# Page 1 Content\nHello World\n"
-		Expect(migratedBody).To(Equal(wantBody))
+		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(migrated))).To(haveMigratedFrontmatter(
+			SatisfyAll(
+				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(*id))),
+				HaveField("LeafWikiTitle", WithTransform(strings.TrimSpace, Not(BeEmpty()))),
+			),
+			Equal(wantBody),
+		))
 	})
 
 	ginkgo.It("backfills V3 metadata frontmatter from stored page metadata", func() {
@@ -214,12 +242,11 @@ Hello World
 		raw, err := os.ReadFile(pagePath)
 		Expect(err).NotTo(HaveOccurred())
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(has).To(BeTrue())
-		Expect(fm).To(matchManagedMetadata("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z", "alice", "bob"))
 		wantBody := "# Page 1 Content\nHello World\n"
-		Expect(migratedBody).To(Equal(wantBody))
+		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(string(raw)))).To(haveMigratedFrontmatter(
+			matchManagedMetadata("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z", "alice", "bob"),
+			Equal(wantBody),
+		))
 	})
 
 	ginkgo.It("backfills V5 child order files from the legacy tree order", func() {
@@ -302,11 +329,10 @@ Hello World
 
 		raw, err := os.ReadFile(indexPath)
 		Expect(err).NotTo(HaveOccurred())
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(has).To(BeTrue())
-		Expect(fm).To(matchSectionFrontmatter(*id, "Docs", "2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z", "alice", "bob"))
-		Expect(strings.TrimSpace(body)).To(BeEmpty())
+		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(string(raw)))).To(haveMigratedFrontmatter(
+			matchSectionFrontmatter(*id, "Docs", "2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z", "alice", "bob"),
+			WithTransform(strings.TrimSpace, BeEmpty()),
+		))
 	})
 
 	ginkgo.It("coerces legacy page nodes with children so V5 preserves child order", func() {
