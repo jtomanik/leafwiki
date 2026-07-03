@@ -6,34 +6,33 @@ import (
 	"sort"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-type propertiesTestT interface {
-	Helper()
-	TempDir() string
-	Fatal(args ...any)
-	Fatalf(format string, args ...any)
-	Error(args ...any)
-	Errorf(format string, args ...any)
+func propertiesTempDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-properties-*")
+	Expect(err).To(Succeed())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
-func closeStoreForTest(t propertiesTestT, store *PropertiesStore) {
-	t.Helper()
+func closeStoreForTest(store *PropertiesStore) {
+	ginkgo.GinkgoHelper()
 	ginkgo.DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
+		Expect(store.Close()).To(Succeed())
 	})
 }
 
-func newTestStore(t propertiesTestT) *PropertiesStore {
-	t.Helper()
-	store, err := NewPropertiesStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewPropertiesStore: %v", err)
-	}
-	closeStoreForTest(t, store)
+func newTestStore() *PropertiesStore {
+	ginkgo.GinkgoHelper()
+
+	store, err := NewPropertiesStore(propertiesTempDir())
+	Expect(err).To(Succeed())
+	closeStoreForTest(store)
 	return store
 }
 
@@ -59,458 +58,287 @@ func props(kv ...string) map[string]PropertyEntry {
 	return m
 }
 
-// ─── DB lifecycle ────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_CreatesDatabaseInStorageDir", func() {
-	t := ginkgo.GinkgoT()
-	tmp := t.TempDir()
-	store, err := NewPropertiesStore(tmp)
-	if err != nil {
-		t.Fatalf("NewPropertiesStore: %v", err)
-	}
-	closeStoreForTest(t, store)
-
-	if _, err := os.Stat(filepath.Join(tmp, "properties.db")); err != nil {
-		t.Fatalf("expected properties.db to exist: %v", err)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_IdempotentSchema", func() {
-	t := ginkgo.GinkgoT()
-	tmp := t.TempDir()
-	for i := 0; i < 3; i++ {
-		store, err := NewPropertiesStore(tmp)
-		if err != nil {
-			t.Fatalf("NewPropertiesStore (run %d): %v", i, err)
-		}
-		if err := store.Close(); err != nil {
-			t.Fatalf("Close (run %d): %v", i, err)
-		}
-	}
-})
-
-// ─── SetPropertiesForPage ────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_StoresEntries", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	input := props("status", "draft", "author", "alice", "environment", "staging")
-	if err := store.SetPropertiesForPage("page-1", input); err != nil {
-		t.Fatalf("SetPropertiesForPage: %v", err)
-	}
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-
-	p := got["page-1"]
-	if p["status"] != (PropertyEntry{Value: "draft", Type: "text"}) {
-		t.Errorf("status = %+v", p["status"])
-	}
-	if p["author"] != (PropertyEntry{Value: "alice", Type: "text"}) {
-		t.Errorf("author = %+v", p["author"])
-	}
-	if p["environment"] != (PropertyEntry{Value: "staging", Type: "text"}) {
-		t.Errorf("environment = %+v", p["environment"])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_ReplacesOnSecondCall", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "author", "alice"))
-	_ = store.SetPropertiesForPage("page-1", props("status", "published"))
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	p := got["page-1"]
-	if _, ok := p["author"]; ok {
-		t.Error("author should have been replaced away")
-	}
-	if p["status"].Value != "published" {
-		t.Errorf("status = %q, want 'published'", p["status"].Value)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_EmptyMapClearsExisting", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	if err := store.SetPropertiesForPage("page-1", map[string]PropertyEntry{}); err != nil {
-		t.Fatalf("SetPropertiesForPage (clear): %v", err)
-	}
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if len(got["page-1"]) != 0 {
-		t.Errorf("expected empty props, got %v", got["page-1"])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_SetPropertiesForPage_NilMapClearsExisting", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	if err := store.SetPropertiesForPage("page-1", nil); err != nil {
-		t.Fatalf("SetPropertiesForPage (nil): %v", err)
-	}
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if len(got["page-1"]) != 0 {
-		t.Errorf("expected empty props after nil set, got %v", got["page-1"])
-	}
-})
-
-// ─── DeletePropertiesForPage ─────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_RemovesEntries", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	if err := store.DeletePropertiesForPage("page-1"); err != nil {
-		t.Fatalf("DeletePropertiesForPage: %v", err)
-	}
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if len(got["page-1"]) != 0 {
-		t.Errorf("expected empty after delete, got %v", got["page-1"])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_NonExistentIsNoop", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-	if err := store.DeletePropertiesForPage("does-not-exist"); err != nil {
-		t.Fatalf("DeletePropertiesForPage on unknown page: %v", err)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_DeletePropertiesForPage_DoesNotAffectOtherPages", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	_ = store.SetPropertiesForPage("page-2", props("status", "published"))
-
-	_ = store.DeletePropertiesForPage("page-1")
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-2"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if got["page-2"]["status"].Value != "published" {
-		t.Errorf("page-2 status should be unaffected, got %v", got["page-2"])
-	}
-})
-
-// ─── GetAllPropertyKeys ──────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_EmptyDB", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-	keys, err := store.GetAllPropertyKeys("", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-	if len(keys) != 0 {
-		t.Errorf("expected empty result, got %v", keys)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_ReturnsDistinctKeysWithCount", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "priority", "high"))
-	_ = store.SetPropertiesForPage("page-2", props("status", "published"))
-	_ = store.SetPropertiesForPage("page-3", props("status", "draft", "author", "alice"))
-
-	keys, err := store.GetAllPropertyKeys("", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-
-	byKey := make(map[string]int, len(keys))
-	for _, kc := range keys {
-		byKey[kc.Key] = kc.Count
-	}
-
-	if byKey["status"] != 3 {
-		t.Errorf("status count = %d, want 3", byKey["status"])
-	}
-	if byKey["priority"] != 1 {
-		t.Errorf("priority count = %d, want 1", byKey["priority"])
-	}
-	if byKey["author"] != 1 {
-		t.Errorf("author count = %d, want 1", byKey["author"])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_OrderByCountDescThenKeyAsc", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("alpha", "x", "beta", "x", "gamma", "x"))
-	_ = store.SetPropertiesForPage("page-2", props("alpha", "x", "beta", "x"))
-	_ = store.SetPropertiesForPage("page-3", props("alpha", "x"))
-
-	keys, err := store.GetAllPropertyKeys("", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-
-	if len(keys) != 3 {
-		t.Fatalf("expected 3 keys, got %d", len(keys))
-	}
-	if keys[0].Key != "alpha" || keys[0].Count != 3 {
-		t.Errorf("keys[0] = %+v, want {alpha 3}", keys[0])
-	}
-	if keys[1].Key != "beta" || keys[1].Count != 2 {
-		t.Errorf("keys[1] = %+v, want {beta 2}", keys[1])
-	}
-	if keys[2].Key != "gamma" || keys[2].Count != 1 {
-		t.Errorf("keys[2] = %+v, want {gamma 1}", keys[2])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_FilterByPrefix", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "x", "stage", "x", "score", "x", "author", "x"))
-
-	keys, err := store.GetAllPropertyKeys("st", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-
-	for _, kc := range keys {
-		if len(kc.Key) < 2 || kc.Key[:2] != "st" {
-			t.Errorf("key %q does not start with 'st'", kc.Key)
-		}
-	}
-	if len(keys) != 2 {
-		t.Errorf("expected 2 keys matching 'st', got %d: %v", len(keys), keys)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_RespectsLimit", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("a", "1", "b", "2", "c", "3", "d", "4", "e", "5"))
-
-	keys, err := store.GetAllPropertyKeys("", 3)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-	if len(keys) != 3 {
-		t.Errorf("expected 3 keys (limit), got %d", len(keys))
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_ZeroLimitReturnsAll", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("a", "1", "b", "2", "c", "3"))
-
-	keys, err := store.GetAllPropertyKeys("", 0)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys: %v", err)
-	}
-	if len(keys) != 3 {
-		t.Errorf("expected all 3 keys, got %d", len(keys))
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetAllPropertyKeys_FilterEscapesLikeWildcards", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "stage", "alpha"))
-
-	// "%" should match nothing (literal, not wildcard)
-	keys, err := store.GetAllPropertyKeys("%", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys with %% filter: %v", err)
-	}
-	if len(keys) != 0 {
-		t.Errorf("filter '%%' should match no keys (literal), got %v", keys)
-	}
-
-	// "_tatus" should match nothing (literal underscore)
-	keys, err = store.GetAllPropertyKeys("_tatus", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys with _ filter: %v", err)
-	}
-	if len(keys) != 0 {
-		t.Errorf("filter '_tatus' should match no keys (literal), got %v", keys)
-	}
-})
-
-// ─── GetPageIDsByProperty ─────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_ExactMatch", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	_ = store.SetPropertiesForPage("page-2", props("status", "published"))
-	_ = store.SetPropertiesForPage("page-3", props("status", "draft"))
-
-	ids, err := store.GetPageIDsByProperty("status", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-
-	sortTestPageIDs(ids)
-	want := []string{"page-1", "page-3"}
-	if len(ids) != len(want) {
-		t.Fatalf("expected %v, got %v", want, ids)
-	}
-	for i, w := range want {
-		if ids[i] != newFixturePageID(w) {
-			t.Errorf("[%d] = %q, want %q", i, ids[i], w)
-		}
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_NoMatch", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-
-	ids, err := store.GetPageIDsByProperty("status", "published")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-	if len(ids) != 0 {
-		t.Errorf("expected no matches, got %v", ids)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_KeyNotExistsReturnsEmpty", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-
-	ids, err := store.GetPageIDsByProperty("nonexistent", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-	if len(ids) != 0 {
-		t.Errorf("expected empty for unknown key, got %v", ids)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetPageIDsByProperty_ValueIsCaseSensitive", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "Draft"))
-
-	// Exact case "draft" should NOT match "Draft"
-	ids, err := store.GetPageIDsByProperty("status", "draft")
-	if err != nil {
-		t.Fatalf("GetPageIDsByProperty: %v", err)
-	}
-	if len(ids) != 0 {
-		t.Errorf("value matching should be case-sensitive, got %v", ids)
-	}
-})
-
-// ─── GetPropertiesForPages ────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_MultiplePages", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft", "score", "10"))
-	_ = store.SetPropertiesForPage("page-2", props("author", "alice"))
-	_ = store.SetPropertiesForPage("page-3", props("status", "published"))
-
-	got, err := store.GetPropertiesForPages(testPageIDs("page-1", "page-3"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-
-	if got["page-1"]["status"].Value != "draft" {
-		t.Errorf("page-1 status = %v", got["page-1"]["status"])
-	}
-	if _, ok := got["page-2"]; ok {
-		t.Error("page-2 should not be in result")
-	}
-	if got["page-3"]["status"].Value != "published" {
-		t.Errorf("page-3 status = %v", got["page-3"]["status"])
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_EmptyInputReturnsEmptyMap", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	got, err := store.GetPropertiesForPages(testPageIDs())
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if got == nil {
-		t.Fatal("expected empty map, got nil")
-	}
-	if len(got) != 0 {
-		t.Errorf("expected empty map, got %v", got)
-	}
-})
-
-var _ = ginkgo.It("TestPropertiesStore_GetPropertiesForPages_UnknownIDReturnsNoEntry", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	got, err := store.GetPropertiesForPages(testPageIDs("does-not-exist"))
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("expected empty map for unknown ID, got %v", got)
-	}
-})
-
-// ─── Clear ───────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestPropertiesStore_Clear_RemovesAllEntries", func() {
-	t := ginkgo.GinkgoT()
-	store := newTestStore(t)
-
-	_ = store.SetPropertiesForPage("page-1", props("status", "draft"))
-	_ = store.SetPropertiesForPage("page-2", props("author", "alice"))
-
-	if err := store.Clear(); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-
-	keys, err := store.GetAllPropertyKeys("", 50)
-	if err != nil {
-		t.Fatalf("GetAllPropertyKeys after Clear: %v", err)
-	}
-	if len(keys) != 0 {
-		t.Errorf("expected empty after Clear, got %v", keys)
-	}
+func matchExtractedProperties(kv ...string) types.GomegaMatcher {
+	return Equal(props(kv...))
+}
+
+func havePropertyKeys(keys ...PropertyKeyCount) types.GomegaMatcher {
+	return Equal(keys)
+}
+
+var _ = ginkgo.Describe("properties store", func() {
+	ginkgo.When("the store is initialized", func() {
+		ginkgo.It("creates the SQLite database in the storage directory", func() {
+			storageDir := propertiesTempDir()
+
+			store, err := NewPropertiesStore(storageDir)
+
+			Expect(err).To(Succeed())
+			closeStoreForTest(store)
+			_, err = os.Stat(filepath.Join(storageDir, "properties.db"))
+			Expect(err).To(Succeed())
+		})
+
+		ginkgo.It("can initialize the schema repeatedly in the same directory", func() {
+			storageDir := propertiesTempDir()
+
+			for range 3 {
+				store, err := NewPropertiesStore(storageDir)
+				Expect(err).To(Succeed())
+				Expect(store.Close()).To(Succeed())
+			}
+		})
+	})
+
+	ginkgo.When("page properties are replaced", func() {
+		ginkgo.It("stores all text entries for a page", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft", "author", "alice", "environment", "staging"))).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
+			Expect(err).To(Succeed())
+			Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), props(
+				"status", "draft",
+				"author", "alice",
+				"environment", "staging",
+			)))
+		})
+
+		ginkgo.It("removes entries that are not present in the second write", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft", "author", "alice"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "published"))).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
+			Expect(err).To(Succeed())
+			Expect(got).To(HaveKeyWithValue(newFixturePageID("page-1"), props("status", "published")))
+		})
+
+		ginkgo.It("clears existing entries for empty and nil property sets", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("empty-page"), props("status", "draft"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("empty-page"), map[string]PropertyEntry{})).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("nil-page"), props("status", "draft"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("nil-page"), nil)).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("empty-page", "nil-page"))
+			Expect(err).To(Succeed())
+			Expect(got).To(BeEmpty())
+		})
+	})
+
+	ginkgo.When("page properties are deleted", func() {
+		ginkgo.It("removes entries for the selected page", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+			Expect(store.DeletePropertiesForPage(newFixturePageID("page-1"))).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("page-1"))
+			Expect(err).To(Succeed())
+			Expect(got).To(BeEmpty())
+		})
+
+		ginkgo.It("treats unknown pages as a no-op", func() {
+			store := newTestStore()
+
+			Expect(store.DeletePropertiesForPage(newFixturePageID("does-not-exist"))).To(Succeed())
+		})
+
+		ginkgo.It("leaves other page properties intact", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("status", "published"))).To(Succeed())
+			Expect(store.DeletePropertiesForPage(newFixturePageID("page-1"))).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("page-2"))
+			Expect(err).To(Succeed())
+			Expect(got).To(HaveKeyWithValue(newFixturePageID("page-2"), props("status", "published")))
+		})
+	})
+
+	ginkgo.When("property keys are listed", func() {
+		ginkgo.It("returns no keys for an empty database", func() {
+			store := newTestStore()
+
+			keys, err := store.GetAllPropertyKeys("", 50)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(BeEmpty())
+		})
+
+		ginkgo.It("returns distinct keys with page counts", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft", "priority", "high"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("status", "published"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-3"), props("status", "draft", "author", "alice"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("", 50)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(ConsistOf(
+				PropertyKeyCount{Key: "status", Count: 3},
+				PropertyKeyCount{Key: "priority", Count: 1},
+				PropertyKeyCount{Key: "author", Count: 1},
+			))
+		})
+
+		ginkgo.It("orders keys by page count descending and then key ascending", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("alpha", "x", "beta", "x", "gamma", "x"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("alpha", "x", "beta", "x"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-3"), props("alpha", "x"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("", 50)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(havePropertyKeys(
+				PropertyKeyCount{Key: "alpha", Count: 3},
+				PropertyKeyCount{Key: "beta", Count: 2},
+				PropertyKeyCount{Key: "gamma", Count: 1},
+			))
+		})
+
+		ginkgo.It("filters keys by literal prefix", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "x", "stage", "x", "score", "x", "author", "x"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("st", 50)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(havePropertyKeys(
+				PropertyKeyCount{Key: "stage", Count: 1},
+				PropertyKeyCount{Key: "status", Count: 1},
+			))
+		})
+
+		ginkgo.It("respects a positive result limit", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("a", "1", "b", "2", "c", "3", "d", "4", "e", "5"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("", 3)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(HaveLen(3))
+		})
+
+		ginkgo.It("treats zero limit as unbounded", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("a", "1", "b", "2", "c", "3"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("", 0)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(HaveLen(3))
+		})
+
+		ginkgo.It("treats SQL wildcard characters as literal filter text", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft", "stage", "alpha"))).To(Succeed())
+
+			percentKeys, err := store.GetAllPropertyKeys("%", 50)
+			Expect(err).To(Succeed())
+			Expect(percentKeys).To(BeEmpty())
+
+			underscoreKeys, err := store.GetAllPropertyKeys("_tatus", 50)
+			Expect(err).To(Succeed())
+			Expect(underscoreKeys).To(BeEmpty())
+		})
+	})
+
+	ginkgo.When("pages are queried by property value", func() {
+		ginkgo.It("returns the pages with an exact key and value match", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("status", "published"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-3"), props("status", "draft"))).To(Succeed())
+
+			ids, err := store.GetPageIDsByProperty("status", "draft")
+			sortTestPageIDs(ids)
+
+			Expect(err).To(Succeed())
+			Expect(ids).To(Equal(testPageIDs("page-1", "page-3")))
+		})
+
+		ginkgo.It("returns no pages for unmatched values or unknown keys", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+
+			publishedIDs, err := store.GetPageIDsByProperty("status", "published")
+			Expect(err).To(Succeed())
+			Expect(publishedIDs).To(BeEmpty())
+
+			unknownKeyIDs, err := store.GetPageIDsByProperty("nonexistent", "draft")
+			Expect(err).To(Succeed())
+			Expect(unknownKeyIDs).To(BeEmpty())
+		})
+
+		ginkgo.It("matches values case-sensitively", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "Draft"))).To(Succeed())
+
+			ids, err := store.GetPageIDsByProperty("status", "draft")
+
+			Expect(err).To(Succeed())
+			Expect(ids).To(BeEmpty())
+		})
+	})
+
+	ginkgo.When("properties are loaded for selected pages", func() {
+		ginkgo.It("returns only the requested pages", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft", "score", "10"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("author", "alice"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-3"), props("status", "published"))).To(Succeed())
+
+			got, err := store.GetPropertiesForPages(testPageIDs("page-1", "page-3"))
+
+			Expect(err).To(Succeed())
+			Expect(got).To(Equal(map[tree.PageID]map[string]PropertyEntry{
+				newFixturePageID("page-1"): props("status", "draft", "score", "10"),
+				newFixturePageID("page-3"): props("status", "published"),
+			}))
+		})
+
+		ginkgo.It("returns an empty non-nil map for empty and unknown selections", func() {
+			store := newTestStore()
+
+			emptySelection, err := store.GetPropertiesForPages(testPageIDs())
+			Expect(err).To(Succeed())
+			Expect(emptySelection).To(SatisfyAll(Not(BeNil()), BeEmpty()))
+
+			unknownSelection, err := store.GetPropertiesForPages(testPageIDs("does-not-exist"))
+			Expect(err).To(Succeed())
+			Expect(unknownSelection).To(BeEmpty())
+		})
+	})
+
+	ginkgo.When("the store is cleared", func() {
+		ginkgo.It("removes all property entries", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-2"), props("author", "alice"))).To(Succeed())
+
+			Expect(store.Clear()).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys("", 50)
+			Expect(err).To(Succeed())
+			Expect(keys).To(BeEmpty())
+		})
+	})
 })

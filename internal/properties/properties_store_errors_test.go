@@ -25,14 +25,14 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			openPropertiesDB = previousOpen
 		})
 
-		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewPropertiesStore(propertiesTempDir())
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(openErr))
 	})
 
 	ginkgo.It("recovers from a corrupt properties database during initialization", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := propertiesTempDir()
 		Expect(os.WriteFile(filepath.Join(storageDir, "properties.db"), []byte("not sqlite"), 0o644)).To(Succeed())
 
 		store, err := NewPropertiesStore(storageDir)
@@ -52,7 +52,8 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		recoverableErr := errors.New("recoverable schema failed")
 		reopenErr := errors.New("reopen failed")
 		var openCalls int
-		var removed bool
+		var removedPaths []string
+		storageDir := propertiesTempDir()
 		openPropertiesDB = func(dbPath string) (*sql.DB, error) {
 			openCalls++
 			if openCalls == 1 {
@@ -66,8 +67,8 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		isRecoverablePropertiesDBError = func(err error) bool {
 			return errors.Is(err, recoverableErr)
 		}
-		removePropertiesSQLiteFiles = func(string) {
-			removed = true
+		removePropertiesSQLiteFiles = func(path string) {
+			removedPaths = append(removedPaths, path)
 		}
 		ginkgo.DeferCleanup(func() {
 			openPropertiesDB = previousOpen
@@ -76,12 +77,12 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			removePropertiesSQLiteFiles = previousRemove
 		})
 
-		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewPropertiesStore(storageDir)
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(reopenErr))
 		Expect(openCalls).To(Equal(2))
-		Expect(removed).To(BeTrue())
+		Expect(removedPaths).To(HaveExactElements(filepath.Join(storageDir, "properties.db")))
 	})
 
 	ginkgo.It("returns second schema errors after recoverable initialization retry", func() {
@@ -115,7 +116,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			removePropertiesSQLiteFiles = previousRemove
 		})
 
-		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewPropertiesStore(propertiesTempDir())
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(finalErr))
@@ -124,7 +125,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns initialization errors for locked databases", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := propertiesTempDir()
 		db, err := sql.Open("sqlite", filepath.Join(storageDir, "properties.db"))
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
@@ -143,7 +144,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns begin errors when the database is closed under the store", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		Expect(store.db.Close()).To(Succeed())
 
 		err := store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
@@ -152,13 +153,13 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns write errors from malformed property tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execPropertiesSQL(store, `DROP TABLE page_properties`)
 
 		err := store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
 		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		prepareErrorStore := newTestStore(ginkgo.GinkgoT())
+		prepareErrorStore := newTestStore()
 		execPropertiesSQL(prepareErrorStore,
 			`DROP TABLE page_properties`,
 			`CREATE TABLE page_properties (page_id TEXT PRIMARY KEY)`,
@@ -166,7 +167,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 		err = prepareErrorStore.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))
 		Expect(err).To(matchPropertiesSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-		insertErrorStore := newTestStore(ginkgo.GinkgoT())
+		insertErrorStore := newTestStore()
 		execPropertiesSQL(insertErrorStore,
 			`CREATE TRIGGER block_property_insert
 			 BEFORE INSERT ON page_properties
@@ -179,7 +180,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns read query errors from missing property tables", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		execPropertiesSQL(store, `DROP TABLE page_properties`)
 
 		keys, err := store.GetAllPropertyKeys("", 50)
@@ -196,7 +197,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns scan errors from malformed property rows", func() {
-		pageIDStore := newTestStore(ginkgo.GinkgoT())
+		pageIDStore := newTestStore()
 		execPropertiesSQL(pageIDStore,
 			`DROP TABLE page_properties`,
 			`CREATE TABLE page_properties (page_id INTEGER, key TEXT, value TEXT, type TEXT)`,
@@ -209,7 +210,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 			MatchError(tree.ErrScanPageID),
 		))
 
-		propertiesStore := newTestStore(ginkgo.GinkgoT())
+		propertiesStore := newTestStore()
 		execPropertiesSQL(propertiesStore,
 			`DROP TABLE page_properties`,
 			`CREATE TABLE page_properties (page_id TEXT, key TEXT, value TEXT, type TEXT)`,
@@ -221,7 +222,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns key-count scan errors", func() {
-		store := newTestStore(ginkgo.GinkgoT())
+		store := newTestStore()
 		Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
 		previousScan := scanPropertyKeyCount
 		scanErr := errors.New("scan failed")
@@ -239,7 +240,7 @@ var _ = ginkgo.Describe("PropertiesStore error and recovery branches", func() {
 	})
 
 	ginkgo.It("returns close errors without clearing the database handle", func() {
-		store, err := NewPropertiesStore(ginkgo.GinkgoT().TempDir())
+		store, err := NewPropertiesStore(propertiesTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		previousClose := closePropertiesDB
 		closeErr := errors.New("close failed")
