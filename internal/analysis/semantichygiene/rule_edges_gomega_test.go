@@ -978,7 +978,7 @@ var _ = ginkgo.Describe("logging behavior", func() {
 			Expect(h.diagnosticMessages()).To(BeEmpty())
 		})
 
-		ginkgo.It("reports direct Ginkgo Fail calls inside Ginkgo spec bodies", func() {
+		ginkgo.It("reports direct fail calls inside spec bodies", func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}

@@ -70,7 +70,7 @@ func checkGinkgoCoverageName(ctx *analysisContext, call *ast.CallExpr, name stri
 
 func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoStaticDescription(expr)
-	if !ok || !strings.HasPrefix(description, "Test") {
+	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
 		return
 	}
 	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
@@ -86,7 +86,7 @@ func reportGinkgoCoverageName(ctx *analysisContext, expr ast.Expr) {
 
 func reportGinkgoTableEntryDescriptionName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoEntryDescriptionValue(expr)
-	if !ok || !strings.HasPrefix(description, "Test") {
+	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
 		return
 	}
 	ctx.report(ruleGinkgoTestName, expr, ginkgoTestNameDiagnostic(description))
@@ -130,6 +130,55 @@ func isCoverageBucketVerb(field string) bool {
 
 func isCoverageBucketBranchPhrase(previous string, current string) bool {
 	return previous == "edge" && (current == "branch" || current == "branches")
+}
+
+func ginkgoDescriptionLooksMigratedTestName(description string) bool {
+	if strings.HasPrefix(description, "Test") {
+		return true
+	}
+	fields := strings.Fields(description)
+	if len(fields) < 2 {
+		return false
+	}
+
+	titleCaseCount := 0
+	for _, field := range fields {
+		if isMigratedTitleCaseFragment(field) {
+			titleCaseCount++
+		}
+	}
+	if titleCaseCount >= 3 {
+		return true
+	}
+	return len(fields) <= 4 &&
+		titleCaseCount == len(fields)-1 &&
+		isLowercaseWord(fields[0])
+}
+
+func isMigratedTitleCaseFragment(field string) bool {
+	field = trimGinkgoNamePunctuation(field)
+	if len(field) < 4 {
+		return false
+	}
+	return field[0] >= 'A' && field[0] <= 'Z' &&
+		field[1] >= 'a' && field[1] <= 'z'
+}
+
+func isLowercaseWord(field string) bool {
+	field = trimGinkgoNamePunctuation(field)
+	if field == "" {
+		return false
+	}
+	for _, r := range field {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+func trimGinkgoNamePunctuation(field string) string {
+	return strings.Trim(field, " \t\r\n.,:;!?()[]{}\"'`")
 }
 
 func isGinkgoNameCarrier(name string) bool {
