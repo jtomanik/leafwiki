@@ -156,6 +156,8 @@ func HaveHTTPBody(want any) any { return nil }
 
 func HaveHTTPHeaderWithValue(name any, value any) any { return nil }
 
+func WithTransform(transform any, matcher any) any { return nil }
+
 func BeEquivalentTo(want any) any { return nil }
 
 func BeNumerically(comparator string, compareTo ...any) any { return nil }
@@ -467,6 +469,17 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	matcherValue := HavePrefix("abc").(GomegaMatcher)
 	Expect(text).To(Equal(matcherValue))                                             // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
 	Expect(text).To(Equal(matcherBackedRecord{Content: matcherValue.(interface{})})) // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
+
+	type observedRequest struct {
+		Path         string
+		Body         string
+		Token        string
+		ActorContext string
+	}
+	seen := observedRequest{}
+	Expect(seen).To(WithTransform(func(actual observedRequest) []string { // want "do not collapse multiple fields into a positional WithTransform assertion; use HaveField/MatchFields or a named matcher"
+		return []string{actual.Path, actual.Body, actual.Token, actual.ActorContext}
+	}, Equal([]string{"/mcp", "{}", "daemon-token", ""})))
 }
 
 func matchMatcherBackedRecord(content GomegaMatcher) any {

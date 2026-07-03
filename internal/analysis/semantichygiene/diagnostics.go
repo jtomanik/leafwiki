@@ -226,6 +226,10 @@ func gomegaMatcherAsValueDiagnostic(matcherName string) string {
 	return fmt.Sprintf("do not pass a Gomega matcher as an expected value to %s; compose or apply the matcher directly", matcherName)
 }
 
+func gomegaPositionalTransformDiagnostic() string {
+	return "do not collapse multiple fields into a positional WithTransform assertion; use HaveField/MatchFields or a named matcher"
+}
+
 func customMatcherSemanticParameterDiagnostic(funcName string, paramName string, semanticType string) string {
 	return fmt.Sprintf("custom matcher %s parameter %s uses string for %s; use the semantic type in matcher constructors", funcName, paramName, semanticType)
 }

@@ -23,6 +23,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherCallUsesMatcherValueAsExpected(ctx, call) {
 		ctx.report(ruleGomegaMatcherAsValue, call, gomegaMatcherAsValueDiagnostic(callName(call)))
 	}
+	if matcherUsesPositionalTransform(ctx, call) {
+		ctx.report(ruleGomegaPositionalTransform, call, gomegaPositionalTransformDiagnostic())
+	}
 	assertion, ok := gomegaAssertionFromCall(ctx, call)
 	if !ok {
 		return
@@ -1028,6 +1031,126 @@ func matcherCallUsesMatcherValueAsExpected(ctx *analysisContext, call *ast.CallE
 		}
 	}
 	return false
+}
+
+func matcherUsesPositionalTransform(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "WithTransform") || len(call.Args) < 2 {
+		return false
+	}
+	if !matcherIsEqualCompositeLiteral(call.Args[1]) {
+		return false
+	}
+	fn, ok := unparenExpr(call.Args[0]).(*ast.FuncLit)
+	if !ok {
+		return false
+	}
+	return funcLitReturnsFieldTuple(ctx, fn)
+}
+
+func matcherIsEqualCompositeLiteral(expr ast.Expr) bool {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	if !ok || !isMatcherNamed(call, "Equal") || len(call.Args) != 1 {
+		return false
+	}
+	lit, ok := unparenExpr(call.Args[0]).(*ast.CompositeLit)
+	if !ok || len(lit.Elts) < 2 {
+		return false
+	}
+	return compositeLiteralIsPositional(lit)
+}
+
+func funcLitReturnsFieldTuple(ctx *analysisContext, fn *ast.FuncLit) bool {
+	paramObjects := funcLitParamObjects(ctx, fn)
+	if len(paramObjects) == 0 {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if nested, ok := node.(*ast.FuncLit); ok && nested != fn {
+			return false
+		}
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return true
+		}
+		lit, ok := unparenExpr(ret.Results[0]).(*ast.CompositeLit)
+		if !ok || len(lit.Elts) < 2 || !compositeLiteralIsPositional(lit) {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			if !exprIsFieldSelectorFromParam(ctx, elt, paramObjects) {
+				return true
+			}
+		}
+		found = true
+		return false
+	})
+	return found
+}
+
+func funcLitParamObjects(ctx *analysisContext, fn *ast.FuncLit) map[types.Object]struct{} {
+	objects := map[types.Object]struct{}{}
+	if fn.Type.Params == nil {
+		return objects
+	}
+	for _, field := range fn.Type.Params.List {
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if obj := ctx.pass.TypesInfo.ObjectOf(name); obj != nil {
+				objects[obj] = struct{}{}
+			}
+		}
+	}
+	return objects
+}
+
+func compositeLiteralIsPositional(lit *ast.CompositeLit) bool {
+	switch lit.Type.(type) {
+	case *ast.ArrayType, *ast.StructType, *ast.Ident, *ast.SelectorExpr:
+	default:
+		return false
+	}
+	for _, elt := range lit.Elts {
+		if _, ok := unparenExpr(elt).(*ast.KeyValueExpr); ok {
+			return false
+		}
+	}
+	return true
+}
+
+func exprIsFieldSelectorFromParam(ctx *analysisContext, expr ast.Expr, paramObjects map[types.Object]struct{}) bool {
+	ident := baseIdentForSelector(expr)
+	if ident == nil {
+		return false
+	}
+	obj := ctx.pass.TypesInfo.ObjectOf(ident)
+	if obj == nil {
+		return false
+	}
+	_, ok := paramObjects[obj]
+	return ok
+}
+
+func baseIdentForSelector(expr ast.Expr) *ast.Ident {
+	selector, ok := unparenExpr(expr).(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	for {
+		switch x := unparenExpr(selector.X).(type) {
+		case *ast.Ident:
+			return x
+		case *ast.SelectorExpr:
+			selector = x
+		default:
+			return nil
+		}
+	}
 }
 
 func isValueComparisonMatcher(call *ast.CallExpr) bool {
