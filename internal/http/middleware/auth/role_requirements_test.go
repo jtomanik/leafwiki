@@ -49,12 +49,12 @@ func testUser(id string, role string) *coreauth.User {
 	}
 }
 
-var _ = DescribeTable("RequireAdmin",
+var _ = DescribeTable("admin-only route authorization",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireAdmin(scenario.authDisabled), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
+			Expect(rec).To(matchAuthMiddlewareError(scenario.expectedCode))
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
@@ -95,12 +95,12 @@ var _ = DescribeTable("RequireAdmin",
 	}),
 )
 
-var _ = DescribeTable("RequireSelfOrAdmin",
+var _ = DescribeTable("self-or-admin route authorization",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelfOrAdmin(scenario.authDisabled), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
+			Expect(rec).To(matchAuthMiddlewareError(scenario.expectedCode))
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
@@ -148,12 +148,12 @@ var _ = DescribeTable("RequireSelfOrAdmin",
 	}),
 )
 
-var _ = DescribeTable("RequireEditorOrAdmin",
+var _ = DescribeTable("editor-or-admin route authorization",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireEditorOrAdmin(), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
+			Expect(rec).To(matchAuthMiddlewareError(scenario.expectedCode))
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
@@ -194,12 +194,12 @@ var _ = DescribeTable("RequireEditorOrAdmin",
 	}),
 )
 
-var _ = DescribeTable("RequireSelf",
+var _ = DescribeTable("self-only route authorization",
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelf(), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
 		if scenario.expectedCode != "" {
-			assertAuthMiddlewareError(GinkgoT(), rec, scenario.expectedCode)
+			Expect(rec).To(matchAuthMiddlewareError(scenario.expectedCode))
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
@@ -233,7 +233,7 @@ var _ = DescribeTable("RequireSelf",
 	}),
 )
 
-var _ = DescribeTable("TryGetUser",
+var _ = DescribeTable("optional user context lookup",
 	func(userValue any, setUser bool, expected *coreauth.User) {
 		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -247,7 +247,7 @@ var _ = DescribeTable("TryGetUser",
 	Entry("returns the context user when valid", testUser("alice", coreauth.RoleEditor), true, testUser("alice", coreauth.RoleEditor)),
 )
 
-var _ = DescribeTable("IsRemoteUser",
+var _ = DescribeTable("remote-user auth source detection",
 	func(source any, setSource bool, expected bool) {
 		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())

@@ -12,750 +12,185 @@ import (
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
-var _ = It("Test_RequireSecure_TLS", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, false)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = DescribeTable("Test_RequireSecure_XForwardedProto",
-	func(value string, expected bool) {
-		t := GinkgoT()
-		gin.SetMode(gin.TestMode)
-
-		router := gin.New()
-		router.GET("/test", func(c *gin.Context) {
-			secure, err := utils.RequireSecure(c, false)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"secure": secure})
+var _ = Describe("secure request detection", func() {
+	It("detects secure requests from TLS", func() {
+		rec := performSecureDetectionRequest(false, func(req *http.Request) {
+			req.TLS = &tls.ConnectionState{}
 		})
 
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.Header.Set("X-Forwarded-Proto", value)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		if expected {
-			if w.Code != http.StatusOK {
-				t.Errorf("Expected status 200, got %d", w.Code)
-			}
-		} else {
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("Expected status 400, got %d", w.Code)
-			}
-		}
-	},
-	Entry("https lowercase", "https", true),
-	Entry("HTTPS uppercase", "HTTPS", true),
-	Entry("https with scheme", "https://example.com", true),
-	Entry("http", "http", false),
-)
-
-var _ = DescribeTable("Test_RequireSecure_XForwardedSsl",
-	func(value string, expected bool) {
-		t := GinkgoT()
-		gin.SetMode(gin.TestMode)
-
-		router := gin.New()
-		router.GET("/test", func(c *gin.Context) {
-			secure, err := utils.RequireSecure(c, false)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"secure": secure})
-		})
-
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.Header.Set("X-Forwarded-Ssl", value)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		if expected {
-			if w.Code != http.StatusOK {
-				t.Errorf("Expected status 200, got %d", w.Code)
-			}
-		} else {
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("Expected status 400, got %d", w.Code)
-			}
-		}
-	},
-	Entry("on lowercase", "on", true),
-	Entry("ON uppercase", "ON", true),
-	Entry("On mixed", "On", true),
-	Entry("off", "off", false),
-	Entry("empty", "", false),
-)
-
-var _ = DescribeTable("Test_RequireSecure_FrontEndHttps",
-	func(value string, expected bool) {
-		t := GinkgoT()
-		gin.SetMode(gin.TestMode)
-
-		router := gin.New()
-		router.GET("/test", func(c *gin.Context) {
-			secure, err := utils.RequireSecure(c, false)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"secure": secure})
-		})
-
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.Header.Set("Front-End-Https", value)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		if expected {
-			if w.Code != http.StatusOK {
-				t.Errorf("Expected status 200, got %d", w.Code)
-			}
-		} else {
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("Expected status 400, got %d", w.Code)
-			}
-		}
-	},
-	Entry("on lowercase", "on", true),
-	Entry("ON uppercase", "ON", true),
-	Entry("On mixed", "On", true),
-	Entry("off", "off", false),
-	Entry("empty", "", false),
-)
-
-var _ = It("Test_RequireSecure_AllowInsecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, true)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	// Make a request without any HTTPS indicators
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
+	DescribeTable("detects secure requests from X-Forwarded-Proto",
+		func(value string, expectedStatus int) {
+			rec := performSecureDetectionRequest(false, func(req *http.Request) {
+				req.Header.Set("X-Forwarded-Proto", value)
+			})
 
-	router.ServeHTTP(w, req)
+			Expect(rec).To(HaveHTTPStatus(expectedStatus))
+		},
+		Entry("accepts lowercase HTTPS", "https", http.StatusOK),
+		Entry("accepts uppercase HTTPS", "HTTPS", http.StatusOK),
+		Entry("accepts HTTPS scheme values", "https://example.com", http.StatusOK),
+		Entry("rejects HTTP", "http", http.StatusBadRequest),
+	)
 
-	// Should succeed when AllowInsecure is true
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200 with AllowInsecure=true, got %d", w.Code)
-	}
+	DescribeTable("detects secure requests from X-Forwarded-Ssl",
+		func(value string, expectedStatus int) {
+			rec := performSecureDetectionRequest(false, func(req *http.Request) {
+				req.Header.Set("X-Forwarded-Ssl", value)
+			})
 
+			Expect(rec).To(HaveHTTPStatus(expectedStatus))
+		},
+		Entry("accepts lowercase on", "on", http.StatusOK),
+		Entry("accepts uppercase on", "ON", http.StatusOK),
+		Entry("accepts mixed-case on", "On", http.StatusOK),
+		Entry("rejects off", "off", http.StatusBadRequest),
+		Entry("rejects empty values", "", http.StatusBadRequest),
+	)
+
+	DescribeTable("detects secure requests from Front-End-Https",
+		func(value string, expectedStatus int) {
+			rec := performSecureDetectionRequest(false, func(req *http.Request) {
+				req.Header.Set("Front-End-Https", value)
+			})
+
+			Expect(rec).To(HaveHTTPStatus(expectedStatus))
+		},
+		Entry("accepts lowercase on", "on", http.StatusOK),
+		Entry("accepts uppercase on", "ON", http.StatusOK),
+		Entry("accepts mixed-case on", "On", http.StatusOK),
+		Entry("rejects off", "off", http.StatusBadRequest),
+		Entry("rejects empty values", "", http.StatusBadRequest),
+	)
+
+	It("allows insecure requests when configured", func() {
+		rec := performSecureDetectionRequest(true, nil)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+	})
+
+	It("rejects insecure requests when HTTPS is required", func() {
+		rec := performSecureDetectionRequest(false, nil)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
+	})
 })
 
-var _ = It("Test_RequireSecure_ErrorWhenHTTPSRequired", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
+var _ = Describe("auth cookie lifecycle", func() {
+	It("uses host-prefixed cookie names for secure responses", func() {
+		auth := NewAuthCookies(false, time.Hour, 24*time.Hour)
 
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		secure, err := utils.RequireSecure(c, false)
-		if err != nil {
-			if err == utils.ErrHTTPSRequired {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"secure": secure})
+		accessName, refreshName := auth.cookieNames(true)
+
+		Expect(accessName).To(Equal("__Host-leafwiki_at"))
+		Expect(refreshName).To(Equal("__Host-leafwiki_rt"))
 	})
 
-	// Make a request without any HTTPS indicators
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
+	It("uses regular cookie names for insecure responses", func() {
+		auth := NewAuthCookies(true, time.Hour, 24*time.Hour)
 
-	router.ServeHTTP(w, req)
+		accessName, refreshName := auth.cookieNames(false)
 
-	// Should fail when AllowInsecure is false and no HTTPS indicators
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when HTTPS required but not present, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_CookieNames_Secure", func() {
-	t := GinkgoT()
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	accessName, refreshName := auth.cookieNames(true)
-
-	if accessName != "__Host-leafwiki_at" {
-		t.Errorf("Expected access cookie name '__Host-leafwiki_at', got '%s'", accessName)
-	}
-
-	if refreshName != "__Host-leafwiki_rt" {
-		t.Errorf("Expected refresh cookie name '__Host-leafwiki_rt', got '%s'", refreshName)
-	}
-
-})
-
-var _ = It("TestAuthCookies_CookieNames_Insecure", func() {
-	t := GinkgoT()
-	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	accessName, refreshName := auth.cookieNames(false)
-
-	if accessName != "leafwiki_at" {
-		t.Errorf("Expected access cookie name 'leafwiki_at', got '%s'", accessName)
-	}
-
-	if refreshName != "leafwiki_rt" {
-		t.Errorf("Expected refresh cookie name 'leafwiki_rt', got '%s'", refreshName)
-	}
-
-})
-
-var _ = It("TestAuthCookies_Set_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Set(c, "access-token-123", "refresh-token-456")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(accessName).To(Equal("leafwiki_at"))
+		Expect(refreshName).To(Equal("leafwiki_rt"))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
+	It("sets secure access and refresh cookies with host-prefixed names", func() {
+		rec := performAuthCookieSet(NewAuthCookies(false, time.Hour, 24*time.Hour), true, "access-token-123", "refresh-token-456")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	// Check that cookies were set correctly
-	cookies := w.Result().Cookies()
-	if len(cookies) != 2 {
-		t.Fatalf("Expected 2 cookies, got %d", len(cookies))
-	}
-
-	// Find access token cookie
-	var accessCookie, refreshCookie *http.Cookie
-	for _, cookie := range cookies {
-		switch cookie.Name {
-		case "__Host-leafwiki_at":
-			accessCookie = cookie
-		case "__Host-leafwiki_rt":
-			refreshCookie = cookie
-		}
-	}
-
-	if accessCookie == nil {
-		t.Fatal("Access token cookie not found")
-	}
-	if refreshCookie == nil {
-		t.Fatal("Refresh token cookie not found")
-	}
-
-	// Verify access cookie properties
-	if accessCookie.Value != "access-token-123" {
-		t.Errorf("Expected access token value 'access-token-123', got '%s'", accessCookie.Value)
-	}
-	if !accessCookie.HttpOnly {
-		t.Error("Expected access cookie to be HttpOnly")
-	}
-	if !accessCookie.Secure {
-		t.Error("Expected access cookie to be Secure")
-	}
-	if accessCookie.Path != "/" {
-		t.Errorf("Expected access cookie path '/', got '%s'", accessCookie.Path)
-	}
-	if accessCookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("Expected access cookie SameSite LaxMode, got %v", accessCookie.SameSite)
-	}
-	if accessCookie.MaxAge != 3600 {
-		t.Errorf("Expected access cookie MaxAge 3600, got %d", accessCookie.MaxAge)
-	}
-
-	// Verify refresh cookie properties
-	if refreshCookie.Value != "refresh-token-456" {
-		t.Errorf("Expected refresh token value 'refresh-token-456', got '%s'", refreshCookie.Value)
-	}
-	if !refreshCookie.HttpOnly {
-		t.Error("Expected refresh cookie to be HttpOnly")
-	}
-	if !refreshCookie.Secure {
-		t.Error("Expected refresh cookie to be Secure")
-	}
-	if refreshCookie.Path != "/" {
-		t.Errorf("Expected refresh cookie path '/', got '%s'", refreshCookie.Path)
-	}
-	if refreshCookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("Expected refresh cookie SameSite LaxMode, got %v", refreshCookie.SameSite)
-	}
-	if refreshCookie.MaxAge != 86400 {
-		t.Errorf("Expected refresh cookie MaxAge 86400, got %d", refreshCookie.MaxAge)
-	}
-
-})
-
-var _ = It("TestAuthCookies_Set_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Set(c, "access-token-789", "refresh-token-012")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Result().Cookies()).To(HaveExactElements(
+			matchAuthCookie("__Host-leafwiki_at", "access-token-123", true, int(time.Hour.Seconds())),
+			matchAuthCookie("__Host-leafwiki_rt", "refresh-token-456", true, int((24*time.Hour).Seconds())),
+		))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
+	It("sets insecure access and refresh cookies without host prefixes", func() {
+		rec := performAuthCookieSet(NewAuthCookies(true, time.Hour, 24*time.Hour), false, "access-token-789", "refresh-token-012")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	// Check that cookies were set correctly
-	cookies := w.Result().Cookies()
-	if len(cookies) != 2 {
-		t.Fatalf("Expected 2 cookies, got %d", len(cookies))
-	}
-
-	// Find access token cookie
-	var accessCookie, refreshCookie *http.Cookie
-	for _, cookie := range cookies {
-		switch cookie.Name {
-		case "leafwiki_at":
-			accessCookie = cookie
-		case "leafwiki_rt":
-			refreshCookie = cookie
-		}
-	}
-
-	if accessCookie == nil {
-		t.Fatal("Access token cookie not found")
-	}
-	if refreshCookie == nil {
-		t.Fatal("Refresh token cookie not found")
-	}
-
-	// Verify access cookie doesn't have __Host- prefix
-	if accessCookie.Name != "leafwiki_at" {
-		t.Errorf("Expected cookie name 'leafwiki_at', got '%s'", accessCookie.Name)
-	}
-	if accessCookie.Secure {
-		t.Error("Expected access cookie to NOT be Secure in insecure mode")
-	}
-
-	// Verify refresh cookie doesn't have __Host- prefix
-	if refreshCookie.Name != "leafwiki_rt" {
-		t.Errorf("Expected cookie name 'leafwiki_rt', got '%s'", refreshCookie.Name)
-	}
-	if refreshCookie.Secure {
-		t.Error("Expected refresh cookie to NOT be Secure in insecure mode")
-	}
-
-})
-
-var _ = It("TestAuthCookies_Set_ErrorWhenHTTPSRequired", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Set(c, "access-token", "refresh-token")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Result().Cookies()).To(HaveExactElements(
+			matchAuthCookie("leafwiki_at", "access-token-789", false, int(time.Hour.Seconds())),
+			matchAuthCookie("leafwiki_rt", "refresh-token-012", false, int((24*time.Hour).Seconds())),
+		))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
+	It("rejects setting secure cookies on insecure requests", func() {
+		rec := performAuthCookieSet(NewAuthCookies(false, time.Hour, 24*time.Hour), false, "access-token", "refresh-token")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when HTTPS required, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_Clear_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Clear(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
+	It("expires secure access and refresh cookies with host-prefixed names", func() {
+		rec := performAuthCookieClear(NewAuthCookies(false, time.Hour, 24*time.Hour), true)
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	// Check that cookies were cleared
-	cookies := w.Result().Cookies()
-	if len(cookies) != 2 {
-		t.Fatalf("Expected 2 cookies, got %d", len(cookies))
-	}
-
-	// Find cookies
-	var accessCookie, refreshCookie *http.Cookie
-	for _, cookie := range cookies {
-		switch cookie.Name {
-		case "__Host-leafwiki_at":
-			accessCookie = cookie
-		case "__Host-leafwiki_rt":
-			refreshCookie = cookie
-		}
-	}
-
-	if accessCookie == nil {
-		t.Fatal("Access token cookie not found")
-	}
-	if refreshCookie == nil {
-		t.Fatal("Refresh token cookie not found")
-	}
-
-	// Verify cookies are expired
-	if accessCookie.Value != "" {
-		t.Errorf("Expected access cookie to have empty value, got '%s'", accessCookie.Value)
-	}
-	if accessCookie.MaxAge != -1 {
-		t.Errorf("Expected access cookie MaxAge -1, got %d", accessCookie.MaxAge)
-	}
-
-	if refreshCookie.Value != "" {
-		t.Errorf("Expected refresh cookie to have empty value, got '%s'", refreshCookie.Value)
-	}
-	if refreshCookie.MaxAge != -1 {
-		t.Errorf("Expected refresh cookie MaxAge -1, got %d", refreshCookie.MaxAge)
-	}
-
-})
-
-var _ = It("TestAuthCookies_Clear_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Clear(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Result().Cookies()).To(HaveExactElements(
+			matchExpiredAuthCookie("__Host-leafwiki_at"),
+			matchExpiredAuthCookie("__Host-leafwiki_rt"),
+		))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
+	It("expires insecure access and refresh cookies without host prefixes", func() {
+		rec := performAuthCookieClear(NewAuthCookies(true, time.Hour, 24*time.Hour), false)
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	// Check that cookies were cleared with correct names
-	cookies := w.Result().Cookies()
-	if len(cookies) != 2 {
-		t.Fatalf("Expected 2 cookies, got %d", len(cookies))
-	}
-
-	// Verify cookie names don't have __Host- prefix
-	for _, cookie := range cookies {
-		if cookie.Name != "leafwiki_at" && cookie.Name != "leafwiki_rt" {
-			t.Errorf("Unexpected cookie name: %s", cookie.Name)
-		}
-		if cookie.MaxAge != -1 {
-			t.Errorf("Expected cookie MaxAge -1, got %d", cookie.MaxAge)
-		}
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadAccess_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadAccess(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Result().Cookies()).To(HaveExactElements(
+			matchExpiredAuthCookie("leafwiki_at"),
+			matchExpiredAuthCookie("leafwiki_rt"),
+		))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	req.AddCookie(&http.Cookie{
-		Name:  "__Host-leafwiki_at",
-		Value: "test-access-token",
-	})
-	w := httptest.NewRecorder()
+	It("reads secure access cookies from host-prefixed names", func() {
+		rec := performAuthCookieReadAccess(NewAuthCookies(false, time.Hour, 24*time.Hour), true, "__Host-leafwiki_at", "test-access-token")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadAccess_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadAccess(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_at",
-		Value: "test-access-token-insecure",
-	})
-	w := httptest.NewRecorder()
+	It("reads insecure access cookies from regular names", func() {
+		rec := performAuthCookieReadAccess(NewAuthCookies(true, time.Hour, 24*time.Hour), false, "leafwiki_at", "test-access-token-insecure")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadAccess_MissingCookie", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadAccess(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
+	It("rejects missing access cookies", func() {
+		rec := performAuthCookieReadAccess(NewAuthCookies(false, time.Hour, 24*time.Hour), true, "", "")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when cookie is missing, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadRefresh_Secure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadRefresh(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	req.AddCookie(&http.Cookie{
-		Name:  "__Host-leafwiki_rt",
-		Value: "test-refresh-token",
-	})
-	w := httptest.NewRecorder()
+	It("reads secure refresh cookies from host-prefixed names", func() {
+		rec := performAuthCookieReadRefresh(NewAuthCookies(false, time.Hour, 24*time.Hour), true, "__Host-leafwiki_rt", "test-refresh-token")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadRefresh_Insecure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadRefresh(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_rt",
-		Value: "test-refresh-token-insecure",
-	})
-	w := httptest.NewRecorder()
+	It("reads insecure refresh cookies from regular names", func() {
+		rec := performAuthCookieReadRefresh(NewAuthCookies(true, time.Hour, 24*time.Hour), false, "leafwiki_rt", "test-refresh-token-insecure")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_ReadRefresh_MissingCookie", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	auth := NewAuthCookies(false, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		token, err := auth.ReadRefresh(c)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"token": token})
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
+	It("rejects missing refresh cookies", func() {
+		rec := performAuthCookieReadRefresh(NewAuthCookies(false, time.Hour, 24*time.Hour), true, "", "")
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 when cookie is missing, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestAuthCookies_CustomTTL", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	accessTTL := 30 * time.Minute
-	refreshTTL := 7 * 24 * time.Hour
-	auth := NewAuthCookies(false, accessTTL, refreshTTL)
-
-	router := gin.New()
-	router.GET("/test", func(c *gin.Context) {
-		err := auth.Set(c, "access-token", "refresh-token")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Status(http.StatusOK)
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.TLS = &tls.ConnectionState{}
-	w := httptest.NewRecorder()
+	It("uses the configured access and refresh token lifetimes", func() {
+		accessTTL := 30 * time.Minute
+		refreshTTL := 7 * 24 * time.Hour
+		rec := performAuthCookieSet(NewAuthCookies(false, accessTTL, refreshTTL), true, "access-token", "refresh-token")
 
-	router.ServeHTTP(w, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Result().Cookies()).To(HaveExactElements(
+			matchAuthCookie("__Host-leafwiki_at", "access-token", true, int(accessTTL.Seconds())),
+			matchAuthCookie("__Host-leafwiki_rt", "refresh-token", true, int(refreshTTL.Seconds())),
+		))
+	})
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	cookies := w.Result().Cookies()
-	for _, cookie := range cookies {
-		switch cookie.Name {
-		case "__Host-leafwiki_at":
-			expectedMaxAge := int(accessTTL.Seconds())
-			if cookie.MaxAge != expectedMaxAge {
-				t.Errorf("Expected access cookie MaxAge %d, got %d", expectedMaxAge, cookie.MaxAge)
-			}
-
-		case "__Host-leafwiki_rt":
-			expectedMaxAge := int(refreshTTL.Seconds())
-			if cookie.MaxAge != expectedMaxAge {
-				t.Errorf("Expected refresh cookie MaxAge %d, got %d", expectedMaxAge, cookie.MaxAge)
-			}
-		}
-	}
-
-})
-
-var _ = Describe("auth cookie secure edge coverage", func() {
 	It("returns HTTPS-required errors from Clear and readers", func() {
 		gin.SetMode(gin.TestMode)
 		cookies := NewAuthCookies(false, time.Hour, time.Hour)
@@ -774,3 +209,116 @@ var _ = Describe("auth cookie secure edge coverage", func() {
 		Expect(refresh).To(BeEmpty())
 	})
 })
+
+func performSecureDetectionRequest(allowInsecure bool, configure func(*http.Request)) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/test", func(c *gin.Context) {
+		secure, err := utils.RequireSecure(c, allowInsecure)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"secure": secure})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	if configure != nil {
+		configure(req)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func performAuthCookieSet(auth *AuthCookies, secure bool, accessToken string, refreshToken string) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRequest(secure, func(c *gin.Context) {
+		err := auth.Set(c, accessToken, refreshToken)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+}
+
+func performAuthCookieClear(auth *AuthCookies, secure bool) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRequest(secure, func(c *gin.Context) {
+		err := auth.Clear(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+}
+
+func performAuthCookieReadAccess(auth *AuthCookies, secure bool, name string, value string) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRead(secure, name, value, auth.ReadAccess)
+}
+
+func performAuthCookieReadRefresh(auth *AuthCookies, secure bool, name string, value string) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRead(secure, name, value, auth.ReadRefresh)
+}
+
+func performAuthCookieRead(secure bool, name string, value string, read func(*gin.Context) (string, error)) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRequestWithCookie(secure, name, value, func(c *gin.Context) {
+		token, err := read(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"token": token})
+	})
+}
+
+func performAuthCookieRequest(secure bool, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	return performAuthCookieRequestWithCookie(secure, "", "", handler)
+}
+
+func performAuthCookieRequestWithCookie(secure bool, name string, value string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	GinkgoHelper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/test", handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	if secure {
+		req.TLS = &tls.ConnectionState{}
+	}
+	if name != "" {
+		req.AddCookie(&http.Cookie{Name: name, Value: value})
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func matchAuthCookie(name string, value string, secure bool, maxAge int) OmegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		HaveField("Name", Equal(name)),
+		HaveField("Value", Equal(value)),
+		HaveField("HttpOnly", BeTrue()),
+		HaveField("Secure", Equal(secure)),
+		HaveField("Path", Equal("/")),
+		HaveField("SameSite", Equal(http.SameSiteLaxMode)),
+		HaveField("MaxAge", Equal(maxAge)),
+	)
+}
+
+func matchExpiredAuthCookie(name string) OmegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		HaveField("Name", Equal(name)),
+		HaveField("Value", BeEmpty()),
+		HaveField("MaxAge", Equal(-1)),
+	)
+}

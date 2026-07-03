@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
 
@@ -15,29 +16,25 @@ type proxyFixture struct {
 	close       func() error
 }
 
-func cleanupWithErrorCheck(t testTB, name string, closeFn func() error) {
-	t.Helper()
+func cleanupWithErrorCheck(name string, closeFn func() error) {
+	GinkgoHelper()
 
 	DeferCleanup(func() {
-		if err := closeFn(); err != nil {
-			t.Errorf("close %s: %v", name, err)
-		}
+		Expect(closeFn()).To(Succeed(), "close %s", name)
 	})
 }
 
-func createProxyFixture(t testTB) *proxyFixture {
-	t.Helper()
+func createProxyFixture() *proxyFixture {
+	GinkgoHelper()
 
-	storageDir := t.TempDir()
+	storageDir := authMiddlewareTempDir()
 	userStore, err := coreauth.NewUserStore(storageDir)
-	if err != nil {
-		t.Fatalf("create user store: %v", err)
-	}
+	Expect(err).To(Succeed())
 
 	userService := coreauth.NewUserService(userStore)
 	if err := userService.InitDefaultAdmin("admin"); err != nil {
 		_ = userStore.Close()
-		t.Fatalf("init default admin: %v", err)
+		Expect(err).To(Succeed())
 	}
 
 	return &proxyFixture{
@@ -46,12 +43,10 @@ func createProxyFixture(t testTB) *proxyFixture {
 	}
 }
 
-func mustParseTrustedProxies(t testTB, raw string) *authmw.TrustedProxies {
-	t.Helper()
+func mustParseTrustedProxies(raw string) *authmw.TrustedProxies {
+	GinkgoHelper()
 	tp, err := authmw.ParseTrustedProxies(raw)
-	if err != nil {
-		t.Fatalf("ParseTrustedProxies(%q): %v", raw, err)
-	}
+	Expect(err).To(Succeed())
 	return tp
 }
 
@@ -71,280 +66,238 @@ func proxyRouter(cfg authmw.RemoteUserConfig) *gin.Engine {
 	return r
 }
 
-var _ = It("TestInjectRemoteUser_Disabled", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
+var _ = Describe("reverse proxy user injection", func() {
+	It("does not inject remote users when the feature is disabled", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
 
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        false,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        false,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
 
-	proxyRouter(cfg).ServeHTTP(w, req)
+		proxyRouter(cfg).ServeHTTP(w, req)
 
-	// Disabled → no user injected → handler returns 401
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 when disabled, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_UntrustedIP", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "10.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "192.168.1.99:1234" // not trusted
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	// Untrusted → header ignored → no user → 401
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 from untrusted IP, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_TrustedIP_NoHeader", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	// no Remote-User header
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	// No header → no user injected → handler returns 401
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 when header absent, got %d", w.Code)
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_TrustedIP_ValidUser", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if body := w.Body.String(); body != `{"username":"admin"}` {
-		t.Errorf("unexpected body: %s", body)
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_TrustedIP_UnknownUser", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "ghost")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for unknown user, got %d", w.Code)
-	}
-	assertAuthMiddlewareError(t, w, expectedAuthRemoteUserNotFound)
-
-})
-
-var _ = It("TestInjectRemoteUser_CustomHeaderName", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "X-Forwarded-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("X-Forwarded-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_CIDRMatch", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "172.18.0.0/16"),
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "172.18.5.10:1234"
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for CIDR-matched IP, got %d: %s", w.Code, w.Body.String())
-	}
-
-})
-
-var _ = It("TestInjectRemoteUser_MisconfiguredTrustedProxies", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: nil,
-		UserService:    f.userService,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500 for missing trusted proxies config, got %d", w.Code)
-	}
-	assertAuthMiddlewareError(t, w, expectedAuthReverseProxyMisconfigured)
-
-})
-
-var _ = It("TestInjectRemoteUser_MisconfiguredUserService", func() {
-	t := GinkgoT()
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    nil,
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "admin")
-	w := httptest.NewRecorder()
-
-	proxyRouter(cfg).ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500 for missing user service config, got %d", w.Code)
-	}
-	assertAuthMiddlewareError(t, w, expectedAuthReverseProxyMisconfigured)
-
-})
-
-// TestInjectRemoteUser_WithRequireAuth verifies the full middleware chain:
-// InjectRemoteUser sets the user, then RequireAuth short-circuits JWT validation.
-var _ = It("TestInjectRemoteUser_WithRequireAuth", func() {
-	t := GinkgoT()
-	f := createProxyFixture(t)
-	cleanupWithErrorCheck(t, "proxy fixture", f.close)
-
-	storageDir := t.TempDir()
-	sessionStore, err := coreauth.NewSessionStore(storageDir)
-	if err != nil {
-		t.Fatalf("create session store: %v", err)
-	}
-	cleanupWithErrorCheck(t, "session store", sessionStore.Close)
-
-	authService := coreauth.NewAuthService(f.userService, sessionStore, "test-secret-key-for-unit-tests-1", 0, 0)
-	authCookies := authmw.NewAuthCookies(true, 0, 0)
-
-	cfg := authmw.RemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "Remote-User",
-		TrustedProxies: mustParseTrustedProxies(t, "127.0.0.1"),
-		UserService:    f.userService,
-	}
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(authmw.InjectRemoteUser(cfg))
-	r.Use(authmw.RequireAuth(authService, authCookies, false))
-	r.GET("/test", func(c *gin.Context) {
-		u := c.MustGet("user").(*coreauth.User)
-		c.JSON(http.StatusOK, gin.H{"username": u.Username})
+		// Disabled → no user injected → handler returns 401
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Remote-User", "admin")
-	// no JWT cookie — proxy auth should take over
-	w := httptest.NewRecorder()
+	It("ignores remote user headers from untrusted addresses", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
 
-	r.ServeHTTP(w, req)
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("10.0.0.1"),
+			UserService:    f.userService,
+		}
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 with proxy auth + RequireAuth chain, got %d: %s", w.Code, w.Body.String())
-	}
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "192.168.1.99:1234" // not trusted
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
 
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		// Untrusted → header ignored → no user → 401
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
+
+	It("requires the remote user header from trusted addresses", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		// no Remote-User header
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		// No header → no user injected → handler returns 401
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
+
+	It("injects a known remote user from a trusted address", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w.Body.String()).To(MatchJSON(`{"username":"admin"}`))
+	})
+
+	It("returns a structured not-found error for unknown remote users", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "ghost")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthRemoteUserNotFound))
+	})
+
+	It("uses the configured remote user header name", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "X-Forwarded-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("X-Forwarded-User", "admin")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+	})
+
+	It("trusts remote user headers from configured CIDR ranges", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("172.18.0.0/16"),
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "172.18.5.10:1234"
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+	})
+
+	It("returns a structured error when trusted proxy configuration is missing", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: nil,
+			UserService:    f.userService,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthReverseProxyMisconfigured))
+	})
+
+	It("returns a structured error when user lookup service is missing", func() {
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    nil,
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "admin")
+		w := httptest.NewRecorder()
+
+		proxyRouter(cfg).ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthReverseProxyMisconfigured))
+	})
+
+	// TestInjectRemoteUser_WithRequireAuth verifies the full middleware chain:
+	// InjectRemoteUser sets the user, then RequireAuth short-circuits JWT validation.
+	It("lets trusted remote users satisfy the required-auth middleware without a JWT cookie", func() {
+		f := createProxyFixture()
+		cleanupWithErrorCheck("proxy fixture", f.close)
+
+		storageDir := authMiddlewareTempDir()
+		sessionStore, err := coreauth.NewSessionStore(storageDir)
+		Expect(err).To(Succeed())
+		cleanupWithErrorCheck("session store", sessionStore.Close)
+
+		authService := coreauth.NewAuthService(f.userService, sessionStore, "test-secret-key-for-unit-tests-1", 0, 0)
+		authCookies := authmw.NewAuthCookies(true, 0, 0)
+
+		cfg := authmw.RemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "Remote-User",
+			TrustedProxies: mustParseTrustedProxies("127.0.0.1"),
+			UserService:    f.userService,
+		}
+
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(authmw.InjectRemoteUser(cfg))
+		r.Use(authmw.RequireAuth(authService, authCookies, false))
+		r.GET("/test", func(c *gin.Context) {
+			u := c.MustGet("user").(*coreauth.User)
+			c.JSON(http.StatusOK, gin.H{"username": u.Username})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Remote-User", "admin")
+		// no JWT cookie — proxy auth should take over
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+	})
 })

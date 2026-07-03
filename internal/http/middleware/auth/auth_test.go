@@ -2,8 +2,10 @@ package auth_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,14 +20,6 @@ type authFixture struct {
 	close func() error
 }
 
-type testTB interface {
-	Helper()
-	Cleanup(func())
-	TempDir() string
-	Errorf(format string, args ...any)
-	Fatalf(format string, args ...any)
-}
-
 type requireAuthComprehensiveScenario struct {
 	authDisabled   bool
 	injectUser     bool
@@ -35,26 +29,24 @@ type requireAuthComprehensiveScenario struct {
 	expectedCode   sharederrors.ErrorCode
 }
 
-func createTestAuthFixture(t testTB) *authFixture {
-	t.Helper()
+func createTestAuthFixture() *authFixture {
+	GinkgoHelper()
 
-	storageDir := t.TempDir()
+	storageDir := authMiddlewareTempDir()
 	userStore, err := coreauth.NewUserStore(storageDir)
-	if err != nil {
-		t.Fatalf("Failed to create user store: %v", err)
-	}
+	Expect(err).To(Succeed())
 	sessionStore, err := coreauth.NewSessionStore(storageDir)
 	if err != nil {
 		_ = userStore.Close()
-		t.Fatalf("Failed to create session store: %v", err)
 	}
+	Expect(err).To(Succeed())
 
 	userService := coreauth.NewUserService(userStore)
 	if err := userService.InitDefaultAdmin("admin"); err != nil {
 		_ = sessionStore.Close()
 		_ = userStore.Close()
-		t.Fatalf("Failed to init default admin: %v", err)
 	}
+	Expect(err).To(Succeed())
 
 	return &authFixture{
 		auth: coreauth.NewAuthService(userService, sessionStore, "test-secret-key-for-unit-tests-1", 15*time.Minute, 7*24*time.Hour),
@@ -68,653 +60,566 @@ func createTestAuthFixture(t testTB) *authFixture {
 	}
 }
 
-var _ = It("TestRequireAuth_WithAuthDisabled_UserExists", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-
-	// Middleware to inject user (simulating authmw.InjectPublicEditor)
-	router.Use(func(c *gin.Context) {
-		c.Set("user", &coreauth.User{
-			ID:       "public-editor",
-			Username: "public-editor",
-			Role:     coreauth.RoleEditor,
-		})
-		c.Next()
-	})
-
-	// Apply RequireAuth with authDisabled=true
-	router.Use(authmw.RequireAuth(nil, authCookies, true))
-
-	router.GET("/test", func(c *gin.Context) {
-		userValue, exists := c.Get("user")
-		if !exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"})
-			return
-		}
-
-		user, ok := userValue.(*coreauth.User)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user type"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"username": user.Username,
-			"role":     user.Role,
-		})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w2 := httptest.NewRecorder()
-
-	router.ServeHTTP(w2, req)
-
-	if w2.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d - %s", w2.Code, w2.Body.String())
-	}
-
-	expectedBody := `{"role":"editor","username":"public-editor"}`
-	if w2.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w2.Body.String())
-	}
-
-})
-
-var _ = It("TestRequireAuth_WithAuthDisabled_NoUser", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=true but no user injected
-	router.Use(authmw.RequireAuth(nil, authCookies, true))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w2 := httptest.NewRecorder()
-
-	router.ServeHTTP(w2, req)
-
-	if w2.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 when authDisabled=true but no user, got %d", w2.Code)
-	}
-
-	assertAuthMiddlewareError(t, w2, expectedAuthDisabledMissingUser)
-
-})
-
-var _ = It("TestRequireAuth_WithInvalidUserContext_NilUser", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", (*coreauth.User)(nil))
-		c.Next()
-	})
-	router.Use(authmw.RequireAuth(nil, authCookies, true))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500 for nil user context, got %d", w.Code)
-	}
-
-	assertAuthMiddlewareError(t, w, expectedAuthInvalidUserContext)
-
-})
-
-var _ = It("TestRequireAuth_WithInvalidUserContext_WrongType", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", "not-a-user")
-		c.Next()
-	})
-	router.Use(authmw.RequireAuth(nil, authCookies, true))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500 for invalid user type, got %d", w.Code)
-	}
-
-	assertAuthMiddlewareError(t, w, expectedAuthInvalidUserContext)
-
-})
-
-var _ = It("TestRequireAuth_WithAuthEnabled_ValidToken", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	// Login to get a valid token
-	authToken, err := fixture.auth.Login("admin", "admin")
-	if err != nil {
-		t.Fatalf("Failed to login: %v", err)
-	}
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=false
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
-
-	router.GET("/test", func(c *gin.Context) {
-		userValue, exists := c.Get("user")
-		if !exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"})
-			return
-		}
-
-		u, ok := userValue.(*coreauth.User)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user type"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"username": u.Username,
-			"role":     u.Role,
-		})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_at",
-		Value: authToken.Token,
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d - %s", w.Code, w.Body.String())
-	}
-
-	expectedBody := `{"role":"admin","username":"admin"}`
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, w.Body.String())
-	}
-
-})
-
-var _ = It("TestRequireAuth_WithAuthEnabled_MissingToken", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=false
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 when no token provided, got %d", w.Code)
-	}
-
-	assertAuthMiddlewareError(t, w, expectedAuthAccessTokenMissing)
-
-})
-
-var _ = It("TestRequireAuth_WithAuthEnabled_NilAuthService", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-	router.Use(authmw.RequireAuth(nil, authCookies, false))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_at",
-		Value: "some-token",
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500 when auth service is nil, got %d", w.Code)
-	}
-
-	assertAuthMiddlewareError(t, w, expectedAuthServiceUnavailable)
-
-})
-
-var _ = It("TestRequireAuth_WithAuthEnabled_InvalidToken", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=false
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_at",
-		Value: "invalid-token-123",
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401 when invalid token provided, got %d", w.Code)
-	}
-
-	assertAuthMiddlewareError(t, w, expectedAuthTokenInvalid)
-
-})
-
-var _ = It("TestRequireAuth_WithAuthEnabled_UserSetInContext", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	// Login to get a valid token
-	authToken, err := fixture.auth.Login("admin", "admin")
-	if err != nil {
-		t.Fatalf("Failed to login: %v", err)
-	}
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=false
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
-
-	userSetInContext := false
-
-	router.GET("/test", func(c *gin.Context) {
-		_, exists := c.Get("user")
-		if exists {
-			userSetInContext = true
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "leafwiki_at",
-		Value: authToken.Token,
-	})
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	if !userSetInContext {
-		t.Error("Expected user to be set in context")
-	}
-
-})
-
-var _ = It("TestRequireAuth_NextNotCalledOnFailure", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-
-	router := gin.New()
-
-	// Apply RequireAuth with authDisabled=false
-	router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
-
-	nextCalled := false
-
-	router.Use(func(c *gin.Context) {
-		nextCalled = true
-		c.Next()
-	})
-
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status 401, got %d", w.Code)
-	}
-
-	if nextCalled {
-		t.Error("Expected Next() not to be called when authentication fails")
-	}
-
-})
-
-var _ = DescribeTable("TestRequireAuth_ComprehensiveScenarios",
-	func(tc requireAuthComprehensiveScenario) {
-		t := GinkgoT()
+func authMiddlewareTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-auth-middleware-*")
+	Expect(err).To(Succeed())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
+func matchAuthMiddlewareError(code sharederrors.ErrorCode) OmegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(rec *httptest.ResponseRecorder) []byte {
+		return rec.Body.Bytes()
+	}, testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code)))
+}
+
+var _ = Describe("required authentication middleware", func() {
+	It("allows an injected public editor when authentication is disabled", func() {
 		gin.SetMode(gin.TestMode)
-
-		fixture := createTestAuthFixture(t)
-		DeferCleanup(fixture.close)
 
 		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
 
 		router := gin.New()
 
-		// Inject user if needed
-		if tc.injectUser {
-			router.Use(func(c *gin.Context) {
-				c.Set("user", &coreauth.User{
-					ID:       "public-editor",
-					Username: "public-editor",
-					Role:     coreauth.RoleEditor,
-				})
-				c.Next()
+		// Middleware to inject user (simulating authmw.InjectPublicEditor)
+		router.Use(func(c *gin.Context) {
+			c.Set("user", &coreauth.User{
+				ID:       "public-editor",
+				Username: "public-editor",
+				Role:     coreauth.RoleEditor,
 			})
-		}
+			c.Next()
+		})
 
-		// Apply RequireAuth
-		router.Use(authmw.RequireAuth(fixture.auth, authCookies, tc.authDisabled))
+		// Apply RequireAuth with authDisabled=true
+		router.Use(authmw.RequireAuth(nil, authCookies, true))
+
+		router.GET("/test", func(c *gin.Context) {
+			userValue, exists := c.Get("user")
+			if !exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"})
+				return
+			}
+
+			user, ok := userValue.(*coreauth.User)
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user type"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"username": user.Username,
+				"role":     user.Role,
+			})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w2 := httptest.NewRecorder()
+
+		router.ServeHTTP(w2, req)
+
+		Expect(w2).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w2.Body.String()).To(MatchJSON(`{"role":"editor","username":"public-editor"}`))
+	})
+
+	It("returns a structured missing-user error when authentication is disabled without an injected user", func() {
+		gin.SetMode(gin.TestMode)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=true but no user injected
+		router.Use(authmw.RequireAuth(nil, authCookies, true))
 
 		router.GET("/test", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		w2 := httptest.NewRecorder()
 
-		// Add token if needed
-		if tc.provideToken {
-			var token string
-			if tc.validToken {
-				authToken, err := fixture.auth.Login("admin", "admin")
-				if err != nil {
-					t.Fatalf("Failed to login: %v", err)
-				}
-				token = authToken.Token
-			} else {
-				token = "invalid-token"
+		router.ServeHTTP(w2, req)
+
+		Expect(w2).To(matchAuthMiddlewareError(expectedAuthDisabledMissingUser))
+		Expect(w2).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
+
+	It("returns a structured invalid-context error for a nil user value", func() {
+		gin.SetMode(gin.TestMode)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set("user", (*coreauth.User)(nil))
+			c.Next()
+		})
+		router.Use(authmw.RequireAuth(nil, authCookies, true))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthInvalidUserContext))
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+	})
+
+	It("returns a structured invalid-context error for a non-user context value", func() {
+		gin.SetMode(gin.TestMode)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set("user", "not-a-user")
+			c.Next()
+		})
+		router.Use(authmw.RequireAuth(nil, authCookies, true))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthInvalidUserContext))
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+	})
+
+	It("authenticates a valid access token and injects the admin user", func() {
+		gin.SetMode(gin.TestMode)
+
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		// Login to get a valid token
+		authToken, err := fixture.auth.Login("admin", "admin")
+		Expect(err).To(Succeed())
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=false
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
+
+		router.GET("/test", func(c *gin.Context) {
+			userValue, exists := c.Get("user")
+			if !exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"})
+				return
 			}
-			req.AddCookie(&http.Cookie{
-				Name:  "leafwiki_at",
-				Value: token,
-			})
-		}
 
+			u, ok := userValue.(*coreauth.User)
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user type"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"username": u.Username,
+				"role":     u.Role,
+			})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{
+			Name:  "leafwiki_at",
+			Value: authToken.Token,
+		})
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w.Body.String()).To(MatchJSON(`{"role":"admin","username":"admin"}`))
+	})
+
+	It("returns a structured missing-token error when authentication is enabled without a token", func() {
+		gin.SetMode(gin.TestMode)
+
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=false
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthAccessTokenMissing))
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
+
+	It("returns a structured service-unavailable error when token validation has no auth service", func() {
+		gin.SetMode(gin.TestMode)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+		router.Use(authmw.RequireAuth(nil, authCookies, false))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{
+			Name:  "leafwiki_at",
+			Value: "some-token",
+		})
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthServiceUnavailable))
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+	})
+
+	It("returns a structured invalid-token error for invalid access tokens", func() {
+		gin.SetMode(gin.TestMode)
+
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=false
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{
+			Name:  "leafwiki_at",
+			Value: "invalid-token-123",
+		})
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthTokenInvalid))
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
+
+	It("sets the authenticated user in context for downstream handlers", func() {
+		gin.SetMode(gin.TestMode)
+
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		// Login to get a valid token
+		authToken, err := fixture.auth.Login("admin", "admin")
+		Expect(err).To(Succeed())
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=false
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
+
+		userSetInContext := false
+
+		router.GET("/test", func(c *gin.Context) {
+			_, exists := c.Get("user")
+			if exists {
+				userSetInContext = true
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{
+			Name:  "leafwiki_at",
+			Value: authToken.Token,
+		})
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(userSetInContext).To(BeTrue())
+	})
+
+	It("stops the handler chain when authentication fails", func() {
+		gin.SetMode(gin.TestMode)
+
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+		router := gin.New()
+
+		// Apply RequireAuth with authDisabled=false
+		router.Use(authmw.RequireAuth(fixture.auth, authCookies, false))
+
+		nextCalled := false
+
+		router.Use(func(c *gin.Context) {
+			nextCalled = true
+			c.Next()
+		})
+
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusUnauthorized))
+		Expect(nextCalled).To(BeFalse())
+	})
+
+	DescribeTable("required authentication scenario matrix",
+		func(tc requireAuthComprehensiveScenario) {
+			gin.SetMode(gin.TestMode)
+
+			fixture := createTestAuthFixture()
+			DeferCleanup(fixture.close)
+
+			authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+
+			router := gin.New()
+
+			// Inject user if needed
+			if tc.injectUser {
+				router.Use(func(c *gin.Context) {
+					c.Set("user", &coreauth.User{
+						ID:       "public-editor",
+						Username: "public-editor",
+						Role:     coreauth.RoleEditor,
+					})
+					c.Next()
+				})
+			}
+
+			// Apply RequireAuth
+			router.Use(authmw.RequireAuth(fixture.auth, authCookies, tc.authDisabled))
+
+			router.GET("/test", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"ok": true})
+			})
+
+			req := httptest.NewRequest("GET", "/test", nil)
+
+			// Add token if needed
+			if tc.provideToken {
+				var token string
+				if tc.validToken {
+					authToken, err := fixture.auth.Login("admin", "admin")
+					Expect(err).To(Succeed())
+					token = authToken.Token
+				} else {
+					token = "invalid-token"
+				}
+				req.AddCookie(&http.Cookie{
+					Name:  "leafwiki_at",
+					Value: token,
+				})
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			Expect(w).To(HaveHTTPStatus(tc.expectedStatus))
+
+			if tc.expectedCode != "" {
+				Expect(w).To(matchAuthMiddlewareError(tc.expectedCode))
+			}
+		},
+		Entry("allows an injected user when authentication is disabled", requireAuthComprehensiveScenario{
+			authDisabled:   true,
+			injectUser:     true,
+			provideToken:   false,
+			validToken:     false,
+			expectedStatus: http.StatusOK,
+		}),
+		Entry("rejects disabled-auth requests without an injected user", requireAuthComprehensiveScenario{
+			authDisabled:   true,
+			injectUser:     false,
+			provideToken:   false,
+			validToken:     false,
+			expectedStatus: http.StatusUnauthorized,
+			expectedCode:   expectedAuthDisabledMissingUser,
+		}),
+		Entry("allows requests with a valid access token", requireAuthComprehensiveScenario{
+			authDisabled:   false,
+			injectUser:     false,
+			provideToken:   true,
+			validToken:     true,
+			expectedStatus: http.StatusOK,
+		}),
+		Entry("rejects requests without an access token", requireAuthComprehensiveScenario{
+			authDisabled:   false,
+			injectUser:     false,
+			provideToken:   false,
+			validToken:     false,
+			expectedStatus: http.StatusUnauthorized,
+			expectedCode:   expectedAuthAccessTokenMissing,
+		}),
+		Entry("rejects requests with an invalid access token", requireAuthComprehensiveScenario{
+			authDisabled:   false,
+			injectUser:     false,
+			provideToken:   true,
+			validToken:     false,
+			expectedStatus: http.StatusUnauthorized,
+			expectedCode:   expectedAuthTokenInvalid,
+		}),
+	)
+
+})
+
+var _ = Describe("optional authentication middleware", func() {
+	It("passes through requests without a token and leaves user context empty", func() {
+		gin.SetMode(gin.TestMode)
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		router := gin.New()
+		router.Use(authmw.OptionalAuth(nil, authCookies))
+		router.GET("/test", func(c *gin.Context) {
+			_, exists := c.Get("user")
+			if exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected user in context"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"user": nil})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		if w.Code != tc.expectedStatus {
-			t.Errorf("Expected status %d, got %d - %s", tc.expectedStatus, w.Code, w.Body.String())
-		}
-
-		if tc.expectedCode != "" {
-			assertAuthMiddlewareError(t, w, tc.expectedCode)
-		}
-	},
-	Entry("authDisabled=true, user injected - should pass", requireAuthComprehensiveScenario{
-		authDisabled:   true,
-		injectUser:     true,
-		provideToken:   false,
-		validToken:     false,
-		expectedStatus: http.StatusOK,
-	}),
-	Entry("authDisabled=true, no user - should fail", requireAuthComprehensiveScenario{
-		authDisabled:   true,
-		injectUser:     false,
-		provideToken:   false,
-		validToken:     false,
-		expectedStatus: http.StatusUnauthorized,
-		expectedCode:   expectedAuthDisabledMissingUser,
-	}),
-	Entry("authDisabled=false, valid token - should pass", requireAuthComprehensiveScenario{
-		authDisabled:   false,
-		injectUser:     false,
-		provideToken:   true,
-		validToken:     true,
-		expectedStatus: http.StatusOK,
-	}),
-	Entry("authDisabled=false, no token - should fail", requireAuthComprehensiveScenario{
-		authDisabled:   false,
-		injectUser:     false,
-		provideToken:   false,
-		validToken:     false,
-		expectedStatus: http.StatusUnauthorized,
-		expectedCode:   expectedAuthAccessTokenMissing,
-	}),
-	Entry("authDisabled=false, invalid token - should fail", requireAuthComprehensiveScenario{
-		authDisabled:   false,
-		injectUser:     false,
-		provideToken:   true,
-		validToken:     false,
-		expectedStatus: http.StatusUnauthorized,
-		expectedCode:   expectedAuthTokenInvalid,
-	}),
-)
-
-var _ = It("TestOptionalAuth_NoToken_PassesThrough", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-	router := gin.New()
-	router.Use(authmw.OptionalAuth(nil, authCookies))
-	router.GET("/test", func(c *gin.Context) {
-		_, exists := c.Get("user")
-		if exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected user in context"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"user": nil})
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	It("sets the user context for a valid token", func() {
+		gin.SetMode(gin.TestMode)
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for no token, got %d: %s", w.Code, w.Body.String())
-	}
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		authToken, err := fixture.auth.Login("admin", "admin")
+		Expect(err).To(Succeed())
 
+		router := gin.New()
+		router.Use(authmw.OptionalAuth(fixture.auth, authCookies))
+		router.GET("/test", func(c *gin.Context) {
+			v, exists := c.Get("user")
+			if !exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user not in context"})
+				return
+			}
+			u, ok := v.(*coreauth.User)
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "wrong type"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"username": u.Username})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: authToken.Token})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w.Body.String()).To(MatchJSON(`{"username":"admin"}`))
+	})
+
+	It("passes through invalid tokens without adding a user context", func() {
+		gin.SetMode(gin.TestMode)
+		fixture := createTestAuthFixture()
+		DeferCleanup(fixture.close)
+
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		router := gin.New()
+		router.Use(authmw.OptionalAuth(fixture.auth, authCookies))
+		router.GET("/test", func(c *gin.Context) {
+			_, exists := c.Get("user")
+			if exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected user for invalid token"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"user": nil})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: "invalid-token"})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+	})
+
+	It("returns a structured service-unavailable error when token validation has no auth service", func() {
+		gin.SetMode(gin.TestMode)
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		router := gin.New()
+		router.Use(authmw.OptionalAuth(nil, authCookies))
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: "some-token"})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(matchAuthMiddlewareError(expectedAuthServiceUnavailable))
+		Expect(w).To(HaveHTTPStatus(http.StatusInternalServerError))
+	})
+
+	It("preserves an existing user context without token validation", func() {
+		gin.SetMode(gin.TestMode)
+		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
+		injected := &coreauth.User{ID: "proxy-user", Username: "proxy", Role: coreauth.RoleViewer}
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set("user", injected)
+			c.Next()
+		})
+		router.Use(authmw.OptionalAuth(nil, authCookies))
+		router.GET("/test", func(c *gin.Context) {
+			v, _ := c.Get("user")
+			u := v.(*coreauth.User)
+			c.JSON(http.StatusOK, gin.H{"username": u.Username})
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		Expect(w).To(HaveHTTPStatus(http.StatusOK))
+		Expect(w.Body.String()).To(MatchJSON(`{"username":"proxy"}`))
+	})
 })
-
-var _ = It("TestOptionalAuth_ValidToken_SetsUser", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-	authToken, err := fixture.auth.Login("admin", "admin")
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-
-	router := gin.New()
-	router.Use(authmw.OptionalAuth(fixture.auth, authCookies))
-	router.GET("/test", func(c *gin.Context) {
-		v, exists := c.Get("user")
-		if !exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "user not in context"})
-			return
-		}
-		u, ok := v.(*coreauth.User)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "wrong type"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"username": u.Username})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: authToken.Token})
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if w.Body.String() != `{"username":"admin"}` {
-		t.Errorf("unexpected body: %s", w.Body.String())
-	}
-
-})
-
-var _ = It("TestOptionalAuth_InvalidToken_PassesThrough", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	fixture := createTestAuthFixture(t)
-	DeferCleanup(fixture.close)
-
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-	router := gin.New()
-	router.Use(authmw.OptionalAuth(fixture.auth, authCookies))
-	router.GET("/test", func(c *gin.Context) {
-		_, exists := c.Get("user")
-		if exists {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected user for invalid token"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"user": nil})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: "invalid-token"})
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for invalid token, got %d: %s", w.Code, w.Body.String())
-	}
-
-})
-
-var _ = It("TestOptionalAuth_NilAuthService_WithToken_Returns500", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-	router := gin.New()
-	router.Use(authmw.OptionalAuth(nil, authCookies))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: "some-token"})
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500 for nil authService with token, got %d: %s", w.Code, w.Body.String())
-	}
-	assertAuthMiddlewareError(t, w, expectedAuthServiceUnavailable)
-
-})
-
-var _ = It("TestOptionalAuth_UserAlreadyInContext_ShortCircuits", func() {
-	t := GinkgoT()
-	gin.SetMode(gin.TestMode)
-	authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-	injected := &coreauth.User{ID: "proxy-user", Username: "proxy", Role: coreauth.RoleViewer}
-
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", injected)
-		c.Next()
-	})
-	router.Use(authmw.OptionalAuth(nil, authCookies))
-	router.GET("/test", func(c *gin.Context) {
-		v, _ := c.Get("user")
-		u := v.(*coreauth.User)
-		c.JSON(http.StatusOK, gin.H{"username": u.Username})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-	if w.Body.String() != `{"username":"proxy"}` {
-		t.Errorf("unexpected body: %s", w.Body.String())
-	}
-
-})
-
-func assertAuthMiddlewareError(t testTB, rec *httptest.ResponseRecorder, code sharederrors.ErrorCode) {
-	t.Helper()
-	matcher := testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code))
-	matched, err := matcher.Match(rec.Body.Bytes())
-	if err != nil {
-		t.Fatalf("match auth middleware error: %v; body=%s", err, rec.Body.String())
-	}
-	if !matched {
-		t.Fatalf("%s", matcher.FailureMessage(rec.Body.String()))
-	}
-}

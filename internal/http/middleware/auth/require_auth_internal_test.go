@@ -12,16 +12,18 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = It("maps unexpected RequireAuth errors to a generic token failure", func() {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(rec)
+var _ = Describe("required authentication error mapping", func() {
+	It("maps unexpected middleware errors to a generic token failure", func() {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
 
-	abortRequireAuthError(ctx, errors.New("unexpected auth failure"))
+		abortRequireAuthError(ctx, errors.New("unexpected auth failure"))
 
-	Expect(rec).To(testmatchers.HaveHTTPStructuredError(
-		http.StatusInternalServerError,
-		errCodeAuthTokenInvalid,
-		sharederrors.MessageIDForCode(errCodeAuthTokenInvalid),
-	))
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(
+			http.StatusInternalServerError,
+			errCodeAuthTokenInvalid,
+			sharederrors.MessageIDForCode(errCodeAuthTokenInvalid),
+		))
+	})
 })
