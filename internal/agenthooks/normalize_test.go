@@ -2,13 +2,34 @@ package agenthooks
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 )
+
+var errNormalizeRejected = errors.New("agent hook event rejected")
+
+func normalizeEvent(provider ProviderID, raw []byte, seenAt time.Time) (Event, error) {
+	GinkgoHelper()
+
+	event, accepted := Normalize(provider, raw, seenAt)
+	if !accepted {
+		return Event{}, errNormalizeRejected
+	}
+	return event, nil
+}
+
+func beNormalizedAgentHookEvent() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(event Event) (bool, error) {
+		return IsNormalizedEvent(event), nil
+	}).WithMessage("be a normalized agent hook event")
+}
 
 var _ = Describe("agent hook normalization", func() {
 	It("hashes Codex session identity while preserving safe tool metadata", func() {
@@ -23,9 +44,9 @@ var _ = Describe("agent hook normalization", func() {
 			"tool_input":{"path":"/secret/page","query":"private prompt"}
 		}`)
 
-		event, ok := Normalize(ProviderCodex, raw, seenAt)
+		event, err := normalizeEvent(ProviderCodex, raw, seenAt)
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Provider":      Equal(ProviderCodex),
 			"SessionIDHash": Equal(testSessionHash(ProviderCodex, "raw-codex-session")),
@@ -43,14 +64,14 @@ var _ = Describe("agent hook normalization", func() {
 		var source AgentSource = AgentSourceCLI
 		var tool AgentToolName = AgentToolName("mcp__leafwiki__wiki_get_page")
 
-		event, ok := Normalize(provider, []byte(`{
+		event, err := normalizeEvent(provider, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"typed-contract-session",
 			"source":"cli",
 			"tool_name":"mcp__leafwiki__wiki_get_page"
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Provider":  Equal(provider),
 			"EventName": Equal(eventName),
@@ -60,7 +81,7 @@ var _ = Describe("agent hook normalization", func() {
 	})
 
 	It("redacts unsafe model source and tool metadata", func() {
-		event, ok := Normalize(ProviderCodex, []byte(`{
+		event, err := normalizeEvent(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"raw-codex-session",
 			"model":"/Users/example/token-model",
@@ -68,7 +89,7 @@ var _ = Describe("agent hook normalization", func() {
 			"tool_name":"Read /secret/token"
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Model":     BeEmpty(),
 			"Source":    BeEmpty(),
@@ -81,9 +102,9 @@ var _ = Describe("agent hook normalization", func() {
 		seenAt := time.Date(2026, 6, 7, 13, 0, 0, 0, time.UTC)
 		raw := []byte(`{"hook_event_name":"sessionStart","conversation_id":"cursor-conversation","user_email":"secret@example.com"}`)
 
-		event, ok := Normalize(ProviderCursor, raw, seenAt)
+		event, err := normalizeEvent(ProviderCursor, raw, seenAt)
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"SessionIDHash": Equal(testSessionHash(ProviderCursor, "cursor-conversation")),
 		}))
@@ -108,9 +129,9 @@ var _ = DescribeTable("supported provider event normalization",
 	func(tc supportedProviderEventCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 
-		event, ok := Normalize(tc.provider, []byte(tc.payload), seenAt)
+		event, err := normalizeEvent(tc.provider, []byte(tc.payload), seenAt)
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Provider":      Equal(tc.provider),
 			"EventName":     Equal(tc.wantEvent),
@@ -161,9 +182,10 @@ var _ = DescribeTable("normalization failure handling",
 	func(tc normalizeFailureCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC)
 
-		event, ok := Normalize(tc.provider, []byte(tc.payload), seenAt)
+		event, err := normalizeEvent(tc.provider, []byte(tc.payload), seenAt)
 
-		Expect(ok).To(BeFalse(), "Normalize returned ok=true with event %#v", event)
+		Expect(err).To(MatchError(errNormalizeRejected), "Normalize accepted event %#v", event)
+		Expect(event).To(Equal(Event{}))
 	},
 	Entry("malformed JSON", normalizeFailureCase{provider: ProviderCodex, payload: `{`}),
 	Entry("missing event", normalizeFailureCase{provider: ProviderCodex, payload: `{"session_id":"s1"}`}),
@@ -199,25 +221,25 @@ var _ = DescribeTable("provider permission response protocol",
 
 var _ = Describe("agent hook normalized event validation", func() {
 	It("accepts normalized events produced by Normalize", func() {
-		event, ok := Normalize(ProviderCodex, []byte(`{
+		event, err := normalizeEvent(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"normalized-session",
 			"tool_name":"mcp__leafwiki__wiki_get_page"
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
-		Expect(IsNormalizedEvent(event)).To(BeTrue())
+		Expect(err).To(Succeed())
+		Expect(event).To(beNormalizedAgentHookEvent())
 	})
 
 	It("collapses whitespace in safe metadata values", func() {
-		event, ok := Normalize(ProviderCodex, []byte(`{
+		event, err := normalizeEvent(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"metadata-session",
 			"model":"  gpt   5.4  ",
 			"tool_name":"  Shell   Command  "
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Model":    Equal("gpt 5.4"),
 			"ToolName": Equal(AgentToolName("Shell Command")),
@@ -225,14 +247,14 @@ var _ = Describe("agent hook normalized event validation", func() {
 	})
 
 	It("truncates safe model and tool metadata at their public bounds", func() {
-		event, ok := Normalize(ProviderCodex, []byte(`{
+		event, err := normalizeEvent(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
 			"session_id":"metadata-session",
 			"model":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
 			"tool_name":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Model":    HaveLen(80),
 			"ToolName": HaveLen(160),
@@ -240,14 +262,14 @@ var _ = Describe("agent hook normalized event validation", func() {
 	})
 
 	It("uses cursor parent conversation ID for subagent session identity", func() {
-		event, ok := Normalize(ProviderCursor, []byte(`{
+		event, err := normalizeEvent(ProviderCursor, []byte(`{
 			"hook_event_name":"subagentStart",
 			"session_id":"child-session",
 			"conversation_id":"child-conversation",
 			"parent_conversation_id":"parent-conversation"
 		}`), time.Now())
 
-		Expect(ok).To(BeTrue())
+		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"SessionIDHash": Equal(testSessionHash(ProviderCursor, "parent-conversation")),
 			"SubagentDelta": Equal(1),
@@ -256,14 +278,14 @@ var _ = Describe("agent hook normalized event validation", func() {
 
 	DescribeTable("rejects malformed normalized-event contracts",
 		func(mutator func(Event) Event) {
-			event, ok := Normalize(ProviderCodex, []byte(`{
+			event, err := normalizeEvent(ProviderCodex, []byte(`{
 				"hook_event_name":"SubagentStart",
 				"session_id":"normalized-session",
 				"tool_name":"mcp__leafwiki__wiki_get_page"
 			}`), time.Now())
-			Expect(ok).To(BeTrue())
+			Expect(err).To(Succeed())
 
-			Expect(IsNormalizedEvent(mutator(event))).To(BeFalse())
+			Expect(mutator(event)).NotTo(beNormalizedAgentHookEvent())
 		},
 		Entry("provider with surrounding whitespace", func(event Event) Event {
 			event.Provider = " codex"
@@ -307,13 +329,13 @@ var _ = Describe("agent hook normalized event validation", func() {
 
 	DescribeTable("normalizes safe source values",
 		func(rawSource string, want AgentSource) {
-			event, ok := Normalize(ProviderCodex, []byte(`{
+			event, err := normalizeEvent(ProviderCodex, []byte(`{
 				"hook_event_name":"SessionStart",
 				"session_id":"source-session",
 				"source":`+rawSource+`
 			}`), time.Now())
 
-			Expect(ok).To(BeTrue())
+			Expect(err).To(Succeed())
 			Expect(event.Source).To(Equal(want))
 		},
 		Entry("hook", `"hook"`, AgentSourceHook),
