@@ -384,8 +384,13 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		workspaceSection := edgeSectionNode("workspace-section", "workspace-section", "Workspace Section", parent)
 		workspaceSection.WorkspaceSourcePath = "Imported/Section"
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errFixtureReadFailed })
-		_, _, err = store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
-		Expect(err).To(MatchError(errFixtureReadFailed))
+		path, exists, err := store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
+		failedWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
+		Expect(failedWorkspaceLookup).To(matchWorkspaceContentPath(
+			BeEmpty(),
+			false,
+			MatchError(errFixtureReadFailed),
+		))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return []os.DirEntry{}, nil })
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return errors.New("mkdir failed") })
@@ -508,14 +513,22 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{fakeTreeDirEntry{name: "index.md"}}, nil
 		})
-		sourcePath, ok, err := store.workspaceContentPathForNode(section, "workspaceContent")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
-		Expect(sourcePath).To(ContainSubstring("index.md"))
+		sourcePath, exists, err := store.workspaceContentPathForNode(section, "workspaceContent")
+		sectionSourceLookup := workspaceContentPathLookup{Path: sourcePath, Exists: exists, Err: err}
+		Expect(sectionSourceLookup).To(matchWorkspaceContentPath(
+			ContainSubstring("index.md"),
+			true,
+			Succeed(),
+		))
 
 		page.WorkspaceSourcePath = "../outside.md"
-		_, _, err = store.workspaceContentPathForNode(page, "workspaceContent")
-		Expect(err).To(matchInvalidOp("workspaceContent"))
+		sourcePath, exists, err = store.workspaceContentPathForNode(page, "workspaceContent")
+		outsideSourceLookup := workspaceContentPathLookup{Path: sourcePath, Exists: exists, Err: err}
+		Expect(outsideSourceLookup).To(matchWorkspaceContentPath(
+			BeEmpty(),
+			false,
+			matchInvalidOp("workspaceContent"),
+		))
 
 		_, err = store.contentPathForNodeRead(edgePageNode("loose-page", "loose-page", "Loose Page", nil))
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
@@ -973,16 +986,24 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return nil, os.ErrNotExist
 		})
-		_, _, err = store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
-		Expect(err).To(matchInvalidOp("workspaceContent"))
+		path, exists, err := store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
+		invalidWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
+		Expect(invalidWorkspaceLookup).To(matchWorkspaceContentPath(
+			BeEmpty(),
+			false,
+			matchInvalidOp("workspaceContent"),
+		))
 
 		unknownWorkspace := edgePageNode("unknown", "unknown", "Unknown", parent)
 		unknownWorkspace.Kind = NodeKind("unknown")
 		unknownWorkspace.WorkspaceSourcePath = "custom.md"
-		path, ok, err := store.workspaceContentPathForNode(unknownWorkspace, "workspaceContent")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
-		Expect(path).To(BeEmpty())
+		path, exists, err = store.workspaceContentPathForNode(unknownWorkspace, "workspaceContent")
+		unknownWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
+		Expect(unknownWorkspaceLookup).To(matchWorkspaceContentPath(
+			BeEmpty(),
+			false,
+			Succeed(),
+		))
 
 		relCalls := 0
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {

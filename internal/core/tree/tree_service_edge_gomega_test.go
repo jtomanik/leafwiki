@@ -201,16 +201,25 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func
 
 		_, err = collectRelativeFiles(filepath.Join(base, "missing"))
 		Expect(err).To(MatchError(ErrCollectLegacyContentFiles))
-		_, err = filesHaveSameContent(filepath.Join(base, "missing.md"), filepath.Join(targetDir, "same.md"))
-		Expect(err).To(MatchError(ErrReadLegacyContentPath))
+		matches, err = filesHaveSameContent(filepath.Join(base, "missing.md"), filepath.Join(targetDir, "same.md"))
+		Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
+			BeFalse(),
+			MatchError(ErrReadLegacyContentPath),
+		))
 
 		if runtime.GOOS != "windows" {
 			loop := filepath.Join(base, "loop")
 			Expect(os.Symlink("loop", loop)).To(Succeed())
-			_, err = directoryHasEntries(loop)
-			Expect(err).To(MatchError(ErrReadDirectory))
-			_, err = filesHaveSameContent(filepath.Join(sourceDir, "same.md"), loop)
-			Expect(err).To(MatchError(ErrReadConfiguredLegacyContentPath))
+			hasEntries, err := directoryHasEntries(loop)
+			Expect(directoryEntriesResult{HasEntries: hasEntries, Err: err}).To(matchDirectoryEntries(
+				BeFalse(),
+				MatchError(ErrReadDirectory),
+			))
+			matches, err = filesHaveSameContent(filepath.Join(sourceDir, "same.md"), loop)
+			Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
+				BeFalse(),
+				MatchError(ErrReadConfiguredLegacyContentPath),
+			))
 		}
 
 		Expect(sameCleanPath(filepath.Join(base, "a", "..", "source"), sourceDir)).To(BeTrue())

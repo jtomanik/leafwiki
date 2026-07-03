@@ -133,17 +133,12 @@ var _ = ginkgo.Describe("workspace route conflict tracking", func() {
 
 			"expected normalized route conflict",
 		)
-		Expect(conflict.
-			RoutePath != "plans/foo-bar" ||
-			conflict.Kind != NodeKindPage,
-		).To(BeFalse(), "conflict route = %#v",
-
-			conflict)
-		Expect(conflict.
-			FirstPath != "plans/foo_bar.md" ||
-			conflict.SecondPath !=
-				"plans/foo-bar.md").To(
-			BeFalse(), "conflict paths = %#v", conflict)
+		Expect(conflict).To(SatisfyAll(
+			HaveField("RoutePath", Equal(RoutePath("plans/foo-bar"))),
+			HaveField("Kind", Equal(NodeKindPage)),
+			HaveField("FirstPath", Equal(WorkspaceSourcePath("plans/foo_bar.md"))),
+			HaveField("SecondPath", Equal(WorkspaceSourcePath("plans/foo-bar.md"))),
+		), "conflict = %#v", conflict)
 
 	})
 })

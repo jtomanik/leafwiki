@@ -120,22 +120,8 @@ leafwiki_title: Readme
 
 		readme := findChildBySlug(tree, "readme")
 		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("page-readme"), "Readme"))
-		Expect(docs.Parent ==
-			nil || docs.
-			Parent.
-			ID != "root",
-		).To(BeFalse(), "expected docs parent root, got %#v",
-
-			docs.Parent)
-		Expect(intro.Parent ==
-			nil ||
-			intro.
-				Parent.ID != docs.
-				ID).To(
-			BeFalse(),
-			"expected intro parent docs, got %#v",
-
-			intro.Parent)
+		Expect(docs.Parent).To(haveParentPageID(RootPageID), "expected docs parent root, got %#v", docs.Parent)
+		Expect(intro.Parent).To(haveParentPageID(docs.ID), "expected intro parent docs, got %#v", intro.Parent)
 
 		// parent pointers
 
@@ -316,13 +302,8 @@ leafwiki_title: Readme Page
 			err)
 
 		docs := findChildBySlug(tree, "docs")
-		Expect(docs.Kind !=
-			NodeKindSection ||
-			docs.ID != "sec-docs",
-		).
-			To(BeFalse(), "docs = %#v, want section from index.md",
-
-				docs)
+		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"),
+			"docs = %#v, want section from index.md", docs)
 
 		raw, err := store.ReadPageRaw(docs)
 		Expect(err).To(Succeed(), "ReadPageRaw docs: %v",
@@ -335,13 +316,8 @@ leafwiki_title: Readme Page
 			raw)
 
 		readme := findChildBySlug(docs, "README")
-		Expect(readme.Kind !=
-			NodeKindPage ||
-			readme.ID != "page-readme",
-		).To(BeFalse(),
-			"README child = %#v, want separate page from README.md",
-
-			readme)
+		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("page-readme"), "Readme Page"),
+			"README child = %#v, want separate page from README.md", readme)
 
 	})
 })
@@ -426,13 +402,8 @@ leafwiki_title: Root Readme
 		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
 			err)
-		Expect(tree.ID != "root" ||
-			tree.
-				Title !=
-				"Root Readme",
-		).To(BeFalse(), "root = %#v, want stable root ID with README title",
-
-			tree)
+		Expect(tree).To(matchTreeNode(NodeKindSection, RootPageID, "Root Readme"),
+			"root = %#v, want stable root ID with README title", tree)
 		Expect(tree.Children).To(HaveLen(0),
 			"root children = %v, want README.md used as root content only",
 
@@ -475,13 +446,8 @@ leafwiki_title: Root Readme Page
 		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
 			err)
-		Expect(tree.ID != "root" ||
-			tree.
-				Title !=
-				"Root Index",
-		).To(BeFalse(), "root = %#v, want stable root ID with index title",
-
-			tree)
+		Expect(tree).To(matchTreeNode(NodeKindSection, RootPageID, "Root Index"),
+			"root = %#v, want stable root ID with index title", tree)
 
 		raw, err := store.ReadPageRaw(tree)
 		Expect(err).To(Succeed(), "ReadPageRaw root: %v",
@@ -494,13 +460,8 @@ leafwiki_title: Root Readme Page
 			raw)
 
 		readme := findChildBySlug(tree, "README")
-		Expect(readme.Kind !=
-			NodeKindPage ||
-			readme.ID != "root-readme",
-		).To(BeFalse(),
-			"README child = %#v, want root README.md as separate page",
-
-			readme)
+		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("root-readme"), "Root Readme Page"),
+			"README child = %#v, want root README.md as separate page", readme)
 
 	})
 })
@@ -535,14 +496,8 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter in materialized index")
-		Expect(newFixturePageID(frontmatter.
-			LeafWikiID) != sec.
-			ID ||
-			frontmatter.
-				LeafWikiTitle !=
-				sec.Title).To(BeFalse(), "unexpected frontmatter in materialized index: %#v",
-
-			frontmatter)
+		Expect(frontmatter).To(matchManagedFrontmatter(sec.ID, sec.Title),
+			"unexpected frontmatter in materialized index: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(BeEmpty(),
 
 			"expected empty body in materialized index, got %q",
@@ -861,20 +816,10 @@ leafwiki_title: Notes Page
 				section = child
 			}
 		}
-		Expect(page == nil ||
-			page.ID !=
-				"notes-page",
-		).To(BeFalse(),
-			"notes page = %#v, want notes-page",
-
-			page)
-		Expect(section == nil ||
-			section.
-				ID !=
-				"notes-section",
-		).To(BeFalse(), "notes section = %#v, want notes-section",
-
-			section)
+		Expect(page).To(matchTreeNodePointer(NodeKindPage, Equal(newFixturePageID("notes-page"))),
+			"notes page = %#v, want notes-page", page)
+		Expect(section).To(matchTreeNodePointer(NodeKindSection, Equal(newFixturePageID("notes-section"))),
+			"notes section = %#v, want notes-section", section)
 
 	})
 })
@@ -973,14 +918,8 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 
 		findChildBySlug(tree, "guide")
 		for _, child := range tree.Children {
-			Expect(strings.EqualFold(child.
-				Slug.
-				String(), "assets",
-			) || strings.
-				EqualFold(child.
-					Slug.String(), "assets-1")).To(BeFalse(), "top-level static assets directory became wiki child: %#v",
-
-				child)
+			Expect(strings.ToLower(child.Slug.String())).NotTo(SatisfyAny(Equal("assets"), Equal("assets-1")),
+				"top-level static assets directory became wiki child: %#v", child)
 
 		}
 
@@ -1138,34 +1077,13 @@ leafwiki_last_author_id: bob
 			err)
 
 		page := findChildBySlug(tree, "page")
-		Expect(page.ID).To(Equal(newFixturePageID("page-1")),
-			"expected page ID from frontmatter, got %q",
-
-			page.ID)
-		{
-
-			got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339)
-			Expect(got).To(Equal("2026-03-21T10:15:30Z"), "expected created_at from frontmatter, got %q",
-
-				got)
-		}
-		{
-
-			got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
-			Expect(got).To(Equal("2026-03-21T11:16:31Z"), "expected updated_at from frontmatter, got %q",
-
-				got)
-		}
-		Expect(page.Metadata.
-			CreatorID !=
-			"alice" ||
-			page.Metadata.
-				LastAuthorID !=
-				"bob",
-		).
-			To(BeFalse(), "expected author metadata from frontmatter, got %#v",
-
-				page.Metadata)
+		Expect(page).To(SatisfyAll(
+			HaveField("ID", Equal(newFixturePageID("page-1"))),
+			HaveField("Metadata", SatisfyAll(
+				matchPageMetadataTimestamps("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z"),
+				matchPageMetadataAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+			)),
+		), "expected page metadata from frontmatter, got %#v", page)
 
 	})
 })
@@ -1304,12 +1222,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 
 				got)
 		}
-		Expect(page.Metadata.
-			CreatorID !=
-			reconstructSystemUserID ||
-			page.Metadata.
-				LastAuthorID !=
-				reconstructSystemUserID).To(BeFalse(),
+		Expect(page.Metadata).To(matchPageMetadataAuthors(reconstructSystemUserID, reconstructSystemUserID),
 			"expected system user fallback, got %#v",
 
 			page.Metadata)

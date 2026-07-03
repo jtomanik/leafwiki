@@ -131,13 +131,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		}
 
 		tree := svc.GetTree()
-		Expect(tree == nil ||
-			tree.ID !=
-				"root",
-		).To(BeFalse(), "expected default root, got: %+v",
-
-			tree,
-		)
+		Expect(tree).To(matchRootSection(), "expected default root, got: %+v", tree)
 		Expect(tree.Kind).To(Equal(NodeKindSection),
 			"expected root to be section, got %q",
 
@@ -792,24 +786,13 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		)
 
 		a := root.Children[0]
-		Expect(a.Parent == nil ||
-			a.Parent.
-				ID !=
-				"root",
-		).To(BeFalse(), "expected parent pointer on A")
-		Expect(a.Children).To(HaveLen(
-			1), "expected A to have 1 child, got %d",
-
-			len(a.Children))
+		Expect(a).To(SatisfyAll(
+			HaveField("Parent", haveParentPageID(RootPageID)),
+			HaveField("Children", HaveLen(1)),
+		), "expected A to be attached under root with one child")
 
 		b := a.Children[0]
-		Expect(b.Parent == nil ||
-			b.Parent.
-				ID !=
-				a.
-					ID).To(BeFalse(),
-			"expected parent pointer on B",
-		)
+		Expect(b.Parent).To(haveParentPageID(a.ID), "expected parent pointer on B")
 
 	})
 })
@@ -1062,19 +1045,12 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(has).To(BeTrue(), "expected frontmatter to exist")
 
 		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
-		Expect(frontmatter.LeafWikiCreatedAt ==
-			"" ||
-			frontmatter.LeafWikiUpdatedAt ==
-				"").
-			To(BeFalse(), "expected leafwiki timestamps to be set, got %#v",
-				frontmatter)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"system" ||
-			frontmatter.
-				LeafWikiLastAuthorID !=
-				"system",
-		).To(BeFalse(), "expected creator metadata to be set, got %#v",
-			frontmatter)
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+		), "expected leafwiki timestamps to be set, got %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterAuthors(newFixtureUserID("system"), newFixtureUserID("system")),
+			"expected creator metadata to be set, got %#v", frontmatter)
 
 	})
 })
@@ -1268,19 +1244,12 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 				"Docs"), "expected leafwiki_title Docs, got %q",
 
 			frontmatter.LeafWikiTitle)
-		Expect(frontmatter.LeafWikiCreatedAt ==
-			"" ||
-			frontmatter.LeafWikiUpdatedAt ==
-				"").
-			To(BeFalse(), "expected leafwiki timestamps to be set, got %#v",
-				frontmatter)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"system" ||
-			frontmatter.
-				LeafWikiLastAuthorID !=
-				"system",
-		).To(BeFalse(), "expected creator metadata to be set, got %#v",
-			frontmatter)
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+		), "expected leafwiki timestamps to be set, got %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterAuthors(newFixtureUserID("system"), newFixtureUserID("system")),
+			"expected creator metadata to be set, got %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(BeEmpty(),
 
 			"expected empty section body, got %q",
@@ -1642,15 +1611,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			)
 
 		}
-		Expect(root.Children[0].Position !=
-			0 ||
-			root.
-				Children[1].Position !=
-				1,
-		).To(BeFalse(), "expected positions reindexed to 0..1, got %d,%d",
-
-			root.
-				Children[0].Position, root.Children[1].Position)
+		Expect(root).To(haveChildPositions(0, 1), "expected positions reindexed to 0..1")
 
 		// Reindex: positions must be 0..1 (order depends on previous positions; we just assert contiguous)
 
@@ -2028,12 +1989,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 		{
 			err := os.Remove(filepath.Join(tmpDir, "root", "dest", ".order.json"))
-			Expect(err != nil &&
-				!errors.Is(err,
-					os.ErrNotExist,
-				)).To(BeFalse(), "remove dest order file: %v",
-
-				err)
+			Expect(err).To(SatisfyAny(Succeed(), matchErrorIs(os.ErrNotExist)), "remove dest order file: %v", err)
 		}
 
 		createTreeDirectory(filepath.Join(tmpDir, "root", "dest", ".order.json"))
@@ -2059,14 +2015,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			"expected rollback to restore root children, got %#v",
 
 			root.Children)
-		Expect(root.Children[0].ID !=
-			*destID ||
-			root.
-				Children[1].ID !=
-				*moveID,
-		).To(BeFalse(), "unexpected root children after rollback: got [%s %s]",
-
-			root.Children[0].ID, root.Children[1].ID)
+		Expect(root).To(haveChildPageIDs(*destID, *moveID), "unexpected root children after rollback")
 
 		dest := findChildBySlug(root, "dest")
 		Expect(dest.Children).To(HaveLen(0),
@@ -2157,21 +2106,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 
 		root := svc.GetTree()
-		Expect(root.Children[0].ID !=
-			*idC ||
-			root.
-				Children[1].ID !=
-				*idA || root.
-			Children[2].ID !=
-
-			*idB).To(BeFalse(), "unexpected order after sort")
-		Expect(root.Children[0].Position !=
-			0 ||
-			root.
-				Children[1].Position !=
-				1 ||
-			root.Children[2].
-				Position != 2).To(BeFalse(), "expected positions to be reindexed")
+		Expect(root).To(haveChildPageIDs(*idC, *idA, *idB), "unexpected order after sort")
+		Expect(root).To(haveChildPositions(0, 1, 2), "expected positions to be reindexed")
 
 	})
 })
@@ -2669,22 +2605,13 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(!lookup.Exists ||
-			len(lookup.
-				Segments,
-			) != 1 || lookup.
-			Segments[0].ID == nil,
-		).To(BeFalse(), "lookup = %#v, want existing section segment",
-			lookup)
-
-		Expect(*lookup.Segments[0].ID).To(Equal(*sectionID))
-		Expect(lookup.Segments[0].Kind ==
-			nil ||
-			*lookup.
-				Segments[0].
-				Kind != NodeKindSection,
-		).To(BeFalse(), "LookupPagePath sync kind = %v, want section",
-			lookup.Segments[0].Kind)
+		Expect(lookup).To(SatisfyAll(
+			HaveField("Exists", BeTrue()),
+			HaveField("Segments", HaveExactElements(SatisfyAll(
+				matchExistingPathSegment(*sectionID),
+				HaveField("Kind", pointToValue[NodeKind](Equal(NodeKindSection))),
+			))),
+		), "lookup = %#v, want existing section segment", lookup)
 
 	})
 })
@@ -2841,37 +2768,26 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
 
 			err)
-		Expect(res.Page == nil ||
-			res.
-				Page.Slug !=
-				"members").To(BeFalse(), "expected final page 'members'")
+		Expect(res.Page).To(SatisfyAll(
+			Not(BeNil()),
+			HaveField("Slug", Equal(newFixtureSlug("members"))),
+		), "expected final page 'members'")
 
 		rootOrder := readOrderIDs(filepath.Join(tmpDir, "root"))
-		Expect(len(rootOrder) != 1 ||
-			newFixturePageID(rootOrder[0]) !=
-				res.Created[0].ID).
-			To(BeFalse(), "unexpected root order after EnsurePagePath: %v",
-				rootOrder)
+		Expect(rootOrder).To(matchPersistedPageIDOrder(res.Created[0].ID),
+			"unexpected root order after EnsurePagePath: %v", rootOrder)
 
 		homeOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home"))
-		Expect(len(homeOrder) != 1 ||
-			newFixturePageID(homeOrder[0]) !=
-				res.Created[1].ID).
-			To(BeFalse(), "unexpected home order after EnsurePagePath: %v",
-				homeOrder)
+		Expect(homeOrder).To(matchPersistedPageIDOrder(res.Created[1].ID),
+			"unexpected home order after EnsurePagePath: %v", homeOrder)
 
 		aboutOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home", "about"))
-		Expect(len(aboutOrder) != 1 ||
-			newFixturePageID(aboutOrder[0]) != res.Created[2].ID,
-		).To(BeFalse(), "unexpected about order after EnsurePagePath: %v",
-			aboutOrder)
+		Expect(aboutOrder).To(matchPersistedPageIDOrder(res.Created[2].ID),
+			"unexpected about order after EnsurePagePath: %v", aboutOrder)
 
 		teamOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home", "about", "team"))
-		Expect(len(teamOrder) != 1 ||
-			newFixturePageID(teamOrder[0]) !=
-				res.Created[3].ID).
-			To(BeFalse(), "unexpected team order after EnsurePagePath: %v",
-				teamOrder)
+		Expect(teamOrder).To(matchPersistedPageIDOrder(res.Created[3].ID),
+			"unexpected team order after EnsurePagePath: %v", teamOrder)
 
 	})
 })
@@ -2885,10 +2801,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
 
 			err)
-		Expect(res.Page == nil ||
-			res.
-				Page.Slug !=
-				"members").To(BeFalse(), "expected final page 'members'")
+		Expect(res.Page).To(SatisfyAll(
+			Not(BeNil()),
+			HaveField("Slug", Equal(newFixtureSlug("members"))),
+		), "expected final page 'members'")
 
 		// home/about/team should exist as path now
 		lookup, err := svc.LookupPagePath("home/about/team/members")
@@ -3124,32 +3040,16 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "FindPageByID docs failed: %v",
 
 			err)
-		Expect(len(docsNode.
-			Children) !=
-			1 ||
-			docsNode.
-				Children[0].ID !=
-				*betaID,
-		).To(BeFalse(), "expected docs child beta before migration")
+		Expect(docsNode).To(haveChildPageIDs(*betaID), "expected docs child beta before migration")
 		{
 
 			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
-			Expect(err != nil &&
-				!errors.Is(err,
-					os.ErrNotExist,
-				)).To(BeFalse(), "remove root order file: %v",
-
-				err)
+			Expect(err).To(SatisfyAny(Succeed(), matchErrorIs(os.ErrNotExist)), "remove root order file: %v", err)
 		}
 		{
 
 			err := os.Remove(filepath.Join(tmpDir, "root", "docs", ".order.json"))
-			Expect(err != nil &&
-				!errors.Is(err,
-					os.ErrNotExist,
-				)).To(BeFalse(), "remove docs order file: %v",
-
-				err)
+			Expect(err).To(SatisfyAny(Succeed(), matchErrorIs(os.ErrNotExist)), "remove docs order file: %v", err)
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
@@ -3255,27 +3155,11 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter after migration")
-		Expect(newFixturePageID(frontmatter.
-			LeafWikiID,
-		) != *id || frontmatter.
-			LeafWikiTitle !=
-			"Docs",
-		).To(BeFalse(), "expected section frontmatter to be materialized, got %#v",
-			frontmatter)
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			"2026-03-22T10:15:30Z" ||
-			frontmatter.
-				LeafWikiUpdatedAt !=
-				"2026-03-22T11:16:31Z").To(BeFalse(), "expected timestamps to be materialized, got %#v",
-			frontmatter,
-		)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"alice" ||
-			frontmatter.
-				LeafWikiLastAuthorID !=
-				"bob",
-		).To(BeFalse(), "expected author metadata to be materialized, got %#v",
-			frontmatter)
+		Expect(frontmatter).To(SatisfyAll(
+			matchManagedFrontmatter(*id, "Docs"),
+			matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
+			matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+		), "expected section frontmatter to be materialized, got %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(BeEmpty(),
 
 			"expected empty section body after migration, got %q",
@@ -3403,14 +3287,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter after resumed migration")
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			originalModTime.
-				Format(time.RFC3339) || frontmatter.
-			LeafWikiUpdatedAt != originalModTime.Format(time.
-			RFC3339)).To(BeFalse(), "expected resumed migration to preserve v1 metadata via persisted legacy snapshot, got %#v",
-
-			frontmatter,
-		)
+		Expect(frontmatter).To(matchFrontmatterTimestamps(
+			originalModTime.Format(time.RFC3339),
+			originalModTime.Format(time.RFC3339),
+		), "expected resumed migration to preserve v1 metadata via persisted legacy snapshot, got %#v", frontmatter)
 
 	})
 })
@@ -3493,20 +3373,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter after migration")
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			"2026-03-21T10:15:30Z" ||
-			frontmatter.
-				LeafWikiUpdatedAt !=
-				"2026-03-21T11:16:31Z").To(BeFalse(), "expected metadata timestamps to be backfilled, got %#v",
-
-			frontmatter)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"alice" ||
-			frontmatter.
-				LeafWikiLastAuthorID !=
-				"bob",
-		).To(BeFalse(), "expected metadata authors to be backfilled, got %#v",
-			frontmatter)
+		Expect(frontmatter).To(SatisfyAll(
+			matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z"),
+			matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+		), "expected metadata to be backfilled, got %#v", frontmatter)
 
 		wantBody := "# Page 1 Content\nHello World\n"
 		Expect(migratedBody).
@@ -4063,12 +3933,8 @@ leafwiki_title: README
 
 		// Verify the tree structure matches
 		tree := newSvc.GetTree()
-		Expect(tree == nil ||
-			tree.ID !=
-				"root",
-		).To(BeFalse(), "expected root node after reload, got: %+v",
-
-			tree)
+		Expect(tree).To(SatisfyAll(Not(BeNil()), HaveField("ID", Equal(RootPageID))),
+			"expected root node after reload, got: %+v", tree)
 
 		// Verify the readme page exists
 		readme := findChildBySlug(tree, "readme")
@@ -4134,14 +4000,8 @@ leafwiki_last_author_id: bob
 
 				got)
 		}
-		Expect(readme.Metadata.
-			CreatorID !=
-			"alice" ||
-			readme.Metadata.
-				LastAuthorID !=
-				"bob",
-		).To(BeFalse(), "expected persisted author metadata from frontmatter, got %#v",
-			readme.Metadata)
+		Expect(readme.Metadata).To(matchPageMetadataAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+			"expected persisted author metadata from frontmatter, got %#v", readme.Metadata)
 
 	})
 })
@@ -4203,14 +4063,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 				got)
 		}
-		Expect(readme.Metadata.
-			CreatorID !=
-			reconstructSystemUserID ||
-			readme.Metadata.
-				LastAuthorID !=
-				reconstructSystemUserID).To(BeFalse(), "expected persisted system-user metadata fallback, got %#v",
-
-			readme.Metadata)
+		Expect(readme.Metadata).To(matchPageMetadataAuthors(reconstructSystemUserID, reconstructSystemUserID),
+			"expected persisted system-user metadata fallback, got %#v", readme.Metadata)
 
 	})
 })
@@ -4343,13 +4197,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 
 		tree := svc.GetTree()
-		Expect(tree == nil ||
-			tree.ID !=
-				"root",
-		).To(BeFalse(), "expected root node, got: %+v",
-
-			tree,
-		)
+		Expect(tree).To(SatisfyAll(Not(BeNil()), HaveField("ID", Equal(RootPageID))),
+			"expected root node, got: %+v", tree)
 
 		// Note: Root metadata may not be backfilled from filesystem when directory is empty
 		// because there's no corresponding file/directory to stat. This is expected behavior.
@@ -4368,13 +4217,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		}
 
 		reloadedTree := reloadedSvc.GetTree()
-		Expect(reloadedTree ==
-			nil ||
-			reloadedTree.
-				ID != "root").To(
-			BeFalse(),
-			"expected root node after reload",
-		)
+		Expect(reloadedTree).To(SatisfyAll(Not(BeNil()), HaveField("ID", Equal(RootPageID))),
+			"expected root node after reload")
 
 	})
 })
@@ -4473,12 +4317,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
-			Expect(err != nil &&
-				!errors.Is(err,
-					os.ErrNotExist,
-				)).To(BeFalse(), "remove root order file failed: %v",
-
-				err)
+			Expect(err).To(SatisfyAny(Succeed(), matchErrorIs(os.ErrNotExist)), "remove root order file failed: %v", err)
 		}
 
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
@@ -4689,15 +4528,15 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 var _ = ginkgo.Describe("tree service behavior", func() {
 	ginkgo.It("walk nodes does nothing when not loaded", func() {
 		svc := NewTreeService(tempTreeDir())
-		called := false
+		var visitedIDs []PageID
 		err := svc.WalkNodes(func(_ PageID) error {
-			called = true
+			visitedIDs = append(visitedIDs, RootPageID)
 			return nil
 		})
 		Expect(err).To(Succeed(), "expected no error, got: %v",
 
 			err)
-		Expect(called).To(BeFalse(), "expected fn not to be called when tree is not loaded")
+		Expect(visitedIDs).To(BeEmpty(), "expected fn not to be called when tree is not loaded")
 
 	})
 })
@@ -4755,17 +4594,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		)
 
 		for _, s := range []string{"a", "b"} {
-			found := false
-			for _, v := range visited {
-				if v == s {
-					found = true
-					break
-				}
-			}
-			Expect(found).To(BeTrue(), "expected slug %q to be visited, got: %v",
-
-				s,
-				visited)
+			Expect(visited).To(ContainElement(s), "expected slug %q to be visited, got: %v", s, visited)
 
 		}
 
@@ -4916,31 +4745,26 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		)
 
 		pages, errs := svc.GetPages([]PageID{*secondID, PageID("missing-id"), *firstID})
-		Expect(len(pages) !=
-			3 || len(
-			errs) !=
-			3).To(BeFalse(), "unexpected result lengths: pages=%d errs=%d",
-
-			len(pages), len(errs))
-		Expect(errs[0] != nil ||
-			pages[0] ==
-				nil ||
-			pages[0].ID != *secondID).To(BeFalse(),
-			"expected second page at index 0, got page=%v err=%v",
-
-			pages[0], errs[0])
-		Expect(!errors.Is(errs[1], ErrPageNotFound) ||
-			pages[1] != nil,
-		).To(BeFalse(), "expected ErrPageNotFound at index 1, got page=%v err=%v",
-
-			pages[1], errs[1])
-		Expect(errs[2] != nil ||
-			pages[2] ==
-				nil ||
-			pages[2].ID != *firstID).To(BeFalse(),
-			"expected first page at index 2, got page=%v err=%v",
-
-			pages[2], errs[2])
+		Expect(pages).To(HaveLen(3), "unexpected page result length")
+		Expect(errs).To(HaveLen(3), "unexpected error result length")
+		pageResults := make([]pageLookupResult, 0, len(pages))
+		for i := range pages {
+			pageResults = append(pageResults, pageLookupResult{Page: pages[i], Err: errs[i]})
+		}
+		Expect(pageResults).To(HaveExactElements(
+			SatisfyAll(
+				HaveField("Page", pointToValue[Page](HaveField("ID", Equal(*secondID)))),
+				HaveField("Err", Succeed()),
+			),
+			SatisfyAll(
+				HaveField("Page", BeNil()),
+				HaveField("Err", MatchError(ErrPageNotFound)),
+			),
+			SatisfyAll(
+				HaveField("Page", pointToValue[Page](HaveField("ID", Equal(*firstID)))),
+				HaveField("Err", Succeed()),
+			),
+		))
 
 	})
 })
@@ -4985,26 +4809,16 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err,
 		)
-		Expect(afterFirst.Content).To(
-			Equal("updated first"), "expected first content update, got %q",
-
-			afterFirst.Content)
-		Expect(afterFirst.Metadata.
-			LastAuthorID,
-		).To(Equal(newFixtureUserID("bulk-user")), "expected first LastAuthorID updated, got %q",
-
-			afterFirst.Metadata.LastAuthorID,
-		)
-		Expect(!afterFirst.Metadata.
-			UpdatedAt.
-			After(beforeFirst.Metadata.
-				UpdatedAt,
-			) && !afterFirst.
-			Metadata.UpdatedAt.Equal(beforeFirst.Metadata.UpdatedAt)).To(BeFalse(), "expected first UpdatedAt to stay monotonic, before=%s after=%s",
-
-			beforeFirst.
-				Metadata.UpdatedAt,
-			afterFirst.Metadata.UpdatedAt)
+		Expect(afterFirst).To(SatisfyAll(
+			HaveField("Content", Equal("updated first")),
+			HaveField("Metadata", SatisfyAll(
+				HaveField("LastAuthorID", Equal(newFixtureUserID("bulk-user"))),
+				HaveField("UpdatedAt", Or(
+					BeTemporally(">", beforeFirst.Metadata.UpdatedAt),
+					BeTemporally("==", beforeFirst.Metadata.UpdatedAt),
+				)),
+			)),
+		), "expected first page content and metadata to reflect the bulk update")
 
 		afterSecond, err := svc.GetPage(*secondID)
 		Expect(err).To(Succeed(), "GetPage(second after) failed: %v",
@@ -5304,9 +5118,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 
 		s := string(data)
-		Expect(strings.Contains(s, "rawContent") ||
-			strings.Contains(s, "raw_content")).To(BeFalse(), "RawContent must not appear in JSON output, got: %s",
-			s)
+		Expect(s).NotTo(SatisfyAny(ContainSubstring("rawContent"), ContainSubstring("raw_content")),
+			"RawContent must not appear in JSON output, got: %s", s)
 
 	})
 })

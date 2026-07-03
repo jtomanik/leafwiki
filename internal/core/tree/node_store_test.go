@@ -91,19 +91,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		sec := loaded.Children[0]
 		p := sec.Children[0]
-		Expect(sec.Parent ==
-			nil || sec.
-			Parent.
-			ID != "root").
-			To(BeFalse(), "expected section parent root, got %#v",
-
-				sec.Parent)
-		Expect(p.Parent == nil ||
-			p.Parent.
-				ID !=
-				"s1").To(BeFalse(), "expected page parent s1, got %#v",
-
-			p.Parent)
+		Expect(sec.Parent).To(haveParentPageID(RootPageID), "expected section parent root, got %#v", sec.Parent)
+		Expect(p.Parent).To(haveParentPageID(newFixturePageID("s1")), "expected page parent s1, got %#v", p.Parent)
 
 	})
 })
@@ -354,14 +343,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		// expected folder: <tmp>/root/docs
 		directory := filepath.Join(tmp, "root", "docs")
-		{
-			st, err := os.Stat(directory)
-			Expect(err != nil ||
-				!st.IsDir()).To(BeFalse(), "expected section folder at %s",
-
-				directory,
-			)
-		}
+		Expect(directory).To(BeADirectory(), "expected section folder")
 
 		index := filepath.Join(directory, "index.md")
 		raw := string(readTreeFile(index))
@@ -371,27 +353,12 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter in section index")
-		Expect(frontmatter.LeafWikiID !=
-			"sec1" ||
-			frontmatter.
-				LeafWikiTitle !=
-				"Docs",
-		).To(
-			BeFalse(), "unexpected section frontmatter: %#v",
-			frontmatter,
-		)
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			"2026-03-22T10:15:30Z" ||
-			frontmatter.
-				LeafWikiUpdatedAt !=
-				"2026-03-22T11:16:31Z").To(BeFalse(), "unexpected section timestamp metadata: %#v",
-			frontmatter)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"alice" || frontmatter.
-			LeafWikiLastAuthorID !=
-			"bob").To(BeFalse(), "unexpected section author metadata: %#v",
-
-			frontmatter)
+		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("sec1"), "Docs"),
+			"unexpected section frontmatter: %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
+			"unexpected section timestamp metadata: %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+			"unexpected section author metadata: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(BeEmpty(),
 
 			"expected empty section body, got %q",
@@ -732,9 +699,9 @@ var _ = ginkgo.Describe("node store persistence", func() {
 			"expected heading in body, got: %q",
 
 			body)
-		Expect(frontmatter.ExtraFields["custom_key"]).To(BeNil(), "expected custom_key to stay as body, got ExtraField %#v",
+		Expect(frontmatter.ExtraFields).NotTo(HaveKey("custom_key"), "expected custom_key to stay as body, got ExtraFields %#v",
 
-			frontmatter.ExtraFields["custom_key"])
+			frontmatter.ExtraFields)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", Equal("p1")),
 			HaveField("LeafWikiTitle", Equal("My Page")),
@@ -781,18 +748,10 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected system frontmatter in written file")
-		Expect(frontmatter.LeafWikiID).
-			To(Equal("p1"), "expected managed leafwiki_id, got %q",
-
-				frontmatter.LeafWikiID)
-		Expect(frontmatter.ExtraFields["custom"]).To(BeNil(),
-			"expected custom to stay as body text, got ExtraField %#v",
-
-			frontmatter.ExtraFields["custom"])
-		Expect(frontmatter.ExtraFields["title"]).To(BeNil(),
-			"expected title to stay as body text, got ExtraField %#v",
-
-			frontmatter.ExtraFields["title"])
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("p1")),
+			HaveField("ExtraFields", Not(SatisfyAny(HaveKey("custom"), HaveKey("title")))),
+		), "expected managed frontmatter without user keys, got %#v", frontmatter)
 		Expect(body).To(ContainSubstring("custom: bar"),
 
 			"expected user frontmatter block preserved in body, got: %q",
@@ -860,37 +819,19 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			body,
 		)
-		{
-
-			got := frontmatter.ExtraFields["custom_key"]
-			Expect(got).To(Equal("keep-me"), "expected custom_key to be preserved, got %#v",
-
-				got,
-			)
-		}
-		{
-
-			got := frontmatter.ExtraFields["title"]
-			Expect(got).To(Equal("Imported Title"), "expected title field to be preserved when leafwiki_title is present, got %#v",
-
-				got)
-		}
-
-		aliases, ok := frontmatter.ExtraFields["aliases"].([]interface{})
-		Expect(!ok || len(aliases) !=
-			1 || aliases[0] != "alpha",
-		).To(BeFalse(), "expected aliases to be preserved, got %#v",
-
-			frontmatter.ExtraFields["aliases"])
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", BeEquivalentTo(newFixturePageID("p1"))),
+			HaveField("ExtraFields", SatisfyAll(
+				HaveKeyWithValue("custom_key", Equal("keep-me")),
+				HaveKeyWithValue("title", Equal("Imported Title")),
+				HaveKeyWithValue("aliases", ConsistOf("alpha")),
+			)),
+		), "expected imported frontmatter fields to be preserved, got %#v", frontmatter)
 		Expect(raw).NotTo(ContainSubstring("leafwiki_id: source-id"),
 
 			"expected source leafwiki_id to be dropped, got: %q",
 
 			raw)
-		Expect(frontmatter.LeafWikiID).
-			To(Equal("p1"), "expected managed leafwiki_id, got %q",
-
-				frontmatter.LeafWikiID)
 
 	})
 })
@@ -1270,12 +1211,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 				err,
 			)
 		}
-		{
-
-			st, err := os.Stat(filepath.Join(tmp, "root", "docs2"))
-			Expect(err != nil ||
-				!st.IsDir()).To(BeFalse(), "expected renamed section directory")
-		}
+		Expect(filepath.Join(tmp, "root", "docs2")).To(BeADirectory(), "expected renamed section directory")
 
 	})
 })
@@ -1602,26 +1538,12 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter after sync")
-		Expect(frontmatter.LeafWikiID !=
-			"p1" ||
-			frontmatter.
-				LeafWikiTitle !=
-				"Title A",
-		).To(
-			BeFalse(), "unexpected frontmatter: %#v", frontmatter,
-		)
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			"2026-03-21T10:15:30Z" ||
-			frontmatter.
-				LeafWikiUpdatedAt !=
-				"2026-03-21T11:16:31Z").To(BeFalse(), "unexpected timestamp metadata: %#v",
-			frontmatter)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"alice" || frontmatter.
-			LeafWikiLastAuthorID !=
-			"bob").To(BeFalse(), "unexpected author metadata: %#v",
-
-			frontmatter)
+		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Title A"),
+			"unexpected frontmatter: %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z"),
+			"unexpected timestamp metadata: %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+			"unexpected author metadata: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(Equal("# Body\nHello"), "body changed unexpectedly: %q",
 
 			body)
@@ -1644,27 +1566,13 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
 
 			err)
-		Expect(!has2 || fm2.
-			LeafWikiID !=
-			"p1b" ||
-			fm2.LeafWikiTitle !=
-				"Title B").
-			To(BeFalse(), "expected updated frontmatter, got %#v", fm2)
-		Expect(fm2.LeafWikiCreatedAt !=
-			"2026-03-21T10:15:30Z" ||
-			fm2.LeafWikiUpdatedAt !=
-				"2026-03-21T12:17:32Z",
-		).To(BeFalse(), "expected updated timestamps in frontmatter, got %#v",
-
-			fm2)
-		Expect(fm2.LeafWikiCreatorID !=
-			"alice" ||
-			fm2.LeafWikiLastAuthorID !=
-				"carol",
-		).To(
-			BeFalse(), "expected updated author metadata in frontmatter, got %#v",
-
-			fm2)
+		Expect(has2).To(BeTrue(), "expected frontmatter after update")
+		Expect(fm2).To(matchManagedFrontmatter(newFixturePageID("p1b"), "Title B"),
+			"expected updated frontmatter, got %#v", fm2)
+		Expect(fm2).To(matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T12:17:32Z"),
+			"expected updated timestamps in frontmatter, got %#v", fm2)
+		Expect(fm2).To(matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("carol")),
+			"expected updated author metadata in frontmatter, got %#v", fm2)
 		Expect(strings.TrimSpace(body2)).To(
 			Equal("# Body\nHello"), "body changed unexpectedly on update: %q",
 
@@ -1718,14 +1626,8 @@ Hello
 
 			err)
 		Expect(has).To(BeTrue(), "expected FM to exist")
-		Expect(frontmatter.LeafWikiID !=
-			"p1" ||
-			frontmatter.
-				LeafWikiTitle !=
-				"Title A",
-		).To(
-			BeFalse(), "unexpected frontmatter: %#v", frontmatter,
-		)
+		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Title A"),
+			"unexpected frontmatter: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(Equal(`# Body
 Hello`), "body changed unexpectedly: %q",
 
@@ -1773,13 +1675,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		Expect(err).To(Succeed(), "resolveNode(page): %v",
 
 			err)
-		Expect(r1.Kind != NodeKindPage ||
-			!r1.
-				HasContent || !strings.HasSuffix(r1.FilePath,
-
-			"p.md")).To(BeFalse(), "unexpected resolved: %#v",
-
-			r1)
+		Expect(r1).To(matchResolvedNode(NodeKindPage, BeTrue(), HaveSuffix("p.md")),
+			"unexpected resolved: %#v", r1)
 
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 		secDir := filepath.Join(tmp, "root", "docs")
@@ -1790,26 +1687,18 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			err,
 		)
-		Expect(r2.Kind != NodeKindSection ||
-			r2.HasContent).To(BeFalse(),
-			"expected section without content: %#v",
-
-			r2)
+		Expect(r2).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindSection)),
+			HaveField("HasContent", BeFalse()),
+		), "expected section without content: %#v", r2)
 
 		writeTreeFile(filepath.Join(secDir, "index.md"), "# idx", 0o644)
 		r3, err := store.resolveNode(sec)
 		Expect(err).To(Succeed(), "resolveNode(sec with index): %v",
 
 			err)
-		Expect(r3.Kind != NodeKindSection ||
-			!r3.HasContent ||
-			!strings.
-				HasSuffix(r3.
-					FilePath,
-
-					"index.md")).To(BeFalse(), "unexpected resolved: %#v",
-
-			r3)
+		Expect(r3).To(matchResolvedNode(NodeKindSection, BeTrue(), HaveSuffix("index.md")),
+			"unexpected resolved: %#v", r3)
 
 	})
 })
@@ -1904,29 +1793,12 @@ leafwiki_title: Legacy Title
 
 			err)
 		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
-		Expect(frontmatter.LeafWikiID !=
-			"p1" ||
-			frontmatter.
-				LeafWikiTitle !=
-				"Section Title",
-		).To(BeFalse(), "expected managed frontmatter from tree metadata, got %#v",
-
-			frontmatter,
-		)
-		Expect(frontmatter.LeafWikiCreatedAt !=
-			"2026-03-22T10:15:30Z" ||
-			frontmatter.
-				LeafWikiUpdatedAt !=
-				"2026-03-22T11:16:31Z").To(BeFalse(), "expected timestamps from tree metadata, got %#v",
-			frontmatter,
-		)
-		Expect(frontmatter.LeafWikiCreatorID !=
-			"alice" || frontmatter.
-			LeafWikiLastAuthorID !=
-			"bob").To(BeFalse(), "expected author metadata from tree metadata, got %#v",
-
-			frontmatter,
-		)
+		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Section Title"),
+			"expected managed frontmatter from tree metadata, got %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
+			"expected timestamps from tree metadata, got %#v", frontmatter)
+		Expect(frontmatter).To(matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
+			"expected author metadata from tree metadata, got %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(Equal("# hi"), "expected body to be preserved, got %q",
 
 			body)
@@ -2027,12 +1899,9 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
 
 			err)
-		Expect(!has || frontmatter.
-			LeafWikiID !=
-			"s1" || frontmatter.
-			LeafWikiTitle !=
-			"Docs",
-		).To(BeFalse(), "unexpected frontmatter: %#v", frontmatter)
+		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("s1"), "Docs"),
+			"unexpected frontmatter: %#v", frontmatter)
 		{
 
 			_, err := os.Stat(directory)
@@ -2076,12 +1945,8 @@ custom: keep
 
 		pageFile := filepath.Join(tmp, "root", "docs.md")
 		raw := string(readTreeFile(pageFile))
-		Expect(!strings.Contains(raw,
-			"custom: keep",
-		) || !strings.
-			Contains(raw, "# idx")).To(BeFalse(), "expected converted page to keep index content, got: %s",
-
-			raw)
+		Expect(raw).To(SatisfyAll(ContainSubstring("custom: keep"), ContainSubstring("# idx")),
+			"expected converted page to keep index content, got: %s", raw)
 		{
 
 			_, err := os.Stat(directory)
@@ -2118,13 +1983,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		}
 
 		dstDir := filepath.Join(tmp, "root", "b", "docs")
-		{
-			st, err := os.Stat(dstDir)
-			Expect(err != nil ||
-				!st.IsDir()).To(BeFalse(), "expected moved section directory, err=%v",
-
-				err)
-		}
+		Expect(dstDir).To(BeADirectory(), "expected moved section directory")
 		{
 
 			_, err := os.Stat(srcDir)
