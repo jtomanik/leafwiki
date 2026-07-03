@@ -45,9 +45,9 @@ func matchPersistedAdminUser() types.GomegaMatcher {
 	}))
 }
 
-var _ = ginkgo.Describe("admin reset", func() {
-	ginkgo.It("TestResetAdminPassword", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+var _ = ginkgo.Describe("admin password reset", func() {
+	ginkgo.It("resets the existing admin password and persists the new credentials", func() {
+		storageDir := tempAdminResetStorageDir()
 		store := openUserStore(storageDir)
 		userService := auth.NewUserService(store)
 		_, err := userService.CreateUser("admin", "admin@example.com", "oldpassword", auth.RoleAdmin)
@@ -67,8 +67,8 @@ var _ = ginkgo.Describe("admin reset", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("TestResetAdminPassword_NoAdmin", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+	ginkgo.It("creates a login-ready default admin when no admin exists", func() {
+		storageDir := tempAdminResetStorageDir()
 
 		adminUser, err := ResetAdminPassword(storageDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 	})
 
 	ginkgo.It("invalidates the previous admin password and preserves regular users", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempAdminResetStorageDir()
 		store := openUserStore(storageDir)
 		userService := auth.NewUserService(store)
 		_, err := userService.CreateUser("admin", "admin@example.com", "oldpassword", auth.RoleAdmin)
@@ -110,7 +110,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 	})
 
 	ginkgo.It("creates a complete default admin user when none exists", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempAdminResetStorageDir()
 
 		adminUser, err := ResetAdminPassword(storageDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("admin reset", func() {
 	})
 
 	ginkgo.It("returns an error and nil user when the auth store cannot open", func() {
-		storageFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-directory")
+		storageFile := filepath.Join(tempAdminResetStorageDir(), "not-a-directory")
 		Expect(os.WriteFile(storageFile, []byte("not a directory"), 0o644)).To(Succeed())
 
 		adminUser, err := ResetAdminPassword(storageFile)
@@ -148,6 +148,15 @@ var _ = ginkgo.Describe("admin reset", func() {
 		))
 	})
 })
+
+func tempAdminResetStorageDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-admin-reset-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
 
 func openUserStore(storageDir string) *auth.UserStore {
 	ginkgo.GinkgoHelper()
