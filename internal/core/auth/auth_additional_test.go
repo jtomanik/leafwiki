@@ -22,12 +22,8 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 
 		Expect(store.CleanupExpiredSessions()).To(Succeed())
 
-		expiredActive, err := store.IsActive(expiredID, userID, "refresh", time.Now())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(expiredActive).To(BeFalse())
-		active, err := store.IsActive(activeID, userID, "refresh", time.Now())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(active).To(BeTrue())
+		Expect(inactiveAuthSession(store.IsActive(expiredID, userID, "refresh", time.Now()))).To(Succeed())
+		Expect(activeAuthSession(store.IsActive(activeID, userID, "refresh", time.Now()))).To(Succeed())
 
 		var expiredRows int
 		Expect(store.withDB(func(db *sql.DB) error {
@@ -78,17 +74,11 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		user, err := service.CreateUser("charlie", "charlie@example.com", "correct-password", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
 
-		matches, err := service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "correct-password")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeTrue())
+		Expect(acceptedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "correct-password"))).To(Succeed())
 
-		matches, err = service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "wrong-password")
-		Expect(err).To(Equal(ErrUserInvalidCredentials))
-		Expect(matches).To(BeFalse())
+		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "wrong-password"))).To(Equal(ErrUserInvalidCredentials))
 
-		matches, err = service.DoesIDAndPasswordMatch(newFixtureUserID("missing-user"), "correct-password")
-		Expect(err).To(Equal(ErrUserNotFound))
-		Expect(matches).To(BeFalse())
+		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID("missing-user"), "correct-password"))).To(Equal(ErrUserNotFound))
 	})
 
 	ginkgo.It("UserService.GetUserByUsername and GetUserByIdentifier resolve username, email fallback, and not found", func() {

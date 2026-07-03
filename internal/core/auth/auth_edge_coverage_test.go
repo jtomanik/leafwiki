@@ -1,8 +1,9 @@
 package auth
 
 import (
-	"os"
-	"path/filepath"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -68,9 +69,10 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(id).To(Equal(newFixtureAPIKeyID("key")))
 
+			service := &APIKeyService{store: &APIKeyStore{}, users: &UserService{store: &UserStore{}}}
 			for _, raw := range []string{"", "not-lwk", "lwk_", "lwk_key_", "lwk__secret"} {
-				_, err := parseAPIKeyID(raw)
-				Expect(err).To(HaveOccurred())
+				_, err := service.VerifyAPIKey(raw)
+				Expect(err).To(MatchError(ErrInvalidToken))
 			}
 		})
 
@@ -226,28 +228,35 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			revokedID := newFixtureSessionID("revoked-session")
 
 			Expect(store.CreateSession(expiredID, userID, "refresh", time.Now().Add(-time.Minute))).To(Succeed())
-			active, err := store.IsActive(expiredID, userID, "refresh", time.Now())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(active).To(BeFalse())
+			Expect(inactiveAuthSession(store.IsActive(expiredID, userID, "refresh", time.Now()))).To(Succeed())
 
 			Expect(store.CreateSession(revokedID, userID, "refresh", time.Now().Add(time.Hour))).To(Succeed())
 			Expect(store.RevokeSession(revokedID)).To(Succeed())
-			active, err = store.IsActive(revokedID, userID, "refresh", time.Now())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(active).To(BeFalse())
+			Expect(inactiveAuthSession(store.IsActive(revokedID, userID, "refresh", time.Now()))).To(Succeed())
 
-			active, err = store.IsActive(newFixtureSessionID("missing-session"), userID, "refresh", time.Now())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(active).To(BeFalse())
+			Expect(inactiveAuthSession(store.IsActive(newFixtureSessionID("missing-session"), userID, "refresh", time.Now()))).To(Succeed())
 		})
 
 		ginkgo.It("cleans up a partially opened connection when schema initialization fails", func() {
-			storageFile := filepath.Join(authTempDir(), "not-a-directory")
-			Expect(os.WriteFile(storageFile, []byte("file"), 0o644)).To(Succeed())
+			schemaErr := errors.New("session schema failed")
+			closed := false
+			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
+				return openAuthScriptedDB(&authScriptedDBScript{
+					exec: func(string, []driver.NamedValue) (driver.Result, error) {
+						return nil, schemaErr
+					},
+					close: func() error {
+						closed = true
+						return nil
+					},
+				}), nil
+			})
+			ginkgo.DeferCleanup(restoreOpen)
 
-			store, err := NewSessionStore(storageFile)
-			Expect(err).To(HaveOccurred())
+			store, err := NewSessionStore(authTempDir())
+			Expect(err).To(MatchError(schemaErr))
 			Expect(store).To(BeNil())
+			Expect(closed).To(BeTrue())
 		})
 	})
 

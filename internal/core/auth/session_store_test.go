@@ -20,9 +20,7 @@ var _ = ginkgo.Describe("session store", func() {
 		sessionID := newFixtureSessionID("s1")
 		Expect(store.CreateSession(sessionID, userID, "refresh", expiresAt)).To(Succeed())
 
-		active, err := store.IsActive(sessionID, userID, "refresh", time.Now())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(active).To(BeTrue())
+		Expect(activeAuthSession(store.IsActive(sessionID, userID, "refresh", time.Now()))).To(Succeed())
 	})
 
 	ginkgo.It("keeps Windows-style storage paths under the session database file", func() {

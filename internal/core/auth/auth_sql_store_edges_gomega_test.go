@@ -195,9 +195,9 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 			_, err = scanAPIKey(authFakeScanner{err: errAPIKeyScanFailed})
 			Expect(err).To(MatchError(errAPIKeyScanFailed))
 			_, err = scanAPIKey(newAPIKeyScannerWithScopes("{not-json"))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchAuthJSONSyntaxError())
 			_, _, err = scanStoredAPIKey(newStoredAPIKeyScannerWithScopes("{not-json"))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchAuthJSONSyntaxError())
 		})
 
 		ginkgo.It("reports API key store method SQL failures", func() {
@@ -246,16 +246,17 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 			Expect(store.ListActiveAPIKeys(key.UserID)).To(BeEmpty())
 			restoreCloseRows()
 
+			apiKeyRowErr := errors.New("api key row failed")
 			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
 				query: func(string, []driver.NamedValue) (driver.Rows, error) {
 					return &authScriptedRows{
 						columns: apiKeyColumns(),
-						values:  [][]driver.Value{{nil}},
+						nextErr: apiKeyRowErr,
 					}, nil
 				},
 			})}
 			_, err = store.ListActiveAPIKeys(key.UserID)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(apiKeyRowErr))
 
 			rowsErr := errors.New("api key rows failed")
 			store = &APIKeyStore{db: openAuthScriptedDB(&authScriptedDBScript{
@@ -305,19 +306,18 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 			Expect(store.db.Ping()).To(Succeed())
 			Expect(store.Close()).To(MatchError(sessionCloseErr))
 
+			sessionRowErr := errors.New("session active row failed")
 			store = &SessionStore{
 				db: openAuthScriptedDB(&authScriptedDBScript{
 					query: func(string, []driver.NamedValue) (driver.Rows, error) {
 						return &authScriptedRows{
 							columns: []string{"expires_at", "revoked_at"},
-							values:  [][]driver.Value{{nil}},
+							nextErr: sessionRowErr,
 						}, nil
 					},
 				}),
 			}
-			active, err := store.IsActive(newFixtureSessionID("session-1"), UserIDFromString("user-1"), "refresh", time.Now())
-			Expect(active).To(BeFalse())
-			Expect(err).To(HaveOccurred())
+			Expect(failedAuthSessionCheck(store.IsActive(newFixtureSessionID("session-1"), UserIDFromString("user-1"), "refresh", time.Now()))).To(MatchError(sessionRowErr))
 		})
 	})
 
@@ -411,15 +411,16 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 			})}
 			Expect(store.CreateUser(user)).To(MatchError(insertErr))
 
-			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
+			userRowErr := errors.New("user row failed")
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), nextErr: userRowErr})
 			_, err := store.GetUserByID(UserIDFromString(user.ID))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(userRowErr))
 			_, err = store.GetUserByUsername(user.Username)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(userRowErr))
 			_, err = store.GetUserByEmail(user.Email)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(userRowErr))
 			_, err = store.GetAdminUser()
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(userRowErr))
 
 			queryErr := errors.New("users query failed")
 			store = &UserStore{db: openAuthScriptedDB(&authScriptedDBScript{
@@ -439,18 +440,19 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
 
 			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
 			_, err = store.GetAllUsers()
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchAuthSQLRowScanFailure())
 
-			store = userStoreReturningRows(&authScriptedRows{columns: []string{"count"}, values: [][]driver.Value{{nil}}})
+			countRowErr := errors.New("user count row failed")
+			store = userStoreReturningRows(&authScriptedRows{columns: []string{"count"}, nextErr: countRowErr})
 			_, err = store.CountAdminUsers()
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(countRowErr))
 			_, err = store.GetUserCount()
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(countRowErr))
 
-			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
-			Expect(store.UpdateUser(user)).To(HaveOccurred())
-			Expect(store.DeleteUser(UserIDFromString(user.ID))).To(HaveOccurred())
-			Expect(store.UpdatePassword(UserIDFromString(user.ID), "new-password")).To(HaveOccurred())
+			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), nextErr: userRowErr})
+			Expect(store.UpdateUser(user)).To(MatchError(userRowErr))
+			Expect(store.DeleteUser(UserIDFromString(user.ID))).To(MatchError(userRowErr))
+			Expect(store.UpdatePassword(UserIDFromString(user.ID), "new-password")).To(MatchError(userRowErr))
 
 			rowsAffectedErr := errors.New("user rows affected failed")
 			store = userStoreWithUserAndExec(user, func(string, []driver.NamedValue) (driver.Result, error) {
