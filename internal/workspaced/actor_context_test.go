@@ -20,7 +20,7 @@ import (
 )
 
 var _ = ginkgo.Describe("authenticated workspaced router", func() {
-	ginkgo.DescribeTable("TestAuthenticatedRouterRequiresPrivateTokenAndActorContext",
+	ginkgo.DescribeTable("private actor authentication",
 		func(token string, actor string, wantCode sharederrors.ErrorCode) {
 			now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 			w := newTestWiki()
@@ -44,12 +44,12 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			rec := requestWithRequest(router, req)
 			Expect(rec).To(matchStructuredPrivateAuthError(wantCode))
 		},
-		ginkgo.Entry("missing token", "", "", errCodePrivateControlTokenInvalid),
-		ginkgo.Entry("wrong token", "wrong", "", errCodePrivateControlTokenInvalid),
-		ginkgo.Entry("missing actor", "private-token", "", errCodePrivateActorContextInvalid),
+		ginkgo.Entry("rejects requests without a private control token", "", "", errCodePrivateControlTokenInvalid),
+		ginkgo.Entry("rejects requests with the wrong private control token", "wrong", "", errCodePrivateControlTokenInvalid),
+		ginkgo.Entry("rejects requests without an actor context", "private-token", "", errCodePrivateActorContextInvalid),
 	)
 
-	ginkgo.It("TestAuthenticatedRouterRequiresPrivateTokenAndActorContext rejects wrong workspace and accepts a valid private request", func() {
+	ginkgo.It("rejects actor contexts for another workspace and serves a valid private actor", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -157,13 +157,13 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateActorContextInvalid))
 	})
 
-	ginkgo.It("TestPrivateAuthOptionsCarriesSemanticWorkspaceID", func() {
+	ginkgo.It("carries workspace IDs as the semantic workspace type", func() {
 		auth := PrivateAuthOptions{WorkspaceID: workspaceid.WorkspaceID("current")}
 
 		var _ workspaceid.WorkspaceID = auth.WorkspaceID
 	})
 
-	ginkgo.It("TestAuthenticatedRouterInstallsActorAsRequestUser", func() {
+	ginkgo.It("installs the actor context as the request user for workspace routes", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -198,7 +198,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
-	ginkgo.It("TestAuthenticatedRouterAllowsPrivateMutationWithoutPublicCSRFCookie", func() {
+	ginkgo.It("allows private mutations without a public CSRF cookie", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
