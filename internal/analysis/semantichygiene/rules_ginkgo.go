@@ -111,6 +111,9 @@ func ginkgoDescriptionUsesCoverageBucket(description string) bool {
 		if i == 0 && isCoverageBucketVerb(field) {
 			return true
 		}
+		if i > 0 && isCoverageBucketBranchPhrase(fields[i-1], field) {
+			return true
+		}
 	}
 	return false
 }
@@ -123,6 +126,10 @@ func isCoverageBucketVerb(field string) bool {
 	default:
 		return false
 	}
+}
+
+func isCoverageBucketBranchPhrase(previous string, current string) bool {
+	return previous == "edge" && (current == "branch" || current == "branches")
 }
 
 func isGinkgoNameCarrier(name string) bool {

@@ -305,6 +305,7 @@ var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
 	ginkgo.It("covers filesystem seam branches", func() {})                            // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("exercises fail-fast startup validation through the exit seam", func() { // want "Ginkgo node name \"exercises fail-fast startup validation through the exit seam\" reads like a coverage bucket; describe observable behavior instead"
 	})
+	ginkgo.Describe("markdown parser and renderer edge branches", func() {}) // want "Ginkgo node name \"markdown parser and renderer edge branches\" reads like a coverage bucket; describe observable behavior instead"
 
 	shared := strings.Builder{}           // want "move state initialization out of Ginkgo container body; declare variables in containers and initialize in setup nodes"
 	Expect(shared.String()).To(Equal("")) // want "move Expect out of Ginkgo container body; containers should only declare specs and setup nodes" "use BeEmpty matcher instead of Equal\\(empty\\) for empty collection/string assertions"
