@@ -31,7 +31,7 @@ const (
 )
 
 var _ = Describe("localized errors", func() {
-	It("TestNewDefinedLocalizedErrorExposesTypedCodeAndMessageID", func() {
+	It("exposes typed codes and message IDs for defined errors", func() {
 		cause := stderrors.New("storage failed")
 		definition := sharederrors.ErrorDefinition{
 			Code:      testPageVersionConflictCode,
@@ -52,13 +52,13 @@ var _ = Describe("localized errors", func() {
 		Expect(err.Args).To(Equal([]string{"page-1"}))
 	})
 
-	It("TestNewLocalizedErrorKeepsLegacyConstructorButAddsDefaultMessageID", func() {
+	It("derives a default message ID for legacy constructor calls", func() {
 		err := sharederrors.NewLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsFallback, testAuthInvalidCredentialsFallback, nil)
 
 		Expect(err).To(testmatchers.MatchLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})
 
-	It("TestNewLocalizedErrorFromCodeRendersCatalogMessage", func() {
+	It("renders catalog messages for code-based errors", func() {
 		cause := stderrors.New("storage failed")
 
 		err := sharederrors.NewLocalizedErrorFromCode(testPageVersionConflictCode, cause, "docs.md", "README.md")
@@ -74,7 +74,7 @@ var _ = Describe("localized errors", func() {
 		Expect(err).To(MatchError(cause))
 	})
 
-	It("TestLocalizedErrorDetailSerializesMessageIDWithCompatibilityFields", func() {
+	It("serializes message IDs while preserving compatibility fields", func() {
 		detail := sharederrors.NewLocalizedErrorDetail(
 			testPageVersionConflictCode,
 			testPageVersionConflictFallback,
@@ -89,7 +89,7 @@ var _ = Describe("localized errors", func() {
 		Expect(string(encoded)).To(MatchJSON(localizedDetailJSON(detail)))
 	})
 
-	It("TestLocalizedErrorDetailRendersMessageFromCatalog", func() {
+	It("renders detail messages from the catalog", func() {
 		detail := sharederrors.NewLocalizedErrorDetail(
 			testAuthInvalidCredentialsCode,
 			testAuthInvalidCredentialsFallback,
@@ -104,7 +104,7 @@ var _ = Describe("localized errors", func() {
 		}))
 	})
 
-	It("TestLocalizedErrorDetailUsesArgNBridgeAndPreservesArgs", func() {
+	It("bridges positional arguments into localized detail rendering", func() {
 		err := sharederrors.NewDefinedLocalizedError(sharederrors.ErrorDefinition{
 			Code:      testPageVersionConflictCode,
 			MessageID: testPageVersionConflictMessageID,
@@ -124,8 +124,8 @@ var _ = Describe("localized errors", func() {
 	})
 })
 
-var _ = Describe("localized error edge coverage", func() {
-	It("MessageIDForCode handles empty, un-namespaced, and namespaced codes", func() {
+var _ = Describe("localized error derived contracts", func() {
+	It("maps empty, un-namespaced, and namespaced codes to message IDs", func() {
 		Expect(sharederrors.MessageIDForCode("")).To(BeEmpty())
 		Expect(sharederrors.MessageIDForCode("  ")).To(BeEmpty())
 		Expect(sharederrors.MessageIDForCode("unknown")).To(Equal(testUnknownMessageID))
@@ -151,7 +151,7 @@ var _ = Describe("localized error edge coverage", func() {
 		}))
 	})
 
-	It("NewLocalizedErrorFromCodeWithFallback renders using fallback when no catalog entry exists", func() {
+	It("renders fallback text when a code has no catalog entry", func() {
 		cause := stderrors.New("cause")
 
 		err := sharederrors.NewLocalizedErrorFromCodeWithFallback(testCustomMissingCode, testCustomMissingFallback, testCustomMissingTemplate, cause, "value")
@@ -166,7 +166,7 @@ var _ = Describe("localized error edge coverage", func() {
 		Expect(err).To(MatchError(cause))
 	})
 
-	It("NewDefinedLocalizedError derives message ID when omitted", func() {
+	It("derives message IDs for defined errors that omit them", func() {
 		err := sharederrors.NewDefinedLocalizedError(sharederrors.ErrorDefinition{
 			Code:     testAuthInvalidCredentialsCode,
 			Message:  testAuthInvalidCredentialsFallback,
@@ -176,7 +176,7 @@ var _ = Describe("localized error edge coverage", func() {
 		Expect(err).To(testmatchers.MatchLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})
 
-	It("NewLocalizedErrorDetailFromCode renders catalog message and preserves args", func() {
+	It("renders catalog-backed details from codes while preserving arguments", func() {
 		detail := sharederrors.NewLocalizedErrorDetailFromCode(testPageVersionConflictCode, "docs.md", "README.md")
 
 		Expect(detail).To(testmatchers.HaveStructuredError(testPageVersionConflictCode, testPageVersionConflictMessageID))
@@ -189,11 +189,11 @@ var _ = Describe("localized error edge coverage", func() {
 		Expect(detail.Args).To(Equal([]string{"docs.md", "README.md"}))
 	})
 
-	It("LocalizedErrorDetailFromError returns an empty detail for nil errors", func() {
+	It("returns an empty detail for nil localized errors", func() {
 		Expect(sharederrors.LocalizedErrorDetailFromError(nil)).To(Equal(sharederrors.LocalizedErrorDetail{}))
 	})
 
-	It("LocalizedErrorDetailFromError derives message ID when the error omitted it", func() {
+	It("derives detail message IDs when localized errors omit them", func() {
 		err := &sharederrors.LocalizedError{
 			Code:     testAuthInvalidCredentialsCode,
 			Message:  testDerivedLocalizedFallback,
@@ -210,7 +210,7 @@ var _ = Describe("localized error edge coverage", func() {
 		}))
 	})
 
-	It("AsLocalizedError recognizes wrapped localized errors and rejects ordinary errors", func() {
+	It("recognizes wrapped localized errors and rejects ordinary errors", func() {
 		localized := sharederrors.NewLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsFallback, testAuthInvalidCredentialsFallback, nil)
 		wrapped := fmt.Errorf("wrap: %w", localized)
 

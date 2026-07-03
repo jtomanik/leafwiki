@@ -20,7 +20,7 @@ const (
 )
 
 var _ = Describe("field validation errors", func() {
-	It("TestValidationErrorsAddWithCodeSerializesStableFieldContract", func() {
+	It("serializes explicit field codes with stable field and message identifiers", func() {
 		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode(
 			testSlugValidationField,
@@ -35,7 +35,7 @@ var _ = Describe("field validation errors", func() {
 		Expect(string(encoded)).To(MatchJSON(fieldErrorsJSON(validation)))
 	})
 
-	It("TestValidationErrorsLegacyAddRendersCatalogBackedDefaultCode", func() {
+	It("renders legacy field additions with the catalog-backed validation code", func() {
 		validation := sharederrors.NewValidationErrors()
 		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
 
@@ -49,7 +49,7 @@ var _ = Describe("field validation errors", func() {
 		}))
 	})
 
-	It("TestValidationErrorsAddWithCodeRendersFromCatalog", func() {
+	It("renders explicit field codes through the localization catalog", func() {
 		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode(
 			testEmailValidationField,
@@ -67,8 +67,8 @@ var _ = Describe("field validation errors", func() {
 	})
 })
 
-var _ = Describe("field validation edge coverage", func() {
-	It("ValidationErrors reports empty and populated state", func() {
+var _ = Describe("field validation state", func() {
+	It("reports whether validation errors are present", func() {
 		validation := sharederrors.NewValidationErrors()
 
 		Expect(validation.HasErrors()).To(BeFalse())
