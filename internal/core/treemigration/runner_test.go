@@ -409,7 +409,6 @@ Hello World
 
 		loaded := tree.NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(matchMigrationError(treemigration.ErrPersistChildOrder))
 	})
 
@@ -448,7 +447,6 @@ Hello World
 
 		loaded := tree.NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(matchMigrationError(treemigration.ErrMaterializeSectionIndex))
 	})
 })

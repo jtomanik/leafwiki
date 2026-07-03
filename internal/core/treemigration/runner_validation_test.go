@@ -73,7 +73,6 @@ var _ = ginkgo.Describe("runner validation", func() {
 		deps := validDependencies()
 
 		err := Run(-1, deps)
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(matchMigrationError(ErrInvalidSchemaVersion))
 	})
 
@@ -84,7 +83,6 @@ var _ = ginkgo.Describe("runner validation", func() {
 				deps := validDependencies()
 				tt.mutate(&deps)
 				err := Run(0, deps)
-				Expect(err).To(HaveOccurred())
 				Expect(err).To(matchMigrationError(tt.want))
 			})
 		}
@@ -95,7 +93,6 @@ var _ = ginkgo.Describe("runner validation", func() {
 		deps.CurrentSchemaVersion = 6
 
 		err := Run(4, deps)
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(matchMigrationError(ErrUnsupportedSchemaMigrationVersion))
 	})
 })

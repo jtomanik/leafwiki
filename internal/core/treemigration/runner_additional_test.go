@@ -202,7 +202,7 @@ func tempMigrationScratchDir() string {
 }
 
 var _ = ginkgo.Describe("tree migration helper behavior", func() {
-	ginkgo.It("backfillMetadata uses filesystem modtime and preserves author metadata", func() {
+	ginkgo.It("uses filesystem timestamps for missing metadata while preserving author identity", func() {
 		tmp := tempMigrationScratchDir()
 		path := filepath.Join(tmp, "page.md")
 		Expect(os.WriteFile(path, []byte("# Page\n"), 0o644)).To(Succeed())
@@ -234,7 +234,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(log.errors).To(BeEmpty())
 	})
 
-	ginkgo.It("backfillMetadata skips nodes that already have metadata", func() {
+	ginkgo.It("leaves nodes unchanged when metadata already exists", func() {
 		existing := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 		node := &mutableMigrationNode{
 			id:       "page-1",
@@ -248,7 +248,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(node.Metadata().CreatedAt).To(BeTemporally("==", existing))
 	})
 
-	ginkgo.It("backfillMetadata treats resolve-node errors as logged non-fatal misses", func() {
+	ginkgo.It("logs unresolved nodes as non-fatal metadata misses", func() {
 		node := &mutableMigrationNode{id: "page-1"}
 		store := &configurableMigrationStore{resolveErr: errors.New("resolve failed")}
 		log := &recordingMigrationLogger{}
@@ -259,7 +259,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(log.errors).To(ContainElement("Could not resolve node for metadata backfill"))
 	})
 
-	ginkgo.It("backfillMetadata handles nil nodes and non-missing stat errors without aborting", func() {
+	ginkgo.It("skips nil nodes and falls back to current time when stat fails", func() {
 		Expect(backfillMetadata(Dependencies{}, nil)).To(Succeed())
 
 		originalStatFile := statFile
@@ -282,7 +282,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(log.errors).To(ContainElement("Could not stat node for metadata"))
 	})
 
-	ginkgo.It("backfillChildOrder handles nil nodes and propagates child order write failures", func() {
+	ginkgo.It("orders nested children and surfaces child order persistence failures", func() {
 		Expect(backfillChildOrder(Dependencies{}, nil)).To(Succeed())
 
 		grandchild := &mutableMigrationNode{id: "grandchild", kind: NodeKindPage}
@@ -299,7 +299,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(store.savedOrderIDs).To(Equal([]migrationNodeID{"root", "child"}))
 	})
 
-	ginkgo.It("migrateToV2 logs and returns managed metadata failures for root children", func() {
+	ginkgo.It("logs managed metadata failures from root children and returns the child error", func() {
 		child := &mutableMigrationNode{id: "page-1", kind: NodeKindPage}
 		root := &mutableMigrationNode{id: "root", kind: NodeKindSection, children: []Node{child}}
 		readFailedErr := errors.New("read failed")
@@ -317,7 +317,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		))
 	})
 
-	ginkgo.It("backfillKindFromFS resolves unknown kinds and falls back to child-aware heuristics", func() {
+	ginkgo.It("infers unknown node kinds from filesystem resolution and child structure", func() {
 		Expect(func() { backfillKindFromFS(Dependencies{}, nil) }).ToNot(Panic())
 
 		resolved := &mutableMigrationNode{id: "resolved", kind: legacyMigrationNodeKind}
@@ -352,7 +352,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		))
 	})
 
-	ginkgo.It("addManagedMetadata recurses through missing parent content", func() {
+	ginkgo.It("continues into children when a section parent has missing content", func() {
 		missingContentErr := errors.New("missing content")
 		childPath := filepath.Join(tempMigrationScratchDir(), "child.md")
 		child := &mutableMigrationNode{id: "child", title: "Child", kind: NodeKindPage}
@@ -380,7 +380,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(string(raw)).To(ContainSubstring("id: child"))
 	})
 
-	ginkgo.It("addManagedMetadata logs child failures from missing-content parents", func() {
+	ginkgo.It("logs child metadata failures from missing-content parents", func() {
 		missingContentErr := errors.New("missing content")
 		childErr := errors.New("child read failed")
 		child := &mutableMigrationNode{id: "child", title: "Child", kind: NodeKindPage}
@@ -403,7 +403,7 @@ var _ = ginkgo.Describe("tree migration helper behavior", func() {
 		Expect(log.errors).To(ContainElement("Error adding metadata to child node"))
 	})
 
-	ginkgo.It("addManagedMetadata reports write-path, parse, write, and recursive child failures", func() {
+	ginkgo.It("surfaces write-path, parse, write, and recursive child metadata failures", func() {
 		tmp := tempMigrationScratchDir()
 		page := &mutableMigrationNode{id: "page", title: "Page", kind: NodeKindPage}
 
@@ -470,7 +470,7 @@ page:
 		Expect(log.errors).To(ContainElement("Error adding metadata to child node"))
 	})
 
-	ginkgo.It("backfillNodeMetadata covers nil, path, load, write, and child error branches", func() {
+	ginkgo.It("handles nil nodes and surfaces path, load, write, and child metadata errors", func() {
 		Expect(backfillNodeMetadata(Dependencies{}, nil)).To(Succeed())
 
 		page := &mutableMigrationNode{id: "page", title: "Page", kind: NodeKindPage}
@@ -518,11 +518,11 @@ page:
 		}, parent)).To(MatchError(childPathFailedErr))
 	})
 
-	ginkgo.It("materializeSectionIndexes accepts nil roots", func() {
+	ginkgo.It("accepts nil section roots", func() {
 		Expect(materializeSectionIndexes(Dependencies{}, nil)).To(Succeed())
 	})
 
-	ginkgo.It("validateDependencies rejects a stored schema newer than the current schema", func() {
+	ginkgo.It("rejects stored schemas newer than the supported schema", func() {
 		deps := validDependencies()
 		deps.CurrentSchemaVersion = 2
 
@@ -531,7 +531,7 @@ page:
 		Expect(err).To(MatchError(ErrStoredSchemaVersionNewer))
 	})
 
-	ginkgo.It("Run propagates SaveTree and SaveSchema errors after successful migrations", func() {
+	ginkgo.It("propagates save-tree and save-schema failures after successful migrations", func() {
 		saveTreeErr := errors.New("save tree failed")
 		deps := validDependencies()
 		deps.CurrentSchemaVersion = 1
@@ -548,7 +548,7 @@ page:
 		Expect(err).To(MatchError(saveSchemaErr))
 	})
 
-	ginkgo.It("formatMetadataTime returns empty zero time and UTC RFC3339 for non-zero time", func() {
+	ginkgo.It("formats zero metadata timestamps as empty and non-zero timestamps as UTC RFC3339", func() {
 		Expect(formatMetadataTime(time.Time{})).To(BeEmpty())
 
 		ts := time.Date(2026, 6, 25, 10, 11, 12, 0, time.FixedZone("offset", 2*60*60))
