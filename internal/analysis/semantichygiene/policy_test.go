@@ -125,6 +125,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega equal zero", ruleID("gomega.equal-zero"), true, waiverScopeCall),
 			ginkgo.Entry("gomega numeric equivalent", ruleID("gomega.numeric-equivalent"), true, waiverScopeCall),
 			ginkgo.Entry("gomega time equal", ruleID("gomega.time-equal"), true, waiverScopeCall),
+			ginkgo.Entry("gomega matcher as value", ruleID("gomega.matcher-as-value"), false, waiverScopeNone),
 		)
 
 		ginkgo.It("uses the documented initial waiver budgets", func() {

@@ -434,6 +434,20 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(now).To(Equal(now))                                   // want "use BeTemporally for time.Time equality assertions"
 	Expect(payload.Code).To(Equal("page_not_found"))             // want "assert structured error semantics with a typed domain matcher/helper instead of matching Code directly" "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
 	Expect(payload.MessageID).To(Equal("errors.page.not_found")) // want "assert structured error semantics with a typed domain matcher/helper instead of matching MessageID directly" "raw stable contract literal \"errors.page.not_found\" used in test assertion code; use the typed constant or semantic helper"
+
+	type matcherBackedRecord struct {
+		Content any
+	}
+	matcherValue := HavePrefix("abc").(GomegaMatcher)
+	Expect(text).To(Equal(matcherValue))                                             // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
+	Expect(text).To(Equal(matcherBackedRecord{Content: matcherValue.(interface{})})) // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
+}
+
+func matchMatcherBackedRecord(content GomegaMatcher) any {
+	type matcherBackedRecord struct {
+		Content any
+	}
+	return Equal(matcherBackedRecord{Content: content.(interface{})}) // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
 }
 
 func TestRepoTestGomegaStructuredMatcherShortcutsAreRejected(t *testing.T) {

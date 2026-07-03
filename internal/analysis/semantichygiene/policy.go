@@ -80,6 +80,7 @@ const (
 	ruleGomegaEqualZero                    ruleID = "gomega.equal-zero"
 	ruleGomegaNumericEquivalent            ruleID = "gomega.numeric-equivalent"
 	ruleGomegaTimeEqual                    ruleID = "gomega.time-equal"
+	ruleGomegaMatcherAsValue               ruleID = "gomega.matcher-as-value"
 	ruleWaiverBudgetExceeded               ruleID = "waiver.budget-exceeded"
 	ruleWaiverDuplicate                    ruleID = "waiver.duplicate"
 	ruleWaiverMalformed                    ruleID = "waiver.malformed"
@@ -170,6 +171,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaEqualZero:                    waivableRule(ruleGomegaEqualZero, waiverScopeCall),
 	ruleGomegaNumericEquivalent:            waivableRule(ruleGomegaNumericEquivalent, waiverScopeCall),
 	ruleGomegaTimeEqual:                    waivableRule(ruleGomegaTimeEqual, waiverScopeCall),
+	ruleGomegaMatcherAsValue:               hardRule(ruleGomegaMatcherAsValue),
 	ruleWaiverBudgetExceeded:               hardRule(ruleWaiverBudgetExceeded),
 	ruleWaiverDuplicate:                    hardRule(ruleWaiverDuplicate),
 	ruleWaiverMalformed:                    hardRule(ruleWaiverMalformed),

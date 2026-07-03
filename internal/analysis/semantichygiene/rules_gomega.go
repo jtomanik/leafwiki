@@ -20,6 +20,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if !isTestFile(ctx.filename(call.Pos())) {
 		return
 	}
+	if matcherCallUsesMatcherValueAsExpected(ctx, call) {
+		ctx.report(ruleGomegaMatcherAsValue, call, gomegaMatcherAsValueDiagnostic(callName(call)))
+	}
 	assertion, ok := gomegaAssertionFromCall(ctx, call)
 	if !ok {
 		return
@@ -997,6 +1000,278 @@ func unparenExpr(expr ast.Expr) ast.Expr {
 
 func isBooleanMatcher(matcher *ast.CallExpr) bool {
 	return isMatcherNamed(matcher, "BeTrue", "BeFalse", "BeTrueBecause", "BeFalseBecause")
+}
+
+func matcherCallUsesMatcherValueAsExpected(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isValueComparisonMatcher(call) {
+		return false
+	}
+	for _, arg := range call.Args {
+		if exprTreeContainsGomegaMatcherValue(ctx, arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func isValueComparisonMatcher(call *ast.CallExpr) bool {
+	return isMatcherNamed(call, "Equal", "BeEquivalentTo", "BeComparableTo", "BeIdenticalTo")
+}
+
+func exprTreeContainsGomegaMatcherValue(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		current, ok := node.(ast.Expr)
+		if !ok {
+			return true
+		}
+		if exprIsGomegaMatcherValue(ctx, current) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func exprIsGomegaMatcherValue(ctx *analysisContext, expr ast.Expr) bool {
+	expr = unparenExpr(expr)
+	if call, ok := expr.(*ast.CallExpr); ok && isKnownGomegaMatcherFactory(call) {
+		return true
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		if obj := ctx.pass.TypesInfo.ObjectOf(ident); obj != nil && typeIsGomegaMatcher(obj.Type()) {
+			return true
+		}
+		if identDeclaredAsGomegaMatcherParameter(ctx, ident) {
+			return true
+		}
+		if identInitializedWithGomegaMatcher(ctx, ident) {
+			return true
+		}
+	}
+	return typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(expr))
+}
+
+func identDeclaredAsGomegaMatcherParameter(ctx *analysisContext, ident *ast.Ident) bool {
+	targetObject := ctx.pass.TypesInfo.ObjectOf(ident)
+	for current := ast.Node(ident); current != nil; current = ctx.parent(current) {
+		switch fn := current.(type) {
+		case *ast.FuncDecl:
+			return fieldListDeclaresGomegaMatcherName(ctx, fn.Type.Params, ident, targetObject)
+		case *ast.FuncLit:
+			return fieldListDeclaresGomegaMatcherName(ctx, fn.Type.Params, ident, targetObject)
+		}
+	}
+	return false
+}
+
+func fieldListDeclaresGomegaMatcherName(ctx *analysisContext, fields *ast.FieldList, ident *ast.Ident, targetObject types.Object) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if !exprNamesGomegaMatcherType(ctx, field.Type) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name != nil && sameIdentifierObject(ctx, name, ident, targetObject) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprNamesGomegaMatcherType(ctx *analysisContext, expr ast.Expr) bool {
+	if exprName(expr) == "GomegaMatcher" {
+		return true
+	}
+	return typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(expr))
+}
+
+func identInitializedWithGomegaMatcher(ctx *analysisContext, ident *ast.Ident) bool {
+	body := enclosingFunctionBody(ctx, ident)
+	if body == nil {
+		return false
+	}
+	targetObject := ctx.pass.TypesInfo.ObjectOf(ident)
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		switch candidate := node.(type) {
+		case *ast.AssignStmt:
+			if candidate.Pos() > ident.Pos() {
+				return false
+			}
+			for i, lhs := range candidate.Lhs {
+				lhsIdent, ok := unparenExpr(lhs).(*ast.Ident)
+				if !ok || !sameIdentifierObject(ctx, lhsIdent, ident, targetObject) || i >= len(candidate.Rhs) {
+					continue
+				}
+				found = exprTreeContainsGomegaMatcherProducer(ctx, candidate.Rhs[i])
+				if found {
+					return false
+				}
+			}
+		case *ast.ValueSpec:
+			if candidate.Pos() > ident.Pos() {
+				return false
+			}
+			for i, name := range candidate.Names {
+				if name == nil || !sameIdentifierObject(ctx, name, ident, targetObject) || i >= len(candidate.Values) {
+					continue
+				}
+				found = exprTreeContainsGomegaMatcherProducer(ctx, candidate.Values[i])
+				if found {
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func enclosingFunctionBody(ctx *analysisContext, node ast.Node) *ast.BlockStmt {
+	for current := node; current != nil; current = ctx.parent(current) {
+		switch fn := current.(type) {
+		case *ast.FuncDecl:
+			return fn.Body
+		case *ast.FuncLit:
+			return fn.Body
+		}
+	}
+	return nil
+}
+
+func sameIdentifierObject(ctx *analysisContext, candidate *ast.Ident, target *ast.Ident, targetObject types.Object) bool {
+	candidateObject := ctx.pass.TypesInfo.ObjectOf(candidate)
+	if candidateObject != nil && targetObject != nil {
+		return candidateObject == targetObject
+	}
+	return candidate.Name == target.Name
+}
+
+func exprTreeContainsGomegaMatcherProducer(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		current, ok := node.(ast.Expr)
+		if !ok {
+			return true
+		}
+		switch candidate := unparenExpr(current).(type) {
+		case *ast.CallExpr:
+			if isKnownGomegaMatcherFactory(candidate) || typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(candidate)) {
+				found = true
+				return false
+			}
+		case *ast.TypeAssertExpr:
+			if exprName(candidate.Type) == "GomegaMatcher" || typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(candidate)) {
+				found = true
+				return false
+			}
+		default:
+			if typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(candidate)) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func isKnownGomegaMatcherFactory(call *ast.CallExpr) bool {
+	switch callName(call) {
+	case "And",
+		"BeAssignableToTypeOf",
+		"BeClosed",
+		"BeComparableTo",
+		"BeElementOf",
+		"BeEmpty",
+		"BeEquivalentTo",
+		"BeFalse",
+		"BeIdenticalTo",
+		"BeNumerically",
+		"BeSent",
+		"BeTemporally",
+		"BeTrue",
+		"BeZero",
+		"ContainElement",
+		"ContainElements",
+		"ContainSubstring",
+		"ConsistOf",
+		"Equal",
+		"HaveCap",
+		"HaveEach",
+		"HaveExactElements",
+		"HaveExistingField",
+		"HaveField",
+		"HaveHTTPBody",
+		"HaveHTTPHeaderWithValue",
+		"HaveHTTPStatus",
+		"HaveKey",
+		"HaveKeyWithValue",
+		"HaveLen",
+		"HaveOccurred",
+		"HavePrefix",
+		"HaveSuffix",
+		"HaveValue",
+		"MatchAllElements",
+		"MatchAllFields",
+		"MatchAllKeys",
+		"MatchError",
+		"MatchFields",
+		"MatchJSON",
+		"MatchRegexp",
+		"MatchXML",
+		"MatchYAML",
+		"Not",
+		"Or",
+		"Panic",
+		"Receive",
+		"Satisfy",
+		"SatisfyAll",
+		"SatisfyAny",
+		"Succeed",
+		"WithTransform":
+		return true
+	default:
+		return false
+	}
+}
+
+func typeIsGomegaMatcher(typ types.Type) bool {
+	named := namedType(typ)
+	if named == nil || named.Obj().Name() != "GomegaMatcher" {
+		return typeStringSuggestsGomegaMatcher(typ)
+	}
+	pkg := named.Obj().Pkg()
+	if pkg == nil {
+		return true
+	}
+	return pkg.Path() == "github.com/onsi/gomega/types" ||
+		strings.Contains(pkg.Path(), "/gomega")
+}
+
+func typeStringSuggestsGomegaMatcher(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	typeName := types.TypeString(types.Unalias(typ), nil)
+	return typeName == "GomegaMatcher" || strings.HasSuffix(typeName, ".GomegaMatcher")
 }
 
 func assertionUsesRawStringMatchError(ctx *analysisContext, assertion gomegaAssertion) bool {
