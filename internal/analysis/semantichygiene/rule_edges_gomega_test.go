@@ -1930,6 +1930,32 @@ func plain() string { return "hello world" }
 	})
 
 	ginkgo.Describe("rule branches", func() {
+		ginkgo.It("reports LastError assertions that only prove non-empty rendered text", func() {
+			h := newRuleHarness("/repo/internal/workspacesync/service_test.go", "github.com/perber/wiki/internal/workspacesync", `package workspacesync
+
+type SyncStatus struct {
+	LastError string
+}
+
+type assertion struct{}
+
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) NotTo(matcher any, extras ...any) {}
+func BeEmpty() any { return nil }
+
+func TestSyncStatus() {
+	status := SyncStatus{LastError: "writeback failed"}
+	Expect(status.LastError).NotTo(BeEmpty())
+}
+`)
+
+			checkGomegaSemanticMatcher(h.ctx, h.findCall("NotTo"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.last-error-not-empty: assert specific LastError semantics instead of only checking for non-empty rendered text",
+			))
+		})
+
 		ginkgo.It("ignores string leak and conversion early exit cases", func() {
 			h := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type PlainID string

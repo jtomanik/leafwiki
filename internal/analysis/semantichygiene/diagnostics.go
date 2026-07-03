@@ -130,6 +130,10 @@ func gomegaRenderedMessageStringsContainsDiagnostic() string {
 	return "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 }
 
+func gomegaLastErrorNotEmptyDiagnostic() string {
+	return "assert specific LastError semantics instead of only checking for non-empty rendered text"
+}
+
 func gomegaErrorsIsMatcherDiagnostic() string {
 	return "use MatchError matcher instead of asserting errors.Is with BeTrue/BeFalse"
 }

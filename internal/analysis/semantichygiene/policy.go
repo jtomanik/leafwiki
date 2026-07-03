@@ -54,6 +54,7 @@ const (
 	ruleGomegaInlineErrorSucceed           ruleID = "gomega.inline-error-succeed"
 	ruleGomegaMultiReturnErrorMatcher      ruleID = "gomega.multi-return-error-matcher"
 	ruleGomegaStringsContains              ruleID = "gomega.strings-contains"
+	ruleGomegaLastErrorNotEmpty            ruleID = "gomega.last-error-not-empty"
 	ruleGomegaStringPredicate              ruleID = "gomega.string-predicate"
 	ruleGomegaRegexpMatchString            ruleID = "gomega.regexp-match-string"
 	ruleGomegaErrorsIsMatcher              ruleID = "gomega.errors-is-matcher"
@@ -156,6 +157,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaInlineErrorSucceed:           hardRule(ruleGomegaInlineErrorSucceed),
 	ruleGomegaMultiReturnErrorMatcher:      hardRule(ruleGomegaMultiReturnErrorMatcher),
 	ruleGomegaStringsContains:              hardRule(ruleGomegaStringsContains),
+	ruleGomegaLastErrorNotEmpty:            hardRule(ruleGomegaLastErrorNotEmpty),
 	ruleGomegaStringPredicate:              hardRule(ruleGomegaStringPredicate),
 	ruleGomegaRegexpMatchString:            hardRule(ruleGomegaRegexpMatchString),
 	ruleGomegaErrorsIsMatcher:              hardRule(ruleGomegaErrorsIsMatcher),

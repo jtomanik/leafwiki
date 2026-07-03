@@ -64,6 +64,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesStringsContains(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaStringsContains, assertion.actual, gomegaStringsContainsMatcherDiagnostic())
 	}
+	if assertionUsesLastErrorNotEmpty(assertion) {
+		ctx.report(ruleGomegaLastErrorNotEmpty, assertion.actual, gomegaLastErrorNotEmptyDiagnostic())
+	}
 	if assertionUsesStringsPredicate(ctx, assertion, "HasPrefix") && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaStringPredicate, assertion.actual, gomegaStringPredicateMatcherDiagnostic("strings.HasPrefix", "HavePrefix"))
 	}
@@ -686,6 +689,42 @@ func callResultTuple(ctx *analysisContext, call *ast.CallExpr) *types.Tuple {
 
 func assertionUsesStringsContains(ctx *analysisContext, assertion gomegaAssertion) bool {
 	return assertionUsesStringsPredicate(ctx, assertion, "Contains")
+}
+
+func assertionUsesLastErrorNotEmpty(assertion gomegaAssertion) bool {
+	if !assertionTargetsLastError(assertion.actual) {
+		return false
+	}
+	if isNegativeAssertionMethod(assertion.method) {
+		return isEmptyMatcher(assertion.matcher)
+	}
+	return isNegatedEmptyMatcher(assertion.matcher)
+}
+
+func assertionTargetsLastError(expr ast.Expr) bool {
+	selector, ok := unparenExpr(expr).(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "LastError"
+}
+
+func isEmptyMatcher(matcher *ast.CallExpr) bool {
+	return isMatcherNamed(matcher, "BeEmpty") || isEqualEmptyStringMatcher(matcher)
+}
+
+func isNegatedEmptyMatcher(matcher *ast.CallExpr) bool {
+	return isMatcherNamed(matcher, "Not") && len(matcher.Args) == 1 && exprIsEmptyMatcher(matcher.Args[0])
+}
+
+func exprIsEmptyMatcher(expr ast.Expr) bool {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	return ok && isEmptyMatcher(call)
+}
+
+func isEqualEmptyStringMatcher(matcher *ast.CallExpr) bool {
+	if !isMatcherNamed(matcher, "Equal") || len(matcher.Args) != 1 {
+		return false
+	}
+	lit, ok := unparenExpr(matcher.Args[0]).(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING && lit.Value == `""`
 }
 
 func assertionUsesStringsPredicate(ctx *analysisContext, assertion gomegaAssertion, predicate string) bool {

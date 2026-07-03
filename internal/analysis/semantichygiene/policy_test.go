@@ -98,6 +98,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega inline error succeed", ruleID("gomega.inline-error-succeed"), false, waiverScopeNone),
 			ginkgo.Entry("gomega multi return error matcher", ruleID("gomega.multi-return-error-matcher"), false, waiverScopeNone),
 			ginkgo.Entry("gomega strings contains", ruleID("gomega.strings-contains"), false, waiverScopeNone),
+			ginkgo.Entry("gomega LastError not empty", ruleID("gomega.last-error-not-empty"), false, waiverScopeNone),
 			ginkgo.Entry("gomega string predicate", ruleID("gomega.string-predicate"), false, waiverScopeNone),
 			ginkgo.Entry("gomega regexp match string", ruleID("gomega.regexp-match-string"), false, waiverScopeNone),
 			ginkgo.Entry("gomega errors is matcher", ruleID("gomega.errors-is-matcher"), false, waiverScopeNone),
