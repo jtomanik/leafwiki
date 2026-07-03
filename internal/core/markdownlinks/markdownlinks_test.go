@@ -5,797 +5,505 @@ import (
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// Canonical Markdown links plan scenarios covered by tests in this file:
-// - Relative page links are resolved from the source file directory
-// - Section trailing slash is accepted but canonicalized away
-// - Root section link remains slash
-// - Query string and fragment are preserved byte-for-byte
-// - Link title and angle-bracket destination syntax are preserved
-// - Percent-encoded paths use exact filesystem matching
-// - External and non-page links are ignored
-// - Link-like text in inline code and fenced code is ignored
-// - Relative old page link migrates to relative .md
-// - Existing canonical .md page link is not rewritten
-// - Explicit index.md section link canonicalizes to the section
-// - Explicit README.md section fallback link canonicalizes to the section
-
-var _ = ginkgo.Describe("markdown links", func() {
-	// - Relative page links are resolved from the source file directory
-	ginkgo.It("TestResolveCanonicalLink_UsesFilesystemRelativeSemanticsNotPageAsFolder", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b/target.md"},
-		})
-
-		result := index.Resolve("docs/a/current.md", "../b/target")
-
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q", result.Kind, TargetKindPage)
-		}
-		if result.CanonicalHref != "../b/target.md" {
-			t.Fatalf("CanonicalHref = %q, want %q", result.CanonicalHref, "../b/target.md")
-		}
-		if result.RoutePath != "docs/b/target" {
-			t.Fatalf("RoutePath = %q, want docs/b/target", result.RoutePath)
-		}
-	})
-
-	// - Prefixed absolute page link resolves inside wiki root
-	ginkgo.It("TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndexWithOptions([]Entry{
-			{Kind: EntryKindPage, Path: "sync/glossary.md"},
-		}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-		result := index.Resolve("index.md", "/docs/sync/glossary.md")
-
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
-		}
-		if result.RoutePath != "sync/glossary" {
-			t.Fatalf("RoutePath = %q, want sync/glossary", result.RoutePath)
-		}
-		if result.CanonicalHref != "/docs/sync/glossary.md" {
-			t.Fatalf("CanonicalHref = %q, want /docs/sync/glossary.md", result.CanonicalHref)
-		}
-	})
-
-	// - Unprefixed absolute page link still resolves but canonicalizes to the configured prefix
-	ginkgo.It("TestResolveForMigration_WithRootPrefixCanonicalizesUnprefixedAbsolutePage", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndexWithOptions([]Entry{
-			{Kind: EntryKindPage, Path: "sync/glossary.md"},
-		}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-		result := index.ResolveForMigration("index.md", "/sync/glossary?view=1#term")
-
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
-		}
-		if result.RoutePath != "sync/glossary" {
-			t.Fatalf("RoutePath = %q, want sync/glossary", result.RoutePath)
-		}
-		if result.CanonicalHref != "/docs/sync/glossary.md?view=1#term" {
-			t.Fatalf("CanonicalHref = %q, want /docs/sync/glossary.md?view=1#term", result.CanonicalHref)
-		}
-	})
-
-	// - Configured prefix root resolves to the wiki root section
-	ginkgo.DescribeTable("TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot",
-		func(href string) {
-			t := ginkgo.GinkgoT()
-			index := NewIndexWithOptions([]Entry{
-				{Kind: EntryKindSection, Path: ""},
-			}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-			result := index.Resolve("index.md", href)
-			if result.Kind != TargetKindSection {
-				t.Fatalf("Resolve(%q).Kind = %q, want %q: %#v", href, result.Kind, TargetKindSection, result)
-			}
-			if result.RoutePath != "" {
-				t.Fatalf("Resolve(%q).RoutePath = %q, want root route", href, result.RoutePath)
-			}
-			if result.CanonicalHref != "/docs" {
-				t.Fatalf("Resolve(%q).CanonicalHref = %q, want /docs", href, result.CanonicalHref)
-			}
-		},
-		ginkgo.Entry("/docs", "/docs"),
-		ginkgo.Entry("/docs/", "/docs/"),
-	)
-
-	ginkgo.DescribeTable("TestResolveCanonicalLink_WithRootPrefixPreservesRootSuffixWithoutExtraSlash",
-		func(href string, want string) {
-			t := ginkgo.GinkgoT()
-			index := NewIndexWithOptions([]Entry{
-				{Kind: EntryKindSection, Path: ""},
-			}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-			result := index.Resolve("index.md", href)
-			if result.Kind != TargetKindSection {
-				t.Fatalf("Resolve(%q).Kind = %q, want section: %#v", href, result.Kind, result)
-			}
-			if result.RoutePath != "" {
-				t.Fatalf("Resolve(%q).RoutePath = %q, want root route", href, result.RoutePath)
-			}
-			if result.CanonicalHref != want {
-				t.Fatalf("Resolve(%q).CanonicalHref = %q, want %q", href, result.CanonicalHref, want)
-			}
-		},
-		ginkgo.Entry("/docs#intro", "/docs#intro", "/docs#intro"),
-		ginkgo.Entry("/docs?view=1#intro", "/docs?view=1#intro", "/docs?view=1#intro"),
-	)
-
-	ginkgo.DescribeTable("TestNormalizeMarkdownLinkRootPrefixRejectsInvalidValues",
-		func(input string) {
-			t := ginkgo.GinkgoT()
-			if got, err := NormalizeMarkdownLinkRootPrefix(input); err == nil {
-				t.Fatalf("NormalizeMarkdownLinkRootPrefix(%q) = %q, nil; want error", input, got)
-			}
-		},
-		ginkgo.Entry("/", "/"),
-		ginkgo.Entry("..", ".."),
-		ginkgo.Entry("/../docs", "/../docs"),
-		ginkgo.Entry("https://example.com/docs", "https://example.com/docs"),
-		ginkgo.Entry("/docs?x=1", "/docs?x=1"),
-		ginkgo.Entry("/docs#intro", "/docs#intro"),
-		ginkgo.Entry(`docs\sync`, `docs\sync`),
-		ginkgo.Entry("http:/docs", "http:/docs"),
-		ginkgo.Entry("mailto:docs", "mailto:docs"),
-	)
-
-	ginkgo.It("TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndexWithOptions([]Entry{
-			{Kind: EntryKindSection, Path: "sync", ContentPath: "sync/index.md"},
-			{Kind: EntryKindPage, Path: "sync.md"},
-		}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-		section := index.Resolve("index.md", "/docs/sync")
-		if section.Kind != TargetKindSection {
-			t.Fatalf("section Kind = %q, want %q: %#v", section.Kind, TargetKindSection, section)
-		}
-		if section.RoutePath != "sync" {
-			t.Fatalf("section RoutePath = %q, want sync", section.RoutePath)
-		}
-		if section.CanonicalHref != "/docs/sync" {
-			t.Fatalf("section CanonicalHref = %q, want /docs/sync", section.CanonicalHref)
-		}
-
-		page := index.Resolve("index.md", "/docs/sync.md")
-		if page.Kind != TargetKindPage {
-			t.Fatalf("page Kind = %q, want %q: %#v", page.Kind, TargetKindPage, page)
-		}
-		if page.RoutePath != "sync" {
-			t.Fatalf("page RoutePath = %q, want sync", page.RoutePath)
-		}
-		if page.CanonicalHref != "/docs/sync.md" {
-			t.Fatalf("page CanonicalHref = %q, want /docs/sync.md", page.CanonicalHref)
-		}
-	})
-
-	ginkgo.It("TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndexWithOptions([]Entry{
-			{Kind: EntryKindPage, Path: "glossary.md"},
-		}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-		relative := index.Resolve("sync/page.md", "../glossary.md")
-		if relative.Kind != TargetKindPage || relative.CanonicalHref != "../glossary.md" {
-			t.Fatalf("relative link resolved as %#v, want page with unchanged relative href", relative)
-		}
-	})
-
-	ginkgo.DescribeTable("TestResolveCanonicalLink_WithRootPrefixLeavesExternalAndHashLinksUnchanged",
-		func(href string) {
-			t := ginkgo.GinkgoT()
-			index := NewIndexWithOptions([]Entry{
-				{Kind: EntryKindPage, Path: "glossary.md"},
-			}, Options{MarkdownLinkRootPrefix: "/docs"})
-
-			result := index.Resolve("sync/page.md", href)
-			if result.Kind != TargetKindExternal {
-				t.Fatalf("Resolve(%q).Kind = %q, want external", href, result.Kind)
-			}
-			if result.CanonicalHref != href {
-				t.Fatalf("Resolve(%q).CanonicalHref = %q, want unchanged", href, result.CanonicalHref)
-			}
-		},
-		ginkgo.Entry("https://example.com/docs/a.md", "https://example.com/docs/a.md"),
-		ginkgo.Entry("//example.com/docs/a.md", "//example.com/docs/a.md"),
-		ginkgo.Entry("mailto:a@example.com", "mailto:a@example.com"),
-		ginkgo.Entry("#local", "#local"),
-	)
-
-	ginkgo.It("TestResolveCanonicalLink_WithRootPrefixResolvesPrefixedAssets", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndexWithOptions(nil, Options{MarkdownLinkRootPrefix: "/docs"})
-
-		result := index.Resolve("index.md", "/docs/assets/logo.png")
-
-		if result.Kind != TargetKindAsset {
-			t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindAsset, result)
-		}
-		if result.CanonicalHref != "/docs/assets/logo.png" {
-			t.Fatalf("CanonicalHref = %q, want /docs/assets/logo.png", result.CanonicalHref)
-		}
-	})
-
-	// - Section trailing slash is accepted but canonicalized away
-	ginkgo.It("TestResolveCanonicalLink_SectionTrailingSlashIsAcceptedButCanonicalizedAway", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindSection, Path: "docs/sync"},
-		})
-
-		result := index.Resolve("docs/a.md", "/docs/sync/")
-
-		if result.Kind != TargetKindSection {
-			t.Fatalf("Kind = %q, want %q", result.Kind, TargetKindSection)
-		}
-		if result.CanonicalHref != "/docs/sync" {
-			t.Fatalf("CanonicalHref = %q, want /docs/sync", result.CanonicalHref)
-		}
-	})
-
-	// - Root section link remains slash
-	ginkgo.It("TestResolveCanonicalLink_RelativeRootSectionCanonicalizesToSlash", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindSection, Path: "", ContentPath: "index.md"},
-		})
-
-		result := index.Resolve("docs/nested/page.md", "../..")
-
-		if result.Kind != TargetKindSection {
-			t.Fatalf("Kind = %q, want %q", result.Kind, TargetKindSection)
-		}
-		if result.CanonicalHref != "/" {
-			t.Fatalf("CanonicalHref = %q, want /", result.CanonicalHref)
-		}
-	})
-
-	ginkgo.DescribeTable("TestResolveCanonicalLink_ClassifiesPageSectionAssetExternalInvalidAndUnresolved",
-		func(href string, kind TargetKind, code IssueCode) {
-			t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("markdown link resolution", func() {
+	ginkgo.When("links point at pages and sections", func() {
+		ginkgo.It("resolves relative page links from the source file directory", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_UsesFilesystemRelativeSemanticsNotPageAsFolder.
 			index := NewIndex([]Entry{
-				{Kind: EntryKindPage, Path: "docs/b.md"},
-				{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
-				{Kind: EntryKindAsset, Path: "assets/page/logo.png"},
+				{Kind: EntryKindPage, Path: "docs/b/target.md"},
 			})
 
-			result := index.Resolve("docs/a/current.md", href)
-			if result.Kind != kind {
-				t.Fatalf("Kind = %q, want %q", result.Kind, kind)
-			}
-			if result.Code != code {
-				t.Fatalf("Code = %q, want %q", result.Code, code)
-			}
-		},
-		ginkgo.Entry("page", "/docs/b.md", TargetKindPage, IssueCode("")),
-		ginkgo.Entry("section", "/docs/sync", TargetKindSection, IssueCode("")),
-		ginkgo.Entry("asset namespace", "/assets/page/logo.png", TargetKindAsset, IssueCode("")),
-		ginkgo.Entry("asset extension", "/docs/manual.pdf", TargetKindAsset, IssueCode("")),
-		ginkgo.Entry("external", "https://example.com", TargetKindExternal, IssueCode("")),
-		ginkgo.Entry("mailto", "mailto:a@example.com", TargetKindExternal, IssueCode("")),
-		ginkgo.Entry("hash", "#heading", TargetKindExternal, IssueCode("")),
-		ginkgo.Entry("invalid percent", "/docs/%zz", TargetKindInvalid, IssueCodeInvalidPercentEncoding),
-		ginkgo.Entry("escape", "../../../outside.md", TargetKindInvalid, IssueCodeWorkspaceEscape),
-		ginkgo.Entry("unresolved", "/docs/missing.md", TargetKindUnresolved, IssueCodeBrokenPage),
-	)
+			result := index.Resolve("docs/a/current.md", "../b/target")
 
-	// - Explicit index.md section link canonicalizes to the section
-	// - Explicit README.md section fallback link canonicalizes to the section
-	ginkgo.DescribeTable("TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection",
-		func(href string, want string) {
-			t := ginkgo.GinkgoT()
+			Expect(result).To(matchResolvedLink(TargetKindPage, "../b/target.md", "docs/b/target"))
+		})
+
+		ginkgo.It("canonicalizes a trailing slash section destination without changing the section route", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_SectionTrailingSlashIsAcceptedButCanonicalizedAway.
+			index := NewIndex([]Entry{
+				{Kind: EntryKindSection, Path: "docs/sync"},
+			})
+
+			result := index.Resolve("docs/a.md", "/docs/sync/")
+
+			Expect(result).To(matchResolvedLink(TargetKindSection, "/docs/sync", "docs/sync"))
+		})
+
+		ginkgo.It("resolves a relative root section destination to a slash href", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_RelativeRootSectionCanonicalizesToSlash.
+			index := NewIndex([]Entry{
+				{Kind: EntryKindSection, Path: "", ContentPath: "index.md"},
+			})
+
+			result := index.Resolve("docs/nested/page.md", "../..")
+
+			Expect(result).To(matchRootSection("/"))
+		})
+
+		ginkgo.It("keeps explicit README page links as pages when a section fallback also exists", func() {
 			index := NewIndex([]Entry{
 				{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
 				{Kind: EntryKindSection, Path: "guides", ContentPath: "guides/README.md"},
 				{Kind: EntryKindPage, Path: "docs/sync/README.md"},
 			})
 
-			result := index.Resolve("docs/a.md", href)
-			if result.Kind != TargetKindSection {
-				t.Fatalf("Resolve(%q).Kind = %q, want section", href, result.Kind)
-			}
-			if result.CanonicalHref != want {
-				t.Fatalf("Resolve(%q).CanonicalHref = %q, want %q", href, result.CanonicalHref, want)
-			}
-		},
-		ginkgo.Entry("index md", "/docs/sync/index.md", "/docs/sync"),
-		ginkgo.Entry("percent-encoded index md", "/docs/%73ync/index.md", "/docs/%73ync"),
-		ginkgo.Entry("readme md", "/guides/README.md", "/guides"),
-		ginkgo.Entry("percent-encoded readme md", "/guid%65s/README.md", "/guid%65s"),
-	)
+			readmePage := index.Resolve("docs/a.md", "/docs/sync/README.md")
 
-	ginkgo.It("TestResolveCanonicalLink_ExplicitREADMEPageTwinStaysPage", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
-			{Kind: EntryKindSection, Path: "guides", ContentPath: "guides/README.md"},
-			{Kind: EntryKindPage, Path: "docs/sync/README.md"},
+			Expect(readmePage).To(matchResolvedLink(TargetKindPage, "/docs/sync/README.md", "docs/sync/README"))
 		})
 
-		readmePage := index.Resolve("docs/a.md", "/docs/sync/README.md")
-		if readmePage.Kind != TargetKindPage || readmePage.CanonicalHref != "/docs/sync/README.md" {
-			t.Fatalf("README page resolution = %#v, want canonical page link", readmePage)
-		}
-	})
-
-	ginkgo.It("TestNewIndexFromRootUsesWorkspaceRouteNormalization", func() {
-		t := ginkgo.GinkgoT()
-		rootDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
-			t.Fatalf("create plans dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("# Plans"), 0o644); err != nil {
-			t.Fatalf("write plans index markdown: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("# Agent Hooks Plan"), 0o644); err != nil {
-			t.Fatalf("write plan markdown: %v", err)
-		}
-
-		index, err := NewIndexFromRoot(rootDir)
-		if err != nil {
-			t.Fatalf("NewIndexFromRoot: %v", err)
-		}
-		result := index.Resolve("source.md", "/plans/agent-hooks-plan.md")
-
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
-		}
-		if result.RoutePath != "plans/agent-hooks-plan" {
-			t.Fatalf("RoutePath = %q, want plans/agent-hooks-plan", result.RoutePath)
-		}
-		if result.CanonicalHref != "/plans/agent-hooks-plan.md" {
-			t.Fatalf("CanonicalHref = %q, want /plans/agent-hooks-plan.md", result.CanonicalHref)
-		}
-
-		rawAbsolute := index.Resolve("source.md", "/plans/agent_hooks.PLAN.md")
-		if rawAbsolute.Kind != TargetKindUnresolved {
-			t.Fatalf("raw absolute Kind = %q, want %q: %#v", rawAbsolute.Kind, TargetKindUnresolved, rawAbsolute)
-		}
-		if rawAbsolute.Code != "non_canonical_markdown_path" {
-			t.Fatalf("raw absolute Code = %q, want non_canonical_markdown_path", rawAbsolute.Code)
-		}
-		if rawAbsolute.RoutePath != "plans/agent-hooks-plan" {
-			t.Fatalf("raw absolute RoutePath = %q, want plans/agent-hooks-plan", rawAbsolute.RoutePath)
-		}
-
-		rawRelative := index.Resolve("plans/source.md", "./agent_hooks.PLAN.md")
-		if rawRelative.Kind != TargetKindUnresolved {
-			t.Fatalf("raw relative Kind = %q, want %q: %#v", rawRelative.Kind, TargetKindUnresolved, rawRelative)
-		}
-		if rawRelative.Code != "non_canonical_markdown_path" {
-			t.Fatalf("raw relative Code = %q, want non_canonical_markdown_path", rawRelative.Code)
-		}
-		if rawRelative.RoutePath != "plans/agent-hooks-plan" {
-			t.Fatalf("raw relative RoutePath = %q, want plans/agent-hooks-plan", rawRelative.RoutePath)
-		}
-
-		migration := index.ResolveForMigration("plans/source.md", "./agent_hooks.PLAN.md")
-		if migration.Kind != TargetKindPage {
-			t.Fatalf("migration Kind = %q, want %q: %#v", migration.Kind, TargetKindPage, migration)
-		}
-		if migration.RoutePath != "plans/agent-hooks-plan" {
-			t.Fatalf("migration RoutePath = %q, want plans/agent-hooks-plan", migration.RoutePath)
-		}
-		if migration.CanonicalHref != "agent-hooks-plan.md" {
-			t.Fatalf("migration CanonicalHref = %q, want agent-hooks-plan.md", migration.CanonicalHref)
-		}
-	})
-
-	ginkgo.It("TestResolveForMigration_AmbiguousLegacyPageAndSectionLinkIsUnresolved", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/sync.md"},
-			{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
-		})
-
-		result := index.ResolveForMigration("docs/a.md", "/docs/sync")
-
-		if result.Kind != TargetKindUnresolved {
-			t.Fatalf("Kind = %q, want unresolved", result.Kind)
-		}
-		if result.Code != "ambiguous_legacy_link" {
-			t.Fatalf("Code = %q, want ambiguous_legacy_link", result.Code)
-		}
-	})
-
-	ginkgo.It("TestResolveForMigration_TrailingSlashTwinCanonicalizesToSection", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/sync.md"},
-			{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
-		})
-
-		result := index.ResolveForMigration("docs/a.md", "/docs/sync/")
-
-		if result.Kind != TargetKindSection {
-			t.Fatalf("Kind = %q, want section", result.Kind)
-		}
-		if result.Code != "" {
-			t.Fatalf("Code = %q, want empty code", result.Code)
-		}
-		if result.CanonicalHref != "/docs/sync" {
-			t.Fatalf("CanonicalHref = %q, want /docs/sync", result.CanonicalHref)
-		}
-		if result.RoutePath != "docs/sync" {
-			t.Fatalf("RoutePath = %q, want docs/sync", result.RoutePath)
-		}
-	})
-
-	ginkgo.It("TestResolveCanonicalLink_PrefersCanonicalSectionForExtensionlessTwin", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/sync.md"},
-			{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
-		})
-
-		result := index.Resolve("docs/a.md", "/docs/sync")
-
-		if result.Kind != TargetKindSection {
-			t.Fatalf("Kind = %q, want section", result.Kind)
-		}
-		if result.Code != "" {
-			t.Fatalf("Code = %q, want empty code", result.Code)
-		}
-		if result.CanonicalHref != "/docs/sync" {
-			t.Fatalf("CanonicalHref = %q, want /docs/sync", result.CanonicalHref)
-		}
-		if result.RoutePath != "docs/sync" {
-			t.Fatalf("RoutePath = %q, want docs/sync", result.RoutePath)
-		}
-	})
-
-	// - Query string and fragment are preserved byte-for-byte
-	// - Link title and angle-bracket destination syntax are preserved
-	ginkgo.It("TestCanonicalizeMarkdownLinks_PreservesAngleDestinationsTitleQueryAndFragment", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-
-		result := index.RewriteMarkdown("docs/a.md", `[B](</docs/b?mode=raw#part-two> "open B")`)
-
-		if result.Content != `[B](</docs/b.md?mode=raw#part-two> "open B")` {
-			t.Fatalf("Content = %q", result.Content)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-		if len(result.Issues) != 0 {
-			t.Fatalf("Issues = %#v, want none", result.Issues)
-		}
-	})
-
-	// - Relative old page link migrates to relative .md
-	// - Existing canonical .md page link is not rewritten
-	ginkgo.It("TestCanonicalizeMarkdownLinks_RewritesReferenceDefinitionsAndSkipsCode", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "[B][b-ref]\n\n[b-ref]: /docs/b\n\n`[B](/docs/b)`\n\n```md\n[B](/docs/b)\n```\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "[B][b-ref]\n\n[b-ref]: /docs/b.md\n\n`[B](/docs/b)`\n\n```md\n[B](/docs/b)\n```\n"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_DoesNotRewriteEscapedLiteralLinks", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := `\[B](/docs/b)
-[Real](/docs/b)`
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := `\[B](/docs/b)
-[Real](/docs/b.md)`
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_DoesNotRewriteLiteralTextWithWhitespaceBeforeDestination", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "[Space] (/docs/b)\n[Newline]\n(/docs/b)\n[Real](/docs/b)"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "[Space] (/docs/b)\n[Newline]\n(/docs/b)\n[Real](/docs/b.md)"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_DoesNotRewriteMalformedInlineLinkTails", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "[MissingTitleClose](/docs/b \"title\"\n[UnquotedTitle](/docs/b title)\n[NewlineTail](/docs/b\ntext)\n[LeadingSpace]( /docs/b)\n[QuotedTitle](/docs/b \"title\")\n[ParenTitle](/docs/b (title))"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "[MissingTitleClose](/docs/b \"title\"\n[UnquotedTitle](/docs/b title)\n[NewlineTail](/docs/b\ntext)\n[LeadingSpace]( /docs/b.md)\n[QuotedTitle](/docs/b.md \"title\")\n[ParenTitle](/docs/b.md (title))"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_DoesNotRewriteImageOnlyReferenceDefinitions", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "![B][b-ref]\n\n[b-ref]: /docs/b\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		if result.Content != content {
-			t.Fatalf("Content = %q, want image reference definition unchanged", result.Content)
-		}
-		if result.Changed {
-			t.Fatalf("Changed = true, want false")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_RewritesNestedListLinks", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "- parent\n    - [Target](/docs/b)\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "- parent\n    - [Target](/docs/b.md)\n"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_SortsReferenceAndInlineReplacementsByOffset", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "[b-ref]: /docs/b\n\n[B](/docs/b)\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "[b-ref]: /docs/b.md\n\n[B](/docs/b.md)\n"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-		if !result.Changed {
-			t.Fatalf("Changed = false, want true")
-		}
-	})
-
-	// - Link-like text in inline code and fenced code is ignored
-	ginkgo.It("TestCanonicalizeMarkdownLinks_SkipsMultiBacktickCodeSpans", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "``[B](/docs/b)``\n\n[B](/docs/b)\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "``[B](/docs/b)``\n\n[B](/docs/b.md)\n"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-	})
-
-	ginkgo.It("TestCanonicalizeMarkdownLinks_SkipsIndentedCodeBlocks", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/b.md"},
-		})
-		content := "Example:\n\n    [B](/docs/b)\n\t[C](/docs/b)\n\n[B](/docs/b)\n"
-
-		result := index.RewriteMarkdown("docs/a.md", content)
-
-		want := "Example:\n\n    [B](/docs/b)\n\t[C](/docs/b)\n\n[B](/docs/b.md)\n"
-		if result.Content != want {
-			t.Fatalf("Content = %q, want %q", result.Content, want)
-		}
-	})
-
-	// - External and non-page links are ignored
-	ginkgo.DescribeTable("TestResolveCanonicalLink_TreatsProtocolRelativeAndSchemedURLsAsExternal",
-		func(href string) {
-			t := ginkgo.GinkgoT()
+		ginkgo.It("prefers the canonical section when page and section routes share an extensionless link", func() {
 			index := NewIndex([]Entry{
-				{Kind: EntryKindPage, Path: "cdn.example.com/lib.md"},
+				{Kind: EntryKindPage, Path: "docs/sync.md"},
+				{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
 			})
 
-			result := index.Resolve("docs/a.md", href)
-			if result.Kind != TargetKindExternal {
-				t.Fatalf("Resolve(%q).Kind = %q, want external", href, result.Kind)
-			}
-			if result.CanonicalHref != href {
-				t.Fatalf("Resolve(%q).CanonicalHref = %q, want original href", href, result.CanonicalHref)
-			}
-		},
-		ginkgo.Entry("protocol-relative", "//cdn.example.com/lib.md"),
-		ginkgo.Entry("schemed URL", "obsidian://open?vault=wiki"),
-	)
+			result := index.Resolve("docs/a.md", "/docs/sync")
 
-	// - Percent-encoded paths use exact filesystem matching
-	ginkgo.It("TestResolveCanonicalLink_PreservesPercentEncodedPathStyle", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/space name.md"},
+			Expect(result).To(matchResolvedLink(TargetKindSection, "/docs/sync", "docs/sync"))
+		})
+	})
+
+	ginkgo.When("a markdown link root prefix is configured", func() {
+		ginkgo.It("resolves prefixed absolute page links inside the wiki root", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot.
+			index := NewIndexWithOptions([]Entry{
+				{Kind: EntryKindPage, Path: "sync/glossary.md"},
+			}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+			result := index.Resolve("index.md", "/docs/sync/glossary.md")
+
+			Expect(result).To(matchResolvedLink(TargetKindPage, "/docs/sync/glossary.md", "sync/glossary"))
 		})
 
-		result := index.Resolve("docs/a.md", "/docs/space%20name?x=1#part")
+		ginkgo.It("canonicalizes unprefixed absolute migration links into the configured root prefix", func() {
+			index := NewIndexWithOptions([]Entry{
+				{Kind: EntryKindPage, Path: "sync/glossary.md"},
+			}, Options{MarkdownLinkRootPrefix: "/docs"})
 
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q", result.Kind, TargetKindPage)
-		}
-		if result.CanonicalHref != "/docs/space%20name.md?x=1#part" {
-			t.Fatalf("CanonicalHref = %q, want /docs/space%%20name.md?x=1#part", result.CanonicalHref)
-		}
+			result := index.ResolveForMigration("index.md", "/sync/glossary?view=1#term")
+
+			Expect(result).To(matchResolvedLink(TargetKindPage, "/docs/sync/glossary.md?view=1#term", "sync/glossary"))
+		})
+
+		ginkgo.DescribeTable("resolves the configured prefix root to the wiki root section",
+			func(href string) {
+				// Plantrace evidence: TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot.
+				index := NewIndexWithOptions([]Entry{
+					{Kind: EntryKindSection, Path: ""},
+				}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+				result := index.Resolve("index.md", href)
+
+				Expect(result).To(matchRootSection("/docs"))
+			},
+			ginkgo.Entry("without a trailing slash", "/docs"),
+			ginkgo.Entry("with a trailing slash", "/docs/"),
+		)
+
+		ginkgo.DescribeTable("preserves root suffixes without adding an extra slash",
+			func(href string, want string) {
+				index := NewIndexWithOptions([]Entry{
+					{Kind: EntryKindSection, Path: ""},
+				}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+				result := index.Resolve("index.md", href)
+
+				Expect(result).To(matchRootSection(want))
+			},
+			ginkgo.Entry("fragment suffix", "/docs#intro", "/docs#intro"),
+			ginkgo.Entry("query and fragment suffix", "/docs?view=1#intro", "/docs?view=1#intro"),
+		)
+
+		ginkgo.It("distinguishes extensionless sections from explicit markdown pages", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax.
+			index := NewIndexWithOptions([]Entry{
+				{Kind: EntryKindSection, Path: "sync", ContentPath: "sync/index.md"},
+				{Kind: EntryKindPage, Path: "sync.md"},
+			}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+			section := index.Resolve("index.md", "/docs/sync")
+			page := index.Resolve("index.md", "/docs/sync.md")
+
+			Expect(section).To(matchResolvedLink(TargetKindSection, "/docs/sync", "sync"))
+			Expect(page).To(matchResolvedLink(TargetKindPage, "/docs/sync.md", "sync"))
+		})
+
+		ginkgo.It("leaves relative links canonical relative to the source file", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged.
+			index := NewIndexWithOptions([]Entry{
+				{Kind: EntryKindPage, Path: "glossary.md"},
+			}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+			relative := index.Resolve("sync/page.md", "../glossary.md")
+
+			Expect(relative).To(matchResolvedLink(TargetKindPage, "../glossary.md", "glossary"))
+		})
+
+		ginkgo.DescribeTable("leaves external and hash links unchanged",
+			func(href string) {
+				// Plantrace evidence: TestResolveCanonicalLink_WithRootPrefixLeavesExternalAndHashLinksUnchanged.
+				index := NewIndexWithOptions([]Entry{
+					{Kind: EntryKindPage, Path: "glossary.md"},
+				}, Options{MarkdownLinkRootPrefix: "/docs"})
+
+				result := index.Resolve("sync/page.md", href)
+
+				Expect(result).To(matchResolvedLink(TargetKindExternal, href, ""))
+			},
+			ginkgo.Entry("absolute URL", "https://example.com/docs/a.md"),
+			ginkgo.Entry("protocol-relative URL", "//example.com/docs/a.md"),
+			ginkgo.Entry("mailto URL", "mailto:a@example.com"),
+			ginkgo.Entry("same-page hash", "#local"),
+		)
+
+		ginkgo.It("resolves prefixed asset destinations as asset links", func() {
+			index := NewIndexWithOptions(nil, Options{MarkdownLinkRootPrefix: "/docs"})
+
+			result := index.Resolve("index.md", "/docs/assets/logo.png")
+
+			Expect(result).To(matchResolvedLink(TargetKindAsset, "/docs/assets/logo.png", ""))
+		})
 	})
 
-	ginkgo.DescribeTable("NormalizeMarkdownLinkRootPrefix accepts stable path forms",
-		func(input string, want string) {
-			t := ginkgo.GinkgoT()
-			got, err := NormalizeMarkdownLinkRootPrefix(input)
-			if err != nil {
-				t.Fatalf("NormalizeMarkdownLinkRootPrefix(%q) error = %v", input, err)
-			}
-			if got != want {
-				t.Fatalf("NormalizeMarkdownLinkRootPrefix(%q) = %q, want %q", input, got, want)
-			}
-		},
-		ginkgo.Entry("empty", "", ""),
-		ginkgo.Entry("blank", " \t\n ", ""),
-		ginkgo.Entry("relative prefix", "docs", "/docs"),
-		ginkgo.Entry("mixed case relative prefix with trailing slash", " Docs/Sync/ ", "/Docs/Sync"),
-		ginkgo.Entry("absolute prefix with redundant slash", "/docs/sync/", "/docs/sync"),
-	)
+	ginkgo.When("normalizing markdown link root prefixes", func() {
+		ginkgo.DescribeTable("rejects non-path or unsafe root prefix values",
+			func(input string) {
+				_, err := NormalizeMarkdownLinkRootPrefix(input)
 
-	ginkgo.It("RewriteMarkdown leaves empty content unchanged", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex(nil)
+				Expect(err).To(HaveOccurred())
+			},
+			ginkgo.Entry("repository root", "/"),
+			ginkgo.Entry("relative parent traversal", ".."),
+			ginkgo.Entry("absolute parent traversal", "/../docs"),
+			ginkgo.Entry("schemed URL", "https://example.com/docs"),
+			ginkgo.Entry("query string", "/docs?x=1"),
+			ginkgo.Entry("fragment", "/docs#intro"),
+			ginkgo.Entry("backslash path", `docs\sync`),
+			ginkgo.Entry("opaque HTTP-ish path", "http:/docs"),
+			ginkgo.Entry("mailto opaque path", "mailto:docs"),
+		)
 
-		result := index.RewriteMarkdown("index.md", "")
-
-		if result.Content != "" {
-			t.Fatalf("Content = %q, want empty", result.Content)
-		}
-		if result.Changed {
-			t.Fatalf("Changed = true, want false")
-		}
-		if len(result.Issues) != 0 {
-			t.Fatalf("Issues = %#v, want none", result.Issues)
-		}
+		ginkgo.DescribeTable("accepts stable repository path forms",
+			func(input string, want string) {
+				Expect(NormalizeMarkdownLinkRootPrefix(input)).To(Equal(want))
+			},
+			ginkgo.Entry("empty value", "", ""),
+			ginkgo.Entry("blank value", " \t\n ", ""),
+			ginkgo.Entry("relative prefix", "docs", "/docs"),
+			ginkgo.Entry("mixed case relative prefix with trailing slash", " Docs/Sync/ ", "/Docs/Sync"),
+			ginkgo.Entry("absolute prefix with redundant slash", "/docs/sync/", "/docs/sync"),
+		)
 	})
 
-	ginkgo.It("RewriteMarkdown reports invalid and unresolved destinations without rewriting", func() {
-		t := ginkgo.GinkgoT()
-		index := NewIndex(nil)
-		content := "[Missing](/missing.md)\n[Bad](/docs/%zz)\n"
+	ginkgo.When("classifying unresolved and non-page destinations", func() {
+		ginkgo.DescribeTable("reports the target kind and issue code for canonical resolution",
+			func(href string, kind TargetKind, code IssueCode) {
+				index := NewIndex([]Entry{
+					{Kind: EntryKindPage, Path: "docs/b.md"},
+					{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
+					{Kind: EntryKindAsset, Path: "assets/page/logo.png"},
+				})
 
-		result := index.RewriteMarkdown("index.md", content)
+				result := index.Resolve("docs/a/current.md", href)
 
-		if result.Content != content {
-			t.Fatalf("Content = %q, want unchanged %q", result.Content, content)
-		}
-		if result.Changed {
-			t.Fatalf("Changed = true, want false")
-		}
-		wantIssues := []Issue{
-			{Code: IssueCodeBrokenPage, Destination: "/missing.md"},
-			{Code: IssueCodeInvalidPercentEncoding, Destination: "/docs/%zz"},
-		}
-		if len(result.Issues) != len(wantIssues) {
-			t.Fatalf("Issues = %#v, want %#v", result.Issues, wantIssues)
-		}
-		for i := range wantIssues {
-			if result.Issues[i] != wantIssues[i] {
-				t.Fatalf("Issues[%d] = %#v, want %#v", i, result.Issues[i], wantIssues[i])
-			}
-		}
+				Expect(result).To(matchResolution(kind, code))
+			},
+			ginkgo.Entry("canonical page", "/docs/b.md", TargetKindPage, IssueCode("")),
+			ginkgo.Entry("canonical section", "/docs/sync", TargetKindSection, IssueCode("")),
+			ginkgo.Entry("asset namespace", "/assets/page/logo.png", TargetKindAsset, IssueCode("")),
+			ginkgo.Entry("asset extension", "/docs/manual.pdf", TargetKindAsset, IssueCode("")),
+			ginkgo.Entry("external URL", "https://example.com", TargetKindExternal, IssueCode("")),
+			ginkgo.Entry("mailto URL", "mailto:a@example.com", TargetKindExternal, IssueCode("")),
+			ginkgo.Entry("same-page hash", "#heading", TargetKindExternal, IssueCode("")),
+			ginkgo.Entry("invalid percent encoding", "/docs/%zz", TargetKindInvalid, IssueCodeInvalidPercentEncoding),
+			ginkgo.Entry("workspace escape", "../../../outside.md", TargetKindInvalid, IssueCodeWorkspaceEscape),
+			ginkgo.Entry("missing page", "/docs/missing.md", TargetKindUnresolved, IssueCodeBrokenPage),
+		)
+
+		ginkgo.DescribeTable("treats protocol-relative and schemed URLs as external destinations",
+			func(href string) {
+				// Plantrace evidence: TestResolveCanonicalLink_TreatsProtocolRelativeAndSchemedURLsAsExternal.
+				index := NewIndex([]Entry{
+					{Kind: EntryKindPage, Path: "cdn.example.com/lib.md"},
+				})
+
+				result := index.Resolve("docs/a.md", href)
+
+				Expect(result).To(matchResolvedLink(TargetKindExternal, href, ""))
+			},
+			ginkgo.Entry("protocol-relative URL", "//cdn.example.com/lib.md"),
+			ginkgo.Entry("schemed URL", "obsidian://open?vault=wiki"),
+		)
+
+		ginkgo.It("keeps percent-encoded path style while matching decoded filesystem paths", func() {
+			// Plantrace evidence: TestResolveCanonicalLink_PreservesPercentEncodedPathStyle.
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/space name.md"},
+			})
+
+			result := index.Resolve("docs/a.md", "/docs/space%20name?x=1#part")
+
+			Expect(result).To(matchResolvedLink(TargetKindPage, "/docs/space%20name.md?x=1#part", "docs/space name"))
+		})
 	})
 
-	ginkgo.It("ScanInlineDestinations skips images by default and can include them", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.When("migration mode handles legacy page and section ambiguity", func() {
+		ginkgo.It("leaves ambiguous extensionless page and section twins unresolved", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/sync.md"},
+				{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
+			})
+
+			result := index.ResolveForMigration("docs/a.md", "/docs/sync")
+
+			Expect(result).To(matchResolution(TargetKindUnresolved, IssueCodeAmbiguousLegacyLink))
+		})
+
+		ginkgo.It("uses a trailing slash to disambiguate page and section twins to the section", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/sync.md"},
+				{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
+			})
+
+			result := index.ResolveForMigration("docs/a.md", "/docs/sync/")
+
+			Expect(result).To(matchResolvedLink(TargetKindSection, "/docs/sync", "docs/sync"))
+		})
+	})
+
+	ginkgo.When("explicit section content files are linked", func() {
+		ginkgo.DescribeTable("canonicalizes default section files to their section routes",
+			func(href string, canonicalHref string, routePath string) {
+				// Plantrace evidence: TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection.
+				index := NewIndex([]Entry{
+					{Kind: EntryKindSection, Path: "docs/sync", ContentPath: "docs/sync/index.md"},
+					{Kind: EntryKindSection, Path: "guides", ContentPath: "guides/README.md"},
+					{Kind: EntryKindPage, Path: "docs/sync/README.md"},
+				})
+
+				result := index.Resolve("docs/a.md", href)
+
+				Expect(result).To(matchResolvedLink(TargetKindSection, canonicalHref, routePath))
+			},
+			ginkgo.Entry("index markdown file", "/docs/sync/index.md", "/docs/sync", "docs/sync"),
+			ginkgo.Entry("percent-encoded index markdown file", "/docs/%73ync/index.md", "/docs/%73ync", "docs/sync"),
+			ginkgo.Entry("README markdown file", "/guides/README.md", "/guides", "guides"),
+			ginkgo.Entry("percent-encoded README markdown file", "/guid%65s/README.md", "/guid%65s", "guides"),
+		)
+	})
+
+	ginkgo.When("building an index from workspace files", func() {
+		ginkgo.It("uses workspace route normalization for canonical route paths", func() {
+			rootDir := markdownLinksTempDir()
+			Expect(os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("# Plans"), 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("# Agent Hooks Plan"), 0o644)).To(Succeed())
+
+			index, err := NewIndexFromRoot(rootDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			result := index.Resolve("source.md", "/plans/agent-hooks-plan.md")
+			rawAbsolute := index.Resolve("source.md", "/plans/agent_hooks.PLAN.md")
+			rawRelative := index.Resolve("plans/source.md", "./agent_hooks.PLAN.md")
+			migration := index.ResolveForMigration("plans/source.md", "./agent_hooks.PLAN.md")
+
+			Expect(result).To(matchResolvedLink(TargetKindPage, "/plans/agent-hooks-plan.md", "plans/agent-hooks-plan"))
+			Expect(rawAbsolute).To(matchResolution(TargetKindUnresolved, IssueCodeNonCanonicalMarkdownPath))
+			Expect(rawAbsolute.RoutePath).To(Equal(rawRelative.RoutePath))
+			Expect(rawAbsolute.RoutePath).To(Equal(result.RoutePath))
+			Expect(rawRelative).To(matchResolution(TargetKindUnresolved, IssueCodeNonCanonicalMarkdownPath))
+			Expect(migration).To(matchResolvedLink(TargetKindPage, "agent-hooks-plan.md", "plans/agent-hooks-plan"))
+		})
+
+		ginkgo.It("applies markdown link root prefixes to discovered page canonical hrefs", func() {
+			rootDir := markdownLinksTempDir()
+			Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "page.md"), []byte("# Page"), 0o644)).To(Succeed())
+
+			index, err := NewIndexFromRootWithOptions(rootDir, Options{MarkdownLinkRootPrefix: "/wiki"})
+			Expect(err).NotTo(HaveOccurred())
+
+			result := index.Resolve("source.md", "/wiki/docs/page.md")
+
+			Expect(result).To(matchResolvedLink(TargetKindPage, "/wiki/docs/page.md", "docs/page"))
+		})
+	})
+})
+
+var _ = ginkgo.Describe("markdown link rewriting", func() {
+	ginkgo.When("rewriting inline and reference markdown destinations", func() {
+		ginkgo.It("preserves angle destinations, titles, query strings, and fragments", func() {
+			// Plantrace evidence: TestCanonicalizeMarkdownLinks_PreservesAngleDestinationsTitleQueryAndFragment.
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+
+			result := index.RewriteMarkdown("docs/a.md", `[B](</docs/b?mode=raw#part-two> "open B")`)
+
+			Expect(result).To(matchRewriteResult(`[B](</docs/b.md?mode=raw#part-two> "open B")`, true))
+		})
+
+		ginkgo.It("rewrites reference definitions without touching code spans or fenced code blocks", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "[B][b-ref]\n\n[b-ref]: /docs/b\n\n`[B](/docs/b)`\n\n```md\n[B](/docs/b)\n```\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			want := "[B][b-ref]\n\n[b-ref]: /docs/b.md\n\n`[B](/docs/b)`\n\n```md\n[B](/docs/b)\n```\n"
+			Expect(result).To(matchRewriteResult(want, true))
+		})
+
+		ginkgo.It("rewrites the real link while leaving escaped literal link text unchanged", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := `\[B](/docs/b)
+[Real](/docs/b)`
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			want := `\[B](/docs/b)
+[Real](/docs/b.md)`
+			Expect(result).To(matchRewriteResult(want, true))
+		})
+
+		ginkgo.It("rewrites only syntactically valid inline links when literal text resembles links", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "[Space] (/docs/b)\n[Newline]\n(/docs/b)\n[Real](/docs/b)"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			want := "[Space] (/docs/b)\n[Newline]\n(/docs/b)\n[Real](/docs/b.md)"
+			Expect(result).To(matchRewriteResult(want, true))
+		})
+
+		ginkgo.It("does not rewrite malformed inline-link tails but still rewrites valid tails", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "[MissingTitleClose](/docs/b \"title\"\n[UnquotedTitle](/docs/b title)\n[NewlineTail](/docs/b\ntext)\n[LeadingSpace]( /docs/b)\n[QuotedTitle](/docs/b \"title\")\n[ParenTitle](/docs/b (title))"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			want := "[MissingTitleClose](/docs/b \"title\"\n[UnquotedTitle](/docs/b title)\n[NewlineTail](/docs/b\ntext)\n[LeadingSpace]( /docs/b.md)\n[QuotedTitle](/docs/b.md \"title\")\n[ParenTitle](/docs/b.md (title))"
+			Expect(result).To(matchRewriteResult(want, true))
+		})
+
+		ginkgo.It("leaves image-only reference definitions unchanged", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "![B][b-ref]\n\n[b-ref]: /docs/b\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			Expect(result).To(matchRewriteResult(content, false))
+		})
+
+		ginkgo.It("rewrites links nested inside list items", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "- parent\n    - [Target](/docs/b)\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			Expect(result).To(matchRewriteResult("- parent\n    - [Target](/docs/b.md)\n", true))
+		})
+
+		ginkgo.It("applies reference and inline replacements in source-order-safe offset order", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "[b-ref]: /docs/b\n\n[B](/docs/b)\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			Expect(result).To(matchRewriteResult("[b-ref]: /docs/b.md\n\n[B](/docs/b.md)\n", true))
+		})
+	})
+
+	ginkgo.When("link text appears inside code", func() {
+		ginkgo.It("skips multi-backtick code spans while rewriting visible markdown links", func() {
+			// Plantrace evidence: TestCanonicalizeMarkdownLinks_SkipsMultiBacktickCodeSpans.
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "``[B](/docs/b)``\n\n[B](/docs/b)\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			Expect(result).To(matchRewriteResult("``[B](/docs/b)``\n\n[B](/docs/b.md)\n", true))
+		})
+
+		ginkgo.It("skips indented code blocks while rewriting visible markdown links", func() {
+			index := NewIndex([]Entry{
+				{Kind: EntryKindPage, Path: "docs/b.md"},
+			})
+			content := "Example:\n\n    [B](/docs/b)\n\t[C](/docs/b)\n\n[B](/docs/b)\n"
+
+			result := index.RewriteMarkdown("docs/a.md", content)
+
+			want := "Example:\n\n    [B](/docs/b)\n\t[C](/docs/b)\n\n[B](/docs/b.md)\n"
+			Expect(result).To(matchRewriteResult(want, true))
+		})
+	})
+
+	ginkgo.When("content has no canonical page rewrite", func() {
+		ginkgo.It("leaves empty content unchanged without issues", func() {
+			index := NewIndex(nil)
+
+			result := index.RewriteMarkdown("index.md", "")
+
+			Expect(result).To(matchRewriteResult("", false))
+		})
+
+		ginkgo.It("reports invalid and unresolved destinations without changing content", func() {
+			index := NewIndex(nil)
+			content := "[Missing](/missing.md)\n[Bad](/docs/%zz)\n"
+
+			result := index.RewriteMarkdown("index.md", content)
+
+			Expect(result).To(matchRewriteResult(content, false,
+				Issue{Code: IssueCodeBrokenPage, Destination: "/missing.md"},
+				Issue{Code: IssueCodeInvalidPercentEncoding, Destination: "/docs/%zz"},
+			))
+		})
+	})
+})
+
+var _ = ginkgo.Describe("markdown link destination scanning", func() {
+	ginkgo.It("skips image destinations by default and can include them when requested", func() {
 		content := "![Logo](/assets/logo.png) [Page](/docs/page)"
 
 		defaultDestinations := ScanInlineDestinations(content, InlineScanOptions{})
-		if len(defaultDestinations) != 1 {
-			t.Fatalf("default destinations = %#v, want one page link", defaultDestinations)
-		}
-		if defaultDestinations[0].Destination != "/docs/page" || defaultDestinations[0].Image {
-			t.Fatalf("default destination = %#v, want non-image page link", defaultDestinations[0])
-		}
-
 		withImages := ScanInlineDestinations(content, InlineScanOptions{IncludeImages: true})
-		if len(withImages) != 2 {
-			t.Fatalf("with images destinations = %#v, want image plus page", withImages)
-		}
-		if withImages[0].Destination != "/assets/logo.png" || !withImages[0].Image {
-			t.Fatalf("withImages[0] = %#v, want image destination", withImages[0])
-		}
-		if withImages[1].Destination != "/docs/page" || withImages[1].Image {
-			t.Fatalf("withImages[1] = %#v, want non-image page link", withImages[1])
-		}
+
+		Expect(defaultDestinations).To(ConsistOf(matchInlineDestination("/docs/page", false)))
+		Expect(withImages).To(ConsistOf(
+			matchInlineDestination("/assets/logo.png", true),
+			matchInlineDestination("/docs/page", false),
+		))
 	})
 
-	ginkgo.It("ScanInlineDestinations can include links inside code ranges", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("skips code-span destinations by default and can include them when requested", func() {
 		content := "`[Code](/docs/code)` [Page](/docs/page)"
 
 		defaultDestinations := ScanInlineDestinations(content, InlineScanOptions{})
-		if len(defaultDestinations) != 1 || defaultDestinations[0].Destination != "/docs/page" {
-			t.Fatalf("default destinations = %#v, want only page link", defaultDestinations)
-		}
-
 		withCode := ScanInlineDestinations(content, InlineScanOptions{IgnoreCodeRanges: true})
-		if len(withCode) != 2 {
-			t.Fatalf("with code destinations = %#v, want code plus page", withCode)
-		}
-		if withCode[0].Destination != "/docs/code" || withCode[1].Destination != "/docs/page" {
-			t.Fatalf("with code destinations = %#v, want code then page", withCode)
-		}
-	})
 
-	ginkgo.It("NewIndexFromRootWithOptions applies markdown link root prefix to canonical hrefs", func() {
-		t := ginkgo.GinkgoT()
-		rootDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755); err != nil {
-			t.Fatalf("create docs dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(rootDir, "docs", "page.md"), []byte("# Page"), 0o644); err != nil {
-			t.Fatalf("write page markdown: %v", err)
-		}
-
-		index, err := NewIndexFromRootWithOptions(rootDir, Options{MarkdownLinkRootPrefix: "/wiki"})
-		if err != nil {
-			t.Fatalf("NewIndexFromRootWithOptions: %v", err)
-		}
-
-		result := index.Resolve("source.md", "/wiki/docs/page.md")
-		if result.Kind != TargetKindPage {
-			t.Fatalf("Kind = %q, want %q: %#v", result.Kind, TargetKindPage, result)
-		}
-		if string(result.RoutePath) != "docs/page" {
-			t.Fatalf("RoutePath = %q, want docs/page", result.RoutePath)
-		}
-		if result.CanonicalHref != "/wiki/docs/page.md" {
-			t.Fatalf("CanonicalHref = %q, want /wiki/docs/page.md", result.CanonicalHref)
-		}
+		Expect(defaultDestinations).To(ConsistOf(matchInlineDestination("/docs/page", false)))
+		Expect(withCode).To(ConsistOf(
+			matchInlineDestination("/docs/code", false),
+			matchInlineDestination("/docs/page", false),
+		))
 	})
 })

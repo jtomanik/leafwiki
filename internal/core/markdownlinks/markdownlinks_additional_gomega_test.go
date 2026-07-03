@@ -45,13 +45,67 @@ func matchResolution(kind TargetKind, code IssueCode) types.GomegaMatcher {
 	})
 }
 
+func matchResolvedLink(kind TargetKind, canonicalHref string, routePath string) types.GomegaMatcher {
+	fields := gstruct.Fields{
+		"Kind":          Equal(kind),
+		"CanonicalHref": Equal(canonicalHref),
+		"Code":          BeZero(),
+	}
+	if routePath != "" {
+		fields["RoutePath"] = Equal(mustRoutePath(routePath))
+	}
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func mustRoutePath(raw string) tree.RoutePath {
+	ginkgo.GinkgoHelper()
+	routePath, err := tree.ParseRoutePath(raw)
+	Expect(err).NotTo(HaveOccurred())
+	return routePath
+}
+
+func matchRootSection(canonicalHref string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Kind":          Equal(TargetKindSection),
+		"CanonicalHref": Equal(canonicalHref),
+		"RoutePath":     BeZero(),
+	})
+}
+
+func matchRewriteResult(content string, changed bool, issues ...Issue) types.GomegaMatcher {
+	issueMatcher := Equal(issues)
+	if len(issues) == 0 {
+		issueMatcher = BeEmpty()
+	}
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Content": Equal(content),
+		"Changed": Equal(changed),
+		"Issues":  issueMatcher,
+	})
+}
+
 func matchLinkOccurrenceHref(href string) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Href": Equal(href),
 	})
 }
 
-var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
+func matchInlineDestination(destination string, image bool) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination": Equal(destination),
+		"Image":       Equal(image),
+	})
+}
+
+func markdownLinksTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-markdownlinks-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
+var _ = ginkgo.Describe("markdown link parser internals", func() {
 	ginkgo.It("handles index construction and root walking edge cases", func() {
 		index := NewIndexWithOptions([]Entry{
 			{Kind: EntryKindPage},
@@ -59,10 +113,10 @@ var _ = ginkgo.Describe("markdown link parser edge coverage", func() {
 		}, Options{MarkdownLinkRootPrefix: "/wiki"})
 		Expect(index).To(haveEmptyIndexEntryMaps())
 
-		_, err := NewIndexFromRootWithOptions(filepath.Join(ginkgo.GinkgoT().TempDir(), "missing"), Options{})
+		_, err := NewIndexFromRootWithOptions(filepath.Join(markdownLinksTempDir(), "missing"), Options{})
 		Expect(err).To(HaveOccurred())
 
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := markdownLinksTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(rootDir, ".hidden"), 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(rootDir, "assets"), 0o755)).To(Succeed())
