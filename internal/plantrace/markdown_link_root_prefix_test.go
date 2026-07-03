@@ -5,7 +5,6 @@ import (
 	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -26,7 +25,7 @@ var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenari
 	{"Configured prefix distinguishes section and page syntax", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax")},
 	{"Relative links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged")},
 	{"External and hash links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesExternalAndHashLinksUnchanged")},
-	{"Prefixed asset links resolve as workspace assets", mlrpEvidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateMarkdownContent_ResolvesPrefixedAssetWithMarkdownLinkRootPrefix")},
+	{"Prefixed asset links resolve as workspace assets", mlrpEvidence("internal/core/markdownvalidation/use_cases_test.go", "resolves prefixed assets through the markdown link root prefix")},
 	{"Workspace sync coerces absolute links to the configured prefix", mlrpEvidence("e2e/tests/workspace-sync.spec.ts", "markdown link root prefix rewrites unprefixed absolute links")},
 	{"Generated editor links include the configured prefix", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix autocomplete inserts prefixed page links")},
 	{"Importer and refactor generated absolute links include the configured prefix", mlrpEvidence("internal/importer/content_transformer_test.go", "TestContentTransformer_UsesMarkdownLinkRootPrefixForGeneratedPageLinks")},
@@ -61,24 +60,20 @@ var _ = ginkgo.Describe("markdown link root prefix plan traceability", func() {
 		coverageByTitle := map[string]markdownLinkRootPrefixEvidence{}
 		for _, coverage := range markdownLinkRootPrefixPlanScenarioCoverage {
 			Expect(coverage).To(haveMarkdownLinkRootPrefixScenarioMapping())
-			_, exists := coverageByTitle[coverage.title]
-			Expect(exists).To(BeFalse(), "duplicate scenario evidence title %q", coverage.title)
+			Expect(coverageByTitle).NotTo(HaveKey(coverage.title), "duplicate scenario evidence title %q", coverage.title)
 			coverageByTitle[coverage.title] = coverage.evidence
 		}
 
-		planTitleSet := map[string]struct{}{}
 		for _, title := range planTitles {
-			planTitleSet[title] = struct{}{}
-			evidence, ok := coverageByTitle[title]
-			Expect(ok).To(BeTrue(), "plan scenario %q has no automated-test evidence mapping", title)
+			evidence, err := markdownLinkRootPrefixEvidenceForTitle(coverageByTitle, title)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(evidence).To(existInMarkdownLinkRootPrefixEvidenceFile(repoRoot, title))
 			for _, extraEvidence := range markdownLinkRootPrefixExtraEvidenceForTitle(title) {
 				Expect(extraEvidence).To(existInMarkdownLinkRootPrefixEvidenceFile(repoRoot, title))
 			}
 		}
 		for title := range coverageByTitle {
-			_, ok := planTitleSet[title]
-			Expect(ok).To(BeTrue(), "scenario evidence %q is not present in the plan", title)
+			Expect(planTitles).To(ContainElement(title), "scenario evidence %q is not present in the plan", title)
 		}
 
 	})
@@ -90,15 +85,11 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 		Expect(err).NotTo(HaveOccurred(), "read markdown link root prefix plan")
 
-		found := 0
-		for _, line := range strings.Split(string(raw), "\n") {
-			if !strings.Contains(line, "./e2e/run.sh tests/") || !strings.Contains(line, `--grep "markdown link root prefix"`) {
-				continue
-			}
-			found++
+		focusedCommands := markdownLinkRootPrefixFocusedCommandLines(string(raw))
+		for _, line := range focusedCommands {
 			Expect(line).To(ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs"), "focused E2E command should set markdown link root prefix")
 		}
-		Expect(found).To(BeNumerically(">", 0), "focused markdown link root prefix E2E commands should exist")
+		Expect(focusedCommands).NotTo(BeEmpty(), "focused markdown link root prefix E2E commands should exist")
 
 	})
 
@@ -107,16 +98,12 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 		Expect(err).NotTo(HaveOccurred(), "read markdown link root prefix plan")
 
-		found := false
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, "./e2e/run.sh tests/page.spec.ts") &&
-				strings.Contains(line, `--grep "markdown link root prefix remains separate from base path"`) &&
-				strings.Contains(line, "E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs") &&
-				strings.Contains(line, "E2E_BASE_PATH=/wiki") {
-				found = true
-			}
-		}
-		Expect(found).To(BeTrue(), "plan should run the base-path separation scenario without skipping")
+		Expect(strings.Split(string(raw), "\n")).To(ContainElement(SatisfyAll(
+			ContainSubstring("./e2e/run.sh tests/page.spec.ts"),
+			ContainSubstring(`--grep "markdown link root prefix remains separate from base path"`),
+			ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs"),
+			ContainSubstring("E2E_BASE_PATH=/wiki"),
+		)), "plan should run the base-path separation scenario without skipping")
 
 	})
 
@@ -125,16 +112,12 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 		Expect(err).NotTo(HaveOccurred(), "read markdown link root prefix plan")
 
-		found := false
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, "./e2e/run.sh tests/root-dir.spec.ts") &&
-				strings.Contains(line, `--grep "markdown link root prefix"`) &&
-				strings.Contains(line, "E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs") &&
-				strings.Contains(line, "E2E_ENABLE_SEPARATE_ROOT_DIR=1") {
-				found = true
-			}
-		}
-		Expect(found).To(BeTrue(), "root-dir command should set separate-root markdown link root prefix env")
+		Expect(strings.Split(string(raw), "\n")).To(ContainElement(SatisfyAll(
+			ContainSubstring("./e2e/run.sh tests/root-dir.spec.ts"),
+			ContainSubstring(`--grep "markdown link root prefix"`),
+			ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs"),
+			ContainSubstring("E2E_ENABLE_SEPARATE_ROOT_DIR=1"),
+		)), "root-dir command should set separate-root markdown link root prefix env")
 
 	})
 
@@ -143,17 +126,13 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
 		Expect(err).NotTo(HaveOccurred(), "read markdown link root prefix plan")
 
-		found := false
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, "./e2e/run.sh tests/mcp-agent-context.spec.ts") &&
-				strings.Contains(line, `--grep "markdown link root prefix"`) &&
-				strings.Contains(line, "E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs") &&
-				strings.Contains(line, "E2E_ENABLE_MCP_LOCAL=1") &&
-				!strings.Contains(line, "E2E_ENABLE_WORKSPACE_SYNC=1") {
-				found = true
-			}
-		}
-		Expect(found).To(BeTrue(), "MCP command should use default workspace sync without legacy workspace sync env")
+		Expect(strings.Split(string(raw), "\n")).To(ContainElement(SatisfyAll(
+			ContainSubstring("./e2e/run.sh tests/mcp-agent-context.spec.ts"),
+			ContainSubstring(`--grep "markdown link root prefix"`),
+			ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs"),
+			ContainSubstring("E2E_ENABLE_MCP_LOCAL=1"),
+			Not(ContainSubstring("E2E_ENABLE_WORKSPACE_SYNC=1")),
+		)), "MCP command should use default workspace sync without legacy workspace sync env")
 
 	})
 })
@@ -224,8 +203,8 @@ func markdownLinkRootPrefixExtraEvidenceForTitle(title string) []markdownLinkRoo
 
 func markdownLinkRootPrefixPlanRepoRoot() string {
 	ginkgo.GinkgoHelper()
-	_, file, _, ok := runtime.Caller(0)
-	Expect(ok).To(BeTrue(), "runtime.Caller should locate the markdown link root prefix test")
+	file, err := plantraceSourceFile()
+	Expect(err).NotTo(HaveOccurred(), "runtime.Caller should locate the markdown link root prefix test")
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 

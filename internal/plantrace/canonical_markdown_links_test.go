@@ -5,7 +5,6 @@ import (
 	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -34,7 +33,7 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"Percent-encoded paths use exact filesystem matching", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_PreservesPercentEncodedPathStyle")},
 	{"External and non-page links are ignored", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_TreatsProtocolRelativeAndSchemedURLsAsExternal")},
 	{"Link-like text in inline code and fenced code is ignored", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestCanonicalizeMarkdownLinks_SkipsMultiBacktickCodeSpans")},
-	{"Malformed percent-encoding reports an invalid link instead of panicking", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFilesReportsInvalidCanonicalLinks")},
+	{"Malformed percent-encoding reports an invalid link instead of panicking", evidence("internal/core/markdownvalidation/use_cases_test.go", "reports invalid canonical links without panicking")},
 	{"Relative link cannot escape the workspace root", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowLeavesInvalidCanonicalLinksUnchangedAndReportsValidation")},
 	{"Existing canonical relative page links preserve relative style", evidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelative")},
 	{"Existing canonical absolute page links preserve absolute style", evidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_RewriteCanonicalPageLinksKeepsMdAbsoluteAndRelative")},
@@ -59,16 +58,16 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"Ambiguous extensionless link is left as validation error", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowReportsAmbiguousLegacyLinkWhenMigrationCannotRewrite")},
 	{"Explicit index.md section link canonicalizes to the section", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection")},
 	{"Explicit README.md section fallback link canonicalizes to the section", evidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_ExplicitSectionDefaultFilesCanonicalizeToSection")},
-	{"Explicit README.md page link stays a page when index.md exists", evidence("internal/http/router_test.go", "TestGetPageByPathEndpoint_ReadmeMarkdownPathUsesFallbackOnlyWhenActive")},
+	{"Explicit README.md page link stays a page when index.md exists", evidence("internal/http/router_test.go", "serves README.md as a section fallback only when no explicit page exists")},
 	{"Migration is idempotent", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowCanonicalMigrationSecondRunCreatesNoNewRevision")},
 	{"Migration writeback is captured in revision history", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowKeepsRawAndCanonicalMigrationPageRevisions")},
 	{"Migration write failure reports sync validation state without losing raw content", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowStopsBeforeDerivedRebuildsWhenCanonicalMigrationWriteFails")},
 	{"Canonical .md page link indexes as outgoing link", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ResolvesCanonicalRelativePageMdFromSourceFileDirectory")},
 	{"Canonical section link indexes as outgoing link", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ResolvesCanonicalSectionLinkForSameBasenameTwin")},
-	{"Case mismatch is invalid", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFiles_UsesExactCaseSensitiveTargetMatching")},
+	{"Case mismatch is invalid", evidence("internal/core/markdownvalidation/use_cases_test.go", "uses exact case-sensitive target matching for workspace links")},
 	{"Assets are not coerced", evidence("internal/links/link_service_test.go", "TestExtractLinksFromMarkdown_IgnoresAssetDestinations")},
 	{"Broken canonical .md page link is reported as broken", evidence("internal/links/link_service_test.go", "TestResolveTargetLinks_ReturnsBrokenTargetsForNonExisting")},
-	{"Old extensionless page link is reported as non-canonical when migration cannot resolve it", evidence("internal/core/markdownvalidation/use_cases_test.go", "TestValidateWorkspaceMarkdownFiles_RejectsUnmigratedExtensionlessPageLink")},
+	{"Old extensionless page link is reported as non-canonical when migration cannot resolve it", evidence("internal/core/markdownvalidation/use_cases_test.go", "rejects unmigrated extensionless page links as non-canonical")},
 	{"Duplicate syntaxes do not create duplicate target identities after migration", evidence("internal/workspacesync/service_test.go", "ServiceSyncNowMigratedDuplicateSyntaxesIndexAsSinglePageTargetIdentity")},
 	{"Reference-style link definitions are rewritten", evidence("internal/importer/content_transformer_test.go", "TestContentTransformer_RewritesReferenceDefinitions")},
 	{"Image links remain governed by existing image and asset validation", evidence("internal/links/link_service_test.go", "TestExtractLinksFromMarkdown_IgnoresImageLinksToPageDestinations")},
@@ -109,21 +108,17 @@ var _ = ginkgo.Describe("canonical Markdown link plan traceability", func() {
 		coverageByTitle := map[string]canonicalPlanEvidence{}
 		for _, coverage := range canonicalMarkdownLinksPlanScenarioCoverage {
 			Expect(coverage).To(haveCanonicalPlanScenarioMapping())
-			_, exists := coverageByTitle[coverage.title]
-			Expect(exists).To(BeFalse(), "duplicate scenario evidence title %q", coverage.title)
+			Expect(coverageByTitle).NotTo(HaveKey(coverage.title), "duplicate scenario evidence title %q", coverage.title)
 			coverageByTitle[coverage.title] = coverage.evidence
 		}
 
-		planTitleSet := map[string]struct{}{}
 		for _, title := range planTitles {
-			planTitleSet[title] = struct{}{}
-			evidence, ok := coverageByTitle[title]
-			Expect(ok).To(BeTrue(), "plan scenario %q has no automated-test evidence mapping", title)
+			evidence, err := canonicalPlanEvidenceForTitle(coverageByTitle, title)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(evidence).To(existInCanonicalPlanEvidenceFile(repoRoot, title))
 		}
 		for title := range coverageByTitle {
-			_, ok := planTitleSet[title]
-			Expect(ok).To(BeTrue(), "scenario evidence %q is not present in the plan", title)
+			Expect(planTitles).To(ContainElement(title), "scenario evidence %q is not present in the plan", title)
 		}
 
 	})
@@ -131,8 +126,8 @@ var _ = ginkgo.Describe("canonical Markdown link plan traceability", func() {
 
 func canonicalPlanRepoRoot() string {
 	ginkgo.GinkgoHelper()
-	_, file, _, ok := runtime.Caller(0)
-	Expect(ok).To(BeTrue(), "runtime.Caller should locate the plantrace source file")
+	file, err := plantraceSourceFile()
+	Expect(err).NotTo(HaveOccurred(), "runtime.Caller should locate the plantrace source file")
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 

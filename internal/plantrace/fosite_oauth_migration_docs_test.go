@@ -5,7 +5,6 @@ import (
 	. "github.com/onsi/gomega"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 var _ = ginkgo.Describe("Fosite OAuth migration documentation", func() {
@@ -51,7 +50,7 @@ var _ = ginkgo.Describe("Fosite OAuth migration documentation", func() {
 
 func fositeOAuthMigrationRepoRoot() string {
 	ginkgo.GinkgoHelper()
-	_, file, _, ok := runtime.Caller(0)
-	Expect(ok).To(BeTrue(), "runtime.Caller should locate the Fosite migration doc test")
+	file, err := plantraceSourceFile()
+	Expect(err).NotTo(HaveOccurred(), "runtime.Caller should locate the Fosite migration doc test")
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }

@@ -1,6 +1,7 @@
 package plantrace
 
 import (
+	"fmt"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"os"
@@ -15,16 +16,16 @@ var _ = ginkgo.Describe("go-i18n rollout plan traceability", func() {
 		titles := goI18nScenarioTitles(planPath)
 		Expect(titles).NotTo(BeEmpty(), "go-i18n rollout scenarios should exist")
 		for _, title := range titles {
-			evidence, ok := goI18nRolloutEvidence(title)
-			Expect(ok).To(BeTrue(), "scenario %q has no evidence mapping", title)
+			evidence, err := goI18nRolloutEvidenceResult(title)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(evidence).To(existInCanonicalPlanEvidenceFile(repoRoot, title))
 		}
 
 	})
 
 	ginkgo.It("keeps CLI startup stderr evidence tied to the catalog-backed failure test", func() {
-		evidence, ok := goI18nRolloutEvidence("CLI startup error renders catalog-backed text to stderr")
-		Expect(ok).To(BeTrue(), "CLI startup scenario has no evidence mapping")
+		evidence, err := goI18nRolloutEvidenceResult("CLI startup error renders catalog-backed text to stderr")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(evidence).To(Equal(canonicalPlanEvidence{
 			file: "cmd/leafwiki/main_test.go",
 			text: "TestFailureMessageRendersCatalogBackedErrorBody",
@@ -127,6 +128,14 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	default:
 		return canonicalPlanEvidence{}, false
 	}
+}
+
+func goI18nRolloutEvidenceResult(title string) (canonicalPlanEvidence, error) {
+	evidence, ok := goI18nRolloutEvidence(title)
+	if !ok {
+		return canonicalPlanEvidence{}, fmt.Errorf("scenario %q has no evidence mapping", title)
+	}
+	return evidence, nil
 }
 
 var _ = ginkgo.Describe("go-i18n public documentation", func() {
