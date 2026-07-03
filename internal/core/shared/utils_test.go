@@ -15,8 +15,8 @@ import (
 )
 
 var _ = Describe("atomic file utilities", func() {
-	It("TestWriteFileAtomic_WritesToTargetFile", func() {
-		tmp := GinkgoT().TempDir()
+	It("writes byte slices to the target path atomically", func() {
+		tmp := sharedTempDir()
 		target := filepath.Join(tmp, "page.md")
 
 		Expect(WriteFileAtomic(target, []byte("hello"), 0o644)).To(Succeed())
@@ -26,8 +26,8 @@ var _ = Describe("atomic file utilities", func() {
 		Expect(string(raw)).To(Equal("hello"))
 	})
 
-	It("TestWriteStreamAtomic_WritesToTargetFile", func() {
-		tmp := GinkgoT().TempDir()
+	It("writes streams to the target path atomically", func() {
+		tmp := sharedTempDir()
 		target := filepath.Join(tmp, "asset.bin")
 
 		Expect(WriteStreamAtomic(target, bytes.NewBufferString("hello stream"), 1024)).To(Succeed())
@@ -43,23 +43,23 @@ type atomicWriteDirCase struct {
 	want string
 }
 
-var _ = DescribeTable("TestAtomicWriteDir_WindowsPath",
+var _ = DescribeTable("atomic write directory resolution",
 	func(tc atomicWriteDirCase) {
 		got := strings.ReplaceAll(atomicWriteDir(tc.path), `\`, `/`)
 
 		Expect(got).To(Equal(tc.want))
 	},
-	Entry("markdown page", atomicWriteDirCase{
+	Entry("normalizes Windows parent directories for markdown pages", atomicWriteDirCase{
 		path: `C:\wiki\data\root\page.md`,
 		want: `C:/wiki/data/root`,
 	}),
-	Entry("asset file", atomicWriteDirCase{
+	Entry("normalizes Windows parent directories for asset files", atomicWriteDirCase{
 		path: `C:\wiki\data\assets\a7b3\image.png`,
 		want: `C:/wiki/data/assets/a7b3`,
 	}),
 )
 
-var _ = Describe("shared utility edge coverage", func() {
+var _ = Describe("shared utility contracts", func() {
 	It("CopyWithLimit succeeds exactly at the byte cap", func() {
 		var dst bytes.Buffer
 
@@ -110,7 +110,7 @@ var _ = Describe("shared utility edge coverage", func() {
 	})
 
 	It("WriteFileAtomic honors nonzero permissions", func() {
-		target := filepath.Join(GinkgoT().TempDir(), "page.md")
+		target := filepath.Join(sharedTempDir(), "page.md")
 
 		Expect(WriteFileAtomic(target, []byte("hello"), 0o600)).To(Succeed())
 		info, err := os.Stat(target)
@@ -173,7 +173,7 @@ var _ = Describe("shared utility edge coverage", func() {
 			return nil, createErr
 		}
 
-		err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "page.md"), []byte("hello"), 0o644)
+		err := WriteFileAtomic(filepath.Join(sharedTempDir(), "page.md"), []byte("hello"), 0o644)
 
 		Expect(err).To(MatchError(createErr))
 	})
@@ -185,7 +185,7 @@ var _ = Describe("shared utility edge coverage", func() {
 			return renameErr
 		}
 
-		err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "target"), []byte("hello"), 0o644)
+		err := WriteFileAtomic(filepath.Join(sharedTempDir(), "target"), []byte("hello"), 0o644)
 
 		Expect(err).To(MatchError(renameErr))
 	})
@@ -233,13 +233,13 @@ var _ = Describe("shared utility edge coverage", func() {
 				restore := restoreSharedUtilitySeams()
 				defer restore()
 				failure := errors.New(tc.name + " failed")
-				fakeFile := &fakeAtomicTempFile{name: filepath.Join(GinkgoT().TempDir(), ".tmp-shared")}
+				fakeFile := &fakeAtomicTempFile{name: filepath.Join(sharedTempDir(), ".tmp-shared")}
 				tc.configure(fakeFile, failure)
 				createTempFile = func(string, string) (atomicTempFile, error) {
 					return fakeFile, nil
 				}
 
-				err := WriteFileAtomic(filepath.Join(GinkgoT().TempDir(), "target"), []byte("hello"), tc.perm)
+				err := WriteFileAtomic(filepath.Join(sharedTempDir(), "target"), []byte("hello"), tc.perm)
 
 				Expect(err).To(MatchError(failure))
 				Expect(fakeFile.closeCalls).To(BeNumerically(">=", 1))
@@ -254,13 +254,13 @@ var _ = Describe("shared utility edge coverage", func() {
 			return nil, createErr
 		}
 
-		err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
+		err := WriteStreamAtomic(filepath.Join(sharedTempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
 
 		Expect(err).To(MatchError(createErr))
 	})
 
 	It("WriteStreamAtomic preserves reader errors and removes the target", func() {
-		target := filepath.Join(GinkgoT().TempDir(), "asset.bin")
+		target := filepath.Join(sharedTempDir(), "asset.bin")
 		copyErr := errors.New("stream read failed")
 
 		err := WriteStreamAtomic(target, errorReader{err: copyErr}, 1024)
@@ -270,7 +270,7 @@ var _ = Describe("shared utility edge coverage", func() {
 	})
 
 	It("WriteStreamAtomic rejects streams over the byte cap", func() {
-		target := filepath.Join(GinkgoT().TempDir(), "asset.bin")
+		target := filepath.Join(sharedTempDir(), "asset.bin")
 
 		err := WriteStreamAtomic(target, strings.NewReader("hello!"), 5)
 
@@ -285,7 +285,7 @@ var _ = Describe("shared utility edge coverage", func() {
 			return renameErr
 		}
 
-		err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
+		err := WriteStreamAtomic(filepath.Join(sharedTempDir(), "asset.bin"), strings.NewReader("hello"), 1024)
 
 		Expect(err).To(MatchError(renameErr))
 	})
@@ -323,13 +323,13 @@ var _ = Describe("shared utility edge coverage", func() {
 				restore := restoreSharedUtilitySeams()
 				defer restore()
 				failure := errors.New(tc.name + " failed")
-				fakeFile := &fakeAtomicTempFile{name: filepath.Join(GinkgoT().TempDir(), ".tmp-stream")}
+				fakeFile := &fakeAtomicTempFile{name: filepath.Join(sharedTempDir(), ".tmp-stream")}
 				tc.configure(fakeFile, failure)
 				createTempFile = func(string, string) (atomicTempFile, error) {
 					return fakeFile, nil
 				}
 
-				err := WriteStreamAtomic(filepath.Join(GinkgoT().TempDir(), "target"), strings.NewReader("hello"), 1024)
+				err := WriteStreamAtomic(filepath.Join(sharedTempDir(), "target"), strings.NewReader("hello"), 1024)
 
 				Expect(err).To(MatchError(failure))
 				Expect(fakeFile.closeCalls).To(BeNumerically(">=", 1))
@@ -419,4 +419,12 @@ func restoreSharedUtilitySeams() func() {
 		renameFile = previousRenameFile
 		runtimeGOOS = previousRuntimeGOOS
 	}
+}
+
+func sharedTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-shared-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
