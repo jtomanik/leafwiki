@@ -1174,6 +1174,30 @@ func helper() {}
 				"semh:ginkgo-linter.raw-ignore: raw ginkgolinter ignore comments are not allowed; fix the generic lint or use semh waivers only for waivable semantic-hygiene rules",
 			))
 		})
+
+		ginkgo.It("reports boolean literal assertions that force pass or fail", func() {
+			h := newRuleHarness("/repo/cmd/leafwiki/main_test.go", "github.com/perber/wiki/cmd/leafwiki", `package main
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func BeTrue() any { return nil }
+func BeFalse() any { return nil }
+
+func TestCLIBehavior() {
+	Expect(false).To(BeTrue())
+	Expect(true).To(BeFalse())
+}
+`)
+			for _, call := range h.findCalls("To") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.boolean-literal: use semantic Gomega assertions instead of forcing pass/fail with boolean literals",
+				"semh:gomega.boolean-literal: use semantic Gomega assertions instead of forcing pass/fail with boolean literals",
+			))
+		})
 	})
 
 	ginkgo.Describe("waiver comments", func() {

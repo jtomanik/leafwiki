@@ -146,6 +146,10 @@ func gomegaBinaryBooleanMatcherDiagnostic() string {
 	return "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 }
 
+func gomegaBooleanLiteralMatcherDiagnostic() string {
+	return "use semantic Gomega assertions instead of forcing pass/fail with boolean literals"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }

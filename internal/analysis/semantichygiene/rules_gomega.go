@@ -69,6 +69,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesBinaryBoolean(assertion) {
 		ctx.report(ruleGomegaBinaryBoolean, assertion.actual, gomegaBinaryBooleanMatcherDiagnostic())
 	}
+	if assertionUsesBooleanLiteral(assertion) {
+		ctx.report(ruleGomegaBooleanLiteral, assertion.actual, gomegaBooleanLiteralMatcherDiagnostic())
+	}
 	if assertionUsesMapIndexEqual(ctx, assertion) {
 		ctx.report(ruleGomegaMapIndex, assertion.actual, gomegaMapIndexMatcherDiagnostic())
 	}
@@ -542,6 +545,11 @@ func assertionUsesLenEqual(assertion gomegaAssertion) bool {
 func assertionUsesBinaryBoolean(assertion gomegaAssertion) bool {
 	binary, ok := assertion.actual.(*ast.BinaryExpr)
 	return ok && isComparisonOp(binary.Op) && isBooleanMatcher(assertion.matcher)
+}
+
+func assertionUsesBooleanLiteral(assertion gomegaAssertion) bool {
+	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
+	return ok && (ident.Name == "true" || ident.Name == "false") && isBooleanMatcher(assertion.matcher)
 }
 
 func isComparisonOp(op token.Token) bool {

@@ -59,6 +59,7 @@ const (
 	ruleGomegaOSIsNotExistMatcher          ruleID = "gomega.os-is-not-exist-matcher"
 	ruleGomegaLenEqual                     ruleID = "gomega.len-equal"
 	ruleGomegaBinaryBoolean                ruleID = "gomega.binary-boolean"
+	ruleGomegaBooleanLiteral               ruleID = "gomega.boolean-literal"
 	ruleGomegaMapIndex                     ruleID = "gomega.map-index"
 	ruleGomegaHTTPStatus                   ruleID = "gomega.http-status"
 	ruleGomegaHTTPBody                     ruleID = "gomega.http-body"
@@ -152,6 +153,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaOSIsNotExistMatcher:          hardRule(ruleGomegaOSIsNotExistMatcher),
 	ruleGomegaLenEqual:                     hardRule(ruleGomegaLenEqual),
 	ruleGomegaBinaryBoolean:                hardRule(ruleGomegaBinaryBoolean),
+	ruleGomegaBooleanLiteral:               hardRule(ruleGomegaBooleanLiteral),
 	ruleGomegaMapIndex:                     hardRule(ruleGomegaMapIndex),
 	ruleGomegaHTTPStatus:                   hardRule(ruleGomegaHTTPStatus),
 	ruleGomegaHTTPBody:                     hardRule(ruleGomegaHTTPBody),
