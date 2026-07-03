@@ -22,7 +22,7 @@ import (
 var _ = ginkgo.Describe("seed MCP API keys", func() {
 	ginkgo.It("default seams read process args and report auth store open errors", func() {
 		Expect(seedArgs()).NotTo(BeNil())
-		blockedPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-dir")
+		blockedPath := filepath.Join(seedTempDir(), "not-a-dir")
 		Expect(os.WriteFile(blockedPath, []byte("blocked"), 0o600)).To(Succeed())
 
 		services, err := openSeedServices(blockedPath)
@@ -94,10 +94,10 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		}),
 	)
 
-	ginkgo.It("TestSeedMCPAPIKeysWritesWikidAuthStoreByDefault", func() {
+	ginkgo.It("writes Wikid auth stores when legacy runtime stack variables are absent", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-		dataDir := ginkgo.GinkgoT().TempDir()
+		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -105,22 +105,22 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(seeds).To(HaveWikidSeededAPIKey(dataDir))
 	})
 
-	ginkgo.DescribeTable("TestSeedMCPAPIKeysRejectsRemovedRuntimeStackEnvironment",
+	ginkgo.DescribeTable("removed runtime stack environment variables",
 		func(name string) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-			ginkgo.GinkgoT().Setenv(name, "legacy")
+			setEnvForTest(name, "legacy")
 
-			_, err := seedMCPAPIKeys(ginkgo.GinkgoT().TempDir())
+			_, err := seedMCPAPIKeys(seedTempDir())
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(MatchError(removedEnvironmentVariableError{Name: name}))
 		},
-		ginkgo.Entry("LEAFWIKI_RUNTIME_STACK", "LEAFWIKI_RUNTIME_STACK"),
-		ginkgo.Entry("LEAFWIKI_RUN_MCP_RUNTIME_STACK", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
+		ginkgo.Entry("rejects LEAFWIKI_RUNTIME_STACK when it still configures the runtime stack", "LEAFWIKI_RUNTIME_STACK"),
+		ginkgo.Entry("rejects LEAFWIKI_RUN_MCP_RUNTIME_STACK when it still configures the runtime stack", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
 	)
 
-	ginkgo.It("TestSeedMCPAPIKeysWritesWikidAuthStore", func() {
-		dataDir := ginkgo.GinkgoT().TempDir()
+	ginkgo.It("writes Wikid auth stores for seeded API key principals", func() {
+		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 	ginkgo.It("seed output populates every principal and invalidates revoked and deleted keys", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-		dataDir := ginkgo.GinkgoT().TempDir()
+		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -178,8 +178,8 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 	ginkgo.It("writes JSON seed output to the requested file", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
-		dataDir := ginkgo.GinkgoT().TempDir()
-		outputPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "seeds.json")
+		dataDir := seedTempDir()
+		outputPath := filepath.Join(seedTempDir(), "seeds.json")
 
 		Expect(writeSeedMCPAPIKeysOutput(dataDir, outputPath)).To(Succeed())
 		info, err := os.Stat(outputPath)
@@ -390,6 +390,27 @@ func unsetEnvForTest(name string) {
 			Expect(os.Unsetenv(name)).To(Succeed())
 		}
 	})
+}
+
+func setEnvForTest(name string, value string) {
+	ginkgo.GinkgoHelper()
+	previousValue, ok := os.LookupEnv(name)
+	Expect(os.Setenv(name, value)).To(Succeed())
+	ginkgo.DeferCleanup(func() {
+		if ok {
+			Expect(os.Setenv(name, previousValue)).To(Succeed())
+		} else {
+			Expect(os.Unsetenv(name)).To(Succeed())
+		}
+	})
+}
+
+func seedTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-seed-mcp-api-keys-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func ExpectSeededUser(user seededUser, username string, role string) {
