@@ -482,6 +482,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(seen).To(WithTransform(func(actual observedRequest) []string { // want "do not collapse multiple fields into a positional WithTransform assertion; use HaveField/MatchFields or a named matcher"
 		return []string{actual.Path, actual.Body, actual.Token, actual.ActorContext}
 	}, Equal([]string{"/mcp", "{}", "daemon-token", ""})))
+	Expect([]string{seen.Path, seen.Body}).To(Equal([]string{"/mcp", "{}"})) // want "do not compare multiple fields through a positional composite assertion; use HaveField/MatchFields or a named matcher"
 }
 
 func matchMatcherBackedRecord(content GomegaMatcher) any {

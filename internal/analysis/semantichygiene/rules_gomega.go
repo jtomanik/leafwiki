@@ -108,6 +108,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesRepeatedFieldAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaRepeatedFieldAssertions, assertion.actual, gomegaRepeatedFieldAssertionDiagnostic())
 	}
+	if assertionUsesPositionalCompositeAssertion(assertion) {
+		ctx.report(ruleGomegaPositionalCompositeAssertion, assertion.actual, gomegaPositionalCompositeAssertionDiagnostic())
+	}
 	if assertionUsesCollectionIndexAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaCollectionIndexAssertion, assertion.actual, gomegaCollectionIndexAssertionDiagnostic())
 	}
@@ -802,6 +805,31 @@ func assertedStructField(expr ast.Expr) (*ast.SelectorExpr, bool) {
 
 func assertionUsesCollectionIndexAssertion(ctx *analysisContext, assertion gomegaAssertion) bool {
 	return exprUsesCollectionIndex(ctx, assertion.actual)
+}
+
+func assertionUsesPositionalCompositeAssertion(assertion gomegaAssertion) bool {
+	if !isValueComparisonMatcher(assertion.matcher) || len(assertion.matcher.Args) != 1 {
+		return false
+	}
+	actual, ok := unparenExpr(assertion.actual).(*ast.CompositeLit)
+	if !ok || len(actual.Elts) < 2 || !compositeLiteralIsPositional(actual) {
+		return false
+	}
+	expected, ok := unparenExpr(assertion.matcher.Args[0]).(*ast.CompositeLit)
+	if !ok || len(expected.Elts) < 2 || !compositeLiteralIsPositional(expected) {
+		return false
+	}
+	return compositeLiteralContainsMultipleFieldSelectors(actual)
+}
+
+func compositeLiteralContainsMultipleFieldSelectors(lit *ast.CompositeLit) bool {
+	fieldSelectors := 0
+	for _, elt := range lit.Elts {
+		if _, ok := unparenExpr(elt).(*ast.SelectorExpr); ok {
+			fieldSelectors++
+		}
+	}
+	return fieldSelectors >= 2
 }
 
 func exprUsesCollectionIndex(ctx *analysisContext, expr ast.Expr) bool {

@@ -129,6 +129,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega time equal", ruleID("gomega.time-equal"), true, waiverScopeCall),
 			ginkgo.Entry("gomega matcher as value", ruleID("gomega.matcher-as-value"), false, waiverScopeNone),
 			ginkgo.Entry("gomega positional transform", ruleID("gomega.positional-transform"), false, waiverScopeNone),
+			ginkgo.Entry("gomega positional composite assertion", ruleID("gomega.positional-composite-assertion"), false, waiverScopeNone),
 		)
 
 		ginkgo.It("uses the documented initial waiver budgets", func() {
