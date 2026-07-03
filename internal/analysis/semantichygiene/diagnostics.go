@@ -397,3 +397,7 @@ func gomegaRepeatedFieldAssertionDiagnostic() string {
 func gomegaCollectionIndexAssertionDiagnostic() string {
 	return "assert collections with ContainElement/ConsistOf/HaveExactElements instead of positional index field assertions"
 }
+
+func gomegaNonEmptyCollectionDiagnostic() string {
+	return "assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())"
+}

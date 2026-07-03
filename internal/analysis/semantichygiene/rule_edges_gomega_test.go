@@ -116,7 +116,7 @@ func (h *ruleHarness) findCalls(name string) []*ast.CallExpr {
 		}
 		return true
 	})
-	Expect(found).NotTo(BeEmpty(), "call %q should exist", name)
+	Expect(len(found)).To(BeNumerically(">", 0), "call %q should exist", name)
 	return found
 }
 
@@ -1413,6 +1413,35 @@ func TestRouterResponse() {
 			Expect(h.diagnosticMessages()).To(ConsistOf(
 				"semh:gomega.map-index: use HaveKeyWithValue matcher instead of asserting a direct map index value",
 				"semh:gomega.map-index: use HaveKeyWithValue matcher instead of asserting a direct map index value",
+			))
+		})
+
+		ginkgo.It("reports weak non-empty assertions on collections without flagging scalar values", func() {
+			h := newRuleHarness("/repo/internal/links/link_refactor_test.go", "github.com/perber/wiki/internal/links", `package links
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func (assertion) NotTo(matcher any, extra ...any) {}
+func BeEmpty() any { return nil }
+func Not(matcher any) any { return nil }
+
+func TestLinkWarnings() {
+	warnings := []string{"reference link skipped"}
+	Expect(warnings).NotTo(BeEmpty())
+	byPath := map[string]int{"/docs": 1}
+	Expect(byPath).To(Not(BeEmpty()))
+	token := "generated-token"
+	Expect(token).NotTo(BeEmpty())
+}
+`)
+			for _, call := range append(h.findCalls("To"), h.findCalls("NotTo")...) {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.non-empty-collection: assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())",
+				"semh:gomega.non-empty-collection: assert collection contents or cardinality semantics instead of only NotTo(BeEmpty())",
 			))
 		})
 

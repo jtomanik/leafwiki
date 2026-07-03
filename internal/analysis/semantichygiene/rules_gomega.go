@@ -133,6 +133,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesEqualEmpty(assertion) {
 		ctx.report(ruleGomegaEqualEmpty, assertion.matcher, gomegaEqualEmptyDiagnostic())
 	}
+	if assertionUsesNonEmptyCollection(ctx, assertion) {
+		ctx.report(ruleGomegaNonEmptyCollection, assertion.matcher, gomegaNonEmptyCollectionDiagnostic())
+	}
 	if assertionUsesRepeatedFieldAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaRepeatedFieldAssertions, assertion.actual, gomegaRepeatedFieldAssertionDiagnostic())
 	}
@@ -770,6 +773,21 @@ func isEmptyMatcher(matcher *ast.CallExpr) bool {
 
 func isNegatedEmptyMatcher(matcher *ast.CallExpr) bool {
 	return isMatcherNamed(matcher, "Not") && len(matcher.Args) == 1 && exprIsEmptyMatcher(matcher.Args[0])
+}
+
+func assertionUsesNonEmptyCollection(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if !assertionActualIsCollection(ctx, assertion.actual) {
+		return false
+	}
+	if isNegativeAssertionMethod(assertion.method) {
+		return isEmptyMatcher(assertion.matcher)
+	}
+	return isNegatedEmptyMatcher(assertion.matcher)
+}
+
+func assertionActualIsCollection(ctx *analysisContext, expr ast.Expr) bool {
+	typ := ctx.pass.TypesInfo.TypeOf(expr)
+	return typeIsSliceOrArray(typ) || typeIsMap(typ)
 }
 
 func exprIsEmptyMatcher(expr ast.Expr) bool {

@@ -86,6 +86,7 @@ const (
 	ruleGomegaHelperShouldBeMatcher        ruleID = "gomega.helper-should-be-matcher"
 	ruleGomegaRepeatedFieldAssertions      ruleID = "gomega.repeated-field-assertions"
 	ruleGomegaCollectionIndexAssertion     ruleID = "gomega.collection-index-assertion"
+	ruleGomegaNonEmptyCollection           ruleID = "gomega.non-empty-collection"
 	ruleGomegaEqualEmpty                   ruleID = "gomega.equal-empty"
 	ruleGomegaEqualZero                    ruleID = "gomega.equal-zero"
 	ruleGomegaNumericEquivalent            ruleID = "gomega.numeric-equivalent"
@@ -189,6 +190,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaHelperShouldBeMatcher:        waivableRule(ruleGomegaHelperShouldBeMatcher, waiverScopeDeclaration),
 	ruleGomegaRepeatedFieldAssertions:      waivableRule(ruleGomegaRepeatedFieldAssertions, waiverScopeCall),
 	ruleGomegaCollectionIndexAssertion:     waivableRule(ruleGomegaCollectionIndexAssertion, waiverScopeCall),
+	ruleGomegaNonEmptyCollection:           waivableRule(ruleGomegaNonEmptyCollection, waiverScopeCall),
 	ruleGomegaEqualEmpty:                   waivableRule(ruleGomegaEqualEmpty, waiverScopeCall),
 	ruleGomegaEqualZero:                    waivableRule(ruleGomegaEqualZero, waiverScopeCall),
 	ruleGomegaNumericEquivalent:            waivableRule(ruleGomegaNumericEquivalent, waiverScopeCall),
@@ -213,6 +215,7 @@ var waiverBudgetsByRule = map[ruleID]int{
 	ruleGomegaHelperShouldBeMatcher:    3,
 	ruleGomegaRepeatedFieldAssertions:  3,
 	ruleGomegaCollectionIndexAssertion: 3,
+	ruleGomegaNonEmptyCollection:       3,
 	ruleGomegaEqualEmpty:               3,
 	ruleGomegaEqualZero:                3,
 	ruleGomegaNumericEquivalent:        3,
