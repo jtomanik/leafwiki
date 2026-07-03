@@ -13,14 +13,14 @@ import (
 )
 
 var _ = Describe("workspace ID parsing", func() {
-	It("TestParseWorkspaceIDReturnsSemanticID", func() {
+	It("returns a semantic workspace ID for a valid slug", func() {
 		id, err := ParseWorkspaceID("docs-home")
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(id).To(Equal(WorkspaceID("docs-home")))
 	})
 
-	It("TestParseWorkspaceIDRejectsInvalidInputWithTypedCode", func() {
+	It("rejects whitespace input with a typed validation code", func() {
 		_, err := ParseWorkspaceID(" Docs ")
 
 		Expect(err).To(HaveOccurred())
