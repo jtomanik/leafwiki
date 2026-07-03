@@ -1089,11 +1089,22 @@ func isTestLocalizedProseContractLiteralContext(ctx *analysisContext, lit *ast.B
 				isTestContractAssertionCall(ctx, n) {
 				return true
 			}
+		case *ast.KeyValueExpr:
+			if isTestRenderedProseFieldLiteral(ctx, n, lit) {
+				return true
+			}
 		case *ast.FuncDecl:
 			return false
 		}
 	}
 	return false
+}
+
+func isTestRenderedProseFieldLiteral(ctx *analysisContext, kv *ast.KeyValueExpr, lit *ast.BasicLit) bool {
+	if !containsNode(kv.Value, lit) || !nameSuggestsTestRenderedProseSubject(keyName(kv.Key)) {
+		return false
+	}
+	return isTestAssertionLiteralContext(ctx, lit)
 }
 
 func directCallArg(ctx *analysisContext, lit *ast.BasicLit) (*ast.CallExpr, int, bool) {
@@ -1286,7 +1297,7 @@ func isGomegaAnnotationCall(name string) bool {
 
 func isTestAssertionMatcherCall(name string) bool {
 	switch name {
-	case "Equal", "ContainSubstring", "HaveKeyWithValue", "HaveField", "MatchError":
+	case "Equal", "ContainSubstring", "HavePrefix", "HaveSuffix", "HaveKeyWithValue", "HaveField", "MatchError":
 		return true
 	default:
 		return false
