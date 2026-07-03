@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -18,6 +19,7 @@ import (
 
 var (
 	errSetRootDirDefaultFailed = errors.New("set root-dir default failed")
+	errSetDataDirDefaultFailed = errors.New("set data-dir default failed")
 	errSetServiceDefaultFailed = errors.New("set service default failed")
 	errSetLogFileDefaultFailed = errors.New("set log-file default failed")
 )
@@ -53,6 +55,21 @@ func matchDaemonServiceConfigMissing(path string) types.GomegaMatcher {
 		"Path": Equal(path),
 		"Err":  MatchError(os.ErrNotExist),
 	}))
+}
+
+func matchCurrentHomeResolutionError() types.GomegaMatcher {
+	return Satisfy(func(err error) bool {
+		_, homeErr := os.UserHomeDir()
+		if err == nil || homeErr == nil {
+			return false
+		}
+		for current := err; current != nil; current = errors.Unwrap(current) {
+			if reflect.DeepEqual(current, homeErr) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 var _ = Describe("startup config validation", func() {
@@ -201,13 +218,13 @@ var _ = Describe("daemon service startup config", func() {
 		setRuntimeConfigEnv("HOME", "")
 
 		_, err := DefaultDaemonServiceDataDir()
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchCurrentHomeResolutionError())
 
 		_, err = DefaultDaemonServiceConfigPath()
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchCurrentHomeResolutionError())
 
-		Expect(ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})).To(HaveOccurred())
-		Expect(ApplyDaemonServiceDefaults(newRuntimeFlagSet(), map[string]bool{})).To(HaveOccurred())
+		Expect(ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})).To(matchCurrentHomeResolutionError())
+		Expect(ApplyDaemonServiceDefaults(newRuntimeFlagSet(), map[string]bool{})).To(matchCurrentHomeResolutionError())
 	})
 
 	It("reports daemon service config usage errors", func() {
@@ -233,7 +250,7 @@ var _ = Describe("daemon service startup config", func() {
 
 		err := ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchConfigFileError(ConfigFileErrorReasonUnknownKey, "unknown"))
 	})
 
 	It("applies daemon service config and fills daemon defaults", func() {
@@ -275,7 +292,10 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("returns flag-set errors while applying daemon defaults", func() {
-		Expect(ApplyDaemonServiceDefaults(flag.NewFlagSet("missing-data-dir", flag.ContinueOnError), map[string]bool{})).To(HaveOccurred())
+		fsWithFailingDataDir := flag.NewFlagSet("failing-data-dir", flag.ContinueOnError)
+		fsWithFailingDataDir.SetOutput(io.Discard)
+		fsWithFailingDataDir.Var(failingRuntimeFlagValue{err: errSetDataDirDefaultFailed}, "data-dir", "")
+		Expect(ApplyDaemonServiceDefaults(fsWithFailingDataDir, map[string]bool{})).To(MatchError(errSetDataDirDefaultFailed))
 
 		fsWithoutRoot := flag.NewFlagSet("failing-root-dir", flag.ContinueOnError)
 		fsWithoutRoot.SetOutput(io.Discard)
