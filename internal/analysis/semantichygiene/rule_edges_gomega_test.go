@@ -977,6 +977,38 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
+		ginkgo.It("reports local failure helpers inside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/tree/tree_test.go", "github.com/perber/wiki/internal/tree", `package tree
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+func failTreeSpec(format string, args ...any) {}
+
+var _ = ginkgo.Describe("tree behavior", func() {
+	ginkgo.It("reconstructs pages", func() {
+		if true {
+			failTreeSpec("tree did not reconstruct")
+		}
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.fail-in-spec: avoid failure helper failTreeSpec inside specs; use Gomega expectations so assertions read semantically",
+			))
+		})
+
 		ginkgo.It("reports goroutine assertions without recovery inside Ginkgo table bodies", func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 

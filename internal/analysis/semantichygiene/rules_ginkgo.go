@@ -185,10 +185,17 @@ func checkGinkgoFailInSpec(ctx *analysisContext, call *ast.CallExpr, name string
 			return false
 		}
 		candidate, ok := node.(*ast.CallExpr)
-		if !ok || !isGinkgoFailCall(ctx, candidate) {
+		if !ok {
 			return true
 		}
-		ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoFailInSpecDiagnostic())
+		if isGinkgoFailCall(ctx, candidate) {
+			ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoFailInSpecDiagnostic())
+			return true
+		}
+		if name, ok := ginkgoFailureHelperCall(ctx, candidate); ok {
+			ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoFailureHelperInSpecDiagnostic(name))
+			return true
+		}
 		return true
 	})
 }
@@ -196,6 +203,33 @@ func checkGinkgoFailInSpec(ctx *analysisContext, call *ast.CallExpr, name string
 func isGinkgoFailCall(ctx *analysisContext, call *ast.CallExpr) bool {
 	packagePath, name := calleePackageAndName(ctx, call)
 	return packagePath == "github.com/onsi/ginkgo/v2" && name == "Fail"
+}
+
+func ginkgoFailureHelperCall(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
+	if _, ok := unparenExpr(call.Fun).(*ast.Ident); !ok {
+		return "", false
+	}
+	_, name := calleePackageAndName(ctx, call)
+	if !isFailureHelperName(name) {
+		return "", false
+	}
+	return name, true
+}
+
+func isFailureHelperName(name string) bool {
+	return hasFailureHelperPrefix(name, "fail") || hasFailureHelperPrefix(name, "fatal")
+}
+
+func hasFailureHelperPrefix(name string, prefix string) bool {
+	lower := strings.ToLower(name)
+	if lower == prefix || lower == prefix+"f" || lower == prefix+"now" {
+		return true
+	}
+	if !strings.HasPrefix(lower, prefix) || len(name) <= len(prefix) {
+		return false
+	}
+	next := name[len(prefix)]
+	return next >= 'A' && next <= 'Z'
 }
 
 func ginkgoTestingTAssertion(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
