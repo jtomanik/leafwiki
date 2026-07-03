@@ -1313,6 +1313,12 @@ func TestAgentPresence() {
 	agentEnabled := true
 	Expect(agentEnabled).To(BeTrue())
 	Expect(struct{ Enabled bool }{Enabled: agentEnabled}).To(HaveField("Enabled", Equal(true)))
+	contentChanged := true
+	Expect(contentChanged).To(BeTrue())
+	revisionCreated := false
+	Expect(revisionCreated).To(BeFalse())
+	linkRemoved := true
+	Expect(linkRemoved).To(BeTrue())
 }
 `)
 			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
@@ -1322,6 +1328,11 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
