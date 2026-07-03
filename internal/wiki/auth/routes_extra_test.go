@@ -694,7 +694,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(rec).To(matchAuthRouteError(http.StatusNotFound, ErrCodeAuthUserNotFound), rec.Body.String())
 	})
 
-	ginkgo.It("covers remaining auth use-case validation edges", func() {
+	ginkgo.It("returns structured validation errors for missing and invalid auth use-case fields", func() {
 		fixture := newAuthRouteFixture()
 
 		_, err := fixture.routes.createUser.Execute(context.Background(), CreateUserInput{
