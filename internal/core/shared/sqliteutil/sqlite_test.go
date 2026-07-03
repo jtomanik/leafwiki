@@ -17,32 +17,32 @@ type sqliteErrorCase struct {
 	want bool
 }
 
-var _ = DescribeTable("TestIsSQLiteRecoverableError",
+var _ = DescribeTable("SQLite recoverable error classification",
 	func(tc sqliteErrorCase) {
 		Expect(IsSQLiteRecoverableError(tc.err)).To(Equal(tc.want))
 	},
-	Entry("SQLITE_IOERR", sqliteErrorCase{err: sqliteErrorWithCode(10), want: true}),
-	Entry("SQLITE_CORRUPT", sqliteErrorCase{err: sqliteErrorWithCode(11), want: true}),
-	Entry("SQLITE_NOTADB", sqliteErrorCase{err: sqliteErrorWithCode(26), want: true}),
-	Entry("SQLITE_IOERR_NOMEM", sqliteErrorCase{err: sqliteErrorWithCode(10 | (12 << 8)), want: false}),
-	Entry("SQLITE_BUSY", sqliteErrorCase{err: sqliteErrorWithCode(5), want: false}),
-	Entry("SQLITE_LOCKED", sqliteErrorCase{err: sqliteErrorWithCode(6), want: false}),
-	Entry("non-sqlite error", sqliteErrorCase{err: errors.New("boom"), want: false}),
+	Entry("treats SQLITE_IOERR as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(10), want: true}),
+	Entry("treats SQLITE_CORRUPT as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(11), want: true}),
+	Entry("treats SQLITE_NOTADB as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(26), want: true}),
+	Entry("does not treat SQLITE_IOERR_NOMEM as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(10 | (12 << 8)), want: false}),
+	Entry("does not treat SQLITE_BUSY as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(5), want: false}),
+	Entry("does not treat SQLITE_LOCKED as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(6), want: false}),
+	Entry("does not treat non-SQLite errors as recoverable", sqliteErrorCase{err: errors.New("boom"), want: false}),
 )
 
-var _ = DescribeTable("TestIsSQLiteTransientLockError",
+var _ = DescribeTable("SQLite transient lock error classification",
 	func(tc sqliteErrorCase) {
 		Expect(IsSQLiteTransientLockError(tc.err)).To(Equal(tc.want))
 	},
-	Entry("SQLITE_BUSY", sqliteErrorCase{err: sqliteErrorWithCode(5), want: true}),
-	Entry("SQLITE_LOCKED", sqliteErrorCase{err: sqliteErrorWithCode(6), want: true}),
-	Entry("SQLITE_IOERR", sqliteErrorCase{err: sqliteErrorWithCode(10), want: false}),
-	Entry("non-sqlite error", sqliteErrorCase{err: errors.New("boom"), want: false}),
+	Entry("treats SQLITE_BUSY as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(5), want: true}),
+	Entry("treats SQLITE_LOCKED as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(6), want: true}),
+	Entry("does not treat SQLITE_IOERR as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(10), want: false}),
+	Entry("does not treat non-SQLite errors as transient lock contention", sqliteErrorCase{err: errors.New("boom"), want: false}),
 )
 
 var _ = Describe("SQLite file cleanup", func() {
-	It("TestRemoveSQLiteFiles", func() {
-		dir := GinkgoT().TempDir()
+	It("removes the database file and known sidecar files", func() {
+		dir := tempSQLiteUtilDir()
 		dbPath := filepath.Join(dir, "search.db")
 		paths := []string{dbPath, dbPath + "-journal", dbPath + "-wal", dbPath + "-shm"}
 
@@ -58,8 +58,8 @@ var _ = Describe("SQLite file cleanup", func() {
 		}
 	})
 
-	It("TestRemoveSQLiteFiles_NoOpWhenMissing", func() {
-		dir := GinkgoT().TempDir()
+	It("leaves missing database and sidecar paths absent", func() {
+		dir := tempSQLiteUtilDir()
 		dbPath := filepath.Join(dir, "missing.db")
 
 		RemoveSQLiteFiles(dbPath)
@@ -71,7 +71,7 @@ var _ = Describe("SQLite file cleanup", func() {
 	})
 
 	It("keeps going when a database path cannot be removed", func() {
-		dir := GinkgoT().TempDir()
+		dir := tempSQLiteUtilDir()
 		dbPath := filepath.Join(dir, "search.db")
 		Expect(os.Mkdir(dbPath, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(dbPath, "child"), []byte("x"), 0o644)).To(Succeed())
@@ -87,7 +87,7 @@ var _ = Describe("SQLite file cleanup", func() {
 	})
 })
 
-var _ = Describe("SQLite error classification edge coverage", func() {
+var _ = Describe("SQLite error classification boundaries", func() {
 	It("returns false for nil errors", func() {
 		Expect(IsSQLiteRecoverableError(nil)).To(BeFalse())
 		Expect(IsSQLiteTransientLockError(nil)).To(BeFalse())
@@ -103,6 +103,15 @@ var _ = Describe("SQLite error classification edge coverage", func() {
 		Expect(IsSQLiteTransientLockError(sqliteErrorWithCode(6 | (1 << 8)))).To(BeTrue())
 	})
 })
+
+func tempSQLiteUtilDir() string {
+	GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-sqliteutil-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
 
 func sqliteErrorWithCode(code int) error {
 	e := &sqlite.Error{}
