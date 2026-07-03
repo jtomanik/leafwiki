@@ -239,38 +239,35 @@ var _ = Describe("revision seam-driven failure behavior", func() {
 		restoreLatest := setRevisionSeam(&revisionStoreGetLatestRevision, func(*FSStore, tree.PageID) (*Revision, error) {
 			return nil, latestErr
 		})
-		_, created, err := service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError(latestErr))
-		_, created, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError(latestErr))
-		_, created, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError(latestErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(latestErr)))
+		Expect(failedRevisionRecord(service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure"))).
+			To(haveRevisionRecordError(MatchError(latestErr)))
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content"))).
+			To(haveRevisionRecordError(MatchError(latestErr)))
 		restoreLatest()
 
 		contentSaveErr := errors.New("content save failed")
 		restoreContent := setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
 			return "", contentSaveErr
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(contentSaveErr))
-		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(contentSaveErr))
-		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(contentSaveErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(contentSaveErr)))
+		Expect(failedRevisionRecord(service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure"))).
+			To(haveRevisionRecordError(MatchError(contentSaveErr)))
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content"))).
+			To(haveRevisionRecordError(MatchError(contentSaveErr)))
 		restoreContent()
 
 		restoreContent = setRevisionSeam(&revisionStoreSaveContentBlob, func(*FSStore, []byte) (string, error) {
 			return "wrong-hash", nil
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(ErrContentHashMismatch))
-		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(ErrContentHashMismatch))
-		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(ErrContentHashMismatch))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(ErrContentHashMismatch)))
+		Expect(failedRevisionRecord(service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure"))).
+			To(haveRevisionRecordError(MatchError(ErrContentHashMismatch)))
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content"))).
+			To(haveRevisionRecordError(MatchError(ErrContentHashMismatch)))
 		restoreContent()
 
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
@@ -278,16 +275,16 @@ var _ = Describe("revision seam-driven failure behavior", func() {
 		restoreAssetBlob := setRevisionSeam(&revisionStoreSaveAssetBlobFromPath, func(*FSStore, string) (string, int64, error) {
 			return "", 0, assetBlobErr
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(assetBlobErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(assetBlobErr)))
 		restoreAssetBlob()
 
 		manifestSaveErr := errors.New("manifest save failed")
 		restoreManifest := setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
 			return "", manifestSaveErr
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(manifestSaveErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(manifestSaveErr)))
 		service.assetManifestCache.Delete(pageID)
 		_, err = service.resolveAssetManifestHash(pageID, nil)
 		Expect(err).To(MatchError(manifestSaveErr))
@@ -296,8 +293,8 @@ var _ = Describe("revision seam-driven failure behavior", func() {
 		restoreManifest = setRevisionSeam(&revisionStoreSaveAssetManifest, func(*FSStore, []AssetRef) (string, error) {
 			return "wrong-manifest", nil
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(ErrAssetManifestHashMismatch))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(ErrAssetManifestHashMismatch)))
 		service.assetManifestCache.Delete(pageID)
 		_, err = service.resolveAssetManifestHash(pageID, nil)
 		Expect(err).To(MatchError(ErrAssetManifestHashMismatch))
@@ -307,12 +304,12 @@ var _ = Describe("revision seam-driven failure behavior", func() {
 		restoreID := setRevisionSeam(&revisionGenerateUniqueID, func() (string, error) {
 			return "", idFailedErr
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(idFailedErr))
-		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(idFailedErr))
-		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(idFailedErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(idFailedErr)))
+		Expect(failedRevisionRecord(service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure"))).
+			To(haveRevisionRecordError(MatchError(idFailedErr)))
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content"))).
+			To(haveRevisionRecordError(MatchError(idFailedErr)))
 		_, err = service.newRevision(RevisionTypeContentUpdate, service.revisionStateFromPage(page), newFixtureUserID("tester"), "summary", "")
 		Expect(err).To(MatchError(idFailedErr))
 		restoreID()
@@ -321,12 +318,12 @@ var _ = Describe("revision seam-driven failure behavior", func() {
 		restoreSaveRevision := setRevisionSeam(&revisionStoreSaveRevision, func(*FSStore, *Revision) error {
 			return saveRevisionErr
 		})
-		_, _, err = service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset")
-		Expect(err).To(MatchError(saveRevisionErr))
-		_, _, err = service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure")
-		Expect(err).To(MatchError(saveRevisionErr))
-		_, _, err = service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content")
-		Expect(err).To(MatchError(saveRevisionErr))
+		Expect(failedRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "asset"))).
+			To(haveRevisionRecordError(MatchError(saveRevisionErr)))
+		Expect(failedRevisionRecord(service.RecordStructureChange(pageID, newFixtureUserID("tester"), "structure"))).
+			To(haveRevisionRecordError(MatchError(saveRevisionErr)))
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(page, newFixtureUserID("tester"), "content"))).
+			To(haveRevisionRecordError(MatchError(saveRevisionErr)))
 		restoreSaveRevision()
 	})
 

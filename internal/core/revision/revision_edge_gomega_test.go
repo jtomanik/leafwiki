@@ -109,9 +109,8 @@ var _ = Describe("revision edge behavior", func() {
 	It("returns public API errors for missing content inputs", func() {
 		service, _, _ := newGomegaRevisionService()
 
-		_, created, err := service.RecordContentUpdate(newFixturePageID("missing"), newFixtureUserID("tester"), "missing")
-		Expect(created).To(BeFalse())
-		Expect(err).To(MatchError(tree.ErrPageNotFound))
+		Expect(failedRevisionRecord(service.RecordContentUpdate(newFixturePageID("missing"), newFixtureUserID("tester"), "missing"))).
+			To(haveRevisionRecordError(MatchError(tree.ErrPageNotFound)))
 	})
 
 	It("prefers canonical metadata hashes and reports metadata marshal failures", func() {
@@ -149,20 +148,18 @@ var _ = Describe("revision edge behavior", func() {
 
 	It("builds restored raw content and rejects invalid metadata inputs", func() {
 		raw, replaceMetadata, err := buildRestoredRawContent(newFixturePageID("page"), " Page ", nil, nil, "body")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(raw).To(Equal("body"))
-		Expect(replaceMetadata).To(BeFalse())
+		Expect(restoredBodyOnlyRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContent(Equal("body")))
 
-		_, _, err = buildRestoredRawContent(newFixturePageID("page"), "Page", &markdown.PageMetadata{
+		raw, replaceMetadata, err = buildRestoredRawContent(newFixturePageID("page"), "Page", &markdown.PageMetadata{
 			Version: 1,
 			Fields:  map[string]interface{}{"bad": []string{"unsupported"}},
 		}, nil, "body")
-		Expect(err).To(HaveOccurred())
+		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(HaveOccurred()))
 
-		_, _, err = buildRestoredRawContent(newFixturePageID("../bad"), "Page", nil, map[string]interface{}{
+		raw, replaceMetadata, err = buildRestoredRawContent(newFixturePageID("../bad"), "Page", nil, map[string]interface{}{
 			"legacy": "value",
 		}, "body")
-		Expect(err).To(HaveOccurred())
+		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(HaveOccurred()))
 	})
 
 	It("reports each revision asset delta type in stable order", func() {
@@ -347,29 +344,25 @@ var _ = Describe("revision edge behavior", func() {
 		}}, newFixtureUserID("tester"), "batch")
 		Expect(errs).To(ConsistOf(MatchError(tree.ErrPageNotFound)))
 
-		_, created, err := service.RecordAssetChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad")
-		Expect(created).To(BeFalse())
-		Expect(err).To(HaveOccurred())
-		_, created, err = service.RecordAssetChange(newFixturePageID("missing-asset-page"), newFixtureUserID("tester"), "missing")
-		Expect(created).To(BeFalse())
-		Expect(err).To(HaveOccurred())
-		_, created, err = service.RecordStructureChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad")
-		Expect(created).To(BeFalse())
-		Expect(err).To(HaveOccurred())
-		_, created, err = service.RecordStructureChange(newFixturePageID("missing-structure-page"), newFixtureUserID("tester"), "missing")
-		Expect(created).To(BeFalse())
-		Expect(err).To(HaveOccurred())
+		Expect(failedRevisionRecord(service.RecordAssetChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad"))).
+			To(haveRevisionRecordError(HaveOccurred()))
+		Expect(failedRevisionRecord(service.RecordAssetChange(newFixturePageID("missing-asset-page"), newFixtureUserID("tester"), "missing"))).
+			To(haveRevisionRecordError(HaveOccurred()))
+		Expect(failedRevisionRecord(service.RecordStructureChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad"))).
+			To(haveRevisionRecordError(HaveOccurred()))
+		Expect(failedRevisionRecord(service.RecordStructureChange(newFixturePageID("missing-structure-page"), newFixtureUserID("tester"), "missing"))).
+			To(haveRevisionRecordError(HaveOccurred()))
 		Expect(service.recordRestoreRevision(newFixturePageID("missing-restore-page"), newFixtureUserID("tester"))).To(HaveOccurred())
 		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("page"), nil)).To(MatchError(ErrRevisionStateRequired))
 		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("missing-enrich-page"), &RevisionState{})).To(HaveOccurred())
-		_, err = service.resolveAssetManifestHash(newFixturePageID("missing-manifest-page"), nil)
+		_, err := service.resolveAssetManifestHash(newFixturePageID("missing-manifest-page"), nil)
 		Expect(err).To(HaveOccurred())
 
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
-		rev, created, err := service.RecordAssetChange(pageID, newFixtureUserID("tester"), "assets")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(created).To(BeTrue())
+		record := createdRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "assets"))
+		Expect(record).To(haveRecordedRevision(Not(BeNil())))
+		rev := record.Revision
 		service.assetManifestCache.Delete(pageID)
 		hash, err := service.resolveAssetManifestHash(pageID, rev)
 		Expect(err).NotTo(HaveOccurred())
@@ -450,10 +443,10 @@ var _ = Describe("revision edge behavior", func() {
 		assetPath := revisionAssetPath(storageDir, brokenAssetPageID)
 		Expect(os.MkdirAll(filepath.Dir(assetPath), 0o755)).To(Succeed())
 		Expect(os.WriteFile(assetPath, []byte("not a directory"), 0o644)).To(Succeed())
-		_, _, err = service.RecordContentUpdate(brokenAssetPageID, newFixtureUserID("tester"), "broken assets")
-		Expect(err).To(HaveOccurred())
-		_, _, err = service.RecordStructureChange(brokenAssetPageID, newFixtureUserID("tester"), "broken assets")
-		Expect(err).To(HaveOccurred())
+		Expect(failedRevisionRecord(service.RecordContentUpdate(brokenAssetPageID, newFixtureUserID("tester"), "broken assets"))).
+			To(haveRevisionRecordError(HaveOccurred()))
+		Expect(failedRevisionRecord(service.RecordStructureChange(brokenAssetPageID, newFixtureUserID("tester"), "broken assets"))).
+			To(haveRevisionRecordError(HaveOccurred()))
 		Expect(os.Remove(assetPath)).To(Succeed())
 
 		Expect(service.persistLiveAssets(pageID, []AssetRef{{Name: "missing.txt", SHA256: strings.Repeat("e", 64), SizeBytes: 7}})).To(HaveOccurred())
@@ -465,8 +458,8 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(err).To(HaveOccurred())
 
 		badPage := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("../bad")}}
-		_, _, err = service.recordContentUpdateForPage(badPage, newFixtureUserID("tester"), "bad")
-		Expect(err).To(HaveOccurred())
+		Expect(failedRevisionRecord(service.recordContentUpdateForPage(badPage, newFixtureUserID("tester"), "bad"))).
+			To(haveRevisionRecordError(HaveOccurred()))
 	})
 
 	It("reports deterministic FSStore edge paths", func() {
