@@ -138,8 +138,11 @@ var _ = Describe("node store filesystem and validation failure behavior", func()
 		Expect(os.MkdirAll(orderDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(orderDir, orderFilename), []byte(`{"ordered_ids":["b","b","a"]}`), 0o644)).To(Succeed())
 		store.applyChildOrder(orderParent, orderDir)
-		Expect([]PageID{orderParent.Children[0].ID, orderParent.Children[1].ID, orderParent.Children[2].ID}).To(Equal([]PageID{"b", "a", "c"}))
-		Expect([]int{orderParent.Children[0].Position, orderParent.Children[1].Position, orderParent.Children[2].Position}).To(Equal([]int{0, 1, 2}))
+		Expect(orderParent.Children).To(HaveExactElements(
+			matchOrderedChild("b", 0),
+			matchOrderedChild("a", 1),
+			matchOrderedChild("c", 2),
+		))
 
 		child := edgePageNode("child", "child", "Child", nil)
 		store.assignParentToChildren(&PageNode{Children: []*PageNode{child}})
@@ -338,6 +341,14 @@ func edgePageNode(id PageID, slug Slug, title string, parent *PageNode) *PageNod
 func edgeSectionNode(id PageID, slug Slug, title string, parent *PageNode) *PageNode {
 	GinkgoHelper()
 	return &PageNode{ID: id, Slug: slug, Title: title, Kind: NodeKindSection, Parent: parent, Children: []*PageNode{}}
+}
+
+func matchOrderedChild(id PageID, position int) OmegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		HaveField("ID", Equal(id)),
+		HaveField("Position", Equal(position)),
+	)
 }
 
 func matchInvalidOp(op string) OmegaMatcher {
