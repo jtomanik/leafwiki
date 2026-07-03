@@ -1244,6 +1244,7 @@ type assertion struct{}
 func Expect(actual any) assertion { return assertion{} }
 func (assertion) To(matcher any, extra ...any) {}
 func BeTrue() any { return nil }
+func BeFalse() any { return nil }
 func Equal(actual any) any { return nil }
 func HaveField(name string, matcher any) any { return nil }
 
@@ -1264,6 +1265,8 @@ func boolState(value bool) string {
 func TestAgentPresence() {
 	_, ok := normalize()
 	Expect(ok).To(BeTrue())
+	mcpCalled := false
+	Expect(mcpCalled).To(BeFalse())
 	Expect(struct {
 		Event string
 		Found bool
@@ -1289,6 +1292,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",

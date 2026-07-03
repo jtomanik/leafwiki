@@ -609,10 +609,10 @@ func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) 
 
 func isProxyBooleanName(name string) bool {
 	switch strings.ToLower(name) {
-	case "ok", "found", "exists", "present", "matched", "valid", "success", "done":
+	case "ok", "found", "exists", "present", "matched", "valid", "success", "done", "called":
 		return true
 	}
-	for _, suffix := range []string{"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done"} {
+	for _, suffix := range []string{"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
