@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -242,17 +243,12 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 	})
 
 	ginkgo.It("handles README markdown path fallback routing", func() {
-		pageRoute, sectionRoute, ok := ReadmeMarkdownPathFallbackRoutes(" docs/README.md ")
-		Expect(ok).To(BeTrue())
-		Expect(pageRoute).To(Equal("docs/README"))
-		Expect(sectionRoute).To(Equal("docs"))
+		Expect(" docs/README.md ").To(HaveReadmeMarkdownFallbackRoutes("docs/README", "docs"))
 
-		_, _, ok = ReadmeMarkdownPathFallbackRoutes("docs/page.md")
-		Expect(ok).To(BeFalse())
+		Expect("docs/page.md").To(BeIgnoredByReadmeMarkdownFallbackRoutes())
 
-		input, ok, err := NormalizeReadmeMarkdownPathFallbackInput("README.md", "")
+		input, err := requireReadmeMarkdownPathFallbackInput("README.md", "")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"PageRoute":    Equal("README"),
 			"SectionRoute": BeEmpty(),
@@ -260,19 +256,17 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 			"TrySection":   BeTrue(),
 		}))
 
-		input, ok, err = NormalizeReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindSection)
+		input, err = requireReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"TryPage":    BeFalse(),
 			"TrySection": BeTrue(),
 		}))
 
-		_, ok, err = NormalizeReadmeMarkdownPathFallbackRawInput("docs/README.md", "bad-kind")
-		Expect(ok).To(BeTrue())
+		_, err = requireReadmeMarkdownPathFallbackRawInput("docs/README.md", "bad-kind")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := pagesTempDir()
 		Expect(ReadmeFallbackSectionIsActive("", "docs")).To(BeFalse())
 		Expect(ReadmeFallbackSectionIsActive(rootDir, "missing")).To(BeFalse())
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "child"), 0o755)).To(Succeed())
@@ -282,7 +276,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(ReadmeFallbackSectionIsActive(rootDir, "docs")).To(BeFalse())
 
 		pageOut := &FindByPathOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: tree.PageIDFromString("readme")}}}
-		out, handled, err := FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
+		out, err := requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
 			FindByPath: func(in FindByPathInput) (*FindByPathOutput, error) {
 				Expect(in).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 					"RoutePath": Equal(tree.RoutePath("docs/README")),
@@ -292,41 +286,25 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(handled).To(BeTrue())
 		Expect(out).To(BeIdenticalTo(pageOut))
 
-		_, handled, err = FindReadmeMarkdownPathFallback("docs/page.md", "", ReadmeMarkdownPathFallbackLookup{})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(handled).To(BeFalse())
+		Expect(ignoreReadmeMarkdownPathFallback("docs/page.md", "", ReadmeMarkdownPathFallbackLookup{})).To(Succeed())
 
-		_, handled, err = FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
+		_, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
 			FindByPath: func(FindByPathInput) (*FindByPathOutput, error) {
 				return nil, tree.ErrPageNotFound
 			},
 		})
-		Expect(handled).To(BeTrue())
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
 	ginkgo.It("maps page-domain errors to localized details and statuses", func() {
-		detail, status, ok := PageErrorDetailForError(tree.ErrPageNotFound)
-		Expect(ok).To(BeTrue())
-		Expect(status).To(Equal(http.StatusNotFound))
-		Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Code":      Equal(ErrCodePageNotFound),
-			"MessageID": Equal(sharederrors.MessageIDForCode(ErrCodePageNotFound)),
-		}))
+		Expect(tree.ErrPageNotFound).To(HavePageErrorDetail(http.StatusNotFound, ErrCodePageNotFound))
 
 		localized := sharederrors.NewLocalizedErrorFromCode(ErrCodePageVersionConflict, nil)
-		detail, status, ok = PageErrorDetailForError(localized)
-		Expect(ok).To(BeTrue())
-		Expect(status).To(Equal(http.StatusConflict))
-		Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Code": Equal(ErrCodePageVersionConflict),
-		}))
+		Expect(localized).To(HavePageErrorDetail(http.StatusConflict, ErrCodePageVersionConflict))
 
-		_, _, ok = PageErrorDetailForError(errors.New("outside pages"))
-		Expect(ok).To(BeFalse())
+		Expect(errors.New("outside pages")).To(BeIgnoredByPageErrorDetail())
 
 		cases := []struct {
 			err    error
@@ -344,12 +322,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		}
 		for _, tc := range cases {
 			tc := tc
-			detail, status, ok = PageErrorDetailForError(tc.err)
-			Expect(ok).To(BeTrue())
-			Expect(status).To(Equal(tc.status))
-			Expect(detail).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Code": Equal(tc.code),
-			}))
+			Expect(tc.err).To(HavePageErrorDetail(tc.status, tc.code))
 		}
 
 		Expect(pageErrorStatus(ErrCodePageVersionConflict)).To(Equal(http.StatusConflict))
@@ -376,6 +349,104 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 
 func MatchPageLocalizedCode(code sharederrors.ErrorCode) types.GomegaMatcher {
 	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
+}
+
+func pagesTempDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-pages-test-*")
+	Expect(err).To(Succeed())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
+func requireReadmeMarkdownPathFallbackInput(path string, kind tree.NodeKind) (ReadmeMarkdownPathFallbackInput, error) {
+	input, handled, err := NormalizeReadmeMarkdownPathFallbackInput(path, kind)
+	if err != nil {
+		return input, err
+	}
+	if !handled {
+		return input, errors.New("README fallback input was not handled")
+	}
+	return input, nil
+}
+
+func requireReadmeMarkdownPathFallbackRawInput(path string, kind string) (ReadmeMarkdownPathFallbackInput, error) {
+	input, handled, err := NormalizeReadmeMarkdownPathFallbackRawInput(path, kind)
+	if err != nil {
+		return input, err
+	}
+	if !handled {
+		return input, errors.New("README fallback input was not handled")
+	}
+	return input, nil
+}
+
+func requireReadmeMarkdownPathFallback(path string, kind tree.NodeKind, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, error) {
+	out, handled, err := FindReadmeMarkdownPathFallback(path, kind, lookup)
+	if err != nil {
+		return out, err
+	}
+	if !handled {
+		return out, errors.New("README fallback was not handled")
+	}
+	return out, nil
+}
+
+func ignoreReadmeMarkdownPathFallback(path string, kind tree.NodeKind, lookup ReadmeMarkdownPathFallbackLookup) error {
+	out, handled, err := FindReadmeMarkdownPathFallback(path, kind, lookup)
+	if err != nil {
+		return err
+	}
+	if handled || out != nil {
+		return errors.New("README fallback was handled")
+	}
+	return nil
+}
+
+func BeRejectedMarkdownFence() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(line string) (bool, error) {
+		_, _, matched := parseMarkdownFence(line)
+		return !matched, nil
+	})
+}
+
+func BeRejectedMarkdownHeading() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(line string) (bool, error) {
+		_, _, matched := parseMarkdownHeading(line)
+		return !matched, nil
+	})
+}
+
+func HaveReadmeMarkdownFallbackRoutes(pageRoute string, sectionRoute string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(path string) (bool, error) {
+		gotPageRoute, gotSectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
+		return matched && gotPageRoute == pageRoute && gotSectionRoute == sectionRoute, nil
+	})
+}
+
+func BeIgnoredByReadmeMarkdownFallbackRoutes() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(path string) (bool, error) {
+		pageRoute, sectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
+		return !matched && pageRoute == "" && sectionRoute == "", nil
+	})
+}
+
+func HavePageErrorDetail(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		detail, gotStatus, matched := PageErrorDetailForError(err)
+		return matched &&
+			gotStatus == status &&
+			detail.Code == code &&
+			detail.MessageID == sharederrors.MessageIDForCode(code), nil
+	})
+}
+
+func BeIgnoredByPageErrorDetail() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		_, _, matched := PageErrorDetailForError(err)
+		return !matched, nil
+	})
 }
 
 func HavePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {

@@ -309,7 +309,7 @@ var _ = ginkgo.Describe("page route handlers", func() {
 func newRoutesSpecDeps() *routesSpecDeps {
 	ginkgo.GinkgoHelper()
 
-	storageDir := ginkgo.GinkgoT().TempDir()
+	storageDir := pagesTempDir()
 	treeService := tree.NewTreeService(storageDir)
 	Expect(treeService.LoadTree()).To(Succeed())
 

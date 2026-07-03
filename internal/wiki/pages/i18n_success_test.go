@@ -2,6 +2,8 @@ package pages
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
@@ -10,12 +12,9 @@ type apiSuccessMessageCase struct {
 	want      string
 }
 
-var _ = ginkgo.DescribeTable("TestAPISuccessMessagesRenderFromCatalog",
+var _ = ginkgo.DescribeTable("API success message catalog rendering",
 	func(tc apiSuccessMessageCase) {
-		t := ginkgo.GinkgoT()
-		if got := apiSuccessMessage(tc.messageID); got != tc.want {
-			t.Fatalf("apiSuccessMessage(%q) = %q, want %q", tc.messageID, got, tc.want)
-		}
+		Expect(apiSuccessMessage(tc.messageID)).To(Equal(tc.want))
 	},
 	ginkgo.Entry("delete", apiSuccessMessageCase{messageID: MessageIDAPIPagesDeleteSuccess, want: "Page deleted"}),
 	ginkgo.Entry("move", apiSuccessMessageCase{messageID: MessageIDAPIPagesMoveSuccess, want: "Page moved"}),

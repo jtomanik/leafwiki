@@ -6,23 +6,17 @@ import (
 	"log/slog"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/core/assets"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/search"
 	"github.com/perber/wiki/internal/test_utils"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki/pages"
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
-
-type pagesTestT interface {
-	Helper()
-	TempDir() string
-	Fatalf(format string, args ...any)
-}
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Refactor preview reports conflicts without mutating content
@@ -36,27 +30,22 @@ type testDeps struct {
 	assets     *assets.AssetService
 }
 
-func newTestDeps(t pagesTestT) *testDeps {
-	t.Helper()
-	storageDir := t.TempDir()
+func newTestDeps() *testDeps {
+	ginkgo.GinkgoHelper()
+
+	storageDir := pagesTestTempDir()
 
 	treeService := tree.NewTreeService(storageDir)
-	if err := treeService.LoadTree(); err != nil {
-		t.Fatalf("failed to load tree: %v", err)
-	}
+	Expect(treeService.LoadTree()).To(Succeed())
 
 	slugService := tree.NewSlugService()
 	assetService := assets.NewAssetService(storageDir, slugService)
 
 	linksStore, err := links.NewLinksStore(storageDir)
-	if err != nil {
-		t.Fatalf("failed to create links store: %v", err)
-	}
+	Expect(err).To(Succeed())
 	linkService := links.NewLinkService(storageDir, treeService, linksStore)
 	ginkgo.DeferCleanup(func() {
-		if err := linkService.Close(); err != nil {
-			t.Fatalf("failed to close link service: %v", err)
-		}
+		Expect(linkService.Close()).To(Succeed())
 	})
 
 	return &testDeps{
@@ -117,2585 +106,1966 @@ func slug[T ~string](value T) tree.Slug {
 // CreatePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.It("TestCreatePageUseCase_HappyPath_Root", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+var _ = ginkgo.Describe("page use case behavior", func() {
+	ginkgo.It("creates a root page", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	out, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Home",
-		Slug:   "home",
-		Kind:   pageKind(),
+		out, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Home",
+			Slug:   "home",
+			Kind:   pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).To(SatisfyAll(
+			HaveField("Title", Equal("Home")),
+			HaveField("Slug", Equal(slug("home"))),
+		))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Page.Title != "Home" {
-		t.Errorf("expected title 'Home', got %q", out.Page.Title)
-	}
-	if out.Page.Slug != "home" {
-		t.Errorf("expected slug 'home', got %q", out.Page.Slug)
-	}
-})
 
-var _ = ginkgo.It("TestCreatePageUseCase_HappyPath_WithParent", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	ginkgo.It("creates a child page under an existing parent", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	parent, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Docs",
-		Slug:   "docs",
-		Kind:   pageKind(),
+		parent, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Docs",
+			Slug:   "docs",
+			Kind:   pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		child, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID:   "user1",
+			ParentID: pageIDPtr(parent.Page.ID),
+			Title:    "Reference",
+			Slug:     "reference",
+			Kind:     pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(child.Page.Parent).To(gstruct.PointTo(HaveField("ID", Equal(parent.Page.ID))))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent: %v", err)
-	}
 
-	child, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID:   "user1",
-		ParentID: pageIDPtr(parent.Page.ID),
-		Title:    "Reference",
-		Slug:     "reference",
-		Kind:     pageKind(),
+	ginkgo.It("rejects creation without a title", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "",
+			Slug:   "home",
+			Kind:   pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating child: %v", err)
-	}
-	if child.Page.Parent == nil || child.Page.Parent.ID != parent.Page.ID {
-		t.Errorf("expected parent ID %q, got %v", parent.Page.ID, child.Page.Parent)
-	}
-})
 
-var _ = ginkgo.It("TestCreatePageUseCase_EmptyTitle_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	ginkgo.It("rejects reserved slugs during creation", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "",
-		Slug:   "home",
-		Kind:   pageKind(),
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Reserved",
+			Slug:   "e", // too short / reserved
+			Kind:   pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("slug", pages.FieldCodePageSlugInvalid, pages.MessageIDPageSlugInvalid))
 	})
-	if err == nil {
-		t.Fatal("expected validation error, got nil")
-	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-	assertFieldErrorCode(t, ve, "title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired)
-})
 
-var _ = ginkgo.It("TestCreatePageUseCase_ReservedSlug_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+	ginkgo.It("keeps page use-case boundaries typed", func() {
+		pageID := newFixturePageID("page-1")
+		parentID := newFixturePageID("parent-1")
+		version := newFixturePageVersion("version-1")
+		slug := newFixtureSlug("page-slug")
+		routePath := tree.RoutePath("docs/page")
 
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Reserved",
-		Slug:   "e", // too short / reserved
-		Kind:   pageKind(),
+		_ = pages.GetPageInput{ID: pageID}
+		_ = pages.ResolvePermalinkInput{ID: pageID}
+		_ = pages.FindByPathInput{RoutePath: routePath}
+		_ = pages.LookupPagePathInput{Path: routePath}
+		_ = pages.CreatePageInput{ParentID: &parentID, Slug: slug}
+		_ = pages.UpdatePageInput{ID: pageID, Version: version, Slug: slug}
+		_ = pages.DeletePageInput{ID: pageID, Version: version}
+		_ = pages.MovePageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version, ParentID: parentID}
+		_ = pages.ConvertPageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version}
+		_ = pages.CopyPageInput{UserID: newFixtureUserID("user-1"), SourcePageID: pageID, TargetParentID: &parentID, Slug: slug}
+		_ = pages.EnsurePathInput{UserID: newFixtureUserID("user-1"), TargetPath: routePath}
+		_ = pages.SortPagesInput{ParentID: parentID, OrderedIDs: []tree.PageID{pageID}}
+		_ = pages.SuggestSlugInput{ParentID: parentID, CurrentID: pageID}
+		_ = pages.RefactorPreviewInput{PageID: pageID, Slug: slug, NewParentID: &parentID}
+		_ = pages.RefactorApplyInput{UserID: newFixtureUserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
 	})
-	if err == nil {
-		t.Fatal("expected error for reserved slug, got nil")
-	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-	assertFieldErrorCode(t, ve, "slug", pages.FieldCodePageSlugInvalid, pages.MessageIDPageSlugInvalid)
-})
 
-var _ = ginkgo.It("TestPageUseCaseInputsUseSemanticTypesAtBoundary", func() {
-	pageID := newFixturePageID("page-1")
-	parentID := newFixturePageID("parent-1")
-	version := newFixturePageVersion("version-1")
-	slug := newFixtureSlug("page-slug")
-	routePath := tree.RoutePath("docs/page")
+	ginkgo.It("reports stable validation codes for metadata input", func() {
+		const whitespacePropertyField = "properties. leafwiki_custom"
 
-	_ = pages.GetPageInput{ID: pageID}
-	_ = pages.ResolvePermalinkInput{ID: pageID}
-	_ = pages.FindByPathInput{RoutePath: routePath}
-	_ = pages.LookupPagePathInput{Path: routePath}
-	_ = pages.CreatePageInput{ParentID: &parentID, Slug: slug}
-	_ = pages.UpdatePageInput{ID: pageID, Version: version, Slug: slug}
-	_ = pages.DeletePageInput{ID: pageID, Version: version}
-	_ = pages.MovePageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version, ParentID: parentID}
-	_ = pages.ConvertPageInput{UserID: newFixtureUserID("user-1"), ID: pageID, Version: version}
-	_ = pages.CopyPageInput{UserID: newFixtureUserID("user-1"), SourcePageID: pageID, TargetParentID: &parentID, Slug: slug}
-	_ = pages.EnsurePathInput{UserID: newFixtureUserID("user-1"), TargetPath: routePath}
-	_ = pages.SortPagesInput{ParentID: parentID, OrderedIDs: []tree.PageID{pageID}}
-	_ = pages.SuggestSlugInput{ParentID: parentID, CurrentID: pageID}
-	_ = pages.RefactorPreviewInput{PageID: pageID, Slug: slug, NewParentID: &parentID}
-	_ = pages.RefactorApplyInput{UserID: newFixtureUserID("user-1"), Version: version, RefactorPreviewInput: pages.RefactorPreviewInput{PageID: pageID}}
-})
+		err := pages.ValidatePageMetadataInput(
+			[]string{" tag ", "unique", "UNIQUE"},
+			map[string]string{
+				" leafwiki_custom": "reserved",
+				"leafwiki_custom":  "reserved prefix",
+				"tags":             "reserved",
+				"":                 "empty",
+			},
+		)
 
-var _ = ginkgo.It("TestValidatePageMetadataInputReportsStableCodes", func() {
-	t := ginkgo.GinkgoT()
-	const whitespacePropertyField = "properties. leafwiki_custom"
+		Expect(err).To(SatisfyAll(
+			HavePageValidationFieldError("tags[0]", pages.FieldCodePageTagWhitespace, pages.MessageIDPageTagWhitespace),
+			HavePageValidationFieldError("tags[2]", pages.FieldCodePageTagDuplicate, pages.MessageIDPageTagDuplicate),
+			HavePageValidationFieldError(whitespacePropertyField, pages.FieldCodePagePropertyKeyWhitespace, pages.MessageIDPagePropertyKeyWhitespace),
+			HavePageValidationFieldError("properties.leafwiki_custom", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReservedPrefix),
+			HavePageValidationFieldError("properties.tags", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReserved),
+			HavePageValidationFieldError("properties.", pages.FieldCodePagePropertyKeyRequired, pages.MessageIDPagePropertyKeyRequired),
+		))
+	})
 
-	err := pages.ValidatePageMetadataInput(
-		[]string{" tag ", "unique", "UNIQUE"},
-		map[string]string{
-			" leafwiki_custom": "reserved",
-			"leafwiki_custom":  "reserved prefix",
-			"tags":             "reserved",
-			"":                 "empty",
-		},
-	)
+	ginkgo.It("rejects creation without a page kind", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-	assertFieldErrorCode(t, ve, "tags[0]", pages.FieldCodePageTagWhitespace, pages.MessageIDPageTagWhitespace)
-	assertFieldErrorCode(t, ve, "tags[2]", pages.FieldCodePageTagDuplicate, pages.MessageIDPageTagDuplicate)
-	assertFieldErrorCode(t, ve, whitespacePropertyField, pages.FieldCodePagePropertyKeyWhitespace, pages.MessageIDPagePropertyKeyWhitespace)
-	assertFieldErrorCode(t, ve, "properties.leafwiki_custom", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReservedPrefix)
-	assertFieldErrorCode(t, ve, "properties.tags", pages.FieldCodePagePropertyKeyReserved, pages.MessageIDPagePropertyKeyReserved)
-	assertFieldErrorCode(t, ve, "properties.", pages.FieldCodePagePropertyKeyRequired, pages.MessageIDPagePropertyKeyRequired)
-})
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Test",
+			Slug:   "test",
+			Kind:   nil,
+		})
+		Expect(err).To(HavePageValidationFieldError("kind", pages.FieldCodePageKindRequired, pages.MessageIDPageKindRequired))
+	})
 
-func assertFieldErrorCode(t pagesTestT, ve *sharederrors.ValidationErrors, field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) {
-	t.Helper()
+	ginkgo.It("creates a section", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	fieldName := field.String()
-	for _, err := range ve.Errors {
-		if err.Field == fieldName {
-			if err.Code != code {
-				t.Fatalf("%s code = %q, want %q", fieldName, err.Code, code)
-			}
-			if err.MessageID != messageID {
-				t.Fatalf("%s messageId = %q, want %q", fieldName, err.MessageID, messageID)
-			}
-			return
+		out, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Section",
+			Slug:   "section",
+			Kind:   sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page.Kind).To(Equal(tree.NodeKindSection))
+	})
+
+	// ─────────────────────────────────────────────────────────────────────────────
+	// UpdatePageUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
+
+	ginkgo.It("updates page title slug and content", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		content := "updated content"
+		out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID:  "user1",
+			ID:      pageID(created.Page.ID),
+			Version: pageVersion(created.Page.Version()),
+			Title:   "New Title",
+			Slug:    "new-title",
+			Content: &content,
+			Kind:    pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).To(SatisfyAll(
+			HaveField("Title", Equal("New Title")),
+			HaveField("Slug", Equal(slug("new-title"))),
+		))
+	})
+
+	ginkgo.It("rejects stale page updates", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		staleVersion := created.Page.Version()
+
+		firstContent := "first update"
+		updated, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID:  "user1",
+			ID:      pageID(created.Page.ID),
+			Version: pageVersion(staleVersion),
+			Title:   "New Title",
+			Slug:    "new-title",
+			Content: &firstContent,
+			Kind:    pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		secondContent := "second update"
+		_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID:  "user2",
+			ID:      pageID(created.Page.ID),
+			Version: pageVersion(staleVersion),
+			Title:   updated.Page.Title,
+			Slug:    slug(updated.Page.Slug),
+			Content: &secondContent,
+			Kind:    pageKind(),
+		})
+		Expect(err).To(MatchError(tree.ErrVersionConflict))
+	})
+
+	ginkgo.It("requires a real version for updates", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		content := "new content"
+		_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID:  "user1",
+			ID:      pageID(created.Page.ID),
+			Version: newFixturePageVersion("\x00"),
+			Title:   "Page",
+			Slug:    "page",
+			Content: &content,
+			Kind:    pageKind(),
+		})
+		Expect(err).To(MatchError(tree.ErrVersionRequired))
+	})
+
+	ginkgo.It("rejects updates without a title", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
+		})
+
+		_, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "", Slug: "page", Kind: pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired))
+	})
+
+	// ─────────────────────────────────────────────────────────────────────────────
+	// DeletePageUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
+
+	ginkgo.It("deletes a page", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
+
+		created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "To Delete", Slug: "to-delete", Kind: pageKind(),
+		})
+
+		if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID:    "user1",
+			ID:        pageID(created.Page.ID),
+			Version:   pageVersion(created.Page.Version()),
+			Recursive: false,
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-	}
-	t.Fatalf("missing field error for %s in %#v", fieldName, ve.Errors)
-}
 
-var _ = ginkgo.It("TestCreatePageUseCase_NilKind_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Test",
-		Slug:   "test",
-		Kind:   nil,
-	})
-	if err == nil {
-		t.Fatal("expected error for nil kind, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCreatePageUseCase_Section_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	out, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Section",
-		Slug:   "section",
-		Kind:   sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Page.Kind != tree.NodeKindSection {
-		t.Errorf("expected kind %q, got %q", tree.NodeKindSection, out.Page.Kind)
-	}
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UpdatePageUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestUpdatePageUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	content := "updated content"
-	out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "user1",
-		ID:      pageID(created.Page.ID),
-		Version: pageVersion(created.Page.Version()),
-		Title:   "New Title",
-		Slug:    "new-title",
-		Content: &content,
-		Kind:    pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error updating page: %v", err)
-	}
-	if out.Page.Title != "New Title" {
-		t.Errorf("expected title 'New Title', got %q", out.Page.Title)
-	}
-	if out.Page.Slug != "new-title" {
-		t.Errorf("expected slug 'new-title', got %q", out.Page.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestUpdatePageUseCase_VersionConflict_ReturnsVersionConflictError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-	staleVersion := created.Page.Version()
-
-	firstContent := "first update"
-	updated, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "user1",
-		ID:      pageID(created.Page.ID),
-		Version: pageVersion(staleVersion),
-		Title:   "New Title",
-		Slug:    "new-title",
-		Content: &firstContent,
-		Kind:    pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error applying first update: %v", err)
-	}
-
-	secondContent := "second update"
-	_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "user2",
-		ID:      pageID(created.Page.ID),
-		Version: pageVersion(staleVersion),
-		Title:   updated.Page.Title,
-		Slug:    slug(updated.Page.Slug),
-		Content: &secondContent,
-		Kind:    pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected version conflict, got nil")
-	}
-	if !errors.Is(err, tree.ErrVersionConflict) {
-		t.Fatalf("expected tree.ErrVersionConflict, got %T: %v", err, err)
-	}
-})
-
-var _ = ginkgo.It("TestUpdatePageUseCase_VersionUncheckedSentinel_TreatedAsVersionRequired", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	content := "new content"
-	_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "user1",
-		ID:      pageID(created.Page.ID),
-		Version: newFixturePageVersion("\x00"),
-		Title:   "Page",
-		Slug:    "page",
-		Content: &content,
-		Kind:    pageKind(),
-	})
-	if !errors.Is(err, tree.ErrVersionRequired) {
-		t.Fatalf("expected ErrVersionRequired when sending reserved version bypass value, got %v", err)
-	}
-})
-
-var _ = ginkgo.It("TestUpdatePageUseCase_EmptyTitle_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
-	})
-
-	_, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "", Slug: "page", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected validation error, got nil")
-	}
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DeletePageUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestDeletePageUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
-
-	created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "To Delete", Slug: "to-delete", Kind: pageKind(),
-	})
-
-	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID:    "user1",
-		ID:        pageID(created.Page.ID),
-		Version:   pageVersion(created.Page.Version()),
-		Recursive: false,
-	}); err != nil {
-		t.Fatalf("unexpected error deleting page: %v", err)
-	}
-
-	// Verify it is gone
-	if _, err := deps.tree.GetPage(newFixturePageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
-		t.Errorf("expected page-not-found after delete, got %v", err)
-	}
-})
-
-var _ = ginkgo.It("TestDeletePageUseCase_Root_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
-
-	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "user1", ID: "root", Recursive: false,
-	})
-	if err == nil {
-		t.Fatal("expected error when deleting root, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestDeletePageUseCase_WithChildren_Recursive", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
-
-	parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
-	})
-	createUC.Execute(context.Background(), pages.CreatePageInput{ //nolint:errcheck
-		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
-	})
-
-	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "user1", ID: pageID(parent.Page.ID), Version: pageVersion(parent.Page.Version()), Recursive: true,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error on recursive delete: %v", err)
-	}
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MovePageUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestMovePageUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
-	})
-	child, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Child", Slug: "child", Kind: pageKind(),
-	})
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID:   "user1",
-		ID:       pageID(child.Page.ID),
-		Version:  pageVersion(child.Page.Version()),
-		ParentID: pageID(parent.Page.ID),
-	}); err != nil {
-		t.Fatalf("unexpected error moving page: %v", err)
-	}
-
-	moved, err := deps.tree.GetPage(newFixturePageID(child.Page.ID))
-	if err != nil {
-		t.Fatalf("could not get moved page: %v", err)
-	}
-	if moved.Parent == nil || moved.Parent.ID != parent.Page.ID {
-		t.Errorf("expected parent %q after move, got %v", parent.Page.ID, moved.Parent)
-	}
-})
-
-var _ = ginkgo.It("TestMovePageUseCase_VersionConflict_ReturnsVersionConflictError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	parentA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent A", Slug: "parent-a", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent A: %v", err)
-	}
-	parentB, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent B", Slug: "parent-b", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent B: %v", err)
-	}
-	parentC, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent C", Slug: "parent-c", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent C: %v", err)
-	}
-	child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID:   "user1",
-		ParentID: pageIDPtr(parentA.Page.ID),
-		Title:    "Child",
-		Slug:     "child",
-		Kind:     pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating child: %v", err)
-	}
-	staleVersion := child.Page.Version()
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID:   "user1",
-		ID:       pageID(child.Page.ID),
-		Version:  pageVersion(staleVersion),
-		ParentID: pageID(parentB.Page.ID),
-	}); err != nil {
-		t.Fatalf("unexpected error applying first move: %v", err)
-	}
-
-	err = moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID:   "user2",
-		ID:       pageID(child.Page.ID),
-		Version:  pageVersion(staleVersion),
-		ParentID: pageID(parentC.Page.ID),
-	})
-	if err == nil {
-		t.Fatal("expected version conflict, got nil")
-	}
-	if !errors.Is(err, tree.ErrVersionConflict) {
-		t.Fatalf("expected tree.ErrVersionConflict, got %T: %v", err, err)
-	}
-})
-
-var _ = ginkgo.It("TestMovePageUseCase_Root_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "user1", ID: "root", Version: "root-version", ParentID: "root",
-	})
-	if err == nil {
-		t.Fatal("expected error when moving root, got nil")
-	}
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ConvertPageUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestConvertPageUseCase_UsesOrchestratorWithMutationSource", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	capture := &captureEffect{}
-	convertUC := pages.NewConvertPageUseCase(deps.tree, pagesave.NewPageSaveOrchestrator(capture), slog.Default())
-
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Convert Me", Slug: "convert-me", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
-
-	if err := convertUC.Execute(context.Background(), pages.ConvertPageInput{
-		UserID:     "mcp-user",
-		Source:     pagesave.PageMutationSourceMCP,
-		ID:         pageID(page.Page.ID),
-		Version:    pageVersion(page.Page.Version()),
-		TargetKind: tree.NodeKindSection,
-	}); err != nil {
-		t.Fatalf("ConvertPage failed: %v", err)
-	}
-
-	if len(capture.events) != 1 {
-		t.Fatalf("captured events = %#v, want one convert event", capture.events)
-	}
-	event := capture.events[0]
-	if event.Operation != pagesave.PageOperationUpdate {
-		t.Fatalf("event operation = %q, want update", event.Operation)
-	}
-	if event.UserID != "mcp-user" {
-		t.Fatalf("event user = %q, want mcp-user", event.UserID)
-	}
-	if event.Source != pagesave.PageMutationSourceMCP {
-		t.Fatalf("event source = %q, want mcp", event.Source)
-	}
-	if event.Before == nil || event.After == nil {
-		t.Fatalf("event before/after missing: %#v", event)
-	}
-	if len(event.AffectedPages) != 1 || event.AffectedPages[0].ID != page.Page.ID {
-		t.Fatalf("event affected pages = %#v, want converted page", event.AffectedPages)
-	}
-	if event.After.Kind != tree.NodeKindSection {
-		t.Fatalf("event after kind = %q, want section", event.After.Kind)
-	}
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EnsurePathUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestEnsurePathUseCase_CreatesNewPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	out, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID:      "user1",
-		TargetPath:  "docs/reference",
-		TargetTitle: "Reference",
-		Kind:        pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Page == nil {
-		t.Fatal("expected page in output, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_ExistingPath_ReturnsExistingPage", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	out1, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "user1", TargetPath: "docs", TargetTitle: "Docs", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error on first create: %v", err)
-	}
-
-	out2, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "user1", TargetPath: "docs", TargetTitle: "Docs", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error on second ensure: %v", err)
-	}
-	if out1.Page.ID != out2.Page.ID {
-		t.Errorf("expected same page ID, got %q vs %q", out1.Page.ID, out2.Page.ID)
-	}
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_CreatesPageTwinWhenSectionRouteExists", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	section, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Sync Section",
-		Slug:   "sync",
-		Kind:   sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("create section failed: %v", err)
-	}
-
-	out, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-		UserID:      "user1",
-		TargetPath:  "sync",
-		TargetTitle: "Sync Page",
-		Kind:        pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("ensure page twin failed: %v", err)
-	}
-	if out.Page.ID == section.Page.ID {
-		t.Fatalf("EnsurePath returned existing section %q instead of page twin", section.Page.ID)
-	}
-	if out.Page.Kind != tree.NodeKindPage {
-		t.Fatalf("ensured page kind = %q, want page", out.Page.Kind)
-	}
-
-	sectionTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindSection)
-	if err != nil {
-		t.Fatalf("find section twin failed: %v", err)
-	}
-	if sectionTwin.ID != section.Page.ID {
-		t.Fatalf("section twin ID = %q, want %q", sectionTwin.ID, section.Page.ID)
-	}
-	pageTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindPage)
-	if err != nil {
-		t.Fatalf("find page twin failed: %v", err)
-	}
-	if pageTwin.ID != out.Page.ID {
-		t.Fatalf("page twin ID = %q, want %q", pageTwin.ID, out.Page.ID)
-	}
-
-	second, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-		UserID:      "user1",
-		TargetPath:  "sync",
-		TargetTitle: "Ignored",
-		Kind:        pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("second ensure page twin failed: %v", err)
-	}
-	if second.Page.ID != out.Page.ID {
-		t.Fatalf("second ensure returned page %q, want existing page twin %q", second.Page.ID, out.Page.ID)
-	}
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_CreatesSectionTwinWhenPageRouteExists", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Sync Page",
-		Slug:   "sync",
-		Kind:   pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create page failed: %v", err)
-	}
-
-	out, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-		UserID:      "user1",
-		TargetPath:  "sync",
-		TargetTitle: "Sync Section",
-		Kind:        sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("ensure section twin failed: %v", err)
-	}
-	if out.Page.ID == page.Page.ID {
-		t.Fatalf("EnsurePath returned existing page %q instead of section twin", page.Page.ID)
-	}
-	if out.Page.Kind != tree.NodeKindSection {
-		t.Fatalf("ensured page kind = %q, want section", out.Page.Kind)
-	}
-
-	pageTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindPage)
-	if err != nil {
-		t.Fatalf("find page twin failed: %v", err)
-	}
-	if pageTwin.ID != page.Page.ID {
-		t.Fatalf("page twin ID = %q, want %q", pageTwin.ID, page.Page.ID)
-	}
-	sectionTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindSection)
-	if err != nil {
-		t.Fatalf("find section twin failed: %v", err)
-	}
-	if sectionTwin.ID != out.Page.ID {
-		t.Fatalf("section twin ID = %q, want %q", sectionTwin.ID, out.Page.ID)
-	}
-
-	second, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-		UserID:      "user1",
-		TargetPath:  "sync",
-		TargetTitle: "Ignored",
-		Kind:        sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("second ensure section twin failed: %v", err)
-	}
-	if second.Page.ID != out.Page.ID {
-		t.Fatalf("second ensure returned section %q, want existing section twin %q", second.Page.ID, out.Page.ID)
-	}
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_EmptyPath_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	_, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "user1", TargetPath: "", TargetTitle: "Title", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected validation error for empty path, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_InvalidRoutePath_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	_, err := uc.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "user1", TargetPath: tree.RoutePath("docs//guide"), TargetTitle: "Guide", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected validation error for invalid path, got nil")
-	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-	assertFieldErrorCode(t, ve, "path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid)
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetPageUseCase
-// ─────────────────────────────────────────────────────────────────────────────
-
-var _ = ginkgo.It("TestGetPageUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	getUC := pages.NewGetPageUseCase(deps.tree)
-
-	created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Home", Slug: "home", Kind: pageKind(),
-	})
-
-	out, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: pageID(created.Page.ID)})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Page.ID != created.Page.ID {
-		t.Errorf("expected ID %q, got %q", created.Page.ID, out.Page.ID)
-	}
-})
-
-var _ = ginkgo.It("TestGetPageUseCase_NotFound_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	getUC := pages.NewGetPageUseCase(deps.tree)
-
-	_, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for non-existent page, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCreatePageUseCase_ReservedHistorySlug_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Reserved",
-		Slug:   "history",
-		Kind:   pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected error for reserved history slug, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCreatePageUseCase_PageExists_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	if _, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Duplicate", Slug: "duplicate", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating initial page: %v", err)
-	}
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Duplicate", Slug: "duplicate", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected duplicate page error, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCreatePageUseCase_InvalidParent_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	invalidID := "not-real"
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(invalidID), Title: "Broken", Slug: "broken", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected invalid parent error, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCreatePageUseCase_RejectsCaseInsensitiveSlugConflict", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	if _, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Upper", Slug: "ABCD-efg", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating initial page: %v", err)
-	}
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Lower", Slug: "abcd-efg", Kind: pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected conflict for case-insensitive duplicate slug")
-	}
-})
-
-var _ = ginkgo.It("TestUpdatePageUseCase_AllowsUppercaseSlug", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	content := "# Updated"
-	out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID:  "user1",
-		ID:      pageID(created.Page.ID),
-		Version: pageVersion(created.Page.Version()),
-		Title:   "Original",
-		Slug:    "ABCD-efg",
-		Content: &content,
-		Kind:    pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("expected uppercase slug update to succeed, got %v", err)
-	}
-	if out.Page.Slug != "ABCD-efg" {
-		t.Fatalf("expected slug to be preserved, got %q", out.Page.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestDeletePageUseCase_EmptyID_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
-
-	err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "user1", ID: "", Recursive: false,
-	})
-	if err == nil {
-		t.Fatal("expected error when deleting empty page ID, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestFindByPathUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	findUC := pages.NewFindByPathUseCase(deps.tree)
-
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Company", Slug: "company", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	out, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "company"})
-	if err != nil {
-		t.Fatalf("unexpected error finding page: %v", err)
-	}
-	if out.Page.Slug != "company" {
-		t.Errorf("expected slug 'company', got %q", out.Page.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestFindByPathUseCase_NotFound_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	findUC := pages.NewFindByPathUseCase(deps.tree)
-
-	_, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "does/not/exist"})
-	if err == nil {
-		t.Fatal("expected error for invalid path, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestLookupPagePathUseCase_InvalidRoutePath_ReturnsValidationError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	lookupUC := pages.NewLookupPagePathUseCase(deps.tree)
-
-	_, err := lookupUC.Execute(context.Background(), pages.LookupPagePathInput{
-		Path: tree.RoutePath("docs//guide"),
-	})
-	if err == nil {
-		t.Fatal("expected validation error for invalid route path, got nil")
-	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-	assertFieldErrorCode(t, ve, "path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid)
-})
-
-var _ = ginkgo.It("TestSortPagesUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	sortUC := pages.NewSortPagesUseCase(deps.tree)
-
-	parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
-	})
-	child1, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child1", Slug: "child1", Kind: pageKind(),
-	})
-	child2, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child2", Slug: "child2", Kind: pageKind(),
-	})
-
-	if err := sortUC.Execute(context.Background(), pages.SortPagesInput{
-		ParentID: pageID(parent.Page.ID), OrderedIDs: []tree.PageID{pageID(child2.Page.ID), pageID(child1.Page.ID)},
-	}); err != nil {
-		t.Fatalf("unexpected error sorting pages: %v", err)
-	}
-
-	sortedParent, err := deps.tree.GetPage(newFixturePageID(parent.Page.ID))
-	if err != nil {
-		t.Fatalf("failed to reload parent: %v", err)
-	}
-	if len(sortedParent.Children) != 2 {
-		t.Fatalf("expected 2 children, got %d", len(sortedParent.Children))
-	}
-	if sortedParent.Children[0].ID != child2.Page.ID || sortedParent.Children[1].ID != child1.Page.ID {
-		t.Errorf("expected order [%s, %s], got [%s, %s]", child2.Page.ID, child1.Page.ID, sortedParent.Children[0].ID, sortedParent.Children[1].ID)
-	}
-})
-
-var _ = ginkgo.It("TestSuggestSlugUseCase_Unique", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
-
-	out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: "root",
-		Title:    "My Page",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Slug != "my-page" {
-		t.Errorf("expected 'my-page', got %q", out.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestSuggestSlugUseCase_Conflict", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
-
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "My Page", Slug: "my-page", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: pageID(deps.tree.GetTree().ID),
-		Title:    "My Page",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Slug != "my-page-1" {
-		t.Errorf("expected 'my-page-1', got %q", out.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestSuggestSlugUseCase_DeepHierarchy", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
-
-	arch, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Architecture", Slug: "architecture", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating architecture: %v", err)
-	}
-	backend, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(arch.Page.ID), Title: "Backend", Slug: "backend", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating backend: %v", err)
-	}
-
-	out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: pageID(backend.Page.ID),
-		Title:    "Data Layer",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error suggesting slug: %v", err)
-	}
-	if out.Slug != "data-layer" {
-		t.Errorf("expected 'data-layer', got %q", out.Slug)
-	}
-
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(backend.Page.ID), Title: "Data Layer", Slug: "data-layer", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating duplicate title page: %v", err)
-	}
-
-	out2, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
-		ParentID: pageID(backend.Page.ID),
-		Title:    "Data Layer",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error suggesting second slug: %v", err)
-	}
-	if out2.Slug != "data-layer-1" {
-		t.Errorf("expected 'data-layer-1', got %q", out2.Slug)
-	}
-})
-
-var _ = ginkgo.It("TestCopyPageUseCase_HappyPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
-
-	original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-
-	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error copying page: %v", err)
-	}
-	if out.Page.Title != "Copy of Original" {
-		t.Errorf("expected title 'Copy of Original', got %q", out.Page.Title)
-	}
-	if out.Page.Slug != "copy-of-original" {
-		t.Errorf("expected slug 'copy-of-original', got %q", out.Page.Slug)
-	}
-	if out.Page.ID == original.Page.ID {
-		t.Error("expected copied page to have a different ID")
-	}
-})
-
-var _ = ginkgo.It("TestCopyPageUseCase_WithParent", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
-
-	parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
-	})
-	original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-
-	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: pageID(original.Page.ID), TargetParentID: pageIDPtr(parent.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error copying page: %v", err)
-	}
-	if out.Page.Parent == nil || out.Page.Parent.ID != parent.Page.ID {
-		t.Errorf("expected parent ID %q, got %v", parent.Page.ID, out.Page.Parent)
-	}
-})
-
-var _ = ginkgo.It("TestCopyPageUseCase_NonExistentSource_ReturnsError", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
-
-	_, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: "non-existent-id", Title: "Copy", Slug: "copy",
-	})
-	if err == nil {
-		t.Fatal("expected error for non-existent source page, got nil")
-	}
-})
-
-var _ = ginkgo.It("TestCopyPageUseCase_WithAssets", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
-
-	original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
-	})
-
-	file, _, err := test_utils.CreateMultipartFile("image.png", []byte("image content"))
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		if err := file.Close(); err != nil {
-			t.Fatalf("failed to close test file: %v", err)
+		// Verify it is gone
+		if _, err := deps.tree.GetPage(newFixturePageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
+			Expect(err).To(MatchError(tree.ErrPageNotFound))
 		}
 	})
 
-	if _, err := deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.AssetName("image.png"), 1024); err != nil {
-		t.Fatalf("Failed to save asset for original page: %v", err)
-	}
+	ginkgo.It("rejects root deletion", func() {
+		deps := newTestDeps()
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
-	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
+		err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID: "user1", ID: "root", Recursive: false,
+		})
+		Expect(err).To(MatchPageLocalizedCode(pages.ErrCodePageRootOperation))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error copying page: %v", err)
-	}
 
-	copiedAssets, err := deps.assets.ListAssetsForPage(out.Page.PageNode)
-	if err != nil {
-		t.Fatalf("Failed to list assets for copied page: %v", err)
-	}
-	if len(copiedAssets) != 1 {
-		t.Errorf("expected 1 asset for copied page, got %d", len(copiedAssets))
-	}
-})
+	ginkgo.It("recursively deletes pages with children", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
-var _ = ginkgo.It("TestCopyPageUseCase_IndexesOutgoingLinksOnCreate", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+		})
+		createUC.Execute(context.Background(), pages.CreatePageInput{ //nolint:errcheck
+			UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
+		})
 
-	target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Target", Slug: "target", Kind: pageKind(),
+		err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID: "user1", ID: pageID(parent.Page.ID), Version: pageVersion(parent.Page.Version()), Recursive: true,
+		})
+		Expect(err).To(Succeed())
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating target page: %v", err)
-	}
 
-	original, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+	// ─────────────────────────────────────────────────────────────────────────────
+	// MovePageUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
+
+	ginkgo.It("moves a page under a new parent", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
+
+		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+		})
+		child, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Child", Slug: "child", Kind: pageKind(),
+		})
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID:   "user1",
+			ID:       pageID(child.Page.ID),
+			Version:  pageVersion(child.Page.Version()),
+			ParentID: pageID(parent.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		moved, err := deps.tree.GetPage(newFixturePageID(child.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(moved.Parent).To(gstruct.PointTo(HaveField("ID", Equal(parent.Page.ID))))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating source page: %v", err)
-	}
 
-	content := "Links: [Target](/target.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: pageID(original.Page.ID), Version: pageVersion(original.Page.Version()), Title: original.Page.Title, Slug: slug(original.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error updating source page: %v", err)
-	}
+	ginkgo.It("rejects stale page moves", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
-	out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
-		UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy", Slug: "copy",
+		parentA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent A", Slug: "parent-a", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		parentB, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent B", Slug: "parent-b", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		parentC, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent C", Slug: "parent-c", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID:   "user1",
+			ParentID: pageIDPtr(parentA.Page.ID),
+			Title:    "Child",
+			Slug:     "child",
+			Kind:     pageKind(),
+		})
+		Expect(err).To(Succeed())
+		staleVersion := child.Page.Version()
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID:   "user1",
+			ID:       pageID(child.Page.ID),
+			Version:  pageVersion(staleVersion),
+			ParentID: pageID(parentB.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		err = moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID:   "user2",
+			ID:       pageID(child.Page.ID),
+			Version:  pageVersion(staleVersion),
+			ParentID: pageID(parentC.Page.ID),
+		})
+		Expect(err).To(MatchError(tree.ErrVersionConflict))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error copying page: %v", err)
-	}
 
-	outgoing, err := deps.links.GetOutgoingLinksForPage(out.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinksForPage failed: %v", err)
-	}
-	if outgoing.Count != 1 {
-		t.Fatalf("expected 1 outgoing link on copied page, got %d", outgoing.Count)
-	}
-	if outgoing.Outgoings[0].ToPageID != target.Page.ID {
-		t.Fatalf("expected copied page link target %q, got %q", target.Page.ID, outgoing.Outgoings[0].ToPageID)
-	}
-})
+	ginkgo.It("rejects moving the root page", func() {
+		deps := newTestDeps()
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
-var _ = ginkgo.It("TestUpdatePageUseCase_EventBeforeIsOmittedForLiveNodeSafety", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	effect := &captureEffect{}
-	orchestrator := pagesave.NewPageSaveOrchestrator(effect)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
-
-	created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Old", Slug: "old", Kind: pageKind(),
+		err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID: "user1", ID: "root", Version: "root-version", ParentID: "root",
+		})
+		Expect(err).To(MatchPageLocalizedCode(pages.ErrCodePageRootOperation))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
 
-	content := "updated"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "New", Slug: "new", Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error updating page: %v", err)
-	}
+	// ─────────────────────────────────────────────────────────────────────────────
+	// ConvertPageUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
 
-	if len(effect.events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(effect.events))
-	}
-	event := effect.events[1]
-	if event.Operation != pagesave.PageOperationUpdate {
-		t.Fatalf("expected update event, got %q", event.Operation)
-	}
-	if event.Before != nil {
-		t.Fatal("expected Before to be omitted for update events")
-	}
-	if event.OldPath != "old" {
-		t.Fatalf("expected OldPath=old, got %q", event.OldPath)
-	}
-})
+	ginkgo.It("records convert mutations with the requested source", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		capture := &captureEffect{}
+		convertUC := pages.NewConvertPageUseCase(deps.tree, pagesave.NewPageSaveOrchestrator(capture), slog.Default())
 
-var _ = ginkgo.It("TestMovePageUseCase_EventBeforeIsOmittedForLiveNodeSafety", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	effect := &captureEffect{}
-	orchestrator := pagesave.NewPageSaveOrchestrator(effect)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, orchestrator, slog.Default())
+		page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Convert Me", Slug: "convert-me", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
 
-	parentA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "A", Slug: "a", Kind: sectionKind(),
+		if err := convertUC.Execute(context.Background(), pages.ConvertPageInput{
+			UserID:     "mcp-user",
+			Source:     pagesave.PageMutationSourceMCP,
+			ID:         pageID(page.Page.ID),
+			Version:    pageVersion(page.Page.Version()),
+			TargetKind: tree.NodeKindSection,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(capture.events).To(HaveExactElements(SatisfyAll(
+			HaveField("Operation", Equal(pagesave.PageOperationUpdate)),
+			HaveField("UserID", Equal(tree.UserIDFromString("mcp-user"))),
+			HaveField("Source", Equal(pagesave.PageMutationSourceMCP)),
+			HaveField("Before", Not(BeNil())),
+			HaveField("After", WithTransform(func(page *tree.Page) tree.NodeKind {
+				if page == nil {
+					return ""
+				}
+				return page.Kind
+			}, Equal(tree.NodeKindSection))),
+			HaveField("AffectedPages", ContainElement(HaveField("ID", Equal(page.Page.ID)))),
+		)))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent A: %v", err)
-	}
-	parentB, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "B", Slug: "b", Kind: sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating parent B: %v", err)
-	}
-	child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", ParentID: pageIDPtr(parentA.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating child: %v", err)
-	}
 
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "user1", ID: pageID(child.Page.ID), Version: pageVersion(child.Page.Version()), ParentID: pageID(parentB.Page.ID),
-	}); err != nil {
-		t.Fatalf("unexpected error moving page: %v", err)
-	}
+	// ─────────────────────────────────────────────────────────────────────────────
+	// EnsurePathUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
 
-	if len(effect.events) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(effect.events))
-	}
-	event := effect.events[3]
-	if event.Operation != pagesave.PageOperationMove {
-		t.Fatalf("expected move event, got %q", event.Operation)
-	}
-	if event.Before != nil {
-		t.Fatal("expected Before to be omitted for move events")
-	}
-	if event.OldPath != "a/child" {
-		t.Fatalf("expected OldPath=a/child, got %q", event.OldPath)
-	}
-})
+	ginkgo.It("creates every segment in a missing path", func() {
+		deps := newTestDeps()
+		uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-var _ = ginkgo.It("TestPreviewPageRefactorUseCase_RenameListsAffectedPages", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		out, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+			UserID:      "user1",
+			TargetPath:  "docs/reference",
+			TargetTitle: "Reference",
+			Kind:        pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).NotTo(BeNil())
+	})
 
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	content := "[Target](/target.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
+	ginkgo.It("returns an existing page for an existing path", func() {
+		deps := newTestDeps()
+		uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: pageID(target.Page.ID),
-		Kind:   pages.RefactorKindRename,
-		Title:  target.Page.Title,
-		Slug:   "target-renamed",
-	})
-	if err != nil {
-		t.Fatalf("PreviewPageRefactor failed: %v", err)
-	}
-	if preview.OldPath != "target" {
-		t.Fatalf("OldPath = %q, want %q", preview.OldPath, "target")
-	}
-	if preview.NewPath != "/target-renamed" {
-		t.Fatalf("NewPath = %q, want %q", preview.NewPath, "/target-renamed")
-	}
-	if preview.Counts.AffectedPages != 1 {
-		t.Fatalf("AffectedPages = %d, want 1", preview.Counts.AffectedPages)
-	}
-	if len(preview.AffectedPages) != 1 {
-		t.Fatalf("expected 1 affected page, got %d", len(preview.AffectedPages))
-	}
-	if preview.AffectedPages[0].FromPageID != ref.Page.ID {
-		t.Fatalf("FromPageID = %q, want %q", preview.AffectedPages[0].FromPageID, ref.Page.ID)
-	}
-})
+		out1, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+			UserID: "user1", TargetPath: "docs", TargetTitle: "Docs", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
 
-var _ = ginkgo.It("TestPreviewPageRefactorUseCase_RenameDoesNotListNonCanonicalExtensionlessPageLink", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		out2, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+			UserID: "user1", TargetPath: "docs", TargetTitle: "Docs", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out1.Page.ID).To(Equal(out2.Page.ID))
+	})
 
-	ref, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create ref failed: %v", err)
-	}
-	content := "[Target](/target)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
+	ginkgo.It("creates a page twin when a section owns the route", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create target failed: %v", err)
-	}
+		section, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Sync Section",
+			Slug:   "sync",
+			Kind:   sectionKind(),
+		})
+		Expect(err).To(Succeed())
 
-	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: pageID(target.Page.ID),
-		Kind:   pages.RefactorKindRename,
-		Title:  target.Page.Title,
-		Slug:   "target-renamed",
-	})
-	if err != nil {
-		t.Fatalf("PreviewPageRefactor failed: %v", err)
-	}
-	if preview.Counts.AffectedPages != 0 {
-		t.Fatalf("AffectedPages = %d, want 0: %#v", preview.Counts.AffectedPages, preview.AffectedPages)
-	}
-})
+		out, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
+			UserID:      "user1",
+			TargetPath:  "sync",
+			TargetTitle: "Sync Page",
+			Kind:        pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).To(SatisfyAll(
+			HaveField("ID", Not(Equal(section.Page.ID))),
+			HaveField("Kind", Equal(tree.NodeKindPage)),
+		))
 
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_RenameDoesNotRewriteNonCanonicalExtensionlessPageLink", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		sectionTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindSection)
+		Expect(err).To(Succeed())
+		Expect(sectionTwin.ID).To(Equal(section.Page.ID))
+		pageTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindPage)
+		Expect(err).To(Succeed())
+		Expect(pageTwin.ID).To(Equal(out.Page.ID))
 
-	ref, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		second, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
+			UserID:      "user1",
+			TargetPath:  "sync",
+			TargetTitle: "Ignored",
+			Kind:        pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(second.Page.ID).To(Equal(out.Page.ID))
 	})
-	if err != nil {
-		t.Fatalf("create ref failed: %v", err)
-	}
-	content := "[Target](/target)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
 
-	target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create target failed: %v", err)
-	}
+	ginkgo.It("creates a section twin when a page owns the route", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(target.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  pageID(target.Page.ID),
-			Kind:    pages.RefactorKindRename,
-			Title:   "Target Renamed",
-			Slug:    "target-renamed",
-			Content: &target.Page.Content,
-		},
-		RewriteLinks: true,
-	}); err != nil {
-		t.Fatalf("ApplyPageRefactor failed: %v", err)
-	}
+		page, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Sync Page",
+			Slug:   "sync",
+			Kind:   pageKind(),
+		})
+		Expect(err).To(Succeed())
 
-	refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(ref) failed: %v", err)
-	}
-	if refPage.Content != content {
-		t.Fatalf("ref content = %q, want unchanged %q", refPage.Content, content)
-	}
-})
+		out, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
+			UserID:      "user1",
+			TargetPath:  "sync",
+			TargetTitle: "Sync Section",
+			Kind:        sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).To(SatisfyAll(
+			HaveField("ID", Not(Equal(page.Page.ID))),
+			HaveField("Kind", Equal(tree.NodeKindSection)),
+		))
 
-var _ = ginkgo.It("TestPreviewPageRefactorUseCase_PageRenameIgnoresSectionTwinDescendants", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		pageTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindPage)
+		Expect(err).To(Succeed())
+		Expect(pageTwin.ID).To(Equal(page.Page.ID))
+		sectionTwin, err := deps.tree.FindPageByRoutePathAndKind("sync", tree.NodeKindSection)
+		Expect(err).To(Succeed())
+		Expect(sectionTwin.ID).To(Equal(out.Page.ID))
 
-	docs, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: sectionKind(),
+		second, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
+			UserID:      "user1",
+			TargetPath:  "sync",
+			TargetTitle: "Ignored",
+			Kind:        sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(second.Page.ID).To(Equal(out.Page.ID))
 	})
-	if err != nil {
-		t.Fatalf("create docs failed: %v", err)
-	}
-	syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create sync page failed: %v", err)
-	}
-	syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("create sync section failed: %v", err)
-	}
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("create sync section child failed: %v", err)
-	}
-	pageRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page Ref", Slug: "page-ref", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create page ref failed: %v", err)
-	}
-	sectionDescendantRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Section Descendant Ref", Slug: "section-descendant-ref", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create section descendant ref failed: %v", err)
-	}
-	pageRefContent := "[Sync page](/docs/sync.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("update page ref failed: %v", err)
-	}
-	sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("update section descendant ref failed: %v", err)
-	}
 
-	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: pageID(syncPage.Page.ID),
-		Kind:   pages.RefactorKindRename,
-		Title:  syncPage.Page.Title,
-		Slug:   "sync-page",
-	})
-	if err != nil {
-		t.Fatalf("PreviewPageRefactor failed: %v", err)
-	}
-	if preview.Counts.AffectedPages != 1 {
-		t.Fatalf("AffectedPages = %d, want 1: %#v", preview.Counts.AffectedPages, preview.AffectedPages)
-	}
-	if len(preview.AffectedPages) != 1 || preview.AffectedPages[0].FromPageID != pageRef.Page.ID {
-		t.Fatalf("affected pages = %#v, want only page ref %q", preview.AffectedPages, pageRef.Page.ID)
-	}
-})
+	ginkgo.It("rejects ensure path without a path", func() {
+		deps := newTestDeps()
+		uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_PageRenameKeepsSectionTwinDescendantLinksHealthy", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		_, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+			UserID: "user1", TargetPath: "", TargetTitle: "Title", Kind: pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("path", pages.FieldCodePagePathRequired, pages.MessageIDPagePathRequired))
+	})
 
-	docs, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("create docs failed: %v", err)
-	}
-	syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create sync page failed: %v", err)
-	}
-	syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
-	})
-	if err != nil {
-		t.Fatalf("create sync section failed: %v", err)
-	}
-	syncChild, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create sync section child failed: %v", err)
-	}
-	pageRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page Ref", Slug: "page-ref", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create page ref failed: %v", err)
-	}
-	sectionDescendantRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Section Descendant Ref", Slug: "section-descendant-ref", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("create section descendant ref failed: %v", err)
-	}
-	pageRefContent := "[Sync page](/docs/sync.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("update page ref failed: %v", err)
-	}
-	sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("update section descendant ref failed: %v", err)
-	}
+	ginkgo.It("rejects ensure path with an invalid route", func() {
+		deps := newTestDeps()
+		uc := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(syncPage.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
+		_, err := uc.Execute(context.Background(), pages.EnsurePathInput{
+			UserID: "user1", TargetPath: tree.RoutePath("docs//guide"), TargetTitle: "Guide", Kind: pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid))
+	})
+
+	// ─────────────────────────────────────────────────────────────────────────────
+	// GetPageUseCase
+	// ─────────────────────────────────────────────────────────────────────────────
+
+	ginkgo.It("returns an existing page by ID", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		getUC := pages.NewGetPageUseCase(deps.tree)
+
+		created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Home", Slug: "home", Kind: pageKind(),
+		})
+
+		out, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: pageID(created.Page.ID)})
+		Expect(err).To(Succeed())
+		Expect(out.Page.ID).To(Equal(created.Page.ID))
+	})
+
+	ginkgo.It("reports an error for missing pages", func() {
+		deps := newTestDeps()
+		getUC := pages.NewGetPageUseCase(deps.tree)
+
+		_, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: "nonexistent"})
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+	})
+
+	ginkgo.It("rejects the reserved history slug", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1",
+			Title:  "Reserved",
+			Slug:   "history",
+			Kind:   pageKind(),
+		})
+		Expect(err).To(HavePageValidationFieldError("slug", pages.FieldCodePageSlugInvalid, pages.MessageIDPageSlugInvalid))
+	})
+
+	ginkgo.It("rejects duplicate page routes", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		if _, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Duplicate", Slug: "duplicate", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Duplicate", Slug: "duplicate", Kind: pageKind(),
+		})
+		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
+	})
+
+	ginkgo.It("rejects a missing parent", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		invalidID := "not-real"
+
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(invalidID), Title: "Broken", Slug: "broken", Kind: pageKind(),
+		})
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+	})
+
+	ginkgo.It("rejects case-insensitive slug conflicts", func() {
+		deps := newTestDeps()
+		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		if _, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Upper", Slug: "ABCD-efg", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Lower", Slug: "abcd-efg", Kind: pageKind(),
+		})
+		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
+	})
+
+	ginkgo.It("preserves uppercase slugs on update", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		content := "# Updated"
+		out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID:  "user1",
+			ID:      pageID(created.Page.ID),
+			Version: pageVersion(created.Page.Version()),
+			Title:   "Original",
+			Slug:    "ABCD-efg",
+			Content: &content,
+			Kind:    pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page.Slug).To(Equal(slug("ABCD-efg")))
+	})
+
+	ginkgo.It("rejects delete requests without an ID", func() {
+		deps := newTestDeps()
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
+
+		err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID: "user1", ID: "", Recursive: false,
+		})
+		Expect(err).To(MatchPageLocalizedCode(pages.ErrCodePageRootOperation))
+	})
+
+	ginkgo.It("finds a page by route", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		findUC := pages.NewFindByPathUseCase(deps.tree)
+
+		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Company", Slug: "company", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "company"})
+		Expect(err).To(Succeed())
+		Expect(out.Page.Slug).To(Equal(slug("company")))
+	})
+
+	ginkgo.It("reports missing page route lookup", func() {
+		deps := newTestDeps()
+		findUC := pages.NewFindByPathUseCase(deps.tree)
+
+		_, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "does/not/exist"})
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+	})
+
+	ginkgo.It("rejects invalid lookup route paths", func() {
+		deps := newTestDeps()
+		lookupUC := pages.NewLookupPagePathUseCase(deps.tree)
+
+		_, err := lookupUC.Execute(context.Background(), pages.LookupPagePathInput{
+			Path: tree.RoutePath("docs//guide"),
+		})
+		Expect(err).To(HavePageValidationFieldError("path", pages.FieldCodePagePathInvalid, pages.MessageIDPagePathInvalid))
+	})
+
+	ginkgo.It("reorders child pages", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		sortUC := pages.NewSortPagesUseCase(deps.tree)
+
+		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+		})
+		child1, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child1", Slug: "child1", Kind: pageKind(),
+		})
+		child2, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child2", Slug: "child2", Kind: pageKind(),
+		})
+
+		if err := sortUC.Execute(context.Background(), pages.SortPagesInput{
+			ParentID: pageID(parent.Page.ID), OrderedIDs: []tree.PageID{pageID(child2.Page.ID), pageID(child1.Page.ID)},
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		sortedParent, err := deps.tree.GetPage(newFixturePageID(parent.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(sortedParent.Children).To(HaveExactElements(
+			HaveField("ID", Equal(child2.Page.ID)),
+			HaveField("ID", Equal(child1.Page.ID)),
+		))
+	})
+
+	ginkgo.It("suggests a unique slug", func() {
+		deps := newTestDeps()
+		uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
+
+		out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
+			ParentID: "root",
+			Title:    "My Page",
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Slug).To(Equal(slug("my-page")))
+	})
+
+	ginkgo.It("suggests a conflict suffix", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
+
+		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "My Page", Slug: "my-page", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
+			ParentID: pageID(deps.tree.GetTree().ID),
+			Title:    "My Page",
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Slug).To(Equal(slug("my-page-1")))
+	})
+
+	ginkgo.It("suggests a slug in a deep hierarchy", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		uc := pages.NewSuggestSlugUseCase(deps.tree, deps.slug)
+
+		arch, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Architecture", Slug: "architecture", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		backend, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(arch.Page.ID), Title: "Backend", Slug: "backend", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		out, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
+			ParentID: pageID(backend.Page.ID),
+			Title:    "Data Layer",
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Slug).To(Equal(slug("data-layer")))
+
+		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(backend.Page.ID), Title: "Data Layer", Slug: "data-layer", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out2, err := uc.Execute(context.Background(), pages.SuggestSlugInput{
+			ParentID: pageID(backend.Page.ID),
+			Title:    "Data Layer",
+		})
+		Expect(err).To(Succeed())
+		Expect(out2.Slug).To(Equal(slug("data-layer-1")))
+	})
+
+	ginkgo.It("copies a page", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+
+		original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+		})
+
+		out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
+			UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page).To(SatisfyAll(
+			HaveField("Title", Equal("Copy of Original")),
+			HaveField("Slug", Equal(slug("copy-of-original"))),
+			HaveField("ID", Not(Equal(original.Page.ID))),
+		))
+	})
+
+	ginkgo.It("copies a page under a parent", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+
+		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+		})
+		original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+		})
+
+		out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
+			UserID: "user1", SourcePageID: pageID(original.Page.ID), TargetParentID: pageIDPtr(parent.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
+		})
+		Expect(err).To(Succeed())
+		Expect(out.Page.Parent).To(gstruct.PointTo(HaveField("ID", Equal(parent.Page.ID))))
+	})
+
+	ginkgo.It("rejects copying a missing source page", func() {
+		deps := newTestDeps()
+		copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+
+		_, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
+			UserID: "user1", SourcePageID: "non-existent-id", Title: "Copy", Slug: "copy",
+		})
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+	})
+
+	ginkgo.It("copies page assets", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+
+		original, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+		})
+
+		file, _, err := test_utils.CreateMultipartFile("image.png", []byte("image content"))
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			if err := file.Close(); err != nil {
+				Expect(err).To(Succeed())
+			}
+		})
+
+		_, err = deps.assets.SaveAssetForPage(original.Page.PageNode, file, tree.AssetName("image.png"), 1024)
+		Expect(err).To(Succeed())
+
+		out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
+			UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy of Original", Slug: "copy-of-original",
+		})
+		Expect(err).To(Succeed())
+
+		copiedAssets, err := deps.assets.ListAssetsForPage(out.Page.PageNode)
+		Expect(err).To(Succeed())
+		Expect(copiedAssets).To(HaveLen(1))
+	})
+
+	ginkgo.It("indexes outgoing links for copied pages", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		copyUC := pages.NewCopyPageUseCase(deps.tree, deps.slug, deps.orchestrator(), deps.assets, slog.Default())
+
+		target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		original, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Original", Slug: "original", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		content := "Links: [Target](/target.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "user1", ID: pageID(original.Page.ID), Version: pageVersion(original.Page.Version()), Title: original.Page.Title, Slug: slug(original.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out, err := copyUC.Execute(context.Background(), pages.CopyPageInput{
+			UserID: "user1", SourcePageID: pageID(original.Page.ID), Title: "Copy", Slug: "copy",
+		})
+		Expect(err).To(Succeed())
+
+		outgoing, err := deps.links.GetOutgoingLinksForPage(out.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outgoing).To(SatisfyAll(
+			HaveField("Count", Equal(1)),
+			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing("/target", target.Page.ID))),
+		))
+	})
+
+	ginkgo.It("omits live before snapshots from update events", func() {
+		deps := newTestDeps()
+		effect := &captureEffect{}
+		orchestrator := pagesave.NewPageSaveOrchestrator(effect)
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
+
+		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Old", Slug: "old", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		content := "updated"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "New", Slug: "new", Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(effect.events).To(SatisfyAll(
+			HaveLen(2),
+			ContainElement(SatisfyAll(
+				HaveField("Operation", Equal(pagesave.PageOperationUpdate)),
+				HaveField("Before", BeNil()),
+				HaveField("OldPath", Equal(tree.RoutePath("old"))),
+			)),
+		))
+	})
+
+	ginkgo.It("omits live before snapshots from move events", func() {
+		deps := newTestDeps()
+		effect := &captureEffect{}
+		orchestrator := pagesave.NewPageSaveOrchestrator(effect)
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, orchestrator, slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, orchestrator, slog.Default())
+
+		parentA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "A", Slug: "a", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		parentB, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "B", Slug: "b", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", ParentID: pageIDPtr(parentA.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID: "user1", ID: pageID(child.Page.ID), Version: pageVersion(child.Page.Version()), ParentID: pageID(parentB.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(effect.events).To(SatisfyAll(
+			HaveLen(4),
+			ContainElement(SatisfyAll(
+				HaveField("Operation", Equal(pagesave.PageOperationMove)),
+				HaveField("Before", BeNil()),
+				HaveField("OldPath", Equal(tree.RoutePath("a/child"))),
+			)),
+		))
+	})
+
+	ginkgo.It("previews affected pages for page renames", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		content := "[Target](/target.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
+			PageID: pageID(target.Page.ID),
+			Kind:   pages.RefactorKindRename,
+			Title:  target.Page.Title,
+			Slug:   "target-renamed",
+		})
+		Expect(err).To(Succeed())
+		Expect(preview.OldPath).To(Equal(tree.RoutePath("target")))
+		Expect(preview.NewPath).To(Equal("/target-renamed"))
+		Expect(preview.Counts.AffectedPages).To(Equal(1))
+		Expect(preview.AffectedPages).To(HaveExactElements(HaveField("FromPageID", Equal(ref.Page.ID))))
+	})
+
+	ginkgo.It("ignores non-canonical extensionless links in rename previews", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		ref, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		content := "[Target](/target)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
+			PageID: pageID(target.Page.ID),
+			Kind:   pages.RefactorKindRename,
+			Title:  target.Page.Title,
+			Slug:   "target-renamed",
+		})
+		Expect(err).To(Succeed())
+		Expect(preview.Counts.AffectedPages).To(BeZero())
+	})
+
+	ginkgo.It("leaves non-canonical extensionless links unchanged during rename apply", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		ref, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		content := "[Target](/target)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		target, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(target.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID:  pageID(target.Page.ID),
+				Kind:    pages.RefactorKindRename,
+				Title:   "Target Renamed",
+				Slug:    "target-renamed",
+				Content: &target.Page.Content,
+			},
+			RewriteLinks: true,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(refPage.Content).To(Equal(content))
+	})
+
+	ginkgo.It("ignores section-twin descendants when previewing a page rename", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		docs, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+		pageRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Page Ref", Slug: "page-ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		sectionDescendantRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Section Descendant Ref", Slug: "section-descendant-ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		pageRefContent := "[Sync page](/docs/sync.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+		sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
 			PageID: pageID(syncPage.Page.ID),
 			Kind:   pages.RefactorKindRename,
 			Title:  syncPage.Page.Title,
 			Slug:   "sync-page",
-		},
-		RewriteLinks: true,
-	}); err != nil {
-		t.Fatalf("ApplyPageRefactor failed: %v", err)
-	}
-
-	status, err := deps.links.GetLinkStatusForPage(sectionDescendantRef.Page.ID, sectionDescendantRef.Page.CalculateRoutePath())
-	if err != nil {
-		t.Fatalf("GetLinkStatusForPage failed: %v", err)
-	}
-	if status.Counts.BrokenOutgoings != 0 {
-		t.Fatalf("broken outgoing count = %d, want 0: %#v", status.Counts.BrokenOutgoings, status.BrokenOutgoings)
-	}
-	if status.Counts.Outgoings != 1 || status.Outgoings[0].ToPageID != syncChild.Page.ID {
-		t.Fatalf("outgoings = %#v, want healthy link to child %q", status.Outgoings, syncChild.Page.ID)
-	}
-})
-
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
-
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		Expect(preview.Counts.AffectedPages).To(Equal(1))
+		Expect(preview.AffectedPages).To(HaveExactElements(HaveField("FromPageID", Equal(pageRef.Page.ID))))
 	})
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	content := "[Target](/target.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
 
-	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(target.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  pageID(target.Page.ID),
-			Kind:    pages.RefactorKindRename,
-			Title:   "Target Renamed",
-			Slug:    "target-renamed",
-			Content: &target.Page.Content,
-		},
-		RewriteLinks: true,
-	})
-	if err != nil {
-		t.Fatalf("ApplyPageRefactor failed: %v", err)
-	}
-	if updated.CalculatePath() != "/target-renamed" {
-		t.Fatalf("updated path mismatch: %q", updated.CalculatePath())
-	}
+	ginkgo.It("keeps section-twin descendant links healthy during page rename apply", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
-	refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(ref) failed: %v", err)
-	}
-	if refPage.Content != "[Target](/target-renamed.md)" {
-		t.Fatalf("ref content = %q, want %q", refPage.Content, "[Target](/target-renamed.md)")
-	}
-
-	outgoing, err := deps.links.GetOutgoingLinksForPage(ref.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks failed: %v", err)
-	}
-	if outgoing.Count != 1 {
-		t.Fatalf("expected 1 outgoing, got %d", outgoing.Count)
-	}
-	if outgoing.Outgoings[0].ToPath != "/target-renamed" {
-		t.Fatalf("ToPath = %q, want %q", outgoing.Outgoings[0].ToPath, "/target-renamed")
-	}
-	if outgoing.Outgoings[0].Broken {
-		t.Fatalf("expected rewritten link to be healed")
-	}
-
-})
-
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_UsesInjectedOrchestratorForRewrittenLinks", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	capture := &captureEffect{}
-	orchestrator := pagesave.NewPageSaveOrchestrator(
-		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
-		capture,
-	)
-	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
-
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	content := "[Target](/target.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
-
-	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "mcp-user",
-		Source:  pagesave.PageMutationSourceMCP,
-		Version: pageVersion(target.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  pageID(target.Page.ID),
-			Kind:    pages.RefactorKindRename,
-			Title:   "Target Renamed",
-			Slug:    "target-renamed",
-			Content: &target.Page.Content,
-		},
-		RewriteLinks: true,
-	}); err != nil {
-		t.Fatalf("ApplyPageRefactor failed: %v", err)
-	}
-
-	var sawRewriteBatch bool
-	for _, event := range capture.events {
-		if event.Operation != pagesave.PageOperationUpdate || !event.ContentChanged || event.After != nil {
-			continue
+		docs, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		syncPage, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Page", Slug: "sync", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		syncSection, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Sync Section", Slug: "sync", Kind: sectionKind(),
+		})
+		Expect(err).To(Succeed())
+		syncChild, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(syncSection.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		pageRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Page Ref", Slug: "page-ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		sectionDescendantRef, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Section Descendant Ref", Slug: "section-descendant-ref", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		pageRefContent := "[Sync page](/docs/sync.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(pageRef.Page.ID), Version: pageVersion(pageRef.Page.Version()), Title: pageRef.Page.Title, Slug: slug(pageRef.Page.Slug), Content: &pageRefContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-		if len(event.AffectedPages) != 1 || event.AffectedPages[0].ID != ref.Page.ID {
-			continue
+		sectionDescendantRefContent := "[Sync child](/docs/sync/child.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(sectionDescendantRef.Page.ID), Version: pageVersion(sectionDescendantRef.Page.Version()), Title: sectionDescendantRef.Page.Title, Slug: slug(sectionDescendantRef.Page.Slug), Content: &sectionDescendantRefContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-		if event.UserID != "mcp-user" {
-			t.Fatalf("rewrite batch user id = %q, want mcp-user", event.UserID)
+
+		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(syncPage.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID: pageID(syncPage.Page.ID),
+				Kind:   pages.RefactorKindRename,
+				Title:  syncPage.Page.Title,
+				Slug:   "sync-page",
+			},
+			RewriteLinks: true,
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-		if event.Source != pagesave.PageMutationSourceMCP {
-			t.Fatalf("rewrite batch source = %q, want MCP", event.Source)
+
+		status, err := deps.links.GetLinkStatusForPage(sectionDescendantRef.Page.ID, sectionDescendantRef.Page.CalculateRoutePath())
+		Expect(err).To(Succeed())
+		Expect(status.Counts.BrokenOutgoings).To(BeZero())
+		Expect(status.Outgoings).To(HaveExactElements(HaveField("ToPageID", Equal(syncChild.Page.ID))))
+	})
+
+	ginkgo.It("rewrites incoming links during rename apply", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		content := "[Target](/target.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-		sawRewriteBatch = true
-	}
-	if !sawRewriteBatch {
-		t.Fatalf("did not see orchestrated rewrite batch event; events = %#v", capture.events)
-	}
-})
 
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_RewrittenLinksKeepSearchIndexRawContent", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	searchIndex, err := search.NewSQLiteIndex(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSQLiteIndex failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		if err := searchIndex.Close(); err != nil {
-			t.Fatalf("failed to close search index: %v", err)
+		updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(target.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID:  pageID(target.Page.ID),
+				Kind:    pages.RefactorKindRename,
+				Title:   "Target Renamed",
+				Slug:    "target-renamed",
+				Content: &target.Page.Content,
+			},
+			RewriteLinks: true,
+		})
+		Expect(err).To(Succeed())
+		Expect(updated.CalculatePath()).To(Equal("/target-renamed"))
+
+		refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(refPage.Content).To(Equal("[Target](/target-renamed.md)"))
+
+		outgoing, err := deps.links.GetOutgoingLinksForPage(ref.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outgoing).To(SatisfyAll(
+			HaveField("Count", Equal(1)),
+			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing("/target-renamed", target.Page.ID))),
+		))
+
+	})
+
+	ginkgo.It("routes rewritten link events through the injected orchestrator", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		capture := &captureEffect{}
+		orchestrator := pagesave.NewPageSaveOrchestrator(
+			pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
+			capture,
+		)
+		applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
+
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		content := "[Target](/target.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
+
+		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "mcp-user",
+			Source:  pagesave.PageMutationSourceMCP,
+			Version: pageVersion(target.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID:  pageID(target.Page.ID),
+				Kind:    pages.RefactorKindRename,
+				Title:   "Target Renamed",
+				Slug:    "target-renamed",
+				Content: &target.Page.Content,
+			},
+			RewriteLinks: true,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(capture.events).To(ContainElement(SatisfyAll(
+			HaveField("Operation", Equal(pagesave.PageOperationUpdate)),
+			HaveField("ContentChanged", BeTrue()),
+			HaveField("After", BeNil()),
+			HaveField("AffectedPages", HaveExactElements(HaveField("ID", Equal(ref.Page.ID)))),
+			HaveField("UserID", Equal(tree.UserIDFromString("mcp-user"))),
+			HaveField("Source", Equal(pagesave.PageMutationSourceMCP)),
+		)))
 	})
 
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	orchestrator := pagesave.NewPageSaveOrchestrator(
-		pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
-		pagesave.NewSearchIndexSideEffect(searchIndex, deps.tree, slog.Default()),
-	)
-	applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
+	ginkgo.It("keeps rewritten link raw content searchable", func() {
+		deps := newTestDeps()
+		searchIndex, err := search.NewSQLiteIndex(pagesTestTempDir())
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			if err := searchIndex.Close(); err != nil {
+				Expect(err).To(Succeed())
+			}
+		})
 
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		orchestrator := pagesave.NewPageSaveOrchestrator(
+			pagesave.NewLinkIndexSideEffect(deps.links, slog.Default()),
+			pagesave.NewSearchIndexSideEffect(searchIndex, deps.tree, slog.Default()),
+		)
+		applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
+
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		content := "refactorsearchtoken [Target](/target.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(target.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID:  pageID(target.Page.ID),
+				Kind:    pages.RefactorKindRename,
+				Title:   "Target Renamed",
+				Slug:    "target-renamed",
+				Content: &target.Page.Content,
+			},
+			RewriteLinks: true,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		result, err := searchIndex.Search("refactorsearchtoken", nil, 0, 10)
+		Expect(err).To(Succeed())
+		Expect(result.Items).To(HaveExactElements(HaveField("PageID", Equal(ref.Page.ID))))
 	})
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+
+	ginkgo.It("leaves incoming links unchanged when rename apply has a stale version", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		refContent := "[Target](/target)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		staleVersion := target.Page.Version()
+		newerTargetContent := "newer target content"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(target.Page.ID), Version: pageVersion(staleVersion), Title: target.Page.Title, Slug: slug(target.Page.Slug), Content: &newerTargetContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(staleVersion),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID: pageID(target.Page.ID),
+				Kind:   pages.RefactorKindRename,
+				Title:  "Target Renamed",
+				Slug:   "target-renamed",
+			},
+			RewriteLinks: true,
+		})
+		Expect(err).To(MatchError(tree.ErrVersionConflict))
+
+		refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(refAfter.Content).To(Equal(refContent))
 	})
-	content := "refactorsearchtoken [Target](/target.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
 
-	if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(target.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID:  pageID(target.Page.ID),
-			Kind:    pages.RefactorKindRename,
-			Title:   "Target Renamed",
-			Slug:    "target-renamed",
-			Content: &target.Page.Content,
-		},
-		RewriteLinks: true,
-	}); err != nil {
-		t.Fatalf("ApplyPageRefactor failed: %v", err)
-	}
+	// - Refactor preview reports conflicts without mutating content
+	ginkgo.It("leaves incoming links unchanged when rename target conflicts", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
-	result, err := searchIndex.Search("refactorsearchtoken", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-	if len(result.Items) != 1 || result.Items[0].PageID != ref.Page.ID {
-		t.Fatalf("search result = %#v, want rewritten ref page", result.Items)
-	}
-})
+		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Existing", Slug: "existing", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+		})
+		refContent := "[Target](/target)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_StaleVersionDoesNotRewriteIncomingLinks", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+		_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(target.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID: pageID(target.Page.ID),
+				Kind:   pages.RefactorKindRename,
+				Title:  "Target",
+				Slug:   "existing",
+			},
+			RewriteLinks: true,
+		})
+		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
 
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(refAfter.Content).To(Equal(refContent))
+		targetAfter, err := deps.tree.GetPage(newFixturePageID(target.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(targetAfter.CalculatePath()).To(Equal("/target"))
 	})
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	refContent := "[Target](/target)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(ref) failed: %v", err)
-	}
 
-	staleVersion := target.Page.Version()
-	newerTargetContent := "newer target content"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(target.Page.ID), Version: pageVersion(staleVersion), Title: target.Page.Title, Slug: slug(target.Page.Slug), Content: &newerTargetContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(target) failed: %v", err)
-	}
+	ginkgo.It("returns empty warning arrays in refactor previews", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
-	_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(staleVersion),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID: pageID(target.Page.ID),
+		page, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+		})
+
+		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
+			PageID: pageID(page.Page.ID),
 			Kind:   pages.RefactorKindRename,
-			Title:  "Target Renamed",
+			Title:  page.Page.Title,
 			Slug:   "target-renamed",
-		},
-		RewriteLinks: true,
-	})
-	if !errors.Is(err, tree.ErrVersionConflict) {
-		t.Fatalf("ApplyPageRefactor stale version error = %v, want ErrVersionConflict", err)
-	}
-
-	refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(ref) failed: %v", err)
-	}
-	if refAfter.Content != refContent {
-		t.Fatalf("stale refactor rewrote incoming link content = %q, want %q", refAfter.Content, refContent)
-	}
-})
-
-// - Refactor preview reports conflicts without mutating content
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_TargetConflictDoesNotRewriteIncomingLinks", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
-
-	target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Existing", Slug: "existing", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("CreatePage(existing) failed: %v", err)
-	}
-	ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
-	})
-	refContent := "[Target](/target)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(ref) failed: %v", err)
-	}
-
-	_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(target.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
-			PageID: pageID(target.Page.ID),
-			Kind:   pages.RefactorKindRename,
-			Title:  "Target",
-			Slug:   "existing",
-		},
-		RewriteLinks: true,
-	})
-	if !errors.Is(err, tree.ErrPageAlreadyExists) {
-		t.Fatalf("ApplyPageRefactor conflict error = %v, want ErrPageAlreadyExists", err)
-	}
-
-	refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(ref) failed: %v", err)
-	}
-	if refAfter.Content != refContent {
-		t.Fatalf("conflicting refactor rewrote incoming link content = %q, want %q", refAfter.Content, refContent)
-	}
-	targetAfter, err := deps.tree.GetPage(newFixturePageID(target.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(target) failed: %v", err)
-	}
-	if targetAfter.CalculatePath() != "/target" {
-		t.Fatalf("conflicting refactor moved target to %q, want /target", targetAfter.CalculatePath())
-	}
-})
-
-var _ = ginkgo.It("TestPreviewPageRefactorUseCase_UsesEmptyWarningArrays", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
-
-	page, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
-	})
-
-	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID: pageID(page.Page.ID),
-		Kind:   pages.RefactorKindRename,
-		Title:  page.Page.Title,
-		Slug:   "target-renamed",
-	})
-	if err != nil {
-		t.Fatalf("PreviewPageRefactor failed: %v", err)
-	}
-	if preview.WarningDetails == nil {
-		t.Fatalf("expected preview warnings to be an empty slice, got nil")
-	}
-	if len(preview.WarningDetails) != 0 {
-		t.Fatalf("expected no preview warnings, got %d", len(preview.WarningDetails))
-	}
-	for i, affected := range preview.AffectedPages {
-		if affected.WarningDetails == nil {
-			t.Fatalf("affected page %d warnings should be empty slice, got nil", i)
+		})
+		Expect(err).To(Succeed())
+		Expect(preview.WarningDetails).NotTo(BeNil())
+		Expect(preview.WarningDetails).To(BeEmpty())
+		for _, affected := range preview.AffectedPages {
+			Expect(affected.WarningDetails).NotTo(BeNil())
+			Expect(affected.MatchedPaths).NotTo(BeNil())
 		}
-		if affected.MatchedPaths == nil {
-			t.Fatalf("affected page %d matched paths should be empty slice, got nil", i)
+	})
+
+	ginkgo.It("excludes moved subtree links from optional preview effects", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
+
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
+		})
+		pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
+		})
+		archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+		})
+
+		contentA := "[To B](./page-b.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-	}
-})
 
-var _ = ginkgo.It("TestPreviewPageRefactorUseCase_Move_ExcludesMovedSubtreeFromOptionalAffectedPages", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
-
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
-	})
-	pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
-	})
-	pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
-	})
-	archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
-	})
-
-	contentA := "[To B](./page-b.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(pageA) failed: %v", err)
-	}
-
-	preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
-		PageID:      pageID(pageA.Page.ID),
-		Kind:        pages.RefactorKindMove,
-		NewParentID: pageIDPtr(archive.Page.ID),
-	})
-	if err != nil {
-		t.Fatalf("PreviewPageRefactor failed: %v", err)
-	}
-	if preview.Counts.AffectedPages != 0 {
-		t.Fatalf("expected no optional affected pages, got %d", preview.Counts.AffectedPages)
-	}
-	if len(preview.AffectedPages) != 0 {
-		t.Fatalf("expected no affected pages, got %d", len(preview.AffectedPages))
-	}
-
-	_ = pageB
-})
-
-var _ = ginkgo.It("TestApplyPageRefactorUseCase_Move_RewritesRelativeOutgoingLinksInMovedPage", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
-
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
-	})
-	pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
-	})
-	pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
-	})
-	archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
-	})
-
-	contentA := "[To B](./page-b.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage(pageA) failed: %v", err)
-	}
-
-	updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-		UserID:  "system",
-		Version: pageVersion(pageA.Page.Version()),
-		RefactorPreviewInput: pages.RefactorPreviewInput{
+		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
 			PageID:      pageID(pageA.Page.ID),
 			Kind:        pages.RefactorKindMove,
 			NewParentID: pageIDPtr(archive.Page.ID),
-		},
-		RewriteLinks: false,
+		})
+		Expect(err).To(Succeed())
+		Expect(preview.Counts.AffectedPages).To(BeZero())
+		Expect(preview.AffectedPages).To(BeEmpty())
+
+		_ = pageB
 	})
-	if err != nil {
-		t.Fatalf("ApplyPageRefactor(move) failed: %v", err)
-	}
-	if updated.CalculatePath() != "/archive/page-a" {
-		t.Fatalf("updated path = %q, want %q", updated.CalculatePath(), "/archive/page-a")
-	}
 
-	movedPage, err := deps.tree.GetPage(newFixturePageID(pageA.Page.ID))
-	if err != nil {
-		t.Fatalf("GetPage(pageA) failed: %v", err)
-	}
-	if movedPage.Content != "[To B](../docs/page-b.md)" {
-		t.Fatalf("moved page content = %q, want %q", movedPage.Content, "[To B](../docs/page-b.md)")
-	}
+	ginkgo.It("rewrites moved page relative links", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
-	outgoing, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks(pageA) failed: %v", err)
-	}
-	if outgoing.Count != 1 {
-		t.Fatalf("expected 1 outgoing link, got %d", outgoing.Count)
-	}
-	if outgoing.Outgoings[0].ToPageID != pageB.Page.ID {
-		t.Fatalf("ToPageID = %q, want %q", outgoing.Outgoings[0].ToPageID, pageB.Page.ID)
-	}
-	if outgoing.Outgoings[0].ToPath != "/docs/page-b" {
-		t.Fatalf("ToPath = %q, want %q", outgoing.Outgoings[0].ToPath, "/docs/page-b")
-	}
-	if outgoing.Outgoings[0].Broken {
-		t.Fatalf("expected outgoing link to remain valid after move refactor")
-	}
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
+		})
+		pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
+		})
+		archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+		})
 
-})
-
-var _ = ginkgo.It("TestEnsurePathUseCase_HealsLinksForAllCreatedSegments", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-
-	pageA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage A failed: %v", err)
-	}
-
-	contentA := "Links: [X](/x) and [XY](/x/y.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
-
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-
-	out1, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks failed: %v", err)
-	}
-	if out1.Count != 2 {
-		t.Fatalf("expected 2 outgoings before ensure, got %d: %#v", out1.Count, out1.Outgoings)
-	}
-
-	byPath := map[string]bool{}
-	for _, it := range out1.Outgoings {
-		byPath[it.ToPath.WikiPath()] = it.Broken
-	}
-	if broken, ok := byPath["/x"]; !ok || !broken {
-		t.Fatalf("expected /x to be broken before ensure, got map=%#v, out=%#v", byPath, out1.Outgoings)
-	}
-	if broken, ok := byPath["/x/y"]; !ok || !broken {
-		t.Fatalf("expected /x/y to be broken before ensure, got map=%#v, out=%#v", byPath, out1.Outgoings)
-	}
-
-	if _, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-		UserID: "system", TargetPath: "/x/y", TargetTitle: "X Y", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("EnsurePath failed: %v", err)
-	}
-
-	out2, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks (after ensure) failed: %v", err)
-	}
-	if out2.Count != 2 {
-		t.Fatalf("expected 2 outgoings after ensure, got %d: %#v", out2.Count, out2.Outgoings)
-	}
-
-	var gotX, gotXY *struct {
-		broken bool
-		toPage tree.PageID
-	}
-	for _, it := range out2.Outgoings {
-		if it.ToPath == "/x" {
-			gotX = &struct {
-				broken bool
-				toPage tree.PageID
-			}{it.Broken, it.ToPageID}
+		contentA := "[To B](./page-b.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-		if it.ToPath == "/x/y" {
-			gotXY = &struct {
-				broken bool
-				toPage tree.PageID
-			}{it.Broken, it.ToPageID}
+
+		updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+			UserID:  "system",
+			Version: pageVersion(pageA.Page.Version()),
+			RefactorPreviewInput: pages.RefactorPreviewInput{
+				PageID:      pageID(pageA.Page.ID),
+				Kind:        pages.RefactorKindMove,
+				NewParentID: pageIDPtr(archive.Page.ID),
+			},
+			RewriteLinks: false,
+		})
+		Expect(err).To(Succeed())
+		Expect(updated.CalculatePath()).To(Equal("/archive/page-a"))
+
+		movedPage, err := deps.tree.GetPage(newFixturePageID(pageA.Page.ID))
+		Expect(err).To(Succeed())
+		Expect(movedPage.Content).To(Equal("[To B](../docs/page-b.md)"))
+
+		outgoing, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outgoing).To(SatisfyAll(
+			HaveField("Count", Equal(1)),
+			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing("/docs/page-b", pageB.Page.ID))),
+		))
+
+	})
+
+	ginkgo.It("heals links for every created path segment", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		pageA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+
+		contentA := "Links: [X](/x) and [XY](/x/y.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
 		}
-	}
 
-	if gotX == nil || gotX.broken || gotX.toPage == "" {
-		t.Fatalf("expected /x healed with ToPageID, got %#v", out2.Outgoings)
-	}
-	if gotXY == nil || gotXY.broken || gotXY.toPage == "" {
-		t.Fatalf("expected /x/y healed with ToPageID, got %#v", out2.Outgoings)
-	}
-})
+		Expect(deps.links.IndexAllPages()).To(Succeed())
 
-var _ = ginkgo.It("TestDeletePageUseCase_NonRecursive_MarksIncomingBroken", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
+		out1, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out1).To(SatisfyAll(
+			HaveField("Count", Equal(2)),
+			HaveField("Outgoings", ConsistOf(
+				HaveBrokenOutgoing("/x"),
+				HaveBrokenOutgoing("/x/y"),
+			)),
+		))
 
-	a, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage A failed: %v", err)
-	}
-	contentA := "Link to B: [Go](/b)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
+		if _, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
+			UserID: "system", TargetPath: "/x/y", TargetTitle: "X Y", Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-	b, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Page B", Slug: "b", Kind: pageKind(),
-	})
-	if err != nil {
-		t.Fatalf("CreatePage B failed: %v", err)
-	}
-	contentB := "# Page B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage B failed: %v", err)
-	}
-
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Recursive: false,
-	}); err != nil {
-		t.Fatalf("DeletePage failed: %v", err)
-	}
-
-	out, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks failed: %v", err)
-	}
-	if out.Count != 1 {
-		t.Fatalf("expected 1 outgoing, got %d", out.Count)
-	}
-	got := out.Outgoings[0]
-	if got.ToPath != "/b" || !got.Broken || got.ToPageID != "" {
-		t.Fatalf("unexpected outgoing after delete: %#v", got)
-	}
-
-	bl, err := deps.links.GetBacklinksForPage(b.Page.ID)
-	if err != nil {
-		t.Fatalf("GetBacklinks failed: %v", err)
-	}
-	if bl.Count != 0 {
-		t.Fatalf("expected 0 backlinks after delete, got %d", bl.Count)
-	}
-})
-
-var _ = ginkgo.It("TestDeletePageUseCase_Recursive_RemovesOutgoingForSubtree_AndBreaksIncomingByPrefix", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
-
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
-	})
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
-	})
-	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
+		out2, err := deps.links.GetOutgoingLinksForPage(pageA.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out2).To(SatisfyAll(
+			HaveField("Count", Equal(2)),
+			HaveField("Outgoings", ConsistOf(
+				HaveHealthyOutgoingWithAnyTarget("/x"),
+				HaveHealthyOutgoingWithAnyTarget("/x/y"),
+			)),
+		))
 	})
 
-	contentA := "Link to B: [B](/docs/b)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage a failed: %v", err)
-	}
-	contentB := "# B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage b failed: %v", err)
-	}
+	ginkgo.It("marks incoming links broken for non-recursive deletion", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
-	c, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "C", Slug: "c", Kind: pageKind(),
+		a, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		contentA := "Link to B: [Go](/b)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		b, err := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Page B", Slug: "b", Kind: pageKind(),
+		})
+		Expect(err).To(Succeed())
+		contentB := "# Page B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+		if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Recursive: false,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out.Count).To(Equal(1))
+		got := out.Outgoings[0]
+		Expect(got).To(HaveBrokenOutgoing("/b"))
+
+		bl, err := deps.links.GetBacklinksForPage(b.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(bl.Count).To(BeZero())
 	})
-	contentC := "Incoming link: [B](/docs/b)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(c.Page.ID), Version: pageVersion(c.Page.Version()), Title: c.Page.Title, Slug: slug(c.Page.Slug), Content: &contentC, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage c failed: %v", err)
-	}
 
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-	outA, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || outA.Count != 1 {
-		t.Fatalf("expected 1 outgoing from a before delete, got err=%v out=%#v", err, outA)
-	}
+	ginkgo.It("removes deleted subtree outgoings and breaks incoming prefix links", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
-	if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Recursive: true,
-	}); err != nil {
-		t.Fatalf("DeletePage(docs, recursive) failed: %v", err)
-	}
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
+		})
 
-	outAAfter, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks(a) after delete failed: %v", err)
-	}
-	if outAAfter.Count != 0 {
-		t.Fatalf("expected 0 outgoing from deleted page a, got %d", outAAfter.Count)
-	}
+		contentA := "Link to B: [B](/docs/b)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+		contentB := "# B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-	outC, err := deps.links.GetOutgoingLinksForPage(c.Page.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinks(c) after delete failed: %v", err)
-	}
-	if outC.Count != 1 {
-		t.Fatalf("expected 1 outgoing from c, got %d", outC.Count)
-	}
-	got := outC.Outgoings[0]
-	if got.ToPath != "/docs/b" || !got.Broken || got.ToPageID != "" {
-		t.Fatalf("unexpected outgoing after recursive delete: %#v", got)
-	}
-})
+		c, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "C", Slug: "c", Kind: pageKind(),
+		})
+		contentC := "Incoming link: [B](/docs/b)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(c.Page.ID), Version: pageVersion(c.Page.Version()), Title: c.Page.Title, Slug: slug(c.Page.Slug), Content: &contentC, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-var _ = ginkgo.It("TestUpdatePageUseCase_RenamePage_MarksOldBroken_HealsNewExactPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+		outA, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outA.Count).To(Equal(1))
 
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
+			UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Recursive: true,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		outAAfter, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outAAfter.Count).To(BeZero())
+
+		outC, err := deps.links.GetOutgoingLinksForPage(c.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(outC.Count).To(Equal(1))
+		got := outC.Outgoings[0]
+		Expect(got).To(HaveBrokenOutgoing("/docs/b"))
 	})
-	contentA := "Links: [B](/b) and [B2](/b2.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
 
-	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "B", Slug: "b", Kind: pageKind(),
+	ginkgo.It("breaks old page links and heals new exact links when renaming", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		contentA := "Links: [B](/b) and [B2](/b2.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "B", Slug: "b", Kind: pageKind(),
+		})
+		contentB := "# B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+		out1, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out1.Count).To(Equal(2))
+
+		contentB2 := "# B (renamed)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: "b2", Content: &contentB2, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out2.Outgoings).To(ConsistOf(
+			HaveBrokenOutgoing("/b"),
+			HaveHealthyOutgoing("/b2", b.Page.ID),
+		))
 	})
-	contentB := "# B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage B failed: %v", err)
-	}
 
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-	out1, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out1.Count != 2 {
-		t.Fatalf("unexpected outgoing before rename err=%v out=%#v", err, out1)
-	}
+	ginkgo.It("breaks old subtree links and heals new subpaths when renaming", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
-	contentB2 := "# B (renamed)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: "b2", Content: &contentB2, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("Rename B failed: %v", err)
-	}
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
+		})
+		contentB := "# B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-	out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out2.Count != 2 {
-		t.Fatalf("unexpected outgoing after rename err=%v out=%#v", err, out2)
-	}
-	byPath := map[string]struct {
-		broken bool
-		toID   tree.PageID
-	}{}
-	for _, it := range out2.Outgoings {
-		byPath[it.ToPath.WikiPath()] = struct {
-			broken bool
-			toID   tree.PageID
-		}{it.Broken, it.ToPageID}
-	}
-	if got, ok := byPath["/b"]; !ok || !got.broken || got.toID != "" {
-		t.Fatalf("expected /b broken after rename, got %#v", byPath)
-	}
-	if got, ok := byPath["/b2"]; !ok || got.broken || got.toID != b.Page.ID {
-		t.Fatalf("expected /b2 healed to %q, got %#v", b.Page.ID, byPath)
-	}
-})
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		contentA := "Links: [Old](/docs/b) and [New](/docs2/b.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-var _ = ginkgo.It("TestUpdatePageUseCase_RenameSubtree_BreaksOldPrefix_HealsNewSubpaths", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		Expect(deps.links.IndexAllPages()).To(Succeed())
 
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		contentDocs2 := "# Docs"
+		nodeSection := tree.NodeKindSection
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Title: docs.Page.Title, Slug: "docs2", Content: &contentDocs2, Kind: &nodeSection,
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out2.Outgoings).To(ConsistOf(
+			HaveBrokenOutgoing("/docs/b"),
+			HaveHealthyOutgoing("/docs2/b", b.Page.ID),
+		))
 	})
-	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
+
+	ginkgo.It("breaks old links and heals the new exact path when moving", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
+
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		contentA := "Links: [B](/b) and [B2](/projects/b.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "B", Slug: "b", Kind: pageKind(),
+		})
+		contentB := "# B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		projects, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Projects", Slug: "projects", Kind: pageKind(),
+		})
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), ParentID: pageID(projects.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out2.Outgoings).To(ConsistOf(
+			HaveBrokenOutgoing("/b"),
+			HaveHealthyOutgoing("/projects/b", b.Page.ID),
+		))
 	})
-	contentB := "# B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage B failed: %v", err)
-	}
 
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+	ginkgo.It("breaks old subtree links and heals new subpaths when moving", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
+
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
+		})
+		contentB := "# B"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+		})
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		contentA := "Links: [Old](/docs/b) and [New](/archive/docs/b.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), ParentID: pageID(archive.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out.Outgoings).To(ConsistOf(
+			HaveBrokenOutgoing("/docs/b"),
+			HaveHealthyOutgoing("/archive/docs/b", b.Page.ID),
+		))
 	})
-	contentA := "Links: [Old](/docs/b) and [New](/docs2/b.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
 
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
+	ginkgo.It("reindexes relative links when a page moves", func() {
+		deps := newTestDeps()
+		createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
+		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
-	contentDocs2 := "# Docs"
-	nodeSection := tree.NodeKindSection
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), Title: docs.Page.Title, Slug: "docs2", Content: &contentDocs2, Kind: &nodeSection,
-	}); err != nil {
-		t.Fatalf("Rename docs failed: %v", err)
-	}
+		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+		})
+		docsShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
+		})
+		contentDocsShared := "# Docs Shared"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(docsShared.Page.ID), Version: pageVersion(docsShared.Page.Version()), Title: docsShared.Page.Title, Slug: slug(docsShared.Page.Slug), Content: &contentDocsShared, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-	out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out2.Count != 2 {
-		t.Fatalf("unexpected outgoing after subtree rename err=%v out=%#v", err, out2)
-	}
-	byPath := map[string]struct {
-		broken bool
-		toID   tree.PageID
-	}{}
-	for _, it := range out2.Outgoings {
-		byPath[it.ToPath.WikiPath()] = struct {
-			broken bool
-			toID   tree.PageID
-		}{it.Broken, it.ToPageID}
-	}
-	if got, ok := byPath["/docs/b"]; !ok || !got.broken || got.toID != "" {
-		t.Fatalf("expected /docs/b broken, got %#v", byPath)
-	}
-	if got, ok := byPath["/docs2/b"]; !ok || got.broken || got.toID != b.Page.ID {
-		t.Fatalf("expected /docs2/b healed to %q, got %#v", b.Page.ID, byPath)
-	}
-})
+		a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
+		})
+		contentA := "Relative: [S](./shared.md)"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-var _ = ginkgo.It("TestMovePageUseCase_MarksOldBroken_HealsNewExactPath", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
+		guide, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", Title: "Guide", Slug: "guide", Kind: pageKind(),
+		})
+		guideShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+			UserID: "system", ParentID: pageIDPtr(guide.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
+		})
+		contentGuideShared := "# Guide Shared"
+		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "system", ID: pageID(guideShared.Page.ID), Version: pageVersion(guideShared.Page.Version()), Title: guideShared.Page.Title, Slug: slug(guideShared.Page.Slug), Content: &contentGuideShared, Kind: pageKind(),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
 
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
+		Expect(deps.links.IndexAllPages()).To(Succeed())
+
+		out1, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out1.Outgoings).To(HaveExactElements(HaveHealthyOutgoing("/docs/shared", docsShared.Page.ID)))
+
+		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
+			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), ParentID: pageID(guide.Page.ID),
+		}); err != nil {
+			Expect(err).To(Succeed())
+		}
+
+		out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
+		Expect(err).To(Succeed())
+		Expect(out2.Outgoings).To(HaveExactElements(HaveHealthyOutgoing("/guide/shared", guideShared.Page.ID)))
 	})
-	contentA := "Links: [B](/b) and [B2](/projects/b.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
-
-	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "B", Slug: "b", Kind: pageKind(),
-	})
-	contentB := "# B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage B failed: %v", err)
-	}
-
-	projects, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Projects", Slug: "projects", Kind: pageKind(),
-	})
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), ParentID: pageID(projects.Page.ID),
-	}); err != nil {
-		t.Fatalf("MovePage failed: %v", err)
-	}
-
-	out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out2.Count != 2 {
-		t.Fatalf("unexpected outgoing after move err=%v out=%#v", err, out2)
-	}
-	state := map[string]struct {
-		broken bool
-		toID   tree.PageID
-	}{}
-	for _, it := range out2.Outgoings {
-		state[it.ToPath.WikiPath()] = struct {
-			broken bool
-			toID   tree.PageID
-		}{it.Broken, it.ToPageID}
-	}
-	if got := state["/b"]; !got.broken || got.toID != "" {
-		t.Fatalf("expected /b broken after move, got %#v", state)
-	}
-	if got := state["/projects/b"]; got.broken || got.toID != b.Page.ID {
-		t.Fatalf("expected /projects/b healed to %q, got %#v", b.Page.ID, state)
-	}
-})
-
-var _ = ginkgo.It("TestMovePageUseCase_MoveSubtree_BreaksOldPrefix_HealsNewSubpaths", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
-	})
-	b, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "B", Slug: "b", Kind: pageKind(),
-	})
-	contentB := "# B"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage B failed: %v", err)
-	}
-
-	archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
-	})
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "A", Slug: "a", Kind: pageKind(),
-	})
-	contentA := "Links: [Old](/docs/b) and [New](/archive/docs/b.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage A failed: %v", err)
-	}
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: pageID(docs.Page.ID), Version: pageVersion(docs.Page.Version()), ParentID: pageID(archive.Page.ID),
-	}); err != nil {
-		t.Fatalf("MovePage(docs -> archive) failed: %v", err)
-	}
-
-	out, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out.Count != 2 {
-		t.Fatalf("unexpected outgoing after subtree move err=%v out=%#v", err, out)
-	}
-	state := map[string]struct {
-		broken bool
-		toID   tree.PageID
-	}{}
-	for _, it := range out.Outgoings {
-		state[it.ToPath.WikiPath()] = struct {
-			broken bool
-			toID   tree.PageID
-		}{it.Broken, it.ToPageID}
-	}
-	if got := state["/docs/b"]; !got.broken || got.toID != "" {
-		t.Fatalf("expected /docs/b broken after move, got %#v", state)
-	}
-	if got := state["/archive/docs/b"]; got.broken || got.toID != b.Page.ID {
-		t.Fatalf("expected /archive/docs/b healed to %q, got %#v", b.Page.ID, state)
-	}
-})
-
-var _ = ginkgo.It("TestMovePageUseCase_ReindexesRelativeLinks", func() {
-	t := ginkgo.GinkgoT()
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
-	moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
-
-	docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
-	})
-	docsShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
-	})
-	contentDocsShared := "# Docs Shared"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(docsShared.Page.ID), Version: pageVersion(docsShared.Page.Version()), Title: docsShared.Page.Title, Slug: slug(docsShared.Page.Slug), Content: &contentDocsShared, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage /docs/shared failed: %v", err)
-	}
-
-	a, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "A", Slug: "a", Kind: pageKind(),
-	})
-	contentA := "Relative: [S](./shared.md)"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage /docs/a failed: %v", err)
-	}
-
-	guide, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", Title: "Guide", Slug: "guide", Kind: pageKind(),
-	})
-	guideShared, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "system", ParentID: pageIDPtr(guide.Page.ID), Title: "Shared", Slug: "shared", Kind: pageKind(),
-	})
-	contentGuideShared := "# Guide Shared"
-	if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-		UserID: "system", ID: pageID(guideShared.Page.ID), Version: pageVersion(guideShared.Page.Version()), Title: guideShared.Page.Title, Slug: slug(guideShared.Page.Slug), Content: &contentGuideShared, Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("UpdatePage /guide/shared failed: %v", err)
-	}
-
-	if err := deps.links.IndexAllPages(); err != nil {
-		t.Fatalf("IndexAllPages failed: %v", err)
-	}
-
-	out1, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out1.Count != 1 {
-		t.Fatalf("unexpected outgoing before move err=%v out=%#v", err, out1)
-	}
-	if out1.Outgoings[0].ToPath != "/docs/shared" || out1.Outgoings[0].Broken || out1.Outgoings[0].ToPageID != docsShared.Page.ID {
-		t.Fatalf("unexpected outgoing before move: %#v", out1.Outgoings[0])
-	}
-
-	if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-		UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), ParentID: pageID(guide.Page.ID),
-	}); err != nil {
-		t.Fatalf("MovePage(a -> guide) failed: %v", err)
-	}
-
-	out2, err := deps.links.GetOutgoingLinksForPage(a.Page.ID)
-	if err != nil || out2.Count != 1 {
-		t.Fatalf("unexpected outgoing after move err=%v out=%#v", err, out2)
-	}
-	if out2.Outgoings[0].ToPath != "/guide/shared" || out2.Outgoings[0].Broken || out2.Outgoings[0].ToPageID != guideShared.Page.ID {
-		t.Fatalf("unexpected outgoing after move: %#v", out2.Outgoings[0])
-	}
 })

@@ -29,7 +29,7 @@ import (
 const pageMetadataWhitespacePropertyKeyFixture = " key "
 
 var _ = ginkgo.Describe("deterministic page helper edges", func() {
-	ginkgo.It("covers markdown section parser and metadata patch edge branches", func() {
+	ginkgo.It("rejects invalid markdown section targets and metadata patch fields", func() {
 		_, err := ReplaceMarkdownSection("# Page\n", []string{" "}, 0, "")
 		Expect(err).To(MatchError(ErrSectionHeadingPathRequired))
 
@@ -42,13 +42,10 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(replaced).NotTo(ContainSubstring("one"))
 		Expect(replaced).To(ContainSubstring("two"))
 
-		_, _, ok := parseMarkdownFence("~~")
-		Expect(ok).To(BeFalse())
+		Expect("~~").To(BeRejectedMarkdownFence())
 
-		_, _, ok = parseMarkdownHeading("####### too deep")
-		Expect(ok).To(BeFalse())
-		_, _, ok = parseMarkdownHeading("#    ")
-		Expect(ok).To(BeFalse())
+		Expect("####### too deep").To(BeRejectedMarkdownHeading())
+		Expect("#    ").To(BeRejectedMarkdownHeading())
 
 		Expect(markdownIndentColumns("\tcode")).To(Equal(4))
 		Expect(firstReplacementHeadingLevel([]string{"", "plain text"})).To(BeZero())
@@ -74,7 +71,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		))
 	})
 
-	ginkgo.It("covers metadata extraction and README fallback branches", func() {
+	ginkgo.It("normalizes metadata and resolves README fallback pages", func() {
 		page := &dto.Page{Node: &dto.Node{ID: "page-1"}}
 		EnrichPageMetadata(page, func(tree.PageID) (string, error) {
 			return "<!-- leafwiki malformed\n-->\nbody", nil
@@ -98,23 +95,22 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(tags).To(Equal([]string{"ready"}))
 		Expect(properties).To(Equal(map[string]string{"owner": "Alice"}))
 
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := pagesTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("# Root"), 0o644)).To(Succeed())
 		rootPage := &tree.Page{PageNode: &tree.PageNode{ID: tree.RootPageID, Title: "Root", Slug: tree.SlugFromString("root"), Kind: tree.NodeKindSection}}
-		out, handled, err := FindReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+		out, err := requireReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: rootDir,
 			RootPage: func() (*tree.Page, error) {
 				return rootPage, nil
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(handled).To(BeTrue())
 		Expect(out.Page).To(BeIdenticalTo(rootPage))
 
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Docs"), 0o644)).To(Succeed())
 		sectionPage := &tree.Page{PageNode: &tree.PageNode{ID: tree.PageIDFromString("docs"), Title: "Docs", Slug: tree.SlugFromString("docs"), Kind: tree.NodeKindSection}}
-		out, handled, err = FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+		out, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: rootDir,
 			FindByPath: func(in FindByPathInput) (*FindByPathOutput, error) {
 				Expect(in).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -125,11 +121,10 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(handled).To(BeTrue())
 		Expect(out.Page).To(BeIdenticalTo(sectionPage))
 	})
 
-	ginkgo.It("covers lookup, permalink, slug, and validation error branches", func() {
+	ginkgo.It("validates page lookup permalink slug and error contracts", func() {
 		deps := newRoutesSpecDeps()
 		docs := deps.createPage("Docs", "docs", tree.NodeKindSection, nil)
 		guide := deps.createPage("Guide", "guide", tree.NodeKindPage, &docs.ID)
@@ -178,7 +173,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(pageErrorStatus(sharederrors.ErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("covers route input helpers for root, README, metadata, and versions", func() {
+	ginkgo.It("normalizes route input for root README metadata and versions", func() {
 		deps := newRoutesSpecDeps()
 		var noKind tree.NodeKind
 
@@ -196,31 +191,26 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err = deps.routes.findByPathRawInput(context.Background(), "", "folder")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
-		pageRoute, sectionRoute, ok := ReadmeMarkdownPathFallbackRoutes("docs/README.md")
-		Expect(ok).To(BeTrue())
-		Expect(pageRoute).To(Equal("docs/README"))
-		Expect(sectionRoute).To(Equal("docs"))
+		Expect("docs/README.md").To(HaveReadmeMarkdownFallbackRoutes("docs/README", "docs"))
 
-		fallback, ok, err := NormalizeReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindPage)
+		fallback, err := requireReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeTrue())
 		Expect(fallback).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"TryPage":    BeTrue(),
 			"TrySection": BeFalse(),
 		}))
 
-		_, handled, err := FindReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+		_, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: "",
 			FindByPath: func(FindByPathInput) (*FindByPathOutput, error) {
 				ginkgo.Fail("section-only inactive README fallback should not query a page route")
 				return nil, nil
 			},
 		})
-		Expect(handled).To(BeTrue())
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		Expect(ReadmeFallbackSectionIsActive("", "")).To(BeFalse())
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := pagesTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("# Root"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "index.md"), []byte("# Index"), 0o644)).To(Succeed())
 		Expect(ReadmeFallbackSectionIsActive(rootDir, "")).To(BeFalse())
@@ -271,7 +261,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(ensureRefactorWarnings([]RefactorWarning{first})).To(Equal([]RefactorWarning{first}))
 	})
 
-	ginkgo.It("covers direct use-case validation and root-operation guards", func() {
+	ginkgo.It("rejects invalid direct page use-case requests", func() {
 		deps := newRoutesSpecDeps()
 		userID := tree.UserIDFromString("pages-direct-user")
 
@@ -372,7 +362,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(recorder.events).To(HaveExactElements(createdEvent, updatedEvent, deletedEvent))
 	})
 
-	ginkgo.It("covers refactor constructors and internal helper branches", func() {
+	ginkgo.It("configures refactor use cases and helper defaults", func() {
 		deps := newRoutesSpecDeps()
 		slugger := tree.NewSlugService()
 		customOrchestrator := pagesave.NewPageSaveOrchestrator()
@@ -424,7 +414,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(snapshotPage(noNode)).To(BeIdenticalTo(noNode))
 	})
 
-	ginkgo.It("covers route malformed-payload branches and semantic ID helpers", func() {
+	ginkgo.It("returns structured route errors for malformed payloads", func() {
 		deps := newRoutesSpecDeps()
 		page := deps.createPage("Payload", "payload", tree.NodeKindPage, nil)
 
@@ -508,7 +498,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(ValidatePageMetadataInput([]string{"alpha", "beta"}, map[string]string{"owner": "alice"})).To(Succeed())
 	})
 
-	ginkgo.It("covers additional route handler error and early-return branches", func() {
+	ginkgo.It("returns route errors for unauthorized and invalid requests", func() {
 		deps := newRoutesSpecDeps()
 		page := deps.createPage("Page", "page", tree.NodeKindPage, nil)
 
@@ -550,7 +540,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		}
 	})
 
-	ginkgo.It("covers refactor use-case edge helpers", func() {
+	ginkgo.It("validates refactor helper outcomes for invalid plans", func() {
 		deps := newRoutesSpecDeps()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -639,7 +629,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(warnings).To(Equal([]RefactorWarning{{MessageID: "a", Message: "one"}, {MessageID: "b", Message: "two"}}))
 	})
 
-	ginkgo.It("covers refactor seam branches for links, plans, and bulk rewrites", func() {
+	ginkgo.It("builds refactor plans around link and rewrite failures", func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -830,7 +820,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(subtreeSideEffectApply.rewritePathChangedSubtree(userID, "test", []pathChangeSnapshot{snapshot}, "old", "new")).To(MatchError(sideEffectErr))
 	})
 
-	ginkgo.It("covers refactor apply execute exits and route fallback branches", func() {
+	ginkgo.It("returns refactor apply failures from mutation and rewrite steps", func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -1007,8 +997,8 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				moveUpdated = true
 				return nil
 			},
-			bulkUpdateContentFunc: func(tree.UserID, []tree.BulkContentUpdate) []error {
-				Expect(moveUpdated).To(BeTrue())
+			bulkUpdateContentFunc: func(_ tree.UserID, updates []tree.BulkContentUpdate) []error {
+				Expect(updates).NotTo(BeEmpty())
 				return []error{nil}
 			},
 		}
@@ -1040,7 +1030,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(movePathErr))
 
 		deps := newRoutesSpecDeps()
-		unloadedTree := tree.NewTreeService(ginkgo.GinkgoT().TempDir())
+		unloadedTree := tree.NewTreeService(pagesTempDir())
 		var noKind tree.NodeKind
 		_, err = (&Routes{treeService: unloadedTree}).findByPathInput(ctx, "", noKind)
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
@@ -1057,7 +1047,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(sectionOut.Page.ID).To(Equal(docs.ID))
 	})
 
-	ginkgo.It("covers direct page mutation validation and error branches", func() {
+	ginkgo.It("returns direct page mutation validation and side-effect failures", func() {
 		deps := newRoutesSpecDeps()
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -1121,7 +1111,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: recursiveParent.ID, Version: recursiveParent.Version(), Recursive: true})).To(Succeed())
 		deleteFailure := errors.New("delete side effect failed")
 		deleteFailurePage := deps.createPage("Delete Failure", "delete-failure", tree.NodeKindPage, nil)
-		Expect(NewDeletePageUseCase(deps.tree, assets.NewAssetService(ginkgo.GinkgoT().TempDir(), slug), pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: deleteFailure}), log).Execute(ctx, DeletePageInput{
+		Expect(NewDeletePageUseCase(deps.tree, assets.NewAssetService(pagesTempDir(), slug), pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: deleteFailure}), log).Execute(ctx, DeletePageInput{
 			UserID:  tree.UserIDFromString("routes-test-user"),
 			ID:      deleteFailurePage.ID,
 			Version: deleteFailurePage.Version(),
@@ -1172,7 +1162,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
 		copyFailurePage := deps.createPage("Copy Failure", "copy-failure", tree.NodeKindPage, nil)
 		copyFailure := errors.New("copy side effect failed")
-		_, err = NewCopyPageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: copyFailure}), assets.NewAssetService(ginkgo.GinkgoT().TempDir(), slug), log).Execute(ctx, CopyPageInput{
+		_, err = NewCopyPageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: copyFailure}), assets.NewAssetService(pagesTempDir(), slug), log).Execute(ctx, CopyPageInput{
 			UserID:       tree.UserIDFromString("routes-test-user"),
 			SourcePageID: copyFailurePage.ID,
 			Title:        "Copy Failure Result",
@@ -1200,7 +1190,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(collectSubtreeIDs(nil)).To(BeEmpty())
 	})
 
-	ginkgo.It("covers remaining validation, README fallback, and route error branches", func() {
+	ginkgo.It("returns validation README fallback and route error outcomes", func() {
 		deps := newRoutesSpecDeps()
 
 		_, _, err := NormalizePagePathInput("docs/page.md", "folder")
@@ -1211,22 +1201,19 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err = ValidateOptionalParentID(&badParent)
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
 
-		_, handled, err := FindReadmeMarkdownPathFallback("../README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{})
-		Expect(handled).To(BeTrue())
+		_, err = requireReadmeMarkdownPathFallback("../README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidPath))
-		_, handled, err = FindReadmeMarkdownPathFallback("../README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{})
-		Expect(handled).To(BeTrue())
+		_, err = requireReadmeMarkdownPathFallback("../README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidPath))
-		rootDir := ginkgo.GinkgoT().TempDir()
+		rootDir := pagesTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("# Root"), 0o644)).To(Succeed())
 		rootLookupErr := errors.New("root lookup failed")
-		_, handled, err = FindReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+		_, err = requireReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: rootDir,
 			RootPage: func() (*tree.Page, error) {
 				return nil, rootLookupErr
 			},
 		})
-		Expect(handled).To(BeTrue())
 		Expect(err).To(MatchError(rootLookupErr))
 
 		rec := performRoutesRequest(http.MethodGet, "/api/pages/by-path?path=missing", "", nil, nil, deps.routes.handleGetByPath)
@@ -1235,7 +1222,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(rec).To(HavePageErrorResponse(http.StatusBadRequest, ErrCodePageInvalidKind), rec.Body.String())
 		rec = performRoutesRequest(http.MethodGet, "/api/pages/permalink/missing", "", ginParams("id", "missing"), nil, deps.routes.handleResolvePermalink)
 		Expect(rec).To(HavePageErrorResponse(http.StatusNotFound, ErrCodePageNotFound), rec.Body.String())
-		unloadedTree := tree.NewTreeService(ginkgo.GinkgoT().TempDir())
+		unloadedTree := tree.NewTreeService(pagesTempDir())
 		lookupUC := NewLookupPagePathUseCase(unloadedTree)
 		_, err = lookupUC.Execute(context.Background(), LookupPagePathInput{Path: "missing"})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
@@ -1297,7 +1284,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		}
 	})
 
-	ginkgo.It("covers page use-case post-mutation failure seams", func() {
+	ginkgo.It("returns post-mutation failures from page use cases", func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -1725,7 +1712,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(ensureSideEffectErr))
 	})
 
-	ginkgo.It("covers filesystem-backed metadata and asset mutation error branches", func() {
+	ginkgo.It("returns filesystem metadata and asset mutation failures", func() {
 		deps := newRoutesSpecDeps()
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -1812,10 +1799,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, _, err = ApplyMetadataPatch(nil, nil, MetadataPatch{RemoveProperties: []string{"leafwiki_hidden"}})
 		Expect(err).To(HavePageValidationField("removeProperties.leafwiki_hidden"))
 
-		detail, status, ok := PageErrorDetailForError(tree.ErrVersionConflict)
-		Expect(ok).To(BeTrue())
-		Expect(status).To(Equal(http.StatusConflict))
-		Expect(detail.Code).To(Equal(ErrCodePageVersionConflict))
+		Expect(tree.ErrVersionConflict).To(HavePageErrorDetail(http.StatusConflict, ErrCodePageVersionConflict))
 		Expect(pageErrorStatus(ErrCodePageNotFound)).To(Equal(http.StatusNotFound))
 
 		rec = performRoutesRequest(http.MethodPost, "/api/pages/ensure", `{`, nil, routesSpecUser(), deps.routes.handleEnsurePath)
