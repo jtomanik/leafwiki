@@ -961,6 +961,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(moveErr))
 
 		moveUpdated := false
+		moveBulkUpdateCalls := 0
 		moveTree := &pageUseCaseFakeTree{
 			getPageFunc: func(id tree.PageID) (*tree.Page, error) {
 				switch id {
@@ -998,7 +999,19 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				return nil
 			},
 			bulkUpdateContentFunc: func(_ tree.UserID, updates []tree.BulkContentUpdate) []error {
-				Expect(updates).NotTo(BeEmpty())
+				moveBulkUpdateCalls++
+				if moveBulkUpdateCalls == 1 {
+					Expect(updates).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+						"ID":      Equal(moveAffected.ID),
+						"Content": Equal("[Move](/move-parent/move-exec.md)"),
+					})))
+				} else {
+					Expect(moveBulkUpdateCalls).To(Equal(2))
+					Expect(updates).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+						"ID":      Equal(movePage.ID),
+						"Content": Equal(movePage.Content),
+					})))
+				}
 				return []error{nil}
 			},
 		}
@@ -1015,6 +1028,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		})
 		Expect(err).To(MatchError(moveRewriteErr))
+		Expect(moveBulkUpdateCalls).To(Equal(1))
 
 		moveUpdated = false
 		movePathErr := errors.New("move subtree rewrite failed")
@@ -1028,6 +1042,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		})
 		Expect(err).To(MatchError(movePathErr))
+		Expect(moveBulkUpdateCalls).To(Equal(2))
 
 		deps := newRoutesSpecDeps()
 		unloadedTree := tree.NewTreeService(pagesTempDir())
