@@ -4,15 +4,14 @@ import (
 	"errors"
 	"log/slog"
 	"mime/multipart"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -81,44 +80,30 @@ func (f *fakeExecWiki) UploadAsset(userID tree.UserID, pageID tree.PageID, file 
 	return "/assets/" + pageID.MetadataValue() + "/" + filename.Filename(), nil
 }
 
-func writeTmp(t importerTestT, dir, rel, content string) {
-	t.Helper()
-	abs := filepath.Join(dir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+func writeTmp(dir, rel, content string) {
+	ginkgo.GinkgoHelper()
+
+	importerWriteFile(dir, rel, content)
 }
 
-var _ = ginkgo.Describe("TestExecutor_StalePlan", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("stale import execution", func() {
+	ginkgo.It("returns a stale-plan error without an execution result", func() {
 		w := &fakeExecWiki{hash: "new"}
 		plan := &PlanResult{TreeHash: "old"}
-		opts := &PlanOptions{SourceBasePath: t.TempDir()}
+		opts := &PlanOptions{SourceBasePath: importerTempDir()}
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
 		got, err := ex.Execute(newFixtureUserID("user1"))
-		if err == nil {
-			t.Fatalf("expected stale plan error")
-		}
-		if got != nil {
-			t.Fatalf("expected nil result on stale plan, got %#v", got)
-		}
-		if !errors.Is(err, ErrImportPlanStale) {
-			t.Fatalf("unexpected stale plan error: %v", err)
-		}
+		Expect(err).To(MatchError(ErrImportPlanStale))
+		Expect(got).To(BeNil())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_HappyPath_PreservesNonInternalFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
+var _ = ginkgo.Describe("created page execution with source frontmatter", func() {
+	ginkgo.It("writes canonical metadata and drops importer-owned legacy fields", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -142,69 +127,41 @@ var _ = ginkgo.Describe("TestExecutor_Create_HappyPath_PreservesNonInternalFront
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 
 		res, err := ex.Execute(newFixtureUserID("user1"))
-		if err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
-		if res.ImportedCount != 1 || res.SkippedCount != 0 {
-			t.Fatalf("counts imported=%d skipped=%d", res.ImportedCount, res.SkippedCount)
-		}
-		if len(res.Items) != 1 || res.Items[0].Action != ExecutionActionCreated {
-			t.Fatalf("item result: %#v", res.Items)
-		}
-		if w.ensureCalls != 1 || w.updateCalls != 1 {
-			t.Fatalf("calls ensure=%d update=%d", w.ensureCalls, w.updateCalls)
-		}
-
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected content to be passed to UpdatePage")
-		}
+		Expect(res).To(SatisfyAll(
+			MatchExecutionResultCounts(1, 0, ConsistOf(HaveField("Action", Equal(ExecutionActionCreated)))),
+			HaveField("TreeHashBefore", Equal("h1")),
+			HaveField("TreeHash", Not(Equal("h1"))),
+		))
+		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
+			HaveField("EnsureCalls", Equal(1)),
+			HaveField("UpdateCalls", Equal(1)),
+			HaveField("LastUpdatedContent", Not(BeNil())),
+		)))
 		raw := *w.lastUpdatedContent
-		if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-			t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
-		}
-		if strings.HasPrefix(raw, "---\n") {
-			t.Fatalf("expected importer output not to use legacy YAML frontmatter, got: %q", raw)
-		}
-		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if doc.Body != "\n# Heading\nBody" {
-			t.Fatalf("unexpected body: %q", doc.Body)
-		}
-		if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom_key to be preserved, got %#v", got)
-		}
-		if got := doc.Metadata.Extra["title"]; got != nil {
-			t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
-		}
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "x" {
-			t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
-		}
-		if strings.Contains(raw, "leafwiki_id: source-id") {
-			t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
-		}
-		if strings.Contains(raw, "leafwiki_title: Source Title") {
-			t.Fatalf("expected source leafwiki_title to be dropped, got: %q", raw)
-		}
-
-		if res.TreeHashBefore != "h1" {
-			t.Fatalf("TreeHashBefore = %q", res.TreeHashBefore)
-		}
-		if res.TreeHash == "h1" {
-			t.Fatalf("expected TreeHash to change (fake changes it), got %q", res.TreeHash)
-		}
+		Expect(raw).To(HavePrefix("<!-- leafwiki\n"))
+		Expect(raw).NotTo(HavePrefix("---\n"))
+		doc, err := importedPageDocumentResult(raw)
+		Expect(err).To(Succeed())
+		Expect(doc).To(HaveImportedPageDocument(
+			Equal("\n# Heading\nBody"),
+			HaveKeyWithValue("custom_key", "keep-me"),
+			SatisfyAll(
+				Not(HaveKey("title")),
+				HaveKeyWithValue("aliases", ConsistOf("x")),
+			),
+		))
+		Expect(raw).NotTo(ContainSubstring("leafwiki_id: source-id"))
+		Expect(raw).NotTo(ContainSubstring("leafwiki_title: Source Title"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_HappyPath_PreservesDistinctExtraFieldValues", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "a.md", "---\nalpha: first\nbeta: second\nnested:\n  key: value\n---\n\nBody")
+var _ = ginkgo.Describe("created page execution with distinct metadata fields", func() {
+	ginkgo.It("preserves distinct imported frontmatter fields", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "a.md", "---\nalpha: first\nbeta: second\nnested:\n  key: value\n---\n\nBody")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -226,39 +183,25 @@ var _ = ginkgo.Describe("TestExecutor_Create_HappyPath_PreservesDistinctExtraFie
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected content to be passed to UpdatePage")
-		}
+		Expect(w.lastUpdatedContent).NotTo(BeNil())
 
-		fm, _, has, err := markdown.ParseFrontmatter(*w.lastUpdatedContent)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter err: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter, got %q", *w.lastUpdatedContent)
-		}
-		if got := fm.ExtraFields["alpha"]; got != "first" {
-			t.Fatalf("expected alpha=first, got %#v", got)
-		}
-		if got := fm.ExtraFields["beta"]; got != "second" {
-			t.Fatalf("expected beta=second, got %#v", got)
-		}
-		nested, ok := fm.ExtraFields["nested"].(map[string]interface{})
-		if !ok || nested["key"] != "value" {
-			t.Fatalf("expected nested map to be preserved, got %#v", fm.ExtraFields["nested"])
-		}
+		fm, _, err := importedFrontmatterResult(*w.lastUpdatedContent)
+		Expect(err).To(Succeed())
+		Expect(fm.ExtraFields).To(SatisfyAll(
+			HaveKeyWithValue("alpha", "first"),
+			HaveKeyWithValue("beta", "second"),
+			HaveKeyWithValue("nested", HaveKeyWithValue("key", "value")),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Skip_DoesNotCallWiki", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("skipped import items", func() {
+	ginkgo.It("records skipped items without touching wiki content", func() {
+		tmp := importerTempDir()
 		w := &fakeExecWiki{hash: "h1"}
 		plan := &PlanResult{
 			TreeHash: "h1",
@@ -270,25 +213,21 @@ var _ = ginkgo.Describe("TestExecutor_Skip_DoesNotCallWiki", func() {
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
-		if err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
-		if res.SkippedCount != 1 || res.ImportedCount != 0 {
-			t.Fatalf("counts imported=%d skipped=%d", res.ImportedCount, res.SkippedCount)
-		}
-		if w.ensureCalls != 0 || w.updateCalls != 0 {
-			t.Fatalf("expected no wiki calls, got ensure=%d update=%d", w.ensureCalls, w.updateCalls)
-		}
+		Expect(res).To(MatchExecutionResultCounts(0, 1, HaveLen(1)))
+		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
+			HaveField("EnsureCalls", BeZero()),
+			HaveField("UpdateCalls", BeZero()),
+		)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_EnsurePathError_SkipsItem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "a.md", "Body")
+var _ = ginkgo.Describe("create execution when path creation fails", func() {
+	ginkgo.It("records create failures without updating page content", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "a.md", "Body")
 
 		w := &fakeExecWiki{
 			hash: "h1",
@@ -306,26 +245,16 @@ var _ = ginkgo.Describe("TestExecutor_Create_EnsurePathError_SkipsItem", func() 
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
-		if err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
-		if res.SkippedCount != 1 || res.ImportedCount != 0 {
-			t.Fatalf("counts imported=%d skipped=%d", res.ImportedCount, res.SkippedCount)
-		}
-		if res.Items[0].Error == nil || *res.Items[0].Error == "" {
-			t.Fatalf("expected error message")
-		}
-		if w.updateCalls != 0 {
-			t.Fatalf("UpdatePage should not be called")
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveField("Error", gstruct.PointTo(Not(BeEmpty()))))))
+		Expect(w.updateCalls).To(BeZero())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_UnknownAction_SkipsItem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("execution of unsupported plan actions", func() {
+	ginkgo.It("records unsupported plan actions as skipped item errors", func() {
+		tmp := importerTempDir()
 		w := &fakeExecWiki{hash: "h1"}
 		plan := &PlanResult{
 			TreeHash: "h1",
@@ -337,29 +266,21 @@ var _ = ginkgo.Describe("TestExecutor_UnknownAction_SkipsItem", func() {
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
-		if err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
-		if res.SkippedCount != 1 {
-			t.Fatalf("SkippedCount=%d", res.SkippedCount)
-		}
-		if res.Items[0].Error == nil || *res.Items[0].Error != "unknown action" {
-			t.Fatalf("Error=%#v", res.Items[0].Error)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveField("Error", gstruct.PointTo(Equal("unknown action"))))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_FolderIndexAndSiblingPage_ImportsSectionThenNestedPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Ordner/index.md", `---
+var _ = ginkgo.Describe("folder index import ordering", func() {
+	ginkgo.It("creates folder indexes before child pages", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Ordner/index.md", `---
 title: Ordner
 ---
 
 # Ordner`)
-		writeTmp(t, tmp, "Ordner/Ordner.md", "# Unterseite")
+		writeTmp(tmp, "Ordner/Ordner.md", "# Unterseite")
 
 		w := &fakeExecWiki{hash: "h1"}
 		plan := &PlanResult{
@@ -373,35 +294,25 @@ title: Ordner
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
-		if err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
-		if res.ImportedCount != 2 || res.SkippedCount != 0 {
-			t.Fatalf("counts imported=%d skipped=%d", res.ImportedCount, res.SkippedCount)
-		}
-		if w.ensureCalls != 2 || w.updateCalls != 2 {
-			t.Fatalf("calls ensure=%d update=%d", w.ensureCalls, w.updateCalls)
-		}
-		if len(w.ensureTargets) != 2 || w.ensureTargets[0] != "ordner" || w.ensureTargets[1] != "ordner/ordner" {
-			t.Fatalf("unexpected ensure targets: %#v", w.ensureTargets)
-		}
-		if len(w.ensureKinds) != 2 || w.ensureKinds[0] != tree.NodeKindSection || w.ensureKinds[1] != tree.NodeKindPage {
-			t.Fatalf("unexpected ensure kinds: %#v", w.ensureKinds)
-		}
-		if len(w.updateTitles) != 2 || w.updateTitles[0] != "Ordner" || w.updateTitles[1] != "Unterseite" {
-			t.Fatalf("unexpected update titles: %#v", w.updateTitles)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(MatchExecutionResultCounts(2, 0, HaveLen(2)))
+		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
+			HaveField("EnsureCalls", Equal(2)),
+			HaveField("UpdateCalls", Equal(2)),
+			HaveField("EnsureTargets", Equal([]tree.RoutePath{"ordner", "ordner/ordner"})),
+			HaveField("EnsureKinds", Equal([]tree.NodeKind{tree.NodeKindSection, tree.NodeKindPage})),
+			HaveField("UpdateTitles", Equal([]string{"Ordner", "Unterseite"})),
+		)))
 
 	})
 })
 
 // - Importer migrates old route-style page link to .md
-var _ = ginkgo.Describe("TestExecutor_Create_RewritesMarkdownAndWikiLinksToImportedPages", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/index.md", "# Guides")
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution link rewriting", func() {
+	ginkgo.It("rewrites imported markdown links to created wiki routes", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/index.md", "# Guides")
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"[Relative](../Reference/Endpoints.md)",
@@ -410,7 +321,7 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesMarkdownAndWikiLinksToImpor
 			"[Container](/Guides/)",
 			"[[Reference/Endpoints|API Alias]]",
 		}, "\n"))
-		writeTmp(t, tmp, "Reference/Endpoints.md", "# Endpoints")
+		writeTmp(tmp, "Reference/Endpoints.md", "# Endpoints")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -434,14 +345,11 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesMarkdownAndWikiLinksToImpor
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		setupContent, ok := updatedContentByTitle["Setup"]
-		if !ok {
-			t.Fatalf("expected setup content to be updated")
-		}
+		setupContent, err := updatedContentByTitleResult(updatedContentByTitle, "Setup")
+		Expect(err).To(Succeed())
 
 		for _, expected := range []string{
 			"[Relative](/reference/endpoints.md)",
@@ -450,19 +358,16 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesMarkdownAndWikiLinksToImpor
 			"[Container](/guides)",
 			"[API Alias](/reference/endpoints.md)",
 		} {
-			if !strings.Contains(setupContent, expected) {
-				t.Fatalf("expected rewritten content to contain %q, got:\n%s", expected, setupContent)
-			}
+			Expect(setupContent).To(ContainSubstring(expected))
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_RewritesBodyLinksWithoutTouchingMetadataValues", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution metadata preservation", func() {
+	ginkgo.It("preserves metadata links while rewriting body links", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"---",
 			`custom_link: "[Endpoint](/Reference/Endpoints)"`,
 			"nested:",
@@ -473,7 +378,7 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesBodyLinksWithoutTouchingMet
 			"",
 			"[RouteStyle](/Reference/Endpoints)",
 		}, "\n"))
-		writeTmp(t, tmp, "Reference/Endpoints.md", "# Endpoints")
+		writeTmp(tmp, "Reference/Endpoints.md", "# Endpoints")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -496,47 +401,33 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesBodyLinksWithoutTouchingMet
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
-		setupContent, ok := updatedContentByTitle["Setup"]
-		if !ok {
-			t.Fatalf("expected setup content to be updated")
-		}
-		doc, _, err := markdown.ParsePageDocument(setupContent)
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if got := doc.Metadata.Fields["custom_link"]; got != "[Endpoint](/Reference/Endpoints)" {
-			t.Fatalf("metadata field link was rewritten: %#v", got)
-		}
-		nested, ok := doc.Metadata.Extra["nested"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("expected nested extra metadata, got %#v", doc.Metadata.Extra["nested"])
-		}
-		if got := nested["link"]; got != "[Endpoint](/Reference/Endpoints)" {
-			t.Fatalf("metadata extra link was rewritten: %#v", got)
-		}
-		if !strings.Contains(doc.Body, "[RouteStyle](/reference/endpoints.md)") {
-			t.Fatalf("expected body link to be rewritten, got:\n%s", doc.Body)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
+		setupContent, err := updatedContentByTitleResult(updatedContentByTitle, "Setup")
+		Expect(err).To(Succeed())
+		doc, err := importedPageDocumentResult(setupContent)
+		Expect(err).To(Succeed())
+		Expect(doc).To(HaveImportedPageDocument(
+			ContainSubstring("[RouteStyle](/reference/endpoints.md)"),
+			HaveKeyWithValue("custom_link", "[Endpoint](/Reference/Endpoints)"),
+			HaveKeyWithValue("nested", HaveKeyWithValue("link", "[Endpoint](/Reference/Endpoints)")),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_UploadsRelativeAndRootAssets", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution asset uploads", func() {
+	ginkgo.It("uploads referenced assets and rewrites hrefs to asset URLs", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"![Relative](./images/logo.png)",
 			"[Asset](/shared/manual.pdf)",
 			"![[./images/logo.png]]",
 		}, "\n"))
-		writeTmp(t, tmp, "Guides/images/logo.png", "png-bytes")
-		writeTmp(t, tmp, "shared/manual.pdf", "pdf-bytes")
+		writeTmp(tmp, "Guides/images/logo.png", "png-bytes")
+		writeTmp(tmp, "shared/manual.pdf", "pdf-bytes")
 
 		w := &fakeExecWiki{hash: "h1"}
 		plan := &PlanResult{
@@ -548,43 +439,31 @@ var _ = ginkgo.Describe("TestExecutor_Create_UploadsRelativeAndRootAssets", func
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 1234, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		if w.uploadCalls != 2 {
-			t.Fatalf("expected 2 asset uploads, got %d", w.uploadCalls)
-		}
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected content to be updated")
-		}
-		if !strings.Contains(*w.lastUpdatedContent, "![Relative](/assets/p1/logo.png)") {
-			t.Fatalf("expected relative asset link rewrite, got:\n%s", *w.lastUpdatedContent)
-		}
-		if !strings.Contains(*w.lastUpdatedContent, "[Asset](/assets/p1/manual.pdf)") {
-			t.Fatalf("expected root asset link rewrite, got:\n%s", *w.lastUpdatedContent)
-		}
-		if !strings.Contains(*w.lastUpdatedContent, "![logo.png](/assets/p1/logo.png)") {
-			t.Fatalf("expected wiki asset link rewrite, got:\n%s", *w.lastUpdatedContent)
-		}
-		if w.lastUploadByteCap != 1234 {
-			t.Fatalf("expected asset uploads to use configured max bytes, got %d", w.lastUploadByteCap)
-		}
+		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
+			HaveField("UploadCalls", Equal(2)),
+			HaveField("LastUpdatedContent", Not(BeNil())),
+			HaveField("LastUploadByteCap", Equal(shared.MaxBytes(1234))),
+		)))
+		Expect(*w.lastUpdatedContent).To(ContainSubstring("![Relative](/assets/p1/logo.png)"))
+		Expect(*w.lastUpdatedContent).To(ContainSubstring("[Asset](/assets/p1/manual.pdf)"))
+		Expect(*w.lastUpdatedContent).To(ContainSubstring("![logo.png](/assets/p1/logo.png)"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkToNonImageAssetStaysNormalLink", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution non-image asset wiki links", func() {
+	ginkgo.It("rewrites non-image wiki asset links with file labels", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"[[../shared/manual.pdf]]",
 			"![[../shared/manual.pdf]]",
 		}, "\n"))
-		writeTmp(t, tmp, "shared/manual.pdf", "pdf-bytes")
+		writeTmp(tmp, "shared/manual.pdf", "pdf-bytes")
 
 		w := &fakeExecWiki{hash: "h1"}
 		plan := &PlanResult{
@@ -596,36 +475,28 @@ var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkToNonImageAssetStaysNormalL
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected content to be updated")
-		}
-		if !strings.Contains(*w.lastUpdatedContent, "[manual.pdf](/assets/p1/manual.pdf)") {
-			t.Fatalf("expected non-embed wiki asset to stay a normal link, got:\n%s", *w.lastUpdatedContent)
-		}
-		if !strings.Contains(*w.lastUpdatedContent, "![manual.pdf](/assets/p1/manual.pdf)") {
-			t.Fatalf("expected embed wiki asset to use embed syntax, got:\n%s", *w.lastUpdatedContent)
-		}
+		Expect(w.lastUpdatedContent).NotTo(BeNil())
+		Expect(*w.lastUpdatedContent).To(ContainSubstring("[manual.pdf](/assets/p1/manual.pdf)"))
+		Expect(*w.lastUpdatedContent).To(ContainSubstring("![manual.pdf](/assets/p1/manual.pdf)"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBasenameOnly", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Home.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution wiki-link basename resolution", func() {
+	ginkgo.It("resolves unique basename wiki links and leaves ambiguous names unchanged", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Home.md", strings.Join([]string{
 			"# Home",
 			"",
 			"[[Brainstorm]]",
 			"[[Meeting Notes]]",
 		}, "\n"))
-		writeTmp(t, tmp, "Daily/Brainstorm.md", "# Brainstorm")
-		writeTmp(t, tmp, "Daily/Meeting Notes.md", "# Daily Meeting Notes")
-		writeTmp(t, tmp, "Archive/Meeting Notes.md", "# Archived Meeting Notes")
+		writeTmp(tmp, "Daily/Brainstorm.md", "# Brainstorm")
+		writeTmp(tmp, "Daily/Meeting Notes.md", "# Daily Meeting Notes")
+		writeTmp(tmp, "Archive/Meeting Notes.md", "# Archived Meeting Notes")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -650,31 +521,26 @@ var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkFallsBackToUniqueNestedBase
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		homeContent := updatedContentByTitle["Home"]
-		if !strings.Contains(homeContent, "[Brainstorm](/daily/brainstorm.md)") {
-			t.Fatalf("expected unique basename wiki link rewrite, got:\n%s", homeContent)
-		}
-		if !strings.Contains(homeContent, "[[Meeting Notes]]") {
-			t.Fatalf("expected ambiguous basename wiki link to stay unchanged, got:\n%s", homeContent)
-		}
+		homeContent, err := updatedContentByTitleResult(updatedContentByTitle, "Home")
+		Expect(err).To(Succeed())
+		Expect(homeContent).To(ContainSubstring("[Brainstorm](/daily/brainstorm.md)"))
+		Expect(homeContent).To(ContainSubstring("[[Meeting Notes]]"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuffix", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "knowledge-main/tools/kubernetes/resources/StatefulSet.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution wiki-link path suffix resolution", func() {
+	ginkgo.It("resolves wiki-link path suffixes to imported pages", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "knowledge-main/tools/kubernetes/resources/StatefulSet.md", strings.Join([]string{
 			"# StatefulSet",
 			"",
 			"[[tools/kubernetes/resources/Deployment|Deployment]]",
 		}, "\n"))
-		writeTmp(t, tmp, "knowledge-main/tools/kubernetes/resources/Deployment.md", "# Deployment")
+		writeTmp(tmp, "knowledge-main/tools/kubernetes/resources/Deployment.md", "# Deployment")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -697,23 +563,20 @@ var _ = ginkgo.Describe("TestExecutor_Create_WikiLinkResolvesUniqueNestedPathSuf
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		statefulSetContent := updatedContentByTitle["StatefulSet"]
-		if !strings.Contains(statefulSetContent, "[Deployment](/knowledge-main/tools/kubernetes/resources/deployment.md)") {
-			t.Fatalf("expected unique nested path suffix wiki link rewrite, got:\n%s", statefulSetContent)
-		}
+		statefulSetContent, err := updatedContentByTitleResult(updatedContentByTitle, "StatefulSet")
+		Expect(err).To(Succeed())
+		Expect(statefulSetContent).To(ContainSubstring("[Deployment](/knowledge-main/tools/kubernetes/resources/deployment.md)"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_UnresolvedWikiLinkFallsBackToDeadMarkdownLink", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Home.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution unresolved wiki links", func() {
+	ginkgo.It("generates fallback hrefs for unresolved wiki links", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Home.md", strings.Join([]string{
 			"# Home",
 			"",
 			"[[Missing Note]]",
@@ -739,23 +602,20 @@ var _ = ginkgo.Describe("TestExecutor_Create_UnresolvedWikiLinkFallsBackToDeadMa
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		homeContent := updatedContentByTitle["Home"]
-		if !strings.Contains(homeContent, "[Missing Note](/missing-note)") {
-			t.Fatalf("expected unresolved wiki link fallback to dead markdown link, got:\n%s", homeContent)
-		}
+		homeContent, err := updatedContentByTitleResult(updatedContentByTitle, "Home")
+		Expect(err).To(Succeed())
+		Expect(homeContent).To(ContainSubstring("[Missing Note](/missing-note)"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_DoesNotRewriteLinksInsideCode", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution code-block link preservation", func() {
+	ginkgo.It("leaves code block links unchanged while rewriting real links", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"`[Inline](../Reference/Endpoints.md)`",
@@ -768,7 +628,7 @@ var _ = ginkgo.Describe("TestExecutor_Create_DoesNotRewriteLinksInsideCode", fun
 			"[Real](../Reference/Endpoints.md)",
 			"[[Reference/Endpoints|Real Alias]]",
 		}, "\n"))
-		writeTmp(t, tmp, "Reference/Endpoints.md", "# Endpoints")
+		writeTmp(tmp, "Reference/Endpoints.md", "# Endpoints")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -791,11 +651,11 @@ var _ = ginkgo.Describe("TestExecutor_Create_DoesNotRewriteLinksInsideCode", fun
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		setupContent := updatedContentByTitle["Setup"]
+		setupContent, err := updatedContentByTitleResult(updatedContentByTitle, "Setup")
+		Expect(err).To(Succeed())
 		for _, expected := range []string{
 			"`[Inline](../Reference/Endpoints.md)`",
 			"[Fence](../Reference/Endpoints.md)",
@@ -803,26 +663,23 @@ var _ = ginkgo.Describe("TestExecutor_Create_DoesNotRewriteLinksInsideCode", fun
 			"[Real](/reference/endpoints.md)",
 			"[Real Alias](/reference/endpoints.md)",
 		} {
-			if !strings.Contains(setupContent, expected) {
-				t.Fatalf("expected content to contain %q, got:\n%s", expected, setupContent)
-			}
+			Expect(setupContent).To(ContainSubstring(expected))
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_RewritesWindowsStyleMarkdownAndAssetPaths", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution Windows-style import paths", func() {
+	ginkgo.It("normalizes Windows-style import link separators", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"[Doc](..\\Reference\\Endpoints.md)",
 			"![Diagram](images\\diagram.png)",
 		}, "\n"))
-		writeTmp(t, tmp, "Reference/Endpoints.md", "# Endpoints")
-		writeTmp(t, tmp, "Guides/images/diagram.png", "png-bytes")
+		writeTmp(tmp, "Reference/Endpoints.md", "# Endpoints")
+		writeTmp(tmp, "Guides/images/diagram.png", "png-bytes")
 
 		w := &fakeExecWiki{hash: "h1"}
 		updatedContentByTitle := map[string]string{}
@@ -845,28 +702,25 @@ var _ = ginkgo.Describe("TestExecutor_Create_RewritesWindowsStyleMarkdownAndAsse
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		setupContent := updatedContentByTitle["Setup"]
+		setupContent, err := updatedContentByTitleResult(updatedContentByTitle, "Setup")
+		Expect(err).To(Succeed())
 		for _, expected := range []string{
 			"[Doc](/reference/endpoints.md)",
 			"![Diagram](/assets/p1/diagram.png)",
 		} {
-			if !strings.Contains(setupContent, expected) {
-				t.Fatalf("expected content to contain %q, got:\n%s", expected, setupContent)
-			}
+			Expect(setupContent).To(ContainSubstring(expected))
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestExecutor_Create_LeavesWindowsDriveLetterPathsUntouched", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		writeTmp(t, tmp, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution Windows drive-letter links", func() {
+	ginkgo.It("leaves Windows drive-letter links unchanged", func() {
+		tmp := importerTempDir()
+		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"[Windows File](C:\\Users\\John\\Notes\\Endpoints.md)",
@@ -883,20 +737,15 @@ var _ = ginkgo.Describe("TestExecutor_Create_LeavesWindowsDriveLetterPathsUntouc
 		opts := &PlanOptions{SourceBasePath: tmp}
 
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
-		if _, err := ex.Execute(newFixtureUserID("user1")); err != nil {
-			t.Fatalf("Execute err: %v", err)
-		}
+		_, err := ex.Execute(newFixtureUserID("user1"))
+		Expect(err).To(Succeed())
 
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected updated content")
-		}
+		Expect(w.lastUpdatedContent).NotTo(BeNil())
 		for _, expected := range []string{
 			"[Windows File](C:\\Users\\John\\Notes\\Endpoints.md)",
 			"![Windows Image](C:\\Users\\John\\Images\\diagram.png)",
 		} {
-			if !strings.Contains(*w.lastUpdatedContent, expected) {
-				t.Fatalf("expected content to keep %q untouched, got:\n%s", expected, *w.lastUpdatedContent)
-			}
+			Expect(*w.lastUpdatedContent).To(ContainSubstring(expected))
 		}
 
 	})

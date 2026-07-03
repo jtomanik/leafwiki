@@ -28,7 +28,7 @@ var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenari
 	{"Prefixed asset links resolve as workspace assets", mlrpEvidence("internal/core/markdownvalidation/use_cases_test.go", "resolves prefixed assets through the markdown link root prefix")},
 	{"Workspace sync coerces absolute links to the configured prefix", mlrpEvidence("e2e/tests/workspace-sync.spec.ts", "markdown link root prefix rewrites unprefixed absolute links")},
 	{"Generated editor links include the configured prefix", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix autocomplete inserts prefixed page links")},
-	{"Importer and refactor generated absolute links include the configured prefix", mlrpEvidence("internal/importer/content_transformer_test.go", "TestContentTransformer_UsesMarkdownLinkRootPrefixForGeneratedPageLinks")},
+	{"Importer and refactor generated absolute links include the configured prefix", mlrpEvidence("internal/importer/content_transformer_test.go", "applies the markdown root prefix to generated link hrefs")},
 	{"CLI env YAML and run wrapper expose the same prefix setting", mlrpEvidence("cmd/leafwiki/main_test.go", "TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars")},
 	{"Daemon identity changes when markdown link root prefix changes", mlrpEvidence("cmd/leafwiki/main_test.go", "TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields")},
 	{"MCP and HTTP config report markdownLinkRootPrefix", mlrpEvidence("internal/wiki/mcp/mcp_integration_test.go", "config[\"markdownLinkRootPrefix\"]")},

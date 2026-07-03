@@ -37,7 +37,7 @@ type importerServiceDefaults struct {
 
 func importerBadStateFile() string {
 	ginkgo.GinkgoHelper()
-	base := ginkgo.GinkgoT().TempDir()
+	base := importerTempDir()
 	blockingFile := filepath.Join(base, "state-dir")
 	Expect(os.WriteFile(blockingFile, []byte("not a directory"), 0o644)).To(Succeed())
 	return filepath.Join(blockingFile, "current-plan.json")
@@ -79,30 +79,30 @@ func importerServiceDefaultState(service *ImporterService) importerServiceDefaul
 
 var _ = ginkgo.Describe("content transformer target normalization", func() {
 	ginkgo.It("normalizes source candidates to route paths", func() {
-		transformer := newContentTransformer(&PlanResult{}, ginkgo.GinkgoT().TempDir(), 1024)
+		transformer := newContentTransformer(&PlanResult{}, importerTempDir(), 1024)
 
-		route, ok := transformer.normalizeSourceCandidateToRoutePath(" Docs/My Page.md ")
-		Expect(ok).To(BeTrue())
-		Expect(route).To(Equal("docs/my-page"))
+		route, err := normalizeSourceCandidateResult(transformer, " Docs/My Page.md ")
+		Expect(err).To(Succeed())
+		Expect(route).To(Equal(newFixtureRoutePath("docs/my-page")))
 
-		route, ok = transformer.normalizeSourceCandidateToRoutePath("docs/section/index.md")
-		Expect(ok).To(BeTrue())
-		Expect(route).To(Equal("docs/section/index-1"))
+		route, err = normalizeSourceCandidateResult(transformer, "docs/section/index.md")
+		Expect(err).To(Succeed())
+		Expect(route).To(Equal(newFixtureRoutePath("docs/section/index-1")))
 
-		route, ok = transformer.normalizeSourceCandidateToRoutePath("assets/manual.pdf")
-		Expect(ok).To(BeTrue())
-		Expect(route).To(Equal("assets-1/manual-pdf"))
+		route, err = normalizeSourceCandidateResult(transformer, "assets/manual.pdf")
+		Expect(err).To(Succeed())
+		Expect(route).To(Equal(newFixtureRoutePath("assets-1/manual-pdf")))
 	})
 
 	ginkgo.It("rejects empty candidates and avoids reserved root routes", func() {
-		transformer := newContentTransformer(&PlanResult{}, ginkgo.GinkgoT().TempDir(), 1024)
+		transformer := newContentTransformer(&PlanResult{}, importerTempDir(), 1024)
 
-		_, ok := transformer.normalizeSourceCandidateToRoutePath("")
-		Expect(ok).To(BeFalse())
+		_, err := normalizeSourceCandidateResult(transformer, "")
+		Expect(err).To(MatchError(errImporterRouteCandidateRejected))
 
-		route, ok := transformer.normalizeSourceCandidateToRoutePath("index.md")
-		Expect(ok).To(BeTrue())
-		Expect(route).To(Equal("index-1"))
+		route, err := normalizeSourceCandidateResult(transformer, "index.md")
+		Expect(err).To(Succeed())
+		Expect(route).To(Equal(newFixtureRoutePath("index-1")))
 	})
 
 	ginkgo.It("filters ambiguous import targets by requested kind", func() {
@@ -120,30 +120,30 @@ var _ = ginkgo.Describe("content transformer target normalization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("content transformer helper edges", func() {
+var _ = ginkgo.Describe("content transformer helper contracts", func() {
 	ginkgo.It("infers target kind only for markdown page and section destinations", func() {
-		kind, ok := impliedImportTargetKind("")
-		Expect(ok).To(BeFalse())
+		kind, err := impliedImportTargetKindResult("")
+		Expect(err).To(MatchError(errImporterTargetKindRejected))
 		Expect(kind).To(Equal(tree.NodeKind("")))
 
-		kind, ok = impliedImportTargetKind(" docs/ ")
-		Expect(ok).To(BeTrue())
+		kind, err = impliedImportTargetKindResult(" docs/ ")
+		Expect(err).To(Succeed())
 		Expect(kind).To(Equal(tree.NodeKindSection))
 
-		kind, ok = impliedImportTargetKind("/docs/index.md")
-		Expect(ok).To(BeTrue())
+		kind, err = impliedImportTargetKindResult("/docs/index.md")
+		Expect(err).To(Succeed())
 		Expect(kind).To(Equal(tree.NodeKindSection))
 
-		kind, ok = impliedImportTargetKind("README.md")
-		Expect(ok).To(BeTrue())
+		kind, err = impliedImportTargetKindResult("README.md")
+		Expect(err).To(Succeed())
 		Expect(kind).To(Equal(tree.NodeKindSection))
 
-		kind, ok = impliedImportTargetKind("docs/guide.md")
-		Expect(ok).To(BeTrue())
+		kind, err = impliedImportTargetKindResult("docs/guide.md")
+		Expect(err).To(Succeed())
 		Expect(kind).To(Equal(tree.NodeKindPage))
 
-		_, ok = impliedImportTargetKind("docs/image.png")
-		Expect(ok).To(BeFalse())
+		_, err = impliedImportTargetKindResult("docs/image.png")
+		Expect(err).To(MatchError(errImporterTargetKindRejected))
 	})
 
 	ginkgo.It("splits markdown destinations and URL suffixes without dropping wrappers", func() {
@@ -207,33 +207,33 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 			{targetPath: "docs/guide", kind: tree.NodeKindSection},
 		}))
 
-		key, ok := normalizeSourcePathSuffixLookupKey("/docs/index.md#intro")
-		Expect(ok).To(BeTrue())
+		key, err := sourceSuffixLookupKeyResult("/docs/index.md#intro")
+		Expect(err).To(Succeed())
 		Expect(key).To(Equal("docs"))
 
-		key, ok = normalizeSourcePathSuffixLookupKey("docs/guide.md?raw=1")
-		Expect(ok).To(BeTrue())
+		key, err = sourceSuffixLookupKeyResult("docs/guide.md?raw=1")
+		Expect(err).To(Succeed())
 		Expect(key).To(Equal("docs/guide"))
 
-		_, ok = normalizeSourcePathSuffixLookupKey("../guide.md")
-		Expect(ok).To(BeFalse())
+		_, err = sourceSuffixLookupKeyResult("../guide.md")
+		Expect(err).To(MatchError(errImporterSourceSuffixRejected))
 	})
 
-	ginkgo.It("covers reference parser and code-range helper edge cases", func() {
+	ginkgo.It("parses reference destinations and protects code-range rewriting", func() {
 		usage := importerReferenceUsage{linkLabels: map[string]struct{}{}, imageLabels: map[string]struct{}{}}
-		Expect(usage.imageOnly("")).To(BeFalse())
+		Expect(usage).NotTo(ReceiveImageOnlyReference(""))
 
-		_, _, _, ok := parseMarkdownReferenceDestination("[unterminated", 0, len("[unterminated"))
-		Expect(ok).To(BeFalse())
+		_, _, err := referenceDestinationResult("[unterminated", 0, len("[unterminated"))
+		Expect(err).To(MatchError(errImporterReferenceDestinationRejected))
 
-		_, _, _, ok = parseMarkdownReferenceDestination("[ref]:", 0, len("[ref]:"))
-		Expect(ok).To(BeFalse())
+		_, _, err = referenceDestinationResult("[ref]:", 0, len("[ref]:"))
+		Expect(err).To(MatchError(errImporterReferenceDestinationRejected))
 
 		line := `[ref]: docs/page.md "Title"`
-		label, start, end, ok := parseMarkdownReferenceDestination(line, 0, len(line))
-		Expect(ok).To(BeTrue())
+		label, destination, err := referenceDestinationResult(line, 0, len(line))
+		Expect(err).To(Succeed())
 		Expect(label).To(Equal("ref"))
-		Expect(line[start:end]).To(Equal("docs/page.md"))
+		Expect(destination).To(Equal("docs/page.md"))
 
 		code := goldast.NewCodeSpan()
 		code.AppendChild(code, goldast.NewString([]byte("not positional text")))
@@ -248,17 +248,16 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 		Expect(ranges).To(Equal([]markdownTextRange{{Start: 1, End: 4}}))
 
 		plainRewriteErr := errors.New("plain rewrite failed")
-		_, err := rewriteOutsideCodeSpans("`code` plain", func(segment string) (string, error) {
+		_, err = rewriteOutsideCodeSpans("`code` plain", func(segment string) (string, error) {
 			return "", plainRewriteErr
 		})
 		Expect(err).To(MatchError(plainRewriteErr))
 	})
 
-	ginkgo.It("covers destination normalization and unresolved wiki-link edges", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "current.md", "# Current")
-		importerWriteFile(t, tmp, "asset.png", "png-bytes")
+	ginkgo.It("normalizes destinations and preserves unresolved wiki links", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "current.md", "# Current")
+		importerWriteFile(tmp, "asset.png", "png-bytes")
 		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
 		transformer := newContentTransformerWithOptions(&PlanResult{
 			Items: []PlanItem{
@@ -280,7 +279,7 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 		Expect(resolved).To(BeEmpty())
 
 		uploadErr := errors.New("upload failed")
-		_, _, err = transformer.resolveDestination("user-1", "current.md", page, "./asset.png", &fakeExecWiki{
+		_, err = resolvedDestinationResult(transformer, newFixtureUserID("user-1"), "current.md", page, "./asset.png", &fakeExecWiki{
 			uploadFn: func(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 				return "", uploadErr
 			},
@@ -310,62 +309,62 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 			{targetPath: "area/resources/guide", kind: tree.NodeKindPage},
 			{targetPath: "other/resources/guide", kind: tree.NodeKindSection},
 		}
-		target, ok := transformer.resolveUniqueTargetPathSuffix("Resources/Guide.md")
-		Expect(ok).To(BeTrue())
+		target, err := uniqueTargetSuffixResult(transformer, "Resources/Guide.md")
+		Expect(err).To(Succeed())
 		Expect(target.kind).To(Equal(tree.NodeKindPage))
 
-		kind, ok := impliedImportTargetKind("/")
-		Expect(ok).To(BeFalse())
+		kind, err := impliedImportTargetKindResult("/")
+		Expect(err).To(MatchError(errImporterTargetKindRejected))
 		Expect(kind).To(Equal(tree.NodeKind("")))
 	})
 
-	ginkgo.It("covers fallback route and asset-path rejection edges", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+	ginkgo.It("rejects unsafe fallback routes and asset paths", func() {
+		tmp := importerTempDir()
 		transformer := newContentTransformer(&PlanResult{}, tmp, 1024)
 
 		Expect(buildSourceCandidates(tmp, "current.md", "")).To(BeNil())
 		Expect(buildSourceCandidates(tmp, "current.md", "../escape.md")).To(BeNil())
 
-		_, ok := transformer.fallbackWikiPageHref("docs/current.md", "!!!")
-		Expect(ok).To(BeFalse())
+		_, err := fallbackWikiHrefResult(transformer, "docs/current.md", "!!!")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("current.md", "../escape.md")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "current.md", "../escape.md")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("docs/current.md", "./!!!")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "./!!!")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
 		caseTransformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{{SourcePath: "Docs/Exact.md", TargetPath: "docs/exact", Kind: tree.NodeKindPage}},
 		}, tmp, 1024)
-		_, ok = caseTransformer.fallbackWikiPageHref("current.md", "/docs/exact.md")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(caseTransformer, "current.md", "/docs/exact.md")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("current.md", "bad/!!!")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "current.md", "bad/!!!")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		href, ok := transformer.fallbackWikiPageHref("docs/current.md", "Missing/Sub")
-		Expect(ok).To(BeTrue())
+		href, err := fallbackWikiHrefResult(transformer, "docs/current.md", "Missing/Sub")
+		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/missing/sub"))
 
-		_, ok = transformer.normalizeWikiHrefToRoutePath("!!!")
-		Expect(ok).To(BeFalse())
+		_, err = wikiHrefRoutePathResult(transformer, "!!!")
+		Expect(err).To(MatchError(errImporterWikiHrefRouteRejected))
 
 		Expect(buildSourcePathSuffixKeys("", tree.NodeKindPage)).To(BeNil())
 
-		_, ok = normalizeSourcePathSuffixLookupKey("index.md")
-		Expect(ok).To(BeFalse())
+		_, err = sourceSuffixLookupKeyResult("index.md")
+		Expect(err).To(MatchError(errImporterSourceSuffixRejected))
 
-		_, ok = resolveAssetPath(tmp, "current.md", "")
-		Expect(ok).To(BeFalse())
+		_, err = resolvedAssetPathResult(tmp, "current.md", "")
+		Expect(err).To(MatchError(errImporterAssetPathRejected))
 
-		_, ok = resolveAssetPath(tmp, "current.md", "../escape.png")
-		Expect(ok).To(BeFalse())
+		_, err = resolvedAssetPathResult(tmp, "current.md", "../escape.png")
+		Expect(err).To(MatchError(errImporterAssetPathRejected))
 	})
 
-	ginkgo.It("covers filesystem seam failures for asset resolution", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
-		importerWriteFile(ginkgo.GinkgoT(), tmp, "asset.png", "png-bytes")
+	ginkgo.It("reports filesystem failures while resolving asset destinations", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "asset.png", "png-bytes")
 		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
 		transformer := newContentTransformer(&PlanResult{}, tmp, 1024)
 
@@ -388,8 +387,8 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 		importerFilepathAbs = func(path string) (string, error) {
 			return "", errors.New("abs failed")
 		}
-		_, ok := resolveAssetPath(tmp, "current.md", "asset.png")
-		Expect(ok).To(BeFalse())
+		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		Expect(err).To(MatchError(errImporterAssetPathRejected))
 
 		absCalls := 0
 		importerFilepathAbs = func(path string) (string, error) {
@@ -399,8 +398,8 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 			}
 			return "/base", nil
 		}
-		_, ok = resolveAssetPath(tmp, "current.md", "asset.png")
-		Expect(ok).To(BeFalse())
+		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		Expect(err).To(MatchError(errImporterAssetPathRejected))
 		importerFilepathAbs = originalAbs
 
 		originalRel := importerFilepathRel
@@ -410,8 +409,8 @@ var _ = ginkgo.Describe("content transformer helper edges", func() {
 		importerFilepathRel = func(basepath, targpath string) (string, error) {
 			return "", errors.New("rel failed")
 		}
-		_, ok = resolveAssetPath(tmp, "current.md", "asset.png")
-		Expect(ok).To(BeFalse())
+		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		Expect(err).To(MatchError(errImporterAssetPathRejected))
 		importerFilepathRel = originalRel
 	})
 })
@@ -422,14 +421,14 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", func() {
 			Items: []PlanItem{
 				{SourcePath: "Notes/Guide.md", TargetPath: "kb/guide", Kind: tree.NodeKindPage},
 			},
-		}, ginkgo.GinkgoT().TempDir(), 1024)
+		}, importerTempDir(), 1024)
 
-		href, ok := transformer.fallbackWikiPageHref("current.md", "Guide#intro")
-		Expect(ok).To(BeTrue())
+		href, err := fallbackWikiHrefResult(transformer, "current.md", "Guide#intro")
+		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/kb/guide.md#intro"))
 
-		href, ok = transformer.fallbackWikiPageHref("current.md", "Missing Note?raw=1#intro")
-		Expect(ok).To(BeTrue())
+		href, err = fallbackWikiHrefResult(transformer, "current.md", "Missing Note?raw=1#intro")
+		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/missing-note?raw=1#intro"))
 	})
 
@@ -440,13 +439,13 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", func() {
 				{SourcePath: "Other/Guide.md", TargetPath: "other/guide", Kind: tree.NodeKindPage},
 				{SourcePath: "Docs/Exact.md", TargetPath: "docs/exact", Kind: tree.NodeKindPage},
 			},
-		}, ginkgo.GinkgoT().TempDir(), 1024)
+		}, importerTempDir(), 1024)
 
-		_, ok := transformer.fallbackWikiPageHref("current.md", "Guide")
-		Expect(ok).To(BeFalse())
+		_, err := fallbackWikiHrefResult(transformer, "current.md", "Guide")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("current.md", "guide")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "current.md", "guide")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
 		Expect(transformer.hasCaseVariantSourceSuffixMatch("docs/exact.md")).To(BeTrue())
 		Expect(transformer.hasCaseVariantSourceSuffixMatch("Docs/Exact.md")).To(BeFalse())
@@ -454,51 +453,51 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", func() {
 	})
 
 	ginkgo.It("generates route fallbacks for safe relative sources", func() {
-		transformer := newContentTransformer(&PlanResult{}, ginkgo.GinkgoT().TempDir(), 1024)
+		transformer := newContentTransformer(&PlanResult{}, importerTempDir(), 1024)
 
-		_, ok := transformer.normalizeWikiHrefToRoutePath("docs//page")
-		Expect(ok).To(BeFalse())
+		_, err := wikiHrefRoutePathResult(transformer, "docs//page")
+		Expect(err).To(MatchError(errImporterWikiHrefRouteRejected))
 
-		_, ok = transformer.normalizeSourceCandidateToRoutePath("/")
-		Expect(ok).To(BeFalse())
+		_, err = normalizeSourceCandidateResult(transformer, "/")
+		Expect(err).To(MatchError(errImporterRouteCandidateRejected))
 
-		href, ok := transformer.fallbackWikiPageHref("docs/current.md", "./New Page.md?raw=1")
-		Expect(ok).To(BeTrue())
+		href, err := fallbackWikiHrefResult(transformer, "docs/current.md", "./New Page.md?raw=1")
+		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/docs/new-page?raw=1"))
 
-		href, ok = transformer.fallbackWikiPageHref("docs/current.md", "/Guides/New Page.md")
-		Expect(ok).To(BeTrue())
+		href, err = fallbackWikiHrefResult(transformer, "docs/current.md", "/Guides/New Page.md")
+		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/guides/new-page"))
 
-		_, ok = transformer.fallbackWikiPageHref("docs/current.md", "https://example.test/page")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "https://example.test/page")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("docs/current.md", "#local")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "#local")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, ok = transformer.fallbackWikiPageHref("docs/current.md", "image.png")
-		Expect(ok).To(BeFalse())
+		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "image.png")
+		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 	})
 
 	ginkgo.It("detects README folder fallbacks case-sensitively", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := importerTempDir()
 		Expect(os.MkdirAll(filepath.Join(tmp, "lower"), 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(tmp, "upper"), 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(tmp, "dironly", "README.md"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(tmp, "lower", "readme.md"), []byte("# lower"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(tmp, "upper", "README.md"), []byte("# upper"), 0o644)).To(Succeed())
 
-		_, ok := sourceDirReadmeFallbackFile(tmp, "missing")
-		Expect(ok).To(BeFalse())
+		_, err := sourceDirReadmeFallbackResult(tmp, "missing")
+		Expect(err).To(MatchError(errImporterReadmeFallbackRejected))
 
-		_, ok = sourceDirReadmeFallbackFile(tmp, "lower")
-		Expect(ok).To(BeFalse())
+		_, err = sourceDirReadmeFallbackResult(tmp, "lower")
+		Expect(err).To(MatchError(errImporterReadmeFallbackRejected))
 
-		_, ok = sourceDirReadmeFallbackFile(tmp, "dironly")
-		Expect(ok).To(BeFalse())
+		_, err = sourceDirReadmeFallbackResult(tmp, "dironly")
+		Expect(err).To(MatchError(errImporterReadmeFallbackRejected))
 
-		name, ok := sourceDirReadmeFallbackFile(tmp, "upper")
-		Expect(ok).To(BeTrue())
+		name, err := sourceDirReadmeFallbackResult(tmp, "upper")
+		Expect(err).To(Succeed())
 		Expect(name).To(Equal("README.md"))
 	})
 })
@@ -507,7 +506,7 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 	ginkgo.It("rejects resume state without a tree hash before processing items", func() {
 		executor := NewExecutor(
 			&PlanResult{TreeHash: "h1", Items: []PlanItem{{SourcePath: "a.md", Action: PlanActionCreate}}},
-			&PlanOptions{SourceBasePath: ginkgo.GinkgoT().TempDir()},
+			&PlanOptions{SourceBasePath: importerTempDir()},
 			0,
 			&fakeExecWiki{hash: "h1"},
 			slog.Default(),
@@ -526,7 +525,7 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 					{SourcePath: "a.md", TargetPath: "a", Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 				},
 			},
-			&PlanOptions{SourceBasePath: ginkgo.GinkgoT().TempDir()},
+			&PlanOptions{SourceBasePath: importerTempDir()},
 			0,
 			&fakeExecWiki{hash: "h1"},
 			slog.Default(),
@@ -540,9 +539,8 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 	})
 
 	ginkgo.It("skips create items when page creation, source loading, or page update fails", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "update.md", "# Update")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "update.md", "# Update")
 		updateFailedErr := errors.New("update failed")
 		wiki := &fakeExecWiki{
 			hash: "h1",
@@ -582,11 +580,10 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 	})
 
 	ginkgo.It("skips create items when transformation or imported-content rendering fails", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "asset-error.md", "![Asset](./missing.png)")
-		importerWriteFile(t, tmp, "render-error.md", "# Render Error")
-		importerWriteFile(t, tmp, "missing.png", "png-bytes")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "asset-error.md", "![Asset](./missing.png)")
+		importerWriteFile(tmp, "render-error.md", "# Render Error")
+		importerWriteFile(tmp, "missing.png", "png-bytes")
 
 		uploadFailedErr := errors.New("upload failed")
 		wiki := &fakeExecWiki{
@@ -626,9 +623,8 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 	})
 
 	ginkgo.It("fills a missing TreeHashBefore when resuming from partial results", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "resume.md", "# Resume")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "resume.md", "# Resume")
 		progresses := []ExecutionProgress{}
 
 		executor := NewExecutor(
@@ -664,15 +660,13 @@ var _ = ginkgo.Describe("PlanStore cancellation", func() {
 			ExecutionStatus: ExecutionStatusRunning,
 		})).To(Succeed())
 
-		plan, requested, err := store.RequestCancel()
+		plan, err := requestCancelResult(store)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(requested).To(BeTrue())
 		Expect(plan.CancelRequested).To(BeTrue())
 		Expect(store.IsCancelRequested("plan-1")).To(BeTrue())
 
-		plan, requested, err = store.RequestCancel()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(requested).To(BeFalse())
+		plan, err = requestCancelResult(store)
+		Expect(err).To(MatchError(errImporterCancellationNotRequested))
 		Expect(plan.CancelRequested).To(BeTrue())
 	})
 
@@ -683,9 +677,8 @@ var _ = ginkgo.Describe("PlanStore cancellation", func() {
 			ExecutionStatus: ExecutionStatusPlanned,
 		})).To(Succeed())
 
-		plan, requested, err := store.RequestCancel()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(requested).To(BeFalse())
+		plan, err := requestCancelResult(store)
+		Expect(err).To(MatchError(errImporterCancellationNotRequested))
 		Expect(plan.CancelRequested).To(BeFalse())
 	})
 })
@@ -694,9 +687,8 @@ var _ = ginkgo.Describe("PlanStore execution state edges", func() {
 	ginkgo.It("starts planned execution by resetting stale execution state", func() {
 		store := NewPlanStore()
 
-		_, started, err := store.TryStartExecution("user-1")
+		_, err := startStoredPlanExecutionResult(store, "user-1")
 		Expect(err).To(MatchError(ErrNoPlan))
-		Expect(started).To(BeFalse())
 
 		errMsg := "previous failure"
 		currentSource := "old.md"
@@ -720,9 +712,8 @@ var _ = ginkgo.Describe("PlanStore execution state edges", func() {
 			},
 		})).To(Succeed())
 
-		plan, started, err := store.TryStartExecution("user-1")
+		plan, err := startStoredPlanExecutionResult(store, "user-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(started).To(BeTrue())
 		Expect(plan).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"ExecutionStatus": Equal(ExecutionStatusRunning),
 			"ExecutionUserID": Equal("user-1"),
@@ -736,9 +727,8 @@ var _ = ginkgo.Describe("PlanStore execution state edges", func() {
 			}),
 		})))
 
-		plan, started, err = store.TryStartExecution("user-2")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(started).To(BeFalse())
+		plan, err = startStoredPlanExecutionResult(store, "user-2")
+		Expect(err).To(MatchError(errImporterExecutionNotStarted))
 		Expect(plan.ExecutionUserID).To(Equal("user-1"))
 	})
 
@@ -903,7 +893,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 					plan.ExecutionStatus = ExecutionStatusPlanned
 				},
 				mutate: func(store *PlanStore) error {
-					_, _, err := store.TryStartExecution("user-1")
+					_, err := startStoredPlanExecutionResult(store, "user-1")
 					return err
 				},
 			},
@@ -931,7 +921,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 					plan.ExecutionStatus = ExecutionStatusRunning
 				},
 				mutate: func(store *PlanStore) error {
-					_, _, err := store.RequestCancel()
+					_, err := requestCancelResult(store)
 					return err
 				},
 			},
@@ -956,11 +946,11 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 		Expect(store.Set(&StoredPlan{})).To(MatchError(ErrImportStateUnavailable))
 		_, err := store.Clear()
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
-		_, _, err = store.TryStartExecution("user-1")
+		_, err = startStoredPlanExecutionResult(store, "user-1")
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 		Expect(store.FinishExecution("plan-1", nil, nil)).To(MatchError(ErrImportStateUnavailable))
 		Expect(store.UpdateExecutionProgress("plan-1", ExecutionProgress{}, nil)).To(MatchError(ErrImportStateUnavailable))
-		_, _, err = store.RequestCancel()
+		_, err = requestCancelResult(store)
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 	})
 
@@ -985,7 +975,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 	})
 
 	ginkgo.It("clears missing state files and clones nil state safely", func() {
-		stateFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "missing", "current-plan.json")
+		stateFile := filepath.Join(importerTempDir(), "missing", "current-plan.json")
 		store := NewPlanStore(stateFile)
 
 		old, err := store.Clear()
@@ -996,7 +986,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 	})
 
 	ginkgo.It("surfaces state-file removal failures when clearing an empty plan", func() {
-		stateFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "current-plan.json")
+		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
 		Expect(os.MkdirAll(stateFile, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(stateFile, "child"), []byte("x"), 0o644)).To(Succeed())
 
@@ -1009,7 +999,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 	})
 
 	ginkgo.It("surfaces state-file write failures", func() {
-		stateDir := filepath.Join(ginkgo.GinkgoT().TempDir(), "readonly")
+		stateDir := filepath.Join(importerTempDir(), "readonly")
 		Expect(os.MkdirAll(stateDir, 0o755)).To(Succeed())
 		Expect(os.Chmod(stateDir, 0o555)).To(Succeed())
 		ginkgo.DeferCleanup(func() {
@@ -1025,7 +1015,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 
 	ginkgo.It("surfaces JSON marshal failures from invalid persisted times", func() {
 		store := NewPlanStore()
-		store.stateFile = filepath.Join(ginkgo.GinkgoT().TempDir(), "current-plan.json")
+		store.stateFile = filepath.Join(importerTempDir(), "current-plan.json")
 
 		err := store.Set(&StoredPlan{
 			Plan:      &PlanResult{ID: "plan-1"},
@@ -1037,7 +1027,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", func() {
 
 var _ = ginkgo.Describe("ImporterService execution state edges", func() {
 	ginkgo.It("returns stored terminal states that do not need a new executor", func() {
-		service := newServiceWithFakeWiki(ginkgo.GinkgoT(), &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		result := &ExecutionResult{ImportedCount: 2}
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
@@ -1065,11 +1055,10 @@ var _ = ginkgo.Describe("ImporterService execution state edges", func() {
 	})
 
 	ginkgo.It("surfaces cancellation and current-plan state without a stored plan", func() {
-		service := newServiceWithFakeWiki(ginkgo.GinkgoT(), &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
-		state, requested, err := service.CancelCurrentPlan()
+		state, err := cancelCurrentPlanResult(service)
 		Expect(state).To(BeNil())
-		Expect(requested).To(BeFalse())
 		Expect(err).To(MatchError(ErrNoPlan))
 
 		Expect(currentPlanStateFromStored(nil)).To(BeNil())
@@ -1077,14 +1066,13 @@ var _ = ginkgo.Describe("ImporterService execution state edges", func() {
 	})
 
 	ginkgo.It("refuses to replace a running folder import plan", func() {
-		t := ginkgo.GinkgoT()
-		newWorkspace := t.TempDir()
-		importerWriteFile(t, newWorkspace, "next.md", "# Next")
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		newWorkspace := importerTempDir()
+		importerWriteFile(newWorkspace, "next.md", "# Next")
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "running"},
-			WorkspaceRoot:   t.TempDir(),
+			WorkspaceRoot:   importerTempDir(),
 			ExecutionStatus: ExecutionStatusRunning,
 		})).To(Succeed())
 
@@ -1095,7 +1083,6 @@ var _ = ginkgo.Describe("ImporterService execution state edges", func() {
 
 var _ = ginkgo.Describe("ImporterService zip planning", func() {
 	ginkgo.It("creates an import plan from an uploaded zip and stores the extracted workspace", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("docs/Imported.md")
@@ -1104,7 +1091,7 @@ var _ = ginkgo.Describe("ImporterService zip planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		plan, err := service.CreateImportPlanFromZipUpload(bytes.NewReader(zipBytes.Bytes()), "wiki")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.Items).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -1125,7 +1112,7 @@ var _ = ginkgo.Describe("ImporterService zip planning", func() {
 	})
 
 	ginkgo.It("honors positive asset max-size overrides and ignores non-positive values", func() {
-		service := newServiceWithFakeWiki(ginkgo.GinkgoT(), &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
 		Expect(service.assetMaxUploadSizeBytes).To(Equal(shared.MaxBytes(0)))
 		service.SetAssetMaxUploadSizeBytes(shared.MaxBytes(2048))
@@ -1141,7 +1128,7 @@ var _ = ginkgo.Describe("ImporterService zip planning", func() {
 	})
 
 	ginkgo.It("reports invalid zip uploads without storing a plan", func() {
-		service := newServiceWithFakeWiki(ginkgo.GinkgoT(), &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
 		_, err := service.CreateImportPlanFromZipUpload(bytes.NewReader([]byte("not a zip")), "wiki")
 		Expect(err).To(MatchError(zip.ErrFormat))
@@ -1153,10 +1140,9 @@ var _ = ginkgo.Describe("ImporterService zip planning", func() {
 
 var _ = ginkgo.Describe("Planner error edges", func() {
 	ginkgo.It("collects filename normalization and lookup errors", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "!!!.md", "# Invalid")
-		importerWriteFile(t, tmp, "lookup.md", "# Lookup")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "!!!.md", "# Invalid")
+		importerWriteFile(tmp, "lookup.md", "# Lookup")
 
 		planner := newPlannerWithFake(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		plan, err := planner.CreatePlan([]ImportMDFile{{SourcePath: "!!!.md"}}, PlanOptions{SourceBasePath: tmp})
@@ -1176,14 +1162,13 @@ var _ = ginkgo.Describe("Planner error edges", func() {
 
 var _ = ginkgo.Describe("ImporterService error edges", func() {
 	ginkgo.It("surfaces folder planning cleanup, discovery, planning, and persistence errors", func() {
-		t := ginkgo.GinkgoT()
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
-		_, err := service.CreateImportPlanFromFolder(filepath.Join(t.TempDir(), "missing"), "")
+		_, err := service.CreateImportPlanFromFolder(filepath.Join(importerTempDir(), "missing"), "")
 		Expect(err).To(MatchError(os.ErrNotExist))
 
-		workspace := t.TempDir()
-		importerWriteFile(t, workspace, "page.md", "# Page")
+		workspace := importerTempDir()
+		importerWriteFile(workspace, "page.md", "# Page")
 
 		originalGenerateID := importerGenerateUniqueID
 		ginkgo.DeferCleanup(func() {
@@ -1201,20 +1186,20 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 		_, err = service.CreateImportPlanFromFolder(workspace, "")
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
-		service = newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service = newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "old"},
-			WorkspaceRoot:   t.TempDir(),
+			WorkspaceRoot:   importerTempDir(),
 			ExecutionStatus: ExecutionStatusPlanned,
 		})).To(Succeed())
 		service.planStore.stateFile = importerBadStateFile()
 		_, err = service.CreateImportPlanFromFolder(workspace, "")
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
-		service = newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service = newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "old"},
-			WorkspaceRoot:   t.TempDir(),
+			WorkspaceRoot:   importerTempDir(),
 			ExecutionStatus: ExecutionStatusPlanned,
 		})).To(Succeed())
 		originalRemoveAll := importerServiceRemoveAll
@@ -1231,11 +1216,10 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 	})
 
 	ginkgo.It("logs clear and cleanup removal failures while preserving clear semantics", func() {
-		t := ginkgo.GinkgoT()
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
-			WorkspaceRoot:   t.TempDir(),
+			WorkspaceRoot:   importerTempDir(),
 			ExecutionStatus: ExecutionStatusPlanned,
 		})).To(Succeed())
 
@@ -1253,16 +1237,15 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 	})
 
 	ginkgo.It("surfaces execution start and finish persistence errors", func() {
-		t := ginkgo.GinkgoT()
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		service.planStore.stateErr = ErrImportStateUnavailable
-		_, _, err := service.StartCurrentPlanExecution("user-1")
+		_, err := startCurrentPlanExecutionResult(service, "user-1")
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
-		workspace := t.TempDir()
-		importerWriteFile(t, workspace, "page.md", "# Page")
+		workspace := importerTempDir()
+		importerWriteFile(workspace, "page.md", "# Page")
 		wiki := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		service = newServiceWithFakeWiki(t, wiki)
+		service = newServiceWithFakeWiki(wiki)
 		wiki.updateFn = func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 			service.planStore.stateFile = importerBadStateFile()
 			return &tree.Page{PageNode: &tree.PageNode{ID: id, Title: title, Slug: slug, Kind: *kind}}, nil
@@ -1275,13 +1258,12 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 		Expect(plan).NotTo(BeNil())
 	})
 
-	ginkgo.It("covers async finish persistence and progress persistence failures", func() {
-		t := ginkgo.GinkgoT()
-		workspace := t.TempDir()
-		importerWriteFile(t, workspace, "page.md", "# Page")
+	ginkgo.It("records async finish and progress persistence failures", func() {
+		workspace := importerTempDir()
+		importerWriteFile(workspace, "page.md", "# Page")
 		finished := make(chan struct{})
 		wiki := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		service := newServiceWithFakeWiki(t, wiki)
+		service := newServiceWithFakeWiki(wiki)
 		wiki.updateErr = nil
 		wiki.ensureFn = func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			service.planStore.stateFile = importerBadStateFile()
@@ -1291,38 +1273,36 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 
 		_, err := service.CreateImportPlanFromFolder(workspace, "")
 		Expect(err).NotTo(HaveOccurred())
-		_, started, err := service.StartCurrentPlanExecution("user-1")
+		_, err = startCurrentPlanExecutionResult(service, "user-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(started).To(BeTrue())
 		Eventually(finished).Should(BeClosed())
 		Eventually(func() error {
 			_, err := service.planStore.Get()
 			return err
 		}).Should(MatchError(ErrImportStateUnavailable))
 
-		service = newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service = newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		service.planStore.stateErr = ErrImportStateUnavailable
 		result, err := service.executeStoredPlan(&StoredPlan{
 			Plan: &PlanResult{TreeHash: "h1", Items: []PlanItem{
 				{SourcePath: "skipped.md", TargetPath: "skipped", Action: PlanActionSkip},
 			}},
-			PlanOptions: PlanOptions{SourceBasePath: t.TempDir()},
+			PlanOptions: PlanOptions{SourceBasePath: importerTempDir()},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.SkippedCount).To(Equal(1))
 	})
 
-	ginkgo.It("covers markdown discovery ordering and error paths", func() {
-		t := ginkgo.GinkgoT()
-		base := t.TempDir()
-		importerWriteFile(t, base, "z.md", "# Z")
-		importerWriteFile(t, base, "index.md", "# Index")
+	ginkgo.It("orders markdown discovery and reports filesystem failures", func() {
+		base := importerTempDir()
+		importerWriteFile(base, "z.md", "# Z")
+		importerWriteFile(base, "index.md", "# Index")
 
 		entries, err := FindMarkdownEntries(base)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(entries[0].SourcePath.FilesystemPath()).To(Equal("index.md"))
 
-		_, err = FindMarkdownEntries(filepath.Join(t.TempDir(), "missing"))
+		_, err = FindMarkdownEntries(filepath.Join(importerTempDir(), "missing"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
 		originalRel := importerServiceRel
@@ -1338,7 +1318,6 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 	})
 
 	ginkgo.It("cleans up extracted zip workspaces when plan creation fails", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("page.md")
@@ -1347,7 +1326,7 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		originalGenerateID := importerGenerateUniqueID
 		ginkgo.DeferCleanup(func() {
 			importerGenerateUniqueID = originalGenerateID
@@ -1372,8 +1351,7 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 	})
 
 	ginkgo.It("surfaces temp zip storage seam failures", func() {
-		t := ginkgo.GinkgoT()
-		service := newServiceWithFakeWiki(t, &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
+		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
 		originalMkdirAll := importerServiceMkdirAll
 		ginkgo.DeferCleanup(func() {
@@ -1427,7 +1405,7 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 		Expect(zipWriter.Close()).To(Succeed())
 		workspace, err := service.extractZipReaderToTemp(bytes.NewReader(zipBytes.Bytes()))
 		Expect(err).NotTo(HaveOccurred())
-		ginkgo.DeferCleanup(workspace.Cleanup)
+		ginkgo.DeferCleanup(cleanupZipWorkspaceResult, workspace)
 		importerServiceRemove = originalRemove
 
 		originalClose := importerServiceCloseFile
@@ -1442,17 +1420,16 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 		Expect(err).To(MatchError(closeFailedErr))
 	})
 
-	ginkgo.It("covers resume startup load, non-running, default-user, and finish-error paths", func() {
-		t := ginkgo.GinkgoT()
-		_ = NewImporterService(newPlannerWithFake(&fakeWiki{}), NewPlanStore(importerBadStateFile()), t.TempDir(), 0)
+	ginkgo.It("resumes startup imports and records finish persistence failures", func() {
+		_ = NewImporterService(newPlannerWithFake(&fakeWiki{}), NewPlanStore(importerBadStateFile()), importerTempDir(), 0)
 
 		store := NewPlanStore()
 		Expect(store.Set(&StoredPlan{Plan: &PlanResult{ID: "planned"}, ExecutionStatus: ExecutionStatusPlanned})).To(Succeed())
-		NewImporterService(newPlannerWithFake(&fakeWiki{}), store, t.TempDir(), 0)
+		NewImporterService(newPlannerWithFake(&fakeWiki{}), store, importerTempDir(), 0)
 
-		workspace := t.TempDir()
-		importerWriteFile(t, workspace, "page.md", "# Page")
-		stateFile := filepath.Join(t.TempDir(), "current-plan.json")
+		workspace := importerTempDir()
+		importerWriteFile(workspace, "page.md", "# Page")
+		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
 		store = NewPlanStore(stateFile)
 		plan := &PlanResult{
 			ID:       "plan-1",
@@ -1468,7 +1445,7 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 			ExecutionStatus: ExecutionStatusRunning,
 		})).To(Succeed())
 		wiki := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		service := NewImporterService(newPlannerWithFake(wiki), NewPlanStore(stateFile), t.TempDir(), 0)
+		service := NewImporterService(newPlannerWithFake(wiki), NewPlanStore(stateFile), importerTempDir(), 0)
 		Eventually(func() (*CurrentPlanState, error) {
 			return service.GetCurrentPlan()
 		}).Should(And(Not(BeNil()), WithTransform(func(state *CurrentPlanState) ExecutionStatus {
@@ -1484,7 +1461,7 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 			ExecutionUserID: "user-1",
 		})).To(Succeed())
 		store.stateFile = importerBadStateFile()
-		service = NewImporterService(newPlannerWithFake(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}), store, t.TempDir(), 0)
+		service = NewImporterService(newPlannerWithFake(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}), store, importerTempDir(), 0)
 		Eventually(func() error {
 			_, err := service.GetCurrentPlan()
 			return err
@@ -1494,7 +1471,6 @@ var _ = ginkgo.Describe("ImporterService error edges", func() {
 
 var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 	ginkgo.It("skips empty and directory entries while extracting regular files", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		_, err := zipWriter.Create("   ")
@@ -1507,17 +1483,16 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath := filepath.Join(t.TempDir(), "safe.zip")
+		zipPath := filepath.Join(importerTempDir(), "safe.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
 
-		workspace, err := NewZipExtractor().ExtractToDir(zipPath, t.TempDir())
+		workspace, err := NewZipExtractor().ExtractToDir(zipPath, importerTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(workspace.Cleanup)
 		Expect(os.ReadFile(filepath.Join(workspace.Root, "docs", "page.md"))).To(Equal([]byte("# Page")))
 	})
 
 	ginkgo.It("reports base directory creation errors before extracting", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("docs/page.md")
@@ -1526,9 +1501,9 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath := filepath.Join(t.TempDir(), "safe.zip")
+		zipPath := filepath.Join(importerTempDir(), "safe.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
-		baseDir := filepath.Join(t.TempDir(), "not-a-dir")
+		baseDir := filepath.Join(importerTempDir(), "not-a-dir")
 		Expect(os.WriteFile(baseDir, []byte("file"), 0o644)).To(Succeed())
 
 		workspace, err := NewZipExtractor().ExtractToDir(zipPath, baseDir)
@@ -1537,7 +1512,6 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 	})
 
 	ginkgo.It("reports temp workspace creation errors", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("docs/page.md")
@@ -1546,9 +1520,9 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath := filepath.Join(t.TempDir(), "safe.zip")
+		zipPath := filepath.Join(importerTempDir(), "safe.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
-		baseDir := filepath.Join(t.TempDir(), "readonly")
+		baseDir := filepath.Join(importerTempDir(), "readonly")
 		Expect(os.MkdirAll(baseDir, 0o755)).To(Succeed())
 		Expect(os.Chmod(baseDir, 0o555)).To(Succeed())
 		ginkgo.DeferCleanup(func() {
@@ -1561,7 +1535,6 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 	})
 
 	ginkgo.It("reports per-entry directory and file creation failures", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("blocked")
@@ -1574,10 +1547,10 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath := filepath.Join(t.TempDir(), "blocked-dir.zip")
+		zipPath := filepath.Join(importerTempDir(), "blocked-dir.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
 
-		workspace, err := NewZipExtractor().ExtractToDir(zipPath, t.TempDir())
+		workspace, err := NewZipExtractor().ExtractToDir(zipPath, importerTempDir())
 		Expect(workspace).To(BeNil())
 		Expect(err).To(MatchError(syscall.ENOTDIR))
 
@@ -1593,16 +1566,15 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath = filepath.Join(t.TempDir(), "blocked-file.zip")
+		zipPath = filepath.Join(importerTempDir(), "blocked-file.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
 
-		workspace, err = NewZipExtractor().ExtractToDir(zipPath, t.TempDir())
+		workspace, err = NewZipExtractor().ExtractToDir(zipPath, importerTempDir())
 		Expect(workspace).To(BeNil())
 		Expect(err).To(MatchError(syscall.EISDIR))
 	})
 
 	ginkgo.It("reports corrupt entry content", func() {
-		t := ginkgo.GinkgoT()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		header := &zip.FileHeader{Name: "docs/page.md", Method: zip.Store}
@@ -1621,24 +1593,23 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		unsupported[localHeader+9] = 0
 		unsupported[centralHeader+10] = 99
 		unsupported[centralHeader+11] = 0
-		zipPath := filepath.Join(t.TempDir(), "unsupported.zip")
+		zipPath := filepath.Join(importerTempDir(), "unsupported.zip")
 		Expect(os.WriteFile(zipPath, unsupported, 0o644)).To(Succeed())
-		workspace, err := NewZipExtractor().ExtractToDir(zipPath, t.TempDir())
+		workspace, err := NewZipExtractor().ExtractToDir(zipPath, importerTempDir())
 		Expect(workspace).To(BeNil())
 		Expect(err).To(MatchError(zip.ErrAlgorithm))
 
 		corrupt := bytes.Replace(zipBytes.Bytes(), []byte("# Page"), []byte("# Paga"), 1)
-		zipPath = filepath.Join(t.TempDir(), "corrupt.zip")
+		zipPath = filepath.Join(importerTempDir(), "corrupt.zip")
 		Expect(os.WriteFile(zipPath, corrupt, 0o644)).To(Succeed())
 
-		workspace, err = NewZipExtractor().ExtractToDir(zipPath, t.TempDir())
+		workspace, err = NewZipExtractor().ExtractToDir(zipPath, importerTempDir())
 		Expect(workspace).To(BeNil())
 		Expect(err).To(MatchError(zip.ErrChecksum))
 	})
 
 	ginkgo.It("rejects unsafe zip entry paths and cleans up the failed workspace", func() {
-		t := ginkgo.GinkgoT()
-		baseDir := t.TempDir()
+		baseDir := importerTempDir()
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
 		file, err := zipWriter.Create("../escape.md")
@@ -1647,7 +1618,7 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(zipWriter.Close()).To(Succeed())
 
-		zipPath := filepath.Join(t.TempDir(), "unsafe.zip")
+		zipPath := filepath.Join(importerTempDir(), "unsafe.zip")
 		Expect(os.WriteFile(zipPath, zipBytes.Bytes(), 0o644)).To(Succeed())
 
 		_, err = NewZipExtractor().ExtractToDir(zipPath, baseDir)
@@ -1662,7 +1633,7 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 	})
 
 	ginkgo.It("keeps safe joined paths inside the extraction root", func() {
-		baseDir := filepath.Join(ginkgo.GinkgoT().TempDir(), "root")
+		baseDir := filepath.Join(importerTempDir(), "root")
 
 		joined, err := safeJoin(baseDir, "docs/page.md")
 		Expect(err).NotTo(HaveOccurred())
@@ -1676,13 +1647,13 @@ var _ = ginkgo.Describe("ZipExtractor safety edges", func() {
 	})
 
 	ginkgo.It("reports missing zip files", func() {
-		_, err := NewZipExtractor().ExtractToDir(filepath.Join(ginkgo.GinkgoT().TempDir(), "missing.zip"), ginkgo.GinkgoT().TempDir())
+		_, err := NewZipExtractor().ExtractToDir(filepath.Join(importerTempDir(), "missing.zip"), importerTempDir())
 		Expect(err).To(MatchError(os.ErrNotExist))
 	})
 
 	ginkgo.It("treats nil or empty zip workspaces as already clean", func() {
 		var workspace *ZipWorkspace
-		Expect(workspace.Cleanup()).To(Succeed())
-		Expect((&ZipWorkspace{}).Cleanup()).To(Succeed())
+		Expect(cleanupZipWorkspaceResult(workspace)).To(Succeed())
+		Expect(cleanupZipWorkspaceResult(&ZipWorkspace{})).To(Succeed())
 	})
 })

@@ -4,13 +4,14 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -140,11 +141,10 @@ func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
 	}
 }
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreateNewPage_NonIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "My Page.md", "# Hello\n\nbody")
+var _ = ginkgo.Describe("import plan creation for markdown pages", func() {
+	ginkgo.It("creates page plan items from markdown headings", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "My Page.md", "# Hello\n\nbody")
 
 		wiki := &fakeWiki{
 			treeHash: "h1",
@@ -156,44 +156,25 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreateNewPage_NonIndex", func() 
 			SourceBasePath: tmp,
 			TargetBasePath: "/docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if res.TreeHash != "h1" {
-			t.Fatalf("TreeHash = %q", res.TreeHash)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d", len(res.Items))
-		}
-
-		it := res.Items[0]
-		if it.Action != PlanActionCreate {
-			t.Fatalf("Action = %q", it.Action)
-		}
-		if it.Kind != tree.NodeKindPage {
-			t.Fatalf("Kind = %v", it.Kind)
-		}
-		if it.Title != "Hello" {
-			t.Fatalf("Title = %q", it.Title)
-		}
-		if it.TargetPath != "docs/my-page" {
-			t.Fatalf("TargetPath = %q (want docs/my-page)", it.TargetPath)
-		}
-		if it.DesiredSlug != "my-page" {
-			t.Fatalf("DesiredSlug = %q (want my-page)", it.DesiredSlug)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(SatisfyAll(
+			HaveField("TreeHash", Equal("h1")),
+			HaveImportPlanResult(ConsistOf(SatisfyAll(
+				HaveField("Action", Equal(PlanActionCreate)),
+				HaveField("Kind", Equal(tree.NodeKindPage)),
+				HaveField("Title", Equal("Hello")),
+				HaveField("TargetPath", Equal(tree.RoutePath("docs/my-page"))),
+				HaveField("DesiredSlug", Equal(tree.Slug("my-page"))),
+			))),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreateNewSection_IndexMd", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Guides/index.md", "---\ntitle: Guides\n---\n\n# Ignored")
+var _ = ginkgo.Describe("import plan creation for folder index sections", func() {
+	ginkgo.It("creates section plan items for folder indexes", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Guides/index.md", "---\ntitle: Guides\n---\n\n# Ignored")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -202,35 +183,22 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreateNewSection_IndexMd", func(
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		it := res.Items[0]
-
-		if it.Kind != tree.NodeKindSection {
-			t.Fatalf("Kind = %v", it.Kind)
-		}
-		if it.Action != PlanActionCreate {
-			t.Fatalf("Action = %q", it.Action)
-		}
-		if it.TargetPath != "docs/guides" {
-			t.Fatalf("TargetPath = %q (want docs/guides)", it.TargetPath)
-		}
-		if it.DesiredSlug != "guides" {
-			t.Fatalf("DesiredSlug = %q (want guides)", it.DesiredSlug)
-		}
-		if it.Title != "Guides" {
-			t.Fatalf("Title = %q", it.Title)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(SatisfyAll(
+			HaveField("Kind", Equal(tree.NodeKindSection)),
+			HaveField("Action", Equal(PlanActionCreate)),
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
+			HaveField("DesiredSlug", Equal(tree.Slug("guides"))),
+			HaveField("Title", Equal("Guides")),
+		)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_ReadmeMdFallbackSectionWhenNoIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Guides/README.md", "# Guides")
+var _ = ginkgo.Describe("import plan creation for README folder fallbacks", func() {
+	ginkgo.It("creates section plan items for README folder fallbacks", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Guides/README.md", "# Guides")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -239,20 +207,12 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_ReadmeMdFallbackSectionWhenNoInd
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		it := res.Items[0]
-
-		if it.Kind != tree.NodeKindSection {
-			t.Fatalf("Kind = %v, want section", it.Kind)
-		}
-		if it.TargetPath != "docs/guides" {
-			t.Fatalf("TargetPath = %q, want docs/guides", it.TargetPath)
-		}
-		if it.DesiredSlug != "guides" {
-			t.Fatalf("DesiredSlug = %q, want guides", it.DesiredSlug)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(SatisfyAll(
+			HaveField("Kind", Equal(tree.NodeKindSection)),
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
+			HaveField("DesiredSlug", Equal(tree.Slug("guides"))),
+		)))
 
 	})
 })
@@ -262,11 +222,10 @@ type nonExactReadmeCase struct {
 	wantPath   string
 }
 
-var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPage",
+var _ = ginkgo.DescribeTable("import plan creation for non-exact README filenames",
 	func(tt nonExactReadmeCase) {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, tt.sourcePath.FilesystemPath(), "# Readme Page")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, tt.sourcePath.FilesystemPath(), "# Readme Page")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -275,26 +234,20 @@ var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_NonExactReadmeMdImportsAsPa
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		it := res.Items[0]
-		if it.Kind != tree.NodeKindPage {
-			t.Fatalf("Kind = %v, want page", it.Kind)
-		}
-		if it.TargetPath != newFixtureRoutePath(tt.wantPath) {
-			t.Fatalf("TargetPath = %q, want %s", it.TargetPath, tt.wantPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(SatisfyAll(
+			HaveField("Kind", Equal(tree.NodeKindPage)),
+			HaveField("TargetPath", Equal(newFixtureRoutePath(tt.wantPath))),
+		)))
 	},
 	ginkgo.Entry("Guides/readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/readme.md"), wantPath: "docs/guides/readme"}),
 	ginkgo.Entry("Guides/Readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/Readme.md"), wantPath: "docs/guides/readme"}),
 )
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreatesPageTwinWhenExistingSameRouteSectionExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "sync.md", "# Sync Page")
+var _ = ginkgo.Describe("import plan creation beside existing sections", func() {
+	ginkgo.It("creates page items beside existing sections", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "sync.md", "# Sync Page")
 
 		wiki := &fakeWiki{
 			treeHash: "h",
@@ -325,33 +278,22 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreatesPageTwinWhenExistingSameR
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d, want 1", len(res.Items))
-		}
-		it := res.Items[0]
-		if it.Action != PlanActionCreate {
-			t.Fatalf("Action = %q, want create", it.Action)
-		}
-		if it.Kind != tree.NodeKindPage {
-			t.Fatalf("Kind = %v, want page", it.Kind)
-		}
-		if it.TargetPath != "docs/sync" {
-			t.Fatalf("TargetPath = %q, want docs/sync", it.TargetPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(SatisfyAll(
+			HaveField("Action", Equal(PlanActionCreate)),
+			HaveField("Kind", Equal(tree.NodeKindPage)),
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/sync"))),
+		)))
 
 	})
 })
 
 // - README.md as normal page keeps its filesystem casing in generated links
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_IndexMdCaseInsensitiveBeatsReadmeFallback", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Guides/index.MD", "# Guides")
-		importerWriteFile(t, tmp, "Guides/README.md", "# Readme Page")
+var _ = ginkgo.Describe("import plan creation with mixed-case index files", func() {
+	ginkgo.It("preserves mixed-case README child pages beside index sections", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Guides/index.MD", "# Guides")
+		importerWriteFile(tmp, "Guides/README.md", "# Readme Page")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -363,37 +305,21 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_IndexMdCaseInsensitiveBeatsReadm
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 2 {
-			t.Fatalf("Items len = %d, want 2", len(res.Items))
-		}
-
-		var readme PlanItem
-		for _, item := range res.Items {
-			if item.SourcePath == "Guides/README.md" {
-				readme = item
-			}
-		}
-		if readme.SourcePath == "" {
-			t.Fatalf("README item not found: %#v", res.Items)
-		}
-		if readme.Kind != tree.NodeKindPage {
-			t.Fatalf("README Kind = %v, want page", readme.Kind)
-		}
-		if readme.TargetPath != "docs/guides/README" {
-			t.Fatalf("README TargetPath = %q, want docs/guides/README", readme.TargetPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(HaveLen(2))
+		Expect(res.Items).To(ContainElement(SatisfyAll(
+			HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Guides/README.md"))),
+			HaveField("Kind", Equal(tree.NodeKindPage)),
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides/README"))),
+		)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_PrefersLeafWikiTitleOverTitle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Guide.md", "---\nleafwiki_title: Preferred Title\ntitle: Fallback Title\n---\n\n# Heading")
+var _ = ginkgo.Describe("import plan title selection", func() {
+	ginkgo.It("prefers source leafwiki titles over fallback titles", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Guide.md", "---\nleafwiki_title: Preferred Title\ntitle: Fallback Title\n---\n\n# Heading")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -402,16 +328,8 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_PrefersLeafWikiTitleOverTitle", 
 			SourceBasePath: tmp,
 			TargetBasePath: "",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d", len(res.Items))
-		}
-
-		if got := res.Items[0].Title; got != "Preferred Title" {
-			t.Fatalf("Title = %q (want Preferred Title)", got)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(HaveField("Title", Equal("Preferred Title"))))
 
 	})
 })
@@ -421,21 +339,14 @@ type titleFallbackCase struct {
 	want    string
 }
 
-var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_TitleFallbackPriority_WindowsPathFilenameFallback",
+var _ = ginkgo.DescribeTable("import title fallback selection",
 	func(tt titleFallbackCase) {
-		t := ginkgo.GinkgoT()
 		mdFile, err := markdown.NewMarkdownFileFromRaw(`C:\Users\johnjkr\AppData\Local\Temp\import-1280817455\1999-07-23 - Memo to Staff.md`, tt.content)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != tt.want {
-			t.Fatalf("title = %q (want %q)", title, tt.want)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal(tt.want))
 	},
 	ginkgo.Entry("frontmatter wins", titleFallbackCase{
 		content: "---\nleafwiki_title: Frontmatter Title\n---\n\n# Heading Title",
@@ -451,11 +362,10 @@ var _ = ginkgo.DescribeTable("TestPlanner_CreatePlan_TitleFallbackPriority_Windo
 	}),
 )
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_SkipExisting_UsesLookupLastSegment", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "a.md", "# A")
+var _ = ginkgo.Describe("import plan existing page detection", func() {
+	ginkgo.It("skips existing pages with their existing IDs", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "a.md", "# A")
 
 		existingID := "id123"
 		existingKind := tree.NodeKindPage
@@ -480,34 +390,20 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_SkipExisting_UsesLookupLastSegme
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-
-		it := res.Items[0]
-		if it.Action != PlanActionSkip {
-			t.Fatalf("Action = %q", it.Action)
-		}
-		if !it.Exists {
-			t.Fatalf("Exists = false")
-		}
-		if it.ExistingID == nil || *it.ExistingID != newFixturePageID(existingID) {
-			t.Fatalf("ExistingID = %#v (want %q)", it.ExistingID, existingID)
-		}
-		if it.DesiredSlug != "a" {
-			t.Fatalf("DesiredSlug = %q (want a)", it.DesiredSlug)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
+			HaveField("Action", Equal(PlanActionSkip)),
+			HaveField("Exists", BeTrue()),
+			HaveField("ExistingID", gstruct.PointTo(Equal(newFixturePageID(existingID)))),
+			HaveField("DesiredSlug", Equal(tree.Slug("a"))),
+		))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_SourceMissing_IsCollected", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("import plan source file errors", func() {
+	ginkgo.It("records errors for missing source files", func() {
+		tmp := importerTempDir()
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
@@ -515,26 +411,16 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_SourceMissing_IsCollected"
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 0 {
-			t.Fatalf("Items len = %d (want 0)", len(res.Items))
-		}
-		if len(res.Errors) != 1 {
-			t.Fatalf("Errors len = %d (want 1)", len(res.Errors))
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanErrors(HaveLen(1)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_SourceIsDirectory_IsCollected", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(tmp, "dir"), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+var _ = ginkgo.Describe("import plan directory source errors", func() {
+	ginkgo.It("records errors when a source path is a directory", func() {
+		tmp := importerTempDir()
+		Expect(os.MkdirAll(filepath.Join(tmp, "dir"), 0o755)).To(Succeed())
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -543,24 +429,16 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_SourceIsDirectory_IsCollec
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 0 {
-			t.Fatalf("Items len = %d (want 0)", len(res.Items))
-		}
-		if len(res.Errors) != 1 {
-			t.Fatalf("Errors len = %d (want 1)", len(res.Errors))
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanErrors(HaveLen(1)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_ExistingZeroSegments_IsCollected", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "x.md", "# X")
+var _ = ginkgo.Describe("import plan malformed lookup errors", func() {
+	ginkgo.It("records malformed lookup responses as plan errors", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "x.md", "# X")
 
 		wiki := &fakeWiki{
 			treeHash: "h",
@@ -574,31 +452,21 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_Error_ExistingZeroSegments_IsCol
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 0 {
-			t.Fatalf("Items len = %d (want 0)", len(res.Items))
-		}
-		if len(res.Errors) != 1 {
-			t.Fatalf("Errors len = %d (want 1)", len(res.Errors))
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanErrors(HaveLen(1)))
 
 	})
 })
 
 // ---- Title extraction -------------------------------------------------------
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_TitleExtractionError_AddsNote", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := importerWriteFile(t, tmp, "unreadable.md", "# Title")
+var _ = ginkgo.Describe("import plan title extraction failures", func() {
+	ginkgo.It("falls back to filenames when title extraction fails", func() {
+		tmp := importerTempDir()
+		abs := importerWriteFile(tmp, "unreadable.md", "# Title")
 
 		// Make file unreadable to trigger extraction error
-		if err := os.Chmod(abs, 0o000); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
+		Expect(os.Chmod(abs, 0o000)).To(Succeed())
 		ginkgo.DeferCleanup(os.Chmod, abs, os.FileMode(0o644))
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
@@ -608,37 +476,20 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_TitleExtractionError_AddsNote", 
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d (want 1)", len(res.Items))
-		}
-
-		it := res.Items[0]
-		if len(it.Notes) != 1 {
-			t.Fatalf("Notes len = %d (want 1)", len(it.Notes))
-		}
-		if !strings.Contains(it.Notes[0], "Failed to load markdown file for title extraction") {
-			t.Fatalf("Note = %q (should contain 'Failed to load markdown file for title extraction')", it.Notes[0])
-		}
-		// Title should still be set (fallback to filename)
-		if it.Title != "unreadable" {
-			t.Fatalf("Title = %q (want unreadable)", it.Title)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
+			HaveField("Notes", ConsistOf(ContainSubstring("Failed to load markdown file for title extraction"))),
+			HaveField("Title", Equal("unreadable")),
+		))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_analyzeEntry_NormalizesSourceDirSegments", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("import plan source directory normalization", func() {
+	ginkgo.It("normalizes source directories into target route paths", func() {
 		// "My Guides/Intro.md" -> "my-guides/intro" via centralized SlugService creation normalization.
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "My Guides/Intro.md", "# Intro")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "My Guides/Intro.md", "# Intro")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -647,24 +498,16 @@ var _ = ginkgo.Describe("TestPlanner_analyzeEntry_NormalizesSourceDirSegments", 
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if res.Items[0].TargetPath != "docs/my-guides/intro" {
-			t.Fatalf("TargetPath = %q (want docs/my-guides/intro)", res.Items[0].TargetPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveField("TargetPath", Equal(tree.RoutePath("docs/my-guides/intro"))))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_analyzeEntry_ReservedSlugSegmentsUseCentralizedSafeNormalization", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Reference/API.md", "# API")
+var _ = ginkgo.Describe("import plan reserved slug normalization", func() {
+	ginkgo.It("avoids reserved target slugs by suffixing them", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Reference/API.md", "# API")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -673,29 +516,21 @@ var _ = ginkgo.Describe("TestPlanner_analyzeEntry_ReservedSlugSegmentsUseCentral
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if got := res.Items[0].TargetPath; got != "docs/reference/api-1" {
-			t.Fatalf("TargetPath = %q (want docs/reference/api-1)", got)
-		}
-		if got := res.Items[0].DesiredSlug; got != "api-1" {
-			t.Fatalf("DesiredSlug = %q (want api-1)", got)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/reference/api-1"))),
+			HaveField("DesiredSlug", Equal(tree.Slug("api-1"))),
+		))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_analyzeEntry_InvalidSourceDirSegment_ReturnsError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("import plan invalid source directory segments", func() {
+	ginkgo.It("reports invalid source directory segments as plan errors", func() {
 		// Import path normalization still rejects segments that collapse to an empty slug.
 		// A segment like "!!!" normalizes to "", so planning should report an error.
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "!!!/a.md", "# A")
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "!!!/a.md", "# A")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -704,36 +539,24 @@ var _ = ginkgo.Describe("TestPlanner_analyzeEntry_InvalidSourceDirSegment_Return
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Items) != 0 {
-			t.Fatalf("Items len = %d (want 0)", len(res.Items))
-		}
-		if len(res.Errors) != 1 {
-			t.Fatalf("Errors len = %d (want 1)", len(res.Errors))
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanErrors(HaveLen(1)))
 		// optional: grobe Assertion, dass es ein Validate-Fehler ist
-		if res.Errors[0] == "" {
-			t.Fatalf("unexpected error: %v", res.Errors[0])
-		}
+		Expect(res.Errors).To(ContainElement(Not(BeEmpty())))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_RootIndexMd_EmptyWikiPath_UsesFallbackTitle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("import plan root index fallback titles", func() {
+	ginkgo.It("uses the root index filename when title extraction fails", func() {
 		// Test case for root-level index.md with empty TargetBasePath and markdown loading failure
 		// When wikiPath is empty, path.Base("") returns ".", which is not meaningful.
 		// The fix should use filename without extension as fallback.
-		tmp := t.TempDir()
-		abs := importerWriteFile(t, tmp, "index.md", "# Title")
+		tmp := importerTempDir()
+		abs := importerWriteFile(tmp, "index.md", "# Title")
 
 		// Make file unreadable to trigger markdown loading failure
-		if err := os.Chmod(abs, 0o000); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
+		Expect(os.Chmod(abs, 0o000)).To(Succeed())
 		ginkgo.DeferCleanup(os.Chmod, abs, os.FileMode(0o644))
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
@@ -743,48 +566,26 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_RootIndexMd_EmptyWikiPath_UsesFa
 			SourceBasePath: tmp,
 			TargetBasePath: "", // empty target base path
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d (want 1)", len(res.Items))
-		}
-
-		it := res.Items[0]
-		if it.TargetPath != "" {
-			t.Fatalf("TargetPath = %q (want empty)", it.TargetPath)
-		}
-		if it.Kind != tree.NodeKindSection {
-			t.Fatalf("Kind = %v (want Section)", it.Kind)
-		}
-		// The title should fallback to "index" (filename without .md), not "." from path.Base("")
-		if it.Title != "index" {
-			t.Fatalf("Title = %q (want index as fallback when wikiPath is empty and markdown fails)", it.Title)
-		}
-		// Should have a note about failed markdown loading
-		if len(it.Notes) == 0 {
-			t.Fatalf("Expected notes about failed markdown loading")
-		}
-		if !strings.Contains(it.Notes[0], "Failed to load markdown file for title extraction") {
-			t.Fatalf("Note = %q (should contain 'Failed to load markdown file for title extraction')", it.Notes[0])
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
+			HaveField("TargetPath", Equal(tree.RoutePath(""))),
+			HaveField("Kind", Equal(tree.NodeKindSection)),
+			HaveField("Title", Equal("index")),
+			HaveField("Notes", ContainElement(ContainSubstring("Failed to load markdown file for title extraction"))),
+		))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_FolderIndexAndSiblingPage_MapToSectionAndNestedPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Ordner/index.md", `---
+var _ = ginkgo.Describe("import plan folder index and sibling pages", func() {
+	ginkgo.It("creates section and sibling page items for folder imports", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Ordner/index.md", `---
 title: Ordner
 ---
 
 # Ordner`)
-		importerWriteFile(t, tmp, "Ordner/Ordner.md", "# Unterseite")
+		importerWriteFile(tmp, "Ordner/Ordner.md", "# Unterseite")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -796,34 +597,27 @@ title: Ordner
 			SourceBasePath: tmp,
 			TargetBasePath: "",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if len(res.Items) != 2 {
-			t.Fatalf("Items len = %d (want 2)", len(res.Items))
-		}
-
-		section := res.Items[0]
-		page := res.Items[1]
-
-		if section.SourcePath != "Ordner/index.md" || section.Kind != tree.NodeKindSection || section.TargetPath != "ordner" {
-			t.Fatalf("unexpected section item: %#v", section)
-		}
-		if page.SourcePath != "Ordner/Ordner.md" || page.Kind != tree.NodeKindPage || page.TargetPath != "ordner/ordner" {
-			t.Fatalf("unexpected nested page item: %#v", page)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(
+			SatisfyAll(
+				HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Ordner/index.md"))),
+				HaveField("Kind", Equal(tree.NodeKindSection)),
+				HaveField("TargetPath", Equal(tree.RoutePath("ordner"))),
+			),
+			SatisfyAll(
+				HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Ordner/Ordner.md"))),
+				HaveField("Kind", Equal(tree.NodeKindPage)),
+				HaveField("TargetPath", Equal(tree.RoutePath("ordner/ordner"))),
+			),
+		)))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_FolderMarkdownWithoutIndex_RemainsNestedPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Ordner/Ordner.md", "# Unterseite")
+var _ = ginkgo.Describe("import plan folder markdown without index", func() {
+	ginkgo.It("creates folder markdown as pages when no index exists", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Ordner/Ordner.md", "# Unterseite")
 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
@@ -832,32 +626,19 @@ var _ = ginkgo.Describe("TestPlanner_CreatePlan_FolderMarkdownWithoutIndex_Remai
 			SourceBasePath: tmp,
 			TargetBasePath: "wiki",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		if len(res.Errors) != 0 {
-			t.Fatalf("Errors = %#v", res.Errors)
-		}
-		if len(res.Items) != 1 {
-			t.Fatalf("Items len = %d (want 1)", len(res.Items))
-		}
-
-		it := res.Items[0]
-		if it.Kind != tree.NodeKindPage {
-			t.Fatalf("Kind = %v (want Page)", it.Kind)
-		}
-		if it.TargetPath != "wiki/ordner/ordner" {
-			t.Fatalf("TargetPath = %q (want wiki/ordner/ordner)", it.TargetPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
+			HaveField("Kind", Equal(tree.NodeKindPage)),
+			HaveField("TargetPath", Equal(tree.RoutePath("wiki/ordner/ordner"))),
+		))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanner_CreatePlan_CreateNewSection_IndexUppercaseMD", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		importerWriteFile(t, tmp, "Guides/index.MD", `---
+var _ = ginkgo.Describe("import plan uppercase index sections", func() {
+	ginkgo.It("treats uppercase index files as section indexes", func() {
+		tmp := importerTempDir()
+		importerWriteFile(tmp, "Guides/index.MD", `---
 title: Guides
 ---
 
@@ -870,16 +651,11 @@ title: Guides
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
-		if err != nil {
-			t.Fatalf("CreatePlan err: %v", err)
-		}
-		it := res.Items[0]
-		if it.Kind != tree.NodeKindSection {
-			t.Fatalf("Kind = %v", it.Kind)
-		}
-		if it.TargetPath != "docs/guides" {
-			t.Fatalf("TargetPath = %q (want docs/guides)", it.TargetPath)
-		}
+		Expect(err).To(Succeed())
+		Expect(res.Items).To(ConsistOf(SatisfyAll(
+			HaveField("Kind", Equal(tree.NodeKindSection)),
+			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
+		)))
 
 	})
 })

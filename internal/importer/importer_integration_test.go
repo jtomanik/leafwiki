@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,36 +16,38 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 func expectedAssetPath(pageID tree.PageID, filename string) string {
 	return fmt.Sprintf("/assets/%s/%s", pageID, filename)
 }
 
+var errIntegrationFrontmatterMissing = errors.New("importer integration frontmatter missing")
+
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Importer distinguishes folder README section from README child page
 
-func integMustWrite(t importerIntegrationTestT, base, rel, content string) string {
-	t.Helper()
+func integMustWrite(base, rel, content string) string {
+	ginkgo.GinkgoHelper()
+
 	abs := filepath.Join(base, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	Expect(os.MkdirAll(filepath.Dir(abs), 0o755)).To(Succeed())
+	Expect(os.WriteFile(abs, []byte(content), 0o644)).To(Succeed())
 	return abs
 }
 
-func integFixturePath(t importerIntegrationTestT, rel string) string {
-	t.Helper()
-	return integFixturePathForT(t, rel, "fixtures", "internal/importer/fixtures")
+func integFixturePath(rel string) string {
+	ginkgo.GinkgoHelper()
+
+	return integFixturePathForT(rel, "fixtures", "internal/importer/fixtures")
 }
 
-func integCopyFixtureToTemp(t importerIntegrationTestT, rel string) string {
-	t.Helper()
-	sourceRoot := integFixturePath(t, rel)
-	destRoot := filepath.Join(t.TempDir(), rel)
+func integCopyFixtureToTemp(rel string) string {
+	ginkgo.GinkgoHelper()
+
+	sourceRoot := integFixturePath(rel)
+	destRoot := filepath.Join(integTempDir(), rel)
 
 	err := filepath.Walk(sourceRoot, func(sourcePath string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -67,16 +70,15 @@ func integCopyFixtureToTemp(t importerIntegrationTestT, rel string) string {
 		}
 		return os.WriteFile(destPath, raw, 0o644)
 	})
-	if err != nil {
-		t.Fatalf("copy fixture %q: %v", rel, err)
-	}
+	Expect(err).To(Succeed())
 	return destRoot
 }
 
-func newTestWiki(t importerIntegrationTestT) *wiki.Wiki {
-	t.Helper()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
+func newTestWiki() *wiki.Wiki {
+	ginkgo.GinkgoHelper()
+
+	dataDir := filepath.Join(integTempDir(), "data")
+	rootDir := filepath.Join(integTempDir(), "content")
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		Workspace:           wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
 		AdminPassword:       "admin",
@@ -84,14 +86,13 @@ func newTestWiki(t importerIntegrationTestT) *wiki.Wiki {
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("NewWiki err: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return w
 }
 
-func newTestImporterService(t importerIntegrationTestT, w *wiki.Wiki) *importer.ImporterService {
-	t.Helper()
+func newTestImporterService(w *wiki.Wiki) *importer.ImporterService {
+	ginkgo.GinkgoHelper()
+
 	planner := importer.NewPlanner(wiki.NewWikiImportAdapter(w), tree.NewSlugService())
 	importerDir := filepath.Join(w.GetStorageDir(), ".importer")
 	return importer.NewImporterService(
@@ -106,161 +107,124 @@ func newImporterProbe(w *wiki.Wiki) *wiki.WikiImportAdapter {
 	return wiki.NewWikiImportAdapter(w)
 }
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_WritesPreservedFrontmatterToDisk", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		integMustWrite(t, ws, "Imported.md", "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\ntitle: Imported Title\n---\n\n# Imported Title\nBody")
+func integImportedPageDocumentResult(raw string) (markdown.PageDocument, error) {
+	ginkgo.GinkgoHelper()
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	return doc, err
+}
+
+func integImportedFrontmatterResult(raw string) (markdown.Frontmatter, string, error) {
+	ginkgo.GinkgoHelper()
+
+	fm, body, has, err := markdown.ParseFrontmatter(raw)
+	if err != nil {
+		return markdown.Frontmatter{}, "", err
+	}
+	if !has {
+		return markdown.Frontmatter{}, body, errIntegrationFrontmatterMissing
+	}
+	return fm, body, nil
+}
+
+var _ = ginkgo.Describe("import execution writes migrated frontmatter", func() {
+	ginkgo.It("imports markdown with canonical metadata and preserved custom fields", func() {
+		ws := integTempDir()
+		integMustWrite(ws, "Imported.md", "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\ntitle: Imported Title\n---\n\n# Imported Title\nBody")
+
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if len(plan.Items) != 1 {
-			t.Fatalf("expected one plan item, got %#v", plan.Items)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(HaveLen(1))
 
 		res, err := is.ExecuteCurrentPlan("system")
-		if err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
-		if res.ImportedCount != 1 || res.SkippedCount != 0 {
-			t.Fatalf("unexpected result: imported=%d skipped=%d", res.ImportedCount, res.SkippedCount)
-		}
+		Expect(err).To(Succeed())
+		Expect(res).To(SatisfyAll(
+			HaveField("ImportedCount", Equal(1)),
+			HaveField("SkippedCount", BeZero()),
+		))
 
 		rawBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "imported.md"))
-		if err != nil {
-			t.Fatalf("ReadFile err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		raw := string(rawBytes)
 
-		if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-			t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
-		}
-		if strings.HasPrefix(raw, "---\n") {
-			t.Fatalf("expected written file not to use legacy YAML frontmatter, got: %q", raw)
-		}
-		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if doc.Body != "\n# Imported Title\nBody" {
-			t.Fatalf("unexpected body: %q", doc.Body)
-		}
-		if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom_key to be preserved, got %#v", got)
-		}
-		if got := doc.Metadata.Extra["title"]; got != nil {
-			t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
-		}
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "alpha" {
-			t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
-		}
-		if strings.Contains(raw, "leafwiki_id: source-id") {
-			t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
-		}
-		if doc.Metadata.Page.ID == "" {
-			t.Fatalf("expected written file to contain generated page.id")
-		}
-		if doc.Metadata.Page.Title != "Imported Title" {
-			t.Fatalf("expected written file to contain effective page.title, got %q", doc.Metadata.Page.Title)
-		}
+		Expect(raw).To(HavePrefix("<!-- leafwiki\n"))
+		Expect(raw).NotTo(HavePrefix("---\n"))
+		doc, err := integImportedPageDocumentResult(raw)
+		Expect(err).To(Succeed())
+		Expect(doc).To(SatisfyAll(
+			HaveField("Body", Equal("\n# Imported Title\nBody")),
+			HaveField("Metadata.Fields", HaveKeyWithValue("custom_key", "keep-me")),
+			HaveField("Metadata.Extra", SatisfyAll(
+				Not(HaveKey("title")),
+				HaveKeyWithValue("aliases", ConsistOf("alpha")),
+			)),
+			HaveField("Metadata.Page.ID", Not(BeEmpty())),
+			HaveField("Metadata.Page.Title", Equal("Imported Title")),
+		))
+		Expect(raw).NotTo(ContainSubstring("leafwiki_id: source-id"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_IndexesTagsAndPropertiesImmediately", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		integMustWrite(t, ws, "Imported.md", "---\ntags:\n  - React\n  - docs\nstatus: published\nowner: alice\npriority: 3\nowners:\n  - alice\n---\n\n# Imported Title\nBody")
+var _ = ginkgo.Describe("import execution indexes metadata", func() {
+	ginkgo.It("indexes imported tags and properties", func() {
+		ws := integTempDir()
+		integMustWrite(ws, "Imported.md", "---\ntags:\n  - React\n  - docs\nstatus: published\nowner: alice\npriority: 3\nowners:\n  - alice\n---\n\n# Imported Title\nBody")
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 
-		if _, err := is.CreateImportPlanFromFolder(ws, ""); err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		_, err := is.CreateImportPlanFromFolder(ws, "")
+		Expect(err).To(Succeed())
 
-		if _, err := is.ExecuteCurrentPlan("system"); err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		_, err = is.ExecuteCurrentPlan("system")
+		Expect(err).To(Succeed())
 
 		tagsStore, err := tags.NewTagsStore(w.GetStorageDir())
-		if err != nil {
-			t.Fatalf("NewTagsStore err: %v", err)
-		}
-		integWrapCloseWithErrorCheck(tagsStore.Close, t)
+		Expect(err).To(Succeed())
+		integWrapCloseWithErrorCheck(tagsStore.Close)
 
 		allTags, err := tagsStore.GetAllTags("", 20)
-		if err != nil {
-			t.Fatalf("GetAllTags err: %v", err)
-		}
-		if len(allTags) != 2 {
-			t.Fatalf("expected 2 indexed tags, got %#v", allTags)
-		}
+		Expect(err).To(Succeed())
+		Expect(allTags).To(HaveLen(2))
 
 		reactPageIDs, err := tagsStore.GetPageIDsByTags([]string{"react"})
-		if err != nil {
-			t.Fatalf("GetPageIDsByTags err: %v", err)
-		}
-		if len(reactPageIDs) != 1 {
-			t.Fatalf("expected react tag to be indexed for one page, got %v", reactPageIDs)
-		}
+		Expect(err).To(Succeed())
+		Expect(reactPageIDs).To(HaveLen(1))
 
 		propsStore, err := properties.NewPropertiesStore(w.GetStorageDir())
-		if err != nil {
-			t.Fatalf("NewPropertiesStore err: %v", err)
-		}
-		integWrapCloseWithErrorCheck(propsStore.Close, t)
+		Expect(err).To(Succeed())
+		integWrapCloseWithErrorCheck(propsStore.Close)
 
 		keys, err := propsStore.GetAllPropertyKeys("", 20)
-		if err != nil {
-			t.Fatalf("GetAllPropertyKeys err: %v", err)
-		}
-		if len(keys) != 2 {
-			t.Fatalf("expected 2 indexed string properties, got %#v", keys)
-		}
+		Expect(err).To(Succeed())
+		Expect(keys).To(HaveLen(2))
 
 		statusPageIDs, err := propsStore.GetPageIDsByProperty("status", "published")
-		if err != nil {
-			t.Fatalf("GetPageIDsByProperty(status) err: %v", err)
-		}
-		if len(statusPageIDs) != 1 {
-			t.Fatalf("expected status property to be indexed for one page, got %v", statusPageIDs)
-		}
+		Expect(err).To(Succeed())
+		Expect(statusPageIDs).To(HaveLen(1))
 
 		ownerPageIDs, err := propsStore.GetPageIDsByProperty("owner", "alice")
-		if err != nil {
-			t.Fatalf("GetPageIDsByProperty(owner) err: %v", err)
-		}
-		if len(ownerPageIDs) != 1 {
-			t.Fatalf("expected owner property to be indexed for one page, got %v", ownerPageIDs)
-		}
+		Expect(err).To(Succeed())
+		Expect(ownerPageIDs).To(HaveLen(1))
 
 		priorityPageIDs, err := propsStore.GetPageIDsByProperty("priority", "3")
-		if err != nil {
-			t.Fatalf("GetPageIDsByProperty(priority) err: %v", err)
-		}
-		if len(priorityPageIDs) != 0 {
-			t.Fatalf("expected numeric property to be skipped, got %v", priorityPageIDs)
-		}
+		Expect(err).To(Succeed())
+		Expect(priorityPageIDs).To(BeEmpty())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_RewritesLinksAndUploadsAssetsToDisk", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		integMustWrite(t, ws, "Guides/index.md", "# Guides")
-		integMustWrite(t, ws, "Guides/Setup.md", strings.Join([]string{
+var _ = ginkgo.Describe("import execution rewrites links and uploads assets", func() {
+	ginkgo.It("rewrites imported links and uploads referenced assets", func() {
+		ws := integTempDir()
+		integMustWrite(ws, "Guides/index.md", "# Guides")
+		integMustWrite(ws, "Guides/Setup.md", strings.Join([]string{
 			"# Setup",
 			"",
 			"[Guide Home](/Guides/)",
@@ -269,31 +233,24 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_RewritesLinksAnd
 			"[Manual](/shared/manual.pdf)",
 			"[[Reference/Endpoints|API Alias]]",
 		}, "\n"))
-		integMustWrite(t, ws, "Reference/Endpoints.md", "# Endpoints")
-		integMustWrite(t, ws, "Guides/images/logo.png", "png-bytes")
-		integMustWrite(t, ws, "shared/manual.pdf", "pdf-bytes")
+		integMustWrite(ws, "Reference/Endpoints.md", "# Endpoints")
+		integMustWrite(ws, "Guides/images/logo.png", "png-bytes")
+		integMustWrite(ws, "shared/manual.pdf", "pdf-bytes")
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 		probe := newImporterProbe(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if len(plan.Items) != 3 {
-			t.Fatalf("expected three plan items, got %#v", plan.Items)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(HaveLen(3))
 
-		if _, err := is.ExecuteCurrentPlan("system"); err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		_, err = is.ExecuteCurrentPlan("system")
+		Expect(err).To(Succeed())
 
 		setupPage, err := probe.FindByPath("guides/setup")
-		if err != nil {
-			t.Fatalf("FindByPath err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		for _, expected := range []string{
 			"[Guide Home](/guides)",
@@ -302,48 +259,34 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_RewritesLinksAnd
 			expectedAssetPath(setupPage.ID, "logo.png"),
 			expectedAssetPath(setupPage.ID, "manual.pdf"),
 		} {
-			if !strings.Contains(setupPage.Content, expected) {
-				t.Fatalf("expected content to contain %q, got:\n%s", expected, setupPage.Content)
-			}
+			Expect(setupPage.Content).To(ContainSubstring(expected))
 		}
 
 		assets, err := probe.ListAssets(setupPage.ID)
-		if err != nil {
-			t.Fatalf("ListAssets err: %v", err)
-		}
-		if len(assets) != 2 {
-			t.Fatalf("expected 2 uploaded assets, got %#v", assets)
-		}
+		Expect(err).To(Succeed())
+		Expect(assets).To(HaveLen(2))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsFixturePackage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := integCopyFixtureToTemp(t, "link-assets-package")
+var _ = ginkgo.Describe("import execution for link asset fixture packages", func() {
+	ginkgo.It("imports the link-asset fixture package with expected routes and assets", func() {
+		ws := integCopyFixtureToTemp("link-assets-package")
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 		probe := newImporterProbe(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if len(plan.Items) != 5 {
-			t.Fatalf("expected five plan items, got %#v", plan.Items)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(HaveLen(5))
 
-		if _, err := is.ExecuteCurrentPlan("system"); err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		_, err = is.ExecuteCurrentPlan("system")
+		Expect(err).To(Succeed())
 
 		setupPage, err := probe.FindByPath("guides/setup")
-		if err != nil {
-			t.Fatalf("FindByPath guides/setup err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		for _, expected := range []string{
 			"[Relative MD](/reference/endpoints.md)",
@@ -360,192 +303,123 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsFixturePa
 			"[[Reference/Endpoints|Fence Alias]]",
 			"![[./images/logo.png]]",
 		} {
-			if !strings.Contains(setupPage.Content, expected) {
-				t.Fatalf("expected setup content to contain %q, got:\n%s", expected, setupPage.Content)
-			}
+			Expect(setupPage.Content).To(ContainSubstring(expected))
 		}
 
 		assets, err := probe.ListAssets(setupPage.ID)
-		if err != nil {
-			t.Fatalf("ListAssets err: %v", err)
-		}
-		if len(assets) != 2 {
-			t.Fatalf("expected 2 uploaded assets, got %#v", assets)
-		}
+		Expect(err).To(Succeed())
+		Expect(assets).To(HaveLen(2))
 
-		if _, err := probe.FindByPath("reference/endpoints"); err != nil {
-			t.Fatalf("FindByPath reference/endpoints err: %v", err)
-		}
-		if _, err := probe.FindByPath("reference/api-1"); err != nil {
-			t.Fatalf("FindByPath reference/api-1 err: %v", err)
-		}
-		if _, err := probe.FindByPath("guides"); err != nil {
-			t.Fatalf("FindByPath guides err: %v", err)
-		}
-		if _, err := probe.FindByPath("readme"); err == nil {
-			t.Fatalf("FindByPath readme succeeded, want root README.md to import as section content instead of child page")
-		}
+		_, err = probe.FindByPath("reference/endpoints")
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("reference/api-1")
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("guides")
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("readme")
+		Expect(err).To(HaveOccurred())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsLeafWikiNestedFixture", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := integCopyFixtureToTemp(t, "leafwiki-nested-package")
+var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages", func() {
+	ginkgo.It("imports nested LeafWiki fixture pages with metadata and links", func() {
+		ws := integCopyFixtureToTemp("leafwiki-nested-package")
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 		probe := newImporterProbe(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if len(plan.Items) != 5 {
-			t.Fatalf("expected five plan items, got %#v", plan.Items)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(HaveLen(5))
 
-		if _, err := is.ExecuteCurrentPlan("system"); err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		_, err = is.ExecuteCurrentPlan("system")
+		Expect(err).To(Succeed())
 
 		introPage, err := probe.FindByPath("intro")
-		if err != nil {
-			t.Fatalf("FindByPath intro err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		gettingStartedPage, err := probe.FindByPath("docs/getting-started")
-		if err != nil {
-			t.Fatalf("FindByPath docs/getting-started err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		basicGuidePage, err := probe.FindByPath("docs/guides/basic-guide")
-		if err != nil {
-			t.Fatalf("FindByPath docs/guides/basic-guide err: %v", err)
-		}
-		if _, err := probe.FindByPath("docs"); err != nil {
-			t.Fatalf("FindByPath docs err: %v", err)
-		}
-		if _, err := probe.FindByPath("docs/guides"); err != nil {
-			t.Fatalf("FindByPath docs/guides err: %v", err)
-		}
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("docs")
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("docs/guides")
+		Expect(err).To(Succeed())
 
 		for _, expected := range []string{
 			"[Getting Started](/docs/getting-started.md)",
 			"[Basic Guide](/docs/guides/basic-guide.md)",
 		} {
-			if !strings.Contains(introPage.Content, expected) {
-				t.Fatalf("expected intro content to contain %q, got:\n%s", expected, introPage.Content)
-			}
+			Expect(introPage.Content).To(ContainSubstring(expected))
 		}
 
 		for _, expected := range []string{
 			"[Intro](/intro.md)",
 			"[Basic Guide](/docs/guides/basic-guide.md)",
 		} {
-			if !strings.Contains(gettingStartedPage.Content, expected) {
-				t.Fatalf("expected getting-started content to contain %q, got:\n%s", expected, gettingStartedPage.Content)
-			}
+			Expect(gettingStartedPage.Content).To(ContainSubstring(expected))
 		}
 
 		for _, expected := range []string{
 			"[Introduction](/intro.md)",
 			"[Documentation](/docs)",
 		} {
-			if !strings.Contains(basicGuidePage.Content, expected) {
-				t.Fatalf("expected basic-guide content to contain %q, got:\n%s", expected, basicGuidePage.Content)
-			}
+			Expect(basicGuidePage.Content).To(ContainSubstring(expected))
 		}
 
 		rawIntroBytes, err := os.ReadFile(filepath.Join(w.GetRootDir(), "intro.md"))
-		if err != nil {
-			t.Fatalf("ReadFile intro err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		rawIntro := string(rawIntroBytes)
 
-		fm, body, has, err := markdown.ParseFrontmatter(rawIntro)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter intro err: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected intro frontmatter, got %q", rawIntro)
-		}
-		if strings.Contains(rawIntro, "leafwiki_id: intro-source") {
-			t.Fatalf("expected source leafwiki_id to be replaced, got: %q", rawIntro)
-		}
-		if fm.LeafWikiID == "" {
-			t.Fatalf("expected regenerated leafwiki_id")
-		}
-		if fm.LeafWikiTitle != "Introduction" {
-			t.Fatalf("expected leafwiki_title Introduction, got %q", fm.LeafWikiTitle)
-		}
-		if fm.LeafWikiCreatorID != "system" {
-			t.Fatalf("expected creator to reflect imported page ownership, got %q", fm.LeafWikiCreatorID)
-		}
-		if fm.LeafWikiLastAuthorID != "system" {
-			t.Fatalf("expected last author to reflect import execution user, got %q", fm.LeafWikiLastAuthorID)
-		}
-		if fm.LeafWikiCreatedAt == "" {
-			t.Fatalf("expected created_at to be written")
-		}
-		if fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected updated_at to be written")
-		}
-		if got := fm.ExtraFields["category"]; got != "onboarding" {
-			t.Fatalf("expected category extra field preserved, got %#v", got)
-		}
-		aliases, ok := fm.ExtraFields["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "start" {
-			t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
-		}
-		if !strings.Contains(body, "[Getting Started](/docs/getting-started.md)") {
-			t.Fatalf("expected rewritten body in persisted intro file, got:\n%s", body)
-		}
+		fm, body, err := integImportedFrontmatterResult(rawIntro)
+		Expect(err).To(Succeed())
+		Expect(rawIntro).NotTo(ContainSubstring("leafwiki_id: intro-source"))
+		Expect(fm).To(SatisfyAll(
+			HaveField("LeafWikiID", Not(BeEmpty())),
+			HaveField("LeafWikiTitle", Equal("Introduction")),
+			HaveField("LeafWikiCreatorID", Equal("system")),
+			HaveField("LeafWikiLastAuthorID", Equal("system")),
+			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+			HaveField("ExtraFields", SatisfyAll(
+				HaveKeyWithValue("category", "onboarding"),
+				HaveKeyWithValue("aliases", ConsistOf("start")),
+			)),
+		))
+		Expect(body).To(ContainSubstring("[Getting Started](/docs/getting-started.md)"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsObsidianWikiLinksFixture", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := integCopyFixtureToTemp(t, "obsidian-wikilinks-package")
+var _ = ginkgo.Describe("import execution for Obsidian wiki-link fixture packages", func() {
+	ginkgo.It("imports Obsidian wiki-link fixtures with expected canonical links", func() {
+		ws := integCopyFixtureToTemp("obsidian-wikilinks-package")
 
-		w := newTestWiki(t)
-		integWrapCloseWithErrorCheck(w.Close, t)
-		is := newTestImporterService(t, w)
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
 		probe := newImporterProbe(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if len(plan.Items) != 5 {
-			t.Fatalf("expected five plan items, got %#v", plan.Items)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(HaveLen(5))
 
-		if _, err := is.ExecuteCurrentPlan("system"); err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		_, err = is.ExecuteCurrentPlan("system")
+		Expect(err).To(Succeed())
 
 		homePage, err := probe.FindByPath("home")
-		if err != nil {
-			t.Fatalf("FindByPath home err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		projectPlanPage, err := probe.FindByPath("project-plan")
-		if err != nil {
-			t.Fatalf("FindByPath project-plan err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		brainstormPage, err := probe.FindByPath("daily/brainstorm")
-		if err != nil {
-			t.Fatalf("FindByPath daily/brainstorm err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		meetingNotesPage, err := probe.FindByPath("daily/meeting-notes")
-		if err != nil {
-			t.Fatalf("FindByPath daily/meeting-notes err: %v", err)
-		}
-		if _, err := probe.FindByPath("archive/meeting-notes"); err != nil {
-			t.Fatalf("FindByPath archive/meeting-notes err: %v", err)
-		}
+		Expect(err).To(Succeed())
+		_, err = probe.FindByPath("archive/meeting-notes")
+		Expect(err).To(Succeed())
 
 		for _, expected := range []string{
 			"[Project Plan](/project-plan.md)",
@@ -557,34 +431,22 @@ var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ImportsObsidianW
 			"[[Daily/Meeting Notes]]",
 			"![[Attachments/diagram.png]]",
 		} {
-			if !strings.Contains(homePage.Content, expected) {
-				t.Fatalf("expected home content to contain %q, got:\n%s", expected, homePage.Content)
-			}
+			Expect(homePage.Content).To(ContainSubstring(expected))
 		}
 
 		for _, expected := range []string{
 			"[Meeting Notes](/daily/meeting-notes.md)",
 			"[Home](/home.md)",
 		} {
-			if !strings.Contains(projectPlanPage.Content, expected) {
-				t.Fatalf("expected project-plan content to contain %q, got:\n%s", expected, projectPlanPage.Content)
-			}
+			Expect(projectPlanPage.Content).To(ContainSubstring(expected))
 		}
 
-		if !strings.Contains(meetingNotesPage.Content, "[Home](/home.md)") {
-			t.Fatalf("expected meeting-notes content to contain rewritten home link, got:\n%s", meetingNotesPage.Content)
-		}
-		if !strings.Contains(brainstormPage.Content, "[Home](/home.md)") {
-			t.Fatalf("expected brainstorm content to contain rewritten home link, got:\n%s", brainstormPage.Content)
-		}
+		Expect(meetingNotesPage.Content).To(ContainSubstring("[Home](/home.md)"))
+		Expect(brainstormPage.Content).To(ContainSubstring("[Home](/home.md)"))
 
 		assets, err := probe.ListAssets(homePage.ID)
-		if err != nil {
-			t.Fatalf("ListAssets err: %v", err)
-		}
-		if len(assets) != 1 {
-			t.Fatalf("expected 1 uploaded asset, got %#v", assets)
-		}
+		Expect(err).To(Succeed())
+		Expect(assets).To(HaveLen(1))
 
 	})
 })

@@ -5,21 +5,23 @@ import (
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-type importerIntegrationTestT interface {
-	Helper()
-	TempDir() string
-	Fatalf(format string, args ...interface{})
+func integTempDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-importer-integration-*")
+	Expect(err).To(Succeed())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
-func integFixturePathForT(t importerIntegrationTestT, rel string, candidates ...string) string {
-	t.Helper()
+func integFixturePathForT(rel string, candidates ...string) string {
+	ginkgo.GinkgoHelper()
 
 	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	Expect(err).To(Succeed())
 	for _, candidate := range candidates {
 		abs := filepath.Join(wd, candidate, rel)
 		if info, err := os.Stat(abs); err == nil && info.IsDir() {
@@ -27,15 +29,21 @@ func integFixturePathForT(t importerIntegrationTestT, rel string, candidates ...
 		}
 	}
 
-	t.Fatalf("fixture path not found for %q from working directory %q", rel, wd)
-	return ""
+	Expect(candidates).To(ContainElement(WithTransform(
+		func(candidate string) bool {
+			abs := filepath.Join(wd, candidate, rel)
+			info, err := os.Stat(abs)
+			return err == nil && info.IsDir()
+		},
+		BeTrue(),
+	)), "fixture path %q should exist below one candidate from %q", rel, wd)
+	return filepath.Join(wd, candidates[0], rel)
 }
 
-func integWrapCloseWithErrorCheck(closer func() error, t importerIntegrationTestT) {
-	t.Helper()
+func integWrapCloseWithErrorCheck(closer func() error) {
+	ginkgo.GinkgoHelper()
+
 	ginkgo.DeferCleanup(func() {
-		if err := closer(); err != nil {
-			t.Fatalf("failed to close resource: %v", err)
-		}
+		Expect(closer()).To(Succeed())
 	})
 }

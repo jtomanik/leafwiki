@@ -1,38 +1,31 @@
 package importer
 
 import (
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
-	gomega "github.com/onsi/gomega"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 // --- Helpers ----------------------------------------------------------------
 
-func mustWrite(t importerTestT, base, rel, content string) string {
-	t.Helper()
-	abs := filepath.Join(base, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	return abs
+func mustWrite(base, rel, content string) string {
+	ginkgo.GinkgoHelper()
+
+	return importerWriteFile(base, rel, content)
 }
 
-func newServiceWithFakeWiki(t importerTestT, w *fakeWiki) *ImporterService {
-	t.Helper()
+func newServiceWithFakeWiki(w *fakeWiki) *ImporterService {
+	ginkgo.GinkgoHelper()
+
 	planner := NewPlanner(w, tree.NewSlugService())
-	importerDir := filepath.Join(t.TempDir(), ".importer")
+	importerDir := filepath.Join(importerTempDir(), ".importer")
 	store := NewPlanStore(filepath.Join(importerDir, "current-plan.json"))
 	return &ImporterService{
 		planner:          planner,
@@ -43,151 +36,125 @@ func newServiceWithFakeWiki(t importerTestT, w *fakeWiki) *ImporterService {
 	}
 }
 
-func waitForExecutionStatus(t importerTestT, is *ImporterService, want ExecutionStatus) *CurrentPlanState {
-	t.Helper()
+func waitForExecutionStatus(is *ImporterService, want ExecutionStatus) *CurrentPlanState {
 	ginkgo.GinkgoHelper()
 
 	var state *CurrentPlanState
-	gomega.Eventually(func(g gomega.Gomega) {
+	Eventually(func(g Gomega) {
 		var err error
 		state, err = is.GetCurrentPlan()
-		g.Expect(err).NotTo(gomega.HaveOccurred())
-		g.Expect(state.ExecutionStatus).To(gomega.Equal(want))
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(state.ExecutionStatus).To(Equal(want))
 	}).
 		WithTimeout(3 * time.Second).
 		WithPolling(10 * time.Millisecond).
-		Should(gomega.Succeed())
+		Should(Succeed())
 	return state
 }
 
 // --- Tests ------------------------------------------------------------------
 
-var _ = ginkgo.Describe("TestImporterService_createImportPlanFromFolder_StoresPlan", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		mustWrite(t, tmp, "a.md", "# A\nbody")
+var _ = ginkgo.Describe("import plan creation persistence", func() {
+	ginkgo.It("stores created folder import plans", func() {
+		tmp := importerTempDir()
+		mustWrite(tmp, "a.md", "# A\nbody")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		plan, err := is.CreateImportPlanFromFolder(tmp, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if plan == nil || len(plan.Items) != 1 {
-			t.Fatalf("unexpected plan: %#v", plan)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan).NotTo(BeNil())
+		Expect(plan.Items).To(HaveLen(1))
 		// plan should have correct options
 
-		if _, err := is.GetCurrentPlan(); err != nil {
-			t.Fatalf("GetCurrentPlan err: %v", err)
-		}
+		_, err = is.GetCurrentPlan()
+		Expect(err).To(Succeed())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_createImportPlanFromFolder_CleansUpOldWorkspace", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("import plan workspace replacement", func() {
+	ginkgo.It("removes the previous workspace when replacing a planned import", func() {
 		// old workspace with a marker file
-		oldWS := t.TempDir()
-		marker := mustWrite(t, oldWS, "marker.txt", "x")
+		oldWS := importerTempDir()
+		marker := mustWrite(oldWS, "marker.txt", "x")
 
 		// new workspace with md
-		newWS := t.TempDir()
-		mustWrite(t, newWS, "b.md", "# B")
+		newWS := importerTempDir()
+		mustWrite(newWS, "b.md", "# B")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		// seed old plan in store
-		if err := is.planStore.Set(&StoredPlan{
+		err := is.planStore.Set(&StoredPlan{
 			Plan:          &PlanResult{ID: "old", TreeHash: "h1"},
 			PlanOptions:   PlanOptions{SourceBasePath: oldWS},
 			WorkspaceRoot: oldWS,
 			CreatedAt:     time.Now(),
-		}); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		})
+		Expect(err).To(Succeed())
 
-		_, err := is.CreateImportPlanFromFolder(newWS, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		_, err = is.CreateImportPlanFromFolder(newWS, "")
+		Expect(err).To(Succeed())
 
 		// old workspace should be removed
-		if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
-			t.Fatalf("expected old workspace removed; statErr=%v", statErr)
-		}
+		_, statErr := os.Stat(marker)
+		Expect(statErr).To(MatchError(os.ErrNotExist))
 
 		// store should now point to new workspace
 
-		if _, err := is.GetCurrentPlan(); err != nil {
-			t.Fatalf("GetCurrentPlan err: %v", err)
-		}
+		_, err = is.GetCurrentPlan()
+		Expect(err).To(Succeed())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_GetCurrentPlan_NoPlan", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("current import plan reads without a plan", func() {
+	ginkgo.It("returns a no-plan error when no current plan is stored", func() {
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		_, err := is.GetCurrentPlan()
-		if !errors.Is(err, ErrNoPlan) {
-			t.Fatalf("expected ErrNoPlan, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ClearCurrentPlan", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		mustWrite(t, tmp, "a.md", "# A")
+var _ = ginkgo.Describe("current import plan clearing", func() {
+	ginkgo.It("clears stored plans and rejects later reads", func() {
+		tmp := importerTempDir()
+		mustWrite(tmp, "a.md", "# A")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		_, err := is.CreateImportPlanFromFolder(tmp, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
-		if err := is.ClearCurrentPlan(); err != nil {
-			t.Fatalf("ClearCurrentPlan err: %v", err)
-		}
+		Expect(is.ClearCurrentPlan()).To(Succeed())
 		_, err = is.GetCurrentPlan()
-		if !errors.Is(err, ErrNoPlan) {
-			t.Fatalf("expected ErrNoPlan after clear, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_NoPlan", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("import execution without a current plan", func() {
+	ginkgo.It("rejects execution without a current plan", func() {
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		_, err := is.ExecuteCurrentPlan("user1")
-		if !errors.Is(err, ErrNoPlan) {
-			t.Fatalf("expected ErrNoPlan, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_StartCurrentPlanExecution_RunsInBackgroundAndStoresResult", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		mustWrite(t, ws, "a.md", "# A\nbody")
+var _ = ginkgo.Describe("background import execution", func() {
+	ginkgo.It("starts execution asynchronously and records completion progress", func() {
+		ws := importerTempDir()
+		mustWrite(ws, "a.md", "# A\nbody")
 
 		allowEnsure := make(chan struct{})
 		w := &fakeWiki{
@@ -195,68 +162,47 @@ var _ = ginkgo.Describe("TestImporterService_StartCurrentPlanExecution_RunsInBac
 			lookups:  map[string]*tree.PathLookup{},
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				defer ginkgo.GinkgoRecover()
-				gomega.Eventually(allowEnsure).Should(gomega.BeClosed())
+				Eventually(allowEnsure).Should(BeClosed())
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
 		}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
-		if _, err := is.CreateImportPlanFromFolder(ws, ""); err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		_, err := is.CreateImportPlanFromFolder(ws, "")
+		Expect(err).To(Succeed())
 
-		state, started, err := is.StartCurrentPlanExecution("user1")
-		if err != nil {
-			t.Fatalf("StartCurrentPlanExecution err: %v", err)
-		}
-		if !started {
-			t.Fatalf("expected execution to start")
-		}
-		if state.ExecutionStatus != ExecutionStatusRunning {
-			t.Fatalf("expected running state, got %q", state.ExecutionStatus)
-		}
-		if state.TotalItems != 1 || state.ProcessedItems != 0 {
-			t.Fatalf("expected initial progress 0/1, got %d/%d", state.ProcessedItems, state.TotalItems)
-		}
-		if state.StartedAt == nil {
-			t.Fatalf("expected started_at to be set")
-		}
+		state, err := startCurrentPlanExecutionResult(is, "user1")
+		Expect(err).To(Succeed())
+		Expect(state).To(SatisfyAll(
+			HaveField("ExecutionStatus", Equal(ExecutionStatusRunning)),
+			HaveField("TotalItems", Equal(1)),
+			HaveField("ProcessedItems", BeZero()),
+			HaveField("StartedAt", Not(BeNil())),
+		))
 
 		runningState, err := is.GetCurrentPlan()
-		if err != nil {
-			t.Fatalf("GetCurrentPlan err: %v", err)
-		}
-		if runningState.ExecutionStatus != ExecutionStatusRunning {
-			t.Fatalf("expected stored running state, got %q", runningState.ExecutionStatus)
-		}
+		Expect(err).To(Succeed())
+		Expect(runningState.ExecutionStatus).To(Equal(ExecutionStatusRunning))
 
 		close(allowEnsure)
 
-		completedState := waitForExecutionStatus(t, is, ExecutionStatusCompleted)
-		if completedState.ExecutionResult == nil {
-			t.Fatalf("expected execution result to be stored")
-		}
-		if completedState.ExecutionResult.ImportedCount != 1 {
-			t.Fatalf("expected imported count 1, got %#v", completedState.ExecutionResult)
-		}
-		if completedState.ProcessedItems != 1 || completedState.TotalItems != 1 {
-			t.Fatalf("expected final progress 1/1, got %d/%d", completedState.ProcessedItems, completedState.TotalItems)
-		}
-		if completedState.CurrentItemSourcePath != nil {
-			t.Fatalf("expected current item to be cleared after completion, got %q", *completedState.CurrentItemSourcePath)
-		}
-		if completedState.FinishedAt == nil {
-			t.Fatalf("expected finished_at to be set")
-		}
+		completedState := waitForExecutionStatus(is, ExecutionStatusCompleted)
+		Expect(completedState).To(SatisfyAll(
+			HaveField("ExecutionResult", Not(BeNil())),
+			HaveField("ExecutionResult.ImportedCount", Equal(1)),
+			HaveField("ProcessedItems", Equal(1)),
+			HaveField("TotalItems", Equal(1)),
+			HaveField("CurrentItemSourcePath", BeNil()),
+			HaveField("FinishedAt", Not(BeNil())),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ClearCurrentPlan_WhileRunning_ReturnsError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		mustWrite(t, ws, "a.md", "# A\nbody")
+var _ = ginkgo.Describe("current import plan clearing while execution is running", func() {
+	ginkgo.It("rejects clearing while execution is running", func() {
+		ws := importerTempDir()
+		mustWrite(ws, "a.md", "# A\nbody")
 
 		allowEnsure := make(chan struct{})
 		w := &fakeWiki{
@@ -264,36 +210,31 @@ var _ = ginkgo.Describe("TestImporterService_ClearCurrentPlan_WhileRunning_Retur
 			lookups:  map[string]*tree.PathLookup{},
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				defer ginkgo.GinkgoRecover()
-				gomega.Eventually(allowEnsure).Should(gomega.BeClosed())
+				Eventually(allowEnsure).Should(BeClosed())
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
 		}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
-		if _, err := is.CreateImportPlanFromFolder(ws, ""); err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if _, _, err := is.StartCurrentPlanExecution("user1"); err != nil {
-			t.Fatalf("StartCurrentPlanExecution err: %v", err)
-		}
+		_, err := is.CreateImportPlanFromFolder(ws, "")
+		Expect(err).To(Succeed())
+		_, err = startCurrentPlanExecutionResult(is, "user1")
+		Expect(err).To(Succeed())
 
-		err := is.ClearCurrentPlan()
-		if !errors.Is(err, ErrImportExecutionRunning) {
-			t.Fatalf("expected ErrImportExecutionRunning, got %v", err)
-		}
+		err = is.ClearCurrentPlan()
+		Expect(err).To(MatchError(ErrImportExecutionRunning))
 
 		close(allowEnsure)
-		waitForExecutionStatus(t, is, ExecutionStatusCompleted)
+		waitForExecutionStatus(is, ExecutionStatusCompleted)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_CancelCurrentPlan_StopsBeforeNextItem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		mustWrite(t, ws, "a.md", "# A\nbody")
-		mustWrite(t, ws, "b.md", "# B\nbody")
+var _ = ginkgo.Describe("import cancellation between items", func() {
+	ginkgo.It("requests cancellation and records canceled progress", func() {
+		ws := importerTempDir()
+		mustWrite(ws, "a.md", "# A\nbody")
+		mustWrite(ws, "b.md", "# B\nbody")
 
 		enterFirstEnsure := make(chan struct{}, 1)
 		allowFirstEnsure := make(chan struct{})
@@ -304,54 +245,44 @@ var _ = ginkgo.Describe("TestImporterService_CancelCurrentPlan_StopsBeforeNextIt
 				if targetPath == "a" {
 					enterFirstEnsure <- struct{}{}
 					defer ginkgo.GinkgoRecover()
-					gomega.Eventually(allowFirstEnsure).Should(gomega.BeClosed())
+					Eventually(allowFirstEnsure).Should(BeClosed())
 				}
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},
 		}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
-		if _, err := is.CreateImportPlanFromFolder(ws, ""); err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if _, _, err := is.StartCurrentPlanExecution("user1"); err != nil {
-			t.Fatalf("StartCurrentPlanExecution err: %v", err)
-		}
+		_, err := is.CreateImportPlanFromFolder(ws, "")
+		Expect(err).To(Succeed())
+		_, err = startCurrentPlanExecutionResult(is, "user1")
+		Expect(err).To(Succeed())
 
-		gomega.Eventually(enterFirstEnsure).Should(gomega.Receive())
+		Eventually(enterFirstEnsure).Should(Receive())
 
-		state, requested, err := is.CancelCurrentPlan()
-		if err != nil {
-			t.Fatalf("CancelCurrentPlan err: %v", err)
-		}
-		if !requested || !state.CancelRequested {
-			t.Fatalf("expected cancel request to be recorded, got requested=%v state=%#v", requested, state)
-		}
+		state, err := cancelCurrentPlanResult(is)
+		Expect(err).To(Succeed())
+		Expect(state.CancelRequested).To(BeTrue())
 
 		close(allowFirstEnsure)
 
-		canceledState := waitForExecutionStatus(t, is, ExecutionStatusCanceled)
-		if canceledState.ExecutionResult == nil {
-			t.Fatalf("expected partial result on cancellation")
-		}
-		if canceledState.ExecutionResult.ImportedCount != 1 {
-			t.Fatalf("expected one imported item before cancel, got %#v", canceledState.ExecutionResult)
-		}
-		if canceledState.ProcessedItems != 1 || canceledState.TotalItems != 2 {
-			t.Fatalf("expected progress 1/2 after cancel, got %d/%d", canceledState.ProcessedItems, canceledState.TotalItems)
-		}
+		canceledState := waitForExecutionStatus(is, ExecutionStatusCanceled)
+		Expect(canceledState).To(SatisfyAll(
+			HaveField("ExecutionResult", Not(BeNil())),
+			HaveField("ExecutionResult.ImportedCount", Equal(1)),
+			HaveField("ProcessedItems", Equal(1)),
+			HaveField("TotalItems", Equal(2)),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ResumesRunningImportFromPersistedState", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		workspaceRoot := t.TempDir()
-		mustWrite(t, workspaceRoot, "a.md", "# A\nbody")
-		mustWrite(t, workspaceRoot, "b.md", "# B\nbody")
+var _ = ginkgo.Describe("persisted running import resumption", func() {
+	ginkgo.It("resumes running imports and completes remaining items", func() {
+		workspaceRoot := importerTempDir()
+		mustWrite(workspaceRoot, "a.md", "# A\nbody")
+		mustWrite(workspaceRoot, "b.md", "# B\nbody")
 
-		stateRoot := t.TempDir()
+		stateRoot := importerTempDir()
 		stateFile := filepath.Join(stateRoot, "current-plan.json")
 		w := &fakeWiki{treeHash: "partial-tree", lookups: map[string]*tree.PathLookup{}}
 		planner := NewPlanner(w, tree.NewSlugService())
@@ -366,17 +297,14 @@ var _ = ginkgo.Describe("TestImporterService_ResumesRunningImportFromPersistedSt
 		}
 
 		plan, err := service.CreateImportPlanFromFolder(workspaceRoot, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		plan.TreeHash = "original-tree"
 
-		sp, started, err := store.TryStartExecution("user1")
-		if err != nil || !started {
-			t.Fatalf("TryStartExecution err=%v started=%v", err, started)
-		}
+		sp, err := startStoredPlanExecutionResult(store, "user1")
+		Expect(err).To(Succeed())
+		Expect(sp.ExecutionStatus).To(Equal(ExecutionStatusRunning))
 		startedAt := time.Now()
-		if err := store.UpdateExecutionProgress(plan.ID, ExecutionProgress{
+		err = store.UpdateExecutionProgress(plan.ID, ExecutionProgress{
 			ProcessedItems: 1,
 			TotalItems:     2,
 			StartedAt:      &startedAt,
@@ -387,35 +315,29 @@ var _ = ginkgo.Describe("TestImporterService_ResumesRunningImportFromPersistedSt
 			Items: []ExecutionItemResult{
 				{SourcePath: "a.md", TargetPath: "a", Action: ExecutionActionCreated},
 			},
-		}); err != nil {
-			t.Fatalf("UpdateExecutionProgress err: %v", err)
-		}
+		})
+		Expect(err).To(Succeed())
 
 		resumed := NewImporterService(planner, NewPlanStore(stateFile), filepath.Join(stateRoot, "workspaces"), 0)
-		_ = sp
 
-		completedState := waitForExecutionStatus(t, resumed, ExecutionStatusCompleted)
-		if completedState.ExecutionResult == nil {
-			t.Fatalf("expected completed result after resume")
-		}
-		if completedState.ExecutionResult.ImportedCount != 2 {
-			t.Fatalf("expected resumed import to keep prior count and finish with 2 imports, got %#v", completedState.ExecutionResult)
-		}
-		if completedState.ProcessedItems != 2 || completedState.TotalItems != 2 {
-			t.Fatalf("expected final progress 2/2 after resume, got %d/%d", completedState.ProcessedItems, completedState.TotalItems)
-		}
+		completedState := waitForExecutionStatus(resumed, ExecutionStatusCompleted)
+		Expect(completedState).To(SatisfyAll(
+			HaveField("ExecutionResult", Not(BeNil())),
+			HaveField("ExecutionResult.ImportedCount", Equal(2)),
+			HaveField("ProcessedItems", Equal(2)),
+			HaveField("TotalItems", Equal(2)),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ResumeRunningImport_FailsWhenTreeHashChanged", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		workspaceRoot := t.TempDir()
-		mustWrite(t, workspaceRoot, "a.md", "# A\nbody")
-		mustWrite(t, workspaceRoot, "b.md", "# B\nbody")
+var _ = ginkgo.Describe("resumed import with changed tree hash", func() {
+	ginkgo.It("fails resumed imports when the tree hash changed", func() {
+		workspaceRoot := importerTempDir()
+		mustWrite(workspaceRoot, "a.md", "# A\nbody")
+		mustWrite(workspaceRoot, "b.md", "# B\nbody")
 
-		stateRoot := t.TempDir()
+		stateRoot := importerTempDir()
 		stateFile := filepath.Join(stateRoot, "current-plan.json")
 		w := &fakeWiki{treeHash: "changed-tree", lookups: map[string]*tree.PathLookup{}}
 		planner := NewPlanner(w, tree.NewSlugService())
@@ -430,11 +352,9 @@ var _ = ginkgo.Describe("TestImporterService_ResumeRunningImport_FailsWhenTreeHa
 		}
 
 		plan, err := service.CreateImportPlanFromFolder(workspaceRoot, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		plan.TreeHash = "original-tree"
-		if err := store.Set(&StoredPlan{
+		err = store.Set(&StoredPlan{
 			Plan:            plan,
 			PlanOptions:     PlanOptions{SourceBasePath: workspaceRoot},
 			WorkspaceRoot:   workspaceRoot,
@@ -453,128 +373,85 @@ var _ = ginkgo.Describe("TestImporterService_ResumeRunningImport_FailsWhenTreeHa
 				ProcessedItems: 1,
 				TotalItems:     2,
 			},
-		}); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		})
+		Expect(err).To(Succeed())
 
 		resumed := NewImporterService(planner, NewPlanStore(stateFile), filepath.Join(stateRoot, "workspaces"), 0)
-		failedState := waitForExecutionStatus(t, resumed, ExecutionStatusFailed)
-		if failedState.ExecutionError == nil || !strings.Contains(*failedState.ExecutionError, "plan is stale") {
-			t.Fatalf("expected stale-plan failure after resume, got %#v", failedState)
-		}
+		failedState := waitForExecutionStatus(resumed, ExecutionStatusFailed)
+		Expect(failedState.ExecutionError).To(gstruct.PointTo(ContainSubstring(ErrImportPlanStale.Error())))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_HappyPath_PreservesNonInternalFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		mustWrite(t, ws, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
+var _ = ginkgo.Describe("import service execution with source frontmatter", func() {
+	ginkgo.It("writes canonical metadata and drops importer-owned legacy fields", func() {
+		ws := importerTempDir()
+		mustWrite(ws, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if plan.TreeHash != "h1" {
-			t.Fatalf("plan.TreeHash=%q want h1", plan.TreeHash)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan.TreeHash).To(Equal("h1"))
 
 		res, err := is.ExecuteCurrentPlan("user1")
-		if err != nil {
-			t.Fatalf("ExecuteCurrentPlan err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
-		if res.ImportedCount != 1 {
-			t.Fatalf("ImportedCount=%d want 1", res.ImportedCount)
-		}
-		if res.SkippedCount != 0 {
-			t.Fatalf("SkippedCount=%d want 0", res.SkippedCount)
-		}
-		if w.ensureCalls != 1 || w.updateCalls != 1 {
-			t.Fatalf("wiki calls ensure=%d update=%d", w.ensureCalls, w.updateCalls)
-		}
-
-		if w.lastUpdatedContent == nil {
-			t.Fatalf("expected UpdatePage content")
-		}
+		Expect(res).To(MatchExecutionResultCounts(1, 0, HaveLen(1)))
+		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
+			HaveField("EnsureCalls", Equal(1)),
+			HaveField("UpdateCalls", Equal(1)),
+			HaveField("LastUpdatedContent", Not(BeNil())),
+		)))
 		raw := *w.lastUpdatedContent
-		if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-			t.Fatalf("expected canonical LeafWiki metadata comment, got: %q", raw)
-		}
-		if strings.HasPrefix(raw, "---\n") {
-			t.Fatalf("expected importer output not to use legacy YAML frontmatter, got: %q", raw)
-		}
-		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if doc.Body != "\n# Heading\nBody" {
-			t.Fatalf("unexpected body: %q", doc.Body)
-		}
-		if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom_key to be preserved, got %#v", got)
-		}
-		if got := doc.Metadata.Extra["title"]; got != nil {
-			t.Fatalf("expected title alias to be consumed during metadata migration, got %#v", got)
-		}
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "x" {
-			t.Fatalf("expected aliases to be preserved, got %#v", doc.Metadata.Extra["aliases"])
-		}
-		if strings.Contains(raw, "leafwiki_id: source-id") {
-			t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
-		}
-		if strings.Contains(raw, "leafwiki_title: Source Title") {
-			t.Fatalf("expected source leafwiki_title to be dropped, got: %q", raw)
-		}
+		Expect(raw).To(HavePrefix("<!-- leafwiki\n"))
+		Expect(raw).NotTo(HavePrefix("---\n"))
+		doc, err := importedPageDocumentResult(raw)
+		Expect(err).To(Succeed())
+		Expect(doc).To(HaveImportedPageDocument(
+			Equal("\n# Heading\nBody"),
+			HaveKeyWithValue("custom_key", "keep-me"),
+			SatisfyAll(
+				Not(HaveKey("title")),
+				HaveKeyWithValue("aliases", ConsistOf("x")),
+			),
+		))
+		Expect(raw).NotTo(ContainSubstring("leafwiki_id: source-id"))
+		Expect(raw).NotTo(ContainSubstring("leafwiki_title: Source Title"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_ExecuteCurrentPlan_ExecutorStalePlanPropagatesError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		ws := t.TempDir()
-		mustWrite(t, ws, "a.md", "# A")
+var _ = ginkgo.Describe("import service execution with stale plan", func() {
+	ginkgo.It("rejects stale plan execution", func() {
+		ws := importerTempDir()
+		mustWrite(ws, "a.md", "# A")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		plan, err := is.CreateImportPlanFromFolder(ws, "")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		// make plan stale
 		plan.TreeHash = "OLD"
 
 		_, err = is.ExecuteCurrentPlan("user1")
-		if err == nil {
-			t.Fatalf("expected stale plan error")
-		}
-		if !errors.Is(err, ErrImportPlanStale) {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		Expect(err).To(MatchError(ErrImportPlanStale))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestFindMarkdownEntries_FindsMdRecursively_AndNormalizesSlashes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		base := t.TempDir()
-		mustWrite(t, base, "a.md", "x")
-		mustWrite(t, base, "b.txt", "x")
-		mustWrite(t, base, "sub/c.MD", "x")
-		mustWrite(t, base, "sub/deeper/d.md", "x")
+var _ = ginkgo.Describe("markdown entry discovery", func() {
+	ginkgo.It("finds markdown entries recursively and ignores non-markdown files", func() {
+		base := importerTempDir()
+		mustWrite(base, "a.md", "x")
+		mustWrite(base, "b.txt", "x")
+		mustWrite(base, "sub/c.MD", "x")
+		mustWrite(base, "sub/deeper/d.md", "x")
 
 		got, err := FindMarkdownEntries(base)
-		if err != nil {
-			t.Fatalf("FindMarkdownEntries err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		// collect paths in a set for stable assertion (WalkDir order is OS-dependent)
 		set := map[string]bool{}
@@ -582,87 +459,66 @@ var _ = ginkgo.Describe("TestFindMarkdownEntries_FindsMdRecursively_AndNormalize
 			sourcePath := e.SourcePath.FilesystemPath()
 			set[sourcePath] = true
 			// should be slash-normalized
-			if strings.Contains(sourcePath, `\`) {
-				t.Fatalf("SourcePath should be slash-normalized: %q", e.SourcePath)
-			}
+			Expect(sourcePath).NotTo(ContainSubstring(`\`))
 		}
 
-		if !set["a.md"] {
-			t.Fatalf("missing a.md, got %#v", set)
-		}
-		if !set["sub/c.MD"] {
-			t.Fatalf("missing sub/c.MD, got %#v", set)
-		}
-		if !set["sub/deeper/d.md"] {
-			t.Fatalf("missing sub/deeper/d.md, got %#v", set)
-		}
-		if set["b.txt"] {
-			t.Fatalf("should not include b.txt")
-		}
+		Expect(set).To(SatisfyAll(
+			HaveKey("a.md"),
+			HaveKey("sub/c.MD"),
+			HaveKey("sub/deeper/d.md"),
+			Not(HaveKey("b.txt")),
+		))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestImporterService_createImportPlanFromFolder_UsesTargetBasePath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		mustWrite(t, tmp, "a.md", "# A\nbody")
+var _ = ginkgo.Describe("import plan creation with target base path", func() {
+	ginkgo.It("stores target base path and applies it to planned items", func() {
+		tmp := importerTempDir()
+		mustWrite(tmp, "a.md", "# A\nbody")
 
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
-		is := newServiceWithFakeWiki(t, w)
+		is := newServiceWithFakeWiki(w)
 
 		plan, err := is.CreateImportPlanFromFolder(tmp, "docs/imports")
-		if err != nil {
-			t.Fatalf("createImportPlanFromFolder err: %v", err)
-		}
-		if plan == nil || len(plan.Items) != 1 {
-			t.Fatalf("unexpected plan: %#v", plan)
-		}
+		Expect(err).To(Succeed())
+		Expect(plan).NotTo(BeNil())
+		Expect(plan.Items).To(HaveLen(1))
 
 		// Verify the plan item has the correct target path with the base path
 		item := plan.Items[0]
-		if item.TargetPath != "docs/imports/a" {
-			t.Fatalf("expected TargetPath 'docs/imports/a', got %q", item.TargetPath)
-		}
+		Expect(item.TargetPath).To(Equal(newFixtureRoutePath("docs/imports/a")))
 
 		// Verify the stored plan options has the correct target base path
 		sp, err := is.planStore.Get()
-		if err != nil {
-			t.Fatalf("Get plan err: %v", err)
-		}
-		if sp.PlanOptions.TargetBasePath != "docs/imports" {
-			t.Fatalf("expected TargetBasePath 'docs/imports', got %q", sp.PlanOptions.TargetBasePath)
-		}
+		Expect(err).To(Succeed())
+		Expect(sp.PlanOptions.TargetBasePath).To(Equal("docs/imports"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestFindMarkdownEntries_FindsMixedCaseMdExtensions", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		base := t.TempDir()
-		mustWrite(t, base, "a.MD", "x")
-		mustWrite(t, base, "b.mD", "x")
-		mustWrite(t, base, "c.Md", "x")
-		mustWrite(t, base, "d.txt", "x")
+var _ = ginkgo.Describe("markdown entry extension matching", func() {
+	ginkgo.It("includes markdown files with mixed-case extensions", func() {
+		base := importerTempDir()
+		mustWrite(base, "a.MD", "x")
+		mustWrite(base, "b.mD", "x")
+		mustWrite(base, "c.Md", "x")
+		mustWrite(base, "d.txt", "x")
 
 		got, err := FindMarkdownEntries(base)
-		if err != nil {
-			t.Fatalf("FindMarkdownEntries err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		set := map[string]bool{}
 		for _, e := range got {
 			set[e.SourcePath.FilesystemPath()] = true
 		}
 
-		if !set["a.MD"] || !set["b.mD"] || !set["c.Md"] {
-			t.Fatalf("expected mixed-case markdown files to be included, got %#v", set)
-		}
-		if set["d.txt"] {
-			t.Fatalf("should not include non-markdown files")
-		}
+		Expect(set).To(SatisfyAll(
+			HaveKey("a.MD"),
+			HaveKey("b.mD"),
+			HaveKey("c.Md"),
+			Not(HaveKey("d.txt")),
+		))
 
 	})
 })

@@ -1,170 +1,125 @@
 package importer
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
-var _ = ginkgo.Describe("TestPlanStoreSet", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("plan store snapshots", func() {
+	ginkgo.It("returns a cloned plan with execution status", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{ExecutionStatus: ExecutionStatusPlanned}
-		if err := s.Set(plan); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		Expect(s.Set(plan)).To(Succeed())
 
 		retrieved, err := s.Get()
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
-		if retrieved == plan {
-			t.Fatalf("expected Get to return a snapshot copy")
-		}
-		if retrieved.ExecutionStatus != plan.ExecutionStatus {
-			t.Fatalf("expected execution status %q, got %q", plan.ExecutionStatus, retrieved.ExecutionStatus)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrieved).NotTo(BeIdenticalTo(plan))
+		Expect(retrieved.ExecutionStatus).To(Equal(plan.ExecutionStatus))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStoreGet", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("empty plan store reads", func() {
+	ginkgo.It("returns an error when no plan is stored", func() {
 		s := NewPlanStore()
 
 		_, err := s.Get()
-		if err == nil {
-			t.Fatalf("expected error when getting plan from empty store")
-		}
+		Expect(err).To(HaveOccurred())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStoreSetAndGet", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("plan store cloned payload reads", func() {
+	ginkgo.It("returns a cloned stored plan payload", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
 			ExecutionStatus: ExecutionStatusPlanned,
 		}
-		if err := s.Set(plan); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		Expect(s.Set(plan)).To(Succeed())
 
 		retrieved, err := s.Get()
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
-		if retrieved == plan {
-			t.Fatalf("expected Get to return a snapshot copy")
-		}
-		if retrieved.Plan == nil || retrieved.Plan.ID != "plan-1" {
-			t.Fatalf("expected retrieved plan ID to match, got %#v", retrieved.Plan)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrieved).NotTo(BeIdenticalTo(plan))
+		Expect(retrieved.Plan).To(SatisfyAll(Not(BeNil()), HaveField("ID", Equal("plan-1"))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStoreClear", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("plan store clearing", func() {
+	ginkgo.It("clears the current plan and makes later reads empty", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{}
-		if err := s.Set(plan); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		Expect(s.Set(plan)).To(Succeed())
 
-		if _, err := s.Clear(); err != nil {
-			t.Fatalf("Clear err: %v", err)
-		}
+		_, err := s.Clear()
+		Expect(err).To(Succeed())
 
-		_, err := s.Get()
-		if err == nil {
-			t.Fatalf("expected error when getting plan from cleared store")
-		}
+		_, err = s.Get()
+		Expect(err).To(HaveOccurred())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStore_PersistsAndLoadsState", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		stateFile := filepath.Join(t.TempDir(), "current-plan.json")
+var _ = ginkgo.Describe("persistent plan store state", func() {
+	ginkgo.It("reloads persisted execution user state from disk", func() {
+		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
 		store := NewPlanStore(stateFile)
-		if err := store.Set(&StoredPlan{
+		Expect(store.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
 			ExecutionStatus: ExecutionStatusRunning,
 			ExecutionUserID: "user-1",
-		}); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		})).To(Succeed())
 
 		loaded := NewPlanStore(stateFile)
 		retrieved, err := loaded.Get()
-		if err != nil {
-			t.Fatalf("expected persisted plan, got %v", err)
-		}
-		if retrieved.Plan == nil || retrieved.Plan.ID != "plan-1" {
-			t.Fatalf("expected loaded plan id plan-1, got %#v", retrieved.Plan)
-		}
-		if retrieved.ExecutionUserID != "user-1" {
-			t.Fatalf("expected persisted execution user, got %q", retrieved.ExecutionUserID)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrieved).To(HaveStoredPlanState(gstruct.Fields{
+			"Plan":            SatisfyAll(Not(BeNil()), HaveField("ID", Equal("plan-1"))),
+			"ExecutionUserID": Equal("user-1"),
+		}))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStore_LoadError_IsReported", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		stateFile := filepath.Join(t.TempDir(), "current-plan.json")
-		if err := os.WriteFile(stateFile, []byte("{invalid"), 0o644); err != nil {
-			t.Fatalf("WriteFile err: %v", err)
-		}
+var _ = ginkgo.Describe("persistent plan store load failures", func() {
+	ginkgo.It("reports unavailable state for invalid persisted JSON", func() {
+		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
+		Expect(os.WriteFile(stateFile, []byte("{invalid"), 0o644)).To(Succeed())
 
 		store := NewPlanStore(stateFile)
-		if _, err := store.Get(); !errors.Is(err, ErrImportStateUnavailable) {
-			t.Fatalf("expected ErrImportStateUnavailable, got %v", err)
-		}
+		_, err := store.Get()
+		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStoreTryStartExecution_WithNilPlanPayload", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("execution start with unavailable plan payload", func() {
+	ginkgo.It("rejects execution start when the stored plan has no payload", func() {
 		store := NewPlanStore()
-		if err := store.Set(&StoredPlan{
+		Expect(store.Set(&StoredPlan{
 			Plan:            nil,
 			ExecutionStatus: ExecutionStatusPlanned,
-		}); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		})).To(Succeed())
 
-		_, _, err := store.TryStartExecution("user-1")
-		if !errors.Is(err, ErrImportStateUnavailable) {
-			t.Fatalf("expected ErrImportStateUnavailable, got %v", err)
-		}
+		_, err := startStoredPlanExecutionResult(store, "user-1")
+		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestPlanStoreUpdateExecutionProgress_UpdatesEmbeddedFields", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("execution progress persistence", func() {
+	ginkgo.It("persists execution progress fields", func() {
 		store := NewPlanStore()
-		if err := store.Set(&StoredPlan{
+		Expect(store.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
 			ExecutionStatus: ExecutionStatusRunning,
-		}); err != nil {
-			t.Fatalf("Set err: %v", err)
-		}
+		})).To(Succeed())
 
 		now := time.Now()
 		sourcePath := "docs/readme.md"
@@ -174,23 +129,16 @@ var _ = ginkgo.Describe("TestPlanStoreUpdateExecutionProgress_UpdatesEmbeddedFie
 			CurrentItemSourcePath: &sourcePath,
 			StartedAt:             &now,
 		}, nil)
-		if err != nil {
-			t.Fatalf("UpdateExecutionProgress err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		retrieved, err := store.Get()
-		if err != nil {
-			t.Fatalf("Get err: %v", err)
-		}
-		if retrieved.ProcessedItems != 2 || retrieved.TotalItems != 5 {
-			t.Fatalf("unexpected progress values: %#v", retrieved.ExecutionProgress)
-		}
-		if retrieved.CurrentItemSourcePath == nil || *retrieved.CurrentItemSourcePath != sourcePath {
-			t.Fatalf("unexpected current item source path: %#v", retrieved.CurrentItemSourcePath)
-		}
-		if retrieved.StartedAt == nil || !retrieved.StartedAt.Equal(now) {
-			t.Fatalf("expected started_at to be updated, got %#v", retrieved.StartedAt)
-		}
+		Expect(err).To(Succeed())
+		Expect(retrieved).To(SatisfyAll(
+			HaveField("ProcessedItems", Equal(2)),
+			HaveField("TotalItems", Equal(5)),
+			HaveField("CurrentItemSourcePath", gstruct.PointTo(Equal(sourcePath))),
+			HaveField("StartedAt", gstruct.PointTo(Equal(now))),
+		))
 
 	})
 })
