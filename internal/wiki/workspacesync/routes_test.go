@@ -21,7 +21,7 @@ import (
 )
 
 var _ = ginkgo.Describe("workspace sync routes", func() {
-	ginkgo.It("TestSnapshotRouteDisabledUsesLocalizedStructuredError", func() {
+	ginkgo.It("returns a localized structured error when snapshot listing is disabled", func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: false}
@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
-	ginkgo.It("TestSnapshotRouteFailureDoesNotRenderRawErrorAsMessage", func() {
+	ginkgo.It("sanitizes raw snapshot listing failures in structured error responses", func() {
 		rawErr := errors.New("git exploded with private path /tmp/secret")
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {

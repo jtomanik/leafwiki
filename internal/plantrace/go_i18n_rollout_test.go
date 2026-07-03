@@ -85,7 +85,7 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 		"API fallback preserves old clients when catalog rendering fails":
 		return evidence("internal/core/shared/errors/localized_error_test.go", "LocalizedErrorDetail"), true
 	case "API error response uses catalog-backed message":
-		return evidence("internal/wiki/workspacesync/routes_test.go", "TestSnapshotRouteDisabledUsesLocalizedStructuredError"), true
+		return evidence("internal/wiki/workspacesync/routes_test.go", "returns a localized structured error when snapshot listing is disabled"), true
 	case "Field validation error renders from field message ID",
 		"API validation error exposes field codes not prose-only assertions":
 		return evidence("internal/core/shared/errors/field_error_test.go", "ValidationErrors"), true
