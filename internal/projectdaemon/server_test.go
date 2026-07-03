@@ -254,7 +254,7 @@ var _ = ginkgo.Describe("project daemon control server", func() {
 
 		_, err := NewClient(server.URL, "control-token").Health(context.Background())
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchProjectdaemonJSONSyntaxError())
 	})
 
 	ginkgo.It("adds control, bearer, and actor-context headers without mutating the original request", func() {

@@ -192,7 +192,7 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 		}),
 	)
 
-	ginkgo.It("keeps zero-TTL sessions until pruning removes them immediately", func() {
+	ginkgo.It("retains newly recorded agent sessions until pruning removes expired sessions", func() {
 		now := time.Date(2026, 6, 7, 14, 30, 0, 0, time.UTC)
 		var counts []int
 		registry := NewAgentPresenceRegistry(0, func(count int) {

@@ -76,7 +76,7 @@ var _ = ginkgo.Describe("actor context envelopes", func() {
 			encoded, err := EncodeActorContext(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			_, err = DecodeActorContext(encoded, ActorContextValidation{Now: now, WorkspaceID: "current"})
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchActorContextValidationRejection())
 		},
 		ginkgo.Entry("expired envelope", func(ctx *ActorContext) {
 			ctx.ExpiresAt = time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC).Add(-time.Second)
@@ -91,6 +91,6 @@ var _ = ginkgo.Describe("actor context envelopes", func() {
 
 		_, err := DecodeActorContext("not json", ActorContextValidation{Now: now, WorkspaceID: "current"})
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(errDecodeActorContext))
 	})
 })

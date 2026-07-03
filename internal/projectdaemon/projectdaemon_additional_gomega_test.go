@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
 		Expect(os.WriteFile(path, []byte("{"), 0o600)).To(Succeed())
 		_, err := ReadDescriptor(path)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchProjectdaemonJSONSyntaxError())
 		_, err = ReadDescriptor(filepath.Join(tempProjectdaemonDir(), "missing.json"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = ReadTrustedDescriptor(filepath.Join(tempProjectdaemonDir(), "missing.json"))
@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		mkdirAllDescriptorPath = originalMkdirAllDescriptorPath
 
 		err = RemoveDescriptor(filepath.Join(parentFile, "descriptor.json"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchProjectdaemonPathError())
 	})
 
 	ginkgo.It("rejects malformed actor context envelopes before trusting workspace identity", func() {
@@ -262,7 +262,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 
 		badURLClient := NewClient("http://127.0.0.1:1/%zz", "control-token")
 		err = badURLClient.Ping(context.Background())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchProjectdaemonURLParseError())
 
 		failingClient := NewClient("http://127.0.0.1", "control-token")
 		transportErr := errors.New("projectdaemon transport failed")
@@ -557,7 +557,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 
 		marshalClient := NewClient("http://127.0.0.1", "control-token")
-		Expect(marshalClient.doJSON(context.Background(), http.MethodPost, "/bad", func() {}, nil)).To(HaveOccurred())
+		Expect(marshalClient.doJSON(context.Background(), http.MethodPost, "/bad", func() {}, nil)).To(matchProjectdaemonJSONMarshalError())
 
 		errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -578,9 +578,9 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		}))
 		ginkgo.DeferCleanup(badStatusServer.Close)
 		_, err = NewClient(badStatusServer.URL, "control-token").RegisterSession(context.Background())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(haveControlStatus(http.StatusInternalServerError))
 		_, err = NewClient(badStatusServer.URL, "control-token").ListAgentPresence(context.Background())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(haveControlStatus(http.StatusInternalServerError))
 
 		var seenControlToken string
 		authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
