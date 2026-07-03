@@ -21,7 +21,7 @@ import (
 )
 
 var _ = ginkgo.Describe("branding error responses", func() {
-	ginkgo.It("TestRespondWithBrandingError_ValidationErrors", func() {
+	ginkgo.It("renders validation errors with field metadata", func() {
 		ctx, rec := ginTestContext()
 
 		ve := sharederrors.NewValidationErrors()
@@ -32,7 +32,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(rec).To(HaveBrandingValidationError(brandingSiteNameValidationField, sharederrors.FieldValidationErrorCode, sharederrors.FieldValidationErrorMessageID))
 	})
 
-	ginkgo.It("TestRespondWithBrandingError_LocalizedError", func() {
+	ginkgo.It("preserves localized branding error identity", func() {
 		ctx, rec := ginTestContext()
 
 		err := sharederrors.NewLocalizedError(
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodeBrandingLogoInvalidType, sharederrors.MessageIDForCode(ErrCodeBrandingLogoInvalidType)))
 	})
 
-	ginkgo.It("TestRespondWithBrandingError_InternalErrorIsSanitized", func() {
+	ginkgo.It("sanitizes unexpected internal error details", func() {
 		ctx, rec := ginTestContext()
 
 		respondWithBrandingError(ctx, errors.New("write config: permission denied"))
@@ -152,9 +152,17 @@ var _ = ginkgo.Describe("branding asset paths", func() {
 
 func newBrandingTestService() *corebranding.BrandingService {
 	ginkgo.GinkgoHelper()
-	svc, err := corebranding.NewBrandingService(ginkgo.GinkgoT().TempDir())
+	svc, err := corebranding.NewBrandingService(newBrandingTempDir())
 	Expect(err).NotTo(HaveOccurred())
 	return svc
+}
+
+func newBrandingTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-branding-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {

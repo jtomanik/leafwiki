@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 
 	ginkgo.It("wraps config reload failures after branding operations", func() {
 		configErr := errors.New("config unavailable")
-		svc := &fakeBrandingService{getErr: configErr, assetsDir: ginkgo.GinkgoT().TempDir()}
+		svc := &fakeBrandingService{getErr: configErr, assetsDir: newBrandingTempDir()}
 
 		getOut, err := (&GetBrandingUseCase{branding: svc}).Execute(context.Background())
 		Expect(getOut).To(BeNil())
@@ -441,7 +441,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 
 func newBrandingUploadFile(contents string) *os.File {
 	ginkgo.GinkgoHelper()
-	file, err := os.CreateTemp(ginkgo.GinkgoT().TempDir(), "branding-upload-*")
+	file, err := os.CreateTemp(newBrandingTempDir(), "branding-upload-*")
 	Expect(err).NotTo(HaveOccurred())
 	_, err = file.WriteString(contents)
 	Expect(err).NotTo(HaveOccurred())
@@ -549,7 +549,7 @@ func (s *fakeBrandingService) GetBrandingAssetsDir() string {
 
 func newFailingBrandingRoutes(err error) *Routes {
 	ginkgo.GinkgoHelper()
-	svc := &fakeBrandingService{getErr: err, assetsDir: ginkgo.GinkgoT().TempDir()}
+	svc := &fakeBrandingService{getErr: err, assetsDir: newBrandingTempDir()}
 	return &Routes{
 		getBranding:     &GetBrandingUseCase{branding: svc},
 		uploadLogo:      &UploadLogoUseCase{branding: svc},
