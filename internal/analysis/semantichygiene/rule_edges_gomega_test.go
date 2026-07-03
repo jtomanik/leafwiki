@@ -1295,6 +1295,8 @@ func TestAgentPresence() {
 	Expect(mcpCalled).To(BeFalse())
 	cancelInvoked := false
 	Expect(cancelInvoked).To(BeFalse())
+	idleCanceled := false
+	Expect(idleCanceled).To(BeFalse())
 	Expect(struct {
 		Event string
 		Found bool
@@ -1320,6 +1322,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
