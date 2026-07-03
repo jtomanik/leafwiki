@@ -1244,15 +1244,22 @@ type assertion struct{}
 func Expect(actual any) assertion { return assertion{} }
 func (assertion) To(matcher any, extra ...any) {}
 func BeTrue() any { return nil }
+func Equal(actual any) any { return nil }
+func HaveField(name string, matcher any) any { return nil }
 
 func normalize() (string, bool) { return "", true }
 
 func TestAgentPresence() {
 	_, ok := normalize()
 	Expect(ok).To(BeTrue())
+	Expect(struct {
+		Event string
+		Found bool
+	}{Event: "start", Found: ok}).To(HaveField("Found", Equal(true)))
 
 	agentEnabled := true
 	Expect(agentEnabled).To(BeTrue())
+	Expect(struct{ Enabled bool }{Enabled: agentEnabled}).To(HaveField("Enabled", Equal(true)))
 }
 `)
 			for _, call := range h.findCalls("To") {
@@ -1260,7 +1267,8 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
-				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with BeTrue/BeFalse",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 			))
 		})
 	})

@@ -159,7 +159,7 @@ func gomegaCommaOKAssertionDiagnostic() string {
 }
 
 func gomegaProxyBooleanDiagnostic() string {
-	return "assert a semantic value or domain outcome instead of proxy boolean variables with BeTrue/BeFalse"
+	return "assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers"
 }
 
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {

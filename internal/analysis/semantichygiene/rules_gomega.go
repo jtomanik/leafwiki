@@ -573,18 +573,27 @@ func assertionUsesBooleanLiteral(assertion gomegaAssertion) bool {
 
 func assertionUsesCommaOKBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
-	return ok && isBooleanMatcher(assertion.matcher) && identIsCommaOKResult(ctx, ident)
+	if ok && isBooleanMatcher(assertion.matcher) && identIsCommaOKResult(ctx, ident) {
+		return true
+	}
+	return compositeActualContainsIdent(assertion.actual, func(ident *ast.Ident) bool {
+		return identIsCommaOKResult(ctx, ident)
+	})
 }
 
 func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
-	if !ok || !isBooleanMatcher(assertion.matcher) || !isProxyBooleanName(ident.Name) {
-		return false
+	if ok && isBooleanMatcher(assertion.matcher) && isProxyBooleanName(ident.Name) {
+		if identIsCommaOKResult(ctx, ident) {
+			return false
+		}
+		return isBoolType(ctx.pass.TypesInfo.TypeOf(ident))
 	}
-	if identIsCommaOKResult(ctx, ident) {
-		return false
-	}
-	return isBoolType(ctx.pass.TypesInfo.TypeOf(ident))
+	return compositeActualContainsIdent(assertion.actual, func(ident *ast.Ident) bool {
+		return isProxyBooleanName(ident.Name) &&
+			isBoolType(ctx.pass.TypesInfo.TypeOf(ident)) &&
+			!identIsCommaOKResult(ctx, ident)
+	})
 }
 
 func isProxyBooleanName(name string) bool {
@@ -622,6 +631,37 @@ func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {
 		return !found
 	})
 	return found
+}
+
+func exprTreeContainsIdent(expr ast.Expr, predicate func(*ast.Ident) bool) bool {
+	found := false
+	ast.Inspect(unparenExpr(expr), func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		ident, ok := node.(*ast.Ident)
+		if ok && predicate(ident) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func compositeActualContainsIdent(expr ast.Expr, predicate func(*ast.Ident) bool) bool {
+	switch actual := unparenExpr(expr).(type) {
+	case *ast.CompositeLit:
+		return exprTreeContainsIdent(actual, predicate)
+	case *ast.UnaryExpr:
+		if actual.Op == token.AND {
+			return compositeActualContainsIdent(actual.X, predicate)
+		}
+	}
+	return false
 }
 
 func exprIsCommaOKSource(ctx *analysisContext, expr ast.Expr) bool {
@@ -1122,7 +1162,14 @@ func unparenExpr(expr ast.Expr) ast.Expr {
 }
 
 func isBooleanMatcher(matcher *ast.CallExpr) bool {
-	return isMatcherNamed(matcher, "BeTrue", "BeFalse", "BeTrueBecause", "BeFalseBecause")
+	if isMatcherNamed(matcher, "BeTrue", "BeFalse", "BeTrueBecause", "BeFalseBecause") {
+		return true
+	}
+	if !isMatcherNamed(matcher, "Equal") || len(matcher.Args) != 1 {
+		return false
+	}
+	ident, ok := unparenExpr(matcher.Args[0]).(*ast.Ident)
+	return ok && (ident.Name == "true" || ident.Name == "false")
 }
 
 func matcherCallUsesMatcherValueAsExpected(ctx *analysisContext, call *ast.CallExpr) bool {
