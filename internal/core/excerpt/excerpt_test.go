@@ -13,29 +13,29 @@ import (
 )
 
 var _ = Describe("excerpt generation from content", func() {
-	It("TestFromContent_PlainText", func() {
+	It("extracts plain body text after frontmatter", func() {
 		raw := "---\ntitle: Hello\n---\n\nThis is the page body."
 
 		Expect(FromContent(raw)).To(Equal("This is the page body."))
 	})
 
-	It("TestFromContent_NoFrontmatter", func() {
+	It("uses raw content when frontmatter is absent", func() {
 		raw := "Just plain content here."
 
 		Expect(FromContent(raw)).To(Equal("Just plain content here."))
 	})
 
-	It("TestFromContent_EmptyBody", func() {
+	It("returns empty text when frontmatter leaves no body", func() {
 		raw := "---\ntitle: Hello\n---\n\n"
 
 		Expect(FromContent(raw)).To(BeEmpty())
 	})
 
-	It("TestFromContent_EmptyContent", func() {
+	It("returns empty text for empty content", func() {
 		Expect(FromContent("")).To(BeEmpty())
 	})
 
-	It("TestFromContent_StripsFencedCode", func() {
+	It("excludes fenced code blocks while keeping surrounding prose", func() {
 		raw := "---\ntitle: T\n---\n\nBefore.\n\n```go\nfunc main() {}\n```\n\nAfter."
 
 		got := FromContent(raw)
@@ -45,7 +45,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).To(ContainSubstring("After."))
 	})
 
-	It("TestFromContent_StripsMarkdownHeadings", func() {
+	It("turns markdown headings into plain heading text", func() {
 		raw := "---\ntitle: T\n---\n\n# Heading One\n\nSome body text."
 
 		got := FromContent(raw)
@@ -54,7 +54,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).To(ContainSubstring("Heading One"))
 	})
 
-	It("TestFromContent_StripsImageSyntax", func() {
+	It("keeps image alt text without image targets", func() {
 		raw := "---\ntitle: T\n---\n\n![alt text](image.png) Some text."
 
 		got := FromContent(raw)
@@ -64,7 +64,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).To(ContainSubstring("alt text"))
 	})
 
-	It("TestFromContent_StripsLinkSyntax", func() {
+	It("keeps link labels without link targets", func() {
 		raw := "---\ntitle: T\n---\n\n[Click here](https://example.com) for more."
 
 		got := FromContent(raw)
@@ -74,7 +74,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).To(ContainSubstring("Click here"))
 	})
 
-	It("TestFromContent_TruncatesLongContent", func() {
+	It("truncates long bodies with an ellipsis", func() {
 		body := strings.Repeat("word ", 200)
 		raw := "---\ntitle: T\n---\n\n" + body
 
@@ -84,13 +84,13 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(len([]rune(got))).To(BeNumerically("<=", MaxRunes+10))
 	})
 
-	It("TestFromContent_ShortContentNotTruncated", func() {
+	It("leaves short bodies unmarked by truncation", func() {
 		raw := "---\ntitle: T\n---\n\nShort body."
 
 		Expect(FromContent(raw)).NotTo(HaveSuffix("..."))
 	})
 
-	It("TestFromContent_CollapsesWhitespace", func() {
+	It("collapses paragraph breaks into single-line text", func() {
 		raw := "---\ntitle: T\n---\n\nLine one.\n\nLine two.\n\nLine three."
 
 		got := FromContent(raw)
@@ -99,7 +99,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).NotTo(ContainSubstring("  "))
 	})
 
-	It("TestFromContent_StripsHTMLTags", func() {
+	It("removes HTML tag markup", func() {
 		raw := "---\ntitle: T\n---\n\n<strong>Bold</strong> text."
 
 		got := FromContent(raw)
@@ -108,7 +108,7 @@ var _ = Describe("excerpt generation from content", func() {
 		Expect(got).NotTo(ContainSubstring("</strong>"))
 	})
 
-	It("TestFromContent_StripsMarkdownEmphasisMarkers", func() {
+	It("removes markdown emphasis markers while keeping emphasized words", func() {
 		raw := "---\ntitle: T\n---\n\nLeafWiki **fett** und _kursiv_."
 
 		got := FromContent(raw)
@@ -120,7 +120,7 @@ var _ = Describe("excerpt generation from content", func() {
 })
 
 var _ = Describe("markdown normalization", func() {
-	It("TestNormalizeMarkdownBody_KeepsLabelsAndRemovesShoutoutFenceSyntax", func() {
+	It("preserves shoutout labels while removing fence markers", func() {
 		body := strings.Join([]string{
 			"::: info",
 			"Helpful details.",
@@ -139,7 +139,7 @@ var _ = Describe("markdown normalization", func() {
 		}
 	})
 
-	It("TestNormalizeMarkdownBody_IgnoresCodeFences", func() {
+	It("leaves shoutout fence syntax unchanged inside code fences", func() {
 		body := strings.Join([]string{
 			"```md",
 			"::: info",
@@ -151,14 +151,14 @@ var _ = Describe("markdown normalization", func() {
 		Expect(NormalizeMarkdownBody(body)).To(Equal(body))
 	})
 
-	It("TestFromBody_StripsHTMLAndMarkdown", func() {
+	It("renders HTML and markdown links as plain body text", func() {
 		body := "<p><strong>Bold</strong> [link](https://example.com)</p>"
 
 		Expect(FromBody(body)).To(Equal("Bold link"))
 	})
 })
 
-var _ = Describe("excerpt edge coverage", func() {
+var _ = Describe("excerpt boundary behavior", func() {
 	It("FromContent falls back to raw content when frontmatter parsing fails", func() {
 		raw := "---\ntitle: [unterminated\n---\n\nBody after invalid frontmatter."
 
