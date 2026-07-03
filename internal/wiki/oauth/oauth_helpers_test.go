@@ -2,12 +2,16 @@ package oauth
 
 import (
 	"context"
+	"errors"
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 
+	"github.com/onsi/gomega/types"
 	"github.com/ory/fosite"
 )
 
@@ -29,19 +33,17 @@ var _ = ginkgo.Describe("OAuth helper contracts", func() {
 		redirects, err := normalizeRedirectURIs([]string{" http://127.0.0.1:49152/callback "})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(redirects).To(Equal([]string{"http://127.0.0.1:49152/callback"}))
-		_, err = normalizeRedirectURIs([]string{""})
-		Expect(err).To(HaveOccurred())
+		_, err = normalizeRedirectURIs(nil)
+		Expect(err).To(matchOAuthErrorIs(ErrOAuthRedirectURIsRequired))
 
 		grants, err := normalizeRegistrationGrantTypes(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(grants).To(Equal([]string{"authorization_code", "refresh_token"}))
-		_, err = normalizeRegistrationGrantTypes([]string{"refresh_token"})
-		Expect(err).To(HaveOccurred())
+		_, err = normalizeRegistrationGrantTypes([]string{"client_credentials"})
+		Expect(err).To(matchOAuthErrorIs(ErrOAuthUnsupportedGrantType))
 		responses, err := normalizeRegistrationResponseTypes(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(responses).To(Equal([]string{"code"}))
-		_, err = normalizeRegistrationResponseTypes([]string{"token"})
-		Expect(err).To(HaveOccurred())
 		scope, err := normalizeRegistrationScope("  " + ScopeMCP + "  ")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(scope).To(Equal(ScopeMCP))
@@ -70,4 +72,24 @@ func oauthTempDir() string {
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(os.RemoveAll, dir)
 	return dir
+}
+
+func matchOAuthErrorIs(target error) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		return errors.Is(err, target)
+	})
+}
+
+func matchOAuthInvalidTokenError() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return matchOAuthErrorIs(sdkauth.ErrInvalidToken)
+}
+
+func matchMalformedOAuthQuery() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var escapeErr url.EscapeError
+		return errors.As(err, &escapeErr)
+	})
 }

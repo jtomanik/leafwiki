@@ -259,9 +259,9 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		Expect(stringSliceContains([]string{"a", "b"}, "c")).To(BeFalse())
 
 		_, err = ((*Service)(nil)).VerifyBearerToken(context.Background(), "token", httptest.NewRequest(http.MethodGet, "/mcp", nil))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchOAuthInvalidTokenError())
 		_, err = service.VerifyBearerToken(context.Background(), "not-a-token", httptest.NewRequest(http.MethodGet, "/mcp", nil))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchOAuthInvalidTokenError())
 
 		Expect(routes.service.clients).NotTo(HaveKey("missing-client"))
 	})

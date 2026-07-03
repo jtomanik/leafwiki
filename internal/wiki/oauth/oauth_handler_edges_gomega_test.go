@@ -166,7 +166,16 @@ var _ = Describe("OAuth authorization handler behavior", func() {
 				ContainSubstring("approval_token="),
 			)),
 		))
-		Expect(service.approvals).NotTo(BeEmpty())
+		Expect(oauthApprovalGrants(service)).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"UserID":     Equal(coreauth.UserIDFromString(currentUser.ID)),
+			"RequestKey": Equal(oauthApprovalKeyFor(validAuthorizeRequestValues(redirectURI))),
+			"Details": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ClientID":    Equal(ClientID),
+				"RedirectURI": Equal(redirectURI),
+				"Scope":       Equal(ScopeMCP),
+				"Resource":    Equal("http://leafwiki.test/wiki/mcp"),
+			}),
+		})))
 	})
 
 	It("exchanges approved authorize requests for redirect responses", func() {
@@ -310,7 +319,7 @@ var _ = Describe("OAuth token and bearer behavior", func() {
 		info, err := service.VerifyBearerToken(context.Background(), "opaque", req)
 
 		Expect(info).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchOAuthInvalidTokenError())
 
 		withOAuthIntrospectToken(func(fosite.OAuth2Provider, context.Context, string, fosite.TokenUse, fosite.Session, ...string) (fosite.TokenUse, fosite.AccessRequester, error) {
 			return fosite.RefreshToken, fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil
@@ -319,7 +328,7 @@ var _ = Describe("OAuth token and bearer behavior", func() {
 		info, err = service.VerifyBearerToken(context.Background(), "opaque", req)
 
 		Expect(info).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchOAuthInvalidTokenError())
 
 		withOAuthIntrospectToken(func(fosite.OAuth2Provider, context.Context, string, fosite.TokenUse, fosite.Session, ...string) (fosite.TokenUse, fosite.AccessRequester, error) {
 			return fosite.AccessToken, fosite.NewAccessRequest(newFositeSession("missing-user", "Missing")), nil
@@ -328,7 +337,7 @@ var _ = Describe("OAuth token and bearer behavior", func() {
 		info, err = service.VerifyBearerToken(context.Background(), "opaque", req)
 
 		Expect(info).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchOAuthInvalidTokenError())
 
 		requester := fosite.NewAccessRequest(newFositeSession(user.ID, user.Username))
 		requester.GrantScope(ScopeMCP)
@@ -547,6 +556,16 @@ func seedOAuthApproval(service *Service, token string, user *coreauth.User, valu
 		},
 		ExpiresAt: time.Now().Add(time.Minute),
 	}
+}
+
+func oauthApprovalGrants(service *Service) []oauthApproval {
+	GinkgoHelper()
+
+	grants := make([]oauthApproval, 0, len(service.approvals))
+	for _, approval := range service.approvals {
+		grants = append(grants, approval)
+	}
+	return grants
 }
 
 func oauthApprovalKeyFor(values url.Values) string {

@@ -288,10 +288,10 @@ var _ = Describe("OAuth deterministic service behavior", func() {
 		badApprovalReq := httptest.NewRequest(http.MethodGet, "/oauth/authorize", nil)
 		badApprovalReq.URL.RawQuery = "%"
 		_, _, err = authorizeApprovalValues(badApprovalReq)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMalformedOAuthQuery())
 
 		badResourceReq := httptest.NewRequest(http.MethodGet, "/oauth/authorize", nil)
 		badResourceReq.URL.RawQuery = "%"
-		Expect(validateAuthorizeResource(badResourceReq, "")).To(HaveOccurred())
+		Expect(validateAuthorizeResource(badResourceReq, "")).To(matchMalformedOAuthQuery())
 	})
 })
